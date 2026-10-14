@@ -45,10 +45,12 @@ export class TrackedWorker<
       await awaitStarted(this.waitUntilReady(), this.redis);
       if (!(await awaitClose(super.close(force), this.redis))) {
         workers.delete(this);
-        // BullMQ's own connection for blocking reads.
-        void this.getBackend()
-          .disconnectBlocking(false)
-          .catch(() => undefined);
+        // BullMQ's own connection for blocking reads. Closing the backend
+        // first marks it closing, so its blocking-read watchdog does not
+        // reconnect the connection once it is dropped.
+        const backend = this.getBackend();
+        void backend.close(true).catch(() => undefined);
+        void backend.disconnectBlocking(false).catch(() => undefined);
       }
     } finally {
       await closeRedisClient(this.redis);
