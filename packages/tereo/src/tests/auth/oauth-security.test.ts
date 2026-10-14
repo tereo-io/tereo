@@ -667,7 +667,6 @@ describe("OAuth Security Tests", () => {
       });
 
       const authData = (await authResponse.json()) as AuthorizeResponse;
-      let code: string | null = null;
 
       expect(authData.redirect_url).toContain("/consent");
       const consentUrl = new URL(authData.redirect_url!);
@@ -689,7 +688,7 @@ describe("OAuth Security Tests", () => {
 
       const consentData = (await consentResponse.json()) as ConsentResponse;
       expect(consentData.redirect_url).toContain("code=");
-      code = new URL(consentData.redirect_url!).searchParams.get("code");
+      const code = new URL(consentData.redirect_url!).searchParams.get("code");
 
       expect(code).toBeTruthy();
 

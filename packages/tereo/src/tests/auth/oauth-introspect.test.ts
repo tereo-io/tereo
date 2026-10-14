@@ -88,7 +88,6 @@ describe("OAuth Introspect Endpoint", () => {
     });
 
     const authData = (await authResponse.json()) as AuthorizeResponse;
-    let code: string | null = null;
 
     expect(authData.redirect_url).toContain("/consent");
     const consentUrl = new URL(authData.redirect_url!);
@@ -113,7 +112,7 @@ describe("OAuth Introspect Endpoint", () => {
 
     const consentData = (await consentResponse.json()) as ConsentResponse;
     expect(consentData.redirect_url).toContain("code=");
-    code = new URL(consentData.redirect_url!).searchParams.get("code");
+    const code = new URL(consentData.redirect_url!).searchParams.get("code");
 
     const tokenResponse = await fetch(`${BASE_URL}/oauth/token`, {
       method: "POST",
@@ -352,7 +351,6 @@ describe("OAuth Introspect Endpoint", () => {
       });
 
       const authData = (await authResponse.json()) as AuthorizeResponse;
-      let code: string | null = null;
 
       expect(authData.redirect_url).toContain("/consent");
       const consentUrl = new URL(authData.redirect_url!);
@@ -377,7 +375,7 @@ describe("OAuth Introspect Endpoint", () => {
 
       const consentData = (await consentResponse.json()) as ConsentResponse;
       expect(consentData.redirect_url).toContain("code=");
-      code = new URL(consentData.redirect_url!).searchParams.get("code");
+      const code = new URL(consentData.redirect_url!).searchParams.get("code");
 
       // Server requires Basic Auth for confidential clients
       const tokenCredentials = Buffer.from(
@@ -614,7 +612,6 @@ describe("OAuth Introspect Endpoint", () => {
       });
 
       const authData = (await authResponse.json()) as AuthorizeResponse;
-      let code: string | null = null;
 
       expect(authData.redirect_url).toContain("/consent");
       const consentUrl = new URL(authData.redirect_url!);
@@ -639,7 +636,7 @@ describe("OAuth Introspect Endpoint", () => {
 
       const consentData = (await consentResponse.json()) as ConsentResponse;
       expect(consentData.redirect_url).toContain("code=");
-      code = new URL(consentData.redirect_url!).searchParams.get("code");
+      const code = new URL(consentData.redirect_url!).searchParams.get("code");
 
       const tokenCredentials = Buffer.from(
         `${serviceA.clientId}:${serviceA.plainSecret}`
@@ -787,7 +784,6 @@ describe("OAuth Introspect Endpoint", () => {
       });
 
       const authData = (await authResponse.json()) as AuthorizeResponse;
-      let code: string | null = null;
 
       expect(authData.redirect_url).toContain("/consent");
       const consentUrl = new URL(authData.redirect_url!);
@@ -812,7 +808,7 @@ describe("OAuth Introspect Endpoint", () => {
 
       const consentData = (await consentResponse.json()) as ConsentResponse;
       expect(consentData.redirect_url).toContain("code=");
-      code = new URL(consentData.redirect_url!).searchParams.get("code");
+      const code = new URL(consentData.redirect_url!).searchParams.get("code");
 
       const tokenCredentials = Buffer.from(
         `${serviceA.clientId}:${serviceA.plainSecret}`
@@ -918,7 +914,6 @@ describe("OAuth Introspect Endpoint", () => {
       });
 
       const authData = (await authResponse.json()) as AuthorizeResponse;
-      let code: string | null = null;
 
       expect(authData.redirect_url).toContain("/consent");
       const consentUrl = new URL(authData.redirect_url!);
@@ -943,7 +938,7 @@ describe("OAuth Introspect Endpoint", () => {
 
       const consentData = (await consentResponse.json()) as ConsentResponse;
       expect(consentData.redirect_url).toContain("code=");
-      code = new URL(consentData.redirect_url!).searchParams.get("code");
+      const code = new URL(consentData.redirect_url!).searchParams.get("code");
 
       const tokenCredentials = Buffer.from(
         `${serviceA.clientId}:${serviceA.plainSecret}`

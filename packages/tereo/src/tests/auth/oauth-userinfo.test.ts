@@ -198,7 +198,6 @@ describe("OAuth UserInfo Endpoint", () => {
       });
 
       const authData = (await authResponse.json()) as AuthorizeResponse;
-      let code: string | null = null;
 
       expect(authData.redirect_url).toContain("/consent");
       const consentUrl = new URL(authData.redirect_url!);
@@ -223,7 +222,7 @@ describe("OAuth UserInfo Endpoint", () => {
 
       const consentData = (await consentResponse.json()) as ConsentResponse;
       expect(consentData.redirect_url).toContain("code=");
-      code = new URL(consentData.redirect_url!).searchParams.get("code");
+      const code = new URL(consentData.redirect_url!).searchParams.get("code");
 
       const tokenResponse = await fetch(`${BASE_URL}/oauth/token`, {
         method: "POST",
