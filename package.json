@@ -32,6 +32,12 @@
     "ioredis": "^5.11.1",
     "nx": {
       "undici": "^7.29.1"
+    },
+    "prisma": {
+      "mysql2": "^3.24.6"
+    },
+    "@prisma/config": {
+      "deepmerge-ts": "^8.0.2"
     }
   },
   "engines": {
