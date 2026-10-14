@@ -1,0 +1,181 @@
+/files/buckets/{name}/permissions:
+  get:
+    tags:
+      - Files - Permissions
+    summary: List bucket permissions
+    description: |
+      Returns a paginated list of permissions granted for a bucket.
+      Each entry includes the user's email and name.
+
+      **Required permissions:**
+      - System: `file-service.permissions.read` AND `file-service.buckets.read`
+      - AND one of: `file-service.admin`, or bucket creator or an active bucket grant, from the bucket's organization
+
+      **Filter operators:**
+      - userId: `equals`, `in` (UUIDs)
+      - canRead: `equals` (true/false)
+      - canWrite: `equals` (true/false)
+      - canDelete: `equals` (true/false)
+
+      **Examples:**
+      - `?filter[userId]=019dd4c2-e0b3-778e-b8db-a52e61927416` (defaults to equals)
+      - `?filter[canWrite]=true` (defaults to equals)
+      - `?sort=grantedAt&sortDir=desc`
+
+      **Sort fields:** `userId`, `grantedAt` (default `grantedAt`, `desc`)
+    operationId: listBucketPermissions
+    security:
+      - BearerAuth: [file-service.permissions.read]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesLimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesSortParam'
+      - $ref: '../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesFilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of bucket permissions
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ListPermissionsResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid filter, sort, limit or cursor (`invalid_cursor`)
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.permissions.read permission, no bucket access, a token for another organization, or no such bucket
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Files - Permissions
+    summary: Grant bucket permission
+    description: |
+      Grants permissions to a user for a bucket.
+
+      **Required permissions:**
+      - System: `file-service.permissions.write` AND `file-service.buckets.write`
+      - AND bucket creator (same organization) or `file-service.admin`
+
+      **Notes:**
+      - The user must exist (`400 unknown_user` otherwise)
+      - For a bucket in an organization, the user must be able to act in it:
+        a member of the organization, or the service-account user of a
+        client bound to it. Access to the bucket is checked against the
+        token's organization, so anyone else's grant could never be used
+        (`400 user_not_in_organization`)
+      - If an active permission already exists for the user, returns 409 Conflict
+      - If a previously revoked permission exists, it will be un-revoked and updated with new permissions
+      - The bucket's creator is granted full object access when the bucket is created; if that grant is revoked, it can be granted again here
+      - `userId` must be a UUID (`400 invalid_request` otherwise)
+      - The response is the grant as the list returns it, with the grantee and the granter named (`user`, `granter`, and their emails and names flat).
+
+      An audit log entry is created and, for a bucket in an organization, a
+      `file-service.permission.granted` webhook event is emitted.
+    operationId: grantBucketPermission
+    security:
+      - BearerAuth: [file-service.permissions.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/GrantPermissionRequest'
+    responses:
+      '201':
+        description: Permission granted successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/GrantPermissionResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`invalid_request` - the body is invalid; `unknown_user` - `userId` names no user; `user_not_in_organization` - the bucket belongs to an organization the user cannot act in'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.permissions.write permission or no bucket access
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Bucket not found (only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: Conflict - permission already exists for this user
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/permissions/{userId}:
+  delete:
+    tags:
+      - Files - Permissions
+    summary: Revoke bucket permission
+    description: |
+      Revokes all permissions for a user on a bucket (soft delete).
+
+      **Required permissions:**
+      - System: `file-service.permissions.delete` AND `file-service.buckets.delete`
+      - AND bucket creator (same organization) or `file-service.admin`
+
+      **Notes:**
+      - On a declared bucket, the declaring service's own grant cannot be revoked
+        (`409 bucket_declared`): its declaration re-applies it on registration
+      - Revoked permissions are soft-deleted (marked with revokedAt timestamp)
+
+      An audit log entry is created and, for a bucket in an organization, a
+      `file-service.permission.revoked` webhook event is emitted.
+    operationId: revokeBucketPermission
+    security:
+      - BearerAuth: [file-service.permissions.delete]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesUserIdParam'
+    responses:
+      '204':
+        $ref: '../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`userId` is not a UUID (`invalid_request`)'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.permissions.delete permission or no bucket access
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Bucket not found, or the user has no active permission on it (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: "`bucket_declared` - the declaring service's own grant"
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

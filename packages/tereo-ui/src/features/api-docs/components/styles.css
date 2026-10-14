@@ -1,0 +1,174 @@
+/* Bleeds over .t-main's 1rem padding so Redoc runs edge to edge. */
+.t-api-docs {
+  height: calc(100% + 2rem);
+  overflow: auto;
+  margin: -1rem;
+  background-color: var(--background-color);
+}
+
+/* Redoc sizes its sticky menu to the viewport; the top bar (3rem) takes the
+   rest, so without this the bottom of the menu is cut off. */
+.t-api-docs .menu-content {
+  height: calc(100vh - 3rem) !important;
+}
+
+.t-api-docs[data-redoc-theme="dark"] {
+  background-color: var(--background-color);
+  color: var(--text-color);
+}
+
+/* Redoc internals don't fully honor theme prop — override directly */
+.t-api-docs[data-redoc-theme="dark"] input {
+  background-color: var(--background-color);
+  color: var(--text-color);
+  border-color: var(--border-color);
+}
+
+.t-api-docs[data-redoc-theme="dark"] input::placeholder {
+  color: var(--text-color-secondary);
+}
+
+/* Tables — header + rows + borders */
+.t-api-docs[data-redoc-theme="dark"] table {
+  background-color: transparent !important;
+}
+
+.t-api-docs[data-redoc-theme="dark"] table thead th {
+  background-color: var(--overlay-dark-weak) !important;
+  color: var(--text-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+.t-api-docs[data-redoc-theme="dark"] table tbody td {
+  background-color: transparent !important;
+  color: var(--text-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+.t-api-docs[data-redoc-theme="dark"] table thead tr,
+.t-api-docs[data-redoc-theme="dark"] table tbody tr,
+.t-api-docs[data-redoc-theme="dark"] table tbody tr:nth-of-type(odd) {
+  background-color: transparent !important;
+}
+
+.t-api-docs[data-redoc-theme="dark"] table tbody tr:nth-of-type(odd) td {
+  background-color: var(--overlay-dark-weak) !important;
+}
+
+/* Kill Redoc's opacity-based zebra striping that fades odd rows */
+.t-api-docs[data-redoc-theme="dark"] table tbody tr,
+.t-api-docs[data-redoc-theme="dark"] table tbody tr td,
+.t-api-docs[data-redoc-theme="dark"] table tbody tr td * {
+  opacity: 1 !important;
+}
+
+/* Right panel header bar + tabs (Request samples, Copy/Expand) */
+.t-api-docs[data-redoc-theme="dark"] [class*="ApiInfoWrap"],
+.t-api-docs[data-redoc-theme="dark"] [class*="RightPanelHeader"],
+.t-api-docs[data-redoc-theme="dark"] [class*="Tabs"] > ul,
+.t-api-docs[data-redoc-theme="dark"] [class*="Tab"] {
+  background-color: transparent;
+  color: var(--text-color);
+}
+
+/* Webhook / status pill backgrounds */
+.t-api-docs[data-redoc-theme="dark"] [class*="Badge"],
+.t-api-docs[data-redoc-theme="dark"] [class*="badge"] {
+  background-color: var(--background-color-light);
+  color: var(--text-color);
+}
+
+/* Catch-all: any white bg residue inside docs container */
+.t-api-docs[data-redoc-theme="dark"] [style*="background: rgb(255, 255, 255)"],
+.t-api-docs[data-redoc-theme="dark"]
+  [style*="background-color: rgb(255, 255, 255)"],
+.t-api-docs[data-redoc-theme="dark"] [style*="background: white"],
+.t-api-docs[data-redoc-theme="dark"] [style*="background-color: white"] {
+  background-color: var(--background-color) !important;
+}
+
+/* Force all heading elements readable */
+.t-api-docs[data-redoc-theme="dark"] h1,
+.t-api-docs[data-redoc-theme="dark"] h2,
+.t-api-docs[data-redoc-theme="dark"] h3,
+.t-api-docs[data-redoc-theme="dark"] h4,
+.t-api-docs[data-redoc-theme="dark"] h5,
+.t-api-docs[data-redoc-theme="dark"] h6 {
+  color: var(--text-color) !important;
+  opacity: 1 !important;
+}
+
+/* Kill any opacity dimming inside docs (section labels, dim text, etc.) */
+.t-api-docs[data-redoc-theme="dark"] *,
+.t-api-docs[data-redoc-theme="dark"] *::before,
+.t-api-docs[data-redoc-theme="dark"] *::after {
+  opacity: 1 !important;
+}
+
+/* Force dim-tone text (was: color hex with low alpha) to readable secondary */
+.t-api-docs[data-redoc-theme="dark"] [class*="UnderlinedHeader"],
+.t-api-docs[data-redoc-theme="dark"] [class*="SectionHeader"],
+.t-api-docs[data-redoc-theme="dark"] [class*="FieldLabel"],
+.t-api-docs[data-redoc-theme="dark"] [class*="DropdownLabel"],
+.t-api-docs[data-redoc-theme="dark"] caption,
+.t-api-docs[data-redoc-theme="dark"] th {
+  color: var(--text-color-secondary) !important;
+}
+
+/* Sample panel meta (Content type, Copy/Expand/Collapse, application/json) */
+.t-api-docs[data-redoc-theme="dark"] [class*="DropdownLabel"],
+.t-api-docs[data-redoc-theme="dark"] [class*="SampleControls"] button,
+.t-api-docs[data-redoc-theme="dark"] [class*="OptionsList"] {
+  color: var(--text-color-secondary) !important;
+}
+
+/* Force readable text on all redoc paragraphs / spans in dim states */
+.t-api-docs[data-redoc-theme="dark"] p,
+.t-api-docs[data-redoc-theme="dark"] li,
+.t-api-docs[data-redoc-theme="dark"] span:not([class*="token"]) {
+  color: inherit;
+}
+
+/* Server name labels (Local development server / Production server) — Redoc forces dark color */
+.t-api-docs[data-redoc-theme="dark"] p {
+  color: var(--text-color) !important;
+}
+
+/* SVG chevrons / carets — Redoc default fill = black, invisible on dark bg.
+   Colored response/method chevrons keep their hue via higher-specificity class rules. */
+.t-api-docs[data-redoc-theme="dark"] svg polygon {
+  fill: var(--text-color);
+}
+
+/* React-tabs (Payload / Response sample tabs) — selected tab bg = light, invisible */
+.t-api-docs[data-redoc-theme="dark"] .react-tabs__tab {
+  color: var(--text-color-secondary) !important;
+  background-color: transparent !important;
+}
+
+.t-api-docs[data-redoc-theme="dark"] .react-tabs__tab--selected {
+  background-color: var(--background-color-light) !important;
+  color: var(--text-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+.t-api-docs[data-redoc-theme="dark"] .react-tabs__tab:hover {
+  background-color: var(--overlay-dark-weak) !important;
+}
+
+/* Inline <code> (markdown) — Redoc default red too dim on dark bg */
+.t-api-docs[data-redoc-theme="dark"] code {
+  color: var(--danger-color) !important;
+  background-color: var(--overlay-dark-weak);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+
+/* Preserve <pre> code blocks (syntax-highlighted) — don't apply inline style */
+.t-api-docs[data-redoc-theme="dark"] pre code,
+.t-api-docs[data-redoc-theme="dark"] pre > code {
+  color: inherit !important;
+  background-color: transparent;
+  padding: 0;
+  border-radius: 0;
+}

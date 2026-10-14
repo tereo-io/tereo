@@ -1,0 +1,389 @@
+/files/buckets/{name}/multipart:
+  post:
+    tags:
+      - Files - Multipart
+    summary: Initiate a multipart upload
+    description: |
+      Begin a multipart upload in the given bucket. The destination object
+      key travels in the request body so every multipart route lives under
+      one `/multipart` namespace (no splat in the URL). Returns a UUID
+      `uploadId` to use for all subsequent part, list, complete, and abort
+      calls.
+
+      In-flight uploads expire after
+      `FILE_SERVICE_MULTIPART_UPLOAD_TTL_HOURS` (default 24h) and are swept
+      hourly by the `multipart-sweep` worker. A user may have at most
+      `FILE_SERVICE_MAX_ACTIVE_MULTIPART_UPLOADS` (default 100) in progress
+      in a bucket; past that, initiate is `409 too_many_multipart_uploads`
+      until one is completed, aborted or expires.
+
+      An `expectedSize` larger than an object can be (68,719,476,704 bytes,
+      32 bytes short of 64 GiB — the most one AES-256-GCM stream can encrypt)
+      is `413 object_too_large`. In a bucket with a quota, each active upload
+      holds its `expectedSize` against the quota until it is completed,
+      aborted or expires: an upload whose `expectedSize`, added to the bytes
+      the bucket stores and the `expectedSize`s of its other active uploads,
+      passes the quota is `507 insufficient_storage`. An upload without an
+      `expectedSize` holds nothing, and is refused only once the others'
+      already pass it.
+
+      **Required permissions:**
+      - System: `file-service.objects.write` AND bucket-level `canWrite`
+
+      A retired bucket refuses new uploads (`409 bucket_retired`).
+
+      An audit log entry is created and, for a bucket in an organization, a
+      `file-service.multipart.initiated` webhook event is emitted.
+    operationId: initiateMultipart
+    security:
+      - BearerAuth: [file-service.objects.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/InitiateMultipartRequest'
+    responses:
+      '201':
+        description: Upload initiated
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/InitiateMultipartResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`invalid_request` - invalid body; `reserved_object_key` - the key is `prefixes` or starts with `by-id/`, `by-key/` or `.thumbnails/`'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_retired` - the bucket is read-only; `too_many_multipart_uploads` - the caller already has the most uploads allowed in progress in this bucket'
+      '413':
+        $ref: '../../components/files/responses.yaml#/PayloadTooLargeResponse'
+        description: '`object_too_large` - `expectedSize` is larger than an object can be'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '507':
+        $ref: '../../components/files/responses.yaml#/InsufficientStorageResponse'
+        description: '`insufficient_storage` - `expectedSize`, with the bucket''s usage and the `expectedSize`s of its active uploads, passes its quota'
+
+/files/buckets/{name}/multipart/{uploadId}:
+  get:
+    tags:
+      - Files - Multipart
+    summary: List parts staged for a multipart upload
+    description: |
+      Returns a snapshot of the multipart upload and all parts staged so far.
+      Works for completed and aborted uploads too (their `completedAt` /
+      `abortedAt` is set).
+
+      Bucket access is checked before the upload is looked up: a caller
+      without it gets `403` whatever the upload id. A caller with it gets
+      `404` for an unknown upload or one in another bucket.
+
+      **Required permissions:**
+      - System: `file-service.objects.read` AND bucket-level `canRead`
+    operationId: listMultipartParts
+    security:
+      - BearerAuth: [file-service.objects.read]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/UploadIdParam'
+    responses:
+      '200':
+        description: Multipart upload snapshot
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/MultipartUploadInfo'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`uploadId` is not a UUID'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing permission or grant on the bucket (or no such bucket), whatever the upload id
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Upload not found or in another bucket; a missing bucket only for a `file-service.admin` holder
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  delete:
+    tags:
+      - Files - Multipart
+    summary: Abort a multipart upload
+    description: |
+      Aborts an in-flight multipart upload and removes its staged part files.
+      Aborting an already-completed or already-aborted upload returns
+      `400 upload_not_active`.
+
+      **Required permissions:**
+      - System: `file-service.objects.delete`
+      - Bucket-level `canDelete` (aborting deletes staged parts and writes nothing)
+      - The caller must be the user who initiated the upload, or hold `file-service.admin`
+
+      Aborting works on a retired bucket too: deletes go on there.
+
+      An audit log entry is created and, for a bucket in an organization, a
+      `file-service.multipart.aborted` webhook event is emitted with
+      `reason: aborted`.
+    operationId: abortMultipart
+    security:
+      - BearerAuth: [file-service.objects.delete]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/UploadIdParam'
+    responses:
+      '204':
+        $ref: '../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing permission or grant on the bucket (or no such bucket), whatever the upload id; or not the upload's initiator
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Upload not found or in another bucket; a missing bucket only for a `file-service.admin` holder
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/multipart/{uploadId}/parts/{partNumber}:
+  put:
+    tags:
+      - Files - Multipart
+    summary: Upload a part
+    description: |
+      Stage a single part for an in-flight multipart upload. The request body
+      is the raw part bytes (octet-stream) streamed directly into the server;
+      no multipart/form-data wrapping.
+
+      Per-part size is capped at `FILE_SERVICE_MAX_UPLOAD_SIZE_MB` (default
+      100MB). All parts except the last must be at least
+      `FILE_SERVICE_MIN_PART_SIZE_MB` bytes; smaller non-final parts are
+      rejected at `complete` time.
+
+      Re-uploading the same `partNumber` replaces the prior staging entry.
+      The upload must still be active (not completed, aborted or expired);
+      otherwise `404`.
+
+      A part is refused when it would take the bytes staged for the upload
+      (its other parts plus this one) past the `expectedSize` given at
+      initiate (`413 exceeds_expected_size`), past the largest object a
+      bucket can store, 68,719,476,704 bytes (`413 object_too_large`), or
+      past what the bucket has left of its quota (`507 insufficient_storage`).
+      With a `Content-Length` the part is refused before its body is read;
+      otherwise once it is staged, and the staged bytes are discarded.
+
+      **Required permissions:**
+      - System: `file-service.objects.write` AND bucket-level `canWrite`
+      - The caller must be the user who initiated the upload, or hold `file-service.admin`
+    operationId: uploadMultipartPart
+    security:
+      - BearerAuth: [file-service.objects.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/UploadIdParam'
+      - $ref: '../../components/files/parameters.yaml#/PartNumberParam'
+    requestBody:
+      required: true
+      content:
+        application/octet-stream:
+          schema:
+            type: string
+            format: binary
+    responses:
+      '200':
+        description: Part accepted
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/UploadPartResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing permission or grant on the bucket (or no such bucket), whatever the upload id; or not the upload's initiator
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Upload not found, not active, or in another bucket; a missing bucket only for a `file-service.admin` holder
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_retired` - the bucket is read-only'
+      '413':
+        $ref: '../../components/files/responses.yaml#/PayloadTooLargeResponse'
+        description: '`payload_too_large` - the part is over `FILE_SERVICE_MAX_UPLOAD_SIZE_MB`; `exceeds_expected_size` - the upload''s parts would total more than its `expectedSize`; `object_too_large` - they would total more than an object can be'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '507':
+        $ref: '../../components/files/responses.yaml#/InsufficientStorageResponse'
+        description: '`insufficient_storage` - the upload''s parts would total more than the bucket has left of its quota'
+
+/files/buckets/{name}/multipart/{uploadId}/complete:
+  post:
+    tags:
+      - Files - Multipart
+    summary: Complete a multipart upload
+    description: |
+      Finalize the multipart upload by submitting the ordered list of staged
+      parts with their ETags. On success the server concatenates the parts,
+      computes the S3-style combined ETag (`md5(concat(part_md5s))-{partCount}`),
+      encrypts + writes the final blob, and creates the target object.
+
+      Returns the same shape as a regular upload response. Status mirrors
+      create-vs-replace: 201 on create, 200 on replace. Requires an
+      `Idempotency-Key`: a retry with the same key and parts replays the
+      first response (`Idempotency-Replay: true`), even after the upload is
+      finalized.
+
+      One complete of an upload runs at a time, however long assembling the
+      parts takes: while it runs, any other complete of the same upload —
+      same key or not — is `409 multipart_complete_in_progress`. Once it has
+      finished, a complete under a new key with the same parts returns its
+      result (for 24 hours); with different parts it is 404.
+
+      **Required permissions:**
+      - System: `file-service.objects.write` AND bucket-level `canWrite`
+      - The caller must be the user who initiated the upload, or hold `file-service.admin`
+
+      An audit log entry is created. For a bucket in an organization a
+      `file-service.multipart.completed` webhook event is emitted, plus
+      `file-service.object.created` / `file-service.object.updated`
+      (`via: multipart`) and, in a versioning-enabled bucket,
+      `file-service.object.version.created`.
+    operationId: completeMultipart
+    security:
+      - BearerAuth: [file-service.objects.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/UploadIdParam'
+      - $ref: '../../components/files/parameters.yaml#/IdempotencyKeyHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/CompleteMultipartRequest'
+    responses:
+      '200':
+        description: Multipart upload completed — existing object replaced
+        headers:
+          ETag:
+            $ref: '../../components/files/headers.yaml#/ETag'
+          Idempotency-Replay:
+            description: '`true` when the response is a replay of an earlier request with the same `Idempotency-Key`.'
+            schema:
+              type: string
+              enum: ['true']
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/CompleteMultipartResponse'
+      '201':
+        description: Multipart upload completed — new object created
+        headers:
+          ETag:
+            $ref: '../../components/files/headers.yaml#/ETag'
+          Idempotency-Replay:
+            description: '`true` when the response is a replay of an earlier request with the same `Idempotency-Key`.'
+            schema:
+              type: string
+              enum: ['true']
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/CompleteMultipartResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: |
+          Invalid body or missing `Idempotency-Key` (`idempotency_key_required`),
+          or a part mismatch: submitted ETag does not match the staged ETag
+          (`part_etag_mismatch`), a part was never uploaded (`part_not_found`),
+          or a non-final part is smaller than `FILE_SERVICE_MIN_PART_SIZE_MB`
+          (`part_too_small`); or the parts' total size differs from the
+          `expectedSize` given at initiate (`size_mismatch`); or the assembled content is a blocked file type
+          (`blocked_file_type`,
+          `unrecognized_text_file_type`) — the same check an upload gets. The
+          upload stays active, to be aborted.
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing permission or grant on the bucket (or no such bucket), whatever the upload id; or not the upload's initiator
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Upload not found, no longer active, or in another bucket; a missing bucket only for a `file-service.admin` holder
+      '409':
+        description: |
+          Another complete of this upload is still running
+          (`multipart_complete_in_progress`; retry for its result), a request
+          with this `Idempotency-Key` is still in flight
+          (`idempotency_request_in_progress`), or the bucket is retired
+          (`bucket_retired`).
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ErrorResponse'
+      '413':
+        $ref: '../../components/files/responses.yaml#/PayloadTooLargeResponse'
+        description: '`object_too_large` - the parts total more than an object can be (68,719,476,704 bytes)'
+      '422':
+        $ref: '../../components/files/responses.yaml#/IdempotencyKeyConflictResponse'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '507':
+        $ref: '../../components/files/responses.yaml#/InsufficientStorageResponse'

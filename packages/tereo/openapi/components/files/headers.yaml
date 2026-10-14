@@ -1,0 +1,51 @@
+ETag:
+  description: Entity tag for cache validation
+  schema:
+    type: string
+  example: "5d41402abc4b2a76b9719d911017c592"
+
+Content-Type:
+  description: MIME type of the content
+  schema:
+    type: string
+  example: "application/json"
+
+Content-Length:
+  description: Size of the content in bytes
+  schema:
+    type: integer
+  example: 2048576
+
+Accept-Ranges:
+  description: Single byte ranges of the content can be requested with `Range`.
+  schema:
+    type: string
+    enum:
+      - bytes
+  example: "bytes"
+
+Content-Range:
+  description: |
+    On a `206`, the byte range sent and the content's full size
+    (`bytes 0-1023/2048576`); on a `416`, the size alone (`bytes */2048576`).
+  schema:
+    type: string
+  example: "bytes 0-1023/2048576"
+
+Content-Security-Policy:
+  description: >-
+    Sandboxes user content on every download: a browser that renders it on
+    core's origin runs no script in it and loads nothing from it.
+  schema:
+    type: string
+    enum:
+      - "sandbox; default-src 'none'"
+  example: "sandbox; default-src 'none'"
+
+X-Content-Type-Options:
+  description: Prevents MIME type sniffing
+  schema:
+    type: string
+    enum:
+      - nosniff
+  example: "nosniff"

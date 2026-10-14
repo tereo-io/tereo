@@ -1,0 +1,13 @@
+# Problems Redocly's linter skips (https://redocly.com/docs/cli/).
+# These operations answer with a redirect (302/303), never a 2xx.
+openapi/paths/auth/oauth.yaml:
+  operation-2xx-response:
+    - '#/~1oauth~1authorize/get/responses'
+openapi/paths/files/shares.yaml:
+  operation-2xx-response:
+    - '#/~1files~1shared~1{token}/get/responses'
+    - '#/~1files~1shared~1{token}~1{filename}/get/responses'
+openapi/paths/auth/oauth-upstream.yaml:
+  operation-2xx-response:
+    - '#/~1oauth~1upstream~1{slug}~1start/get/responses'
+    - '#/~1oauth~1upstream~1{slug}~1callback/get/responses'

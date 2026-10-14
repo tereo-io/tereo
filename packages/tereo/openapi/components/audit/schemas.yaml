@@ -1,0 +1,306 @@
+# Enums
+Action:
+  type: string
+  enum: [CREATE, UPDATE, DELETE, MERGE, ARCHIVE, RESTORE, LOGIN, LOGOUT]
+  description: |
+    The type of operation that was performed. `LOGIN` and `LOGOUT` are
+    written only by core: a user signing in with their credentials (not a
+    silent continuation of an existing session), and a user signing
+    themselves out. Services write the others (`WritableAction`).
+
+    Both have entity `User`. `LOGIN` carries `metadata`
+    `{ client_id, sid, auth_methods }`. `LOGOUT` from `/oauth/end-session`
+    carries `{ client_id, sids, sessionIds, method }` (`method`
+    `id_token_hint` or `confirm`); from the account API's session revocation,
+    `{ action: "sessions_revoked", sessionIds, ssoSessionIds, method:
+    "account" }`. An admin revoking a user's sessions writes an `UPDATE` with
+    the same metadata, without `method`.
+
+WritableAction:
+  type: string
+  enum: [CREATE, UPDATE, DELETE, MERGE, ARCHIVE, RESTORE]
+  description: The actions a service may write; `LOGIN` and `LOGOUT` are core's own
+
+# Audit Log Entry
+AuditLogEntry:
+  type: object
+  description: An audit log entry. Entries are immutable.
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Unique identifier for the audit log entry
+    source:
+      type: string
+      maxLength: 100
+      description: The service that generated this entry (e.g., "inventory-service"); self-reported by the writer
+    organizationId:
+      type: [string, 'null']
+      format: uuid
+      description: Tenant identifier
+    userId:
+      type: string
+      format: uuid
+      description: The user who performed the action; self-reported by the writer
+    userEmail:
+      type: [string, 'null']
+      format: email
+      description: Email of the user who performed the action
+    action:
+      $ref: '#/Action'
+    entityType:
+      type: string
+      maxLength: 100
+      description: The type of entity affected (e.g., "Order", "Product")
+    entityId:
+      type: string
+      description: The unique identifier of the affected entity
+    entityName:
+      type: [string, 'null']
+      maxLength: 500
+      description: Human-readable name of the affected entity
+    changes:
+      type: [object, 'null']
+      description: Field-level changes (for UPDATE actions)
+      additionalProperties:
+        type: object
+        properties:
+          old:
+            description: Previous value
+          new:
+            description: New value
+    metadata:
+      type: [object, 'null']
+      description: Additional context about the operation
+      additionalProperties: true
+    ipAddress:
+      type: [string, 'null']
+      maxLength: 45
+      description: IP address of the user who performed the action (IPv4 or IPv6)
+    correlationId:
+      type: [string, 'null']
+      maxLength: 255
+      description: Correlation ID for tracing related operations
+    writerUserId:
+      type: string
+      format: uuid
+      description: |
+        The authenticated user that wrote this entry, taken from the bearer
+        token (a client writes as its service-account user; core as its system
+        user). Unlike `source`/`userId`, it cannot be supplied by the caller.
+    createdAt:
+      type: string
+      format: date-time
+      description: When the audit log entry was created
+  required:
+    - id
+    - source
+    - organizationId
+    - userId
+    - userEmail
+    - action
+    - entityType
+    - entityId
+    - entityName
+    - changes
+    - metadata
+    - ipAddress
+    - correlationId
+    - writerUserId
+    - createdAt
+
+AuditLogActor:
+  $ref: '../schemas.yaml#/UserRef'
+
+AuditLogOrganization:
+  $ref: '../schemas.yaml#/OrgRef'
+
+AuditLogEntryWithNames:
+  description: An audit log entry as the read endpoints return it, with its users and organization named
+  allOf:
+    - $ref: '#/AuditLogEntry'
+    - type: object
+      properties:
+        user:
+          $ref: '#/AuditLogActor'
+          description: The user `userId` names
+        writer:
+          $ref: '#/AuditLogActor'
+          description: The user `writerUserId` names
+        organization:
+          oneOf:
+            - $ref: '#/AuditLogOrganization'
+            - type: 'null'
+          description: The organization `organizationId` names; `null` for a system-wide entry
+      required:
+        - user
+        - writer
+        - organization
+
+# Request Schemas — Shared entry fields (no idempotencyKey)
+AuditLogEntryFields:
+  type: object
+  description: |
+    No string — nor any key or string value inside `changes` or `metadata` —
+    may contain a NUL character (`\u0000`); one that does is a `400`.
+  properties:
+    source:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: The service generating this entry
+    organizationId:
+      type: [string, 'null']
+      format: uuid
+      description: |
+        Tenant identifier; must name an existing organization (`400 unknown_organization`).
+        Null or absent for a system-wide entry. A token with an `org_id` and without
+        `audit-logs.admin` may give only its own organization (`403` otherwise, including for
+        null or absent).
+    userId:
+      type: string
+      format: uuid
+      description: The user performing the action; must name an existing user (`400 unknown_user`)
+    userEmail:
+      type: [string, 'null']
+      format: email
+      description: Email of the user; stored lower-cased
+    action:
+      $ref: '#/WritableAction'
+    entityType:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: Type of entity affected
+    entityId:
+      type: string
+      minLength: 1
+      maxLength: 500
+      description: ID of the affected entity, as entity history looks it up
+    entityName:
+      type: string
+      maxLength: 500
+      description: Human-readable entity name (omit it rather than sending `null`)
+    changes:
+      type: object
+      description: Field-level changes
+      additionalProperties:
+        type: object
+        properties:
+          old:
+            description: Previous value
+          new:
+            description: New value
+    metadata:
+      type: object
+      description: Additional context
+      additionalProperties: true
+    ipAddress:
+      type: [string, 'null']
+      maxLength: 45
+      description: |
+        IP address of the user: an IPv4 or IPv6 address, including an
+        IPv4-mapped one such as `::ffff:203.0.113.7`; anything else is a `400`
+    correlationId:
+      type: string
+      maxLength: 255
+      description: Correlation ID for tracing; an empty string is stored as `null`
+  required:
+    - source
+    - userId
+    - action
+    - entityType
+    - entityId
+
+CreateAuditLogEntryRequest:
+  allOf:
+    - $ref: '#/AuditLogEntryFields'
+    - type: object
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Unique key to prevent duplicate entries
+
+CreateBatchRequest:
+  type: object
+  properties:
+    entries:
+      type: array
+      items:
+        allOf:
+          - $ref: '#/AuditLogEntryFields'
+        unevaluatedProperties: false
+      minItems: 1
+      maxItems: 1000
+      description: |
+        Array of audit log entries to create. Unknown fields are rejected, so a
+        per-entry `idempotencyKey` is a 400 — use the batch-level one.
+    idempotencyKey:
+      type: string
+      minLength: 1
+      maxLength: 255
+      description: Unique key to prevent duplicate batch creation
+  required:
+    - entries
+
+CreateBatchResponse:
+  type: object
+  properties:
+    created:
+      type: integer
+      description: Number of entries created
+  required:
+    - created
+
+# Response Schemas
+ListAuditLogEntriesResponse:
+  type: object
+  description: Cursor-paginated list of audit log entries
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AuditLogEntryWithNames'
+    hasMore:
+      type: boolean
+      description: Whether there are more entries beyond the current page
+    limit:
+      type: integer
+      description: The page size requested (echoed back from the request)
+    nextCursor:
+      type: [string, 'null']
+      description: |
+        Opaque, HMAC-signed cursor for fetching the next page. `null` when
+        `hasMore` is `false`. Pass back as the `cursor` query parameter on
+        the next request. Bound to the request's `sort` + `sortDir`.
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+
+AuditLogFacets:
+  type: object
+  description: Distinct values present in the entries the caller can read, sorted
+  properties:
+    sources:
+      type: array
+      items:
+        type: string
+    entityTypes:
+      type: array
+      items:
+        type: string
+    metadataKeys:
+      type: array
+      description: |
+        Top-level keys of `metadata`, sampled from the most recent entries in the
+        request's date window (up to 5000 with metadata); at most 200.
+      items:
+        type: string
+  required:
+    - sources
+    - entityTypes
+    - metadataKeys

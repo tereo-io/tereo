@@ -1,0 +1,34 @@
+name: PR Labels
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Add label based on branch name
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          LABEL=""
+          case "$BRANCH" in
+            feature/*) LABEL="feature" ;;
+            bugfix/*)  LABEL="bugfix" ;;
+            hotfix/*)  LABEL="hotfix" ;;
+          esac
+
+          if [ -n "$LABEL" ]; then
+            # Create label if it doesn't exist
+            gh label create "$LABEL" --repo "${{ github.repository }}" 2>/dev/null || true
+            gh pr edit "$PR_NUMBER" --add-label "$LABEL" --repo "${{ github.repository }}"
+            echo "Added label '$LABEL' for branch '$BRANCH'"
+          else
+            echo "No matching label for branch '$BRANCH'"
+          fi

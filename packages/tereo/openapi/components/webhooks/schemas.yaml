@@ -1,0 +1,833 @@
+# ============================================
+# Enums
+# ============================================
+
+WebhookEndpointStatus:
+  type: string
+  enum:
+    - ACTIVE
+    - PAUSED
+    - DISABLED
+  description: Status of a webhook endpoint
+
+WebhookDeliveryStatus:
+  type: string
+  enum:
+    - PENDING
+    - SUCCESS
+    - FAILED
+  description: Status of a webhook delivery attempt
+
+# ============================================
+# Webhook Endpoints
+# ============================================
+
+WebhookEndpoint:
+  type: object
+  description: A webhook endpoint configuration for receiving event notifications
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Unique identifier
+      examples:
+        - "550e8400-e29b-41d4-a716-446655440000"
+    organizationId:
+      type: string
+      format: uuid
+      description: |
+        Tenant identifier — an `Organization.id` (UUIDv7).
+        Bootstrap-time endpoints register under the default organization.
+      examples:
+        - "019dd4c2-e0b3-778e-b8db-a52e61927416"
+    url:
+      type: string
+      format: uri
+      description: The URL to deliver webhook events to
+      maxLength: 2048
+      examples:
+        - "https://example.com/webhooks"
+    description:
+      type: [string, 'null']
+      description: Optional description of the webhook endpoint
+      maxLength: 500
+      examples:
+        - "Order status notifications"
+    signingSecret:
+      type: string
+      description: |
+        Signing secret for verifying webhook payloads: 64 lowercase hex
+        characters. Returned in full only by create and rotate-secret; every
+        other response masks it to its first 8 characters followed by `...`.
+        Stored sealed under core's key-encryption key.
+      examples:
+        - "3f9a1c7e..."
+    status:
+      $ref: '#/WebhookEndpointStatus'
+    eventTypes:
+      type: array
+      items:
+        type: string
+      description: Event types this endpoint is subscribed to, sorted by name (duplicates in the request are dropped)
+      examples:
+        - ["order.created", "order.shipped"]
+    retiredEventTypes:
+      type: array
+      items:
+        type: string
+      description: |
+        Those of `eventTypes` that are retired (their service no longer
+        declares them); they will not fire again.
+      examples:
+        - []
+    consecutiveFailures:
+      type: integer
+      minimum: 0
+      description: |
+        Deliveries in a row that failed all their attempts; reset by any
+        successful delivery, and when a non-`ACTIVE` endpoint is set back to
+        `ACTIVE`. At 5 an `ACTIVE` endpoint is set to `DISABLED`.
+      examples:
+        - 0
+    createdBy:
+      type: string
+      format: uuid
+      description: User (or client service-account user) that created the endpoint
+      examples:
+        - "019dd4c2-e0b3-778e-b8db-a52e61927416"
+    creator:
+      description: The user `createdBy` names.
+      $ref: '../schemas.yaml#/UserRef'
+    customHeaders:
+      type: [object, 'null']
+      additionalProperties:
+        type: string
+      description: |
+        Custom HTTP headers sent with every delivery. Only the names are
+        returned: every value is masked as `********`, in every response and
+        in audit entries. Deliveries send the stored values. To keep a value
+        on update, send the mask back for that header.
+      examples:
+        - { "X-Custom-Auth": "********", "X-Tenant-Id": "********" }
+    archivedAt:
+      type: [string, 'null']
+      format: date-time
+      description: Archive (retirement) timestamp; null for active endpoints. Archived endpoints never receive deliveries.
+      examples:
+        - "2025-01-15T10:30:00.000Z"
+    createdAt:
+      type: string
+      format: date-time
+      description: Creation timestamp
+      examples:
+        - "2025-01-15T10:30:00.000Z"
+    updatedAt:
+      type: string
+      format: date-time
+      description: Last update timestamp
+      examples:
+        - "2025-01-15T10:30:00.000Z"
+    previousSecretExpiresAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        When the signing secret replaced by the last rotation stops signing
+        deliveries; null when no rotation overlap is in progress. The previous
+        secret itself is never returned.
+      examples:
+        - "2025-01-16T10:30:00.000Z"
+    hasDeliveries:
+      type: boolean
+      description: |
+        Whether delivery history references this endpoint. While true, a hard
+        DELETE answers 409 — archive the endpoint instead.
+  required:
+    - id
+    - organizationId
+    - url
+    - description
+    - signingSecret
+    - status
+    - eventTypes
+    - retiredEventTypes
+    - customHeaders
+    - consecutiveFailures
+    - archivedAt
+    - createdBy
+    - creator
+    - previousSecretExpiresAt
+    - hasDeliveries
+    - createdAt
+    - updatedAt
+
+CreateWebhookEndpointRequest:
+  type: object
+  description: |
+    Request body for creating a webhook endpoint. No string — the URL, the
+    description, an event type or a custom header value — may contain a NUL
+    character (`\u0000`); one that does is a `400`.
+  properties:
+    url:
+      type: string
+      format: uri
+      description: |
+        The URL to deliver webhook events to. Must be `http` or `https`
+        and carry no credentials (`400 invalid_url`;
+        send them in a custom header), and not be `localhost` or a private or
+        reserved IP literal, IPv6 included (`400 private_url_not_allowed`);
+        hostnames are resolved and checked at every delivery, which fails
+        when one resolves to a private or reserved address.
+      maxLength: 2048
+      examples:
+        - "https://example.com/webhooks"
+    description:
+      type: string
+      description: Optional description of the webhook endpoint
+      maxLength: 500
+      examples:
+        - "Order status notifications"
+    eventTypes:
+      type: array
+      items:
+        type: string
+        maxLength: 100
+      minItems: 1
+      description: |
+        Event types to subscribe to (at least one). Each must be registered and
+        not retired, or the request fails with `400 invalid_event_type`.
+        `webhook.test` is reserved for the test action (`400 reserved_event_type`).
+      examples:
+        - ["order.created", "order.shipped"]
+    customHeaders:
+      type: object
+      maxProperties: 10
+      patternProperties:
+        "^[a-zA-Z0-9-]{1,100}$":
+          type: string
+          maxLength: 500
+          pattern: '^[\t\x20-\x7e\x80-\xff]*$'
+      additionalProperties: false
+      description: |
+        Custom HTTP headers to include in webhook deliveries. Maximum 10 headers.
+        Header names: 1-100 chars, alphanumeric + hyphen (`^[a-zA-Z0-9-]+$`).
+        Header values: max 500 chars, tabs and printable Latin-1 only (no CR
+        or LF, nothing above U+00FF; `400`).
+        Cannot set reserved headers, compared case-insensitively (`400`): core's
+        own (Content-Type, X-Webhook-Id, X-Webhook-Event, X-Webhook-Timestamp,
+        X-Webhook-Signature) and the hop-by-hop and framing ones (Connection,
+        Keep-Alive, Transfer-Encoding, TE, Trailer, Upgrade, Content-Length,
+        Host, Expect, and any `Proxy-*`). Names are case-insensitive: two that differ
+        only in case are a `400`.
+        Values are stored as sent but never returned: responses mask each one
+        as `********`.
+      examples:
+        - { "X-Custom-Auth": "my-secret", "X-Tenant-Id": "tenant-123" }
+  required:
+    - url
+    - eventTypes
+
+UpdateWebhookEndpointRequest:
+  type: object
+  description: |
+    Request body for updating a webhook endpoint. All fields are optional. As
+    on create, a string containing a NUL character (`\u0000`) is a `400`.
+  properties:
+    url:
+      type: string
+      format: uri
+      description: The URL to deliver webhook events to (same rules as on create)
+      maxLength: 2048
+      examples:
+        - "https://example.com/webhooks/v2"
+    description:
+      type: [string, 'null']
+      maxLength: 500
+      description: Optional description (set to null to clear)
+      examples:
+        - "Updated webhook endpoint"
+    eventTypes:
+      type: array
+      items:
+        type: string
+        maxLength: 100
+      minItems: 1
+      description: |
+        Replaces the subscriptions. Each must be registered and not retired
+        (`400 invalid_event_type`), and none may be `webhook.test`
+        (`400 reserved_event_type`).
+      examples:
+        - ["order.created", "order.shipped", "order.cancelled"]
+    status:
+      type: string
+      enum:
+        - ACTIVE
+        - PAUSED
+      description: |
+        New status (only ACTIVE or PAUSED allowed via update). Setting `ACTIVE`
+        re-enables a `DISABLED` (or `PAUSED`) endpoint and resets its
+        `consecutiveFailures` to 0.
+    customHeaders:
+      type: [object, 'null']
+      maxProperties: 10
+      patternProperties:
+        "^[a-zA-Z0-9-]{1,100}$":
+          type: string
+          maxLength: 500
+          pattern: '^[\t\x20-\x7e\x80-\xff]*$'
+      additionalProperties: false
+      description: |
+        Replaces the custom headers (set to null to clear).
+        Maximum 10 headers. Header names: 1-100 chars, alphanumeric + hyphen
+        (`^[a-zA-Z0-9-]+$`). Header values: max 500 chars, tabs and
+        printable Latin-1 only (`400`).
+        Cannot set reserved headers (`400`; the list is on create). Names are
+        case-insensitive: two that differ only in case are a `400`.
+
+        Responses mask every value as `********`. A header sent with that mask
+        as its value keeps its stored value, so the headers read from the
+        endpoint can be sent back with only some values changed; the name is
+        matched case-insensitively. The mask for a header name that has no
+        stored value (a new or renamed header) is
+        refused with `400 masked_header_value`.
+      examples:
+        - { "X-Custom-Auth": "********", "X-Tenant-Id": "tenant-456" }
+
+ListWebhookEndpointsResponse:
+  type: object
+  description: Cursor-paginated list of webhook endpoints
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/WebhookEndpoint'
+    hasMore:
+      type: boolean
+      description: Whether there are more records beyond the current page
+      examples:
+        - true
+    limit:
+      type: integer
+      description: The page size requested (echoed back from the request)
+      examples:
+        - 25
+    nextCursor:
+      type: [string, 'null']
+      description: |
+        Opaque, HMAC-signed cursor for fetching the next page. `null` when
+        `hasMore` is `false`. Pass back as the `cursor` query parameter on the
+        next request. Bound to the request's `sort` + `sortDir`.
+      examples:
+        - "eyJ2IjoxLCJrdiI6MSwicyI6ImNyZWF0ZWRBdCJ9.abc..."
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+
+# ============================================
+# Webhook Deliveries
+# ============================================
+
+WebhookDelivery:
+  type: object
+  description: A record of a webhook delivery attempt to an endpoint
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Unique identifier
+      examples:
+        - "660e8400-e29b-41d4-a716-446655440001"
+    webhookEndpointId:
+      type: string
+      format: uuid
+      description: The webhook endpoint this delivery belongs to
+      examples:
+        - "550e8400-e29b-41d4-a716-446655440000"
+    eventType:
+      type: string
+      description: The event type that triggered this delivery
+      examples:
+        - "order.created"
+    payload:
+      type: [object, 'null']
+      description: |
+        The event envelope delivered to the endpoint (see `WebhookEvent`),
+        stored so retries resend it unchanged. `null` when the caller could
+        not read the event themselves (`payloadRedacted`).
+      additionalProperties: true
+    payloadRedacted:
+      type: boolean
+      description: |
+        True when `payload` and `responseBody` are withheld: the caller lacks
+        the event type's read permission in the organization, or for a file
+        event, read access to its bucket — the check the endpoint itself is
+        sent the event under.
+    status:
+      $ref: '#/WebhookDeliveryStatus'
+    attempts:
+      type: integer
+      description: Number of delivery attempts made
+      minimum: 0
+      examples:
+        - 1
+    lastAttemptAt:
+      type: [string, 'null']
+      format: date-time
+      description: Timestamp of the last delivery attempt
+      examples:
+        - "2025-01-15T10:30:05.000Z"
+    httpStatus:
+      type: [integer, 'null']
+      description: HTTP status code from the last delivery attempt
+      examples:
+        - 200
+    responseBody:
+      type: [string, 'null']
+      description: Response body from the last delivery attempt (truncated to 4096 chars); `null` when `payloadRedacted`, since a receiver may echo the payload
+      maxLength: 4096
+      examples:
+        - '{"received": true}'
+    errorMessage:
+      type: [string, 'null']
+      description: |
+        Why the last delivery attempt failed: `HTTP <status>` for a non-2xx
+        response; without one, a category — `Target resolves to a private or
+        reserved address`, `Target host could not be resolved`, `Request timed
+        out` or `Connection failed` — never the underlying network detail.
+      maxLength: 2048
+      examples:
+        - "Connection failed"
+    completedAt:
+      type: [string, 'null']
+      format: date-time
+      description: Timestamp when the delivery was completed (success or final failure)
+      examples:
+        - "2025-01-15T10:30:05.000Z"
+    createdAt:
+      type: string
+      format: date-time
+      description: Creation timestamp
+      examples:
+        - "2025-01-15T10:30:00.000Z"
+    updatedAt:
+      type: string
+      format: date-time
+      description: Last update timestamp
+      examples:
+        - "2025-01-15T10:30:05.000Z"
+  required:
+    - id
+    - webhookEndpointId
+    - eventType
+    - payload
+    - status
+    - attempts
+    - lastAttemptAt
+    - httpStatus
+    - responseBody
+    - errorMessage
+    - completedAt
+    - createdAt
+    - updatedAt
+
+ListWebhookDeliveriesResponse:
+  type: object
+  description: Cursor-paginated list of webhook deliveries
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/WebhookDelivery'
+    hasMore:
+      type: boolean
+      description: Whether there are more records beyond the current page
+      examples:
+        - true
+    limit:
+      type: integer
+      description: The page size requested (echoed back from the request)
+      examples:
+        - 25
+    nextCursor:
+      type: [string, 'null']
+      description: |
+        Opaque, HMAC-signed cursor for fetching the next page. `null` when
+        `hasMore` is `false`. Pass back as the `cursor` query parameter on the
+        next request. Bound to the request's `sort` + `sortDir`.
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+
+# ============================================
+# Event Types
+# ============================================
+
+EventType:
+  type: object
+  description: |
+    An event type, declared by the service that emits it and registered when
+    that service starts (`POST /v1/registry/declaration`). One dropped from its
+    service's declaration is marked `missingSince`, then retired (`retiredAt`)
+    a day later; retired types cannot be emitted.
+  properties:
+    eventType:
+      type: string
+      description: |
+        Unique event type name — the primary key. Event types have no separate
+        `id`; reference them, and key lists of them, by this name.
+      maxLength: 100
+      examples:
+        - "order.created"
+    description:
+      type: [string, 'null']
+      description: Human-readable description of the event type
+      examples:
+        - "Fired when a new order is created"
+    source:
+      type: string
+      description: Slug of the service that declares this event type (`core` for core's own); filterable as `filter[source]`
+      maxLength: 100
+      examples:
+        - "core"
+    serviceId:
+      type: string
+      format: uuid
+      description: Id of the service that declares this event type
+      examples:
+        - "019dd4c2-e0b3-778e-b8db-a52e61927416"
+    serviceName:
+      type: string
+      description: Display name of the service that declares this event type
+      maxLength: 100
+      examples:
+        - "tereo"
+    missingSince:
+      type: [string, 'null']
+      format: date-time
+      description: When the event type was first absent from its service's declaration; null while declared
+      examples:
+        - "2025-01-15T10:30:00.000Z"
+    retiredAt:
+      type: [string, 'null']
+      format: date-time
+      description: When the event type was retired; null while active
+      examples:
+        - "2025-01-16T10:30:00.000Z"
+    createdAt:
+      type: string
+      format: date-time
+      description: Creation timestamp
+      examples:
+        - "2025-01-15T10:30:00.000Z"
+  required:
+    - eventType
+    - description
+    - source
+    - serviceId
+    - serviceName
+    - missingSince
+    - retiredAt
+    - createdAt
+
+ListEventTypesResponse:
+  type: object
+  description: Cursor-paginated list of event types
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/EventType'
+    hasMore:
+      type: boolean
+      description: Whether there are more records beyond the current page
+      examples:
+        - false
+    limit:
+      type: integer
+      description: The page size requested (echoed back from the request)
+      examples:
+        - 50
+    nextCursor:
+      type: [string, 'null']
+      description: |
+        Opaque, HMAC-signed cursor for fetching the next page. `null` when
+        `hasMore` is `false`. Pass back as the `cursor` query parameter on the
+        next request. Bound to the request's `sort` + `sortDir`.
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+
+# ============================================
+# Events (Emission)
+# ============================================
+
+EmitEventRequest:
+  type: object
+  description: |
+    Request body for emitting an event to all matching webhook endpoints. No
+    string — `data` included, keys as well as values — may contain a NUL
+    character (`\u0000`); one that does is a `400`.
+  properties:
+    organizationId:
+      type: string
+      format: uuid
+      description: |
+        Tenant whose webhook endpoints should receive this event — an
+        `Organization.id` (UUIDv7). System-scoped events
+        (org/client/role mutations, system integrations) are emitted under
+        the default organization.
+      examples:
+        - "019dd4c2-e0b3-778e-b8db-a52e61927416"
+    eventType:
+      type: string
+      description: The event type (must be declared by a service and not retired)
+      minLength: 1
+      maxLength: 100
+      examples:
+        - "order.created"
+    entityType:
+      type: string
+      description: The type of entity this event relates to
+      minLength: 1
+      maxLength: 100
+      examples:
+        - "Order"
+    entityId:
+      type: string
+      description: The unique identifier of the entity
+      minLength: 1
+      examples:
+        - "ord-12345"
+    data:
+      type: object
+      description: Event payload data
+      additionalProperties: true
+      examples:
+        - { "orderNumber": "ORD-001", "status": "CONFIRMED" }
+    idempotencyKey:
+      type: string
+      minLength: 1
+      maxLength: 255
+      description: |
+        Optional idempotency key. When provided, submissions by the same
+        caller with the same key, `organizationId` and `eventType` are
+        deduplicated for 24 hours (Redis TTL): a duplicate returns the first
+        request's result without creating deliveries, and one arriving while
+        the first is still processing (a claim that lasts 60 seconds) gets
+        `409 idempotency_request_in_progress`. The same key with a different event
+        (any field but the key) is `422 idempotency_key_conflict`. A request
+        that fails before writing
+        anything releases the key; once its deliveries are written the key
+        stays claimed, even if the request then errors. In a
+        batch, a key may appear only once per organization and event type
+        (`400 duplicate_idempotency_key`).
+      examples:
+        - "order-12345-created-v1"
+  required:
+    - organizationId
+    - eventType
+    - entityType
+    - entityId
+    - data
+
+EmitEventResponse:
+  type: object
+  description: Result of emitting an event
+  properties:
+    deliveriesCreated:
+      type: integer
+      description: Number of webhook deliveries created (one per matching active endpoint)
+      minimum: 0
+      examples:
+        - 3
+  required:
+    - deliveriesCreated
+
+BatchEmitEventRequest:
+  type: object
+  description: Request body for emitting multiple events in a single API call
+  properties:
+    events:
+      type: array
+      items:
+        $ref: '#/EmitEventRequest'
+      minItems: 1
+      maxItems: 100
+      description: Array of events to emit (1-100)
+  required:
+    - events
+
+BatchEmitEventResponse:
+  type: object
+  description: Result of batch emitting events
+  properties:
+    results:
+      type: array
+      items:
+        type: object
+        properties:
+          eventType:
+            type: string
+            description: The event type that was emitted
+            examples:
+              - "order.created"
+          entityId:
+            type: string
+            description: The entity ID associated with the event
+            examples:
+              - "ord-12345"
+          deliveriesCreated:
+            type: integer
+            description: Number of deliveries created for this event
+            minimum: 0
+            examples:
+              - 2
+        required:
+          - eventType
+          - entityId
+          - deliveriesCreated
+      description: Per-event results in the same order as the input
+  required:
+    - results
+
+BulkRetryRequest:
+  type: object
+  description: Request body for bulk retrying failed deliveries
+  properties:
+    createdAfter:
+      type: string
+      format: date-time
+      description: Only retry deliveries created at or after this timestamp (years 1-9999)
+      examples:
+        - "2026-02-20T00:00:00.000Z"
+    createdBefore:
+      type: string
+      format: date-time
+      description: Only retry deliveries created at or before this timestamp (years 1-9999)
+      examples:
+        - "2026-02-23T00:00:00.000Z"
+    eventType:
+      type: string
+      maxLength: 100
+      description: Only retry deliveries for this event type
+      examples:
+        - "order.created"
+    limit:
+      type: integer
+      minimum: 1
+      maximum: 1000
+      default: 100
+      description: Maximum number of deliveries to retry, newest first. Must be a JSON integer — a string such as `"50"` is a `400 invalid_request`.
+      examples:
+        - 100
+
+BulkRetryResponse:
+  type: object
+  description: Result of bulk retrying failed deliveries
+  properties:
+    retriedCount:
+      type: integer
+      description: Number of deliveries that were reset and re-queued for delivery
+      minimum: 0
+      examples:
+        - 15
+  required:
+    - retriedCount
+
+TestWebhookResponse:
+  type: object
+  description: Result of enqueuing a test webhook delivery
+  properties:
+    deliveryId:
+      type: string
+      format: uuid
+      description: Identifier of the test delivery that was created and queued
+      examples:
+        - "660e8400-e29b-41d4-a716-446655440001"
+  required:
+    - deliveryId
+
+DeliveryStats:
+  type: object
+  description: |
+    Aggregated delivery statistics for a webhook endpoint, over the deliveries
+    created in the last `windowDays` (30) days.
+  properties:
+    windowDays:
+      type: integer
+      description: How many days back the counts reach (30)
+      examples:
+        - 30
+    total:
+      type: integer
+      description: Number of deliveries created in the window
+      examples:
+        - 1500
+    success:
+      type: integer
+      description: Number of successful deliveries
+      examples:
+        - 1400
+    failed:
+      type: integer
+      description: Number of failed deliveries
+      examples:
+        - 80
+    pending:
+      type: integer
+      description: Number of pending deliveries
+      examples:
+        - 20
+    successRate:
+      type: number
+      format: float
+      description: Ratio of successful deliveries to completed deliveries (success + failed), rounded to 3 decimals; 0 when none have completed
+      minimum: 0
+      maximum: 1
+      examples:
+        - 0.946
+    averageAttempts:
+      type: number
+      format: float
+      description: Average number of attempts for completed deliveries, rounded to 1 decimal; 0 when none have completed
+      examples:
+        - 1.3
+    last24Hours:
+      type: object
+      description: Delivery counts scoped to the last 24 hours
+      properties:
+        total:
+          type: integer
+          examples:
+            - 150
+        success:
+          type: integer
+          examples:
+            - 140
+        failed:
+          type: integer
+          examples:
+            - 8
+        pending:
+          type: integer
+          examples:
+            - 2
+      required:
+        - total
+        - success
+        - failed
+        - pending
+  required:
+    - windowDays
+    - total
+    - success
+    - failed
+    - pending
+    - successRate
+    - averageAttempts
+    - last24Hours

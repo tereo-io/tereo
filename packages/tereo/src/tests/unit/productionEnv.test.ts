@@ -1,0 +1,77 @@
+import { describe, expect, it } from "vitest";
+import { EnvSchema } from "../../env.js";
+
+const production = {
+  NODE_ENV: "production",
+  DATABASE_URL: "postgresql://core:core@db:5432/core",
+  REDIS_URL: "redis://redis:6379",
+  PUBLIC_URL: "https://core.example.com",
+  CORS_ALLOWED_ORIGINS: "https://core.example.com",
+  TRUST_PROXY: "1",
+  CORE_KEK: Buffer.alloc(32, 1).toString("base64"),
+};
+
+const issuesFor = (overrides: Record<string, string>) => {
+  const result = EnvSchema.safeParse({ ...production, ...overrides });
+  return result.success
+    ? []
+    : result.error.issues.map((issue) => issue.path.join("."));
+};
+
+describe("production env", () => {
+  it("accepts a safe production configuration", () => {
+    expect(issuesFor({})).toEqual([]);
+    expect(
+      issuesFor({
+        COOKIE_SECURE: "true",
+        UI_BASE_URL: "https://admin.example.com",
+        TRUST_PROXY: "10.0.0.0/8,192.168.0.0/16",
+      })
+    ).toEqual([]);
+  });
+
+  it.each(["true", "TRUE"])("refuses TRUST_PROXY=%s", (value) => {
+    expect(issuesFor({ TRUST_PROXY: value })).toContain("TRUST_PROXY");
+  });
+
+  it.each(["1", "loopback", "false", "10.0.0.0/8"])(
+    "accepts TRUST_PROXY=%s",
+    (value) => {
+      expect(issuesFor({ TRUST_PROXY: value })).toEqual([]);
+    }
+  );
+
+  it.each(["false", "0"])("refuses COOKIE_SECURE=%s", (value) => {
+    expect(issuesFor({ COOKIE_SECURE: value })).toContain("COOKIE_SECURE");
+  });
+
+  it("refuses an http PUBLIC_URL", () => {
+    expect(
+      issuesFor({
+        PUBLIC_URL: "http://core.example.com",
+        CORS_ALLOWED_ORIGINS: "http://core.example.com",
+      })
+    ).toContain("PUBLIC_URL");
+  });
+
+  it("refuses an http UI_BASE_URL", () => {
+    expect(issuesFor({ UI_BASE_URL: "http://admin.example.com" })).toContain(
+      "UI_BASE_URL"
+    );
+  });
+
+  it.each(["development", "test"])(
+    "leaves all three alone in %s",
+    (nodeEnv) => {
+      expect(
+        issuesFor({
+          NODE_ENV: nodeEnv,
+          TRUST_PROXY: "true",
+          COOKIE_SECURE: "false",
+          PUBLIC_URL: "http://localhost:4001",
+          UI_BASE_URL: "http://localhost:4000",
+        })
+      ).toEqual([]);
+    }
+  );
+});

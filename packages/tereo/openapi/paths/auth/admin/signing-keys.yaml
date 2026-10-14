@@ -1,0 +1,136 @@
+/admin/signing-keys:
+  get:
+    tags:
+      - Admin - Settings
+    summary: List JWT signing keys
+    description: |
+      The active signing key, a rotated-in key not yet active, and any
+      retired key still within its retention (`JWT_ACCESS_TOKEN_TTL` plus the
+      one-hour `id_token_hint` grace) — the keys `/.well-known/jwks.json`
+      publishes. Newest first. No key material.
+    operationId: listAdminSigningKeys
+    security:
+      - BearerAuth: [settings.read]
+    responses:
+      '200':
+        description: Signing keys
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/SigningKeyList'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/signing-keys/rotate:
+  post:
+    tags:
+      - Admin - Settings
+    summary: Rotate the JWT signing key
+    description: |
+      Generates the next signing key version. It is published in the JWKS at
+      once and signs every token issued from `activatesAt`, 150 seconds later
+      — time for every core process (which refresh each minute) and every
+      service that refetches the JWKS to know it before a token carries its
+      `kid`. With `immediate: true` it signs at once, for a compromised key.
+
+      The previous key signs until then and is then retired: tokens it signed
+      keep verifying, and it stays in the JWKS, until `expiresAt` (one
+      access-token lifetime plus the `id_token_hint` grace). Keys past their
+      retention are deleted.
+
+      Refused with 409 when the signing key is supplied in env
+      (`JWT_PRIVATE_KEY`), or when another rotation ran at the same moment.
+
+      An audit log entry is created for this action (entity type
+      `SigningKey`, the new `kid`).
+      A `core.signing-key.rotated` webhook event is emitted.
+    operationId: rotateAdminSigningKey
+    security:
+      - BearerAuth: [settings.write]
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/RotateSigningKeyRequest'
+    responses:
+      '200':
+        description: The keys after the rotation, and when the new one activates
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/SigningKeyRotation'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+core.signing-key.rotated:
+  post:
+    tags:
+      - Admin - Settings
+    summary: JWT signing key rotated
+    description: |
+      Fired when the JWT signing key is rotated. The JWKS now publishes
+      `kid`, and tokens are signed with it from `activatesAt` (150 seconds
+      on, or at once for an immediate rotation); `retiredKid` signs until
+      then and keeps verifying until `retiredKidExpiresAt`. A service that
+      caches the JWKS should refetch it. No key material is included.
+    operationId: webhookSigningKeyRotated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.signing-key.rotated
+                  entityType:
+                    const: SigningKey
+                  entityId:
+                    type: string
+                    description: The new key's kid
+                  data:
+                    type: object
+                    required: [kid, activatesAt, retiredKid, retiredKidExpiresAt]
+                    properties:
+                      kid:
+                        type: string
+                        description: The new key's kid (JWK thumbprint)
+                      activatesAt:
+                        type: string
+                        format: date-time
+                        description: When the new key starts signing
+                      retiredKid:
+                        type: [string, 'null']
+                        description: The key it replaced
+                      retiredKidExpiresAt:
+                        type: [string, 'null']
+                        format: date-time
+                        description: When the retired key stops verifying and leaves the JWKS
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

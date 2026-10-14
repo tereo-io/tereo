@@ -1,0 +1,1395 @@
+/files/buckets/{name}/objects:
+  get:
+    tags:
+      - Files - Objects
+    summary: List objects in bucket
+    description: |
+      Returns a paginated list of objects in a bucket.
+
+      **Required permissions:**
+      - **Public buckets**: No authentication required
+      - **Private buckets**: Authentication required with `file-service.objects.read` AND bucket-level `canRead`
+        (an anonymous request — for a private or a missing bucket — gets `401 invalid_token`)
+
+      **Filter operators:**
+      - objectKey: `contains`, `startsWith`, `equals`
+      - contentType: `contains`, `equals`
+
+      **Sort fields:** `objectKey`, `createdAt`, `sizeBytes` (default `createdAt`, `desc`)
+
+      **Examples:**
+      - `?filter[objectKey]=photos/2024/&filter[objectKey_op]=startsWith`
+      - `?filter[objectKey]=photos/2024/vacation.jpg&filter[objectKey_op]=equals`
+      - `?filter[contentType]=image/jpeg` (defaults to equals)
+      - `?sort=createdAt&sortDir=desc`
+
+      **Deleted objects:** `?deleted=true` lists the bucket's deleted objects instead — those
+      deleted while versioning was on, whose current version is a delete marker — as
+      `DeletedObject`s, with the same filters, sorts (but `sizeBytes`) and pagination. Restoring a
+      version (`POST .../by-id/{id}/versions/{versionId}/restore`) undeletes one. A bucket without
+      versioning keeps no version to restore, so lists none.
+    operationId: listObjects
+    security:
+      - {}
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesLimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesSortParam'
+      - $ref: '../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesFilterOperatorParam'
+      - name: deleted
+        in: query
+        description: '`true` lists deleted objects (`ListDeletedObjectsResponse`) instead of live ones'
+        schema:
+          type: string
+          enum: ['true', 'false']
+          default: 'false'
+    responses:
+      '200':
+        description: Paginated list of objects, or of deleted objects with `deleted=true`
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              anyOf:
+                - $ref: '../../components/files/schemas.yaml#/ListObjectsResponse'
+                - $ref: '../../components/files/schemas.yaml#/ListDeletedObjectsResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid filter, sort, limit or cursor (`invalid_cursor`); `invalid_sort` for `sizeBytes` with `deleted=true`
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing bucket-level canRead permission (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/objects/by-key/{objectKey}:
+  get:
+    tags:
+      - Files - Objects
+    summary: Resolve an object key to its full metadata (including stable id)
+    description: |
+      Looks up an object by `(bucket, objectKey)` and returns the same
+      serialized shape as `GET /v1/files/buckets/{name}/objects/by-id/{id}` and the
+      upload response. Useful for callers that only hold a key but need the
+      stable UUID `id` before calling an id-addressed mutation — one round
+      trip instead of a list-and-filter.
+
+      Returns 404 if there is no live object at the given key in the bucket.
+
+      **Required permissions:**
+      - **Public buckets**: No authentication required
+      - **Private buckets**: Authentication required with `file-service.objects.read` AND bucket-level `canRead`
+        (an anonymous request — for a private or a missing bucket — gets `401 invalid_token`)
+    operationId: getObjectByKey
+    security:
+      - {}
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectKeyParam'
+    responses:
+      '200':
+        description: Object metadata
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ObjectResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid object key
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.objects.read permission or bucket-level canRead (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'No live object at this key in the bucket (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/objects/prefixes:
+  get:
+    tags:
+      - Files - Objects
+    summary: List virtual folders + leaf objects under a prefix (tree view)
+    description: |
+      Returns a combined listing of virtual folders (common prefixes) and leaf
+      objects directly under the requested `prefix`. Powers the admin UI tree
+      view. A leaf is any object whose remaining key (after the prefix) does
+      not contain the `delimiter`. Folders and leaf objects are each ordered
+      by name, ascending; there is no sort parameter.
+
+      **Required permissions:**
+      - **Public buckets**: No authentication required
+      - **Private buckets**: Authentication required with `file-service.objects.read` AND bucket-level `canRead`
+        (an anonymous request — for a private or a missing bucket — gets `401 invalid_token`)
+    operationId: listObjectPrefixes
+    security:
+      - {}
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - name: prefix
+        in: query
+        description: Prefix to list under. Default empty (bucket root).
+        schema:
+          type: string
+          maxLength: 1024
+          default: ""
+      - name: delimiter
+        in: query
+        description: Path delimiter used to synthesize virtual folders.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 4
+          default: "/"
+      - $ref: '../../components/files/parameters.yaml#/FilesLimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: Combined folder + leaf listing under the prefix.
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ListObjectPrefixesResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid prefix, delimiter, limit or cursor (`invalid_cursor`)
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing bucket-level canRead permission (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/objects/bulk-delete:
+  post:
+    tags:
+      - Files - Objects
+    summary: Bulk soft-delete objects by prefix or id list
+    description: |
+      Soft-deletes many objects in a single request. The body is a
+      discriminated union — supply exactly one of `prefix` or `ids`:
+
+      - `{ "prefix": "images/2024/" }` — deletes every live object whose key
+        starts with the prefix, taken literally (`_` and `%` are not
+        wildcards). Capped at **10,000 objects per request**. If
+        more match, the response sets `truncated: true` and the caller should
+        re-invoke to sweep the remainder.
+      - `{ "ids": ["<uuid>", ...] }` — deletes the exact set of object ids.
+        Maximum **1,000 ids per request**. IDs that don't match a live object
+        are silently ignored.
+
+      Per-object semantics match `DELETE /v1/files/buckets/{name}/objects/by-id/{id}`:
+      in a versioned bucket a delete-marker is inserted; in a non-versioned
+      bucket the current version row is dropped and its blob's refcount is
+      decremented.
+
+      Objects are deleted in batches of up to 100, each in its own
+      transaction with its audit entry (`objects_bulk`, listing the batch's
+      objects), so every delete that commits is audited even if the request
+      stops part-way. One `file-service.objects.bulk-deleted` webhook event
+      is emitted for the entire request. Per-object webhooks are
+      deliberately **not** emitted — they would flood subscribers on large
+      folder deletes.
+
+      **Required permissions:**
+      - System: `file-service.objects.delete` AND bucket-level `canDelete`
+
+      An audit log entry is created for each batch.
+    operationId: bulkDeleteObjects
+    security:
+      - BearerAuth: [file-service.objects.delete]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - type: object
+                required: [prefix]
+                properties:
+                  prefix:
+                    type: string
+                    minLength: 1
+                    maxLength: 1024
+                    description: Object-key prefix to match (must be non-empty).
+                    example: "images/2024/"
+              - type: object
+                required: [ids]
+                properties:
+                  ids:
+                    type: array
+                    minItems: 1
+                    maxItems: 1000
+                    items:
+                      type: string
+                      format: uuid
+                    example: ["11111111-1111-4111-8111-111111111111"]
+    responses:
+      '200':
+        description: Bulk delete completed. `deletedCount` is the number of objects soft-deleted; `truncated=true` means a prefix request hit the 10,000-object cap and more remain.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deletedCount, truncated]
+              properties:
+                deletedCount:
+                  type: integer
+                  format: int64
+                truncated:
+                  type: boolean
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.objects.delete permission or bucket-level canDelete
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/objects/purge-non-current-versions:
+  post:
+    tags:
+      - Files - Objects
+    summary: Purge non-current object versions in a bucket
+    description: |
+      Soft-deletes every non-current, live `ObjectVersion` row in the bucket
+      and releases its blob ref. The current version of every object is left
+      untouched. The orphan-blob worker reclaims the bytes after the
+      configured grace period.
+
+      Capped at **10,000 versions per request**. When more remain the
+      response sets `truncated: true` and the caller should re-invoke until
+      the cap is no longer hit.
+
+      Versions are purged in batches of up to 100, each in its own
+      transaction with its audit entry (`object_versions_purge`, listing the
+      batch's version ids). One `file-service.objects.versions.purged`
+      webhook event is emitted per request — per-version webhooks would flood
+      subscribers on buckets with deep history.
+
+      **Required permissions:**
+      - System: `file-service.objects.delete` AND bucket-level `canDelete`
+
+      An audit log entry is created for each batch.
+    operationId: purgeNonCurrentVersions
+    security:
+      - BearerAuth: [file-service.objects.delete]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    responses:
+      '200':
+        description: |
+          Purge tick completed. `purgedCount` is the number of non-current
+          versions soft-deleted in this call; `bytesFreed` is the bucket-usage
+          refund applied (string-encoded bigint); `truncated=true` means the
+          per-request cap was hit and more remain.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purgedCount, bytesFreed, truncated]
+              properties:
+                purgedCount:
+                  type: integer
+                  format: int64
+                bytesFreed:
+                  type: string
+                  description: Bytes refunded to `currentUsageBytes`. String-encoded bigint.
+                  example: "10485760"
+                truncated:
+                  type: boolean
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid bucket name (`invalid_request`)
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.objects.delete permission or bucket-level canDelete
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/objects/{objectKey}:
+  put:
+    tags:
+      - Files - Objects
+    summary: Upload object (key-addressed; identity-creator)
+    description: |
+      Uploads a new object or replaces an existing object at the given key.
+      Because upload is the identity-creator, it stays key-addressed.
+
+      The response body includes the newly-created `id` (UUIDv7). Callers
+      **must** store this id — every subsequent mutation (`PATCH` rename,
+      `DELETE`, presign, version list/get/restore/delete) is id-addressed
+      under `/v1/files/buckets/{name}/objects/by-id/{id}/...`.
+
+      **Required permissions:**
+      - System: `file-service.objects.write` AND bucket-level `canWrite`
+
+      **Limits:**
+      - Maximum file size: Configurable (default 100MB, `FILE_SERVICE_MAX_UPLOAD_SIZE_MB`)
+      - Maximum metadata size: 100KB
+      - Maximum metadata keys: 100
+
+      **Metadata:**
+      Send custom metadata as a JSON object in the `X-Metadata` header (raw
+      JSON, at most 100KB). Keys up to 255 characters; values may be strings
+      (up to 10,000 characters), numbers, booleans, null, or arrays (up to
+      100 items) of those.
+
+      **Tags:**
+      Send tags in the `X-Tags` header (max 50 tags, each up to 128 chars), in
+      one of two forms:
+      - **JSON array** — a value starting with `[` is a JSON array of
+        non-empty strings, taken as is (like `tags` in a JSON body), e.g.
+        `["invoice","a,b","\u65e5\u672c"]`. A header value must be ASCII,
+        so write characters past `~` as `\uXXXX` escapes, as for
+        `X-Metadata`. Tags may hold any character, commas included.
+      - **Comma-separated** — any other value, e.g. `invoice, 2024, q1`; each
+        tag is trimmed and empty ones dropped. The first tag cannot start
+        with `[`, since that value is read as JSON.
+
+      A value starting with `[` that is not a JSON array of non-empty strings
+      is `400 invalid_request` — never read as the comma form.
+
+      **Conditional writes:**
+      - `If-None-Match: *` — create only (412 `precondition_failed` if the key already exists).
+        Both preconditions are checked under the object's row lock in the
+        write's transaction, so a concurrent write can't slip past them, and
+        after the `Idempotency-Key` lookup, so a retry of a successful create
+        is replayed rather than refused.
+      - `If-Match: "<etag>"` — replace only if the current version's ETag matches (412 otherwise).
+
+      **Content type:**
+      The `file` part's content type becomes the object's. Executables and
+      other blocked types are refused (400 `blocked_file_type`,
+      `unrecognized_text_file_type`), and so is one over 255
+      characters or other than a single `type/subtype` with at most a
+      `charset` parameter (400 `invalid_content_type`). It is stored
+      lowercased.
+
+      **Storage quota:**
+      Returns 507 if the upload would exceed the bucket's storage quota.
+
+      **Versioning:**
+      On buckets with `versioningEnabled=true`, each upload creates a new
+      `ObjectVersion` and flips the prior one to non-current. Otherwise the
+      prior version's blob ref is released and replaced in place.
+
+      **Response status:**
+      - **201 Created** — returned when a new object is created
+      - **200 OK** — returned when an existing object is replaced
+
+      An audit log entry is created. For a bucket in an organization a
+      `file-service.object.created` / `file-service.object.updated` webhook
+      event is emitted (`via: direct`), plus `file-service.object.version.created`
+      in a versioning-enabled bucket.
+    operationId: uploadObject
+    security:
+      - BearerAuth: [file-service.objects.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectKeyParam'
+      - $ref: '../../components/files/parameters.yaml#/IdempotencyKeyHeader'
+      - name: X-Metadata
+        in: header
+        description: Custom metadata as a JSON object string (max 100KB, max 100 keys)
+        required: false
+        schema:
+          type: string
+          example: '{"author":"John Doe","category":"vacation","year":2024}'
+      - name: X-Tags
+        in: header
+        description: |
+          Tags (max 50, each up to 128 chars; header max 10KB). A value
+          starting with `[` is a JSON array of non-empty strings, with
+          non-ASCII characters `\uXXXX`-escaped — tags may then hold any
+          character, commas included; invalid JSON or a non-string or empty
+          entry is `400 invalid_request`. Any other value is a comma-separated
+          list, each tag trimmed and empty ones dropped.
+        required: false
+        schema:
+          type: string
+          example: '["invoice","2024","q1"]'
+      - name: If-Match
+        in: header
+        description: Replace only if the current version's ETag matches.
+        required: false
+        schema:
+          type: string
+      - name: If-None-Match
+        in: header
+        description: Use `*` for atomic create-only semantics.
+        required: false
+        schema:
+          type: string
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            properties:
+              file:
+                type: string
+                format: binary
+                description: The file to upload
+            required:
+              - file
+    responses:
+      '200':
+        description: Object updated successfully (existing object replaced)
+        headers:
+          ETag:
+            $ref: '../../components/files/headers.yaml#/ETag'
+          Idempotency-Replay:
+            description: '`true` when the response is a replay of an earlier request with the same `Idempotency-Key`.'
+            schema:
+              type: string
+              enum: ['true']
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ObjectResponse'
+      '201':
+        description: Object created successfully (new object)
+        headers:
+          ETag:
+            $ref: '../../components/files/headers.yaml#/ETag'
+          Idempotency-Replay:
+            description: '`true` when the response is a replay of an earlier request with the same `Idempotency-Key`.'
+            schema:
+              type: string
+              enum: ['true']
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ObjectResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: |
+          Invalid request - invalid key, missing `file` (`file_upload_required`),
+          missing `Idempotency-Key` (`idempotency_key_required`), invalid
+          `X-Metadata` (`invalid_metadata`, `x_metadata_header_too_large`) or
+          `X-Tags` (`too_many_tags`, `tag_too_long`, `x_tags_header_too_large`,
+          or `invalid_request` for a malformed JSON-array value),
+          an invalid content type (`invalid_content_type`), a blocked file
+          type (`blocked_file_type`, `unrecognized_text_file_type`), or a
+          reserved key (`reserved_object_key`: `prefixes`, or starting with
+          `by-id/`, `by-key/` or `.thumbnails/` — refused before the file is
+          read)
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.objects.write permission or bucket-level canWrite permission
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        description: |
+          A request with this `Idempotency-Key` is still in flight
+          (`idempotency_request_in_progress`), the bucket is
+          retired (`bucket_retired`), or a concurrent write conflicted
+          (`conflict` / `version_conflict`).
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ErrorResponse'
+      '412':
+        description: Precondition failed (If-Match or If-None-Match)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum:
+                    - precondition_failed
+                error_description:
+                  type: string
+      '413':
+        $ref: '../../components/files/responses.yaml#/PayloadTooLargeResponse'
+      '422':
+        $ref: '../../components/files/responses.yaml#/IdempotencyKeyConflictResponse'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '507':
+        $ref: '../../components/files/responses.yaml#/InsufficientStorageResponse'
+  get:
+    tags:
+      - Files - Objects
+    summary: Download object
+    description: |
+      Downloads an object's content (key-addressed). Supports retrieving a
+      specific non-current version via `?versionId=<uuid>` and retrieving a
+      generated thumbnail via `?thumbnail=thumb|small|medium`. Thumbnails are
+      served only while the bucket's `autoThumbnails` is on: with it off,
+      `?thumbnail=` is `404` even where thumbnails were generated before.
+      Thumbnails follow the object's current content: writing new content
+      (upload, multipart complete, presigned write, version restore) drops
+      the old ones, and image content gets new ones in the background, so a
+      `404` can mean they are not generated yet.
+
+      Supports `If-Match` / `If-None-Match` preconditions, compared against
+      the ETag of the version being served. A match on `If-None-Match`
+      returns `304 Not Modified`; both are checked before `Range`.
+
+      Supports one byte range (`Range`, `If-Range`): `206 Partial Content`
+      with `Content-Range`, or `416` for a range past the end. Content up to
+      16 MiB is decrypted and verified whole before any of it is sent; a
+      range of larger content is decrypted from its offset and is not
+      covered by the at-rest integrity tag.
+
+      **Required permissions:**
+      - **Public buckets**: No authentication required
+      - **Private buckets**: Authentication required with `file-service.objects.read` AND bucket-level `canRead`
+        (an anonymous request — for a private or a missing bucket — gets `401 invalid_token`)
+    operationId: downloadObject
+    security:
+      - {}
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectKeyParam'
+      - name: versionId
+        in: query
+        description: Download a specific non-current version of the object (UUID).
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: thumbnail
+        in: query
+        description: Download a generated thumbnail variant. `404` while the bucket's `autoThumbnails` is off, or before the current content's thumbnails are generated.
+        required: false
+        schema:
+          type: string
+          enum:
+            - thumb
+            - small
+            - medium
+      - name: If-Match
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          type: string
+      - $ref: '../../components/files/parameters.yaml#/RangeHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/IfRangeHeaderParam'
+    responses:
+      '200':
+        description: |
+          Object content. The `Content-Type` response header reflects the stored
+          object's content type (e.g., `image/jpeg`, `application/pdf`,
+          `application/octet-stream`), not a fixed value.
+        headers:
+          Content-Type:
+            $ref: '../../components/files/headers.yaml#/Content-Type'
+          Content-Length:
+            $ref: '../../components/files/headers.yaml#/Content-Length'
+          Accept-Ranges:
+            $ref: '../../components/files/headers.yaml#/Accept-Ranges'
+          ETag:
+            $ref: '../../components/files/headers.yaml#/ETag'
+          Last-Modified:
+            description: Last modification timestamp
+            schema:
+              type: string
+              format: http-date
+            example: "Mon, 15 Jan 2024 10:30:00 GMT"
+          Cache-Control:
+            description: |
+              `public` for a public bucket, `private` otherwise. The current
+              content of a key is `no-cache` (revalidate with the `ETag`); a
+              pinned `?versionId=` is `max-age=31536000, immutable`.
+            schema:
+              type: string
+            example: "private, no-cache"
+          Content-Disposition:
+            description: |
+              `inline` for images, video, audio, PDF and plain text;
+              `attachment` for everything else (HTML, SVG, scripts, …). Carries
+              an ASCII `filename` and RFC 5987 `filename*` with the real name
+              (the key's last segment).
+            schema:
+              type: string
+          X-Object-Id:
+            description: The object's UUID — the parent's on a `?thumbnail=` download.
+            schema:
+              type: string
+              format: uuid
+          X-Content-Type-Options:
+            $ref: '../../components/files/headers.yaml#/X-Content-Type-Options'
+          Content-Security-Policy:
+            $ref: '../../components/files/headers.yaml#/Content-Security-Policy'
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          '*/*':
+            schema:
+              type: string
+              format: binary
+      '206':
+        $ref: '../../components/files/responses.yaml#/PartialContentResponse'
+      '304':
+        description: Not Modified (matched `If-None-Match`)
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid object key, `versionId` or `thumbnail`
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing bucket-level canRead permission (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Bucket, object, version or thumbnail not found, or the version is a delete marker (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '412':
+        description: Precondition failed (If-Match)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                error_description:
+                  type: string
+      '416':
+        $ref: '../../components/files/responses.yaml#/RangeNotSatisfiableResponse'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  head:
+    tags:
+      - Files - Objects
+    summary: Get object metadata
+    description: |
+      Retrieves metadata for an object without downloading its content.
+
+      **Required permissions:**
+      - **Public buckets**: No authentication required
+      - **Private buckets**: Authentication required with `file-service.objects.read` AND bucket-level `canRead`
+        (an anonymous request — for a private or a missing bucket — gets `401 invalid_token`)
+
+      Returns the `Content-Type`, `Content-Length`, `ETag`, and
+      `Last-Modified` of the current version without a response body.
+      Supports the same conditional headers as `GET`.
+    operationId: headObject
+    security:
+      - {}
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectKeyParam'
+      - name: If-Match
+        in: header
+        required: false
+        schema:
+          type: string
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          type: string
+    responses:
+      '200':
+        description: Object metadata
+        headers:
+          Content-Type:
+            $ref: '../../components/files/headers.yaml#/Content-Type'
+          Content-Length:
+            $ref: '../../components/files/headers.yaml#/Content-Length'
+          Accept-Ranges:
+            $ref: '../../components/files/headers.yaml#/Accept-Ranges'
+          ETag:
+            $ref: '../../components/files/headers.yaml#/ETag'
+          Last-Modified:
+            description: Last modification timestamp
+            schema:
+              type: string
+              format: http-date
+            example: "Mon, 15 Jan 2024 10:30:00 GMT"
+          X-Object-Id:
+            description: The object's UUID.
+            schema:
+              type: string
+              format: uuid
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+      '304':
+        description: Not Modified (matched `If-None-Match`)
+      '400':
+        description: Invalid object key (no body)
+      '401':
+        description: Unauthorized - invalid access token (no body)
+      '403':
+        description: Forbidden - missing file-service.objects.read permission or bucket-level canRead, private buckets only; or a delegated token whose core API scopes do not reach `/v1/files`, public bucket or not (no body)
+      '404':
+        description: 'Bucket or object not found, no body (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403` — or `401` without a token)'
+      '412':
+        description: Precondition failed (If-Match)
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+# Id-addressed object mutation routes. The object's UUID `id` is the stable
+# identifier — it survives renames, which is why every mutation is keyed by id
+# rather than `objectKey`.
+
+/files/buckets/{name}/objects/by-id/{id}:
+  get:
+    tags:
+      - Files - Objects
+    summary: Get object metadata by id
+    description: |
+      Returns the current metadata of an object by its UUID `id`. Same shape
+      as the upload/list responses and `GET /v1/files/buckets/{name}/objects/by-key/{objectKey}`.
+
+      **Required permissions:**
+      - **Public buckets**: No authentication required
+      - **Private buckets**: Authentication required with `file-service.objects.read` AND bucket-level `canRead`
+        (an anonymous request — for a private or a missing bucket — gets `401 invalid_token`)
+    operationId: getObjectById
+    security:
+      - {}
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectIdParam'
+    responses:
+      '200':
+        description: Object metadata
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ObjectResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`id` is not a UUID'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Files - Objects
+    summary: Rename and/or update object metadata
+    description: |
+      Partial update of an object. `objectKey` renames the object in place
+      (the UUID `id` is stable across renames); `contentType`, `metadata`,
+      and `tags` update the current version's metadata; `deleteAfter` sets
+      or clears the object's own expiry. At least one editable field
+      (excluding `createNewVersion`) must be provided.
+
+      **Versioning:**
+      Setting `createNewVersion: true` on a bucket with
+      `versioningEnabled=true` makes the metadata edit create a NEW
+      `ObjectVersion` that inherits the current blob — the prior current
+      version is flipped to `isCurrent=false`. This preserves the "every
+      mutation creates a version" invariant for callers that treat metadata
+      as part of the versioned content. Silently ignored on non-versioned
+      buckets — the setting as it stands when the edit is written, read under
+      the bucket's lock. Rename (`objectKey`) never creates a version — it is
+      a property of the identity row.
+
+      **Required permissions:**
+      - System: `file-service.objects.write` AND bucket-level `canWrite`
+
+      A rename that collides with another live key in the bucket returns 409.
+      A metadata change on an object whose current version is a delete
+      marker returns 400 (`no_current_version` / `cannot_branch_delete_marker`).
+      An audit log entry is written and, for a bucket in an organization, a
+      `file-service.object.updated` webhook is emitted (plus
+      `file-service.object.version.created` with `via: metadata` when a
+      version was branched).
+    operationId: patchObject
+    security:
+      - BearerAuth: [file-service.objects.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/PatchObjectRequest'
+    responses:
+      '200':
+        description: Updated object metadata
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ObjectResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`invalid_request` - invalid body; `no_current_version` / `cannot_branch_delete_marker`; `reserved_object_key` - the key is `prefixes` or starts with `by-id/`, `by-key/` or `.thumbnails/`'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: Conflict - rename target already exists as a live key in the bucket (`conflict`), or the bucket is retired (`bucket_retired`)
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  delete:
+    tags:
+      - Files - Objects
+    summary: Delete object (soft)
+    description: |
+      Soft-deletes the object. In a versioning-enabled bucket, inserts a
+      delete-marker version as the current version (prior versions remain
+      accessible via the versions API); otherwise the object's current
+      version is removed and its blob reference released.
+
+      **Required permissions:**
+      - System: `file-service.objects.delete` AND bucket-level `canDelete`
+
+      An audit log entry is written and, for a bucket in an organization, a
+      `file-service.object.deleted` webhook is emitted.
+    operationId: deleteObjectById
+    security:
+      - BearerAuth: [file-service.objects.delete]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectIdParam'
+    responses:
+      '204':
+        $ref: '../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`id` is not a UUID'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.objects.delete permission or bucket-level canDelete permission
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/objects/by-id/{id}/presign:
+  post:
+    tags:
+      - Files - Objects
+    summary: Generate a presigned URL
+    description: |
+      Generates a stateless HMAC-signed URL for reading from or writing to the
+      object. The returned URL is id-addressed — it has the shape
+      `GET/PUT /v1/files/signed/objects/{bucket}/by-id/{id}?op=…&expires=…&nonce=…&v=…&sig=…`.
+      The HMAC binds the object's stable UUID `id`, NOT its current
+      `objectKey`, so the URL survives a subsequent PATCH rename.
+
+      **Required permissions:**
+      - `operation=read`: `file-service.objects.read` AND bucket-level `canRead`
+      - `operation=write`: `file-service.objects.write` AND bucket-level `canWrite`
+        (the route requires `file-service.objects.read` for either operation)
+
+      A TTL above `FILE_SERVICE_MAX_PRESIGN_TTL_SECONDS` (default 7 days) is
+      rejected with `400 invalid_expiration`. A `write` URL for a retired
+      bucket is refused (`409 bucket_retired`), and so is one for an object
+      stored under a reserved key (`400 reserved_object_key`). Uploads through a `write` URL
+      are attributed to the caller (the URL carries a signed `by`).
+
+      An audit log entry (`presignedUrl`) is created for this action.
+    operationId: presignObjectById
+    security:
+      - BearerAuth: [file-service.objects.read, file-service.objects.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/PresignRequest'
+    responses:
+      '200':
+        description: Presigned URL
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/PresignResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`invalid_request` - invalid body; `invalid_expiration` - TTL over the maximum; `reserved_object_key` - the key is `prefixes` or starts with `by-id/`, `by-key/` or `.thumbnails/` (a `write` URL for an object stored under one)'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_retired` - the bucket is read-only'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/objects/by-id/{id}/versions:
+  get:
+    tags:
+      - Files - Objects
+    summary: List versions of an object
+    description: |
+      Returns a paginated list of all versions of the object (default
+      newest first; sort field `createdAt` only). Version history stays
+      visible after the object is deleted. Only available on buckets with
+      `versioningEnabled=true` — returns `400 versioning_disabled` otherwise
+      (reported only once access is granted).
+
+      **Required permissions:**
+      - **Public buckets**: No authentication required
+      - **Private buckets**: Authentication required with `file-service.objects.read` AND bucket-level `canRead`
+        (an anonymous request — for a private or a missing bucket — gets `401 invalid_token`)
+    operationId: listObjectVersionsById
+    security:
+      - {}
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectIdParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesLimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - name: sort
+        in: query
+        description: Field name to sort by
+        schema:
+          type: string
+          enum: [createdAt]
+          default: createdAt
+      - $ref: '../../components/parameters.yaml#/SortDirParam'
+    responses:
+      '200':
+        description: Paginated list of versions
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ListObjectVersionsResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Versioning is not enabled for this bucket (`versioning_disabled`), or invalid parameters
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}:
+  get:
+    tags:
+      - Files - Objects
+    summary: Get a single object version
+    description: |
+      Returns metadata for a specific version. To download the version's
+      bytes, use either the id-addressed
+      `GET /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/download`
+      (rename-stable) or the key-addressed
+      `GET /v1/files/buckets/{name}/objects/{objectKey}?versionId=<uuid>`.
+      Unlike list items, the response carries no writer email/name.
+
+      **Required permissions:**
+      - **Public buckets**: No authentication required
+      - **Private buckets**: Authentication required with `file-service.objects.read` AND bucket-level `canRead`
+        (an anonymous request — for a private or a missing bucket — gets `401 invalid_token`)
+    operationId: getObjectVersionById
+    security:
+      - {}
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectIdParam'
+      - $ref: '../../components/files/parameters.yaml#/VersionIdParam'
+    responses:
+      '200':
+        description: Version metadata
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ObjectVersion'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Versioning is not enabled for this bucket (`versioning_disabled`), or invalid parameters
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  delete:
+    tags:
+      - Files - Objects
+    summary: Hard-delete a non-current version
+    description: |
+      Removes a non-current version row, drops its blob reference and refunds
+      the bucket usage the version was charged (the bucket's
+      `currentUsageBytes` counts every retained version). Orphan blob cleanup
+      is picked up asynchronously by the orphan-blob worker. Of two
+      concurrent deletes of one version, the second is `404`.
+
+      Refuses to delete the current version (`400 cannot_delete_current_version`;
+      use the object-level DELETE or upload a new version instead). Only
+      available on buckets with `versioningEnabled=true` (`400 versioning_disabled`).
+
+      **Required permissions:**
+      - System: `file-service.objects.delete` AND bucket-level `canDelete`
+
+      An audit log entry is created and, for a bucket in an organization, a
+      `file-service.object.version.deleted` webhook event is emitted.
+    operationId: deleteObjectVersionById
+    security:
+      - BearerAuth: [file-service.objects.delete]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectIdParam'
+      - $ref: '../../components/files/parameters.yaml#/VersionIdParam'
+    responses:
+      '204':
+        $ref: '../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/download:
+  get:
+    tags:
+      - Files - Objects
+    summary: Download a specific version's bytes by id
+    description: |
+      Streams the raw content bytes of a specific `ObjectVersion`. Unlike the
+      key-addressed `GET /v1/files/buckets/{name}/objects/{objectKey}?versionId=<uuid>`
+      route, this path is id-addressed — it survives a PATCH rename, so
+      long-lived links to "version X of this object" keep working.
+
+      Only available on buckets with `versioningEnabled=true` — returns 400
+      (`versioning_disabled`) otherwise. Returns 404 if the version is a
+      delete marker or has no content blob.
+
+      Response headers include `Content-Type`, `Content-Length`, `ETag`,
+      `Content-Disposition`, `Cache-Control: <public|private>, max-age=31536000, immutable`
+      (`public` only for a public bucket),
+      and `X-Content-Type-Options: nosniff`. `If-Match` / `If-None-Match`
+      are not evaluated on this route. The bytes of a specific version are
+      immutable, so aggressive caching is safe.
+
+      Supports one byte range (`Range`, and `If-Range` with the `ETag`) as
+      on `GET /v1/files/buckets/{name}/objects/{objectKey}`.
+
+      **Required permissions:**
+      - **Public buckets**: No authentication required
+      - **Private buckets**: Authentication required with `file-service.objects.read` AND bucket-level `canRead`
+        (an anonymous request — for a private or a missing bucket — gets `401 invalid_token`)
+    operationId: downloadObjectVersionById
+    security:
+      - {}
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectIdParam'
+      - $ref: '../../components/files/parameters.yaml#/VersionIdParam'
+      - $ref: '../../components/files/parameters.yaml#/RangeHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/IfRangeHeaderParam'
+    responses:
+      '200':
+        description: |
+          Version content. `Content-Type` reflects the stored version's MIME
+          type (falls back to `application/octet-stream`).
+        headers:
+          Content-Type:
+            $ref: '../../components/files/headers.yaml#/Content-Type'
+          Content-Length:
+            $ref: '../../components/files/headers.yaml#/Content-Length'
+          Accept-Ranges:
+            $ref: '../../components/files/headers.yaml#/Accept-Ranges'
+          ETag:
+            $ref: '../../components/files/headers.yaml#/ETag'
+          Cache-Control:
+            description: Immutable — a specific version's bytes never change. `public` for a public bucket, `private` otherwise.
+            schema:
+              type: string
+            example: "private, max-age=31536000, immutable"
+          Content-Disposition:
+            description: '`inline` for safe media types, `attachment` otherwise, with `filename` and RFC 5987 `filename*`.'
+            schema:
+              type: string
+          X-Content-Type-Options:
+            $ref: '../../components/files/headers.yaml#/X-Content-Type-Options'
+          Content-Security-Policy:
+            $ref: '../../components/files/headers.yaml#/Content-Security-Policy'
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          '*/*':
+            schema:
+              type: string
+              format: binary
+      '206':
+        $ref: '../../components/files/responses.yaml#/PartialContentResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Versioning is not enabled for this bucket (`versioning_disabled`).
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Object, version, or version content not found (e.g. delete marker) (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '416':
+        $ref: '../../components/files/responses.yaml#/RangeNotSatisfiableResponse'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/restore:
+  post:
+    tags:
+      - Files - Objects
+    summary: Restore a prior version as the current version
+    description: |
+      Creates a new current `ObjectVersion` row pointing at the specified
+      version's blob. The previous "current" stays in history; the restored
+      content becomes the new current. A fresh `versionId` is minted for the
+      restore — the source version's id is unchanged.
+
+      Cannot restore the current version (`already_current`), a delete marker
+      (`cannot_restore_delete_marker`) or a version whose content blob has
+      already been swept past the orphan grace period (`blob_swept`). The
+      restored copy counts against the bucket quota (`507`).
+
+      Restoring a version of a deleted object (one whose current version is
+      a delete marker) undeletes it: the restored version replaces the
+      marker and the object is live again under its key, with its id
+      unchanged. If another object has taken the key since the delete, the
+      restore is `409 conflict`; delete or rename that object first. A
+      per-object expiry (`deleteAfter`) already in the past is cleared, so
+      the object is not expired again straight away.
+
+      The bucket's versioning setting is read again under its lock when the
+      restore is written: if versioning was turned off in the meantime the
+      restore is `400 versioning_disabled`.
+
+      **Required permissions:**
+      - System: `file-service.objects.write` AND bucket-level `canWrite`
+
+      An audit log entry is created and, for a bucket in an organization, a
+      `file-service.object.version.restored` webhook event is emitted.
+    operationId: restoreObjectVersionById
+    security:
+      - BearerAuth: [file-service.objects.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ObjectIdParam'
+      - $ref: '../../components/files/parameters.yaml#/VersionIdParam'
+    responses:
+      '201':
+        description: New current version created from the restored source
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/RestoreObjectVersionResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: |
+          Cannot restore: version is already current, source is a delete
+          marker, source blob was already swept, or versioning is not enabled.
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`conflict` - undeleting an object whose key another object has taken since; `bucket_retired` - the bucket is read-only'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '507':
+        $ref: '../../components/files/responses.yaml#/InsufficientStorageResponse'

@@ -1,0 +1,24 @@
+/health:
+  get:
+    tags:
+      - Health
+    summary: Health check
+    description: |
+      Probes Postgres and Redis (500 ms timeout each). Returns `200` with
+      `status: ok` when both answer, `503` with `status: degraded` and the
+      failing dependency marked `fail` otherwise. Public and not rate-limited.
+    operationId: getHealth
+    security: []
+    responses:
+      '200':
+        description: Postgres and Redis are reachable
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/HealthStatus'
+      '503':
+        description: Postgres or Redis is unreachable
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/HealthStatus'

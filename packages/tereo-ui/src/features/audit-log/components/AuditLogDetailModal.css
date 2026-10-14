@@ -1,0 +1,39 @@
+/* Audit log entry detail: summary rows, change diff, metadata. */
+
+.t-audit-field {
+  font-weight: 500;
+  font-family: monospace;
+}
+
+.t-audit-mono {
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.t-audit-value {
+  margin: 0;
+  font-family: monospace;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.t-audit-old {
+  color: var(--danger-color);
+}
+
+.t-audit-new {
+  color: var(--success-color);
+}
+
+.t-audit-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.t-audit-subtle {
+  opacity: 0.7;
+  font-size: 0.85em;
+}

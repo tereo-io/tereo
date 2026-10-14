@@ -1,0 +1,331 @@
+/oauth/upstream/providers:
+  get:
+    tags:
+      - OAuth2/OIDC - Upstream Sign-in
+    summary: List sign-in providers
+    description: |
+      The active identity providers, for the login page's "Sign in with ..."
+      buttons: a button for each, labelled `displayName`, navigating to
+      `GET /oauth/upstream/{slug}/start` with the authorize request's parameters.
+      Public; reveals nothing but slug and label. Ordered by display name.
+    operationId: listUpstreamProviders
+    security: []
+    responses:
+      "200":
+        description: The active providers (possibly none)
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "../../components/auth/schemas.yaml#/UpstreamProviderSummary"
+      "429":
+        $ref: "../../components/responses.yaml#/RateLimitResponse"
+      "500":
+        $ref: "../../components/responses.yaml#/ServerErrorResponse"
+
+/oauth/upstream/{slug}/start:
+  get:
+    tags:
+      - OAuth2/OIDC - Upstream Sign-in
+    summary: Start a sign-in through an identity provider
+    description: |
+      A browser navigation, not an API call: the login page's provider button
+      navigates here with the same query parameters it was given by
+      `GET /oauth/authorize` (validated exactly as there). Always answers
+      with a 302.
+
+      Requires the `tereo_session_{client_id}` cookie that
+      `GET /oauth/authorize` set, as `POST /oauth/authorize` does. Core
+      re-validates the client and `redirect_uri`, stores the authorize request
+      with a fresh `state`, `nonce` and PKCE (`S256`) verifier for this round trip
+      (valid for 10 minutes), sets the `tereo_upstream_auth` cookie
+      carrying the `state`, and redirects to the provider's authorization
+      endpoint, with the callback URL `${PUBLIC_URL}/oauth/upstream/{slug}/callback`
+      as its `redirect_uri`.
+
+      Redirect targets:
+
+      - the provider's authorization endpoint, on success;
+      - `{UI}/login` with the authorize request's parameters and
+        `error=<code>`, so the user can try again or use another way to sign in:
+        `session_expired` (no auth-session cookie), `provider_inactive` (unknown
+        or deactivated provider), `upstream_failed` (the provider's discovery
+        failed). Never to the client's `redirect_uri`.
+
+      **With `grant`** (the link-required page's button, after a correct
+      password on an SSO-only domain), the request carries only `grant`: the
+      link grant from `POST /oauth/authorize`, which supplies the authorize
+      request. It needs the `tereo_identity_link_grant_{client_id}`
+      cookie holding the same grant, and `slug` must be the provider that
+      owns the user's email domain; otherwise, or for a used or expired
+      grant, the redirect is to `{UI}/login` with `error=session_expired`.
+      A deactivated provider gives `provider_inactive`. The callback then
+      links the provider (`identity_in_use` / `already_linked` as for an
+      account-page link), requires the provider account's verified email to be
+      the user's (`email_unverified`, `account_mismatch`), clears the user's
+      password, consumes the grant, ends the user's other sessions and
+      completes the login as a provider login. A failed callback leaves the
+      grant usable until it expires.
+
+      Errors that are not safe to redirect are JSON, as at `GET /oauth/authorize`:
+      400 `invalid_request` (validation — a `slug` not matching its pattern
+      included — unregistered `redirect_uri`, unknown `client_id`), 400 `unauthorized_client` (the client lacks the
+      `authorization_code` grant).
+    operationId: getUpstreamStart
+    security: []
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        description: The provider's slug
+        schema:
+          type: string
+          pattern: "^[a-z0-9-]{1,50}$"
+      - name: grant
+        in: query
+        description: A link grant from `POST /oauth/authorize`; sent alone, in place of the authorize parameters, which are then not required
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      - name: response_type
+        in: query
+        required: true
+        schema:
+          type: string
+          enum: [code]
+      - name: client_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+      - name: redirect_uri
+        in: query
+        required: true
+        description: Must match a registered redirect URI for the client. Cannot contain a fragment, or use a `javascript:`, `data:`, `vbscript:`, `blob:` or `file:` scheme (refused even if registered).
+        schema:
+          type: string
+          format: uri
+          minLength: 1
+          maxLength: 2048
+      - name: scope
+        in: query
+        schema:
+          type: string
+          maxLength: 1000
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 512
+      - name: nonce
+        in: query
+        description: Required for OpenID Connect flows with id_token
+        schema:
+          type: string
+          maxLength: 512
+      - name: code_challenge
+        in: query
+        required: true
+        description: PKCE code challenge — the unpadded base64url SHA-256 of the code verifier, always 43 characters
+        schema:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]+$"
+      - name: code_challenge_method
+        in: query
+        required: true
+        schema:
+          type: string
+          enum: [S256]
+      - name: max_age
+        in: query
+        description: Maximum authentication age in seconds
+        schema:
+          type: integer
+          minimum: 0
+      - name: acr_values
+        in: query
+        description: |
+          Requested Authentication Context Class Reference values, from
+          `acr_values_supported`. Naming `urn:auth-service:mfa` without
+          `urn:auth-service:pwd` makes a second factor required, not merely
+          preferred: the login goes through the 2FA step (or 2FA setup for a
+          user without TOTP), and no code is issued without one. The ID
+          token's `acr` reports the class the login actually reached.
+        schema:
+          type: string
+          maxLength: 512
+      - name: prompt
+        in: query
+        description: Controls authentication behavior
+        schema:
+          type: string
+          enum: [none, login, consent, select_account]
+      - name: claims
+        in: query
+        description: Requested claims as JSON string
+        schema:
+          type: string
+          maxLength: 4096
+      - name: response_mode
+        in: query
+        schema:
+          type: string
+          enum: [query]
+      - name: login_hint
+        in: query
+        description: Hint about the user's identifier
+        schema:
+          type: string
+          maxLength: 256
+      - name: ui_locales
+        in: query
+        description: Preferred UI locales
+        schema:
+          type: string
+          maxLength: 128
+      - name: org_id
+        in: query
+        description: Organization hint. With a live user session that is a member of this active organization, login is skipped and consent is requested for it.
+        schema:
+          type: string
+          format: uuid
+    responses:
+      "302":
+        description: Redirect to the provider, or to the login page with an error (see the description)
+        headers:
+          Location:
+            description: The redirect target
+            schema:
+              type: string
+              format: uri
+          Set-Cookie:
+            description: The `tereo_upstream_auth` cookie, carrying the `state` of this round trip. `HttpOnly`, `SameSite=Lax` (it must survive the top-level redirect back from the provider), `Path=/oauth/upstream`, 10 minutes, `Secure` per `COOKIE_SECURE`.
+            schema:
+              type: string
+      "400":
+        $ref: "../../components/auth/responses.yaml#/OAuth2ErrorResponse"
+      "429":
+        $ref: "../../components/responses.yaml#/RateLimitResponse"
+      "500":
+        $ref: "../../components/responses.yaml#/ServerErrorResponse"
+
+/oauth/upstream/{slug}/callback:
+  get:
+    tags:
+      - OAuth2/OIDC - Upstream Sign-in
+    summary: Finish a sign-in through an identity provider
+    description: |
+      The redirect URI registered at the provider
+      (`${PUBLIC_URL}/oauth/upstream/{slug}/callback`); the provider sends the
+      browser here. Always answers with a 302 and always clears the
+      `tereo_upstream_auth` cookie.
+
+      Core requires the cookie to equal `state`, looks the round trip up by
+      `state` **for this provider** (a callback on another provider's URL
+      fails, as a defence against mix-up attacks), deletes it (single use),
+      and exchanges the code for an ID token, validating its signature,
+      `iss`, `aud`, `exp` and `nonce`. It then resolves the user: an already
+      linked identity, an invite, or an auto-accept domain; an identity is
+      never matched to an existing account by email. An active human user then
+      continues exactly as after a password: the TOTP step unless the provider
+      `countsAsMfa`, organization selection, consent, and the code. The login's
+      `amr` is `["fed"]`, `["fed","mfa"]` for a `countsAsMfa` provider (or
+      `["fed","otp"]` once the user passes TOTP). A `LOGIN` audit entry names
+      the provider.
+
+      Redirect targets:
+
+      - on success, the next step of the login, as after `POST /oauth/authorize`:
+        `{UI}/login/2fa?session=...`, `{UI}/login/2fa/setup?setup_grant=...`,
+        `{UI}/consent?session=...`, `{UI}/login/org-select?session=...`
+        (setting that step's cookie), or the client's `redirect_uri` with `error=invalid_scope`
+        or `error=unmet_authentication_requirements`, as there;
+      - on failure, `{UI}/login` with the authorize request's parameters (when
+        the round trip was found) and `error=<code>`. Never to the client's
+        `redirect_uri`, because the user may still sign in another way.
+
+      Error codes:
+
+      | Code | Meaning |
+      |------|---------|
+      | `upstream_cancelled` | The provider returned `access_denied` |
+      | `upstream_failed` | The provider returned an error, or the code exchange or ID token validation failed |
+      | `session_expired` | No or mismatched `upstream_auth` cookie, or an unknown, used or expired round trip; for a forced link, a link grant used or expired meanwhile |
+      | `provider_inactive` | The provider was deactivated |
+      | `no_account` | No linked identity, no invite, no auto-accept domain of this provider; also no email claim, or the domain's organization is archived or inactive |
+      | `account_exists` | An auto-accept domain matched, but an account already has that email; or an invited user already has an identity at this provider |
+      | `email_unverified` | An invite or domain would match (or, for a forced link, always), but the provider did not verify the email, or, for Google, its `hd` claim did not match the domain |
+      | `account_inactive` | The user is deactivated or a service account |
+      | `identity_in_use` | Forced link: the provider account is linked to another user |
+      | `already_linked` | Forced link: the user linked this provider meanwhile |
+      | `account_mismatch` | Forced link: the provider account's verified email is not the user's |
+      | `too_many_attempts` | Too many failed callbacks from this address (below) |
+
+      Callbacks whose round trip is found count toward the failure limiter
+      shared with password logins (5 per 300 seconds per IP, cleared by a
+      successful callback); beyond it the callback redirects with
+      `error=too_many_attempts` (to `{UI}/account` for a link) rather than
+      answering a JSON 429, still clearing the cookie. A callback with no or a
+      mismatched `upstream_auth` cookie counts nothing: it carries no
+      `client_id`, so the key is the address alone, and any page could
+      otherwise lock out provider sign-in for everyone behind an address.
+    operationId: getUpstreamCallback
+    security: []
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        description: The provider's slug. One not matching the pattern is a `session_expired` redirect, as for an unknown provider, not a 400.
+        schema:
+          type: string
+          pattern: "^[a-z0-9-]{1,50}$"
+      - name: state
+        in: query
+        description: The `state` core sent to the provider; must equal the `upstream_auth` cookie. Missing or malformed is a `session_expired` redirect, not a 400.
+        schema:
+          type: string
+      - name: code
+        in: query
+        description: The authorization code the provider issued (a successful result)
+        schema:
+          type: string
+      - name: iss
+        in: query
+        description: The issuer (RFC 9207), when the provider sends it; checked against the configured issuer
+        schema:
+          type: string
+      - name: error
+        in: query
+        description: The provider's error, e.g. `access_denied` (becomes `upstream_cancelled`), any other becomes `upstream_failed`
+        schema:
+          type: string
+      - name: error_description
+        in: query
+        description: The provider's description of `error`, logged, never shown
+        schema:
+          type: string
+    responses:
+      "302":
+        description: Redirect to the next login step, or to the login page with an error (see the description)
+        headers:
+          Location:
+            description: The redirect target
+            schema:
+              type: string
+              format: uri
+          Set-Cookie:
+            description: Clears the `tereo_upstream_auth` cookie; a successful sign-in also sets the next step's cookie (2FA, 2FA setup grant, consent or org-select session)
+            schema:
+              type: string
+      "429":
+        $ref: "../../components/responses.yaml#/RateLimitResponse"
+      "500":
+        $ref: "../../components/responses.yaml#/ServerErrorResponse"

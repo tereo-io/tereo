@@ -1,0 +1,14 @@
+# Build output
+dist/
+tsconfig.tsbuildinfo
+
+# Prisma generated client
+prisma/generated/
+
+# Storage files for dev
+storage/
+
+# Environment files
+.env
+.env.*
+!.env.example

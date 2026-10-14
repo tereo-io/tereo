@@ -1,0 +1,97 @@
+/admin/permissions:
+  get:
+    tags:
+      - Admin - Permissions
+    summary: List permissions
+    description: |
+      Returns a paginated list of permissions. Permissions are declared in
+      code by their services and registered at boot (`POST /v1/registry/declaration`);
+      admins read them and compose custom roles from them, but never create,
+      edit or delete them.
+
+      **Filter fields and operators:**
+      - `name`: `contains`, `equals`
+      - `displayName`: `contains`, `equals`
+      - `serviceId`: `equals`
+      - `orgAssignable`: `equals` (`true` / `false`)
+
+      **Sort fields:** `id` (default), `name`, `displayName`, `createdAt`
+
+      Retired permissions (dropped from their service's declaration) are
+      excluded by default; pass `includeRetired=true` to include them.
+    operationId: getAdminPermissions
+    security:
+      - BearerAuth: [permissions.read]
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../../components/parameters.yaml#/SortParam'
+      - $ref: '../../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../../components/parameters.yaml#/FilterOperatorParam'
+      - $ref: '../../../components/auth/parameters.yaml#/IncludeRetiredParam'
+    responses:
+      '200':
+        description: Paginated list of permissions
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/PaginatedPermissionsResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing permissions.read permission
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/permissions/{id}:
+  get:
+    tags:
+      - Admin - Permissions
+    summary: Get permission by ID
+    description: |
+      Returns a permission. Retired permissions stay viewable: custom roles
+      may still list them.
+    operationId: getAdminPermission
+    security:
+      - BearerAuth: [permissions.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/PermissionIdParam'
+    responses:
+      '200':
+        description: Permission details
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Permission'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing permissions.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'

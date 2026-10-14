@@ -1,0 +1,205 @@
+/notifications:
+  post:
+    tags:
+      - Notifications
+    summary: Send a notification
+    description: |
+      Accepts a notification for delivery and answers at once; delivery happens in the
+      background, and `GET /v1/notifications/{id}` reports how it went.
+
+      Everything that can be checked is checked here, so a bad request fails now rather than as
+      a failed delivery: the channel and the named connection (enabled), the content and each
+      recipient's options against the channel, `from` and `replyTo` against the connection's allowed senders
+      (or the channel's default connection when none is named), that `userId` recipients are
+      active people, and that the sender can read every attachment's bucket (checked again at
+      send: access lost by then fails the delivery with `attachment_forbidden`). With no connection
+      named and no default yet, the send is still accepted and waits for one.
+
+      **Email:** `subject` (at most 998 characters, no line breaks), at least one of `text` and
+      `html`, optional `from` (defaults to the connection's `defaultFrom`; its `name` must not
+      contain `<`, `>`, `@` or `"`) and `replyTo` (an allowed sender, like `from`). Each
+      recipient's `as` is `to` (default), `cc` or `bcc`; at least one `to`, at most 50
+      recipients. An address named twice is sent once, under the highest of to, cc, bcc.
+      Attachments total at most 20 MB; `contentType` and `size` come from the stored version,
+      and `filename` defaults to the last segment of the object's key.
+
+      `idempotencyKey` makes a retry safe: the same key and body answer the first result, a
+      different body is a `422`.
+
+      An audit log entry is created for this action.
+
+      **Required permission:** `notifications.send`
+    operationId: sendNotification
+    security:
+      - BearerAuth: [notifications.send]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/notifications/schemas.yaml#/SendNotificationRequest'
+    responses:
+      '202':
+        description: Accepted; delivery is pending
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/SendNotificationResponse'
+      '400':
+        $ref: '../../components/notifications/responses.yaml#/NotificationsSendBadRequestResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/notifications/responses.yaml#/NotificationsSendForbiddenResponse'
+      '409':
+        $ref: '../../components/notifications/responses.yaml#/NotificationsSendConflictResponse'
+      '413':
+        $ref: '../../components/notifications/responses.yaml#/NotificationsPayloadTooLargeResponse'
+      '422':
+        $ref: '../../components/notifications/responses.yaml#/NotificationsIdempotencyKeyConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '503':
+        description: |
+          The request carries an `idempotencyKey` and Redis, which holds the keys, is
+          unreachable: the request is refused, and nothing is written, rather than risk a
+          duplicate. Retry after `Retry-After` seconds.
+        headers:
+          Retry-After:
+            $ref: '../../components/headers.yaml#/Retry-After'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum:
+                    - temporarily_unavailable
+                error_description:
+                  type: string
+
+/notifications/{id}:
+  get:
+    tags:
+      - Notifications
+    summary: Get a notification
+    description: |
+      The status of one send, with its deliveries. `content` is not returned.
+
+      A caller with `notifications.send` sees the notifications it sent; any other id is a
+      `404`, whether or not it exists.
+
+      **Required permission:** `notifications.send` (own notifications) or `notifications.read`
+    operationId: getNotification
+    security:
+      - BearerAuth: [notifications.send]
+      - BearerAuth: [notifications.read]
+    parameters:
+      - $ref: '../../components/notifications/parameters.yaml#/NotificationIdParam'
+    responses:
+      '200':
+        description: The notification
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/Notification'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - neither notifications.send nor notifications.read
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+notification.sent:
+  post:
+    tags:
+      - Notifications
+    summary: Notification delivery sent
+    description: |
+      Fired when one delivery of a notification is sent. One event per delivery, not per
+      notification; `entityId` is the notification. In the notification's organization, or the
+      default organization when it has none.
+    operationId: webhookNotificationSent
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: notification.sent
+                  entityType:
+                    const: Notification
+                  data:
+                    $ref: '../../components/notifications/schemas.yaml#/NotificationDeliveryEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+notification.failed:
+  post:
+    tags:
+      - Notifications
+    summary: Notification delivery failed
+    description: |
+      Fired when one delivery of a notification fails for good: a permanent error, or its last
+      attempt. One event per delivery; `entityId` is the notification. In the notification's
+      organization, or the default organization when it has none.
+    operationId: webhookNotificationFailed
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: notification.failed
+                  entityType:
+                    const: Notification
+                  data:
+                    $ref: '../../components/notifications/schemas.yaml#/NotificationDeliveryEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

@@ -1,0 +1,7 @@
+Tereo
+Copyright 2026 Aaron Leman
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The container image also bundles third-party software under its own licenses, among them libvips
+(LGPL-3.0, through sharp) and the Node.js runtime.

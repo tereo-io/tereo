@@ -1,0 +1,477 @@
+/admin/clients:
+  get:
+    tags:
+      - Admin - Clients
+    summary: List OAuth clients
+    description: |
+      Returns a paginated list of OAuth clients with filtering and sorting —
+      login clients and services' clients alike (a service's client has
+      `service` set).
+
+      **Filter operators:**
+      - name: `contains`, `equals`
+      - clientId: `contains`, `equals`
+      - clientType: `equals` (confidential/public)
+      - ownerId: `equals` (UUID)
+
+      **Sort fields:** `id` (default), `name`, `clientId`, `clientType`, `createdAt`
+      (default direction `desc`)
+    operationId: getAdminClients
+    security:
+      - BearerAuth: [clients.read]
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../../components/parameters.yaml#/SortParam'
+      - $ref: '../../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../../components/parameters.yaml#/FilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of clients
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/PaginatedClientsResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing clients.read permission
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Admin - Clients
+    summary: Create OAuth client
+    description: |
+      Creates a login client (`authorization_code` / `refresh_token`), owned
+      by the caller. A machine identity is a service instead — add it with
+      `POST /v1/admin/services`.
+
+      **Validation rules:**
+      - Public clients must have at least one redirect URI
+      - Every scope must be registered
+      - A confidential client gets a secret, returned once in `clientSecret`;
+        a public client has none
+
+      An audit log entry is created for this action.
+      An `auth.client.created` webhook event is emitted.
+    operationId: postAdminClients
+    security:
+      - BearerAuth: [clients.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/CreateClientRequest'
+    responses:
+      '201':
+        description: Client created (a confidential client's response includes `clientSecret`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ClientWithSecret'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Validation error, an unregistered scope, or a public client without a redirect URI
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing clients.write permission
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/clients/{id}:
+  get:
+    tags:
+      - Admin - Clients
+    summary: Get client by ID
+    description: |
+      Returns an OAuth client (never its secret). Only its owner or a holder
+      of `clients.admin` may read it; anyone else gets `403 forbidden`.
+    operationId: getAdminClient
+    security:
+      - BearerAuth: [clients.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/ClientIdParam'
+    responses:
+      '200':
+        description: Client details
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Client'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Malformed id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing clients.read permission, or the caller is neither the client's owner nor holds `clients.admin`
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Admin - Clients
+    summary: Update client
+    description: |
+      Updates a login client. A service's client (`service` set) is refused
+      with `409`. Only its owner or a holder of `clients.admin` may update it
+      (`403` otherwise). After the change a public client must
+      still use only `authorization_code` / `refresh_token`
+      (`400 invalid_request`) and have a redirect URI (`400 invalid_request`).
+      A new `ownerId` must name a user (`400 unknown_user`) who is an active
+      human (`400 invalid_owner`).
+
+      Switching a client that has no secret to `confidential` generates one:
+      the response carries it in `clientSecret`, once, as create does, and
+      the audit entry notes `metadata.action` `secret_generated` (never the
+      secret or its hash). Any other update returns no `clientSecret`.
+
+      The admin UI's own client (`tereo-ui`) derives its
+      `redirectUris`, `grantTypes` and `clientType` from core's configuration
+      and has them set again on every start: a change to any of them is
+      refused with `409`. Its `redirectUris` are exactly
+      `${UI_BASE_URL}/callback` in production; elsewhere that callback comes
+      first, beside the loopback callbacks of other local cores sharing the
+      database.
+
+      Adding core API scopes (`core:*`) to a client's `scopes` lets its users
+      grant it access to core's API, capped by those scopes (see
+      `BearerAuth`).
+
+      An audit log entry is created for this action.
+      An `auth.client.updated` webhook event is emitted.
+    operationId: patchAdminClient
+    security:
+      - BearerAuth: [clients.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/ClientIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/UpdateClientRequest'
+    responses:
+      '200':
+        description: Client updated successfully; with `clientSecret` when the switch to confidential generated one
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ClientWithSecret'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Validation error, an unregistered scope, an invalid public-client configuration (`invalid_request`), a new owner that names no user (`unknown_user`), or one who is not an active human (`invalid_owner`)
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing clients.write permission, or the caller is neither the client's owner nor holds `clients.admin`
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Client not found
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes` or `clientType`
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  delete:
+    tags:
+      - Admin - Clients
+    summary: Delete client
+    description: |
+      Deletes a login client. A service's client (`service` set) is refused
+      with `409`. Only its owner or a holder of `clients.admin` may delete it
+      (`403` otherwise). The admin UI's login client (`tereo-ui`)
+      cannot be deleted (`409`). The client's access tokens are
+      revoked, and its service-account user, if any, is deactivated (never
+      deleted).
+
+      An audit log entry is created for this action.
+      An `auth.client.deleted` webhook event is emitted.
+    operationId: deleteAdminClient
+    security:
+      - BearerAuth: [clients.delete]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/ClientIdParam'
+    responses:
+      '204':
+        description: Client deleted successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Malformed id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing clients.delete permission, or the caller is neither the client's owner nor holds `clients.admin`
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The client belongs to a service (its `service` is set; manage it under /v1/admin/services), or it is the admin UI's login client
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/clients/{id}/regenerate-secret:
+  post:
+    tags:
+      - Admin - Clients
+    summary: Regenerate client secret
+    description: |
+      Generates a new client secret; the old one stops working at once. A
+      service's client (`service` set) is refused with `409`; regenerate it
+      under /v1/admin/services — checked first, so a service's client answers
+      `409` to anyone holding `clients.write`. Then an unknown id is `404`,
+      and only the client's owner or a holder of `clients.admin` may
+      regenerate it (`403` otherwise). A public client has no secret
+      (`400 invalid_request`).
+
+      An audit log entry is created for this action.
+      An `auth.client.secret-regenerated` webhook event is emitted.
+    operationId: postAdminClientRegenerateSecret
+    security:
+      - BearerAuth: [clients.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/ClientIdParam'
+    responses:
+      '200':
+        description: New client secret generated
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ClientWithSecret'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Malformed id, or a public client (`invalid_request`)
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing clients.write permission, or the caller is neither the client's owner nor holds `clients.admin`
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+# ============================================
+# WEBHOOK EVENTS
+# ============================================
+
+auth.client.created:
+  post:
+    tags:
+      - Admin - Clients
+    summary: OAuth client created
+    description: |
+      Fired when a login client is created with `POST /v1/admin/clients`.
+      `data` is the new client (no secret, no `owner`).
+    operationId: webhookClientCreated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.client.created
+                  entityType:
+                    const: OAuthClient
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/Client'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.client.updated:
+  post:
+    tags:
+      - Admin - Clients
+    summary: OAuth client updated
+    description: |
+      Fired when an OAuth client is updated. `data` is the client after the
+      change (no secret, no `owner`).
+    operationId: webhookClientUpdated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.client.updated
+                  entityType:
+                    const: OAuthClient
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/Client'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.client.deleted:
+  post:
+    tags:
+      - Admin - Clients
+    summary: OAuth client deleted
+    description: Fired when an OAuth client is deleted.
+    operationId: webhookClientDeleted
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.client.deleted
+                  entityType:
+                    const: OAuthClient
+                  data:
+                    type: object
+                    required: [id, clientId, name]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                        description: OAuthClient row id
+                      clientId:
+                        type: string
+                        description: OAuth `client_id`
+                      name:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.client.secret-regenerated:
+  post:
+    tags:
+      - Admin - Clients
+    summary: OAuth client secret regenerated
+    description: Fired when an OAuth client's secret is regenerated. The secret is not included.
+    operationId: webhookClientSecretRegenerated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.client.secret-regenerated
+                  entityType:
+                    const: OAuthClient
+                  data:
+                    type: object
+                    required: [id, clientId, name]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                        description: OAuthClient row id
+                      clientId:
+                        type: string
+                        description: OAuth `client_id`
+                      name:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

@@ -1,0 +1,118 @@
+/admin/settings:
+  get:
+    tags:
+      - Admin - Settings
+    summary: Get system settings
+    description: Returns the system-wide 2FA settings.
+    operationId: getAdminSettings
+    security:
+      - BearerAuth: [settings.read]
+    responses:
+      '200':
+        description: System settings
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/SystemSettings'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing settings.read permission
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Admin - Settings
+    summary: Update system settings
+    description: |
+      Updates the system-wide 2FA settings. At least one field is required;
+      an empty body returns `400 invalid_request`. Returns the settings after
+      the change.
+
+      An audit log entry is created for this action.
+      An `auth.settings.updated` webhook event is emitted.
+    operationId: patchAdminSettings
+    security:
+      - BearerAuth: [settings.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/UpdateSettingsRequest'
+    responses:
+      '200':
+        description: Settings updated successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/SystemSettings'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing settings.write permission
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+auth.settings.updated:
+  post:
+    tags:
+      - Admin - Settings
+    summary: System settings updated
+    description: Fired when the system 2FA settings are changed with `PATCH /v1/admin/settings`. `data` is the settings after the change.
+    operationId: webhookSettingsUpdated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.settings.updated
+                  entityType:
+                    const: SystemSettings
+                  entityId:
+                    const: totp
+                  data:
+                    type: object
+                    required: [totpPolicy, totpRecoveryCodeCount]
+                    properties:
+                      totpPolicy:
+                        type: string
+                        enum: [disabled, optional, required]
+                      totpRecoveryCodeCount:
+                        type: integer
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

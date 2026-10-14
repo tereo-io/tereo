@@ -1,0 +1,15 @@
+.t-idp-callback {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.t-idp-domains-action {
+  margin-top: 0.75rem;
+}
+
+.t-idp-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}

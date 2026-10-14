@@ -1,0 +1,78 @@
+# Responses only this area uses; the shared ones are in ../responses.yaml
+
+WebhooksUnauthorizedResponse:
+  description: |
+    Unauthorized - missing, invalid, expired or revoked access token; a token whose session (refresh token) was revoked, rotated or superseded, or whose client was deleted (both also clear the `trt_{client_id}` / `tsi_{client_id}` cookies); an inactive user; or a token issued to a client other than core's UI or a service, without core API scopes (not for core's API — see `BearerAuth`).
+    Authentication runs before rate limiting, so this response carries no
+    rate-limit headers.
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Unauthorized error code
+            type: string
+            enum:
+              - invalid_token
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+WebhooksIdempotencyKeyConflictResponse:
+  description: |
+    An event's `idempotencyKey` was already used, by this caller for the same
+    organization and event type, with a different event (any field but the
+    key differs; key order does not count) — whether that request finished
+    or is still in progress. Use a new key, or retry with the original event.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - idempotency_key_conflict
+          error_description:
+            type: string
+            examples:
+              - This idempotency key was already used with a different event
+
+WebhooksConflictResponse:
+  description: |
+    Conflict. `conflict` for a state conflict (delivery history blocking a
+    delete), `already_archived` when archiving an archived endpoint,
+    `resource_archived` when the endpoint is archived and must be restored
+    first, `idempotency_request_in_progress`
+    when an event with the same idempotency key is still being processed.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Conflict error code
+            type: string
+            enum:
+              - conflict
+              - already_archived
+              - resource_archived
+              - idempotency_request_in_progress
+          error_description:
+            description: A human-readable explanation of the error
+            type: string

@@ -1,0 +1,199 @@
+/admin/notifications:
+  get:
+    tags:
+      - Admin - Notifications
+    summary: List the notification log
+    description: |
+      Every send across organizations, newest first, with cursor pagination
+      (`{ data, hasMore, limit, nextCursor }`). Message content is left out of the list; each
+      entry carries its `summary` (for email, the subject) and `sentAt`, when its latest
+      delivery was sent.
+
+      Filters: `filter[channel]`, `filter[status]` (`pending`, `sent`, `partial`, `failed`; `in`
+      takes several), `filter[senderUserId]`, `filter[recipient]` (matches any delivery's
+      address, ignoring case) and `filter[createdAt_gte]` / `filter[createdAt_lte]`.
+
+      **Required permission:** `notifications.read`
+    operationId: listNotificationLog
+    security:
+      - BearerAuth: [notifications.read]
+    parameters:
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - name: sort
+        in: query
+        required: false
+        description: Field to sort by; only `createdAt`
+        schema:
+          type: string
+          enum: [createdAt]
+          default: createdAt
+      - $ref: '../../components/parameters.yaml#/SortDirParam'
+      - name: filter[channel]
+        in: query
+        required: false
+        description: Only sends on this channel
+        schema:
+          $ref: '../../components/notifications/schemas.yaml#/NotificationChannel'
+      - name: filter[status]
+        in: query
+        required: false
+        description: |
+          Only sends with this status; with `filter[status_op]=in`, a comma-separated list of
+          statuses
+        schema:
+          type: string
+      - name: filter[status_op]
+        in: query
+        required: false
+        description: Operator for `filter[status]`
+        schema:
+          type: string
+          enum: [equals, in]
+          default: equals
+      - name: filter[senderUserId]
+        in: query
+        required: false
+        description: Only sends by this user
+        schema:
+          type: string
+          format: uuid
+      - name: filter[recipient]
+        in: query
+        required: false
+        description: Only sends with a delivery to this address (case-insensitive)
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 320
+      - name: filter[createdAt_gte]
+        in: query
+        required: false
+        description: Created at or after (ISO 8601)
+        schema:
+          type: string
+          format: date-time
+      - name: filter[createdAt_lte]
+        in: query
+        required: false
+        description: Created at or before (ISO 8601)
+        schema:
+          type: string
+          format: date-time
+    responses:
+      '200':
+        description: A page of the log
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/ListNotificationLogResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing notifications.read permission
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/notifications/{id}:
+  get:
+    tags:
+      - Admin - Notifications
+    summary: Get a notification from the log
+    description: |
+      One send with its deliveries (attempts, last error, the provider's reply) and attachment
+      metadata. `content` is included while any delivery is unsent, so a failed delivery can be
+      retried, and is `null` once every delivery is sent. Connection secrets are never returned.
+
+      **Required permission:** `notifications.read`
+    operationId: getNotificationLogEntry
+    security:
+      - BearerAuth: [notifications.read]
+    parameters:
+      - $ref: '../../components/notifications/parameters.yaml#/NotificationIdParam'
+    responses:
+      '200':
+        description: The notification
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/NotificationLogDetail'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing notifications.read permission
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/notifications/{id}/retry:
+  post:
+    tags:
+      - Admin - Notifications
+    summary: Retry a notification's failed deliveries
+    description: |
+      Puts each `failed` delivery back to `pending` with its attempts reset, queues it again and
+      re-rolls the notification's status. Deliveries already sent are not touched. With nothing
+      failed the answer is `409 nothing_to_retry`.
+
+      An audit log entry is created for this action.
+
+      **Required permission:** `notifications.admin`
+    operationId: retryNotification
+    security:
+      - BearerAuth: [notifications.admin]
+    parameters:
+      - $ref: '../../components/notifications/parameters.yaml#/NotificationIdParam'
+    responses:
+      '200':
+        description: The failed deliveries were re-queued
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/RetryNotificationResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing notifications.admin permission
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/notifications/responses.yaml#/NotificationsNothingToRetryResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

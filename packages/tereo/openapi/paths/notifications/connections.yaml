@@ -1,0 +1,455 @@
+/admin/notifications/channels:
+  get:
+    tags:
+      - Admin - Notifications
+    summary: List notification channels
+    description: |
+      Lists the channels core can send through, with a JSON Schema of the `settings` and the
+      `secrets` a connection to each takes. An admin UI can build its connection form from it.
+
+      **Required permission:** `notifications.read`
+    operationId: listNotificationChannels
+    security:
+      - BearerAuth: [notifications.read]
+    responses:
+      '200':
+        description: The channels
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/ListNotificationChannelsResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing notifications.read permission
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/notifications/connections:
+  get:
+    tags:
+      - Admin - Notifications
+    summary: List notification connections
+    description: |
+      Lists connections, optionally of one channel. Secrets are never returned.
+
+      **Required permission:** `notifications.read`
+    operationId: listNotificationConnections
+    security:
+      - BearerAuth: [notifications.read]
+    parameters:
+      - $ref: '../../components/notifications/parameters.yaml#/NotificationChannelFilterParam'
+    responses:
+      '200':
+        description: The connections
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/ListNotificationConnectionsResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing notifications.read permission
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Admin - Notifications
+    summary: Create a notification connection
+    description: |
+      Creates a connection. `settings` and `secrets` are validated by the channel's adapter
+      (`400 invalid_settings` / `400 invalid_secrets`, with the field `issues`); the secrets are
+      sealed at rest. The first connection of a channel becomes its default. A repeated slug
+      within a channel is `409 slug_taken`.
+
+      An audit log entry is created for this action.
+      A `notification.connection.created` webhook event is emitted.
+
+      **Required permission:** `notifications.admin`
+    operationId: createNotificationConnection
+    security:
+      - BearerAuth: [notifications.admin]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/notifications/schemas.yaml#/CreateNotificationConnectionRequest'
+    responses:
+      '201':
+        description: Connection created
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/NotificationConnection'
+      '400':
+        $ref: '../../components/notifications/responses.yaml#/NotificationsInvalidConfigResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing notifications.admin permission
+      '409':
+        $ref: '../../components/notifications/responses.yaml#/NotificationsConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/notifications/connections/{id}:
+  get:
+    tags:
+      - Admin - Notifications
+    summary: Get a notification connection
+    description: |
+      **Required permission:** `notifications.read`
+    operationId: getNotificationConnection
+    security:
+      - BearerAuth: [notifications.read]
+    parameters:
+      - $ref: '../../components/notifications/parameters.yaml#/NotificationConnectionIdParam'
+    responses:
+      '200':
+        description: The connection
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/NotificationConnection'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing notifications.read permission
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Admin - Notifications
+    summary: Update a notification connection
+    description: |
+      Changes the named fields; the rest keep their value, secrets included. Changed `settings`
+      and `secrets` are validated by the channel's adapter. `secrets: null` clears the stored
+      secrets.
+
+      While secrets are stored, a change to the settings that say where they are sent (email:
+      `host`, `port`, `security`, `username`) needs `secrets` in the same request — new ones,
+      or `null` — otherwise `400 secrets_required`: the stored password is never sent, through
+      a test or a send, to a server or account it was not entered for. Other settings
+      (`defaultFrom`, `allowedSenders`, …) change without it.
+
+      An audit log entry is created for this action.
+      A `notification.connection.updated` webhook event is emitted.
+
+      **Required permission:** `notifications.admin`
+    operationId: updateNotificationConnection
+    security:
+      - BearerAuth: [notifications.admin]
+    parameters:
+      - $ref: '../../components/notifications/parameters.yaml#/NotificationConnectionIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/notifications/schemas.yaml#/UpdateNotificationConnectionRequest'
+    responses:
+      '200':
+        description: Connection updated
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/NotificationConnection'
+      '400':
+        $ref: '../../components/notifications/responses.yaml#/NotificationsInvalidConfigResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing notifications.admin permission
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  delete:
+    tags:
+      - Admin - Notifications
+    summary: Delete a notification connection
+    description: |
+      Deletes a connection nothing references. Once a notification or delivery names it, the
+      answer is `409 connection_in_use`: disable the connection instead. The channel's default
+      connection, while the channel has other connections, is `409 connection_is_default`: make
+      another one the default first.
+
+      An audit log entry is created for this action.
+      A `notification.connection.deleted` webhook event is emitted.
+
+      **Required permission:** `notifications.admin`
+    operationId: deleteNotificationConnection
+    security:
+      - BearerAuth: [notifications.admin]
+    parameters:
+      - $ref: '../../components/notifications/parameters.yaml#/NotificationConnectionIdParam'
+    responses:
+      '204':
+        $ref: '../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing notifications.admin permission
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/notifications/responses.yaml#/NotificationsConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/notifications/connections/{id}/default:
+  post:
+    tags:
+      - Admin - Notifications
+    summary: Make a connection its channel's default
+    description: |
+      Makes the connection the channel's default; the previous default stops being one. Does
+      nothing when it already is.
+
+      An audit log entry is created for each connection that changes.
+      A `notification.connection.updated` webhook event is emitted for each.
+
+      **Required permission:** `notifications.admin`
+    operationId: setDefaultNotificationConnection
+    security:
+      - BearerAuth: [notifications.admin]
+    parameters:
+      - $ref: '../../components/notifications/parameters.yaml#/NotificationConnectionIdParam'
+    responses:
+      '200':
+        description: The connection, now the default
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/NotificationConnection'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing notifications.admin permission
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/notifications/connections/{id}/test:
+  post:
+    tags:
+      - Admin - Notifications
+    summary: Send a test message through a connection
+    description: |
+      Sends a test message to `to` synchronously, with the stored secrets, and answers the
+      provider's reply: `{ ok: true, providerResponse }`, or `{ ok: false, error }` when the
+      provider or the connection refuses. An invalid `to` is `400`. Works on a disabled connection.
+      Nothing is recorded as a notification.
+
+      An audit log entry is created for this action.
+
+      **Required permission:** `notifications.admin`
+    operationId: testNotificationConnection
+    security:
+      - BearerAuth: [notifications.admin]
+    parameters:
+      - $ref: '../../components/notifications/parameters.yaml#/NotificationConnectionIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/notifications/schemas.yaml#/TestNotificationConnectionRequest'
+    responses:
+      '200':
+        description: The provider's answer
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/notifications/schemas.yaml#/TestNotificationConnectionResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing notifications.admin permission
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+notification.connection.created:
+  post:
+    tags:
+      - Admin - Notifications
+    summary: Notification connection created
+    description: Fired when a connection is created. `data` names the connection; it carries no settings or secrets.
+    operationId: webhookNotificationConnectionCreated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: notification.connection.created
+                  entityType:
+                    const: NotificationConnection
+                  data:
+                    $ref: '../../components/notifications/schemas.yaml#/NotificationConnectionEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+notification.connection.updated:
+  post:
+    tags:
+      - Admin - Notifications
+    summary: Notification connection updated
+    description: Fired when a connection is changed, or becomes or stops being its channel's default. `data` is the connection after the change, without settings or secrets.
+    operationId: webhookNotificationConnectionUpdated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: notification.connection.updated
+                  entityType:
+                    const: NotificationConnection
+                  data:
+                    $ref: '../../components/notifications/schemas.yaml#/NotificationConnectionEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+notification.connection.deleted:
+  post:
+    tags:
+      - Admin - Notifications
+    summary: Notification connection deleted
+    description: Fired when a connection is deleted. `data` is the connection as it was.
+    operationId: webhookNotificationConnectionDeleted
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: notification.connection.deleted
+                  entityType:
+                    const: NotificationConnection
+                  data:
+                    $ref: '../../components/notifications/schemas.yaml#/NotificationConnectionEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

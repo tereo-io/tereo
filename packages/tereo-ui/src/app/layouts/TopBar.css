@@ -1,0 +1,68 @@
+.t-topbar {
+  display: flex;
+  align-items: center;
+  height: 3rem;
+  background-color: var(--primary-color);
+  color: var(--text-color-light);
+  padding: 0 1rem;
+  flex-shrink: 0;
+}
+
+.t-topbar-brand {
+  display: flex;
+  align-items: center;
+  margin-right: 2rem;
+}
+
+.t-topbar-logo {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.t-topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.t-topbar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  color: var(--text-color-light);
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  height: 3rem;
+  box-sizing: border-box;
+  transition: background-color 0.2s;
+}
+
+.t-topbar-link:hover {
+  background-color: var(--overlay-light-weak);
+  color: var(--text-color-light);
+}
+
+.t-topbar-link.active {
+  border-bottom-color: var(--text-color-light);
+  background-color: var(--overlay-light-weak);
+}
+
+.t-topbar-link svg {
+  width: 1rem;
+}
+
+.t-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.t-topbar-right .v-button {
+  padding: 0.35rem 0.75rem;
+}

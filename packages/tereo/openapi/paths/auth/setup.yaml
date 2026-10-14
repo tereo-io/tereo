@@ -1,0 +1,89 @@
+/setup/status:
+  get:
+    tags:
+      - Setup
+    summary: Get setup status
+    description: |
+      Whether first-boot setup is complete. Public: the UI calls it to decide
+      whether to show the setup screen.
+    operationId: getSetupStatus
+    security: []
+    responses:
+      '200':
+        description: Setup status
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/SetupStatusResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/setup:
+  post:
+    tags:
+      - Setup
+    summary: Complete setup
+    description: |
+      Creates the first admin and names the default organization. No bearer
+      token: the credential is the setup token core logs on first start while
+      setup is pending. The new admin gets core's admin roles.
+
+      The token is matched case-insensitively, ignoring hyphens and spaces.
+      Returns `404` once setup is complete. An invalid or expired token
+      returns `401`. Every attempt while setup is pending counts against the
+      caller's IP before the body is checked, and a successful setup clears
+      the count: past 10 in 15 minutes, `429` until the window passes (`503`
+      when the limiter cannot reach Redis).
+
+      Audit log entries are created for the new admin and for the renamed
+      default organization. No webhook event is emitted.
+    operationId: completeSetup
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/CompleteSetupRequest'
+    responses:
+      '201':
+        description: Setup complete
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/CompleteSetupResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid body, including a password that fails the password policy (`invalid_request`)
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+        description: Invalid or expired setup token (`unauthorized`)
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Setup is already complete
+      '409':
+        $ref: '../../components/responses.yaml#/ConflictResponse'
+        description: A user with this email, or an organization with this slug or code, already exists
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+        description: Rate limit exceeded, or too many failed setup attempts
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

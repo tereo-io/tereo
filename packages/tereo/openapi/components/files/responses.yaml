@@ -1,0 +1,240 @@
+# Responses only this area uses; the shared ones are in ../responses.yaml
+
+FilesUnauthorizedResponse:
+  description: Unauthorized - missing, invalid, expired or revoked access token; a token whose session (refresh token) was revoked, rotated or superseded, or whose client was deleted (both also clear the `trt_{client_id}` / `tsi_{client_id}` cookies); an inactive user; or a token issued to a client other than core's UI or a service, without core API scopes (not for core's API — see `BearerAuth`)
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Unauthorized error code (`invalid_token` for a missing, invalid, expired or revoked token)
+            type: string
+            enum:
+              - invalid_token
+              - unauthorized
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+FilesRateLimitResponse:
+  description: |
+    Too many requests — either the general limiter or a bucket's own
+    `rateLimitConfig` (`error_description` "Per-bucket rate limit exceeded").
+    Both answer with the same shape: `too_many_requests`, a `retry_after`
+    field, `Retry-After` and the `X-RateLimit-*` headers (for a per-bucket
+    limit, the bucket's `maxTokens` and remaining tokens).
+  headers:
+    Retry-After:
+      $ref: '../headers.yaml#/Retry-After'
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: A standardized error code indicating rate limit has been exceeded
+            type: string
+            enum:
+              - too_many_requests
+          error_description:
+            description: A human-readable explanation specific to this occurrence of the error
+            type: string
+            example: "Rate limit exceeded. Try again in 1 seconds."
+          retry_after:
+            description: Time in seconds to wait before retrying
+            type: integer
+            minimum: 0
+            example: 1
+
+FilesConflictResponse:
+  description: |
+    Conflict. `conflict` - the resource already exists or is in use;
+    `bucket_declared` - the change touches what a service's declaration owns;
+    `bucket_retired` - the bucket is retired and read-only; `version_conflict` -
+    a concurrent update, retry after re-reading; `share_revoked` - the share
+    is revoked and can no longer be edited.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Conflict error code
+            type: string
+            enum:
+              - conflict
+              - bucket_declared
+              - bucket_retired
+              - version_conflict
+              - share_revoked
+              - too_many_multipart_uploads
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+PayloadTooLargeResponse:
+  description: |
+    Payload too large - the upload exceeds the maximum size, a multipart
+    upload carries more than 10 parts besides the file or a field over 1 KB,
+    or a JSON body exceeds the body parser's limit (`payload_too_large`); for
+    a multipart upload, its parts would total more than its `expectedSize`
+    (`exceeds_expected_size`) or than an object can be (`object_too_large`)
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Payload too large error code
+            type: string
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+IdempotencyInProgressResponse:
+  description: |
+    A request with this `Idempotency-Key` is currently being processed by
+    another caller. Retry after the in-flight request completes.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - idempotency_request_in_progress
+          error_description:
+            type: string
+            example: "A request with this idempotency key is already being processed"
+
+IdempotencyKeyConflictResponse:
+  description: |
+    This `Idempotency-Key` was previously used with a different request
+    payload. Choose a new key, or retry with the original payload.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - idempotency_key_conflict
+          error_description:
+            type: string
+
+InsufficientStorageResponse:
+  description: Insufficient storage - quota exceeded
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Insufficient storage error code
+            type: string
+            enum:
+              - insufficient_storage
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+PartialContentResponse:
+  description: |
+    The byte range asked for with `Range`. Headers are those of the `200`
+    response, with `Content-Length` the range's length.
+  headers:
+    Content-Range:
+      $ref: './headers.yaml#/Content-Range'
+    Content-Length:
+      $ref: './headers.yaml#/Content-Length'
+    Accept-Ranges:
+      $ref: './headers.yaml#/Accept-Ranges'
+    ETag:
+      $ref: './headers.yaml#/ETag'
+  content:
+    '*/*':
+      schema:
+        type: string
+        format: binary
+
+RangeNotSatisfiableResponse:
+  description: |
+    The `Range` starts past the end of the content (or asks for an empty
+    suffix). `Content-Range` gives the content's size.
+  headers:
+    Content-Range:
+      $ref: './headers.yaml#/Content-Range'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - range_not_satisfiable
+          error_description:
+            type: string
+
+SignatureRejectedResponse:
+  description: |
+    The signature did not verify: invalid or tampered signature, expired
+    URL (beyond the configured clock skew), unknown key version,
+    signature for a different operation, a share that is no longer
+    serveable, a share or version binding on a write URL, or an expired
+    archive.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/ErrorResponse'

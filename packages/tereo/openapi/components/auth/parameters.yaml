@@ -1,0 +1,75 @@
+UserIdParam:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid
+
+ClientIdParam:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid
+
+RoleIdParam:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid
+
+PermissionIdParam:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid
+
+OrganizationIdParam:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid
+
+IncludeRetiredParam:
+  name: includeRetired
+  in: query
+  description: |
+    When `true`, retired rows (items their service no longer declares) are
+    included in the results. Defaults to `false`. Must be `true` or `false`.
+  required: false
+  schema:
+    type: string
+    enum: ['true', 'false']
+    default: 'false'
+
+ServiceIdParam:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid
+
+IdentityProviderIdParam:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid
+
+IdentityProviderDomainIdParam:
+  name: domainId
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid

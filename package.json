@@ -1,0 +1,52 @@
+{
+  "name": "tereo",
+  "version": "0.1.0",
+  "description": "Reusable application core — OAuth2/OIDC auth, virtual file storage, webhook delivery, and centralized audit logging — deployed once per app",
+  "author": "Aaron Leman",
+  "license": "Apache-2.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@nx/js": "22.7.5",
+    "@swc-node/register": "^1.11.1",
+    "@swc/core": "^1.15.40",
+    "@types/node": "^25.9.2",
+    "eslint": "^9.39.4",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-import": "^2.32.0",
+    "nx": "22.7.5",
+    "prettier": "^3.9.10",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.0"
+  },
+  "overrides": {
+    "axios": "^1.17.0",
+    "brace-expansion": "^5.0.5",
+    "follow-redirects": "^1.16.0",
+    "yaml": "^2.9.0",
+    "@hono/node-server": "1.19.14",
+    "ioredis": "^5.11.1"
+  },
+  "engines": {
+    "node": "22.x.x"
+  },
+  "prettier": {
+    "trailingComma": "es5",
+    "tabWidth": 2,
+    "semi": true,
+    "singleQuote": false
+  },
+  "scripts": {
+    "format": "prettier --write \"packages/*/src/**/*.{ts,tsx,js,jsx,css}\" scripts",
+    "format:check": "prettier --check \"packages/*/src/**/*.{ts,tsx,js,jsx,css}\" scripts",
+    "lint": "eslint packages/ scripts/ && npm run lint --workspaces --if-present",
+    "sort-imports": "tsx scripts/sort-imports.ts",
+    "sort-imports:check": "tsx scripts/sort-imports.ts --check",
+    "check": "nx run-many -t check",
+    "version-plan": "nx release plan"
+  }
+}

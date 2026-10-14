@@ -1,0 +1,49 @@
+/* Notifications section */
+
+.t-notif-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.t-notif-result {
+  margin-top: 1rem;
+  word-break: break-word;
+}
+
+.t-notif-mono {
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.t-notif-code {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: monospace;
+  font-size: 0.85rem;
+  background: var(--color-surface-muted, rgba(127, 127, 127, 0.1));
+  border-radius: 0.25rem;
+}
+
+.t-notif-list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.t-notif-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.t-notif-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}

@@ -1,0 +1,207 @@
+NotificationsInvalidConfigResponse:
+  description: |
+    Validation error. `invalid_settings` and `invalid_secrets` mean the channel's adapter refused
+    the connection's settings or secrets; `issues` lists each field. An email connection with
+    `security: "none"` is refused unless core runs with `ALLOW_PLAINTEXT_SMTP=true`.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        required: [error, error_description]
+        properties:
+          error:
+            type: string
+            enum: [invalid_request, invalid_settings, invalid_secrets]
+          error_description:
+            type: string
+          issues:
+            description: Present with `invalid_settings` and `invalid_secrets`.
+            type: array
+            items:
+              type: object
+              required: [path, message]
+              properties:
+                path:
+                  description: Dotted path to the field, empty for the object itself.
+                  type: string
+                message:
+                  type: string
+
+NotificationsConflictResponse:
+  description: |
+    Conflict. `slug_taken`: the channel already has a connection with that slug.
+    `connection_in_use`: notifications or deliveries reference the connection, so it cannot be
+    deleted; disable it instead. `connection_is_default`: the connection is its channel's default
+    and the channel has other connections; make another one the default first.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        required: [error, error_description]
+        properties:
+          error:
+            type: string
+            enum: [slug_taken, connection_in_use, connection_is_default]
+          error_description:
+            type: string
+
+NotificationsSendBadRequestResponse:
+  description: |
+    The send was refused. `invalid_request`: the body's shape. `unknown_channel`,
+    `unknown_connection` (no connection with that slug on the channel), `invalid_content` (the
+    content, a recipient's address or options, an attachment's filename, or no `to`),
+    `too_many_recipients`, `sender_not_allowed` (`from` or `replyTo` is not an allowed sender of
+    the connection), `unknown_user`, `inactive_user` (deactivated, or not a person),
+    `unknown_organization`, `attachment_not_found` (the version is not one of the object's, or
+    is a delete marker), `attachments_too_large`.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        required: [error, error_description]
+        properties:
+          error:
+            type: string
+            enum:
+              - invalid_request
+              - unknown_channel
+              - unknown_connection
+              - invalid_content
+              - too_many_recipients
+              - sender_not_allowed
+              - unknown_user
+              - inactive_user
+              - unknown_organization
+              - attachment_not_found
+              - attachments_too_large
+          error_description:
+            type: string
+
+NotificationsSendForbiddenResponse:
+  description: |
+    `forbidden`: the caller lacks `notifications.send`, or names an `organizationId` outside its
+    token's organization (only `notifications.admin` and a service account's token without an
+    organization may name any). `attachment_forbidden`: the caller cannot
+    read an attachment's bucket (a missing bucket answers the same). `insufficient_scope`: the
+    token is delegated; only core's UI and services may send.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        required: [error, error_description]
+        properties:
+          error:
+            type: string
+            enum: [forbidden, attachment_forbidden, insufficient_scope]
+          error_description:
+            type: string
+
+NotificationsSendConflictResponse:
+  description: |
+    `connection_disabled`: the named connection is disabled. `idempotency_request_in_progress`:
+    a request with the same `idempotencyKey` and body is still being processed; retry shortly.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        required: [error, error_description]
+        properties:
+          error:
+            type: string
+            enum: [connection_disabled, idempotency_request_in_progress]
+          error_description:
+            type: string
+
+NotificationsPayloadTooLargeResponse:
+  description: The request body is over 10 MB.
+  content:
+    application/json:
+      schema:
+        type: object
+        required: [error, error_description]
+        properties:
+          error:
+            type: string
+            enum: [payload_too_large]
+          error_description:
+            type: string
+
+NotificationsIdempotencyKeyConflictResponse:
+  description: |
+    The `idempotencyKey` was already used by this caller with a different request body (whether
+    that request finished or is still in progress). Use a new key, or retry with the original
+    body.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        required: [error, error_description]
+        properties:
+          error:
+            type: string
+            enum: [idempotency_key_conflict]
+          error_description:
+            type: string
+
+NotificationsNothingToRetryResponse:
+  description: Conflict. `nothing_to_retry`, the notification has no failed delivery.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        required: [error, error_description]
+        properties:
+          error:
+            type: string
+            enum: [nothing_to_retry]
+          error_description:
+            type: string

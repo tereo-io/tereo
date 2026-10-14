@@ -1,0 +1,59 @@
+/* TOTP Setup — content-specific styles.
+ * Shell (container/header) and stepper handled by <AuthPage> and <Stepper>
+ * from @kosmeo-ui/react. */
+
+.t-setup-step {
+  margin-bottom: 1.5rem;
+}
+
+.t-setup-step h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-color);
+  margin: 0 0 1rem;
+}
+
+.t-setup-step p {
+  color: var(--text-color-secondary);
+  margin: 0 0 1rem;
+  line-height: 1.6;
+}
+
+.t-setup-step ul {
+  margin: 0 0 1rem;
+  padding-left: 1.5rem;
+}
+
+.t-setup-step li {
+  color: var(--text-color-secondary);
+  margin-bottom: 0.25rem;
+}
+
+/* QR Code Display */
+.t-qr-code-wrapper {
+  display: flex;
+  justify-content: center;
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: var(--background-color-light);
+  border-radius: 8px;
+}
+
+.t-manual-entry {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.t-manual-entry p {
+  font-size: 0.875rem;
+  color: var(--text-color-secondary);
+  margin-bottom: 0.5rem;
+}
+
+/* Loading spinner wrapper */
+.t-setup-loading {
+  display: flex;
+  justify-content: center;
+  padding: 2rem;
+}

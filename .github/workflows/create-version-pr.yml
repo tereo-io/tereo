@@ -1,0 +1,121 @@
+name: Create Version Bump PR
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+
+concurrency:
+  group: version-bump-create
+  cancel-in-progress: false
+
+jobs:
+  create-pr:
+    if: >
+      github.event.pull_request.merged == true &&
+      !contains(github.event.pull_request.labels.*.name, 'automated-version-bump')
+    runs-on: ubuntu-latest
+    # The built-in token pushes the bump branch and opens its PR. A PR it opens
+    # triggers no workflows, and CI skips release/version-bump anyway. It is
+    # not left in .git/config: only the push step and the gh steps see it.
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: master
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Check for version plans
+        id: check-plans
+        run: |
+          if [ -d ".nx/version-plans" ] && ls .nx/version-plans/*.md 1>/dev/null 2>&1; then
+            echo "has_plans=true" >> $GITHUB_OUTPUT
+            echo "Found version plans:"
+            ls -la .nx/version-plans/*.md
+          else
+            echo "has_plans=false" >> $GITHUB_OUTPUT
+            echo "No version plans found. Skipping."
+          fi
+
+      - name: Check if version bump PR exists
+        if: steps.check-plans.outputs.has_plans == 'true'
+        id: check-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER=$(gh pr list --base master --head release/version-bump --json number -q '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$PR_NUMBER" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Version bump PR already exists: #$PR_NUMBER"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.check-plans.outputs.has_plans == 'true'
+        with:
+          node-version: 22
+          # The runner's cached 22.x can lag; dependencies need >= 22.22.2.
+          check-latest: true
+
+      # Nx release needs no install scripts, and skipping them keeps
+      # dependency code from running in a job that holds a write token.
+      - name: Install dependencies
+        if: steps.check-plans.outputs.has_plans == 'true'
+        run: npm ci --ignore-scripts
+
+      - name: Configure git
+        if: steps.check-plans.outputs.has_plans == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create version bump branch from master
+        if: steps.check-plans.outputs.has_plans == 'true'
+        run: git checkout -B release/version-bump origin/master
+
+      - name: Run Nx Release
+        if: steps.check-plans.outputs.has_plans == 'true'
+        run: npx nx release --skip-publish
+
+      - name: Sync lockfile to bumped versions
+        if: steps.check-plans.outputs.has_plans == 'true'
+        run: npm install --package-lock-only
+
+      - name: Commit and push version changes
+        if: steps.check-plans.outputs.has_plans == 'true'
+        id: commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -f .nx/version-plans/*.md
+          git add packages/*/package.json packages/*/CHANGELOG.md package-lock.json .nx/version-plans/
+
+          if git diff --staged --quiet; then
+            echo "No version changes to commit."
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            git commit -m "chore(release): bump versions"
+            AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $AUTH" \
+              push --force-with-lease origin release/version-bump
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create PR if needed
+        if: steps.check-plans.outputs.has_plans == 'true' && steps.commit.outputs.has_changes == 'true' && steps.check-pr.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --base master \
+            --head release/version-bump \
+            --title "chore(release): bump versions" \
+            --body "Automated version bump based on conventional commits." \
+            --label "automated-version-bump"
+          echo "Created version bump PR"

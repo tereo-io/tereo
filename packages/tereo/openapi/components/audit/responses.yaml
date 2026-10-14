@@ -1,0 +1,124 @@
+# Responses only this area uses; the shared ones are in ../responses.yaml
+
+AuditUnauthorizedResponse:
+  description: |
+    Unauthorized - missing, invalid, expired or revoked access token; a token whose session (refresh token) was revoked, rotated or superseded, or whose client was deleted (both also clear the `trt_{client_id}` / `tsi_{client_id}` cookies); an inactive user; or a token issued to a client other than core's UI or a service, without core API scopes (not for core's API — see `BearerAuth`).
+    Authentication runs before rate limiting, so no `X-RateLimit-*` headers are set.
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Unauthorized error code
+            type: string
+            enum:
+              - invalid_token
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+AuditForbiddenResponse:
+  description: |
+    Forbidden - the token lacks the operation's permission, names an organization it may not
+    read or write, or has no `org_id` without holding `audit-logs.admin` (writes excepted for
+    a service account) — or, `insufficient_scope`, a delegated token whose core API scopes do
+    not include `core:audit` or `core:audit.read`
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Forbidden error code
+            type: string
+            enum:
+              - forbidden
+              - insufficient_scope
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+AuditConflictResponse:
+  description: |
+    Conflict. `idempotency_request_in_progress` - a request with the same
+    `idempotencyKey` and body is still being processed; retry shortly.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Conflict error code
+            type: string
+            enum:
+              - idempotency_request_in_progress
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+AuditIdempotencyKeyConflictResponse:
+  description: |
+    The `idempotencyKey` was already used on this endpoint, by this caller, with a different
+    request body (whether that request finished or is still in progress). Use a new key, or
+    retry with the original body.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - idempotency_key_conflict
+          error_description:
+            type: string
+            examples:
+              - This idempotency key was already used with a different request body
+
+AuditBadRequestResponse:
+  description: |
+    Invalid request. `error` is `invalid_request` for a validation failure, or a
+    specific code the operation lists (`invalid_cursor`, `search_window_too_large`,
+    `unknown_user`, `unknown_organization`).
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: A standardized error code
+            type: string
+            examples:
+              - invalid_request
+          error_description:
+            description: A human-readable explanation of the error
+            type: string

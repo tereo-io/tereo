@@ -1,0 +1,114 @@
+.t-sidebar {
+  width: 15.5rem;
+  background-color: var(--primary-color-dark);
+  color: var(--text-color-light);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width 0.2s ease;
+  border-right: 1px solid var(--border-color);
+}
+
+/* Sidebar header */
+.t-sidebar-header {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 0.5rem 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--overlay-light-weak);
+  gap: 0.5rem;
+}
+
+.t-sidebar-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-color-light);
+  white-space: nowrap;
+  overflow: hidden;
+  flex: 1;
+}
+
+/* Collapse button */
+.t-sidebar-collapse-btn {
+  background: none;
+  border: none;
+  color: var(--overlay-light-medium);
+  cursor: pointer;
+  padding: 0.25rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
+}
+
+.t-sidebar-collapse-btn:hover {
+  background-color: var(--overlay-light-weak);
+  color: var(--text-color-light);
+}
+
+/* Main content */
+.t-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  background-color: var(--background-color);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* ===== Collapsed state ===== */
+.t-sidebar-collapsed {
+  width: 3.5rem;
+}
+
+.t-sidebar-collapsed .t-sidebar-header {
+  padding: 0.75rem 0;
+  justify-content: center;
+}
+
+.t-sidebar-collapsed .t-sidebar-header h3 {
+  display: none;
+}
+
+.t-sidebar-collapsed .v-sidebar-nav-group-label {
+  font-size: 0;
+  padding: 0.25rem 0;
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--overlay-light-weak);
+}
+
+.t-sidebar-collapsed
+  .v-sidebar-nav-group:first-child
+  .v-sidebar-nav-group-label {
+  border-top: none;
+}
+
+.t-sidebar-collapsed .v-sidebar-nav-link {
+  justify-content: center;
+  padding: 0.6rem 0;
+  gap: 0;
+}
+
+.t-sidebar-collapsed .v-sidebar-nav-link span {
+  display: none;
+}
+
+.t-sidebar-collapsed .v-sidebar-nav-link.active {
+  border-left: 3px solid var(--text-color-light);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .t-sidebar {
+    width: 100%;
+    height: auto;
+  }
+
+  .t-body {
+    flex-direction: column;
+  }
+}

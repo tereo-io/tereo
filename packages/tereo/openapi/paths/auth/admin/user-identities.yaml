@@ -1,0 +1,304 @@
+/admin/users/{id}/identities:
+  get:
+    tags:
+      - Admin - User Identities
+    summary: List a user's identities and invites
+    description: |
+      The identity provider accounts linked to the user and their outstanding
+      invites. An expired invite is listed until the hourly cleanup removes
+      it; check `expiresAt`.
+    operationId: getAdminUserIdentities
+    security:
+      - BearerAuth: [users.read]
+    parameters:
+      - $ref: "../../../components/auth/parameters.yaml#/UserIdParam"
+    responses:
+      "200":
+        description: Identities and invites
+        headers:
+          X-RateLimit-Limit:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Limit"
+          X-RateLimit-Remaining:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Remaining"
+          X-RateLimit-Reset:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Reset"
+        content:
+          application/json:
+            schema:
+              $ref: "../../../components/auth/schemas.yaml#/UserIdentitiesResponse"
+      "400":
+        $ref: "../../../components/responses.yaml#/BadRequestResponse"
+      "401":
+        $ref: "../../../components/responses.yaml#/UnauthorizedResponse"
+      "403":
+        $ref: "../../../components/responses.yaml#/ForbiddenResponse"
+      "404":
+        $ref: "../../../components/responses.yaml#/NotFoundResponse"
+      "429":
+        $ref: "../../../components/responses.yaml#/RateLimitResponse"
+      "500":
+        $ref: "../../../components/responses.yaml#/ServerErrorResponse"
+
+/admin/users/{id}/identities/{identityId}:
+  delete:
+    tags:
+      - Admin - User Identities
+    summary: Unlink a user's identity
+    description: |
+      Removes one of the user's linked identities. No recent login is needed,
+      and it is not limited to core's own UI. Refused with 409 when it would
+      lock the user out:
+
+      - `last_sign_in_method`: the user has no password and this is their only
+        identity;
+      - `sso_required`: the user's email domain is `ssoOnly` for this
+        identity's provider.
+
+      `404` when the identity is not this user's.
+
+      Unlinking changes how the account is entered, so the credential-reset
+      guard applies, as for identity invites: the caller must hold every
+      permission the user holds, from global roles or roles in any
+      organization (`403`, naming the permissions the caller lacks,
+      otherwise). The caller's own permissions count from global roles only,
+      capped by a delegated token's scopes.
+
+      An audit log entry is created (the admin as actor) and an
+      `auth.user.identity-unlinked` webhook event is emitted.
+    operationId: deleteAdminUserIdentity
+    security:
+      - BearerAuth: [users.write]
+    parameters:
+      - $ref: "../../../components/auth/parameters.yaml#/UserIdParam"
+      - name: identityId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    responses:
+      "204":
+        description: Identity unlinked
+        headers:
+          X-RateLimit-Limit:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Limit"
+          X-RateLimit-Remaining:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Remaining"
+          X-RateLimit-Reset:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Reset"
+      "400":
+        $ref: "../../../components/responses.yaml#/BadRequestResponse"
+      "401":
+        $ref: "../../../components/responses.yaml#/UnauthorizedResponse"
+      "403":
+        $ref: "../../../components/responses.yaml#/ForbiddenResponse"
+        description: Forbidden - missing users.write permission, or the user holds a permission the caller does not
+      "404":
+        $ref: "../../../components/responses.yaml#/NotFoundResponse"
+      "409":
+        $ref: "../../../components/auth/responses.yaml#/IdentityConflictResponse"
+      "429":
+        $ref: "../../../components/responses.yaml#/RateLimitResponse"
+      "500":
+        $ref: "../../../components/responses.yaml#/ServerErrorResponse"
+
+/admin/users/{id}/identity-invites:
+  post:
+    tags:
+      - Admin - User Identities
+    summary: Invite a user to sign in with a provider
+    description: |
+      Lets the user's first sign-in with the provider claim the account: the
+      sign-in must carry a verified email equal to the user's (and, for
+      Google, a matching `hd`). The invite is claimed once and lasts 7 days;
+      issuing again for the same provider replaces the earlier invite and
+      restarts the 7 days. Core sends no email: tell the user to "Sign in
+      with <provider>". Changing the user's email withdraws their outstanding
+      invites, and linking the provider another way removes its invite.
+
+      An invite is a new way into the account, so the credential-reset guard
+      applies: the caller must hold every permission the user holds, from
+      global roles or roles in any organization (`403`, naming the
+      permissions the caller lacks, otherwise). The caller's own permissions
+      count from global roles only, capped by a delegated token's scopes. The
+      system user (`400 system_user`) and service accounts (`403`) are
+      refused.
+
+      Errors: 400 `unknown_provider` (no provider has that id),
+      400 `provider_inactive` (the provider is deactivated), 409
+      `already_linked` (the user already has an identity at the provider).
+
+      An audit log entry is created (`entityType` `IdentityInvite`).
+    operationId: postAdminUserIdentityInvites
+    security:
+      - BearerAuth: [users.write]
+    parameters:
+      - $ref: "../../../components/auth/parameters.yaml#/UserIdParam"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../../../components/auth/schemas.yaml#/CreateIdentityInviteRequest"
+    responses:
+      "201":
+        description: Invite issued
+        headers:
+          X-RateLimit-Limit:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Limit"
+          X-RateLimit-Remaining:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Remaining"
+          X-RateLimit-Reset:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Reset"
+        content:
+          application/json:
+            schema:
+              $ref: "../../../components/auth/schemas.yaml#/IdentityInvite"
+      "400":
+        $ref: "../../../components/responses.yaml#/BadRequestResponse"
+        description: Invalid body or user id, `unknown_provider`, `provider_inactive`, or the target is the system user (`system_user`)
+      "401":
+        $ref: "../../../components/responses.yaml#/UnauthorizedResponse"
+      "403":
+        $ref: "../../../components/responses.yaml#/ForbiddenResponse"
+        description: Forbidden - missing users.write permission, the user is a service account, or the user holds a permission the caller does not
+      "404":
+        $ref: "../../../components/responses.yaml#/NotFoundResponse"
+        description: No such user
+      "409":
+        $ref: "../../../components/responses.yaml#/ConflictResponse"
+        description: The user is already linked to the provider (`already_linked`)
+      "429":
+        $ref: "../../../components/responses.yaml#/RateLimitResponse"
+      "500":
+        $ref: "../../../components/responses.yaml#/ServerErrorResponse"
+
+/admin/users/{id}/identity-invites/{providerId}:
+  delete:
+    tags:
+      - Admin - User Identities
+    summary: Withdraw an invite
+    description: |
+      Removes the user's unclaimed invite for the provider. `404` when there is
+      none. An audit log entry is created.
+    operationId: deleteAdminUserIdentityInvite
+    security:
+      - BearerAuth: [users.write]
+    parameters:
+      - $ref: "../../../components/auth/parameters.yaml#/UserIdParam"
+      - name: providerId
+        in: path
+        required: true
+        description: The identity provider's id
+        schema:
+          type: string
+          format: uuid
+    responses:
+      "204":
+        description: Invite withdrawn
+        headers:
+          X-RateLimit-Limit:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Limit"
+          X-RateLimit-Remaining:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Remaining"
+          X-RateLimit-Reset:
+            $ref: "../../../components/headers.yaml#/X-RateLimit-Reset"
+      "400":
+        $ref: "../../../components/responses.yaml#/BadRequestResponse"
+      "401":
+        $ref: "../../../components/responses.yaml#/UnauthorizedResponse"
+      "403":
+        $ref: "../../../components/responses.yaml#/ForbiddenResponse"
+      "404":
+        $ref: "../../../components/responses.yaml#/NotFoundResponse"
+        description: The user has no invite for this provider
+      "429":
+        $ref: "../../../components/responses.yaml#/RateLimitResponse"
+      "500":
+        $ref: "../../../components/responses.yaml#/ServerErrorResponse"
+
+# ============================================
+# WEBHOOK EVENTS
+# ============================================
+
+auth.user.identity-linked:
+  post:
+    tags:
+      - Admin - User Identities
+    summary: Identity linked
+    description: Fired when a provider account is linked to a user, from the account page or by claiming an invite or auto-accept on a first sign-in.
+    operationId: webhookUserIdentityLinked
+    security: []
+    parameters:
+      - $ref: "../../../components/parameters.yaml#/WebhookIdHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookEventHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookTimestampHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookSignatureHeader"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent"
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.identity-linked
+                  entityType:
+                    const: UserIdentity
+                  data:
+                    type: object
+                    required:
+                      [id, userId, providerId, provider, email, createdAt]
+                    properties:
+                      id: { type: string, format: uuid }
+                      userId: { type: string, format: uuid }
+                      providerId: { type: string, format: uuid }
+                      provider:
+                        { type: string, description: The provider's slug }
+                      email: { type: [string, "null"] }
+                      createdAt: { type: string, format: date-time }
+    responses:
+      "2XX":
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.user.identity-unlinked:
+  post:
+    tags:
+      - Admin - User Identities
+    summary: Identity unlinked
+    description: Fired when a provider account is unlinked from a user, by the user or an admin.
+    operationId: webhookUserIdentityUnlinked
+    security: []
+    parameters:
+      - $ref: "../../../components/parameters.yaml#/WebhookIdHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookEventHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookTimestampHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookSignatureHeader"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent"
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.identity-unlinked
+                  entityType:
+                    const: UserIdentity
+                  data:
+                    type: object
+                    required: [id, userId, providerId, provider, email]
+                    properties:
+                      id: { type: string, format: uuid }
+                      userId: { type: string, format: uuid }
+                      providerId: { type: string, format: uuid }
+                      provider:
+                        { type: string, description: The provider's slug }
+                      email: { type: [string, "null"] }
+    responses:
+      "2XX":
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

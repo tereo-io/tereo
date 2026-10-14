@@ -1,0 +1,16 @@
+# The one spec for core: `npm run openapi:lint` / `npm run openapi:build`.
+extends:
+  - recommended
+
+apis:
+  core:
+    root: openapi/openapi.yaml
+    output: openapi/bundled-openapi.yaml
+
+rules:
+  # Localhost server URLs are intended.
+  no-server-example.com: off
+  # Every operation declares security; public endpoints (health, OAuth flows,
+  # well-known, setup, signed URLs, share links, webhook definitions) opt out
+  # explicitly with `security: []`.
+  security-defined: error

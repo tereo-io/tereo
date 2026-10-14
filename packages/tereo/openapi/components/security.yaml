@@ -1,0 +1,50 @@
+BearerAuth:
+  type: http
+  scheme: bearer
+  bearerFormat: JWT
+  description: |
+    JWT access token (header `typ: at+jwt`, RFC 9068) issued by core's own
+    OAuth2 server (`POST /oauth/token`) and verified in-process. The caller's
+    permissions are read from the database on each request.
+
+    Which tokens core's own API (`/v1/account`, `/v1/admin`, `/v1/files`, `/v1/audit`,
+    `/v1/webhooks`, `/v1/notifications`, `/v1/registry`, the `/ws` socket) admits depends on the client
+    the token was issued to:
+
+    - core's UI (`tereo-ui`) or a service (a client registered under
+      `/v1/admin/services`, or any `client_credentials` token): admitted
+      everywhere with the user's (service account's) live permissions; no
+      scope is needed.
+    - any other client, only if it was granted core API scopes — its token's
+      `aud` then includes `core`. It reaches only the areas its scopes name,
+      and its permissions are the user's live ones cut down to the scopes'
+      ceilings: `core:account` (`/v1/account`, `/ws`), `core:admin` /
+      `core:admin.read` (`/v1/admin`: `users`, `roles`, `permissions`, `clients`,
+      `settings`, `organizations`, `services` — `.admin` / `.read`),
+      `core:files` / `core:files.read` (`file-service.admin` / the
+      `file-service.*.read` permissions), `core:audit` / `core:audit.read`
+      (`audit-logs.admin` / `audit-logs.read`), `core:webhooks` /
+      `core:webhooks.read` (`webhooks.admin` / `webhooks.read`,
+      `webhooks.event-types.read`). No scope opens `/v1/registry` or
+      `/v1/notifications`. An
+      organization member role is capped the same way.
+    - any other client without core API scopes: 401 `invalid_token`.
+
+    A delegated token outside its scopes' areas is 403 `insufficient_scope`
+    with `WWW-Authenticate: Bearer error="insufficient_scope", scope="…"`.
+
+    Permissions are hierarchical and domain-specific: `write` covers `read`,
+    `archive` covers `write`, `delete` covers `archive`, and a domain's `admin` (`webhooks.admin`,
+    `audit-logs.admin`, `file-service.admin`, …) covers every permission in
+    that domain. In the auth area an operation's permission is the scope on
+    `BearerAuth`; elsewhere it is listed in the operation's description.
+
+    Files operations check two levels: the system permission
+    (`file-service.buckets.*`, `file-service.objects.*`,
+    `file-service.permissions.*`, `file-service.shares.*`) and the bucket-level
+    grant (`canRead`, `canWrite`, `canDelete`).
+
+ClientCredentials:
+  type: http
+  scheme: basic
+  description: Client ID and secret for OAuth client authentication (Basic Auth)

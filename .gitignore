@@ -1,0 +1,24 @@
+node_modules/
+**/node_modules/
+/build/
+**/dist/
+**/uploads/
+**/local/
+logs/
+**/logs/
+/.vscode/
+!nx.json
+.env*
+.node-version
+*.png.*
+*.tsbuildinfo
+
+
+.nx/cache
+.nx/workspace-data
+vite.config.*.timestamp*
+vitest.config.*.timestamp*
+# Other sessions' git worktrees
+.claude/worktrees/
+# Copied from core by the UI's openapi:sync
+packages/tereo-ui/public/openapi/

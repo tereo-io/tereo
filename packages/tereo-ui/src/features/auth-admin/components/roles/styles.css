@@ -1,0 +1,17 @@
+/* Roles editor loading spinner (used by UserRolesEditor) */
+.t-roles-editor-loading {
+  display: flex;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.t-role-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.t-system-icon {
+  color: var(--text-color-secondary);
+  font-size: 0.75rem;
+}

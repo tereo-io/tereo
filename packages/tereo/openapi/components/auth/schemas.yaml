@@ -1,0 +1,3407 @@
+# Well-Known Schemas
+OAuthAuthorizationServerMetadata:
+  type: object
+  required:
+    - issuer
+    - authorization_endpoint
+    - token_endpoint
+    - introspection_endpoint
+    - revocation_endpoint
+    - jwks_uri
+    - response_types_supported
+    - response_modes_supported
+    - grant_types_supported
+    - token_endpoint_auth_methods_supported
+    - introspection_endpoint_auth_methods_supported
+    - revocation_endpoint_auth_methods_supported
+    - code_challenge_methods_supported
+  properties:
+    issuer:
+      type: string
+      format: uri
+    authorization_endpoint:
+      type: string
+      format: uri
+    token_endpoint:
+      type: string
+      format: uri
+    introspection_endpoint:
+      type: string
+      format: uri
+    revocation_endpoint:
+      type: string
+      format: uri
+    jwks_uri:
+      type: string
+      format: uri
+    response_types_supported:
+      type: array
+      items:
+        type: string
+      examples:
+        - ["code"]
+    response_modes_supported:
+      type: array
+      items:
+        type: string
+      examples:
+        - ["query"]
+    grant_types_supported:
+      type: array
+      items:
+        type: string
+      examples:
+        - ["authorization_code", "client_credentials", "refresh_token"]
+    token_endpoint_auth_methods_supported:
+      type: array
+      items:
+        type: string
+      description: '`client_secret_basic` for confidential clients, `none` for public ones; `client_secret_post` is not accepted.'
+      examples:
+        - ["client_secret_basic", "none"]
+    introspection_endpoint_auth_methods_supported:
+      type: array
+      items:
+        type: string
+      description: '`client_secret_basic` for confidential clients, `none` for public ones; `client_secret_post` is not accepted.'
+      examples:
+        - ["client_secret_basic", "none"]
+    revocation_endpoint_auth_methods_supported:
+      type: array
+      items:
+        type: string
+      description: '`client_secret_basic` for confidential clients, `none` for public ones; `client_secret_post` is not accepted.'
+      examples:
+        - ["client_secret_basic", "none"]
+    code_challenge_methods_supported:
+      type: array
+      items:
+        type: string
+      examples:
+        - ["S256"]
+    authorization_response_iss_parameter_supported:
+      type: boolean
+      description: Always `true` — every authorization response (code or error) carries `iss` (RFC 9207)
+      const: true
+
+OpenIDConfiguration:
+  type: object
+  required:
+    - issuer
+    - authorization_endpoint
+    - token_endpoint
+    - userinfo_endpoint
+    - end_session_endpoint
+    - jwks_uri
+    - introspection_endpoint
+    - revocation_endpoint
+    - response_types_supported
+    - response_modes_supported
+    - grant_types_supported
+    - subject_types_supported
+    - id_token_signing_alg_values_supported
+    - token_endpoint_auth_methods_supported
+    - introspection_endpoint_auth_methods_supported
+    - revocation_endpoint_auth_methods_supported
+    - request_parameter_supported
+    - request_uri_parameter_supported
+    - scopes_supported
+    - claims_supported
+    - acr_values_supported
+    - prompt_values_supported
+    - code_challenge_methods_supported
+  properties:
+    issuer:
+      type: string
+      format: uri
+    authorization_endpoint:
+      type: string
+      format: uri
+    token_endpoint:
+      type: string
+      format: uri
+    userinfo_endpoint:
+      type: string
+      format: uri
+    end_session_endpoint:
+      type: string
+      format: uri
+    jwks_uri:
+      type: string
+      format: uri
+    introspection_endpoint:
+      type: string
+      format: uri
+    revocation_endpoint:
+      type: string
+      format: uri
+    response_types_supported:
+      type: array
+      items:
+        type: string
+    response_modes_supported:
+      type: array
+      items:
+        type: string
+    grant_types_supported:
+      type: array
+      items:
+        type: string
+    subject_types_supported:
+      type: array
+      items:
+        type: string
+    id_token_signing_alg_values_supported:
+      type: array
+      items:
+        type: string
+    token_endpoint_auth_methods_supported:
+      type: array
+      description: '`client_secret_basic` for confidential clients, `none` for public ones; `client_secret_post` is not accepted.'
+      items:
+        type: string
+      examples:
+        - ["client_secret_basic", "none"]
+    introspection_endpoint_auth_methods_supported:
+      type: array
+      items:
+        type: string
+      examples:
+        - ["client_secret_basic", "none"]
+    revocation_endpoint_auth_methods_supported:
+      type: array
+      items:
+        type: string
+      examples:
+        - ["client_secret_basic", "none"]
+    request_parameter_supported:
+      type: boolean
+      description: Always `false`; the `request` parameter is not supported.
+    request_uri_parameter_supported:
+      type: boolean
+      description: Always `false`; the `request_uri` parameter is not supported.
+    scopes_supported:
+      type: array
+      description: The OIDC scopes and core's API scopes (`core:*`; see `BearerAuth`)
+      items:
+        type: string
+    claims_supported:
+      type: array
+      items:
+        type: string
+      examples:
+        - [sub, iss, aud, exp, iat, auth_time, nonce, at_hash, acr, amr, name, given_name, family_name, email, email_verified, picture, updated_at, org_id, sid]
+    acr_values_supported:
+      type: array
+      description: |
+        `urn:auth-service:pwd` and `urn:auth-service:mfa`. An authorize
+        request whose `acr_values` names `mfa` without `pwd` requires a second
+        factor; the ID token's `acr` is the class the login reached.
+      items:
+        type: string
+      examples:
+        - ["urn:auth-service:pwd", "urn:auth-service:mfa"]
+    prompt_values_supported:
+      type: array
+      items:
+        type: string
+      description: '`select_account` is accepted but ignored, so not listed.'
+      examples:
+        - ["none", "login", "consent"]
+    code_challenge_methods_supported:
+      type: array
+      items:
+        type: string
+    authorization_response_iss_parameter_supported:
+      type: boolean
+      description: Always `true` — every authorization response (code or error) carries `iss` (RFC 9207)
+      const: true
+
+JWKS:
+  type: object
+  required:
+    - keys
+  properties:
+    keys:
+      type: array
+      description: |
+        The active signing key, then any retired key still within its
+        retention (one access-token lifetime plus the id_token_hint grace).
+        Pick the key by the token's `kid`.
+      items:
+        type: object
+        required: [kty, use, alg, kid, n, e]
+        properties:
+          kty:
+            type: string
+            examples:
+              - RSA
+          use:
+            type: string
+            examples:
+              - sig
+          alg:
+            type: string
+            examples:
+              - RS256
+          kid:
+            type: string
+            description: |
+              The key's RFC 7638 JWK thumbprint, or `JWT_KEY_ID` for a key
+              pair supplied in env. Core refuses a token whose `kid` is
+              missing or names no published key.
+          n:
+            type: string
+            description: RSA modulus
+          e:
+            type: string
+            description: RSA exponent
+
+# OAuth2 Request/Response Schemas
+AuthorizeSubmitRequest:
+  type: object
+  required:
+    - email
+    - password
+    - client_id
+    - redirect_uri
+    - state
+    - code_challenge
+    - code_challenge_method
+  properties:
+    email:
+      type: string
+      format: email
+      maxLength: 255
+    password:
+      type: string
+      minLength: 1
+      maxLength: 256
+    client_id:
+      type: string
+      minLength: 1
+      maxLength: 64
+    redirect_uri:
+      type: string
+      format: uri
+      minLength: 1
+      maxLength: 2048
+    scope:
+      type: string
+      maxLength: 1000
+    state:
+      type: string
+      minLength: 1
+      maxLength: 512
+    nonce:
+      type: string
+      maxLength: 512
+    code_challenge:
+      type: string
+      minLength: 43
+      maxLength: 43
+      pattern: '^[A-Za-z0-9_-]+$'
+      description: The S256 challenge — the unpadded base64url SHA-256 of the code verifier, always 43 characters.
+    code_challenge_method:
+      type: string
+      enum: [S256]
+    max_age:
+      type: integer
+      minimum: 0
+    acr_values:
+      type: string
+      maxLength: 512
+    prompt:
+      type: string
+      maxLength: 64
+      description: A space-separated list of `none`, `login`, `consent` and `select_account`; `none` stands alone
+
+ConsentSubmitRequest:
+  type: object
+  required:
+    - session_token
+    - approved
+  properties:
+    session_token:
+      type: string
+      minLength: 1
+      maxLength: 64
+    approved:
+      description: |
+        Boolean, or a string: only `"true"` approves, any other string denies.
+      oneOf:
+        - type: boolean
+        - type: string
+
+ConsentDetailsResponse:
+  type: object
+  required:
+    - sessionToken
+    - clientName
+    - clientId
+    - scopes
+    - user
+  properties:
+    sessionToken:
+      type: string
+      description: The consent session token
+    clientName:
+      type: string
+      description: Display name of the OAuth client
+    clientId:
+      type: string
+      description: The client_id of the OAuth client
+    scopes:
+      type: array
+      items:
+        type: object
+        required:
+          - name
+          - description
+        properties:
+          name:
+            type: string
+            description: The scope identifier
+          description:
+            type: [string, 'null']
+            description: Human-readable description of the scope
+    user:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+          description: User's email address
+        name:
+          type: [string, 'null']
+          description: User's display name
+
+OrgSelectResponse:
+  type: object
+  required:
+    - organizations
+    - client
+    - user
+  properties:
+    organizations:
+      type: array
+      description: Active organizations the authenticated user may choose from.
+      items:
+        type: object
+        required:
+          - id
+          - name
+          - slug
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: Organization ID
+          name:
+            type: string
+            description: Organization display name
+          slug:
+            type: string
+            description: Organization slug
+    client:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Display name of the OAuth client
+    user:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+          description: User's email address
+        name:
+          type: [string, 'null']
+          description: User's display name
+
+OrgSelectSubmitRequest:
+  type: object
+  required:
+    - session_token
+    - organization_id
+  properties:
+    session_token:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: Org-selection session token issued by the authorize endpoint.
+    organization_id:
+      type: string
+      format: uuid
+      description: ID of the organization the user is selecting for this OAuth flow.
+
+AuthorizationCodeTokenRequest:
+  type: object
+  required:
+    - grant_type
+    - code
+    - redirect_uri
+  properties:
+    grant_type:
+      type: string
+      enum: [authorization_code]
+    code:
+      type: string
+      minLength: 1
+      maxLength: 128
+    redirect_uri:
+      type: string
+      format: uri
+      minLength: 1
+      maxLength: 2048
+      description: Must equal the redirect_uri of the authorize request. Cannot contain a fragment.
+    code_verifier:
+      type: string
+      minLength: 43
+      maxLength: 128
+      pattern: '^[A-Za-z0-9._~-]+$'
+      description: PKCE code verifier (RFC 7636 unreserved characters). Required — a request without it is refused with 400 `invalid_grant` (RFC 7636 §4.6).
+    client_id:
+      type: string
+      maxLength: 64
+    refresh_token_response_mode:
+      type: string
+      enum: [body, cookie]
+      description: Controls whether refresh token is returned in response body or set as HTTP-only cookie
+
+ClientCredentialsTokenRequest:
+  type: object
+  required:
+    - grant_type
+  properties:
+    grant_type:
+      type: string
+      enum: [client_credentials]
+    scope:
+      type: string
+      maxLength: 1000
+    client_id:
+      type: string
+      maxLength: 64
+
+RefreshTokenRequest:
+  type: object
+  required:
+    - grant_type
+  properties:
+    grant_type:
+      type: string
+      enum: [refresh_token]
+    refresh_token:
+      type: string
+      maxLength: 2048
+      description: Can be omitted if provided via cookie
+    scope:
+      type: string
+      maxLength: 1000
+      description: |
+        Narrows the new tokens to these scopes, all of which must have been
+        granted to the refresh token (400 `invalid_scope` otherwise). Omitted,
+        the original scopes are kept.
+    client_id:
+      type: string
+      maxLength: 64
+    refresh_token_response_mode:
+      type: string
+      enum: [body, cookie]
+
+TokenResponse:
+  type: object
+  required:
+    - access_token
+    - token_type
+    - expires_in
+    - scope
+  properties:
+    access_token:
+      type: string
+    id_token:
+      type: string
+      description: |
+        Included for the authorization_code and refresh_token grants when the
+        grant has the `openid` scope. A refresh returns a fresh ID token for
+        the same login (OIDC Core 12.2): the same `sid`, `auth_time`, `acr`
+        and `amr`, a new `at_hash`, and no `nonce`. An RS256 JWT with `iss`,
+        `sub`, `aud` (the client_id), `exp`, `iat`, and when known
+        `auth_time`, `nonce`, `at_hash`, `acr`, `amr`, `org_id`, `sid`, and
+        the profile claims (`name`, `given_name`, `family_name`, `picture`,
+        `updated_at`) only with the `profile` scope and `email` /
+        `email_verified` only with the `email` scope — on a narrowed refresh,
+        the scopes of that refresh. `sid` is the SSO session (browser) the login belongs to. Pass it as `id_token_hint` to `/oauth/end-session` to end
+        that session. (An access token's `sid` is different: its refresh-token
+        session.)
+    token_type:
+      type: string
+      enum: [Bearer]
+    expires_in:
+      type: integer
+      description: Lifetime in seconds
+    refresh_token:
+      type: string
+      description: |
+        Omitted for client_credentials, for a client without the
+        `refresh_token` grant type, and when `refresh_token_response_mode`
+        is `cookie` (the token is then set in the `trt_{client_id}` cookie).
+    scope:
+      type: string
+      description: Space-delimited list of scopes granted for this token (empty string when none)
+
+IntrospectRequest:
+  type: object
+  required:
+    - token
+  properties:
+    token:
+      type: string
+      minLength: 1
+      maxLength: 2048
+    token_type_hint:
+      type: string
+      maxLength: 64
+      description: '`access_token` or `refresh_token`. Only a hint — every token type is tried, and an unknown value is ignored.'
+    client_id:
+      type: string
+      maxLength: 64
+
+IntrospectResponse:
+  type: object
+  description: |
+    `{ active: false }` alone for an invalid, expired, revoked or foreign
+    token, one whose session was rotated or revoked or whose client was
+    deleted, or one whose user or service account is inactive. An active token returns its access-token claims plus the user's
+    claims for the token's scopes and, when it carries `org_id`, `org_name`
+    (omitted when that organization has since been archived or deleted).
+  required:
+    - active
+  properties:
+    active:
+      type: boolean
+    scope:
+      type: string
+    client_id:
+      type: string
+    exp:
+      type: integer
+    iat:
+      type: integer
+    sub:
+      type: string
+      description: |
+        The token's own `sub`: the user's id for a user token, the
+        `client_id` for a client_credentials token.
+    user_id:
+      type: string
+      format: uuid
+      description: |
+        The id of the user the token acts as: the user's id for a user token
+        (equal to `sub`), the client's service-account user for a
+        client_credentials token. Always present for an active token.
+    aud:
+      oneOf:
+        - type: string
+        - type: array
+          items:
+            type: string
+    iss:
+      type: string
+    jti:
+      type: string
+    sid:
+      type: string
+      description: Refresh-token session id, for user tokens
+    auth_time:
+      type: integer
+      description: Unix timestamp of the user's sign-in, for user tokens (RFC 9068)
+    permissions:
+      type: array
+      description: |
+        The user's permissions now, scoped to the token's organization, as
+        `requireAuth` computes them: a role revoked since the token was issued
+        is gone here though the token's own `permissions` claim still lists
+        it. Always present for an active token (possibly empty).
+      items:
+        type: string
+    org_id:
+      type: string
+      format: uuid
+    org_name:
+      type: string
+    name:
+      type: string
+      description: With the `profile` scope
+    given_name:
+      type: string
+      description: With the `profile` scope
+    family_name:
+      type: string
+      description: With the `profile` scope
+    updated_at:
+      type: integer
+      description: Unix timestamp; with the `profile` scope
+    email:
+      type: string
+      format: email
+      description: With the `email` scope
+    email_verified:
+      type: boolean
+      description: With the `email` scope
+
+RevokeRequest:
+  type: object
+  properties:
+    token:
+      type: string
+      maxLength: 2048
+      description: Required unless the `trt_{client_id}` refresh cookie is sent, which stands in for it; with neither, 400 `invalid_request`
+    token_type_hint:
+      type: string
+      maxLength: 64
+      description: '`access_token` or `refresh_token`. Only a hint — every token type is tried, and an unknown value is ignored.'
+    client_id:
+      type: string
+      maxLength: 64
+
+UserInfoResponse:
+  type: object
+  required:
+    - sub
+  properties:
+    sub:
+      type: string
+      description: Subject identifier (user ID)
+    name:
+      type: string
+    given_name:
+      type: string
+    family_name:
+      type: string
+    email:
+      type: string
+      format: email
+    email_verified:
+      type: boolean
+    picture:
+      type: string
+      format: uri
+      description: Presigned file URL for the user's profile photo (1h TTL); only set when scope includes "profile" and the user has a photo.
+    updated_at:
+      type: integer
+      description: Unix timestamp
+    roles:
+      type: array
+      items:
+        type: string
+      description: Names of the user's global roles and, when the token carries `org_id`, of their roles in that organization — unexpired, of an active, unarchived, unretired role. Only for a token of core's UI or a service's client, or one carrying a core API scope
+    permissions:
+      type: array
+      items:
+        type: string
+      description: Effective permissions — from global roles and roles in the token's organization when it carries `org_id` (only the org-assignable permissions of those), from global roles alone otherwise. Only for a token of core's UI or a service's client, or one carrying a core API scope
+    org_id:
+      type: string
+      format: uuid
+      description: The token's organization; omitted when the token has none, or when that organization has since been archived or deleted
+    org_name:
+      type: string
+      description: Name of `org_id`'s organization; omitted with it
+    organizations:
+      type: array
+      description: The user's active organization memberships. Only for a token of core's UI or a service's client, or one carrying a core API scope
+      items:
+        type: object
+        required: [id, name, slug, memberRole]
+        properties:
+          id:
+            type: string
+            format: uuid
+          name:
+            type: string
+          slug:
+            type: string
+          memberRole:
+            type: string
+            enum: [owner, admin, member]
+
+EndSessionRequest:
+  type: object
+  properties:
+    id_token_hint:
+      type: string
+      maxLength: 8192
+    post_logout_redirect_uri:
+      type: string
+      format: uri
+      maxLength: 2048
+    state:
+      type: string
+      maxLength: 512
+    client_id:
+      type: string
+      maxLength: 64
+
+EndSessionConfirmRequest:
+  type: object
+  required:
+    - client_id
+    - confirm_token
+  properties:
+    client_id:
+      type: string
+      minLength: 1
+      maxLength: 64
+    confirm_token:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: The `confirm_token` from the confirmation page's URL
+    post_logout_redirect_uri:
+      type: string
+      format: uri
+      maxLength: 2048
+    state:
+      type: string
+      maxLength: 512
+
+EndSessionConfirmDetails:
+  type: object
+  required:
+    - client_name
+    - sign_in_url
+  properties:
+    client_name:
+      type: string
+    sign_in_url:
+      type: string
+      format: uri
+      description: Where the user signs in to the client again
+
+EndSessionConfirmResponse:
+  type: object
+  required:
+    - redirect_url
+    - sign_in_url
+  properties:
+    redirect_url:
+      type: [string, 'null']
+      format: uri
+      description: '`post_logout_redirect_uri` with `state`; null when none was given'
+    sign_in_url:
+      type: string
+      format: uri
+      description: Where the user signs in to the client again
+
+CheckPermissionRequest:
+  type: object
+  required:
+    - user_id
+    - permission
+  properties:
+    user_id:
+      type: string
+      format: uuid
+    permission:
+      type: string
+      minLength: 1
+      maxLength: 100
+    organization_id:
+      type: string
+      format: uuid
+      description: Count global roles and roles scoped to this organization; when omitted, only global roles count — a role held in some organization never does
+
+CheckPermissionResponse:
+  type: object
+  required:
+    - granted
+  properties:
+    granted:
+      type: boolean
+      description: Whether the user has the requested permission
+
+CheckPermissionsBatchRequest:
+  type: object
+  required:
+    - user_id
+    - permissions
+  properties:
+    user_id:
+      type: string
+      format: uuid
+    permissions:
+      type: array
+      minItems: 1
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 100
+    organization_id:
+      type: string
+      format: uuid
+      description: Count global roles and roles scoped to this organization; when omitted, only global roles count — a role held in some organization never does
+
+CheckPermissionsBatchResponse:
+  type: object
+  required:
+    - results
+  properties:
+    results:
+      type: object
+      additionalProperties:
+        type: boolean
+      description: Map of permission names to boolean values indicating whether the user has each permission
+      examples:
+        - "users.read": true
+          "users.write": false
+
+# TOTP Schemas
+TotpVerifyRequest:
+  type: object
+  required:
+    - session_token
+    - totp_code
+  properties:
+    session_token:
+      type: string
+      minLength: 1
+      maxLength: 128
+    totp_code:
+      type: string
+      pattern: '^\d{6}$'
+
+TotpRecoveryRequest:
+  type: object
+  required:
+    - session_token
+    - recovery_code
+  properties:
+    session_token:
+      type: string
+      minLength: 1
+      maxLength: 128
+    recovery_code:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: Automatically transformed to uppercase with dashes removed
+
+TotpSetupInitiateRequest:
+  type: object
+  required:
+    - setup_grant
+  properties:
+    setup_grant:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: |
+        The `setup_grant` query parameter of the `/login/2fa/setup` redirect
+        returned by `POST /oauth/authorize`. Single-use.
+
+TotpSetupResponse:
+  type: object
+  required:
+    - secret
+    - qrCodeUri
+    - setupToken
+    - expiresAt
+  properties:
+    secret:
+      type: string
+      description: Base32-encoded TOTP secret
+    qrCodeUri:
+      type: string
+      format: uri
+      description: OTP Auth URI (otpauth://) for QR code generation
+    setupToken:
+      type: string
+      description: Token to complete setup verification
+    expiresAt:
+      type: string
+      format: date-time
+      description: When the setup session expires
+
+TotpSetupVerifyRequest:
+  type: object
+  required:
+    - setup_token
+    - totp_code
+  properties:
+    setup_token:
+      type: string
+      minLength: 1
+      maxLength: 128
+    totp_code:
+      type: string
+      pattern: '^\d{6}$'
+
+TotpSetupVerifyResponse:
+  type: object
+  required:
+    - success
+    - recoveryCodes
+    - message
+  properties:
+    success:
+      type: boolean
+      description: Whether TOTP setup was successful
+    recoveryCodes:
+      type: array
+      items:
+        type: string
+      description: One-time recovery codes to save securely
+    message:
+      type: string
+      description: Success message with instructions
+
+TotpStatus:
+  type: object
+  required:
+    - enabled
+    - enabledAt
+    - required
+    - recoveryCodesRemaining
+  properties:
+    enabled:
+      type: boolean
+      description: Whether TOTP is enabled
+    enabledAt:
+      type: [string, 'null']
+      format: date-time
+      description: When TOTP was enabled (null if not enabled)
+    required:
+      type: boolean
+      description: Whether TOTP is required for this user
+    recoveryCodesRemaining:
+      type: integer
+      description: Number of unused recovery codes remaining
+
+AccountTotpStatusResponse:
+  type: object
+  required:
+    - totpEnabled
+    - totpEnabledAt
+    - totpRequired
+    - recoveryCodesRemaining
+  properties:
+    totpEnabled:
+      type: boolean
+      description: Whether TOTP is enabled
+    totpEnabledAt:
+      type: [string, 'null']
+      format: date-time
+      description: When TOTP was enabled (null if not enabled)
+    totpRequired:
+      type: boolean
+      description: |
+        Whether TOTP is required for this user: by the `required` policy, or
+        under `optional` by an active role with `requires2fa` that the user
+        holds unexpired, globally or in an active organization they are a
+        member of.
+    recoveryCodesRemaining:
+      type: integer
+      description: Number of unused recovery codes remaining
+
+AdminUserTotpStatusResponse:
+  type: object
+  description: A user's TOTP status, as an admin sees it (`GET /v1/admin/users/{id}/totp`)
+  required:
+    - userId
+    - totpEnabled
+    - totpEnabledAt
+    - totpRequired
+    - recoveryCodesRemaining
+  properties:
+    userId:
+      type: string
+      format: uuid
+    totpEnabled:
+      type: boolean
+      description: Whether TOTP is enabled
+    totpEnabledAt:
+      type: [string, 'null']
+      format: date-time
+      description: When TOTP was enabled (null if not enabled)
+    totpRequired:
+      type: boolean
+      description: |
+        Whether TOTP is required for this user: by the `required` policy, or
+        under `optional` by an active role with `requires2fa` that the user
+        holds unexpired, globally or in an active organization they are a
+        member of.
+    recoveryCodesRemaining:
+      type: integer
+      description: Number of unused recovery codes remaining
+
+DisableTotpRequest:
+  type: object
+  required:
+    - totpCode
+  properties:
+    totpCode:
+      type: string
+      pattern: '^\d{6}$'
+
+VerifySetupRequest:
+  type: object
+  required:
+    - setupToken
+    - totpCode
+  properties:
+    setupToken:
+      type: string
+      minLength: 1
+    totpCode:
+      type: string
+      pattern: '^\d{6}$'
+
+RegenerateRecoveryCodesRequest:
+  type: object
+  required:
+    - totpCode
+  properties:
+    totpCode:
+      type: string
+      pattern: '^\d{6}$'
+
+RecoveryCodesResponse:
+  type: object
+  required:
+    - recoveryCodes
+    - message
+  properties:
+    recoveryCodes:
+      type: array
+      items:
+        type: string
+      description: Newly generated recovery codes
+    message:
+      type: string
+      description: Informational message about the recovery codes
+
+# Account Schemas
+UserProfile:
+  type: object
+  required:
+    - id
+    - email
+    - name
+    - isActive
+    - hasPassword
+    - createdAt
+    - updatedAt
+    - photoUrl
+    - roles
+    - permissions
+    - totp
+  properties:
+    id:
+      type: string
+      format: uuid
+    email:
+      type: string
+      format: email
+    name:
+      type: [string, 'null']
+    isActive:
+      type: boolean
+    hasPassword:
+      type: boolean
+      description: Whether the account has a password. False for an account created without one, which signs in through a linked identity provider only.
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    photoUrl:
+      type: [string, 'null']
+      description: Presigned file URL for the user's profile photo (1h TTL); null when no photo set.
+    roles:
+      type: array
+      description: |
+        The user's role assignments in the token's scope, as for
+        `permissions`: global ones and, when the token carries an
+        organization, those in it. Only assignments that grant anything are
+        listed — unexpired, of an active, unarchived, unretired role.
+      items:
+        type: object
+        required:
+          - id
+          - name
+          - displayName
+          - expiresAt
+        properties:
+          id:
+            type: string
+            format: uuid
+          name:
+            type: string
+          displayName:
+            type: string
+          expiresAt:
+            type: [string, 'null']
+            format: date-time
+            description: When the assignment expires; null for a permanent one.
+    permissions:
+      type: array
+      description: Effective permission names — from the user's global roles and, when the token carries an organization, their roles in it (only the org-assignable permissions of those).
+      items:
+        type: string
+    totp:
+      $ref: '#/TotpStatus'
+
+SessionsResponse:
+  type: object
+  required:
+    - sessions
+  properties:
+    sessions:
+      type: array
+      items:
+        type: object
+        required:
+          - id
+          - clientId
+          - clientName
+          - scopes
+          - createdAt
+          - expiresAt
+          - isCurrent
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: The session's refresh-token id; pass it to `DELETE /v1/account/sessions/{sessionId}`.
+          clientId:
+            type: string
+            description: OAuth `client_id` of the client the session was issued to
+          clientName:
+            type: string
+          scopes:
+            type: array
+            items:
+              type: string
+          createdAt:
+            type: string
+            format: date-time
+          expiresAt:
+            type: string
+            format: date-time
+          isCurrent:
+            type: boolean
+            description: Whether this is the session the request's token belongs to.
+
+UserSessionsResponse:
+  type: object
+  required:
+    - userId
+    - sessions
+  properties:
+    userId:
+      type: string
+      format: uuid
+    sessions:
+      type: array
+      items:
+        type: object
+        required: [id, clientId, clientName, scopes, createdAt, expiresAt, isCurrent]
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: Session (refresh token) id
+          clientId:
+            type: string
+            description: OAuth `client_id` of the client the session was issued to
+          clientName:
+            type: string
+          scopes:
+            type: array
+            items:
+              type: string
+          createdAt:
+            type: string
+            format: date-time
+          expiresAt:
+            type: string
+            format: date-time
+          isCurrent:
+            type: boolean
+
+ChangePasswordRequest:
+  type: object
+  required:
+    - currentPassword
+    - newPassword
+  properties:
+    currentPassword:
+      type: string
+      minLength: 1
+    newPassword:
+      type: string
+      minLength: 12
+      maxLength: 256
+      pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};'':"\\|,.<>\/?])'
+      description: |
+        At least 12 characters, with an uppercase letter, a lowercase
+        letter, a number and a special character. Must differ from
+        `currentPassword`.
+
+# Admin - User Schemas
+User:
+  type: object
+  required: [id, email, name, isActive, userType, hasPassword, createdAt, updatedAt]
+  properties:
+    id:
+      type: string
+      format: uuid
+    email:
+      type: string
+      format: email
+    name:
+      type: [string, 'null']
+    isActive:
+      type: boolean
+    userType:
+      type: string
+      enum: [human, service_account]
+    hasPassword:
+      type: boolean
+      description: Whether the user has a password. False for a user created without one, who can sign in only through a linked identity provider (or an invite's first sign-in).
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+CreateUserRequest:
+  type: object
+  required:
+    - email
+  properties:
+    email:
+      type: string
+      format: email
+      maxLength: 255
+      description: Trimmed and lower-cased before it is stored.
+    password:
+      type: string
+      minLength: 12
+      maxLength: 256
+      pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};'':"\\|,.<>\/?])'
+      description: |
+        Optional. Omit it to create a user with no password, who then signs
+        in through an identity provider (see
+        `POST /v1/admin/users/{id}/identity-invites`). When given, it must
+        meet all requirements:
+        - At least 12 characters
+        - Contains uppercase letter
+        - Contains lowercase letter
+        - Contains number
+        - Contains special character
+    name:
+      type: string
+      maxLength: 100
+    userType:
+      type: string
+      enum: [human]
+      default: human
+      description: Only person users are created here; service accounts come with their service (`POST /v1/admin/services`).
+
+UpdateUserRequest:
+  type: object
+  properties:
+    email:
+      type: string
+      format: email
+      maxLength: 255
+      description: Trimmed and lower-cased before it is stored.
+    password:
+      type: string
+      minLength: 12
+      maxLength: 256
+      pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};'':"\\|,.<>\/?])'
+    name:
+      type: string
+      maxLength: 100
+    isActive:
+      type: boolean
+
+PaginatedUsersResponse:
+  type: object
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/User'
+    hasMore:
+      type: boolean
+      description: Whether more pages exist beyond this one.
+    limit:
+      type: integer
+      description: The page size used for this request.
+    nextCursor:
+      description: Opaque cursor to pass as `cursor` on the next request to continue paginating. `null` when `hasMore` is `false`.
+      type: [string, 'null']
+
+RoleAssignment:
+  description: Role assignment with basic role info (used in user roles endpoints)
+  allOf:
+    - $ref: '../schemas.yaml#/RoleRef'
+    - type: object
+      required: [expiresAt]
+      properties:
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the role assignment expires (null if permanent)
+
+UserRolesResponse:
+  type: object
+  required:
+    - userId
+    - roles
+  properties:
+    userId:
+      type: string
+      format: uuid
+    roles:
+      type: array
+      items:
+        $ref: '#/RoleAssignment'
+
+UserPermissionsResponse:
+  type: object
+  required:
+    - userId
+    - permissions
+  properties:
+    userId:
+      type: string
+      format: uuid
+    permissions:
+      type: array
+      items:
+        type: string
+      examples:
+        - ["users.read", "users.write"]
+
+SetUserRolesRequest:
+  type: object
+  required:
+    - roleIds
+  properties:
+    roleIds:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        format: uuid
+
+RevokeSessionRequest:
+  type: object
+  required:
+    - sessionId
+  properties:
+    sessionId:
+      type: string
+      format: uuid
+
+# Admin - Client Schemas
+Client:
+  type: object
+  required:
+    - id
+    - clientId
+    - clientType
+    - name
+    - redirectUris
+    - postLogoutRedirectUris
+    - scopes
+    - grantTypes
+    - audience
+    - ownerId
+    - organizationId
+    - service
+    - createdAt
+    - updatedAt
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: OAuthClient row PK (UUIDv7)
+    clientId:
+      type: string
+      maxLength: 64
+      description: OAuth `client_id` slug used in OAuth2/OIDC flows (VarChar, not a UUID)
+    name:
+      type: string
+    clientType:
+      type: string
+      enum: [confidential, public]
+    redirectUris:
+      type: array
+      items:
+        type: string
+        format: uri
+    postLogoutRedirectUris:
+      type: array
+      description: |
+        The only URIs `/oauth/end-session` redirects to after logout
+        (`post_logout_redirect_uri` must match one exactly).
+      items:
+        type: string
+        format: uri
+    scopes:
+      type: array
+      items:
+        type: string
+    grantTypes:
+      type: array
+      description: |
+        A login client has `authorization_code` and/or `refresh_token`; a
+        service's client has `client_credentials`.
+      items:
+        type: string
+        enum: [authorization_code, client_credentials, refresh_token]
+    audience:
+      type: array
+      items:
+        type: string
+    ownerId:
+      type: string
+      format: uuid
+      description: The user who created (or was given) the client
+    owner:
+      description: |
+        The owner. Present on every admin client response; absent from the
+        `auth.client.*` event payloads.
+      $ref: '#/ClientUser'
+    organizationId:
+      type: [string, 'null']
+      format: uuid
+      description: The organization the client is bound to; its client-credentials tokens carry it. Null for a client bound to none.
+    organization:
+      description: |
+        The organization `organizationId` names; null when it is null.
+        Present on every admin client response; absent from the
+        `auth.client.*` event payloads.
+      oneOf:
+        - $ref: '../schemas.yaml#/OrgRef'
+        - type: 'null'
+    serviceAccountUser:
+      description: The service-account user the client acts as. Absent when the client has none (every login client).
+      $ref: '#/ClientUser'
+    service:
+      description: |
+        The service this client belongs to, or null for a login client. A service's
+        client is managed under /v1/admin/services: editing, deleting or regenerating
+        it here is refused with `409`.
+      oneOf:
+        - $ref: '#/ClientService'
+        - type: 'null'
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+ClientUser:
+  type: object
+  required: [id, email, name, userType]
+  properties:
+    id:
+      type: string
+      format: uuid
+    email:
+      type: string
+      format: email
+    name:
+      type: [string, 'null']
+    userType:
+      type: string
+      enum: [human, service_account]
+
+ClientService:
+  $ref: '../schemas.yaml#/ServiceRef'
+
+ClientWithSecret:
+  allOf:
+    - $ref: '#/Client'
+    - type: object
+      properties:
+        clientSecret:
+          type: string
+          description: |
+            The plain secret, shown once. Returned by create and
+            regenerate-secret for a confidential client, and by an update that
+            switches a client without a secret to confidential; absent
+            otherwise.
+
+CreateClientRequest:
+  type: object
+  description: |
+    A login client. A machine identity (`client_credentials`) is a service,
+    added with `POST /v1/admin/services`.
+  required:
+    - name
+    - grantTypes
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+    clientType:
+      type: string
+      enum: [confidential, public]
+      default: confidential
+    redirectUris:
+      type: array
+      maxItems: 50
+      items:
+        type: string
+        format: uri
+        maxLength: 2048
+      default: []
+      description: |
+        A public client needs at least one. Every URI here and in
+        `postLogoutRedirectUris` is refused (400) with a `javascript:`,
+        `data:`, `vbscript:`, `blob:` or `file:` scheme; private-use schemes
+        (RFC 8252) are allowed.
+    postLogoutRedirectUris:
+      type: array
+      maxItems: 50
+      description: |
+        The only URIs `/oauth/end-session` redirects to after logout
+        (`post_logout_redirect_uri` must match one exactly).
+      items:
+        type: string
+        format: uri
+        maxLength: 2048
+      default: []
+    scopes:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 100
+      default: []
+      description: Each must be a registered scope (`400` otherwise).
+    grantTypes:
+      type: array
+      minItems: 1
+      items:
+        type: string
+        enum: [authorization_code, refresh_token]
+
+UpdateClientRequest:
+  type: object
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+    clientType:
+      type: string
+      enum: [confidential, public]
+    redirectUris:
+      type: array
+      maxItems: 50
+      items:
+        type: string
+        format: uri
+        maxLength: 2048
+    postLogoutRedirectUris:
+      type: array
+      maxItems: 50
+      description: |
+        The only URIs `/oauth/end-session` redirects to after logout
+        (`post_logout_redirect_uri` must match one exactly).
+      items:
+        type: string
+        format: uri
+        maxLength: 2048
+    scopes:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 100
+      description: Each must be a registered scope (`400` otherwise).
+    grantTypes:
+      type: array
+      minItems: 1
+      items:
+        type: string
+        enum: [authorization_code, refresh_token]
+    ownerId:
+      type: string
+      format: uuid
+      description: Transfer ownership; the new owner must be a human user (`400 invalid_owner` otherwise).
+
+PaginatedClientsResponse:
+  type: object
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/Client'
+    hasMore:
+      type: boolean
+      description: Whether more pages exist beyond this one.
+    limit:
+      type: integer
+      description: The page size used for this request.
+    nextCursor:
+      description: Opaque cursor to pass as `cursor` on the next request to continue paginating. `null` when `hasMore` is `false`.
+      type: [string, 'null']
+
+# Admin - Role Schemas
+Role:
+  type: object
+  required:
+    - id
+    - name
+    - displayName
+    - description
+    - isActive
+    - isSystem
+    - serviceId
+    - service
+    - requires2fa
+    - retiredAt
+    - archivedAt
+    - createdAt
+    - updatedAt
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    displayName:
+      type: string
+    description:
+      type: [string, 'null']
+    isActive:
+      type: boolean
+    isSystem:
+      type: boolean
+      description: True for a system role, declared in code by a service (`serviceId` set); read-only except `requires2fa`.
+    serviceId:
+      type: [string, 'null']
+      format: uuid
+      description: The service that declared this system role; `null` for custom roles.
+    service:
+      description: The service `serviceId` names; `null` for custom roles.
+      oneOf:
+        - $ref: '../schemas.yaml#/ServiceRef'
+        - type: 'null'
+    requires2fa:
+      type: boolean
+    retiredAt:
+      type: [string, 'null']
+      format: date-time
+      description: When the system role was retired (dropped from its service's declaration); `null` otherwise.
+    archivedAt:
+      description: |
+        When the role was archived; `null` for non-archived roles. Archived
+        roles are hidden from lists by default and are read-only except
+        restore and hard delete.
+      type: [string, 'null']
+      format: date-time
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+RoleWithPermissions:
+  allOf:
+    - $ref: '#/Role'
+    - type: object
+      required:
+        - permissions
+      properties:
+        permissions:
+          type: array
+          items:
+            type: object
+            required: [id, name, displayName, retired, orgAssignable]
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              displayName:
+                type: string
+              retired:
+                type: boolean
+                description: The permission is retired and grants nothing.
+              orgAssignable:
+                type: boolean
+                description: |
+                  The permission counts when this role is assigned within an
+                  organization; otherwise only a global assignment grants it.
+          description: List of permissions assigned to this role (simplified)
+
+RoleUsersResponse:
+  type: object
+  required:
+    - roleId
+    - users
+  properties:
+    roleId:
+      type: string
+      format: uuid
+    users:
+      type: array
+      items:
+        type: object
+        description: One per assignment — a user holding the role globally and in an organization appears once for each.
+        required: [id, email, name, isActive, organizationId, organization, expiresAt]
+        properties:
+          id:
+            type: string
+            format: uuid
+            description: User ID
+          email:
+            type: string
+            format: email
+          name:
+            type: [string, 'null']
+          isActive:
+            type: boolean
+          organizationId:
+            type: [string, 'null']
+            format: uuid
+            description: The organization the assignment is scoped to; null for a global assignment. Pass it to `DELETE /v1/admin/roles/{id}/users/{userId}` as `organizationId` to remove this row.
+          organization:
+            description: The organization `organizationId` names; null for a global assignment.
+            oneOf:
+              - $ref: '../schemas.yaml#/OrgRef'
+              - type: 'null'
+          expiresAt:
+            type: [string, 'null']
+            format: date-time
+            description: When the role assignment expires
+
+CreateRoleRequest:
+  type: object
+  required:
+    - name
+    - displayName
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+      pattern: '^[a-zA-Z][a-zA-Z0-9_-]*$'
+      description: Must start with letter, contain only letters, numbers, underscores, hyphens
+    displayName:
+      type: string
+      minLength: 1
+      maxLength: 255
+    description:
+      type: string
+      maxLength: 500
+    requires2fa:
+      type: boolean
+      default: false
+
+UpdateRoleRequest:
+  type: object
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+      pattern: '^[a-zA-Z][a-zA-Z0-9_-]*$'
+    displayName:
+      type: string
+      minLength: 1
+      maxLength: 255
+    description:
+      type: string
+      maxLength: 500
+    isActive:
+      type: boolean
+    requires2fa:
+      type: boolean
+
+DuplicateRoleRequest:
+  type: object
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+      pattern: '^[a-zA-Z][a-zA-Z0-9_-]*$'
+      description: Name of the new custom role
+    displayName:
+      type: string
+      minLength: 1
+      maxLength: 255
+      description: Defaults to the source role's display name
+    description:
+      type: string
+      maxLength: 500
+      description: Defaults to the source role's description
+
+SetPermissionsRequest:
+  type: object
+  required:
+    - permissionIds
+  properties:
+    permissionIds:
+      type: array
+      maxItems: 500
+      description: A repeated id counts once.
+      items:
+        type: string
+        format: uuid
+
+PaginatedRolesResponse:
+  type: object
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/RoleWithPermissions'
+    hasMore:
+      type: boolean
+      description: Whether more pages exist beyond this one.
+    limit:
+      type: integer
+      description: The page size used for this request.
+    nextCursor:
+      description: Opaque cursor to pass as `cursor` on the next request to continue paginating. `null` when `hasMore` is `false`.
+      type: [string, 'null']
+
+# Admin - Permission Schemas
+Permission:
+  type: object
+  description: |
+    A permission declared by a service and registered at boot. Read-only to
+    admins.
+  required: [id, name, displayName, description, serviceId, serviceName, orgAssignable, missingSince, retiredAt, createdAt, updatedAt]
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+      description: Dot-separated name, prefixed with the declaring service's namespace (e.g. `roles.read`).
+    displayName:
+      type: string
+    description:
+      type: [string, 'null']
+    orgAssignable:
+      type: boolean
+      description: |
+        Declared by the service. Only org-assignable permissions may be in a
+        role assigned within an organization, and only they count from one.
+    serviceId:
+      type: string
+      format: uuid
+      description: The service that declared the permission.
+    serviceName:
+      type: string
+      description: Name of the service that declared the permission.
+    missingSince:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        When the permission was first missing from its service's declaration;
+        it retires once the grace period passes. `null` while declared.
+    retiredAt:
+      type: [string, 'null']
+      format: date-time
+      description: When the permission was retired; retired permissions grant nothing.
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+PaginatedPermissionsResponse:
+  type: object
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/Permission'
+    hasMore:
+      type: boolean
+      description: Whether more pages exist beyond this one.
+    limit:
+      type: integer
+      description: The page size used for this request.
+    nextCursor:
+      description: Opaque cursor to pass as `cursor` on the next request to continue paginating. `null` when `hasMore` is `false`.
+      type: [string, 'null']
+
+# Admin - Organization Schemas
+Organization:
+  type: object
+  required: [id, name, slug, code, isDefault, isActive, archivedAt, memberCount, createdAt, updatedAt]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Globally unique organization identifier (UUIDv7)
+    name:
+      type: string
+    slug:
+      type: string
+    code:
+      type: string
+      description: Short uppercase alphanumeric code (1-6 characters)
+    isDefault:
+      type: boolean
+    isActive:
+      type: boolean
+    archivedAt:
+      description: |
+        When the organization was archived; `null` for non-archived
+        organizations. Archived organizations are hidden from lists by
+        default and are read-only except restore.
+      type: [string, 'null']
+      format: date-time
+    memberCount:
+      type: integer
+      description: Number of members in the organization
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+OrganizationMember:
+  type: object
+  required: [id, memberRole, createdAt, user]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Membership id
+    memberRole:
+      type: string
+      enum: [owner, admin, member]
+    createdAt:
+      type: string
+      format: date-time
+    user:
+      type: object
+      required: [id, email, name, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: [string, 'null']
+        isActive:
+          type: boolean
+
+CreateOrganizationRequest:
+  type: object
+  required:
+    - name
+    - slug
+    - code
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 255
+    slug:
+      type: string
+      minLength: 1
+      maxLength: 100
+      pattern: '^[a-z0-9][a-z0-9-]*$'
+      description: Lowercase letters, numbers, and hyphens. Must start with a letter or number.
+    code:
+      type: string
+      minLength: 1
+      maxLength: 6
+      pattern: '^[A-Z0-9]+$'
+      description: Uppercase alphanumeric (A-Z, 0-9)
+
+UpdateOrganizationRequest:
+  type: object
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 255
+    slug:
+      type: string
+      minLength: 1
+      maxLength: 100
+      pattern: '^[a-z0-9][a-z0-9-]*$'
+    isActive:
+      type: boolean
+
+AddOrganizationMemberRequest:
+  type: object
+  required:
+    - userId
+  properties:
+    userId:
+      type: string
+      format: uuid
+    memberRole:
+      type: string
+      enum: [owner, admin, member]
+      default: member
+
+UpdateMemberRoleRequest:
+  type: object
+  required:
+    - memberRole
+  properties:
+    memberRole:
+      type: string
+      enum: [owner, admin, member]
+
+SetMemberRolesRequest:
+  type: object
+  required:
+    - roleIds
+  properties:
+    roleIds:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        format: uuid
+
+PaginatedOrganizationsResponse:
+  type: object
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/Organization'
+    hasMore:
+      type: boolean
+      description: Whether more pages exist beyond this one.
+    limit:
+      type: integer
+      description: The page size used for this request.
+    nextCursor:
+      description: Opaque cursor to pass as `cursor` on the next request to continue paginating. `null` when `hasMore` is `false`.
+      type: [string, 'null']
+
+OrganizationMembersResponse:
+  type: object
+  required:
+    - organizationId
+    - members
+  properties:
+    organizationId:
+      type: string
+      format: uuid
+    members:
+      type: array
+      items:
+        $ref: '#/OrganizationMember'
+
+OrganizationMemberRolesResponse:
+  type: object
+  required:
+    - organizationId
+    - userId
+    - roles
+  properties:
+    organizationId:
+      type: string
+      format: uuid
+    userId:
+      type: string
+      format: uuid
+    roles:
+      type: array
+      items:
+        $ref: '#/RoleAssignment'
+
+# Admin - Settings Schemas
+SystemSettings:
+  type: object
+  required: [totpPolicy, totpRecoveryCodeCount]
+  properties:
+    totpPolicy:
+      type: string
+      enum: [disabled, optional, required]
+      description: |
+        `required` makes every user enrol; `optional` lets users enrol and
+        requires it of users holding a role with `requires2fa`; `disabled`
+        refuses new enrolment (403 `totp_disabled`) and ignores `requires2fa`.
+        Users already enrolled keep TOTP and still verify at login.
+    totpRecoveryCodeCount:
+      type: integer
+      minimum: 5
+      maximum: 20
+      description: How many recovery codes are generated at enrolment and on regeneration
+
+UpdateSettingsRequest:
+  type: object
+  properties:
+    totpPolicy:
+      type: string
+      enum: [disabled, optional, required]
+      description: |
+        `required` makes every user enrol; `optional` lets users enrol and
+        requires it of users holding a role with `requires2fa`; `disabled`
+        refuses new enrolment (403 `totp_disabled`) and ignores `requires2fa`.
+        Users already enrolled keep TOTP and still verify at login.
+    totpRecoveryCodeCount:
+      type: integer
+      minimum: 5
+      maximum: 20
+
+# Setup Schemas
+SetupStatusResponse:
+  type: object
+  required:
+    - setupComplete
+  properties:
+    setupComplete:
+      type: boolean
+      description: Whether the first admin has been created. While `false`, the UI shows the setup screen.
+
+CompleteSetupRequest:
+  type: object
+  required:
+    - token
+    - admin
+    - organization
+  properties:
+    token:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: The setup token core logs on first start while setup is pending.
+    admin:
+      type: object
+      required:
+        - email
+        - name
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+          pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};'':"\\|,.<>\/?])'
+          description: |
+            At least 12 characters, with an uppercase letter, a lowercase
+            letter, a number and a special character.
+    organization:
+      $ref: '#/CreateOrganizationRequest'
+
+CompleteSetupResponse:
+  type: object
+  required:
+    - user
+    - organization
+  properties:
+    user:
+      type: object
+      required:
+        - id
+        - email
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: [string, 'null']
+    organization:
+      type: object
+      required:
+        - id
+        - name
+        - slug
+        - code
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        code:
+          type: string
+
+# Registry Schemas
+Declaration:
+  type: object
+  description: |
+    Everything an app service declares, sent on every start. Every list
+    defaults to empty; an item missing from a later declaration is marked
+    missing and retired after the grace period.
+  required:
+    - version
+  properties:
+    version:
+      type: string
+      maxLength: 64
+      pattern: '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?$'
+      description: |
+        Semver of the release declaring it, `MAJOR.MINOR.PATCH` with an
+        optional `-prerelease` (no build metadata). A declaration older than
+        the one applied last is ignored (`applied: false`), so a replica of
+        an earlier release restarting after a rollout cannot undo it. An
+        equal or newer one is applied when its content changed.
+      example: 1.4.0
+    permissions:
+      type: array
+      maxItems: 1000
+      items:
+        type: object
+        required:
+          - name
+          - displayName
+        properties:
+          name:
+            type: string
+            minLength: 1
+            maxLength: 100
+            pattern: '^[a-z0-9][a-z0-9._-]*$'
+            description: Must be prefixed with the service's namespace.
+          displayName:
+            type: string
+            minLength: 1
+            maxLength: 255
+          description:
+            type: string
+            maxLength: 500
+            default: ''
+          orgAssignable:
+            type: boolean
+            default: false
+            description: |
+              A role assigned within an organization may grant this
+              permission. Set it only where every use of the permission stays
+              inside the caller's organization.
+    systemRoles:
+      type: array
+      maxItems: 200
+      items:
+        type: object
+        required:
+          - name
+          - displayName
+        properties:
+          name:
+            type: string
+            minLength: 1
+            maxLength: 100
+            pattern: '^[a-z][a-z0-9_-]*$'
+            description: |
+              `<namespace>_<name>`, under the service's namespace (a service
+              with namespace `billing` declares `billing_editor`); anything
+              else is a `400 invalid_role_name`. Nor may it equal one of
+              core's role names.
+          displayName:
+            type: string
+            minLength: 1
+            maxLength: 255
+          description:
+            type: string
+            maxLength: 500
+            default: ''
+          permissions:
+            type: array
+            maxItems: 1000
+            items:
+              type: string
+              minLength: 1
+              maxLength: 200
+            default: []
+            description: Names of permissions the role grants.
+    buckets:
+      type: array
+      maxItems: 100
+      items:
+        type: object
+        required:
+          - bucketName
+        properties:
+          bucketName:
+            type: string
+            minLength: 3
+            maxLength: 63
+            pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+          description:
+            type: string
+            maxLength: 500
+          policy:
+            type: string
+            enum: [public, private]
+            default: private
+          storageQuotaBytes:
+            type: integer
+            minimum: 1
+    eventTypes:
+      type: array
+      maxItems: 1000
+      items:
+        type: object
+        required:
+          - eventType
+        properties:
+          eventType:
+            type: string
+            minLength: 1
+            maxLength: 100
+            pattern: '^[a-z0-9][a-z0-9._-]*$'
+          description:
+            type: string
+            maxLength: 500
+            default: ''
+          readPermission:
+            type: string
+            minLength: 1
+            maxLength: 200
+            description: |
+              A permission this declaration lists, or one of core's, that a
+              webhook endpoint's creator must hold to subscribe to the event
+              type and be sent its events. Without one, `webhooks.read` is
+              enough.
+    requestedAccess:
+      type: object
+      description: Access the service asks for; each new item waits for an admin to approve it.
+      properties:
+        roles:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+          default: []
+          description: A core system role by `name`, or another service's as `<slug>/<name>`.
+        audiences:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          default: []
+          description: Slugs of other services whose APIs this service calls.
+
+ServiceAccessSummary:
+  type: object
+  required:
+    - id
+    - kind
+    - target
+    - status
+  properties:
+    id:
+      type: string
+      format: uuid
+    kind:
+      type: string
+      enum: [role, audience]
+    target:
+      type: string
+      description: The role (`name` or `<slug>/<name>`) or audience (service slug) requested.
+    status:
+      type: string
+      enum: [pending, approved, revoked]
+
+RegisterDeclarationResponse:
+  type: object
+  required:
+    - service
+    - applied
+    - changed
+    - access
+  properties:
+    service:
+      type: string
+      description: Slug of the calling service
+    applied:
+      type: boolean
+      description: |
+        `false` when the declaration's `version` is older than the one
+        applied last: nothing was written, and core logged a warning.
+    changed:
+      type: boolean
+      description: '`false` when nothing was applied: the declaration was ignored, or its hash matched the last one applied (a no-op).'
+    access:
+      type: array
+      description: Every access request on file for the service, with its status.
+      items:
+        $ref: '#/ServiceAccessSummary'
+
+# Admin - Service Schemas
+Service:
+  type: object
+  description: An app service — its OAuth client, the service-account user it acts as, and its registration state.
+  required:
+    - id
+    - slug
+    - name
+    - namespace
+    - isActive
+    - clientId
+    - serviceAccountUserId
+    - serviceAccountUser
+    - audience
+    - previousSecretExpiresAt
+    - declarationHash
+    - declarationVersion
+    - declaredAt
+    - createdBy
+    - creator
+    - createdAt
+    - updatedAt
+  properties:
+    id:
+      type: string
+      format: uuid
+    slug:
+      type: string
+    name:
+      type: string
+    namespace:
+      type: string
+      description: Prefix of everything the service declares. Fixed once set.
+    isActive:
+      type: boolean
+    clientId:
+      type: [string, 'null']
+      description: OAuth `client_id` of the service's confidential client
+    serviceAccountUserId:
+      type: [string, 'null']
+      format: uuid
+    serviceAccountUser:
+      description: The service-account user `serviceAccountUserId` names; null when it is null.
+      oneOf:
+        - $ref: '../schemas.yaml#/UserRef'
+        - type: 'null'
+    audience:
+      type: array
+      items:
+        type: string
+      description: Approved audiences (slugs of services this one may call)
+    previousSecretExpiresAt:
+      type: [string, 'null']
+      format: date-time
+      description: When the replaced client secret stops working; `null` when there is no overlap, including once that time has passed.
+    declarationHash:
+      type: [string, 'null']
+      description: SHA-256 of the last declaration applied; `null` until the service first registers.
+    declarationVersion:
+      type: [string, 'null']
+      description: The `version` of the last declaration applied; an older one is ignored. `null` until the service first registers.
+    declaredAt:
+      type: [string, 'null']
+      format: date-time
+    createdBy:
+      type: string
+      format: uuid
+    creator:
+      description: The user `createdBy` names.
+      $ref: '../schemas.yaml#/UserRef'
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+ServiceCredentials:
+  type: object
+  required:
+    - clientId
+    - clientSecret
+  properties:
+    clientId:
+      type: string
+    clientSecret:
+      type: string
+      description: Shown once; only its hash is stored.
+
+ServiceWithCredentials:
+  allOf:
+    - $ref: '#/Service'
+    - type: object
+      required:
+        - credentials
+      properties:
+        credentials:
+          $ref: '#/ServiceCredentials'
+
+ServiceAccess:
+  type: object
+  required:
+    - id
+    - serviceId
+    - kind
+    - target
+    - status
+    - requestedAt
+    - decidedAt
+    - decidedBy
+    - decidedByEmail
+    - decidedByName
+    - decider
+    - approvedPermissions
+    - pendingPermissions
+  properties:
+    id:
+      type: string
+      format: uuid
+    serviceId:
+      type: string
+      format: uuid
+    kind:
+      type: string
+      enum: [role, audience]
+    target:
+      type: string
+    status:
+      type: string
+      enum: [pending, approved, revoked]
+    requestedAt:
+      type: string
+      format: date-time
+    decidedAt:
+      type: [string, 'null']
+      format: date-time
+    decidedBy:
+      type: [string, 'null']
+      format: uuid
+      description: |
+        The user who last approved or revoked it; `null` until first
+        decided. A role that grew since its approval is `pending` again and
+        keeps the earlier decision here.
+    decidedByEmail:
+      type: [string, 'null']
+      format: email
+      description: Email of the `decidedBy` user; `null` until first decided.
+    decidedByName:
+      type: [string, 'null']
+      description: Name of the `decidedBy` user, if it has one.
+    decider:
+      description: The user `decidedBy` names; `null` until first decided.
+      oneOf:
+        - $ref: '../schemas.yaml#/UserRef'
+        - type: 'null'
+    approvedPermissions:
+      type: [array, 'null']
+      items:
+        type: string
+      description: |
+        For another service's role (`<slug>/<name>`): the permissions its
+        approval recorded, the only ones the service holds through it. `null`
+        for core's roles and for audiences.
+    pendingPermissions:
+      type: [array, 'null']
+      items:
+        type: string
+      description: |
+        For another service's role while `pending`: what the role grants
+        beyond `approvedPermissions`, which approving would grant. Empty
+        otherwise; `null` for core's roles and for audiences.
+
+ServiceAccessListItem:
+  allOf:
+    - $ref: '#/ServiceAccess'
+    - type: object
+      required:
+        - service
+      properties:
+        service:
+          description: The service that asked for this access.
+          $ref: '../schemas.yaml#/ServiceRef'
+
+ServiceListItem:
+  allOf:
+    - $ref: '#/Service'
+    - type: object
+      required:
+        - pendingAccessCount
+      properties:
+        pendingAccessCount:
+          type: integer
+          minimum: 0
+          description: How many of the service's access requests await a decision.
+
+ServiceSettings:
+  type: object
+  description: Core's configuration that governs services, as this deployment has it set.
+  required:
+    - secretOverlapHours
+    - retirementGraceHours
+  properties:
+    secretOverlapHours:
+      type: number
+      minimum: 0
+      description: |
+        How long a replaced client secret keeps working after
+        `regenerate-secret` (`SERVICE_SECRET_OVERLAP_HOURS`, default 24).
+        `0` means the old secret stops at once.
+      examples:
+        - 24
+    retirementGraceHours:
+      type: number
+      minimum: 0
+      description: |
+        How long a declared item a later declaration stops listing stays
+        missing before it retires (`REGISTRY_RETIREMENT_GRACE_HOURS`,
+        default 24).
+      examples:
+        - 24
+
+ServiceDetail:
+  allOf:
+    - $ref: '#/Service'
+    - type: object
+      required: [declared, access, settings]
+      properties:
+        declared:
+          type: object
+          description: What the service declared, retired items included.
+          required: [permissions, systemRoles, buckets, eventTypes]
+          properties:
+            permissions:
+              type: array
+              items:
+                type: object
+                required: [id, name, displayName, missingSince, retiredAt]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+                  displayName:
+                    type: string
+                  missingSince:
+                    type: [string, 'null']
+                    format: date-time
+                  retiredAt:
+                    type: [string, 'null']
+                    format: date-time
+            systemRoles:
+              type: array
+              items:
+                type: object
+                required: [id, name, displayName, missingSince, retiredAt, permissions]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+                  displayName:
+                    type: string
+                  missingSince:
+                    type: [string, 'null']
+                    format: date-time
+                  retiredAt:
+                    type: [string, 'null']
+                    format: date-time
+                  permissions:
+                    type: array
+                    items:
+                      type: string
+                    description: Names of the permissions the role grants
+            buckets:
+              type: array
+              items:
+                type: object
+                required: [id, name, policy, deletedAt, missingSince, retiredAt]
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  policy:
+                    type: string
+                    enum: [public, private]
+                  deletedAt:
+                    type: [string, 'null']
+                    format: date-time
+                  missingSince:
+                    type: [string, 'null']
+                    format: date-time
+                  retiredAt:
+                    type: [string, 'null']
+                    format: date-time
+            eventTypes:
+              type: array
+              items:
+                type: object
+                required: [eventType, description, missingSince, retiredAt]
+                properties:
+                  eventType:
+                    type: string
+                  description:
+                    type: [string, 'null']
+                  missingSince:
+                    type: [string, 'null']
+                    format: date-time
+                  retiredAt:
+                    type: [string, 'null']
+                    format: date-time
+        access:
+          type: array
+          items:
+            $ref: '#/ServiceAccess'
+        settings:
+          $ref: '#/ServiceSettings'
+
+CreateServiceRequest:
+  type: object
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+    slug:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+      description: Defaults to the name, lowercased and hyphenated.
+    namespace:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+      description: |
+        Defaults to the slug without a trailing `-service`. Fixed once set;
+        must not overlap another service's namespace or core's reserved ones.
+
+UpdateServiceRequest:
+  type: object
+  minProperties: 1
+  description: At least one field is required.
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+    isActive:
+      type: boolean
+      description: '`false` deactivates the service and its service account and revokes its tokens.'
+
+RegenerateServiceSecretResponse:
+  type: object
+  required:
+    - clientId
+    - clientSecret
+    - previousSecretExpiresAt
+  properties:
+    clientId:
+      type: string
+    clientSecret:
+      type: string
+      description: The new secret, shown once.
+    previousSecretExpiresAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        When the replaced secret stops working (`SERVICE_SECRET_OVERLAP_HOURS`
+        from now); `null` when there is no overlap.
+
+AccessDecisionRequest:
+  type: object
+  required:
+    - ids
+  properties:
+    ids:
+      type: array
+      minItems: 1
+      maxItems: 100
+      items:
+        type: string
+        format: uuid
+      description: Ids of the service's access requests
+
+AccessDecisionItem:
+  type: object
+  required:
+    - id
+    - kind
+    - target
+  properties:
+    id:
+      type: string
+      format: uuid
+    kind:
+      type: string
+      enum: [role, audience]
+    target:
+      type: string
+
+ApproveAccessResponse:
+  type: object
+  required:
+    - approved
+  properties:
+    approved:
+      type: array
+      description: The requests that changed to approved (already-approved ones are left out).
+      items:
+        $ref: '#/AccessDecisionItem'
+
+RevokeAccessResponse:
+  type: object
+  required:
+    - revoked
+  properties:
+    revoked:
+      type: array
+      description: The requests that changed to revoked (already-revoked ones are left out).
+      items:
+        $ref: '#/AccessDecisionItem'
+
+PaginatedServicesResponse:
+  type: object
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/ServiceListItem'
+    hasMore:
+      type: boolean
+      description: Whether more pages exist beyond this one.
+    limit:
+      type: integer
+      description: The page size used for this request.
+    nextCursor:
+      type: [string, 'null']
+      description: Opaque cursor to pass as `cursor` on the next request to continue paginating. `null` when `hasMore` is `false`.
+
+PaginatedServiceAccessResponse:
+  type: object
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/ServiceAccessListItem'
+    hasMore:
+      type: boolean
+      description: Whether more pages exist beyond this one.
+    limit:
+      type: integer
+      description: The page size used for this request.
+    nextCursor:
+      type: [string, 'null']
+      description: Opaque cursor to pass as `cursor` on the next request to continue paginating. `null` when `hasMore` is `false`.
+
+# Health
+HealthStatus:
+  type: object
+  required:
+    - status
+    - service
+    - version
+    - timestamp
+  properties:
+    status:
+      type: string
+      enum: [ok, degraded]
+    service:
+      type: string
+      description: '`SERVICE_NAME`'
+    version:
+      type: string
+      description: Package version (`0.0.0` when unknown)
+    timestamp:
+      type: string
+      format: date-time
+    db:
+      type: string
+      enum: [fail]
+      description: Present only when Postgres did not answer
+    redis:
+      type: string
+      enum: [fail]
+      description: Present only when Redis did not answer
+
+SigningKeyList:
+  type: object
+  required: [keys]
+  properties:
+    keys:
+      type: array
+      items:
+        $ref: '#/SigningKey'
+SigningKeyRotation:
+  type: object
+  required: [keys, activatesAt]
+  properties:
+    keys:
+      type: array
+      items:
+        $ref: '#/SigningKey'
+    activatesAt:
+      type: string
+      format: date-time
+      description: When the new key starts signing
+RotateSigningKeyRequest:
+  type: object
+  properties:
+    immediate:
+      type: boolean
+      default: false
+      description: |
+        Sign with the new key at once instead of after the activation delay,
+        for a compromised key. Tokens may then carry a kid that services
+        with a cached JWKS do not know yet.
+SigningKey:
+  type: object
+  required: [kid, version, active, activatesAt, retiredAt, expiresAt]
+  properties:
+    kid:
+      type: string
+      description: The public key's RFC 7638 JWK thumbprint, or JWT_KEY_ID for an env-supplied key
+    version:
+      type: [integer, 'null']
+      description: Null for a key pair supplied in env
+    active:
+      type: boolean
+      description: Whether this key signs new tokens now
+    activatesAt:
+      type: [string, 'null']
+      format: date-time
+      description: When it starts (or started) signing; null for a key pair supplied in env
+    retiredAt:
+      type: [string, 'null']
+      format: date-time
+      description: When the next version activates (or activated) and replaces it
+    expiresAt:
+      type: [string, 'null']
+      format: date-time
+      description: When a retired key stops verifying and leaves the JWKS
+
+UpstreamProviderSummary:
+  type: object
+  description: An active identity provider, as the login page lists it
+  required: [slug, displayName]
+  properties:
+    slug:
+      type: string
+      description: In the provider's URLs, `/oauth/upstream/{slug}/…`
+      examples:
+        - google
+    displayName:
+      type: string
+      description: The login button's label
+      examples:
+        - Google
+
+IdentityProvider:
+  type: object
+  description: An upstream identity provider. The client secret is write-only and never returned.
+  required:
+    - id
+    - slug
+    - displayName
+    - kind
+    - issuer
+    - clientId
+    - scopes
+    - countsAsMfa
+    - isActive
+    - callbackUrl
+    - createdAt
+    - updatedAt
+  properties:
+    id:
+      type: string
+      format: uuid
+    slug:
+      type: string
+      description: Lowercase letters, numbers and hyphens, 1-50. Cannot change once a user has linked an identity.
+    displayName:
+      type: string
+      maxLength: 100
+    kind:
+      type: string
+      enum: [oidc]
+      description: Picks the adapter; only `oidc` exists
+    issuer:
+      type: [string, 'null']
+      description: The OIDC issuer URL; equals the `issuer` of its discovery document
+    clientId:
+      type: string
+    scopes:
+      type: array
+      items:
+        type: string
+    countsAsMfa:
+      type: boolean
+      description: |
+        A login through this provider counts as multi-factor everywhere (instance
+        policy, `requires_2fa` roles, `acr_values`); its tokens carry
+        `amr: ["fed", "mfa"]`. Core cannot verify what the provider required: it
+        trusts the provider's own MFA.
+    isActive:
+      type: boolean
+    callbackUrl:
+      type: string
+      format: uri
+      description: The redirect URI to register at the provider, `${PUBLIC_URL}/oauth/upstream/<slug>/callback`
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+CreateIdentityProviderRequest:
+  type: object
+  required: [slug, displayName, kind, issuer, clientId, clientSecret]
+  properties:
+    slug:
+      type: string
+      pattern: '^[a-z0-9-]{1,50}$'
+      description: '`providers` is reserved'
+    displayName:
+      type: string
+      minLength: 1
+      maxLength: 100
+    kind:
+      type: string
+      enum: [oidc]
+    issuer:
+      type: string
+      format: uri
+      maxLength: 512
+    clientId:
+      type: string
+      minLength: 1
+      maxLength: 255
+    clientSecret:
+      type: string
+      minLength: 1
+      maxLength: 4096
+      description: Sealed at rest; never returned
+    scopes:
+      type: array
+      minItems: 1
+      maxItems: 50
+      items:
+        type: string
+        minLength: 1
+        maxLength: 100
+      description: Must include `openid`. Default `["openid", "email", "profile"]`.
+    countsAsMfa:
+      type: boolean
+      description: Default false. See `IdentityProvider.countsAsMfa`.
+
+UpdateIdentityProviderRequest:
+  type: object
+  description: Any subset of the create fields (`kind` can only repeat `oidc`). Omitting `clientSecret` keeps the stored one; a changed `issuer` or `clientId` needs it (400 `client_secret_required`).
+  properties:
+    slug:
+      type: string
+      pattern: '^[a-z0-9-]{1,50}$'
+    displayName:
+      type: string
+      minLength: 1
+      maxLength: 100
+    kind:
+      type: string
+      enum: [oidc]
+    issuer:
+      type: string
+      format: uri
+      maxLength: 512
+    clientId:
+      type: string
+      minLength: 1
+      maxLength: 255
+    clientSecret:
+      type: string
+      minLength: 1
+      maxLength: 4096
+    scopes:
+      type: array
+      minItems: 1
+      maxItems: 50
+      items:
+        type: string
+        minLength: 1
+        maxLength: 100
+    countsAsMfa:
+      type: boolean
+
+IdentityProviderDomain:
+  type: object
+  description: An email domain claimed by an identity provider
+  required: [id, domain, organization, autoAccept, ssoOnly, roles]
+  properties:
+    id:
+      type: string
+      format: uuid
+    domain:
+      type: string
+      description: Lowercase, no leading `@`; unique across all providers
+      examples:
+        - example.com
+    organization:
+      type: object
+      description: Where auto-accepted users join
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    autoAccept:
+      type: boolean
+      description: Create a user on the first verified sign-in at this domain
+    ssoOnly:
+      type: boolean
+      description: Refuse password sign-in for this domain's users
+    roles:
+      type: array
+      description: Default roles, assigned in the domain's organization to auto-accepted users
+      items:
+        type: object
+        required: [id, name, displayName]
+        properties:
+          id:
+            type: string
+            format: uuid
+          name:
+            type: string
+          displayName:
+            type: string
+
+CreateIdentityProviderDomainRequest:
+  type: object
+  required: [domain, organizationId]
+  properties:
+    domain:
+      type: string
+      description: A hostname; lowercased, a leading `@` dropped
+      examples:
+        - example.com
+    organizationId:
+      type: string
+      format: uuid
+    autoAccept:
+      type: boolean
+      default: false
+    ssoOnly:
+      type: boolean
+      default: false
+    roleIds:
+      type: array
+      maxItems: 100
+      default: []
+      items:
+        type: string
+        format: uuid
+      description: Roles assignable within an organization, and ones the caller may grant
+
+UpdateIdentityProviderDomainRequest:
+  type: object
+  description: Only the fields sent change; `roleIds` replaces the whole set.
+  properties:
+    domain:
+      type: string
+    organizationId:
+      type: string
+      format: uuid
+    autoAccept:
+      type: boolean
+    ssoOnly:
+      type: boolean
+    roleIds:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        format: uuid
+
+UserIdentity:
+  type: object
+  description: A user's account at an identity provider
+  required: [id, provider, email, createdAt, lastLoginAt]
+  properties:
+    id:
+      type: string
+      format: uuid
+    provider:
+      type: object
+      required: [slug, displayName]
+      properties:
+        slug:
+          type: string
+        displayName:
+          type: string
+    email:
+      type: [string, 'null']
+      format: email
+      description: The email the provider reported when the identity was linked. Informational; it is never used to match accounts.
+    createdAt:
+      type: string
+      format: date-time
+    lastLoginAt:
+      type: [string, 'null']
+      format: date-time
+      description: Null until the identity is used to sign in
+
+UserIdentityInvite:
+  type: object
+  description: An invite to sign in with a provider, as an admin sees it. It stays listed after `expiresAt` until the hourly cleanup removes it.
+  required: [provider, expiresAt]
+  properties:
+    provider:
+      type: object
+      required: [id, slug, displayName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        displayName:
+          type: string
+    expiresAt:
+      type: string
+      format: date-time
+
+UserIdentitiesResponse:
+  type: object
+  required: [identities, invites]
+  properties:
+    identities:
+      type: array
+      items:
+        $ref: '#/UserIdentity'
+    invites:
+      type: array
+      description: Outstanding invites (an expired invite is listed until the hourly cleanup removes it; check `expiresAt`)
+      items:
+        $ref: '#/UserIdentityInvite'
+
+StartIdentityLinkRequest:
+  type: object
+  required: [provider]
+  properties:
+    provider:
+      type: string
+      minLength: 1
+      maxLength: 50
+      description: The slug of an active identity provider (from `GET /oauth/upstream/providers`)
+
+StartIdentityLinkResponse:
+  type: object
+  required: [redirect_url]
+  properties:
+    redirect_url:
+      type: string
+      format: uri
+      description: The provider's authorization endpoint. Navigate the browser there.
+
+CreateIdentityInviteRequest:
+  type: object
+  required: [providerId]
+  properties:
+    providerId:
+      type: string
+      format: uuid
+      description: The identity provider's id (`GET /v1/admin/identity-providers`)
+
+IdentityInvite:
+  type: object
+  required: [providerId, expiresAt]
+  properties:
+    providerId:
+      type: string
+      format: uuid
+    expiresAt:
+      type: string
+      format: date-time
+      description: 7 days after the invite was issued

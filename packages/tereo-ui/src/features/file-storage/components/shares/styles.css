@@ -1,0 +1,22 @@
+.t-share-target {
+  max-width: 24rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.t-share-url-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.t-share-url-row > :first-child {
+  flex: 1;
+}
+
+.t-share-hint {
+  margin: 0;
+  font-size: 0.85em;
+  color: var(--text-color-secondary);
+}

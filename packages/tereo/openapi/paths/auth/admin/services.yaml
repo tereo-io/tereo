@@ -1,0 +1,895 @@
+/admin/services:
+  get:
+    tags:
+      - Admin - Services
+    summary: List services
+    description: |
+      Returns a paginated list of services, core's own row included. Each
+      carries `pendingAccessCount`, the number of its access requests that
+      await a decision.
+
+      **Filter fields and operators:**
+      - `slug`: `contains`, `equals`
+      - `name`: `contains`, `equals`
+
+      **Sort fields:** `id` (default), `slug`, `name`, `createdAt`
+    operationId: listAdminServices
+    security:
+      - BearerAuth: [services.read]
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../../components/parameters.yaml#/SortParam'
+      - $ref: '../../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../../components/parameters.yaml#/FilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of services
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/PaginatedServicesResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing services.read permission
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Admin - Services
+    summary: Add a service
+    description: |
+      Adds an app service: a confidential OAuth client (`client_credentials`
+      only), the service-account user it acts as, and the service row. The
+      client secret is returned in this response and nowhere else — only its
+      hash is stored. The service then registers what it declares with
+      `POST /v1/registry/declaration`, using these credentials.
+
+      `slug` defaults to the name, lowercased and hyphenated (cut to 64
+      characters, without a trailing hyphen); `namespace`
+      defaults to the slug without a trailing `-service`. Returns `409` when
+      the slug is taken or the namespace overlaps another service's or a
+      reserved one, and `400 invalid_name` when no slug is given and the
+      name has no letters to derive one from.
+
+      An audit log entry is created for this action.
+      A `core.service.created` webhook event is emitted.
+    operationId: createAdminService
+    security:
+      - BearerAuth: [services.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/CreateServiceRequest'
+    responses:
+      '201':
+        description: Service added; `credentials` holds the only copy of the client secret
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ServiceWithCredentials'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid body (`invalid_request`), or the name has no letters to derive a slug from (`invalid_name`)
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing services.write permission
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: Slug, namespace or service-account email already taken
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/services/access:
+  get:
+    tags:
+      - Admin - Services
+    summary: List access requests across services
+    description: |
+      Returns a paginated list of every service's access requests — the
+      approval inbox. Each row carries the service it belongs to and who
+      decided it. Approve or revoke through
+      `POST /v1/admin/services/{id}/access/approve` and `.../revoke`.
+
+      **Filter fields and operators:**
+      - `status`: `equals`, `in` (`pending`, `approved`, `revoked`)
+      - `kind`: `equals`, `in` (`role`, `audience`)
+      - `serviceId`: `equals`
+      - `target`: `contains`, `equals`
+
+      **Sort fields:** `requestedAt` (default, descending), `id`
+
+      Example: `GET /v1/admin/services/access?filter[status]=pending`
+    operationId: listAdminServiceAccess
+    security:
+      - BearerAuth: [services.read]
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../../components/parameters.yaml#/SortParam'
+      - $ref: '../../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../../components/parameters.yaml#/FilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of access requests
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/PaginatedServiceAccessResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing services.read permission
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/services/{id}:
+  get:
+    tags:
+      - Admin - Services
+    summary: Get service
+    description: |
+      Returns the service, everything it declared (retired items included)
+      and its access requests. Works for core's own row too.
+
+      Each access row names who decided it (`decidedBy`, plus
+      `decidedByEmail` and `decidedByName`). `settings` states the secret
+      overlap a `regenerate-secret` would give and the grace period before a
+      dropped declared item retires, as this deployment is configured.
+    operationId: getAdminService
+    security:
+      - BearerAuth: [services.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/ServiceIdParam'
+    responses:
+      '200':
+        description: Service details
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ServiceDetail'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing services.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Admin - Services
+    summary: Update service
+    description: |
+      Renames, deactivates or reactivates a service. The name is copied to
+      its OAuth client; `isActive` is copied to its service-account user.
+      Deactivating revokes all of the service's outstanding tokens. Core's
+      own row cannot be changed (`403`).
+
+      An audit log entry is created for this action.
+      A `core.service.updated` webhook event is emitted.
+    operationId: updateAdminService
+    security:
+      - BearerAuth: [services.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/ServiceIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/UpdateServiceRequest'
+    responses:
+      '200':
+        description: Service updated
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Service'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Validation error, or neither `name` nor `isActive` given
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing services.write permission, or the service is core
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/services/{id}/regenerate-secret:
+  post:
+    tags:
+      - Admin - Services
+    summary: Regenerate service secret
+    description: |
+      Issues a new client secret, shown once in this response. The replaced
+      secret keeps working for `SERVICE_SECRET_OVERLAP_HOURS` (until
+      `previousSecretExpiresAt`) so running copies survive the rollout; end
+      the overlap early with `POST /v1/admin/services/{id}/revoke-previous-secret`.
+      Core's own row cannot be changed (`403`).
+
+      An audit log entry is created for this action.
+      A `core.service.secret-regenerated` webhook event is emitted.
+    operationId: regenerateAdminServiceSecret
+    security:
+      - BearerAuth: [services.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/ServiceIdParam'
+    responses:
+      '200':
+        description: New secret issued
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/RegenerateServiceSecretResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing services.write permission, or the service is core
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/services/{id}/revoke-previous-secret:
+  post:
+    tags:
+      - Admin - Services
+    summary: Revoke previous service secret
+    description: |
+      Ends the secret overlap now: only the current secret works from here
+      on. Core's own row cannot be changed (`403`).
+
+      An audit log entry is created for this action.
+      A `core.service.previous-secret-revoked` webhook event is emitted.
+    operationId: revokeAdminServicePreviousSecret
+    security:
+      - BearerAuth: [services.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/ServiceIdParam'
+    responses:
+      '200':
+        description: Previous secret revoked
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Service'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing services.write permission, or the service is core
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/services/{id}/access/approve:
+  post:
+    tags:
+      - Admin - Services
+    summary: Approve service access
+    description: |
+      Grants what the service asked for in its declaration: a requested
+      role is assigned (globally) to its service-account user, a requested
+      audience is added to its client's `audience`. Requests already approved
+      are skipped. All ids must belong to this service (`404` otherwise);
+      a requested role that no longer exists or is retired fails the whole
+      call with `422 role_unavailable`. Core's own row cannot be changed
+      (`403`).
+
+      Only grant what you hold: every permission of a requested role the
+      service account does not already hold must be one the approver holds
+      through a global role (`admin` holds all), otherwise the whole call is a `403` naming them
+      and nothing is approved.
+
+      Approving another service's role (`<slug>/<name>`) records the
+      permissions it grants at that moment, and the service holds only
+      those. When the declaring service later adds permissions to the role,
+      the request returns to `pending` with them in `pendingPermissions`;
+      it keeps what was approved meanwhile. Approving it again records the
+      role's current permissions, and the approver must hold the added
+      ones. Core's own roles are not recorded: they change only with core.
+
+      When anything changed, an audit log entry is created and a
+      `core.service.access-approved` webhook event is emitted.
+    operationId: approveAdminServiceAccess
+    security:
+      - BearerAuth: [services.approve]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/ServiceIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/AccessDecisionRequest'
+    responses:
+      '200':
+        description: Access approved
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ApproveAccessResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing services.approve permission, the service is core, or a requested role grants a permission the approver does not hold
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Service not found, or an access request id is not this service's
+      '422':
+        $ref: '../../../components/auth/responses.yaml#/UnprocessableEntityResponse'
+        description: A requested role no longer exists or is retired (`role_unavailable`)
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/services/{id}/access/revoke:
+  post:
+    tags:
+      - Admin - Services
+    summary: Revoke service access
+    description: |
+      Takes access away: the role is removed from the service-account user,
+      or the audience from its client. Requests already revoked are skipped.
+      When anything was revoked, all of the service's outstanding tokens are
+      revoked too, so its next call fetches a token without that access.
+      All ids must belong to this service (`404` otherwise). Core's own row
+      cannot be changed (`403`).
+
+      When anything changed, an audit log entry is created and a
+      `core.service.access-revoked` webhook event is emitted.
+    operationId: revokeAdminServiceAccess
+    security:
+      - BearerAuth: [services.approve]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/ServiceIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/AccessDecisionRequest'
+    responses:
+      '200':
+        description: Access revoked
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/RevokeAccessResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing services.approve permission, or the service is core
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Service not found, or an access request id is not this service's
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+# ============================================
+# WEBHOOK EVENTS
+# ============================================
+
+core.service.created:
+  post:
+    tags:
+      - Admin - Services
+    summary: Service added
+    description: Fired when an app service is added.
+    operationId: webhookServiceCreated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.service.created
+                  entityType:
+                    const: Service
+                  data:
+                    type: object
+                    required: [id, slug, name, namespace]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      slug:
+                        type: string
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+core.service.updated:
+  post:
+    tags:
+      - Admin - Services
+    summary: Service updated
+    description: Fired when a service is renamed, deactivated or reactivated.
+    operationId: webhookServiceUpdated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.service.updated
+                  entityType:
+                    const: Service
+                  data:
+                    type: object
+                    required: [id, slug, name, isActive]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      slug:
+                        type: string
+                      name:
+                        type: string
+                      isActive:
+                        type: boolean
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+core.service.secret-regenerated:
+  post:
+    tags:
+      - Admin - Services
+    summary: Service secret regenerated
+    description: Fired when a service's client secret is regenerated. The secret is not included.
+    operationId: webhookServiceSecretRegenerated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.service.secret-regenerated
+                  entityType:
+                    const: Service
+                  data:
+                    type: object
+                    required: [id, slug, previousSecretExpiresAt]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      slug:
+                        type: string
+                      previousSecretExpiresAt:
+                        type: [string, 'null']
+                        format: date-time
+                        description: When the replaced secret stops working; `null` when there is no overlap
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+core.service.declared:
+  post:
+    tags:
+      - Registry
+    summary: Service declaration registered
+    description: Fired when a service registers a declaration that differs from the last one applied.
+    operationId: webhookServiceDeclared
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.service.declared
+                  entityType:
+                    const: Service
+                  data:
+                    type: object
+                    required: [slug, version, hash, permissions, systemRoles, buckets, eventTypes]
+                    properties:
+                      slug:
+                        type: string
+                      version:
+                        type: string
+                        description: The declaration's semver version
+                      hash:
+                        type: string
+                        description: SHA-256 of the declaration
+                      permissions:
+                        type: object
+                        required: [declared, missing]
+                        properties:
+                          declared:
+                            type: integer
+                            description: Items in the declaration
+                          missing:
+                            type: integer
+                            description: Previously declared items now missing (retired after the grace period)
+                      systemRoles:
+                        type: object
+                        required: [declared, missing]
+                        properties:
+                          declared:
+                            type: integer
+                            description: Items in the declaration
+                          missing:
+                            type: integer
+                            description: Previously declared items now missing (retired after the grace period)
+                      buckets:
+                        type: object
+                        required: [declared, missing]
+                        properties:
+                          declared:
+                            type: integer
+                            description: Items in the declaration
+                          missing:
+                            type: integer
+                            description: Previously declared items now missing (retired after the grace period)
+                      eventTypes:
+                        type: object
+                        required: [declared, missing]
+                        properties:
+                          declared:
+                            type: integer
+                            description: Items in the declaration
+                          missing:
+                            type: integer
+                            description: Previously declared items now missing (retired after the grace period)
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+core.service.access-requested:
+  post:
+    tags:
+      - Registry
+    summary: Service access requested
+    description: |
+      Fired when a declaration requests roles or audiences not requested
+      before, and for each service whose approved access to a role grew when
+      the role's own service declared more permissions for it (`entityId` is
+      then that service, and each item names the added `permissions`). Both
+      await an admin's approval.
+    operationId: webhookServiceAccessRequested
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.service.access-requested
+                  entityType:
+                    const: Service
+                  data:
+                    type: object
+                    required: [slug, requested]
+                    properties:
+                      slug:
+                        type: string
+                      requested:
+                        type: array
+                        items:
+                          type: object
+                          required: [kind, target]
+                          properties:
+                            kind:
+                              type: string
+                              enum: [role, audience]
+                            target:
+                              type: string
+                            permissions:
+                              type: array
+                              items:
+                                type: string
+                              description: 'A role that grew since its approval: the permissions it gained, awaiting approval'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+core.service.access-approved:
+  post:
+    tags:
+      - Admin - Services
+    summary: Service access approved
+    description: Fired when an admin approves a service's access requests.
+    operationId: webhookServiceAccessApproved
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.service.access-approved
+                  entityType:
+                    const: Service
+                  data:
+                    type: object
+                    required: [id, slug, access]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      slug:
+                        type: string
+                      access:
+                        type: array
+                        items:
+                          type: object
+                          required: [kind, target]
+                          properties:
+                            kind:
+                              type: string
+                              enum: [role, audience]
+                            target:
+                              type: string
+                            permissions:
+                              type: array
+                              items:
+                                type: string
+                              description: "Another service's role: the permissions this approval newly granted"
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+core.service.access-revoked:
+  post:
+    tags:
+      - Admin - Services
+    summary: Service access revoked
+    description: Fired when an admin revokes a service's access.
+    operationId: webhookServiceAccessRevoked
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.service.access-revoked
+                  entityType:
+                    const: Service
+                  data:
+                    type: object
+                    required: [id, slug, access]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      slug:
+                        type: string
+                      access:
+                        type: array
+                        items:
+                          type: object
+                          required: [kind, target]
+                          properties:
+                            kind:
+                              type: string
+                              enum: [role, audience]
+                            target:
+                              type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+core.service.previous-secret-revoked:
+  post:
+    tags:
+      - Admin - Services
+    summary: Service previous secret revoked
+    description: Fired when the overlap of a service's replaced secret is ended early with `POST /v1/admin/services/{id}/revoke-previous-secret`.
+    operationId: webhookServicePreviousSecretRevoked
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.service.previous-secret-revoked
+                  entityType:
+                    const: Service
+                  data:
+                    type: object
+                    required: [id, slug]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      slug:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

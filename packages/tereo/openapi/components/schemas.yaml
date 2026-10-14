@@ -1,0 +1,56 @@
+# Compact objects a response embeds next to the foreign id they name, so a
+# client can show who or what the id is without a second call. Every area
+# uses them the same way.
+
+UserRef:
+  type: object
+  description: A user named by an id beside it
+  required: [id, email, name]
+  properties:
+    id:
+      type: string
+      format: uuid
+    email:
+      type: string
+      format: email
+    name:
+      type: [string, 'null']
+
+OrgRef:
+  type: object
+  description: An organization named by an id beside it
+  required: [id, name, slug]
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    slug:
+      type: string
+
+ServiceRef:
+  type: object
+  description: An app service named by an id beside it
+  required: [id, slug, name]
+  properties:
+    id:
+      type: string
+      format: uuid
+    slug:
+      type: string
+    name:
+      type: string
+
+RoleRef:
+  type: object
+  description: A role named by an id beside it
+  required: [id, name, displayName]
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    displayName:
+      type: string

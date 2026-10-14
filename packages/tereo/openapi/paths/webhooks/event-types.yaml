@@ -1,0 +1,116 @@
+/webhooks/v1/event-types:
+  get:
+    tags:
+      - Event Types
+    summary: List event types
+    description: |
+      Returns a paginated list of registered event types, including retired
+      ones (`retiredAt` set). Event types are read-only here: each service
+      declares its own at boot (`POST /v1/registry/declaration`), and one dropped
+      from a declaration is retired.
+
+      **Required permissions:**
+      - `webhooks.event-types.read`
+
+      Each row names its declaring service (`serviceName`). Event types have
+      no `id`: the name (`eventType`) is the key.
+
+      **Filter fields and operators:**
+      - `source`: `equals`
+      - `eventType`: `contains`
+      - `retired`: `equals` (`true` lists only retired event types, `false`
+        only those that can still be subscribed to; omit for both)
+
+      `contains` is case-insensitive. `filter[source]` takes the service's
+      slug; there is no filter on `serviceName`.
+
+      **Sort fields:** `eventType`, `createdAt`
+
+      **Default limit:** 50 (max 200)
+
+      **Examples:**
+      - `?filter[source]=core`
+      - `?filter[eventType]=order&filter[eventType_op]=contains`
+      - `?filter[retired]=false`
+      - `?sort=eventType&sortDir=asc`
+    operationId: listEventTypes
+    security:
+      - BearerAuth: []
+    parameters:
+      - name: limit
+        in: query
+        description: Maximum number of items to return per page
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../components/parameters.yaml#/SortParam'
+      - $ref: '../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksFilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of event types
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/ListEventTypesResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/event-types/{eventType}:
+  get:
+    tags:
+      - Event Types
+    summary: Get an event type
+    description: |
+      Retrieves a single event type by its identifier, retired or not.
+
+      **Required permissions:**
+      - `webhooks.event-types.read`
+    operationId: getEventType
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/EventTypeParam'
+    responses:
+      '200':
+        description: Event type details
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/EventType'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

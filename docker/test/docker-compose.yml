@@ -1,0 +1,48 @@
+# Isolated integration-test stack: throwaway Postgres and Redis on tmpfs, no
+# published ports, and the test runner. Driven by docker/test/run.sh.
+name: tereo-test
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: core
+      POSTGRES_PASSWORD: core
+      POSTGRES_DB: core_test
+    tmpfs:
+      # postgres:18 keeps PGDATA under this directory.
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U core -d core_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  runner:
+    build:
+      context: ../..
+      dockerfile: docker/test/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Keys are generated into the fresh database, like a first deploy.
+    environment:
+      DOCKER_TEST: "true"
+      NODE_ENV: "test"
+      LOG_LEVEL: "silent"
+      DATABASE_URL: postgresql://core:core@postgres:5432/core_test
+      REDIS_URL: redis://redis:6379
+      # The fake SMTP server speaks plaintext.
+      ALLOW_PLAINTEXT_SMTP: "true"

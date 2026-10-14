@@ -1,0 +1,54 @@
+.t-role-2fa-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.t-permissions-editor-loading {
+  display: flex;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.t-permissions-actions-top {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.t-permissions-groups {
+  max-height: 25rem;
+  overflow-y: auto;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
+
+.t-permission-group {
+  margin-bottom: 1rem;
+}
+
+.t-permission-group:last-child {
+  margin-bottom: 0;
+}
+
+.t-permission-group-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  margin: 0 0 0.5rem;
+  color: var(--primary-color);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.25rem;
+}
+
+.t-permission-group-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
+  gap: 0.5rem;
+}
+
+.t-permission-item {
+  padding: 0.25rem;
+}

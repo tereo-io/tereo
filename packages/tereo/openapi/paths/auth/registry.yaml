@@ -1,0 +1,77 @@
+/registry/declaration:
+  post:
+    tags:
+      - Registry
+    summary: Register a declaration
+    description: |
+      Called by an app service on every start, with its own
+      client-credentials token: registers the permissions, system roles,
+      buckets and event types it declares under its namespace, and the roles
+      and audiences it requests. The declaration applies to the calling
+      service; any other token gets `403`. No specific permission is needed.
+
+      A declaration whose `version` is older than the one applied last is
+      ignored: `200` with `applied: false`, nothing written, and a warning
+      logged with both versions. Otherwise `applied` is `true`.
+
+      A declaration identical to the last one applied (same hash; `version`
+      is not part of it) is a no-op (`changed: false`) beyond recording a
+      newer version. Otherwise new items are created, changed ones
+      updated, and items no longer declared are marked missing and retired
+      after `REGISTRY_RETIREMENT_GRACE_HOURS`. Newly requested access is
+      recorded as pending until an admin approves it
+      (`POST /v1/admin/services/{id}/access/approve`).
+
+      System roles are named `<namespace>_<name>`: a role named otherwise
+      is a `400 invalid_role_name`, and nothing is applied.
+
+      A declaration that breaks a rule is refused whole: names outside the
+      service's namespace, duplicates, a system role granting a permission
+      the declaration doesn't declare, or requested access that doesn't exist
+      return `422` with every problem listed; items owned
+      by another service or an admin return `409`. The body may be up to 1 MB.
+
+      When it changes anything, an audit log entry is created and a
+      `core.service.declared` webhook event is emitted, plus
+      `core.service.access-requested` when new access was requested.
+    operationId: registerDeclaration
+    security:
+      - BearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/Declaration'
+    responses:
+      '200':
+        description: Declaration applied, or unchanged
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/RegisterDeclarationResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: The body does not match the declaration schema (`invalid_request`), or a system role is not named `<namespace>_<name>` (`invalid_role_name`)
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: The token is not a service's client-credentials token (`forbidden`), or is a delegated token, which no core API scope lets reach `/v1/registry` (`insufficient_scope`)
+      '409':
+        $ref: '../../components/responses.yaml#/ConflictResponse'
+        description: A declared item is already owned by another service or an admin
+      '422':
+        $ref: '../../components/auth/responses.yaml#/UnprocessableEntityResponse'
+        description: The declaration breaks a rule (`invalid_declaration`) or requests access that doesn't exist (`invalid_requested_access`)
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

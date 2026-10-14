@@ -1,0 +1,40 @@
+import "../preload.js";
+import { runOutboxReplayCli } from "./outboxReplay/index.js";
+import { disconnectDatabase } from "../utils/db/prisma.js";
+import { runRewrapCli } from "./rewrapMasterKey/index.js";
+
+async function main() {
+  const args = process.argv.slice(2);
+  const command = args[0];
+
+  if (!command || command === "--help" || command === "-h") {
+    console.error("Usage: npm run cli -- <command> [options]");
+    console.error("");
+    console.error("Commands:");
+    console.error(
+      "  rewrap-master-key    Re-wrap every wrapped DEK under the active master key"
+    );
+    console.error(
+      "  outbox-replay        Return dead-lettered outbox rows to the reaper"
+    );
+    process.exit(command ? 0 : 1);
+  }
+
+  if (command === "rewrap-master-key") {
+    await runRewrapCli(args.slice(1));
+  } else if (command === "outbox-replay") {
+    await runOutboxReplayCli(args.slice(1));
+  } else {
+    console.error(`Unknown command: ${command}`);
+    process.exit(1);
+  }
+}
+
+main()
+  .catch((e) => {
+    console.error("CLI failed:", e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await disconnectDatabase();
+  });

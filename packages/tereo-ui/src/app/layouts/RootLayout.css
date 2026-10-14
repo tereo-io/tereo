@@ -1,0 +1,22 @@
+.t-welcome-container {
+  text-align: center;
+  padding: 2rem;
+}
+
+.t-welcome-container h1 {
+  margin-bottom: 1rem;
+  color: var(--primary-color);
+}
+
+.t-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.t-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}

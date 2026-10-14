@@ -1,0 +1,436 @@
+/audit/v1/entries:
+  post:
+    tags:
+      - Audit Log Entries
+    summary: Create an audit log entry
+    description: |
+      Creates a single audit log entry. This endpoint is intended for service-to-service calls;
+      app services normally reach it through `@tereo-io/sdk`'s outbox.
+
+      `userId` and `organizationId` must name an existing user and organization
+      (`400 unknown_user` / `400 unknown_organization`). The entry's `writerUserId` is the
+      authenticated caller.
+
+      **Organization:** a caller without `audit-logs.admin` whose token has an `org_id` may
+      write only for that organization; another `organizationId`, or none (a system-wide entry),
+      is `403 forbidden`. A service account's token without an `org_id` — an app service's
+      client — may write for any organization or none; a person's token without one may not
+      write at all (`403`). `audit-logs.admin` may write for any organization or none. The
+      check runs before `unknown_organization`, so a refused caller learns nothing about which
+      organizations exist.
+
+      **Idempotency:** with an `idempotencyKey`, a repeat of the same request (same body,
+      `idempotencyKey` aside) from the same caller within 24 hours returns the first response
+      (`201`) without writing again; one that arrives while the first is still in progress gets
+      `409 idempotency_request_in_progress`. Reusing the key with a different body — finished or still in progress — is
+      `422 idempotency_key_conflict`. Once the entry is written the request succeeds, even if
+      its result could not be stored for replay. Keys are scoped to the authenticated caller and the
+      endpoint: this endpoint and `POST /v1/audit/entries/batch` have separate key spaces, so
+      the same key on the other endpoint is a new request.
+
+      **Errors (`400`):** `invalid_request` (validation), `unknown_user`, `unknown_organization`.
+
+      **Required permission:** `audit-logs.write`
+    operationId: createEntry
+    security:
+      - BearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/audit/schemas.yaml#/CreateAuditLogEntryRequest'
+    responses:
+      '201':
+        description: Audit log entry created successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/audit/schemas.yaml#/AuditLogEntry'
+      '400':
+        $ref: '../../components/audit/responses.yaml#/AuditBadRequestResponse'
+      '401':
+        $ref: '../../components/audit/responses.yaml#/AuditUnauthorizedResponse'
+      '403':
+        $ref: '../../components/audit/responses.yaml#/AuditForbiddenResponse'
+      '409':
+        $ref: '../../components/audit/responses.yaml#/AuditConflictResponse'
+      '422':
+        $ref: '../../components/audit/responses.yaml#/AuditIdempotencyKeyConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '503':
+        description: |
+          The request carries an `idempotencyKey` and Redis, which holds the keys,
+          is unreachable: the request is refused, and nothing is written, rather
+          than risk a duplicate. Retry after `Retry-After` seconds.
+        headers:
+          Retry-After:
+            $ref: '../../components/headers.yaml#/Retry-After'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum:
+                    - temporarily_unavailable
+                error_description:
+                  type: string
+
+  get:
+    tags:
+      - Audit Log Entries
+    summary: List audit log entries
+    description: |
+      Returns a paginated list of audit log entries with optional filtering and sorting.
+
+      **Required permission:** `audit-logs.read`
+
+      Results are scoped to the organization in the bearer token's `org_id`. An
+      `audit-logs.admin` token may read another organization, or system-wide entries, with
+      `filter[organizationId]=<id>|none`; without the filter, an admin token that has no `org_id`
+      reads across organizations. Any other token without one is refused (`403`).
+
+      Each entry names its `user`, `writer` and `organization`.
+
+      **Supported filters:**
+      - `source` - equals, in
+      - `organizationId` - an id or `none` (see above)
+      - `userId` - equals (a uuid)
+      - `writerUserId` - equals (a uuid)
+      - `userEmail` - equals, contains; both ignore case
+      - `action` - equals, in (CREATE, UPDATE, DELETE, MERGE, ARCHIVE, RESTORE, LOGIN, LOGOUT)
+      - `entityType` - equals, in
+      - `entityId` - equals
+      - `entityName` - equals, contains
+      - `ipAddress` - equals
+      - `correlationId` - equals
+      - `createdAt` - gte, lte (a date in the years 1-9999)
+      - `q` - text search; see the parameter for the 31-day window it scans
+
+      `contains` is case-insensitive. Any other filter field or operator is a `400`, as is a
+      value containing a NUL character.
+
+      **Metadata filters:**
+
+      Entries can also be filtered by top-level keys of the `metadata` JSON blob
+      using bracket-style query parameters:
+
+      - `metadata[<key>_equals]=<value>` - the key's value is the string `<value>` (a number or
+        boolean value never matches)
+      - `metadata[<key>_contains]=<value>` - the key's value is a string containing `<value>`
+        (case-sensitive)
+
+      Multiple metadata filters may be combined and are AND-ed together with the
+      other filters above. Example: `?metadata[requestId_equals]=abc-123`. A `metadata[...]`
+      parameter of any other form, or given more than once, is a `400`; one with an empty
+      value is ignored.
+
+      **Supported sort fields:** `createdAt` (default `desc`)
+
+      **Errors (`400`):** `invalid_request` (validation, or a malformed `filter[organizationId]`),
+      `invalid_cursor`, `search_window_too_large` (`filter[q]` over more than 31 days).
+
+      The permission is checked before the organization: a token without `audit-logs.read`
+      gets `403` whatever `filter[organizationId]` says.
+    operationId: listEntries
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../components/audit/parameters.yaml#/AuditSortParam'
+      - $ref: '../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../components/audit/parameters.yaml#/OrganizationFilterParam'
+      - $ref: '../../components/audit/parameters.yaml#/SearchParam'
+      - $ref: '../../components/audit/parameters.yaml#/AuditFilterValueParam'
+      - $ref: '../../components/audit/parameters.yaml#/AuditFilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of audit log entries
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/audit/schemas.yaml#/ListAuditLogEntriesResponse'
+      '400':
+        $ref: '../../components/audit/responses.yaml#/AuditBadRequestResponse'
+      '401':
+        $ref: '../../components/audit/responses.yaml#/AuditUnauthorizedResponse'
+      '403':
+        $ref: '../../components/audit/responses.yaml#/AuditForbiddenResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/audit/v1/entries/batch:
+  post:
+    tags:
+      - Audit Log Entries
+    summary: Create audit log entries in batch
+    description: |
+      Creates multiple audit log entries in a single request. Maximum 1000 entries per batch.
+      Every `userId` and `organizationId` must exist, or nothing is written (`400`).
+
+      **Organization:** each entry's `organizationId` is checked as for
+      `POST /v1/audit/entries`; one entry the caller may not write refuses the whole batch with
+      `403 forbidden`, and nothing is written.
+
+      **Idempotency:** one optional `idempotencyKey` covers the whole batch (per-entry keys are
+      rejected); it behaves as for single entries — a different body is
+      `422 idempotency_key_conflict` — but has its own key space, separate from
+      `POST /v1/audit/entries`.
+
+      **Errors (`400`):** `invalid_request` (validation, including any unknown field on an
+      entry), `unknown_user`, `unknown_organization`.
+
+      **Required permission:** `audit-logs.write`
+    operationId: createBatch
+    security:
+      - BearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/audit/schemas.yaml#/CreateBatchRequest'
+    responses:
+      '201':
+        description: Batch of audit log entries created successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/audit/schemas.yaml#/CreateBatchResponse'
+      '400':
+        $ref: '../../components/audit/responses.yaml#/AuditBadRequestResponse'
+      '401':
+        $ref: '../../components/audit/responses.yaml#/AuditUnauthorizedResponse'
+      '403':
+        $ref: '../../components/audit/responses.yaml#/AuditForbiddenResponse'
+      '409':
+        $ref: '../../components/audit/responses.yaml#/AuditConflictResponse'
+      '422':
+        $ref: '../../components/audit/responses.yaml#/AuditIdempotencyKeyConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '503':
+        description: |
+          The request carries an `idempotencyKey` and Redis, which holds the keys,
+          is unreachable: the request is refused, and nothing is written, rather
+          than risk a duplicate. Retry after `Retry-After` seconds.
+        headers:
+          Retry-After:
+            $ref: '../../components/headers.yaml#/Retry-After'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum:
+                    - temporarily_unavailable
+                error_description:
+                  type: string
+
+/audit/v1/entries/facets:
+  get:
+    tags:
+      - Audit Log Entries
+    summary: List distinct sources, entity types and metadata keys
+    description: |
+      Returns the distinct `source` and `entityType` values among the entries the caller can
+      read, and the top-level `metadata` keys of recent entries, for filter dropdowns. Scoped to
+      the token's organization, and to `filter[organizationId]`, as for `GET /v1/audit/entries`.
+
+      Only entries created in a date window count, so the scan stays on recent partitions:
+      `filter[createdAt_gte]` / `filter[createdAt_lte]`, as on the list. Without
+      `filter[createdAt_gte]` the window starts 90 days before its end (`filter[createdAt_lte]`,
+      or now). Other query parameters are ignored.
+
+      **Required permission:** `audit-logs.read`
+    operationId: getEntryFacets
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/audit/parameters.yaml#/OrganizationFilterParam'
+      - name: filter[createdAt_gte]
+        in: query
+        required: false
+        description: Start of the window (ISO 8601); defaults to 90 days before its end
+        schema:
+          type: string
+          format: date-time
+      - name: filter[createdAt_lte]
+        in: query
+        required: false
+        description: End of the window (ISO 8601); defaults to now
+        schema:
+          type: string
+          format: date-time
+    responses:
+      '200':
+        description: Distinct sources, entity types and metadata keys
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/audit/schemas.yaml#/AuditLogFacets'
+      '400':
+        $ref: '../../components/audit/responses.yaml#/AuditBadRequestResponse'
+      '401':
+        $ref: '../../components/audit/responses.yaml#/AuditUnauthorizedResponse'
+      '403':
+        $ref: '../../components/audit/responses.yaml#/AuditForbiddenResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/audit/v1/entries/{id}:
+  get:
+    tags:
+      - Audit Log Entries
+    summary: Get a single audit log entry
+    description: |
+      Returns a single audit log entry by its unique identifier, naming its `user`, `writer` and
+      `organization`. An entry outside the token's organization — or outside the one
+      `filter[organizationId]` names, as for `GET /v1/audit/entries` — is reported as not found. An
+      `audit-logs.admin` token with no `org_id` and no filter can read an entry of any
+      organization. The permission is checked before the organization (`403` first).
+
+      **Required permission:** `audit-logs.read`
+    operationId: getEntry
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/audit/parameters.yaml#/AuditIdParam'
+      - $ref: '../../components/audit/parameters.yaml#/OrganizationFilterParam'
+    responses:
+      '200':
+        description: Audit log entry details
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/audit/schemas.yaml#/AuditLogEntryWithNames'
+      '400':
+        $ref: '../../components/audit/responses.yaml#/AuditBadRequestResponse'
+      '401':
+        $ref: '../../components/audit/responses.yaml#/AuditUnauthorizedResponse'
+      '403':
+        $ref: '../../components/audit/responses.yaml#/AuditForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/audit/v1/entries/entity/{entityType}/{entityId}:
+  get:
+    tags:
+      - Audit Log Entries
+    summary: Get entity change history
+    description: |
+      Returns a paginated list of audit log entries for a specific entity, ordered by most recent first.
+      Useful for viewing the complete change history of an entity.
+
+      **Required permission:** `audit-logs.read`
+
+      Scoped to the token's organization, and to `filter[organizationId]`, as for
+      `GET /v1/audit/entries`.
+
+      **Supported filters:**
+      - `source` - equals, in
+      - `organizationId` - an id or `none` (see `GET /v1/audit/entries`)
+      - `userId` - equals (a uuid)
+      - `writerUserId` - equals (a uuid)
+      - `userEmail` - equals, contains; both ignore case
+      - `action` - equals, in (CREATE, UPDATE, DELETE, MERGE, ARCHIVE, RESTORE, LOGIN, LOGOUT)
+      - `createdAt` - gte, lte (a date in the years 1-9999)
+
+      `contains` is case-insensitive. Any other filter field (including `q`) is a `400`;
+      `metadata[...]` filters are not applied here and are ignored.
+
+      **Supported sort fields:** `createdAt` (default `desc`)
+
+      **Errors (`400`):** `invalid_request` (validation — `entityId` is 1-500 characters, as on
+      write — or a malformed `filter[organizationId]`), `invalid_cursor`. The permission is
+      checked before the organization (`403` first).
+    operationId: getEntityHistory
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/audit/parameters.yaml#/EntityTypeParam'
+      - $ref: '../../components/audit/parameters.yaml#/EntityIdParam'
+      - $ref: '../../components/audit/parameters.yaml#/EntityHistoryLimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../components/audit/parameters.yaml#/AuditSortParam'
+      - $ref: '../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../components/audit/parameters.yaml#/OrganizationFilterParam'
+      - $ref: '../../components/audit/parameters.yaml#/AuditFilterValueParam'
+      - $ref: '../../components/audit/parameters.yaml#/AuditFilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of audit log entries for the entity
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/audit/schemas.yaml#/ListAuditLogEntriesResponse'
+      '400':
+        $ref: '../../components/audit/responses.yaml#/AuditBadRequestResponse'
+      '401':
+        $ref: '../../components/audit/responses.yaml#/AuditUnauthorizedResponse'
+      '403':
+        $ref: '../../components/audit/responses.yaml#/AuditForbiddenResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

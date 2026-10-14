@@ -1,0 +1,1131 @@
+/admin/organizations:
+  get:
+    tags:
+      - Admin - Organizations
+    summary: List organizations
+    description: |
+      Returns a paginated list of organizations with filtering and sorting.
+
+      **Filter fields and operators:**
+      - `name`: `contains`, `equals`
+      - `slug`: `contains`, `equals`
+      - `code`: `contains`, `equals`
+      - `isActive`: `equals` (true/false)
+
+      **Sort fields:** `id` (default), `name`, `slug`, `createdAt`, `isActive`
+      (`sortDir` defaults to `desc`)
+
+      Archived organizations are excluded by default; pass
+      `includeArchived=true` to include them (`true` or `false` only — any
+      other value is a `400`).
+    operationId: getAdminOrganizations
+    security:
+      - BearerAuth: [organizations.read]
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../../components/parameters.yaml#/SortParam'
+      - $ref: '../../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../../components/parameters.yaml#/FilterOperatorParam'
+      - $ref: '../../../components/parameters.yaml#/IncludeArchivedParam'
+    responses:
+      '200':
+        description: Paginated list of organizations
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/PaginatedOrganizationsResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing organizations.read permission
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Admin - Organizations
+    summary: Create organization
+    description: |
+      Creates an organization. A slug or code already used by another
+      organization, archived or not, returns `409`.
+
+      An audit log entry is created for this action.
+      An `auth.organization.created` webhook event is emitted.
+    operationId: postAdminOrganizations
+    security:
+      - BearerAuth: [organizations.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/CreateOrganizationRequest'
+    responses:
+      '201':
+        description: Organization created successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Organization'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing organizations.write permission
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: An organization with this slug or code already exists (possibly archived)
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/organizations/default:
+  get:
+    tags:
+      - Admin - Organizations
+    summary: Get default organization
+    description: |
+      Returns the platform's configured default organization.
+
+      **Authorization:** Requires the platform-level permission `organizations.read`.
+
+      Returns a 404 if no default organization is configured.
+    operationId: getAdminOrganizationsDefault
+    security:
+      - BearerAuth: [organizations.read]
+    responses:
+      '200':
+        description: Default organization
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Organization'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing organizations.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: No default organization configured
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/organizations/{id}:
+  get:
+    tags:
+      - Admin - Organizations
+    summary: Get organization
+    description: |
+      Returns a single organization by UUID id. Archived organizations stay
+      viewable.
+
+      **Authorization:** Either the platform-level permission `organizations.read` OR the org role `member` on the target organization grants access. Org role is checked via `requireOrgRole()` inside the handler.
+    operationId: getAdminOrganization
+    security:
+      - BearerAuth: [organizations.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/OrganizationIdParam'
+    responses:
+      '200':
+        description: Organization details
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Organization'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid organization id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - neither organizations.read nor membership of the organization
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Admin - Organizations
+    summary: Update organization
+    description: |
+      Updates an organization. Changing `isActive` needs the platform
+      permission `organizations.write`; an owner may rename the organization
+      but not deactivate or reactivate it (`403`). Deactivating it
+      (`isActive: false`) revokes every token and session scoped to it; the
+      default organization cannot be deactivated (`400 default_organization`). A slug used by another
+      organization returns `409 conflict`; an archived organization is
+      read-only (`409 resource_archived`).
+
+      On an archived organization every mutation answers
+      `409 resource_archived` once the caller passes the member-tier check
+      (a member, or `organizations.read`) and before the route's own role
+      check, so a member without the required role may see `409` rather
+      than `403`. A caller who is neither gets `403`.
+
+      **Authorization:** Either the platform-level permission `organizations.write` OR the org role `owner` on the target organization grants access. Org role is checked via `requireOrgRole()` inside the handler. On an inactive organization the org role is not enough: only `organizations.write` passes, and its members get `403`.
+
+      An audit log entry is created for this action.
+      An `auth.organization.updated` webhook event is emitted.
+    operationId: patchAdminOrganization
+    security:
+      - BearerAuth: [organizations.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/OrganizationIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/UpdateOrganizationRequest'
+    responses:
+      '200':
+        description: Organization updated successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Organization'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid body or id (`invalid_request`), or deactivating the default organization (`default_organization`)
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - neither organizations.write nor the owner role in the organization, an owner changing `isActive`, or a member of an inactive organization
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        description: Slug already in use (`conflict`), or the organization is archived (`resource_archived`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum: [conflict, resource_archived]
+                error_description:
+                  type: string
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/organizations/{id}/archive:
+  post:
+    tags:
+      - Admin - Organizations
+    summary: Archive organization
+    description: |
+      Archives an organization. The organization must be deactivated first
+      (`isActive: false`) — archiving an active organization returns
+      `409 conflict`. The default organization cannot be archived
+      (`400 default_organization`). Archiving an already archived
+      organization returns `409 already_archived`; an unknown id, `404`.
+
+      Archived organizations are hidden from lists by default and are
+      read-only except restore. There is no delete: history (audit entries,
+      buckets, webhooks) references organizations. No tokens are revoked here:
+      archive requires the organization to already be deactivated, and
+      deactivation is what revoked them.
+
+      **Authorization:** Requires the platform-level permission `organizations.archive`. Org membership roles do not grant access to this operation.
+
+      An audit log entry is created for this action.
+      An `auth.organization.archived` webhook event is emitted.
+    operationId: archiveAdminOrganization
+    security:
+      - BearerAuth: [organizations.archive]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/OrganizationIdParam'
+    responses:
+      '204':
+        description: Organization archived
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: The default organization cannot be archived (`default_organization`), or invalid organization id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing organizations.archive permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Organization not found
+      '409':
+        description: The organization is still active (`conflict`), or already archived (`already_archived`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum: [conflict, already_archived]
+                error_description:
+                  type: string
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/organizations/{id}/restore:
+  post:
+    tags:
+      - Admin - Organizations
+    summary: Restore archived organization
+    description: |
+      Restores an archived organization. Returns `409 not_archived` when the
+      organization is not archived. The organization comes back still deactivated
+      (`isActive: false`) — it grants and authorizes nothing until it is
+      explicitly reactivated via `PATCH /v1/admin/organizations/{id}`.
+
+      **Authorization:** Requires the platform-level permission `organizations.archive`. Org membership roles do not grant access to this operation.
+
+      An audit log entry is created for this action.
+      An `auth.organization.restored` webhook event is emitted.
+    operationId: restoreAdminOrganization
+    security:
+      - BearerAuth: [organizations.archive]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/OrganizationIdParam'
+    responses:
+      '200':
+        description: Organization restored
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Organization'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid organization id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing organizations.archive permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Organization not found
+      '409':
+        $ref: '../../../components/responses.yaml#/NotArchivedResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/organizations/{id}/members:
+  get:
+    tags:
+      - Admin - Organization Members
+    summary: List organization members
+    description: |
+      Returns the members of the organization, ordered by email. Not
+      paginated. Archived organizations' members stay viewable.
+
+      **Authorization:** Either the platform-level permission `organizations.read` OR the org role `member` on the target organization grants access. Org role is checked via `requireOrgRole()` inside the handler.
+    operationId: getAdminOrganizationMembers
+    security:
+      - BearerAuth: [organizations.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/OrganizationIdParam'
+    responses:
+      '200':
+        description: List of organization members
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/OrganizationMembersResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid organization id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - neither organizations.read nor membership of the organization
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Admin - Organization Members
+    summary: Add member to organization
+    description: |
+      Adds a user to the organization with a specified member role
+      (default `member`). Refused on an archived
+      organization (`409 resource_archived`). Only an active person can be a
+      member: core's system user, a service account or an inactive user is
+      refused with `400 user_not_addable`.
+
+      On an archived organization every mutation answers
+      `409 resource_archived` once the caller passes the member-tier check
+      (a member, or `organizations.read`) and before the route's own
+      permission check, so a member without `organizations.write` may see
+      `409` rather than `403`. A caller who is neither gets `403`.
+
+      An audit log entry is created for this action.
+      An `auth.organization.member-added` webhook event is emitted.
+
+      **Authorization:** The platform-level permission `organizations.write`. No organization member role is enough: the organization's owners and admins get `403`, though they keep managing member tiers and roles and removing members.
+    operationId: postAdminOrganizationMember
+    security:
+      - BearerAuth: [organizations.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/OrganizationIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/AddOrganizationMemberRequest'
+    responses:
+      '201':
+        description: Member added successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/OrganizationMember'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid body (`invalid_request`), a `userId` that names no user (`unknown_user`), or the user is the system user, a service account or inactive (`user_not_addable`)
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - the caller lacks the platform permission organizations.write (an organization owner or admin included)
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Organization not found
+      '409':
+        description: User is already a member of this organization (`conflict`), or the organization is archived (`resource_archived`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum: [conflict, resource_archived]
+                error_description:
+                  type: string
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/organizations/{id}/members/{userId}:
+  patch:
+    tags:
+      - Admin - Organization Members
+    summary: Update member role
+    description: |
+      Updates a member's org-scoped role (member/admin/owner) within the
+      organization. Demoting the organization's last `owner` is refused
+      (`409 conflict`). Refused on an archived organization
+      (`409 resource_archived`).
+
+      On an archived organization every mutation answers
+      `409 resource_archived` once the caller passes the member-tier check
+      (a member, or `organizations.read`) and before the route's own role
+      check, so a member without the required role may see `409` rather
+      than `403`. A caller who is neither gets `403`.
+
+      An audit log entry is created for this action.
+      An `auth.organization.member-updated` webhook event is emitted.
+
+      **Authorization:** Either the platform-level permission `organizations.write` OR the org role `admin` on the target organization grants access. Org role is checked via `requireOrgRole()` inside the handler, before the body is validated. Note that org `admin`s cannot change an `owner`'s role, nor make anyone (themselves included) an `owner` — only platform admins or org `owner`s can. On an inactive organization the org role is not enough: only `organizations.write` passes, and its members get `403`.
+    operationId: patchAdminOrganizationMember
+    security:
+      - BearerAuth: [organizations.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/OrganizationIdParam'
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/UpdateMemberRoleRequest'
+    responses:
+      '200':
+        description: Member role updated successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/OrganizationMember'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - neither organizations.write nor the admin role in the organization, or an org admin targeting an owner or making someone an owner
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Organization not found, or the user is not a member of it
+      '409':
+        description: The change would leave the organization without an owner (`conflict`), or the organization is archived (`resource_archived`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum: [conflict, resource_archived]
+                error_description:
+                  type: string
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  delete:
+    tags:
+      - Admin - Organization Members
+    summary: Remove member from organization
+    description: |
+      Removes a member from the organization, with their org-scoped role
+      assignments in it, and signs them out of it: every token issued under
+      the organization and every SSO session bound to it (with the token
+      families those browsers obtained) is revoked. Removing the last
+      `owner` is refused (`409 conflict`). Refused on an archived
+      organization (`409 resource_archived`).
+
+      On an archived organization every mutation answers
+      `409 resource_archived` once the caller passes the member-tier check
+      (a member, or `organizations.read`) and before the route's own role
+      check, so a member without the required role may see `409` rather
+      than `403`. A caller who is neither gets `403`.
+
+      An audit log entry is created for this action.
+      An `auth.organization.member-removed` webhook event is emitted.
+
+      **Authorization:** Either the platform-level permission `organizations.write` OR the org role `admin` on the target organization grants access. Org role is checked via `requireOrgRole()` inside the handler. Note that org `admin`s cannot remove `owner`s — only platform admins or org `owner`s can. On an inactive organization the org role is not enough: only `organizations.write` passes, and its members get `403`.
+    operationId: deleteAdminOrganizationMember
+    security:
+      - BearerAuth: [organizations.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/OrganizationIdParam'
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    responses:
+      '204':
+        description: Member removed successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid organization or user id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - neither organizations.write nor the admin role in the organization, or an org admin targeting an owner
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Organization not found, or the user is not a member of it
+      '409':
+        description: The user is the organization's last owner (`conflict`), or the organization is archived (`resource_archived`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum: [conflict, resource_archived]
+                error_description:
+                  type: string
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/organizations/{id}/members/{userId}/roles:
+  get:
+    tags:
+      - Admin - Organization Member Roles
+    summary: Get member's org-scoped roles
+    description: |
+      Returns the roles assigned to a member within this specific
+      organization. An archived organization's member roles stay readable.
+
+      **Authorization:** Either the platform-level permission `organizations.read` OR the org role `member` on the target organization grants access. Org role is checked via `requireOrgRole()` inside the handler.
+    operationId: getAdminOrganizationMemberRoles
+    security:
+      - BearerAuth: [organizations.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/OrganizationIdParam'
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    responses:
+      '200':
+        description: Member's org-scoped roles
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/OrganizationMemberRolesResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - neither organizations.read nor membership of the organization
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Organization not found, or the user is not a member of it
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  put:
+    tags:
+      - Admin - Organization Member Roles
+    summary: Set member's org-scoped roles
+    description: |
+      Replaces all org-scoped role assignments for a member within this
+      organization (duplicate `roleIds` are ignored). A role the member
+      already holds here keeps its assignment, `expiresAt` included; only
+      roles left out are removed. Only custom roles can
+      be assigned here: a system role (declared by a service) returns `403`.
+      A newly granted role may carry only org-assignable permissions
+      (`Permission.orgAssignable`), whoever the caller is; one carrying any
+      other returns `400 not_org_assignable` naming them. It may also carry
+      only permissions the caller holds in this organization (`admin`
+      covers all) — through global roles or roles here, not roles in another
+      organization; one granting more returns `403`. Roles the member
+      already holds here are kept without either check; whatever they carry
+      that is not org-assignable grants nothing within the organization.
+      An org admin may not change an owner's roles (`403`); an owner or a
+      caller with `organizations.write` may.
+      Refused on an archived organization (`409 resource_archived`).
+
+      On an archived organization every mutation answers
+      `409 resource_archived` once the caller passes the member-tier check
+      (a member, or `organizations.read`) and before the route's own role
+      check, so a member without the required role may see `409` rather
+      than `403`. A caller who is neither gets `403`.
+
+      An audit log entry is created for this action.
+      An `auth.organization.member-roles-changed` webhook event is emitted.
+
+      **Authorization:** Either the platform-level permission `organizations.write` OR the org role `admin` on the target organization grants access. Org role is checked via `requireOrgRole()` inside the handler, before the body is validated. On an inactive organization the org role is not enough: only `organizations.write` passes, and its members get `403`.
+    operationId: putAdminOrganizationMemberRoles
+    security:
+      - BearerAuth: [organizations.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/OrganizationIdParam'
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/SetMemberRolesRequest'
+    responses:
+      '200':
+        description: Member's org-scoped roles updated
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/OrganizationMemberRolesResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid body (`invalid_request`), a role id that names no role, or an archived or retired one (`unknown_role`), or a new role carries a permission that is not org-assignable (`not_org_assignable`)
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - neither organizations.write nor the admin role in the organization, a member of an inactive organization, an org admin changing an owner's roles, a system role was requested, or a new role grants a permission the caller does not hold in this organization
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Organization not found, or the user is not a member of it
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/ArchivedResponse'
+        description: The organization is archived (`resource_archived`)
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+# ============================================
+# WEBHOOK EVENTS
+# ============================================
+
+auth.organization.created:
+  post:
+    tags:
+      - Admin - Organizations
+    summary: Organization created
+    description: Fired when an organization is created. `data` is the organization.
+    operationId: webhookOrganizationCreated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.organization.created
+                  entityType:
+                    const: Organization
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/Organization'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.organization.updated:
+  post:
+    tags:
+      - Admin - Organizations
+    summary: Organization updated
+    description: Fired when an organization is updated. `data` is the organization after the change.
+    operationId: webhookOrganizationUpdated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.organization.updated
+                  entityType:
+                    const: Organization
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/Organization'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.organization.archived:
+  post:
+    tags:
+      - Admin - Organizations
+    summary: Organization archived
+    description: Fired when an organization is archived. `data` is the archived organization.
+    operationId: webhookOrganizationArchived
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.organization.archived
+                  entityType:
+                    const: Organization
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/Organization'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.organization.restored:
+  post:
+    tags:
+      - Admin - Organizations
+    summary: Organization restored
+    description: Fired when an archived organization is restored (still deactivated). `data` is the organization.
+    operationId: webhookOrganizationRestored
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.organization.restored
+                  entityType:
+                    const: Organization
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/Organization'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.organization.member-added:
+  post:
+    tags:
+      - Admin - Organization Members
+    summary: Organization member added
+    description: Fired when a user is added to an organization with `POST /v1/admin/organizations/{id}/members`. Delivered to the default organization's endpoints, like the other `auth.organization.*` events.
+    operationId: webhookOrganizationMemberAdded
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.organization.member-added
+                  entityType:
+                    const: OrganizationMember
+                  data:
+                    type: object
+                    required: [organizationId, userId, email, memberRole]
+                    properties:
+                      organizationId:
+                        type: string
+                        format: uuid
+                      userId:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                      memberRole:
+                        type: string
+                        enum: [owner, admin, member]
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.organization.member-updated:
+  post:
+    tags:
+      - Admin - Organization Members
+    summary: Organization member role changed
+    description: Fired when a member's role (owner/admin/member) is changed with `PATCH /v1/admin/organizations/{id}/members/{userId}`.
+    operationId: webhookOrganizationMemberUpdated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.organization.member-updated
+                  entityType:
+                    const: OrganizationMember
+                  data:
+                    type: object
+                    required: [organizationId, userId, email, memberRole, previousMemberRole]
+                    properties:
+                      organizationId:
+                        type: string
+                        format: uuid
+                      userId:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                      memberRole:
+                        type: string
+                        enum: [owner, admin, member]
+                      previousMemberRole:
+                        type: string
+                        enum: [owner, admin, member]
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.organization.member-removed:
+  post:
+    tags:
+      - Admin - Organization Members
+    summary: Organization member removed
+    description: Fired when a member is removed with `DELETE /v1/admin/organizations/{id}/members/{userId}`.
+    operationId: webhookOrganizationMemberRemoved
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.organization.member-removed
+                  entityType:
+                    const: OrganizationMember
+                  data:
+                    type: object
+                    required: [organizationId, userId, email, memberRole]
+                    properties:
+                      organizationId:
+                        type: string
+                        format: uuid
+                      userId:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                      memberRole:
+                        type: string
+                        enum: [owner, admin, member]
+                        description: The role the member held
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.organization.member-roles-changed:
+  post:
+    tags:
+      - Admin - Organization Member Roles
+    summary: Organization member roles changed
+    description: Fired when a member's org-scoped role assignments are replaced with `PUT /v1/admin/organizations/{id}/members/{userId}/roles`.
+    operationId: webhookOrganizationMemberRolesChanged
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.organization.member-roles-changed
+                  entityType:
+                    const: OrganizationMember
+                  data:
+                    type: object
+                    required: [organizationId, userId, email, roleIds]
+                    properties:
+                      organizationId:
+                        type: string
+                        format: uuid
+                      userId:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                      roleIds:
+                        type: array
+                        items:
+                          type: string
+                          format: uuid
+                        description: The member's org-scoped role ids after the change
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

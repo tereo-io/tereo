@@ -1,0 +1,1992 @@
+# Bucket Schemas
+
+CorsConfig:
+  type: object
+  description: |
+    Per-bucket CORS configuration. Overrides the service-wide
+    `CORS_ALLOWED_ORIGINS` default when set. `null` clears the override.
+    `allowCredentials: true` together with a `*` origin is rejected (400).
+    Values go into response headers as they are: an origin must be
+    `scheme://host[:port]` (ASCII; no path) or `*`, and a header name an
+    RFC 9110 token — anything else is 400.
+  properties:
+    allowedOrigins:
+      type: array
+      items:
+        type: string
+        minLength: 1
+        maxLength: 255
+      minItems: 1
+      maxItems: 50
+      examples:
+        - ["https://app.example.com"]
+    allowedMethods:
+      type: array
+      items:
+        type: string
+        enum: [GET, HEAD, PUT, POST, DELETE, PATCH]
+      minItems: 1
+      maxItems: 6
+      default: [GET, HEAD]
+    allowedHeaders:
+      type: array
+      items:
+        type: string
+        pattern: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+        maxLength: 255
+      maxItems: 20
+      default: [Content-Type, Authorization]
+    exposedHeaders:
+      type: array
+      items:
+        type: string
+        pattern: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+        maxLength: 255
+      maxItems: 20
+    maxAgeSeconds:
+      type: integer
+      minimum: 0
+      maximum: 86400
+      default: 600
+    allowCredentials:
+      type: boolean
+      default: false
+  required:
+    - allowedOrigins
+
+RateLimitConfig:
+  type: object
+  description: |
+    Per-bucket rate-limit override (a token bucket). Applied by the
+    `bucketRateLimit` middleware on the bucket's `/objects`, `/multipart` and
+    `/archives` routes and on its presigned (`/v1/files/signed/objects/**`) traffic;
+    over the limit answers `429 too_many_requests` (same shape as the general
+    limiter's, with `retry_after` and `X-RateLimit-*` headers). `null` clears the override.
+  properties:
+    tokensPerSecond:
+      type: number
+      exclusiveMinimum: 0
+      maximum: 10000
+    maxTokens:
+      type: integer
+      minimum: 1
+      maximum: 100000
+    requestCost:
+      type: number
+      exclusiveMinimum: 0
+      default: 1
+  required:
+    - tokensPerSecond
+    - maxTokens
+
+Bucket:
+  type: object
+  properties:
+    id:
+      description: Unique bucket identifier
+      type: integer
+      examples:
+        - 1
+    name:
+      description: Bucket name (unique, lowercase alphanumeric with hyphens)
+      type: string
+      minLength: 3
+      maxLength: 63
+      pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+      examples:
+        - my-bucket
+        - user-uploads-2024
+    description:
+      description: Optional bucket description
+      type: [string, 'null']
+      maxLength: 500
+      examples:
+        - User profile images
+    policy:
+      description: Bucket access policy
+      type: string
+      enum: [public, private]
+      examples:
+        - private
+    storageQuotaBytes:
+      description: Maximum storage quota in bytes (BigInt as string). The field is omitted when the bucket is unlimited.
+      type: string
+      examples:
+        - "1073741824"
+    currentUsageBytes:
+      description: |
+        Total storage usage in bytes, including historical versions retained
+        in a versioning-enabled bucket (BigInt as string). This is the figure
+        used for quota enforcement.
+      type: string
+      examples:
+        - "524288000"
+    liveUsageBytes:
+      description: |
+        Sum of blob sizes across the bucket's live *current* (non-delete-marker)
+        versions, as a BigInt string. Only present on `GET /v1/files/buckets/:name` and
+        only when `versioningEnabled=true`. Lets clients show a Current / History
+        split (History = `currentUsageBytes - liveUsageBytes`). For versioning-off
+        buckets `currentUsageBytes` is already the live figure.
+      type: string
+      examples:
+        - "131072000"
+    versioningEnabled:
+      description: |
+        When true, every write creates a new `ObjectVersion` row and prior
+        content is retained; deletes insert a delete-marker version.
+      type: boolean
+      examples:
+        - false
+    autoThumbnails:
+      description: |
+        When true, image content written to this bucket (by upload,
+        multipart complete, presigned write or version restore) triggers
+        automatic thumbnail generation (`thumb`, `small`, `medium`) via the
+        BullMQ thumbnail worker. SVG and images over 50 megapixels get none.
+        Thumbnails are served only while this is true.
+      type: boolean
+      examples:
+        - false
+    corsConfig:
+      description: Optional per-bucket CORS override. Null when unset.
+      oneOf:
+        - $ref: '#/CorsConfig'
+        - type: 'null'
+    rateLimitConfig:
+      description: Optional per-bucket rate-limit override. Null when unset.
+      oneOf:
+        - $ref: '#/RateLimitConfig'
+        - type: 'null'
+    organizationId:
+      description: |
+        The organization that owns the bucket; null for a bucket in no
+        organization. Bucket grants may only go to this organization's members.
+      type: [string, 'null']
+      format: uuid
+    organization:
+      description: The organization `organizationId` names; null when it is null.
+      oneOf:
+        - $ref: '../schemas.yaml#/OrgRef'
+        - type: 'null'
+    createdBy:
+      description: |
+        User id of the creator. For a declared bucket, the declaring service's
+        service-account user (or the system user for core's own).
+      type: string
+      format: uuid
+    creator:
+      description: The user `createdBy` names.
+      $ref: '../schemas.yaml#/UserRef'
+    serviceId:
+      description: |
+        The service that declared the bucket at registration; null for a bucket a
+        user created. A declared bucket cannot be deleted and its description is
+        set by the service; admins may tune its other settings and grants.
+      type: [string, 'null']
+      format: uuid
+    serviceName:
+      description: Name of the declaring service; null when `serviceId` is null.
+      type: [string, 'null']
+    service:
+      description: The service `serviceId` names; null when it is null.
+      oneOf:
+        - $ref: '../schemas.yaml#/ServiceRef'
+        - type: 'null'
+    missingSince:
+      description: |
+        When the declaring service's latest declaration stopped listing the bucket;
+        cleared if it is declared again. Retired after the grace period.
+      type: [string, 'null']
+      format: date-time
+    retiredAt:
+      description: |
+        When the bucket was retired (its service no longer declares it). A retired
+        bucket is read-only: writes get `409 bucket_retired`.
+      type: [string, 'null']
+      format: date-time
+    createdAt:
+      description: Bucket creation timestamp
+      type: string
+      format: date-time
+      examples:
+        - "2024-01-15T10:30:00Z"
+    updatedAt:
+      description: Last update timestamp
+      type: string
+      format: date-time
+      examples:
+        - "2024-01-20T14:45:00Z"
+  required:
+    - id
+    - name
+    - description
+    - policy
+    - currentUsageBytes
+    - versioningEnabled
+    - autoThumbnails
+    - corsConfig
+    - rateLimitConfig
+    - organizationId
+    - organization
+    - createdBy
+    - creator
+    - serviceId
+    - serviceName
+    - service
+    - missingSince
+    - retiredAt
+    - createdAt
+    - updatedAt
+
+CreateBucketRequest:
+  type: object
+  properties:
+    name:
+      description: Bucket name (unique, lowercase alphanumeric with hyphens)
+      type: string
+      minLength: 3
+      maxLength: 63
+      pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+      examples:
+        - my-new-bucket
+    description:
+      description: Optional bucket description
+      type: string
+      maxLength: 500
+      examples:
+        - User profile images
+    policy:
+      description: Bucket access policy (defaults to private)
+      type: string
+      enum: [public, private]
+      default: private
+      examples:
+        - private
+    storageQuotaBytes:
+      description: |
+        Maximum storage quota in bytes, as a decimal string or an integer
+        (positive, max 1 TB = 1099511627776). Omit or pass `null` for unlimited.
+      type: [string, integer, 'null']
+      pattern: '^[0-9]+$'
+      minimum: 1
+      maximum: 1099511627776
+      examples:
+        - "1073741824"
+        - null
+  required:
+    - name
+
+UpdateBucketRequest:
+  type: object
+  description: |
+    Partial update. Every field is optional. Cannot flip `versioningEnabled`
+    from `true` to `false` while historical versions still exist — clear
+    history first via a lifecycle policy (`expireVersionsAfterDays`).
+  properties:
+    description:
+      description: |
+        Updated bucket description. On a declared bucket (`serviceId` set) a
+        changed value is refused with `409 bucket_declared`.
+      type: string
+      maxLength: 500
+      examples:
+        - Updated description
+    policy:
+      description: Updated bucket access policy
+      type: string
+      enum: [public, private]
+      examples:
+        - public
+    storageQuotaBytes:
+      description: |
+        Updated storage quota in bytes, as a decimal string or an integer
+        (positive, max 1 TB). `null` clears the quota (unlimited), as on
+        create; omit it to leave the quota unchanged.
+      type: [string, integer, 'null']
+      pattern: '^[0-9]+$'
+      minimum: 1
+      maximum: 1099511627776
+      examples:
+        - "2147483648"
+        - null
+    versioningEnabled:
+      description: |
+        Toggle object versioning for this bucket. Flipping to `false` while
+        historical versions exist returns 400 (`versioning_disable_blocked`).
+      type: boolean
+      examples:
+        - true
+    autoThumbnails:
+      description: Enable background thumbnail generation for image uploads.
+      type: boolean
+      examples:
+        - true
+    corsConfig:
+      description: Set the per-bucket CORS override. Pass `null` to clear.
+      oneOf:
+        - $ref: '#/CorsConfig'
+        - type: 'null'
+    rateLimitConfig:
+      description: Set the per-bucket rate-limit override. Pass `null` to clear.
+      oneOf:
+        - $ref: '#/RateLimitConfig'
+        - type: 'null'
+
+CreateBucketResponse:
+  allOf:
+    - $ref: '#/Bucket'
+  description: |
+    Response from creating a bucket. Same shape as `Bucket` — returned by
+    `POST /v1/files/buckets`. Includes the newly-minted bucket's `id`,
+    `versioningEnabled` (defaults to false), `autoThumbnails` (defaults to
+    false), and `corsConfig`/`rateLimitConfig` (null unless set).
+
+UpdateBucketResponse:
+  allOf:
+    - $ref: '#/Bucket'
+  description: |
+    Response from updating a bucket. Same shape as `Bucket` — returned by
+    `PUT /v1/files/buckets/{name}`.
+
+ListBucketsResponse:
+  type: object
+  properties:
+    data:
+      description: Array of buckets
+      type: array
+      items:
+        $ref: '#/Bucket'
+    hasMore:
+      description: Whether more results are available
+      type: boolean
+      examples:
+        - true
+    limit:
+      description: Maximum number of items per page (as requested)
+      type: integer
+      examples:
+        - 100
+    nextCursor:
+      description: |
+        Opaque cursor to pass as `cursor` on the next request to continue
+        paginating. `null` when `hasMore` is `false`.
+      type: [string, 'null']
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+
+BucketPermissions:
+  type: object
+  description: |
+    What the caller may do in the bucket — their effective access. All three
+    are `true` for a `file-service.admin` holder; otherwise each is the
+    caller's active grant flag (`false` without one) AND the matching role
+    permission (`file-service.objects.read` / `.write` / `.delete`, cut to a
+    delegated token's ceiling), and `canRead` is also `true` on a public
+    bucket. Being the bucket's creator adds nothing beyond the grant made at
+    create time. Never `null`.
+  properties:
+    canRead:
+      description: Whether the current user can read from this bucket
+      type: boolean
+      examples:
+        - true
+    canWrite:
+      description: Whether the current user can write to this bucket
+      type: boolean
+      examples:
+        - true
+    canDelete:
+      description: Whether the current user can delete from this bucket
+      type: boolean
+      examples:
+        - false
+  required:
+    - canRead
+    - canWrite
+    - canDelete
+
+# Object Schemas
+
+Object:
+  type: object
+  properties:
+    id:
+      description: |
+        Stable UUIDv7 object identifier. Used by all id-addressed mutation
+        routes (`/v1/files/buckets/{name}/objects/by-id/{id}/...`). Survives renames.
+      type: string
+      format: uuid
+      examples:
+        - "018f5b9c-1234-7890-abcd-0123456789ab"
+    key:
+      description: Object key (path within bucket)
+      type: string
+      maxLength: 1024
+      examples:
+        - photos/2024/vacation.jpg
+        - documents/report.pdf
+    contentType:
+      description: MIME type of the object
+      type: string
+      examples:
+        - image/jpeg
+        - application/pdf
+    sizeBytes:
+      description: Object size in bytes (BigInt serialized as string)
+      type: string
+      examples:
+        - "2048576"
+    etag:
+      description: Entity tag for cache validation
+      type: string
+      examples:
+        - 5d41402abc4b2a76b9719d911017c592
+    metadata:
+      description: Custom metadata (JSON object, max 100KB, max 100 keys)
+      type: [object, 'null']
+      additionalProperties: true
+      examples:
+        - author: John Doe
+          category: vacation
+          year: 2024
+    tags:
+      description: Free-form tags associated with the current version (max 50 tags, each up to 128 chars)
+      type: array
+      items:
+        type: string
+      examples:
+        - ["invoice", "2024", "q1"]
+    deleteAfter:
+      description: |
+        Per-object expiry that overrides the bucket's lifecycle policy (set
+        with `PATCH .../by-id/{id}`); null when unset. Overwriting the object
+        (simple, presigned or multipart upload to its key) keeps it.
+      type: [string, 'null']
+      format: date-time
+    createdAt:
+      description: Object creation timestamp
+      type: string
+      format: date-time
+      examples:
+        - "2024-01-15T10:30:00Z"
+    updatedAt:
+      description: Last update timestamp
+      type: string
+      format: date-time
+      examples:
+        - "2024-01-15T10:30:00Z"
+  required:
+    - id
+    - key
+    - contentType
+    - sizeBytes
+    - etag
+    - metadata
+    - tags
+    - deleteAfter
+    - createdAt
+    - updatedAt
+
+ObjectResponse:
+  type: object
+  description: |
+    Response returned by the object upload endpoint (same shape for both
+    created and updated objects). The `id` is the UUIDv7 object identifier;
+    callers should store it to drive subsequent id-addressed mutation routes
+    (`PATCH`, `DELETE`, presign, versions).
+  properties:
+    id:
+      description: |
+        Stable UUIDv7 object identifier. This is the canonical handle for
+        subsequent mutations on this object — rename, delete, presign, and all
+        version operations address the object by this id, not its key.
+      type: string
+      format: uuid
+      examples:
+        - "018f5b9c-1234-7890-abcd-0123456789ab"
+    key:
+      description: Object key (path within bucket)
+      type: string
+      maxLength: 1024
+      examples:
+        - photos/2024/vacation.jpg
+    contentType:
+      description: MIME type of the object
+      type: string
+      examples:
+        - image/jpeg
+    sizeBytes:
+      description: Object size in bytes (BigInt serialized as string)
+      type: string
+      examples:
+        - "2048576"
+    etag:
+      description: Entity tag for cache validation
+      type: string
+      examples:
+        - 5d41402abc4b2a76b9719d911017c592
+    metadata:
+      description: Custom metadata (JSON object, max 100KB, max 100 keys)
+      type: [object, 'null']
+      additionalProperties: true
+      examples:
+        - author: John Doe
+          category: vacation
+    tags:
+      description: Free-form tags associated with the current version
+      type: array
+      items:
+        type: string
+    deleteAfter:
+      description: |
+        Per-object expiry that overrides the bucket's lifecycle policy (set
+        with `PATCH .../by-id/{id}`); null when unset. Overwriting the object
+        (simple, presigned or multipart upload to its key) keeps it.
+      type: [string, 'null']
+      format: date-time
+    createdAt:
+      description: Object creation timestamp
+      type: string
+      format: date-time
+      examples:
+        - "2024-01-15T10:30:00Z"
+    updatedAt:
+      description: Last update timestamp
+      type: string
+      format: date-time
+      examples:
+        - "2024-01-15T10:30:00Z"
+  required:
+    - id
+    - key
+    - contentType
+    - sizeBytes
+    - etag
+    - metadata
+    - tags
+    - deleteAfter
+    - createdAt
+    - updatedAt
+
+ListObjectsResponse:
+  type: object
+  properties:
+    data:
+      description: Array of objects
+      type: array
+      items:
+        $ref: '#/Object'
+    hasMore:
+      description: Whether more results are available
+      type: boolean
+      examples:
+        - true
+    limit:
+      description: Maximum number of items per page (as requested)
+      type: integer
+      examples:
+        - 100
+    nextCursor:
+      description: |
+        Opaque cursor to pass as `cursor` on the next request to continue
+        paginating. `null` when `hasMore` is `false`.
+      type: [string, 'null']
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+
+DeletedObject:
+  type: object
+  description: |
+    An object deleted in a versioned bucket, as `GET /v1/files/buckets/{name}/objects?deleted=true`
+    lists it. Its versions are at `/v1/files/buckets/{name}/objects/by-id/{id}/versions`; restoring
+    one undeletes it.
+  properties:
+    id:
+      type: string
+      format: uuid
+    key:
+      description: The key it had when deleted
+      type: string
+    deletedAt:
+      type: string
+      format: date-time
+    deletedBy:
+      description: User id of whoever deleted it
+      type: [string, 'null']
+      format: uuid
+    deletedByUser:
+      description: |
+        The user `deletedBy` names. Null when `deletedBy` is, and for a caller
+        served only because the bucket is public (anonymous, or from another
+        organization).
+      oneOf:
+        - $ref: '../schemas.yaml#/UserRef'
+        - type: 'null'
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+  required:
+    - id
+    - key
+    - deletedAt
+    - deletedBy
+    - deletedByUser
+    - createdAt
+    - updatedAt
+
+ListDeletedObjectsResponse:
+  type: object
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/DeletedObject'
+    hasMore:
+      type: boolean
+    limit:
+      type: integer
+    nextCursor:
+      type: [string, 'null']
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+
+# Prefix (tree-view) Schemas
+
+PrefixEntry:
+  type: object
+  description: A virtual folder (common prefix) under the requested prefix.
+  properties:
+    type:
+      description: Discriminator identifying this entry as a virtual folder.
+      type: string
+      const: prefix
+    prefix:
+      description: The full prefix (including the requested prefix and the delimiter).
+      type: string
+      examples:
+        - photos/2024/
+    objectCount:
+      description: Number of live leaf objects under this prefix (transitive).
+      type: integer
+      examples:
+        - 12
+    totalSizeBytes:
+      description: Sum of `sizeBytes` across all live leaf objects under this prefix (BigInt as string).
+      type: string
+      examples:
+        - "104857600"
+  required:
+    - type
+    - prefix
+    - objectCount
+    - totalSizeBytes
+
+PrefixObjectEntry:
+  type: object
+  description: A leaf object directly under the requested prefix.
+  properties:
+    type:
+      description: Discriminator identifying this entry as a leaf object.
+      type: string
+      const: object
+    id:
+      description: Stable UUIDv7 object identifier. Used by all id-addressed mutation routes.
+      type: string
+      format: uuid
+      examples:
+        - "018f5b9c-1234-7890-abcd-0123456789ab"
+    key:
+      description: Full object key
+      type: string
+      examples:
+        - photos/2024/vacation.jpg
+    contentType:
+      description: MIME type of the current version
+      type: string
+      examples:
+        - image/jpeg
+    sizeBytes:
+      description: Size of the current version in bytes (BigInt as string)
+      type: string
+      examples:
+        - "2048576"
+    etag:
+      description: Entity tag of the current version
+      type: string
+      examples:
+        - 5d41402abc4b2a76b9719d911017c592
+    tags:
+      description: Free-form tags of the current version
+      type: array
+      items:
+        type: string
+    updatedAt:
+      description: Last update timestamp
+      type: string
+      format: date-time
+      examples:
+        - "2024-01-15T10:30:00Z"
+  required:
+    - type
+    - id
+    - key
+    - contentType
+    - sizeBytes
+    - etag
+    - tags
+    - updatedAt
+
+PrefixListEntry:
+  description: |
+    Tagged union of prefix listing entries. `type: "prefix"` denotes a virtual
+    folder; `type: "object"` denotes a leaf object.
+  oneOf:
+    - $ref: '#/PrefixEntry'
+    - $ref: '#/PrefixObjectEntry'
+  discriminator:
+    propertyName: type
+    mapping:
+      prefix: '#/PrefixEntry'
+      object: '#/PrefixObjectEntry'
+
+ListObjectPrefixesResponse:
+  type: object
+  description: |
+    Combined folder + leaf listing used by the admin UI's tree view. Matches
+    the standard cursor-pagination envelope — `data` contains virtual folders
+    (`type: "prefix"`) followed by leaf objects (`type: "object"`).
+  properties:
+    data:
+      description: |
+        Ordered list of entries under the requested prefix — all virtual
+        folders first, then leaf objects. Each entry is discriminated by its
+        `type` field.
+      type: array
+      items:
+        $ref: '#/PrefixListEntry'
+    hasMore:
+      description: Whether more folders or leaf objects are available under this prefix.
+      type: boolean
+    limit:
+      description: Maximum number of items per page (as requested).
+      type: integer
+    nextCursor:
+      description: |
+        Opaque cursor for the next page. Pagination advances folders and leaf
+        objects independently — internal state is encoded in the cursor, so
+        clients should treat the value as opaque.
+      type: [string, 'null']
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+
+# Object Mutation / Versioning Schemas
+
+PatchObjectRequest:
+  type: object
+  description: |
+    Partial update to an existing object. All fields are optional; at least
+    one editable field (`objectKey`, `contentType`, `metadata`, `tags` or
+    `deleteAfter`) must be provided — `createNewVersion` alone does not
+    satisfy the requirement. Providing `objectKey` renames the object (409 on collision
+    with another live key in the bucket). The other fields mutate the
+    current version's metadata in place, unless `createNewVersion` is set on
+    a versioning-enabled bucket — see below.
+  properties:
+    objectKey:
+      description: |
+        New object key. Pass to rename the object in place. Same rules as
+        upload keys: no `..` or `//`, no leading or trailing `/`, and not a
+        reserved key (`prefixes`, or starting with `by-id/` or `by-key/`:
+        `400 reserved_object_key`).
+      type: string
+      minLength: 1
+      maxLength: 1024
+      pattern: "^[a-zA-Z0-9/_\\-. ()\\[\\]{}+=@#$!&',]+$"
+      examples:
+        - photos/2024/renamed.jpg
+    contentType:
+      description: |
+        Update the current version's MIME type: a single `type/subtype`,
+        optionally with a `charset` parameter, stored lowercased. A list of
+        types or any other parameter is `400 invalid_request`.
+      type: string
+      minLength: 1
+      maxLength: 255
+      examples:
+        - image/jpeg
+        - text/plain; charset=utf-8
+    metadata:
+      description: |
+        Replace the current version's custom metadata object. Values must be
+        strings (≤ 10,000 chars), numbers, booleans, null, or
+        arrays of these (≤ 100 items); at most 100 keys (each ≤ 255 chars) and
+        100 KB serialized — the same limits as the upload `X-Metadata` header.
+        Over a limit is `400 invalid_request`.
+      type: object
+      maxProperties: 100
+      additionalProperties: true
+      examples:
+        - author: Jane Doe
+          category: archive
+    tags:
+      description: Replace the current version's tag list (max 50 tags, each 1-128 chars).
+      type: array
+      items:
+        type: string
+        minLength: 1
+        maxLength: 128
+      maxItems: 50
+      examples:
+        - ["invoice", "reviewed"]
+    createNewVersion:
+      description: |
+        When `true` on a bucket with `versioningEnabled=true`, the metadata
+        edits (`contentType`, `metadata`, `tags`) create a NEW
+        `ObjectVersion` inheriting the current content blob — the prior
+        current version is flipped to `isCurrent=false`. This preserves the
+        "every mutation creates a version" invariant. When `false` or
+        absent, metadata is updated in place on the current version
+        (existing behavior). Silently ignored on non-versioned buckets.
+        Renames (`objectKey`) are never versioned either way. The new version
+        is charged the content's size against the bucket quota, like a
+        restore (`507` when that would exceed it).
+      type: boolean
+      default: false
+      examples:
+        - true
+    deleteAfter:
+      description: |
+        Per-object expiry overriding the bucket's lifecycle policy (ISO 8601).
+        `null` clears it; omit to leave it unchanged. Later uploads to the
+        object's key keep it.
+      type: [string, 'null']
+      format: date-time
+
+ObjectVersion:
+  type: object
+  description: |
+    A single version of an object in a versioning-enabled bucket, as the
+    versions list and `GET .../versions/{versionId}` return it. The writer is
+    named (`createdByEmail`, `createdByName`, `creator`) only to readers of the
+    bucket: all three are null for a caller served only because the bucket is
+    public (anonymous, or from another organization), and when the user no
+    longer resolves.
+  properties:
+    versionId:
+      description: Stable UUID identifier for this version.
+      type: string
+      format: uuid
+      examples:
+        - "018f5b9c-aaaa-7890-abcd-0123456789ab"
+    contentBlobHash:
+      description: SHA-256 of the version's plaintext content. Null for delete markers.
+      type: [string, 'null']
+      examples:
+        - "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+    etag:
+      description: Entity tag of this version. Null for delete markers.
+      type: [string, 'null']
+    sizeBytes:
+      description: Size of this version's content in bytes (BigInt as string). Null for delete markers.
+      type: [string, 'null']
+      examples:
+        - "2048576"
+    contentType:
+      description: MIME type of this version. Null for delete markers.
+      type: [string, 'null']
+      examples:
+        - image/jpeg
+    metadata:
+      description: Custom metadata captured with this version.
+      type: [object, 'null']
+      additionalProperties: true
+    tags:
+      description: Tags captured with this version.
+      type: array
+      items:
+        type: string
+    isCurrent:
+      description: Whether this is the current version of the object.
+      type: boolean
+    isDeleteMarker:
+      description: Whether this version is a tombstone created by a soft delete in a versioned bucket.
+      type: boolean
+    restoredFromVersionId:
+      description: If this version was created by restoring a prior version, the UUID of that source version. Null otherwise.
+      type: [string, 'null']
+      format: uuid
+    createdAt:
+      description: When this version was written.
+      type: string
+      format: date-time
+    createdBy:
+      description: User ID that wrote this version.
+      type: string
+      format: uuid
+      examples:
+        - "019dd4c2-e0b3-778e-b8db-a52e61927416"
+    createdByEmail:
+      description: Email of the user who wrote this version.
+      type: [string, 'null']
+      format: email
+      examples:
+        - uploader@example.com
+    createdByName:
+      description: Name of the user who wrote this version.
+      type: [string, 'null']
+      examples:
+        - Jane Doe
+    creator:
+      description: The user `createdBy` names.
+      oneOf:
+        - $ref: '../schemas.yaml#/UserRef'
+        - type: 'null'
+  required:
+    - versionId
+    - contentBlobHash
+    - etag
+    - sizeBytes
+    - contentType
+    - metadata
+    - tags
+    - isCurrent
+    - isDeleteMarker
+    - restoredFromVersionId
+    - createdAt
+    - createdBy
+    - createdByEmail
+    - createdByName
+    - creator
+
+ObjectVersionListItem:
+  description: A version as the versions list returns it — the same as `ObjectVersion`.
+  allOf:
+    - $ref: '#/ObjectVersion'
+
+ListObjectVersionsResponse:
+  type: object
+  properties:
+    data:
+      description: Paginated list of versions, newest first.
+      type: array
+      items:
+        $ref: '#/ObjectVersionListItem'
+    hasMore:
+      type: boolean
+      examples:
+        - false
+    limit:
+      type: integer
+      examples:
+        - 100
+    nextCursor:
+      type: [string, 'null']
+      description: Opaque cursor for the next page (null when hasMore is false).
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+
+RestoreObjectVersionResponse:
+  type: object
+  description: |
+    Response from restoring a prior version. Represents the newly-created
+    current version row (which points at the restored blob). Its `versionId`
+    is new — the source version remains in history under its original id.
+  properties:
+    versionId:
+      description: Stable UUID of the new current version row created by the restore.
+      type: string
+      format: uuid
+    contentBlobHash:
+      type: [string, 'null']
+    etag:
+      type: [string, 'null']
+    sizeBytes:
+      description: Size of the restored content in bytes (BigInt as string).
+      type: [string, 'null']
+    contentType:
+      type: [string, 'null']
+    createdAt:
+      type: string
+      format: date-time
+  required:
+    - versionId
+    - contentBlobHash
+    - etag
+    - sizeBytes
+    - contentType
+    - createdAt
+
+# Presigned URL Schemas
+
+PresignRequest:
+  type: object
+  description: |
+    Request body for generating a presigned URL bound to a specific object.
+    The HMAC binds the object's stable UUID `id`, so presigned URLs survive
+    a subsequent PATCH rename.
+  properties:
+    operation:
+      description: Whether the URL should be usable for reads or writes.
+      type: string
+      enum:
+        - read
+        - write
+      default: read
+      examples:
+        - read
+    expiresInSeconds:
+      description: |
+        Time-to-live of the presigned URL in seconds. Defaults to 3600 (1h).
+        Values above `FILE_SERVICE_MAX_PRESIGN_TTL_SECONDS` (default 7 days)
+        are rejected with `400 invalid_expiration`.
+      type: integer
+      minimum: 1
+      default: 3600
+      examples:
+        - 3600
+
+PresignResponse:
+  type: object
+  properties:
+    url:
+      description: |
+        Fully-qualified presigned URL. Id-addressed — has the shape
+        `/v1/files/signed/objects/{bucket}/by-id/{id}?op=…&expires=…&nonce=…&v=…&sig=…`.
+        The HMAC binds the object's UUID `id`, not its current `objectKey`,
+        so the URL survives renames. Resolves via
+        `GET/PUT /v1/files/signed/objects/{bucket}/by-id/{id}`.
+      type: string
+      format: uri
+      examples:
+        - "http://localhost:4001/v1/files/signed/objects/my-bucket/by-id/018f5b9c-1234-7890-abcd-0123456789ab?op=read&expires=1710000000&nonce=abc&v=1&sig=..."
+    expiresAt:
+      description: Absolute ISO 8601 expiration timestamp for the signature.
+      type: string
+      format: date-time
+    operation:
+      description: The operation the signature authorizes.
+      type: string
+      enum:
+        - read
+        - write
+  required:
+    - url
+    - expiresAt
+    - operation
+
+# Multipart Upload Schemas
+
+InitiateMultipartRequest:
+  type: object
+  description: |
+    Begin a multipart upload. Because initiate is a bucket-level route, the
+    object key travels in the body rather than the URL.
+  properties:
+    objectKey:
+      description: |
+        Destination object key within the bucket. Same rules as upload keys:
+        no `..` or `//`, no leading or trailing `/`, and not a reserved key
+        (`prefixes`, or starting with `by-id/` or `by-key/`:
+        `400 reserved_object_key`).
+      type: string
+      minLength: 1
+      maxLength: 1024
+      pattern: "^[a-zA-Z0-9/_\\-. ()\\[\\]{}+=@#$!&',]+$"
+      examples:
+        - videos/2024/training.mp4
+    contentType:
+      description: |
+        MIME type the finalized object should advertise: a single
+        `type/subtype`, optionally with a `charset` parameter, stored
+        lowercased. A list of types or any other parameter is
+        `400 invalid_request`. The content is checked against it on
+        `complete`, as on an upload.
+      type: string
+      minLength: 1
+      maxLength: 255
+      examples:
+        - video/mp4
+    expectedSize:
+      description: |
+        Optional final object size in bytes — a positive decimal string or
+        integer. When given, a part that would take the staged total past it
+        is refused (`413 exceeds_expected_size`), and `complete` refuses parts
+        whose total size differs (`400 size_mismatch`).
+      type: [string, integer]
+      pattern: '^[0-9]+$'
+      minimum: 1
+      examples:
+        - "5368709120"
+    metadata:
+      description: |
+        Custom metadata to apply to the finalized object's current version.
+        Values must be strings (≤ 10,000 chars), numbers, booleans, null, or
+        arrays of these (≤ 100 items); at most 100 keys (each ≤ 255 chars) and
+        100 KB serialized — the same limits as the upload `X-Metadata` header.
+        Over a limit is `400 invalid_request`.
+      type: object
+      maxProperties: 100
+      additionalProperties: true
+    tags:
+      description: Tags to apply to the finalized object's current version (max 50, each 1-128 chars).
+      type: array
+      items:
+        type: string
+        minLength: 1
+        maxLength: 128
+      maxItems: 50
+  required:
+    - objectKey
+    - contentType
+
+InitiateMultipartResponse:
+  type: object
+  properties:
+    uploadId:
+      description: UUID handle used for all subsequent part uploads, list, complete, and abort.
+      type: string
+      format: uuid
+    bucket:
+      description: Bucket that will host the finalized object.
+      type: string
+    objectKey:
+      description: Destination object key.
+      type: string
+    contentType:
+      description: MIME type the finalized object will advertise.
+      type: string
+    expiresAt:
+      description: When the multipart upload will be swept if not completed or aborted.
+      type: string
+      format: date-time
+  required:
+    - uploadId
+    - bucket
+    - objectKey
+    - contentType
+    - expiresAt
+
+UploadPartResponse:
+  type: object
+  properties:
+    partNumber:
+      description: The part number that was staged.
+      type: integer
+      minimum: 1
+    etag:
+      description: ETag of the part (MD5 hex of its plaintext) — must be echoed back on `complete`.
+      type: string
+    sizeBytes:
+      description: Size of the part in bytes (BigInt as string).
+      type: string
+    minPartSize:
+      description: |
+        Server-enforced minimum part size in bytes for all but the last part
+        (echoed for client convenience).
+      type: integer
+  required:
+    - partNumber
+    - etag
+    - sizeBytes
+    - minPartSize
+
+MultipartPartEntry:
+  type: object
+  properties:
+    partNumber:
+      type: integer
+      minimum: 1
+    etag:
+      type: string
+    sizeBytes:
+      description: Size in bytes (BigInt as string).
+      type: string
+    uploadedAt:
+      type: string
+      format: date-time
+  required:
+    - partNumber
+    - etag
+    - sizeBytes
+    - uploadedAt
+
+MultipartUploadInfo:
+  type: object
+  description: Snapshot of a multipart upload, including all staged parts.
+  properties:
+    uploadId:
+      type: string
+      format: uuid
+    objectKey:
+      type: string
+    contentType:
+      type: string
+    expiresAt:
+      type: string
+      format: date-time
+    completedAt:
+      description: Non-null once the upload has been finalized.
+      type: [string, 'null']
+      format: date-time
+    abortedAt:
+      description: Non-null once the upload has been aborted.
+      type: [string, 'null']
+      format: date-time
+    parts:
+      type: array
+      items:
+        $ref: '#/MultipartPartEntry'
+  required:
+    - uploadId
+    - objectKey
+    - contentType
+    - expiresAt
+    - completedAt
+    - abortedAt
+    - parts
+
+CompleteMultipartRequest:
+  type: object
+  description: |
+    Finalize a multipart upload by submitting the ordered list of staged parts.
+    Each entry's `etag` must match the ETag returned from the corresponding
+    `PUT .../parts/{partNumber}` call. All parts except the last must meet the
+    server's minimum part size (`FILE_SERVICE_MIN_PART_SIZE_MB`). Part numbers
+    must be unique; the list may be in any order. The bounds below are the
+    defaults of `FILE_SERVICE_MAX_MULTIPART_PARTS`.
+  properties:
+    parts:
+      type: array
+      minItems: 1
+      maxItems: 10000
+      items:
+        type: object
+        properties:
+          partNumber:
+            type: integer
+            minimum: 1
+            maximum: 10000
+          etag:
+            description: The part's ETag as returned by the part upload (32 lowercase hex characters).
+            type: string
+            pattern: '^[0-9a-f]{32}$'
+        required:
+          - partNumber
+          - etag
+  required:
+    - parts
+
+CompleteMultipartResponse:
+  allOf:
+    - $ref: '#/ObjectResponse'
+  description: |
+    Response from `POST /v1/files/buckets/{name}/multipart/{uploadId}/complete`. Same
+    shape as an ordinary upload response — the newly-finalized object's
+    metadata, including its UUIDv7 `id` for subsequent id-addressed
+    mutations.
+
+# Lifecycle Policy Schemas
+
+LifecyclePolicy:
+  type: object
+  description: |
+    Per-bucket retention rules applied by the daily `lifecycle-sweep` BullMQ
+    worker. A bucket has at most one policy — `PUT /lifecycle` upserts.
+  properties:
+    expireObjectsAfterDays:
+      description: |
+        Soft-delete objects last written more than N days ago — counted from
+        the current version's `createdAt`, as S3 counts it, so an object
+        overwritten (or restored) recently is kept however old its key is.
+        `null` disables the rule.
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 3650
+      examples:
+        - 30
+    expireVersionsAfterDays:
+      description: |
+        Hard-delete non-current versions whose `createdAt` is older than N
+        days. `null` disables the rule. Only meaningful on buckets with
+        `versioningEnabled=true`.
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 3650
+      examples:
+        - 90
+    purgeSoftDeletedAfterDays:
+      description: |
+        Hard-delete soft-deleted object rows whose `deletedAt` is older than
+        N days (frees row + blob refs). `null` disables the rule. `0` is
+        allowed (purge immediately).
+      type: [integer, 'null']
+      minimum: 0
+      maximum: 3650
+      examples:
+        - 7
+    enabled:
+      description: Whether the policy is active. Defaults to `true`.
+      type: boolean
+      default: true
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+  required:
+    - expireObjectsAfterDays
+    - expireVersionsAfterDays
+    - purgeSoftDeletedAfterDays
+    - enabled
+    - createdAt
+    - updatedAt
+
+UpsertLifecyclePolicyRequest:
+  type: object
+  description: |
+    Upsert (create or replace) the per-bucket lifecycle policy. All fields
+    are optional — omitting a rule leaves it unset (treated as `null`).
+  properties:
+    expireObjectsAfterDays:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 3650
+      examples:
+        - 30
+    expireVersionsAfterDays:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 3650
+      examples:
+        - 90
+    purgeSoftDeletedAfterDays:
+      type: [integer, 'null']
+      minimum: 0
+      maximum: 3650
+      examples:
+        - 7
+    enabled:
+      type: boolean
+      default: true
+      examples:
+        - true
+
+# Permission Schemas
+
+BucketPermission:
+  type: object
+  properties:
+    id:
+      description: Permission record ID
+      type: integer
+      examples:
+        - 42
+    userId:
+      description: User ID
+      type: string
+      format: uuid
+      examples:
+        - "019dd4c2-e0b3-778e-b8db-a52e61927416"
+    userEmail:
+      description: User email
+      type: [string, 'null']
+      format: email
+      examples:
+        - user@example.com
+    userName:
+      description: User display name
+      type: [string, 'null']
+      examples:
+        - John Doe
+    user:
+      description: The user `userId` names.
+      oneOf:
+        - $ref: '../schemas.yaml#/UserRef'
+        - type: 'null'
+    canRead:
+      description: Whether user can read from bucket
+      type: boolean
+      examples:
+        - true
+    canWrite:
+      description: Whether user can write to bucket
+      type: boolean
+      examples:
+        - true
+    canDelete:
+      description: Whether user can delete from bucket
+      type: boolean
+      examples:
+        - false
+    grantedAt:
+      description: When permission was granted
+      type: string
+      format: date-time
+      examples:
+        - "2024-01-15T10:30:00Z"
+    grantedBy:
+      description: User ID who granted the permission
+      type: string
+      format: uuid
+      examples:
+        - "019dd4c2-e0b3-778e-b8db-a52e61927416"
+    grantedByEmail:
+      description: Email of user who granted permission
+      type: [string, 'null']
+      format: email
+      examples:
+        - admin@example.com
+    grantedByName:
+      description: Name of user who granted permission
+      type: [string, 'null']
+      examples:
+        - Admin User
+    granter:
+      description: The user `grantedBy` names.
+      oneOf:
+        - $ref: '../schemas.yaml#/UserRef'
+        - type: 'null'
+  required:
+    - id
+    - userId
+    - userEmail
+    - userName
+    - user
+    - canRead
+    - canWrite
+    - canDelete
+    - grantedAt
+    - grantedBy
+    - grantedByEmail
+    - grantedByName
+    - granter
+  additionalProperties: false
+
+GrantPermissionRequest:
+  type: object
+  properties:
+    userId:
+      description: User ID to grant permissions to (a UUID; `400 invalid_request` otherwise)
+      type: string
+      format: uuid
+      examples:
+        - "019dd4c2-e0b3-778e-b8db-a52e61927416"
+    canRead:
+      description: Grant read permission
+      type: boolean
+      default: false
+      examples:
+        - true
+    canWrite:
+      description: Grant write permission
+      type: boolean
+      default: false
+      examples:
+        - true
+    canDelete:
+      description: Grant delete permission
+      type: boolean
+      default: false
+      examples:
+        - false
+  required:
+    - userId
+
+GrantPermissionResponse:
+  description: Response from granting a permission — the grant as the list returns it, with the grantee and granter named.
+  allOf:
+    - $ref: '#/BucketPermission'
+
+ListPermissionsResponse:
+  type: object
+  properties:
+    data:
+      description: Array of bucket permissions
+      type: array
+      items:
+        $ref: '#/BucketPermission'
+    hasMore:
+      description: Whether more results are available
+      type: boolean
+      examples:
+        - false
+    limit:
+      description: Maximum number of items per page (as requested)
+      type: integer
+      examples:
+        - 100
+    nextCursor:
+      description: Opaque cursor for the next page (null when hasMore is false).
+      type: [string, 'null']
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+
+CreateArchiveRequest:
+  type: object
+  description: |
+    Describe an archive download to create. Exactly one of `prefix` or
+    `keys` is required — mixing them returns `400`.
+  properties:
+    prefix:
+      description: |
+        Folder prefix (must match at least one live object). The archive's
+        entries drop the prefix, so they extract cleanly without reproducing
+        the bucket path.
+      type: string
+      minLength: 1
+      maxLength: 1024
+      examples:
+        - images/2024/
+    keys:
+      description: Explicit list of object keys to archive. Bounded at 1,000 per request.
+      type: array
+      items:
+        type: string
+        minLength: 1
+        maxLength: 1024
+      minItems: 1
+      maxItems: 1000
+      examples:
+        - ["reports/q1.pdf", "reports/q2.pdf"]
+    format:
+      description: Archive format.
+      type: string
+      enum: [zip, tar]
+      default: zip
+    expiresInSeconds:
+      description: |
+        How long the presigned download URL is valid, in seconds. Values above
+        `FILE_SERVICE_MAX_PRESIGN_TTL_SECONDS` (default 7 days) are rejected
+        with `400 invalid_expiration`.
+      type: integer
+      minimum: 60
+      default: 3600
+    filename:
+      description: |
+        Filename sent back in the `Content-Disposition` header. If omitted,
+        derived from the last prefix segment, or `archive.<format>` for
+        multi-key requests. Control characters, `/` and `\` are replaced
+        with `_`.
+      type: string
+      minLength: 1
+      maxLength: 255
+
+CreateArchiveResponse:
+  type: object
+  properties:
+    id:
+      description: Archive request identifier (UUID).
+      type: string
+      format: uuid
+    url:
+      description: |
+        Presigned download URL. No bearer auth is required on this URL —
+        the HMAC signature is verified per request. This is the only way to
+        retrieve the archive's contents.
+      type: string
+      format: uri
+    expiresAt:
+      description: When the presigned URL expires.
+      type: string
+      format: date-time
+    objectCount:
+      description: Number of objects included in the archive snapshot.
+      type: integer
+    totalSizeBytes:
+      description: |
+        Total plaintext size of all included objects, in bytes. Encoded as
+        a string to avoid loss of precision beyond 2^53.
+      type: string
+      examples:
+        - "104857600"
+    format:
+      description: Archive format that will be streamed.
+      type: string
+      enum: [zip, tar]
+    filename:
+      description: Filename the download will report in `Content-Disposition`.
+      type: string
+  required:
+    - id
+    - url
+    - expiresAt
+    - objectCount
+    - totalSizeBytes
+    - format
+    - filename
+
+ShareKind:
+  type: string
+  enum: [OBJECT, ARCHIVE]
+  description: |
+    Discriminator. `OBJECT` shares point at a single object and (optionally)
+    a pinned version. `ARCHIVE` shares wrap a server-built ArchiveRequest
+    snapshot of a prefix or key list.
+
+ShareStatus:
+  type: string
+  enum: [active, revoked, expired, exhausted]
+  description: |
+    Derived field — the server computes this from (revokedAt, expiresAt,
+    downloadCount, maxDownloads) so clients do not have to re-derive it.
+
+ShareTargetObject:
+  type: object
+  properties:
+    id:
+      type: string
+      format: uuid
+    objectKey:
+      type: string
+  required: [id, objectKey]
+
+ShareTargetArchive:
+  type: object
+  properties:
+    id:
+      type: string
+      format: uuid
+    prefix:
+      type: [string, 'null']
+    format:
+      type: string
+      enum: [zip, tar]
+    filename:
+      type: string
+    objectCount:
+      type: integer
+    totalSizeBytes:
+      type: string
+    expiresAt:
+      type: string
+      format: date-time
+  required: [id, prefix, format, filename, objectCount, totalSizeBytes, expiresAt]
+
+Share:
+  type: object
+  description: |
+    A persistent download link. The `url` field is what you hand to
+    recipients; the `token` is the opaque id inside that URL.
+
+    `token` and `url` are bearer credentials, so list and get return them
+    only to the share's creator and to callers with write access to the
+    bucket; every other reader gets `null` for both. Create and update
+    responses always include them.
+  properties:
+    id:
+      type: string
+      format: uuid
+    token:
+      type: [string, 'null']
+      description: |
+        Opaque random URL token — 18 bytes, base64url-encoded. Used as the
+        path segment in `url`. `null` on list and get unless the caller
+        created the share or can write the bucket.
+    bucketId:
+      type: integer
+    kind:
+      $ref: '#/ShareKind'
+    url:
+      type: [string, 'null']
+      format: uri
+      description: |
+        Public share URL. Includes the token and the cosmetic `urlFilename`
+        suffix (when set). Safe to hand directly to recipients. `null`
+        whenever `token` is.
+    urlFilename:
+      type: [string, 'null']
+      description: |
+        Cosmetic suffix after the token, used for browser "Save As" defaults
+        and shareable-link aesthetics. The server ignores this at resolution
+        time; only the token identifies the share.
+    objectId:
+      type: [string, 'null']
+      format: uuid
+    versionId:
+      type: [string, 'null']
+      format: uuid
+      description: |
+        When set on an OBJECT share, pins the share to a specific version;
+        otherwise the share serves the current version of the object.
+    archiveRequestId:
+      type: [string, 'null']
+      format: uuid
+    hasPassword:
+      type: boolean
+    expiresAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        When the share stops working. Always set on a share created or
+        edited now; `null` only on one created before expiries were
+        required, until the daily share sweep gives it one.
+    maxDownloads:
+      type: [integer, 'null']
+    downloadCount:
+      type: integer
+    revokedAt:
+      type: [string, 'null']
+      format: date-time
+    revokedByUserId:
+      type: [string, 'null']
+      format: uuid
+    revokedByUser:
+      description: The user `revokedByUserId` names; null while the share is not revoked.
+      oneOf:
+        - $ref: '../schemas.yaml#/UserRef'
+        - type: 'null'
+    note:
+      type: [string, 'null']
+    createdByUserId:
+      type: string
+      format: uuid
+    creator:
+      description: The user `createdByUserId` names.
+      $ref: '../schemas.yaml#/UserRef'
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    status:
+      $ref: '#/ShareStatus'
+    object:
+      description: The shared object (OBJECT shares); null for ARCHIVE shares.
+      oneOf:
+        - $ref: '#/ShareTargetObject'
+        - type: 'null'
+    archiveRequest:
+      description: The shared archive snapshot (ARCHIVE shares); null for OBJECT shares.
+      oneOf:
+        - $ref: '#/ShareTargetArchive'
+        - type: 'null'
+  required:
+    - id
+    - token
+    - bucketId
+    - kind
+    - url
+    - urlFilename
+    - objectId
+    - versionId
+    - archiveRequestId
+    - hasPassword
+    - expiresAt
+    - maxDownloads
+    - downloadCount
+    - revokedAt
+    - revokedByUserId
+    - revokedByUser
+    - note
+    - createdByUserId
+    - creator
+    - createdAt
+    - updatedAt
+    - status
+    - object
+    - archiveRequest
+
+CreateShareRequestCommon:
+  type: object
+  properties:
+    password:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: Optional password. Stored as scrypt hash.
+    expiresAt:
+      type: string
+      format: date-time
+      description: |
+        When the share stops working. Must be in the future and within
+        `FILE_SERVICE_MAX_SHARE_TTL_SECONDS` (default 365 days) of now;
+        otherwise `400 invalid_expiration`. Omitted, the share expires
+        `FILE_SERVICE_MAX_SHARE_TTL_SECONDS` after creation.
+    maxDownloads:
+      type: integer
+      minimum: 1
+      maximum: 1000000
+      description: Download cap. Atomically decremented on each successful download.
+    urlFilename:
+      type: string
+      minLength: 1
+      maxLength: 255
+      description: |
+        Cosmetic suffix for the URL and browser default save-as filename.
+    note:
+      type: string
+      maxLength: 500
+      description: Free-text note visible to share admins in the list view.
+
+CreateObjectShareRequest:
+  allOf:
+    - type: object
+      required: [kind, objectId]
+      properties:
+        kind:
+          type: string
+          enum: [OBJECT]
+        objectId:
+          type: string
+          format: uuid
+        versionId:
+          type: string
+          format: uuid
+          description: |
+            Optional pin. When set, the share always serves that specific
+            version even after overwrites. When omitted, the share tracks
+            whatever is current.
+    - $ref: '#/CreateShareRequestCommon'
+
+CreateArchiveShareRequest:
+  allOf:
+    - type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [ARCHIVE]
+        prefix:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        keys:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 1024
+          minItems: 1
+          maxItems: 1000
+        format:
+          type: string
+          enum: [zip, tar]
+          default: zip
+        archiveFilename:
+          type: string
+          minLength: 1
+          maxLength: 255
+    - $ref: '#/CreateShareRequestCommon'
+  description: |
+    Exactly one of `prefix` or `keys` is required — mixing them returns 400.
+
+CreateShareRequest:
+  oneOf:
+    - $ref: '#/CreateObjectShareRequest'
+    - $ref: '#/CreateArchiveShareRequest'
+  discriminator:
+    propertyName: kind
+    mapping:
+      OBJECT: '#/CreateObjectShareRequest'
+      ARCHIVE: '#/CreateArchiveShareRequest'
+
+UpdateShareRequest:
+  type: object
+  minProperties: 1
+  description: |
+    All fields optional, but at least one must be present. Pass `null` to
+    clear an optional field (e.g. `{ "password": null }` removes password
+    protection). A new `expiresAt` follows the same bounds as on create;
+    `expiresAt: null` sets the longest allowed, `FILE_SERVICE_MAX_SHARE_TTL_SECONDS`
+    from now, since a share always expires.
+  properties:
+    password:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 128
+    expiresAt:
+      type: [string, 'null']
+      format: date-time
+    maxDownloads:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 1000000
+    urlFilename:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 255
+    note:
+      type: [string, 'null']
+      maxLength: 500
+
+ListSharesResponse:
+  type: object
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/Share'
+    hasMore:
+      type: boolean
+    limit:
+      type: integer
+    nextCursor:
+      type: [string, 'null']
+  required: [data, hasMore, limit, nextCursor]
+
+PasswordRequiredResponse:
+  type: object
+  properties:
+    error:
+      type: string
+      enum: [password_required]
+    error_description:
+      type: string
+    requiresPassword:
+      type: boolean
+      enum: [true]
+  required: [error, error_description, requiresPassword]
+
+UnlockShareRequest:
+  type: object
+  required: [password]
+  properties:
+    password:
+      type: string
+      minLength: 1
+      maxLength: 128
+
+UnlockShareResponse:
+  type: object
+  required: [url, expiresAt]
+  properties:
+    url:
+      type: string
+      format: uri
+      description: Short-TTL presigned download URL. Navigate here to download.
+    expiresAt:
+      type: string
+      format: date-time
+
+ErrorResponse:
+  type: object
+  properties:
+    error:
+      type: string
+    error_description:
+      type: string
+  required: [error]

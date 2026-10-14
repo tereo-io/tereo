@@ -1,0 +1,2047 @@
+openapi: 3.1.0
+info:
+  title: Tereo API
+  version: 0.1.0
+  description: |
+    Tereo is a reusable application core — auth, file storage, webhooks and audit logging —
+    run as one service with one database. Each app deploys its own core.
+
+    Its API has five areas. Every path in this spec is the full path on core. Core's own API is
+    versioned under `/v1`; the OAuth2 / OpenID Connect endpoints, discovery and `/health` stay at
+    the root, as their standards and probes expect. Everything else at the root is the admin UI.
+
+    | Area | Mounted at | Covers |
+    |---|---|---|
+    | Auth | `/oauth`, `/.well-known`, `/v1` | Its OAuth2 / OpenID Connect authorization server (`/oauth`, `/.well-known`), account and admin APIs (`/v1/account`, `/v1/admin`), first-boot setup (`/v1/setup`), the registry app services declare themselves to at boot (`/v1/registry`), service administration (`/v1/admin/services`) and `GET /health` |
+    | Files | `/v1/files` | S3-like object storage with fine-grained access control and audit logging |
+    | Webhooks | `/v1/webhooks` | Webhook endpoints, the event type registry, and asynchronous event delivery with retry logic and delivery tracking |
+    | Audit | `/v1/audit` | Centralized audit log: receives entries from the app's services and queries change history across all of them |
+    | Notifications | `/v1/notifications`, `/v1/admin/notifications` | Sending notifications through configured channel connections and following their delivery; the admin log, retry, and connection management |
+
+    ## Features
+
+    ### Auth
+    - OAuth 2.0 authorization server (RFC 6749)
+    - OpenID Connect 1.0 compliant
+    - PKCE support (RFC 7636) - S256 required
+    - Token introspection (RFC 7662)
+    - Token revocation (RFC 7009)
+    - Multi-factor authentication (TOTP)
+    - Role-based access control (RBAC)
+    - Service account support
+    - Session management
+    - Comprehensive admin APIs
+
+    ### Files
+    - Bucket-based organization with policies (public/private)
+    - Fine-grained permission system (read, write, delete)
+    - Storage quotas and usage tracking
+    - Custom metadata support (up to 100KB per object)
+    - Content type detection and validation
+    - ETags for cache validation
+    - Comprehensive access logging
+    - Presigned (HMAC-signed) URLs and revocable share links
+    - Webhook events for every mutation (see **Webhooks**)
+
+    ### Webhooks
+    - **Webhook endpoint management** - Register, update, pause, archive, and delete webhook endpoints per organization
+    - **Event type registry** - Read-only view of the event types each service declares at boot
+    - **Asynchronous event delivery** - BullMQ-powered delivery with up to 10 attempts and exponential backoff
+    - **Delivery tracking** - Full visibility into delivery status, HTTP responses, and error details
+    - **Signing secrets** - HMAC signing secrets for payload verification with secret rotation support
+    - **Multi-tenant support** - Organization-scoped webhook endpoints and event delivery
+    - **Audit logging** - An audit entry for every endpoint change, test send and delivery retry
+
+    ### Audit
+    - **Centralized audit logging** - One log collecting entries from every service
+    - **Service-to-service ingestion** - Single and batch writes, usually via the SDK's outbox
+    - **Batch entry creation** - Up to 1000 entries per batch request
+    - **Entity change history** - View complete change history for any entity across services
+    - **Daily partitioned storage** - PostgreSQL range partitioning with configurable retention
+    - **Idempotency** - Redis-backed idempotency keys to prevent duplicate entries
+    - **Tamper evidence** - Entries are immutable: there is no update or delete API; old entries
+      leave only through partition retention. Each entry records the authenticated writer
+      (`writerUserId`), taken from the token, alongside the self-reported `source`/`userId`
+
+    Across every area: one Redis-coordinated rate limit (see **Rate Limiting**), cursor pagination
+    with filtering and sorting on every list endpoint, and hierarchical role-based permissions,
+    verified in-process.
+
+    ## Authentication Guide
+
+    Core issues its own tokens (`/oauth/token`) and verifies them in-process. Every request needs
+    a valid OAuth2 access token except the public endpoints: `GET /health`, the OAuth2 / OIDC flow
+    endpoints and `/.well-known`, first-boot `/v1/setup` (authorized by the setup token),
+    public-bucket reads, signed URLs (`/v1/files/signed/**`, authenticated by their HMAC signature)
+    and share links (`/v1/files/shared/**`). Public operations say so with `security: []`;
+    public-bucket reads, which take a token for a private bucket, make it optional with
+    `security: [ {}, { BearerAuth: [] } ]`.
+
+    Core supports multiple authentication methods depending on the type of client and use case.
+
+    ### 1. Authorization Code Flow with PKCE (Recommended for Web/Mobile Apps)
+
+    This is the recommended flow for web applications and mobile apps where the user needs to authenticate.
+
+    **Step-by-step process:**
+
+    1. **Generate PKCE parameters** (client-side):
+       ```javascript
+       // Generate code_verifier (random string 43-128 characters)
+       const codeVerifier = generateRandomString(128);
+
+       // Generate code_challenge (SHA256 hash of code_verifier, base64url encoded)
+       const codeChallenge = base64url(sha256(codeVerifier));
+       ```
+
+    2. **Redirect user to authorization endpoint**:
+       ```
+       GET /oauth/authorize?response_type=code
+         &client_id=YOUR_CLIENT_ID
+         &redirect_uri=https://app.example.com/callback
+         &scope=openid profile email
+         &state=RANDOM_STATE_STRING
+         &code_challenge=CODE_CHALLENGE
+         &code_challenge_method=S256
+         &nonce=RANDOM_NONCE
+       ```
+
+    3. **User authenticates** and grants consent (may include TOTP if enabled)
+
+    4. **Receive authorization code** via redirect:
+       ```
+       https://app.example.com/callback?code=AUTHORIZATION_CODE&state=RANDOM_STATE_STRING
+       ```
+
+    5. **Exchange authorization code for tokens**:
+       ```bash
+       POST /oauth/token
+       Content-Type: application/x-www-form-urlencoded
+
+       grant_type=authorization_code
+       &code=AUTHORIZATION_CODE
+       &redirect_uri=https://app.example.com/callback
+       &client_id=YOUR_CLIENT_ID
+       &code_verifier=CODE_VERIFIER
+       ```
+
+       For confidential clients, also include Basic Auth header:
+       ```
+       Authorization: Basic base64(client_id:client_secret)
+       ```
+
+    6. **Token response**:
+       ```json
+       {
+         "access_token": "eyJhbGc...",
+         "token_type": "Bearer",
+         "expires_in": 3600,
+         "refresh_token": "eyJhbGc...",
+         "id_token": "eyJhbGc...",
+         "scope": "openid profile email"
+       }
+       ```
+
+    ### 2. Client Credentials Flow (Service-to-Service)
+
+    Use this flow for backend services and APIs that need to authenticate without user interaction.
+
+    **Request:**
+    ```bash
+    POST /oauth/token
+    Authorization: Basic base64(client_id:client_secret)
+    Content-Type: application/x-www-form-urlencoded
+
+    grant_type=client_credentials
+    &scope=file-service
+    ```
+
+    The same with curl (`scope` is optional):
+    ```bash
+    curl -X POST http://localhost:4001/oauth/token \
+      -u "$CLIENT_ID:$CLIENT_SECRET" \
+      -d grant_type=client_credentials
+    ```
+
+    **Response:**
+    ```json
+    {
+      "access_token": "eyJhbGc...",
+      "token_type": "Bearer",
+      "expires_in": 3600,
+      "scope": "file-service"
+    }
+    ```
+
+    ### 3. Refresh Token Flow
+
+    Use refresh tokens to obtain new access tokens without requiring user re-authentication.
+
+    **Request:**
+    ```bash
+    POST /oauth/token
+    Content-Type: application/x-www-form-urlencoded
+
+    grant_type=refresh_token
+    &refresh_token=REFRESH_TOKEN
+    &client_id=YOUR_CLIENT_ID
+    ```
+
+    For confidential clients, include Basic Auth:
+    ```
+    Authorization: Basic base64(client_id:client_secret)
+    ```
+
+    **Response:**
+    ```json
+    {
+      "access_token": "eyJhbGc...",
+      "token_type": "Bearer",
+      "expires_in": 3600,
+      "refresh_token": "eyJhbGc...",
+      "scope": "openid profile email"
+    }
+    ```
+
+    ### 4. Making Authenticated API Calls
+
+    Once you have an access token, include it in the Authorization header:
+
+    ```bash
+    GET /v1/account/me
+    Authorization: Bearer YOUR_ACCESS_TOKEN
+    ```
+
+    ```bash
+    curl http://localhost:4001/v1/files/buckets \
+      -H "Authorization: Bearer $ACCESS_TOKEN"
+    ```
+
+    Every protected endpoint checks the token in-process. Besides a missing,
+    malformed or expired token, it is 401 `invalid_token` when the access
+    token was revoked, when the session (refresh token) it was issued with has
+    been revoked, rotated or superseded, when its client has been deleted, or
+    when its user (or service account) is inactive. For a revoked, rotated or
+    superseded session or a deleted client, the response also clears the
+    client's `trt_{client_id}` and `tsi_{client_id}` cookies. 403 is only
+    for a missing permission (or an operation-specific refusal).
+
+    ### Token Lifetimes
+
+    - **Access Tokens**: 1 hour (`JWT_ACCESS_TOKEN_TTL`, 3600 seconds)
+    - **Refresh Tokens**: 30 days (`JWT_REFRESH_TOKEN_TTL`), absolute from the code exchange;
+      issued only to clients with the `refresh_token` grant type
+    - **Authorization Codes**: 2 minutes (`AUTHORIZATION_CODE_TTL`, 120 seconds)
+    - **ID Tokens**: Same as access tokens
+
+    ### Security Best Practices
+
+    1. **Always use HTTPS** in production
+    2. **Validate state parameter** to prevent CSRF attacks
+    3. **Store tokens securely** (never in localStorage for web apps - use httpOnly cookies or secure storage)
+    4. **Implement token refresh** before expiration
+    5. **Use PKCE** for all public clients (mobile apps, SPAs)
+    6. **Validate ID tokens** including signature, issuer, audience, and expiration
+    7. **Implement proper error handling** and token revocation on logout
+    8. **Use appropriate scopes** - request only what you need
+
+    ### Token Introspection
+
+    To validate and inspect an access token:
+
+    ```bash
+    POST /oauth/introspect
+    Authorization: Basic base64(client_id:client_secret)
+    Content-Type: application/x-www-form-urlencoded
+
+    token=ACCESS_TOKEN
+    &token_type_hint=access_token
+    ```
+
+    ### Token Revocation
+
+    To revoke a token (logout, security incident):
+
+    ```bash
+    POST /oauth/revoke
+    Content-Type: application/x-www-form-urlencoded
+
+    token=TOKEN_TO_REVOKE
+    &token_type_hint=refresh_token
+    &client_id=YOUR_CLIENT_ID
+    ```
+
+    For confidential clients, include Basic Auth header.
+
+    ### Cookie-Authenticated Requests
+
+    The browser's login state lives in cookies scoped to `/oauth`: the refresh token
+    (`trt_{client_id}`, cookie mode) and the `tereo_*` SSO and login-flow sessions. They
+    are `SameSite=Lax`, so a cross-site page cannot send them with a POST — but a same-site one
+    (another port or subdomain) can. Every POST (or other unsafe method) under `/oauth` that
+    carries one of them is therefore checked:
+
+    - with `Sec-Fetch-Site`, it must be `same-origin`, or `same-site` with an allowed `Origin`;
+    - without it, `Origin`, when sent, must be allowed;
+    - a request with neither header is not from a browser page and passes.
+
+    Allowed origins are core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) and
+    `CORS_ALLOWED_ORIGINS` (any, when that is `*`). A refused request is 403 `access_denied`. This
+    covers the login, consent, org-select and 2FA submits, `POST /oauth/token` and
+    `POST /oauth/revoke` with the refresh cookie, and the sign-out confirmation. A request without
+    these cookies (a client authenticating with a secret, a code or a bearer token) is not checked.
+
+    ### OpenID Connect Discovery
+
+    Core supports OIDC discovery. Fetch server metadata from:
+    ```
+    GET /.well-known/openid-configuration
+    ```
+
+    This returns all endpoints, supported features, and cryptographic keys.
+
+    ## Permissions
+
+    Operations require permissions declared by core (`src/definitions/permissions.ts`), granted
+    through roles. Permissions are **hierarchical and domain-specific**: `write` includes `read`,
+    `delete` includes `write`, `admin` includes all levels, and a domain's admin permission
+    (`file-service.admin`, `webhooks.admin`, `audit-logs.admin`) covers every permission in that
+    domain. Auth operations state their permission as the scope on `BearerAuth`; files, webhooks
+    and audit operations list it in their description.
+
+    ### Files
+
+    - `file-service.buckets.read` / `.write` / `.delete` / `.admin` - Buckets
+    - `file-service.objects.read` / `.write` / `.delete` / `.admin` - Objects, versions, multipart, archives
+    - `file-service.permissions.read` / `.write` / `.delete` / `.admin` - Bucket-level grants
+    - `file-service.shares.read` / `.write` / `.delete` / `.admin` - Share links
+    - `file-service.admin` - Everything in the files area
+
+    ### Webhooks
+
+    | Domain | Permissions | Description |
+    |---|---|---|
+    | Webhook Admin | `webhooks.admin` | All webhook operations; rotating a secret, ending its overlap, and naming another organization in `X-Organization-ID` need it |
+    | Webhook Endpoints | `webhooks.read` | List and view webhook endpoints, their stats and deliveries |
+    | Webhook Endpoints | `webhooks.write` | Create and update webhook endpoints, send test deliveries, retry deliveries |
+    | Webhook Endpoints | `webhooks.archive` | Archive and restore webhook endpoints |
+    | Webhook Endpoints | `webhooks.delete` | Permanently delete webhook endpoints |
+    | Event Types | `webhooks.event-types.read` | List and view event types |
+    | Event Emission | `webhooks.emit` | Emit events to webhook endpoints. Outside the read/write ladder: no other `webhooks.*` permission but `webhooks.admin` includes it |
+
+    There is no API for writing event types: each service declares its own when it registers at
+    boot (`POST /v1/registry/declaration`), and one dropped from a declaration is retired a day later.
+
+    ### Audit
+
+    | Domain | Permissions | Description |
+    |---|---|---|
+    | Audit Log Admin | `audit-logs.admin` | All audit log operations |
+    | Audit Log Read | `audit-logs.read` | Query and view audit log entries |
+    | Audit Log Write | `audit-logs.write` | Create audit log entries (service-to-service) |
+    | Audit Log Delete | `audit-logs.delete` | Defined, but no endpoint uses it — entries cannot be deleted |
+
+    ## Rate Limiting
+
+    Core implements rate limiting to protect against abuse and ensure fair usage across all clients.
+
+    ### Rate Limit Structure
+
+    #### General API Rate Limit
+    One limiter covers every area — auth, files (including `/v1/files/signed/**` and
+    `/v1/files/shared/**`), webhooks and audit — and they all draw on the same budget:
+    - **Rate**: 100 requests/second per authenticated user, or per client IP for unauthenticated
+      requests
+    - **Service accounts**: a service-account token calling from an internal network address
+      (private ranges, or `INTERNAL_NETWORK_CIDRS`, with no proxy headers) gets 1000
+      requests/second, counted per OAuth client
+    - **Window**: 1 second rolling window
+    - **Backend**: Redis-coordinated across multiple instances
+    - A batch write (e.g. `POST /v1/audit/entries/batch`) counts as one request
+
+    #### Per-Address Limit Before Authentication
+    On `/v1/admin`, `/v1/account`, `/v1/files`, `/v1/audit`, `/v1/webhooks` and `/v1/registry`, a cheaper limit
+    runs before the token is checked, so floods of missing or invalid tokens are bounded too:
+    300 requests/second per client IP (1000 for a direct connection from an internal network
+    address). Passing it adds no headers; past it, the same `429 too_many_requests` as the
+    general limit.
+
+    #### Authentication Failure Rate Limiting
+    Credential attempts have additional strict limits to prevent brute force attacks. Each
+    attempt is counted before the credential is checked, so concurrent attempts cannot exceed
+    the limit; a correct credential clears the count:
+    - **Login passwords** (`POST /oauth/authorize`): 5 attempts per 300 seconds per client ID
+      and IP address. In addition, per account (the submitted email, whether or not an account
+      has it): 5 attempts, then a delay before each further attempt that starts at 1 second and
+      doubles with each failure, up to 15 minutes. An attempt during the delay — even with the
+      right password — gets `429` with `Retry-After`; it does not lengthen the delay. A correct
+      password clears the count, and an account left alone for a day starts over. A browser
+      that has completed a login as the account (2FA included) holds a known-device cookie
+      (`tereo_known_device`, 90 days) that lets its attempts through the account's
+      delay, so someone keeping the account in backoff does not lock its owner out. Its wrong
+      passwords still count toward the account's delay, and are capped at 5 per 900 seconds
+      per cookie. The cookie is bound to the account and its current password: it does nothing
+      for another email, and a password change or reset voids it
+    - **Login 2FA** (`/oauth/totp/verify`, `/oauth/totp/recovery`, `/oauth/totp/setup/verify`):
+      5 attempts per 300 seconds per user, across logins — a new login with the password does
+      not reset it
+    - **Wrong codes on `/v1/account/totp/*`** (enable, disable, regenerate backup codes): 5 per user
+      per 300 seconds
+    - **Wrong current password on `POST /v1/account/password`**: 5 per user per 300 seconds
+    - **First-boot setup** (`POST /v1/setup`): 10 wrong setup tokens per IP address per 900 seconds
+    - **Share passwords** (`POST /v1/files/shared/{token}/unlock`): per share token and IP address,
+      `FILE_SERVICE_SHARE_UNLOCK_MAX_ATTEMPTS` per `FILE_SERVICE_SHARE_UNLOCK_WINDOW_SECONDS`;
+      past it, `429 too_many_requests`
+    - Past any limit: `429 too_many_requests`, with the seconds to wait in a `Retry-After` header
+      and the body's `retry_after`
+    - **Window**: 5 minute (300 second) window unless stated
+
+    #### When Redis Is Unavailable
+    The limits are kept in Redis. Without it, credential endpoints (login password and 2FA,
+    `/v1/account/password`, `/v1/account/totp/*`, setup and share unlock) refuse attempts with
+    `503 temporarily_unavailable` (with `Retry-After`) rather than allow
+    unlimited guesses. The general and per-address limits let requests through, so the rest
+    of the API stays up.
+
+    #### Per-Bucket Rate Limits (Files)
+    Buckets with a `rateLimitConfig` additionally get a per-bucket token bucket on their
+    `/v1/files/buckets/{name}/objects`, `/multipart` and `/archives` routes and on presigned
+    (`/v1/files/signed/objects/**`) traffic.
+
+    #### Unprotected Endpoints
+    - **Health check** (`/health`): No rate limiting
+
+    ### Rate Limit Headers
+
+    Responses that pass the general limiter include rate limit information in headers:
+
+    - **X-RateLimit-Limit**: Maximum number of requests allowed in the current window (e.g., `100`)
+    - **X-RateLimit-Remaining**: Number of requests remaining in the current window (e.g., `95`)
+    - **X-RateLimit-Reset**: ISO 8601 timestamp when the rate limit window resets
+
+    ```http
+    HTTP/1.1 200 OK
+    X-RateLimit-Limit: 100
+    X-RateLimit-Remaining: 95
+    X-RateLimit-Reset: 2026-02-25T10:30:01.000Z
+    ```
+
+    On the authenticated routes the general limit runs after authentication, so a `401` there
+    carries no rate limit headers.
+
+    ### Rate Limit Exceeded Response
+
+    When the general limit is exceeded, the API returns a `429 Too Many Requests` response:
+
+    ```json
+    {
+      "error": "too_many_requests",
+      "error_description": "Rate limit exceeded. Please try again later.",
+      "retry_after": 1
+    }
+    ```
+
+    The `retry_after` field indicates the number of seconds to wait before retrying.
+
+    Additionally, rate limit headers and a `Retry-After` header are included:
+    ```http
+    HTTP/1.1 429 Too Many Requests
+    Retry-After: 1
+    X-RateLimit-Limit: 100
+    X-RateLimit-Remaining: 0
+    X-RateLimit-Reset: 2026-02-25T10:30:01.000Z
+    ```
+
+    For authentication failures, the error message is more specific:
+    ```json
+    {
+      "error": "too_many_requests",
+      "error_description": "Too many failed authentication attempts. Please try again later.",
+      "retry_after": 300
+    }
+    ```
+
+    A per-bucket limit answers with the same shape — `too_many_requests`, `retry_after`,
+    `Retry-After` and `X-RateLimit-*` headers (the bucket's `maxTokens` and remaining tokens) —
+    with `"error_description": "Per-bucket rate limit exceeded"`. So does the share unlock
+    limit, without the `X-RateLimit-*` headers. Every `429` from core has this shape.
+
+    ### Best Practices for Rate Limiting
+
+    1. **Monitor rate limit headers** in your client application to track consumption
+    2. **Implement exponential backoff** when receiving 429 responses
+    3. **Respect the `Retry-After` header** - wait the specified time before retrying
+    4. **Cache responses** where appropriate to reduce API calls (e.g., user profiles, permissions)
+    5. **Use batch endpoints** when available (e.g., `/oauth/check-permission/batch`)
+    6. **Distribute requests** evenly over time instead of bursting
+
+    ### Rate Limit Strategies by Client Type
+
+    **Web Applications:**
+    - Implement client-side caching for user profile and permissions
+    - Batch permission checks when validating multiple actions
+    - Avoid polling - use event-driven approaches when possible
+
+    **Mobile Applications:**
+    - Cache tokens and user data locally with appropriate TTLs
+    - Implement request queuing with automatic retry logic
+    - Use refresh tokens efficiently to minimize token endpoint calls
+
+    **Service-to-Service:**
+    - Implement request pooling and batching
+    - Cache frequently accessed data (user info, permissions)
+    - The 100 req/sec limit allows for 360,000 requests/hour per service (1000 req/sec from the
+      internal network)
+
+    ### Rate Limit Notes
+
+    - The general rate limit is generous for typical usage patterns
+    - Authentication failure limits are intentionally strict (5 failures per 5 minutes) to prevent brute force attacks
+    - Rate limits apply per authenticated user (when authenticated) or per IP address (when unauthenticated)
+
+    ## Pagination, Filtering and Sorting
+
+    ### Pagination
+
+    All list endpoints use **cursor-based keyset pagination**. Pass the `nextCursor` from the
+    previous response as the `cursor` parameter to fetch the next page; omit `cursor` on the first
+    request. Cursors are HMAC-signed opaque strings bound to the list that minted them (its
+    request path, so one endpoint's or bucket's cursor does not page another's) and to the
+    requested `sort` + `sortDir`; tampering, or replay on another list or sort, returns
+    `400 invalid_cursor`. Cursors issued before this binding are refused the same way; start the
+    list again.
+
+    ```
+    GET /v1/webhooks/webhooks?limit=50
+    GET /v1/webhooks/webhooks?limit=50&cursor=<nextCursor>
+    ```
+
+    Response shape: `{ data, hasMore, limit, nextCursor }`. There is no `total` count —
+    `COUNT(*)` is not cheap on the partitioned `webhook_deliveries` table at scale.
+
+    Each list operation documents its `limit` default and maximum. For example:
+    - **Webhooks**: default 25 (webhooks, deliveries) or 50 (event types); maximum 100
+      (webhooks, deliveries) or 200 (event types)
+    - **Audit**: default 50; maximum 200 (entries list) or 1000 (entity history)
+
+    ### Filtering
+
+    Use the `filter[field]` pattern to filter results, with `filter[field_op]` for the operator:
+
+    ```
+    GET /v1/webhooks/webhooks?filter[status]=ACTIVE&filter[status_op]=equals
+    GET /v1/webhooks/webhooks?filter[url]=example.com&filter[url_op]=contains
+    GET /v1/webhooks/event-types?filter[source]=core
+    GET /v1/audit/entries?filter[source]=inventory-service&filter[source_op]=equals
+    GET /v1/audit/entries?filter[action]=ARCHIVE&filter[action_op]=equals
+    GET /v1/audit/entries?filter[entityType]=Order,Product&filter[entityType_op]=in
+    GET /v1/audit/entries?filter[createdAt_gte]=2026-01-01T00:00:00Z&filter[createdAt_lte]=2026-02-01T00:00:00Z
+    ```
+
+    **Supported operators:** `equals` (the default), `contains` (case-insensitive), `in`
+    (comma-separated values), `gte`, `lte`; the auth and files areas also accept `gt`, `lt`,
+    `startsWith` and `endsWith`. Range operators can also be written as a key suffix
+    (`filter[createdAt_gte]`, ISO 8601 for dates), which lets one request bound a field on both
+    sides:
+
+    ```
+    GET /v1/webhooks/webhooks/{id}/deliveries?filter[createdAt_gte]=2026-01-01T00:00:00Z
+    ```
+
+    Each endpoint documents its supported filter fields and operators in the endpoint
+    description; a field or operator it does not list is a `400 invalid_request`.
+
+    ### Sorting
+
+    Use the `sort` and `sortDir` parameters:
+
+    ```
+    GET /v1/webhooks/webhooks?sort=createdAt&sortDir=asc
+    GET /v1/webhooks/event-types?sort=eventType&sortDir=asc
+    GET /v1/audit/entries?sort=createdAt&sortDir=asc
+    ```
+
+    Each operation lists its sort fields and default; any other value returns `400`. Audit entries
+    sort by `createdAt` only (default `desc`).
+
+    ## Embedded References
+
+    A response that returns a foreign id also names what it points at, so a client needs no
+    second call: a compact `UserRef` (`{ id, email, name }`), `OrgRef` (`{ id, name, slug }`) or
+    `ServiceRef` (`{ id, slug, name }`) beside the id. The field is named after the relation
+    (`creator` beside `createdBy`, `organization` beside `organizationId`, `service`, `owner`,
+    `granter`, `serviceAccountUser`), or `<verb>ByUser` where there is none (`revokedByUser`,
+    `deletedByUser`). The id stays, and so do older flat fields such as `serviceName` and
+    `grantedByEmail`. A ref is null when its id is, and where a field is withheld: object version
+    writers and object deleters are named only to readers of the bucket, not to a caller served
+    only because the bucket is public. To resolve other user ids, `GET /v1/admin/users` takes up to
+    100 of them at once (`filter[id]=…&filter[id_op]=in`).
+
+    ## Error Handling
+
+    Core uses standard HTTP status codes and returns errors in JSON format:
+
+    ```json
+    {
+      "error": "error_code",
+      "error_description": "Human-readable error message"
+    }
+    ```
+
+    Common error codes:
+    - `invalid_request` - Malformed request or validation error (`400`; other `400` codes are
+      operation-specific, e.g. `invalid_cursor`). A request body that isn't valid JSON (or
+      urlencoded form) is `400 invalid_request` on every route
+    - `payload_too_large` - A JSON or form body over the body parser's limit (`413`, every route):
+      10 MB under `/v1/files`, `/v1/webhooks` and `/v1/audit`, 1 MB for `/v1/registry`, 10 KB for the auth
+      routes
+    - `invalid_token` / `unauthorized` - Missing, invalid, expired or revoked access token, a
+      token whose session was revoked, rotated or superseded or whose client was deleted, or an
+      inactive user (`401`)
+    - `forbidden` - Insufficient permissions (`403`)
+    - `not_found` - The resource in the URL does not exist, or is hidden from the caller (`404`)
+    - `unknown_user` / `unknown_organization` - An id in the request body names no user /
+      organization (`400`)
+    - `conflict` - Resource already exists, is in use, or is in a conflicting state (`409`)
+    - `resource_archived` - The resource is archived and read-only; restore it first (`409`)
+    - `already_archived` - Archiving a resource that is already archived (`409`)
+    - `not_archived` - Restoring a resource that is not archived (`409`)
+    - `too_many_requests` - Rate limit exceeded (`429`, with `retry_after` and `Retry-After`)
+    - `temporarily_unavailable` - A dependency is down; retry after `Retry-After` (`503`)
+    - `server_error` - Internal server error (`500`)
+
+    The archive rule is the same for organizations, roles and webhook endpoints: archiving or
+    restoring in the wrong state, or changing an archived resource, is a `409` with one of the
+    three archive codes above; a `404` means only that the resource is not there (or not
+    visible to the caller).
+    - `idempotency_request_in_progress` - A request with the same idempotency key is still in
+      flight; retry shortly (`409`). The same code for files' `Idempotency-Key`, emitted events'
+      `idempotencyKey` and audit writes' `idempotencyKey`
+
+    Files adds:
+    - `idempotency_key_required` / `invalid_expiration` - Operation-specific `400` codes
+    - `bucket_declared` / `bucket_retired` - The bucket is owned by a service's declaration / is read-only (`409`)
+    - `version_conflict` - Concurrent update; re-read and retry (`409`)
+    - `precondition_failed` - `If-Match` / `If-None-Match` not satisfied (`412`)
+    - `payload_too_large` - Upload over the size limit (`413`)
+    - `idempotency_key_conflict` - `Idempotency-Key` reused with a different request (`422`)
+    - `share_revoked` - Editing a revoked share (`409`)
+    - `insufficient_storage` - Bucket storage quota exceeded (`507`)
+
+    Webhooks adds:
+    - `invalid_cursor` - Cursor malformed, tampered with, or minted for another list or sort
+    - `invalid_event_type` / `event_type_retired` - Event type unregistered or retired
+    - `reserved_event_type` - `webhook.test` named in an emit or a subscription; only the test action sends it
+    - `duplicate_idempotency_key` - Two events in one batch share an idempotency key, organization and event type
+    - `invalid_url` / `private_url_not_allowed` - Unusable webhook URL (not a URL, not http(s) or credentials in it / localhost or a private IP)
+    - `invalid_endpoint_status` / `invalid_delivery_status` - Test or retry not allowed in the current status (the endpoint must be `ACTIVE`; only a `FAILED` delivery is retried)
+    - `unknown_organization` - An emitted event names no organization (`400`)
+    - `conflict` - State conflict (delivery history blocking a delete)
+    - `resource_archived` / `already_archived` / `not_archived` - Archive state conflicts, as above
+    - `idempotency_key_conflict` - An event's `idempotencyKey` reused with a different event (`422`)
+
+    Audit's `400` uses `invalid_request` for validation failures, or a specific code an operation
+    documents. Audit adds:
+    - `idempotency_key_conflict` - `idempotencyKey` reused on the same endpoint with a different body (`422`)
+
+    ## Files
+
+    ### Object Access Control
+
+    Object operations (list, download, metadata, versions, upload, delete,
+    multipart, archives, shares, lifecycle) check two things:
+    - the system permission in the token (`file-service.objects.*`), and
+    - an active bucket-level grant (`canRead` / `canWrite` / `canDelete`) for
+      the caller, unless the caller holds `file-service.admin`.
+
+    - **Public buckets**: reads need no token and no grant
+    - **Private buckets**: reads need a token with `file-service.objects.read`
+      AND a `canRead` grant. On the read routes admitted without a token, an
+      anonymous read of a private (or missing) bucket is refused with
+      `401 invalid_token`
+    - Buckets of another organization are refused (`403`) unless the caller
+      holds `file-service.admin`. So a grant on an organization's bucket
+      only goes to a user who can act in that organization (a member, or the
+      service-account user of a client bound to it); anyone else is refused
+      with `400 user_not_in_organization`
+    - **Access is checked before anything about the bucket is revealed**: a
+      caller without access gets the same `403` for a bucket that doesn't
+      exist as for one they can't access; only callers who could see it
+      (`file-service.admin`) get `404`. Versioning and retired state
+      (`versioning_disabled`, `409 bucket_retired`) are reported only after
+      the permission check
+    - Creating a bucket also grants its creator full object access
+      (`canRead`, `canWrite`, `canDelete`) — an ordinary grant, listed under
+      `/permissions`, audited, emitted as `file-service.permission.granted`
+      and revocable; after revoking it the creator still manages the bucket
+      but needs a grant again for object access
+    - The lifecycle policy is a bucket setting: it takes the bucket-management
+      check (creator or `file-service.admin`), not an object grant
+    - `file-service.admin` may manage any bucket; a bucket a service declared cannot be deleted
+    - A retired bucket (its service no longer declares it) is read-only: writes
+      return `409 bucket_retired`
+
+    ### Storage and Limits
+
+    - **Maximum file size**: Configurable (default 100MB)
+    - **Maximum metadata size**: 100KB per object
+    - **Maximum metadata keys**: 100 per object
+    - **Bucket storage quota**: Configurable per bucket (max 1TB)
+    - **Bucket name length**: 3-63 characters, lowercase alphanumeric with hyphens
+    - **Object key length**: 1-1024 characters
+
+    ### Files Webhook Events
+
+    Mutations emit `file-service.*` webhook events (listed under **Webhooks**) for buckets that
+    belong to an organization. Endpoints subscribe through the webhooks area (`/v1/webhooks`);
+    deliveries are described under **Receiving Webhook Deliveries**.
+
+    ## Receiving Webhook Deliveries
+
+    Each delivery is an HTTP `POST` of a JSON event envelope (see the **Webhooks** section) to the
+    endpoint's URL, with the endpoint's custom headers plus these, which custom headers cannot
+    override:
+
+    | Header | Value |
+    |---|---|
+    | `Content-Type` | `application/json` |
+    | `X-Webhook-Id` | The **delivery** id (`WebhookDelivery.id`). Stable across retries of the same delivery — use it to deduplicate. It is not the body's `id`. |
+    | `X-Webhook-Event` | The event type, e.g. `webhook.test` (same as the body's `eventType`) |
+    | `X-Webhook-Timestamp` | Unix time in **seconds** when this attempt was signed, e.g. `1736937000` |
+    | `X-Webhook-Signature` | `sha256=` followed by the lowercase hex HMAC-SHA256 of `{X-Webhook-Timestamp}.{raw body}`, keyed with the endpoint's signing secret. During a rotation overlap, one value per secret, comma-separated, current first: `sha256=<new>,sha256=<old>` |
+
+    To verify, recompute the HMAC over the timestamp header, a literal `.`, and the raw request
+    body bytes exactly as received (not re-serialized JSON), using the signing secret string as
+    the key; compare in constant time, and reject timestamps too far from your clock. Each retry
+    is signed afresh with a new timestamp.
+
+    After `POST /v1/webhooks/webhooks/{id}/rotate-secret` the replaced secret keeps signing for
+    `WEBHOOK_SECRET_OVERLAP_HOURS` (24 by default; `0` drops it at once) — until the endpoint's
+    `previousSecretExpiresAt`, or until
+    `POST /v1/webhooks/webhooks/{id}/revoke-previous-secret`. Each delivery then carries both
+    signatures, so split the header on `,` and accept the request if any value matches your
+    secret. Update the receiver to the new secret within that window.
+
+    A delivery succeeds on any 2xx response within 30 seconds, counted from the connection to the
+    end of reading the response. Core keeps the first 4096 bytes of the response body with the
+    delivery and reads no further. The endpoint's host is resolved at every attempt and the
+    connection is made only to the checked addresses; one that resolves to a private or reserved
+    address fails the attempt. Anything else — a non-2xx status, a timeout, a connection error — is
+    retried, up to 10 attempts in all, with exponential backoff
+    starting at 5 minutes and doubling (5, 10, 20, … minutes); redirects are not followed. After
+    the last attempt the delivery is `FAILED` (retry it with
+    `POST /v1/webhooks/webhooks/{id}/deliveries/{deliveryId}/retry`). After five deliveries in a
+    row fail all their attempts, the endpoint is set to `DISABLED`; any success resets that count.
+    A delivery whose endpoint is no longer `ACTIVE`, or is archived, by the time it runs is marked
+    `FAILED` without being sent.
+
+    The body is the envelope `{ id, organizationId, eventType, entityType, entityId, occurredAt,
+    data }` (`organizationId` is absent on `webhook.test`). It is stored with the delivery, so
+    every retry sends the same bytes.
+
+    ## Audit
+
+    App services usually do not call `POST /v1/audit/entries` directly: `@tereo-io/sdk`'s
+    `core.outbox` writes entries in the service's own transactions and delivers them here.
+    Core's own entries are written in-process and never pass through this API.
+
+    ### Organization Scoping
+
+    Reads are scoped to the organization in the token (`org_id`). A token holding
+    `audit-logs.admin` (or anything that covers it, such as `admin`) may instead name an
+    organization with `filter[organizationId]=<id>`, or read system-wide entries — those with
+    no organization — with `filter[organizationId]=none`. Without the filter, an admin token
+    that has no `org_id` reads across all organizations. Any other token naming a different
+    organization, or having no `org_id`, is refused (`403`).
+
+    Writes follow the same rule. Without `audit-logs.admin`, a token with an `org_id` writes
+    only entries for that organization: another organization, or a system-wide entry, is
+    `403`, and one such entry refuses a whole batch. A service account's token without an
+    `org_id` — an app service's client, which writes for every tenant of its app — may write
+    for any organization; a person's token without one may not write.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:4001
+    description: Local development server (each app deploys its own core; substitute its host)
+
+security:
+  - BearerAuth: []
+
+tags:
+  # Auth
+  - name: OAuth2/OIDC - Authorization
+    description: OAuth 2.0 authorization flow endpoints (authorize, consent)
+  - name: OAuth2/OIDC - Upstream Sign-in
+    description: 'Sign in through an upstream OpenID Connect identity provider (Google, Okta, Entra, ...): the provider list, and the start and callback browser redirects'
+  - name: OAuth2/OIDC - Tokens
+    description: Token management endpoints (issue, introspect, revoke)
+  - name: OAuth2/OIDC - TOTP
+    description: TOTP two-factor authentication during OAuth flow
+  - name: OAuth2/OIDC - User Info
+    description: OpenID Connect UserInfo endpoints
+  - name: OAuth2/OIDC - Session
+    description: Session management and logout endpoints
+  - name: OAuth2/OIDC - Permissions
+    description: Permission checking endpoints for service-to-service calls
+  - name: Well-Known
+    description: Discovery and metadata endpoints
+  - name: Account - Profile
+    description: User profile, password, and photo management
+  - name: Account - Sessions
+    description: Session management and revocation
+  - name: Account - TOTP
+    description: TOTP management for user accounts
+  - name: Account - Sign-in Methods
+    description: The identity provider accounts a user has linked, and linking or unlinking one (core's own UI only)
+  - name: Admin - Users
+    description: Admin endpoints for managing users (CRUD operations)
+  - name: Admin - User Identities
+    description: Admin endpoints for a user's linked identity provider accounts and sign-in invites, and their lifecycle events
+  - name: Admin - User Permissions
+    description: Admin endpoints for viewing user permissions
+  - name: Admin - User Sessions
+    description: Admin endpoints for managing user sessions
+  - name: Admin - User TOTP
+    description: Admin endpoints for managing user TOTP settings
+  - name: Admin - Clients
+    description: Admin endpoints for managing OAuth clients
+  - name: Admin - Roles
+    description: Admin endpoints for managing roles (CRUD operations)
+  - name: Admin - Role Users
+    description: Admin endpoints for managing role users
+  - name: Admin - Role Permissions
+    description: Admin endpoints for managing role permissions
+  - name: Admin - Permissions
+    description: Admin endpoints for managing permissions
+  - name: Admin - Organizations
+    description: Admin endpoints for managing organizations (CRUD operations)
+  - name: Admin - Organization Members
+    description: Admin endpoints for managing organization memberships
+  - name: Admin - Organization Member Roles
+    description: Admin endpoints for managing org-scoped role assignments
+  - name: Admin - Identity Providers
+    description: Admin endpoints for upstream identity providers and their lifecycle events
+  - name: Admin - Identity Provider Domains
+    description: Admin endpoints for the email domains a provider claims — organization, default roles, auto-accept and SSO-only
+  - name: Admin - Settings
+    description: Admin endpoints for system settings
+  - name: Admin - Services
+    description: Admin endpoints for app services — credentials, activation and access approval
+  - name: Setup
+    description: First-boot setup — create the first admin (public; authorized by the setup token)
+  - name: Registry
+    description: Declarations app services register at boot
+  - name: Health
+    description: System health check
+
+  # Files
+  - name: Files - Buckets
+    description: Bucket management (create, list, update, delete)
+  - name: Files - Objects
+    description: |
+      Object storage operations. Reads (list, download, HEAD) and uploads are
+      key-addressed under `/v1/files/buckets/{name}/objects/*objectKey`. Mutations
+      (rename, metadata update, delete, presign, version list / get / restore
+      / delete) are id-addressed under
+      `/v1/files/buckets/{name}/objects/by-id/{id}/...` — the `id` is a stable UUIDv7
+      returned by the upload endpoint.
+  - name: Files - Multipart
+    description: |
+      S3-style multipart upload lifecycle. All routes live under
+      `/v1/files/buckets/{name}/multipart` — the object's destination key is sent in
+      the initiate body so no path splat is needed.
+  - name: Files - Archives
+    description: |
+      Folder-by-prefix or multi-select archive downloads. `POST
+      /v1/files/buckets/{name}/archives` snapshots a bucket-scoped set of objects and
+      returns a presigned URL that streams the zip/tar. The download URL is
+      the only way to consume an archive — there is no authenticated-session
+      shortcut, so the same flow serves both "download now" and "share a
+      link".
+  - name: Files - Permissions
+    description: Bucket permission management (grant, revoke, list)
+  - name: Files - Shares
+    description: |
+      DB-backed, revocable download links. Unlike stateless presigned URLs,
+      shares persist as rows so they can be listed, revoked, password-
+      protected, download-capped, or TTL-bounded. Supports single objects
+      and server-built archives.
+  - name: Files - Signed URLs
+    description: |
+      Endpoints that presigned URLs point at. They take no bearer token: the
+      HMAC signature in the query string (`expires`, `nonce`, `v`, `sig`, and
+      an optional `share`) is the authorization. URLs are minted by
+      `POST /v1/files/buckets/{name}/objects/by-id/{id}/presign`,
+      `POST /v1/files/buckets/{name}/archives` and `GET /v1/files/shared/{token}`; treat them
+      as opaque and use them as returned.
+
+  # Webhooks
+  - name: Webhook Endpoints
+    description: Webhook endpoint registration and management
+  - name: Webhook Deliveries
+    description: Webhook delivery tracking and inspection
+  - name: Event Types
+    description: The event type registry (read-only; services declare their event types at boot)
+  - name: Events
+    description: Event emission to webhook endpoints
+  - name: Webhook Events
+    description: Outbound events delivered to subscribed webhook endpoints
+
+  # Audit
+  - name: Audit Log Entries
+    description: Audit log entry management and querying
+
+  # Notifications
+  - name: Notifications
+    description: Sending notifications and following their delivery
+  - name: Admin - Notifications
+    description: Notification channels and the connections (provider settings and sealed secrets) sends go through
+
+x-tagGroups:
+  - name: Auth
+    tags:
+      - Health
+      - Well-Known
+      - Setup
+      - OAuth2/OIDC - Authorization
+      - OAuth2/OIDC - Upstream Sign-in
+      - OAuth2/OIDC - Tokens
+      - OAuth2/OIDC - TOTP
+      - OAuth2/OIDC - User Info
+      - OAuth2/OIDC - Session
+      - OAuth2/OIDC - Permissions
+      - Account - Profile
+      - Account - Sessions
+      - Account - TOTP
+      - Account - Sign-in Methods
+      - Admin - Users
+      - Admin - User Identities
+      - Admin - User Permissions
+      - Admin - User Sessions
+      - Admin - User TOTP
+      - Admin - Clients
+      - Admin - Roles
+      - Admin - Role Users
+      - Admin - Role Permissions
+      - Admin - Permissions
+      - Admin - Organizations
+      - Admin - Organization Members
+      - Admin - Organization Member Roles
+      - Admin - Identity Providers
+      - Admin - Identity Provider Domains
+      - Admin - Settings
+      - Admin - Services
+      - Registry
+
+  - name: Files
+    tags:
+      - Files - Buckets
+      - Files - Objects
+      - Files - Multipart
+      - Files - Archives
+      - Files - Permissions
+      - Files - Shares
+      - Files - Signed URLs
+
+  - name: Webhooks
+    tags:
+      - Webhook Endpoints
+      - Webhook Deliveries
+      - Event Types
+      - Events
+      - Webhook Events
+
+  - name: Audit
+    tags:
+      - Audit Log Entries
+
+  - name: Notifications
+    tags:
+      - Notifications
+      - Admin - Notifications
+
+paths:
+  # Auth
+  /health:
+    $ref: './paths/auth/health.yaml#/~1health'
+  /v1/setup/status:
+    $ref: './paths/auth/setup.yaml#/~1setup~1status'
+  /v1/setup:
+    $ref: './paths/auth/setup.yaml#/~1setup'
+  /v1/registry/declaration:
+    $ref: './paths/auth/registry.yaml#/~1registry~1declaration'
+  /.well-known/oauth-authorization-server:
+    $ref: './paths/auth/well-known.yaml#/~1.well-known~1oauth-authorization-server'
+  /.well-known/openid-configuration:
+    $ref: './paths/auth/well-known.yaml#/~1.well-known~1openid-configuration'
+  /.well-known/jwks.json:
+    $ref: './paths/auth/well-known.yaml#/~1.well-known~1jwks.json'
+  /oauth/authorize:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1authorize'
+  /oauth/upstream/providers:
+    $ref: './paths/auth/oauth-upstream.yaml#/~1oauth~1upstream~1providers'
+  /oauth/upstream/{slug}/start:
+    $ref: './paths/auth/oauth-upstream.yaml#/~1oauth~1upstream~1{slug}~1start'
+  /oauth/upstream/{slug}/callback:
+    $ref: './paths/auth/oauth-upstream.yaml#/~1oauth~1upstream~1{slug}~1callback'
+  /oauth/consent:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1consent'
+  /oauth/org-select:
+    $ref: './paths/auth/oauth-org-select.yaml#/~1oauth~1org-select'
+  /oauth/org-select/submit:
+    $ref: './paths/auth/oauth-org-select.yaml#/~1oauth~1org-select~1submit'
+  /oauth/token:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1token'
+  /oauth/introspect:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1introspect'
+  /oauth/revoke:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1revoke'
+  /oauth/userinfo:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1userinfo'
+  /oauth/end-session:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1end-session'
+  /oauth/end-session/confirm:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1end-session~1confirm'
+  /oauth/check-permission:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1check-permission'
+  /oauth/check-permission/batch:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1check-permission~1batch'
+  /oauth/totp/verify:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1totp~1verify'
+  /oauth/totp/recovery:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1totp~1recovery'
+  /oauth/totp/setup:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1totp~1setup'
+  /oauth/totp/setup/verify:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1totp~1setup~1verify'
+  /v1/account/me:
+    $ref: './paths/auth/account.yaml#/~1account~1me'
+  /v1/account/sessions:
+    $ref: './paths/auth/account.yaml#/~1account~1sessions'
+  /v1/account/sessions/{sessionId}:
+    $ref: './paths/auth/account.yaml#/~1account~1sessions~1{sessionId}'
+  /v1/account/password:
+    $ref: './paths/auth/account.yaml#/~1account~1password'
+  /v1/account/photo:
+    $ref: './paths/auth/account.yaml#/~1account~1photo'
+  /v1/account/identities:
+    $ref: './paths/auth/account-identities.yaml#/~1account~1identities'
+  /v1/account/identities/{id}:
+    $ref: './paths/auth/account-identities.yaml#/~1account~1identities~1{id}'
+  /v1/account/totp:
+    $ref: './paths/auth/account.yaml#/~1account~1totp'
+  /v1/account/totp/setup:
+    $ref: './paths/auth/account.yaml#/~1account~1totp~1setup'
+  /v1/account/totp/setup/verify:
+    $ref: './paths/auth/account.yaml#/~1account~1totp~1setup~1verify'
+  /v1/account/totp/recovery-codes:
+    $ref: './paths/auth/account.yaml#/~1account~1totp~1recovery-codes'
+  /v1/admin/users:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users'
+  /v1/admin/users/{id}:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}'
+  /v1/admin/users/{id}/roles:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1roles'
+  /v1/admin/users/{id}/permissions:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1permissions'
+  /v1/admin/users/{id}/sessions:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1sessions'
+  /v1/admin/users/{id}/sessions/all:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1sessions~1all'
+  /v1/admin/users/{id}/totp:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1totp'
+  /v1/admin/users/{id}/identities:
+    $ref: './paths/auth/admin/user-identities.yaml#/~1admin~1users~1{id}~1identities'
+  /v1/admin/users/{id}/identities/{identityId}:
+    $ref: './paths/auth/admin/user-identities.yaml#/~1admin~1users~1{id}~1identities~1{identityId}'
+  /v1/admin/users/{id}/identity-invites:
+    $ref: './paths/auth/admin/user-identities.yaml#/~1admin~1users~1{id}~1identity-invites'
+  /v1/admin/users/{id}/identity-invites/{providerId}:
+    $ref: './paths/auth/admin/user-identities.yaml#/~1admin~1users~1{id}~1identity-invites~1{providerId}'
+  /v1/admin/users/{id}/totp/reset:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1totp~1reset'
+  /v1/admin/clients:
+    $ref: './paths/auth/admin/clients.yaml#/~1admin~1clients'
+  /v1/admin/clients/{id}:
+    $ref: './paths/auth/admin/clients.yaml#/~1admin~1clients~1{id}'
+  /v1/admin/clients/{id}/regenerate-secret:
+    $ref: './paths/auth/admin/clients.yaml#/~1admin~1clients~1{id}~1regenerate-secret'
+  /v1/admin/roles:
+    $ref: './paths/auth/admin/roles.yaml#/~1admin~1roles'
+  /v1/admin/roles/{id}:
+    $ref: './paths/auth/admin/roles.yaml#/~1admin~1roles~1{id}'
+  /v1/admin/roles/{id}/duplicate:
+    $ref: './paths/auth/admin/roles.yaml#/~1admin~1roles~1{id}~1duplicate'
+  /v1/admin/roles/{id}/archive:
+    $ref: './paths/auth/admin/roles.yaml#/~1admin~1roles~1{id}~1archive'
+  /v1/admin/roles/{id}/restore:
+    $ref: './paths/auth/admin/roles.yaml#/~1admin~1roles~1{id}~1restore'
+  /v1/admin/roles/{id}/permissions:
+    $ref: './paths/auth/admin/roles.yaml#/~1admin~1roles~1{id}~1permissions'
+  /v1/admin/roles/{id}/users:
+    $ref: './paths/auth/admin/roles.yaml#/~1admin~1roles~1{id}~1users'
+  /v1/admin/roles/{id}/users/{userId}:
+    $ref: './paths/auth/admin/roles.yaml#/~1admin~1roles~1{id}~1users~1{userId}'
+  /v1/admin/organizations:
+    $ref: './paths/auth/admin/organizations.yaml#/~1admin~1organizations'
+  /v1/admin/organizations/default:
+    $ref: './paths/auth/admin/organizations.yaml#/~1admin~1organizations~1default'
+  /v1/admin/organizations/{id}:
+    $ref: './paths/auth/admin/organizations.yaml#/~1admin~1organizations~1{id}'
+  /v1/admin/organizations/{id}/archive:
+    $ref: './paths/auth/admin/organizations.yaml#/~1admin~1organizations~1{id}~1archive'
+  /v1/admin/organizations/{id}/restore:
+    $ref: './paths/auth/admin/organizations.yaml#/~1admin~1organizations~1{id}~1restore'
+  /v1/admin/organizations/{id}/members:
+    $ref: './paths/auth/admin/organizations.yaml#/~1admin~1organizations~1{id}~1members'
+  /v1/admin/organizations/{id}/members/{userId}:
+    $ref: './paths/auth/admin/organizations.yaml#/~1admin~1organizations~1{id}~1members~1{userId}'
+  /v1/admin/organizations/{id}/members/{userId}/roles:
+    $ref: './paths/auth/admin/organizations.yaml#/~1admin~1organizations~1{id}~1members~1{userId}~1roles'
+  /v1/admin/permissions:
+    $ref: './paths/auth/admin/permissions.yaml#/~1admin~1permissions'
+  /v1/admin/permissions/{id}:
+    $ref: './paths/auth/admin/permissions.yaml#/~1admin~1permissions~1{id}'
+  /v1/admin/identity-providers:
+    $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers'
+  /v1/admin/identity-providers/{id}:
+    $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers~1{id}'
+  /v1/admin/identity-providers/{id}/activate:
+    $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers~1{id}~1activate'
+  /v1/admin/identity-providers/{id}/deactivate:
+    $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers~1{id}~1deactivate'
+  /v1/admin/identity-providers/{id}/domains:
+    $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers~1{id}~1domains'
+  /v1/admin/identity-providers/{id}/domains/{domainId}:
+    $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers~1{id}~1domains~1{domainId}'
+  /v1/admin/services:
+    $ref: './paths/auth/admin/services.yaml#/~1admin~1services'
+  /v1/admin/services/access:
+    $ref: './paths/auth/admin/services.yaml#/~1admin~1services~1access'
+  /v1/admin/services/{id}:
+    $ref: './paths/auth/admin/services.yaml#/~1admin~1services~1{id}'
+  /v1/admin/services/{id}/regenerate-secret:
+    $ref: './paths/auth/admin/services.yaml#/~1admin~1services~1{id}~1regenerate-secret'
+  /v1/admin/services/{id}/revoke-previous-secret:
+    $ref: './paths/auth/admin/services.yaml#/~1admin~1services~1{id}~1revoke-previous-secret'
+  /v1/admin/services/{id}/access/approve:
+    $ref: './paths/auth/admin/services.yaml#/~1admin~1services~1{id}~1access~1approve'
+  /v1/admin/services/{id}/access/revoke:
+    $ref: './paths/auth/admin/services.yaml#/~1admin~1services~1{id}~1access~1revoke'
+  /v1/admin/settings:
+    $ref: './paths/auth/admin/settings.yaml#/~1admin~1settings'
+  /v1/admin/signing-keys:
+    $ref: './paths/auth/admin/signing-keys.yaml#/~1admin~1signing-keys'
+  /v1/admin/signing-keys/rotate:
+    $ref: './paths/auth/admin/signing-keys.yaml#/~1admin~1signing-keys~1rotate'
+  # Files
+  /v1/files/buckets:
+    $ref: './paths/files/buckets.yaml#/~1files~1buckets'
+  /v1/files/buckets/{name}:
+    $ref: './paths/files/buckets.yaml#/~1files~1buckets~1{name}'
+  /v1/files/buckets/{name}/my-permissions:
+    $ref: './paths/files/buckets.yaml#/~1files~1buckets~1{name}~1my-permissions'
+  /v1/files/buckets/{name}/lifecycle:
+    $ref: './paths/files/lifecycle.yaml#/~1files~1buckets~1{name}~1lifecycle'
+  /v1/files/buckets/{name}/objects:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects'
+  /v1/files/buckets/{name}/objects/prefixes:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects~1prefixes'
+  /v1/files/buckets/{name}/objects/bulk-delete:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects~1bulk-delete'
+  /v1/files/buckets/{name}/objects/purge-non-current-versions:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects~1purge-non-current-versions'
+  /v1/files/buckets/{name}/objects/by-key/{objectKey}:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects~1by-key~1{objectKey}'
+  /v1/files/buckets/{name}/objects/{objectKey}:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects~1{objectKey}'
+  /v1/files/buckets/{name}/objects/by-id/{id}:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects~1by-id~1{id}'
+  /v1/files/buckets/{name}/objects/by-id/{id}/presign:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects~1by-id~1{id}~1presign'
+  /v1/files/buckets/{name}/objects/by-id/{id}/versions:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects~1by-id~1{id}~1versions'
+  /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects~1by-id~1{id}~1versions~1{versionId}'
+  /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/download:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects~1by-id~1{id}~1versions~1{versionId}~1download'
+  /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/restore:
+    $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects~1by-id~1{id}~1versions~1{versionId}~1restore'
+  /v1/files/buckets/{name}/multipart:
+    $ref: './paths/files/multipart.yaml#/~1files~1buckets~1{name}~1multipart'
+  /v1/files/buckets/{name}/multipart/{uploadId}:
+    $ref: './paths/files/multipart.yaml#/~1files~1buckets~1{name}~1multipart~1{uploadId}'
+  /v1/files/buckets/{name}/multipart/{uploadId}/parts/{partNumber}:
+    $ref: './paths/files/multipart.yaml#/~1files~1buckets~1{name}~1multipart~1{uploadId}~1parts~1{partNumber}'
+  /v1/files/buckets/{name}/multipart/{uploadId}/complete:
+    $ref: './paths/files/multipart.yaml#/~1files~1buckets~1{name}~1multipart~1{uploadId}~1complete'
+  /v1/files/buckets/{name}/archives:
+    $ref: './paths/files/archives.yaml#/~1files~1buckets~1{name}~1archives'
+  /v1/files/buckets/{name}/permissions:
+    $ref: './paths/files/permissions.yaml#/~1files~1buckets~1{name}~1permissions'
+  /v1/files/buckets/{name}/permissions/{userId}:
+    $ref: './paths/files/permissions.yaml#/~1files~1buckets~1{name}~1permissions~1{userId}'
+  /v1/files/buckets/{name}/shares:
+    $ref: './paths/files/shares.yaml#/~1files~1buckets~1{name}~1shares'
+  /v1/files/buckets/{name}/shares/by-id/{id}:
+    $ref: './paths/files/shares.yaml#/~1files~1buckets~1{name}~1shares~1by-id~1{id}'
+  /v1/files/shared/{token}:
+    $ref: './paths/files/shares.yaml#/~1files~1shared~1{token}'
+  /v1/files/shared/{token}/{filename}:
+    $ref: './paths/files/shares.yaml#/~1files~1shared~1{token}~1{filename}'
+  /v1/files/shared/{token}/unlock:
+    $ref: './paths/files/shares.yaml#/~1files~1shared~1{token}~1unlock'
+  /v1/files/signed/objects/{bucket}/by-id/{id}:
+    $ref: './paths/files/signed.yaml#/~1files~1signed~1objects~1{bucket}~1by-id~1{id}'
+  /v1/files/signed/archives/{id}:
+    $ref: './paths/files/signed.yaml#/~1files~1signed~1archives~1{id}'
+  # Webhooks
+  /v1/webhooks/webhooks:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks'
+  /v1/webhooks/webhooks/{id}:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks~1{id}'
+  /v1/webhooks/webhooks/{id}/archive:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks~1{id}~1archive'
+  /v1/webhooks/webhooks/{id}/restore:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks~1{id}~1restore'
+  /v1/webhooks/webhooks/{id}/rotate-secret:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks~1{id}~1rotate-secret'
+  /v1/webhooks/webhooks/{id}/revoke-previous-secret:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks~1{id}~1revoke-previous-secret'
+  /v1/webhooks/webhooks/{id}/test:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks~1{id}~1test'
+  /v1/webhooks/webhooks/{id}/stats:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks~1{id}~1stats'
+  /v1/webhooks/webhooks/{id}/deliveries:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks~1{id}~1deliveries'
+  /v1/webhooks/webhooks/{id}/deliveries/retry:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks~1{id}~1deliveries~1retry'
+  /v1/webhooks/webhooks/{id}/deliveries/{deliveryId}:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks~1{id}~1deliveries~1{deliveryId}'
+  /v1/webhooks/webhooks/{id}/deliveries/{deliveryId}/retry:
+    $ref: './paths/webhooks/webhooks.yaml#/~1webhooks~1v1~1webhooks~1{id}~1deliveries~1{deliveryId}~1retry'
+  /v1/webhooks/event-types:
+    $ref: './paths/webhooks/event-types.yaml#/~1webhooks~1v1~1event-types'
+  /v1/webhooks/event-types/{eventType}:
+    $ref: './paths/webhooks/event-types.yaml#/~1webhooks~1v1~1event-types~1{eventType}'
+  /v1/webhooks/events:
+    $ref: './paths/webhooks/events.yaml#/~1webhooks~1v1~1events'
+  /v1/webhooks/events/batch:
+    $ref: './paths/webhooks/events.yaml#/~1webhooks~1v1~1events~1batch'
+  # Audit
+  /v1/audit/entries:
+    $ref: './paths/audit/entries.yaml#/~1audit~1v1~1entries'
+  /v1/audit/entries/batch:
+    $ref: './paths/audit/entries.yaml#/~1audit~1v1~1entries~1batch'
+  /v1/audit/entries/facets:
+    $ref: './paths/audit/entries.yaml#/~1audit~1v1~1entries~1facets'
+  /v1/audit/entries/{id}:
+    $ref: './paths/audit/entries.yaml#/~1audit~1v1~1entries~1{id}'
+  /v1/audit/entries/entity/{entityType}/{entityId}:
+    $ref: './paths/audit/entries.yaml#/~1audit~1v1~1entries~1entity~1{entityType}~1{entityId}'
+
+  # Notifications
+  /v1/notifications:
+    $ref: './paths/notifications/send.yaml#/~1notifications'
+  /v1/notifications/{id}:
+    $ref: './paths/notifications/send.yaml#/~1notifications~1{id}'
+  /v1/admin/notifications:
+    $ref: './paths/notifications/admin-log.yaml#/~1admin~1notifications'
+  /v1/admin/notifications/{id}:
+    $ref: './paths/notifications/admin-log.yaml#/~1admin~1notifications~1{id}'
+  /v1/admin/notifications/{id}/retry:
+    $ref: './paths/notifications/admin-log.yaml#/~1admin~1notifications~1{id}~1retry'
+  /v1/admin/notifications/channels:
+    $ref: './paths/notifications/connections.yaml#/~1admin~1notifications~1channels'
+  /v1/admin/notifications/connections:
+    $ref: './paths/notifications/connections.yaml#/~1admin~1notifications~1connections'
+  /v1/admin/notifications/connections/{id}:
+    $ref: './paths/notifications/connections.yaml#/~1admin~1notifications~1connections~1{id}'
+  /v1/admin/notifications/connections/{id}/default:
+    $ref: './paths/notifications/connections.yaml#/~1admin~1notifications~1connections~1{id}~1default'
+  /v1/admin/notifications/connections/{id}/test:
+    $ref: './paths/notifications/connections.yaml#/~1admin~1notifications~1connections~1{id}~1test'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      $ref: './components/security.yaml#/BearerAuth'
+    ClientCredentials:
+      $ref: './components/security.yaml#/ClientCredentials'
+
+  parameters:
+    LimitParam:
+      $ref: './components/parameters.yaml#/LimitParam'
+    CursorParam:
+      $ref: './components/parameters.yaml#/CursorParam'
+    SortParam:
+      $ref: './components/parameters.yaml#/SortParam'
+    SortDirParam:
+      $ref: './components/parameters.yaml#/SortDirParam'
+    UserIdParam:
+      $ref: './components/auth/parameters.yaml#/UserIdParam'
+    ClientIdParam:
+      $ref: './components/auth/parameters.yaml#/ClientIdParam'
+    RoleIdParam:
+      $ref: './components/auth/parameters.yaml#/RoleIdParam'
+    PermissionIdParam:
+      $ref: './components/auth/parameters.yaml#/PermissionIdParam'
+    OrganizationIdParam:
+      $ref: './components/auth/parameters.yaml#/OrganizationIdParam'
+    ServiceIdParam:
+      $ref: './components/auth/parameters.yaml#/ServiceIdParam'
+    IdentityProviderIdParam:
+      $ref: './components/auth/parameters.yaml#/IdentityProviderIdParam'
+    IdentityProviderDomainIdParam:
+      $ref: './components/auth/parameters.yaml#/IdentityProviderDomainIdParam'
+    IncludeArchivedParam:
+      $ref: './components/parameters.yaml#/IncludeArchivedParam'
+    IncludeRetiredParam:
+      $ref: './components/auth/parameters.yaml#/IncludeRetiredParam'
+    FilterValueParam:
+      $ref: './components/parameters.yaml#/FilterValueParam'
+    FilterOperatorParam:
+      $ref: './components/parameters.yaml#/FilterOperatorParam'
+    WebhookIdHeader:
+      $ref: './components/parameters.yaml#/WebhookIdHeader'
+    WebhookEventHeader:
+      $ref: './components/parameters.yaml#/WebhookEventHeader'
+    WebhookTimestampHeader:
+      $ref: './components/parameters.yaml#/WebhookTimestampHeader'
+    WebhookSignatureHeader:
+      $ref: './components/parameters.yaml#/WebhookSignatureHeader'
+    FilesLimitParam:
+      $ref: './components/files/parameters.yaml#/FilesLimitParam'
+    ShareLimitParam:
+      $ref: './components/files/parameters.yaml#/ShareLimitParam'
+    FilesSortParam:
+      $ref: './components/files/parameters.yaml#/FilesSortParam'
+    BucketNameParam:
+      $ref: './components/files/parameters.yaml#/BucketNameParam'
+    ObjectKeyParam:
+      $ref: './components/files/parameters.yaml#/ObjectKeyParam'
+    ObjectIdParam:
+      $ref: './components/files/parameters.yaml#/ObjectIdParam'
+    VersionIdParam:
+      $ref: './components/files/parameters.yaml#/VersionIdParam'
+    UploadIdParam:
+      $ref: './components/files/parameters.yaml#/UploadIdParam'
+    PartNumberParam:
+      $ref: './components/files/parameters.yaml#/PartNumberParam'
+    RangeHeaderParam:
+      $ref: './components/files/parameters.yaml#/RangeHeaderParam'
+    IfRangeHeaderParam:
+      $ref: './components/files/parameters.yaml#/IfRangeHeaderParam'
+    FilesUserIdParam:
+      $ref: './components/files/parameters.yaml#/FilesUserIdParam'
+    IdempotencyKeyHeader:
+      $ref: './components/files/parameters.yaml#/IdempotencyKeyHeader'
+    FilesFilterOperatorParam:
+      $ref: './components/files/parameters.yaml#/FilesFilterOperatorParam'
+    ShareIdParam:
+      $ref: './components/files/parameters.yaml#/ShareIdParam'
+    SignedOpParam:
+      $ref: './components/files/parameters.yaml#/SignedOpParam'
+    SignedExpiresParam:
+      $ref: './components/files/parameters.yaml#/SignedExpiresParam'
+    SignedNonceParam:
+      $ref: './components/files/parameters.yaml#/SignedNonceParam'
+    SignedKeyVersionParam:
+      $ref: './components/files/parameters.yaml#/SignedKeyVersionParam'
+    SignedSigParam:
+      $ref: './components/files/parameters.yaml#/SignedSigParam'
+    SignedShareParam:
+      $ref: './components/files/parameters.yaml#/SignedShareParam'
+    SignedByParam:
+      $ref: './components/files/parameters.yaml#/SignedByParam'
+    WebhooksLimitParam:
+      $ref: './components/webhooks/parameters.yaml#/WebhooksLimitParam'
+    WebhooksFilterOperatorParam:
+      $ref: './components/webhooks/parameters.yaml#/WebhooksFilterOperatorParam'
+    WebhooksIdParam:
+      $ref: './components/webhooks/parameters.yaml#/WebhooksIdParam'
+    EventTypeParam:
+      $ref: './components/webhooks/parameters.yaml#/EventTypeParam'
+    OrganizationIdHeader:
+      $ref: './components/webhooks/parameters.yaml#/OrganizationIdHeader'
+    DeliveryIdParam:
+      $ref: './components/webhooks/parameters.yaml#/DeliveryIdParam'
+    AuditSortParam:
+      $ref: './components/audit/parameters.yaml#/AuditSortParam'
+    AuditFilterValueParam:
+      $ref: './components/audit/parameters.yaml#/AuditFilterValueParam'
+    AuditFilterOperatorParam:
+      $ref: './components/audit/parameters.yaml#/AuditFilterOperatorParam'
+    AuditIdParam:
+      $ref: './components/audit/parameters.yaml#/AuditIdParam'
+    EntityTypeParam:
+      $ref: './components/audit/parameters.yaml#/EntityTypeParam'
+    EntityIdParam:
+      $ref: './components/audit/parameters.yaml#/EntityIdParam'
+    EntityHistoryLimitParam:
+      $ref: './components/audit/parameters.yaml#/EntityHistoryLimitParam'
+    OrganizationFilterParam:
+      $ref: './components/audit/parameters.yaml#/OrganizationFilterParam'
+    SearchParam:
+      $ref: './components/audit/parameters.yaml#/SearchParam'
+    NotificationConnectionIdParam:
+      $ref: './components/notifications/parameters.yaml#/NotificationConnectionIdParam'
+    NotificationChannelFilterParam:
+      $ref: './components/notifications/parameters.yaml#/NotificationChannelFilterParam'
+    NotificationIdParam:
+      $ref: './components/notifications/parameters.yaml#/NotificationIdParam'
+
+
+  responses:
+    UnauthorizedResponse:
+      $ref: './components/responses.yaml#/UnauthorizedResponse'
+    ForbiddenResponse:
+      $ref: './components/responses.yaml#/ForbiddenResponse'
+    NotFoundResponse:
+      $ref: './components/responses.yaml#/NotFoundResponse'
+    ServerErrorResponse:
+      $ref: './components/responses.yaml#/ServerErrorResponse'
+    RateLimitResponse:
+      $ref: './components/responses.yaml#/RateLimitResponse'
+    ServiceUnavailableResponse:
+      $ref: './components/responses.yaml#/ServiceUnavailableResponse'
+    NoContentResponse:
+      $ref: './components/responses.yaml#/NoContentResponse'
+    BadRequestResponse:
+      $ref: './components/responses.yaml#/BadRequestResponse'
+    OAuth2ErrorResponse:
+      $ref: './components/auth/responses.yaml#/OAuth2ErrorResponse'
+    ConflictResponse:
+      $ref: './components/responses.yaml#/ConflictResponse'
+    NotArchivedResponse:
+      $ref: './components/responses.yaml#/NotArchivedResponse'
+    ArchivedResponse:
+      $ref: './components/auth/responses.yaml#/ArchivedResponse'
+    UnprocessableEntityResponse:
+      $ref: './components/auth/responses.yaml#/UnprocessableEntityResponse'
+    FilesUnauthorizedResponse:
+      $ref: './components/files/responses.yaml#/FilesUnauthorizedResponse'
+    FilesConflictResponse:
+      $ref: './components/files/responses.yaml#/FilesConflictResponse'
+    FilesRateLimitResponse:
+      $ref: './components/files/responses.yaml#/FilesRateLimitResponse'
+    PayloadTooLargeResponse:
+      $ref: './components/files/responses.yaml#/PayloadTooLargeResponse'
+    InsufficientStorageResponse:
+      $ref: './components/files/responses.yaml#/InsufficientStorageResponse'
+    PartialContentResponse:
+      $ref: './components/files/responses.yaml#/PartialContentResponse'
+    RangeNotSatisfiableResponse:
+      $ref: './components/files/responses.yaml#/RangeNotSatisfiableResponse'
+    SignatureRejectedResponse:
+      $ref: './components/files/responses.yaml#/SignatureRejectedResponse'
+    WebhooksUnauthorizedResponse:
+      $ref: './components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+    WebhooksConflictResponse:
+      $ref: './components/webhooks/responses.yaml#/WebhooksConflictResponse'
+    AuditUnauthorizedResponse:
+      $ref: './components/audit/responses.yaml#/AuditUnauthorizedResponse'
+    AuditForbiddenResponse:
+      $ref: './components/audit/responses.yaml#/AuditForbiddenResponse'
+    AuditConflictResponse:
+      $ref: './components/audit/responses.yaml#/AuditConflictResponse'
+    AuditIdempotencyKeyConflictResponse:
+      $ref: './components/audit/responses.yaml#/AuditIdempotencyKeyConflictResponse'
+    AuditBadRequestResponse:
+      $ref: './components/audit/responses.yaml#/AuditBadRequestResponse'
+    NotificationsInvalidConfigResponse:
+      $ref: './components/notifications/responses.yaml#/NotificationsInvalidConfigResponse'
+    NotificationsNothingToRetryResponse:
+      $ref: './components/notifications/responses.yaml#/NotificationsNothingToRetryResponse'
+    NotificationsConflictResponse:
+      $ref: './components/notifications/responses.yaml#/NotificationsConflictResponse'
+    NotificationsSendBadRequestResponse:
+      $ref: './components/notifications/responses.yaml#/NotificationsSendBadRequestResponse'
+    NotificationsSendForbiddenResponse:
+      $ref: './components/notifications/responses.yaml#/NotificationsSendForbiddenResponse'
+    NotificationsSendConflictResponse:
+      $ref: './components/notifications/responses.yaml#/NotificationsSendConflictResponse'
+    NotificationsPayloadTooLargeResponse:
+      $ref: './components/notifications/responses.yaml#/NotificationsPayloadTooLargeResponse'
+    NotificationsIdempotencyKeyConflictResponse:
+      $ref: './components/notifications/responses.yaml#/NotificationsIdempotencyKeyConflictResponse'
+
+
+  schemas:
+    UserRef:
+      $ref: './components/schemas.yaml#/UserRef'
+    OrgRef:
+      $ref: './components/schemas.yaml#/OrgRef'
+    ServiceRef:
+      $ref: './components/schemas.yaml#/ServiceRef'
+    RoleRef:
+      $ref: './components/schemas.yaml#/RoleRef'
+    HealthStatus:
+      $ref: './components/auth/schemas.yaml#/HealthStatus'
+    OAuthAuthorizationServerMetadata:
+      $ref: './components/auth/schemas.yaml#/OAuthAuthorizationServerMetadata'
+    OpenIDConfiguration:
+      $ref: './components/auth/schemas.yaml#/OpenIDConfiguration'
+    JWKS:
+      $ref: './components/auth/schemas.yaml#/JWKS'
+    AuthorizeSubmitRequest:
+      $ref: './components/auth/schemas.yaml#/AuthorizeSubmitRequest'
+    ConsentSubmitRequest:
+      $ref: './components/auth/schemas.yaml#/ConsentSubmitRequest'
+    OrgSelectResponse:
+      $ref: './components/auth/schemas.yaml#/OrgSelectResponse'
+    OrgSelectSubmitRequest:
+      $ref: './components/auth/schemas.yaml#/OrgSelectSubmitRequest'
+    AuthorizationCodeTokenRequest:
+      $ref: './components/auth/schemas.yaml#/AuthorizationCodeTokenRequest'
+    ClientCredentialsTokenRequest:
+      $ref: './components/auth/schemas.yaml#/ClientCredentialsTokenRequest'
+    RefreshTokenRequest:
+      $ref: './components/auth/schemas.yaml#/RefreshTokenRequest'
+    TokenResponse:
+      $ref: './components/auth/schemas.yaml#/TokenResponse'
+    IntrospectRequest:
+      $ref: './components/auth/schemas.yaml#/IntrospectRequest'
+    IntrospectResponse:
+      $ref: './components/auth/schemas.yaml#/IntrospectResponse'
+    RevokeRequest:
+      $ref: './components/auth/schemas.yaml#/RevokeRequest'
+    UserInfoResponse:
+      $ref: './components/auth/schemas.yaml#/UserInfoResponse'
+    EndSessionRequest:
+      $ref: './components/auth/schemas.yaml#/EndSessionRequest'
+    CheckPermissionRequest:
+      $ref: './components/auth/schemas.yaml#/CheckPermissionRequest'
+    CheckPermissionResponse:
+      $ref: './components/auth/schemas.yaml#/CheckPermissionResponse'
+    CheckPermissionsBatchRequest:
+      $ref: './components/auth/schemas.yaml#/CheckPermissionsBatchRequest'
+    CheckPermissionsBatchResponse:
+      $ref: './components/auth/schemas.yaml#/CheckPermissionsBatchResponse'
+    TotpVerifyRequest:
+      $ref: './components/auth/schemas.yaml#/TotpVerifyRequest'
+    TotpRecoveryRequest:
+      $ref: './components/auth/schemas.yaml#/TotpRecoveryRequest'
+    TotpSetupInitiateRequest:
+      $ref: './components/auth/schemas.yaml#/TotpSetupInitiateRequest'
+    TotpSetupResponse:
+      $ref: './components/auth/schemas.yaml#/TotpSetupResponse'
+    TotpSetupVerifyRequest:
+      $ref: './components/auth/schemas.yaml#/TotpSetupVerifyRequest'
+    TotpSetupVerifyResponse:
+      $ref: './components/auth/schemas.yaml#/TotpSetupVerifyResponse'
+    TotpStatus:
+      $ref: './components/auth/schemas.yaml#/TotpStatus'
+    AccountTotpStatusResponse:
+      $ref: './components/auth/schemas.yaml#/AccountTotpStatusResponse'
+    AdminUserTotpStatusResponse:
+      $ref: './components/auth/schemas.yaml#/AdminUserTotpStatusResponse'
+    DisableTotpRequest:
+      $ref: './components/auth/schemas.yaml#/DisableTotpRequest'
+    VerifySetupRequest:
+      $ref: './components/auth/schemas.yaml#/VerifySetupRequest'
+    RegenerateRecoveryCodesRequest:
+      $ref: './components/auth/schemas.yaml#/RegenerateRecoveryCodesRequest'
+    RecoveryCodesResponse:
+      $ref: './components/auth/schemas.yaml#/RecoveryCodesResponse'
+    UserProfile:
+      $ref: './components/auth/schemas.yaml#/UserProfile'
+    SessionsResponse:
+      $ref: './components/auth/schemas.yaml#/SessionsResponse'
+    UserSessionsResponse:
+      $ref: './components/auth/schemas.yaml#/UserSessionsResponse'
+    ChangePasswordRequest:
+      $ref: './components/auth/schemas.yaml#/ChangePasswordRequest'
+    User:
+      $ref: './components/auth/schemas.yaml#/User'
+    CreateUserRequest:
+      $ref: './components/auth/schemas.yaml#/CreateUserRequest'
+    UpdateUserRequest:
+      $ref: './components/auth/schemas.yaml#/UpdateUserRequest'
+    PaginatedUsersResponse:
+      $ref: './components/auth/schemas.yaml#/PaginatedUsersResponse'
+    RoleAssignment:
+      $ref: './components/auth/schemas.yaml#/RoleAssignment'
+    UserRolesResponse:
+      $ref: './components/auth/schemas.yaml#/UserRolesResponse'
+    UserPermissionsResponse:
+      $ref: './components/auth/schemas.yaml#/UserPermissionsResponse'
+    SetUserRolesRequest:
+      $ref: './components/auth/schemas.yaml#/SetUserRolesRequest'
+    RevokeSessionRequest:
+      $ref: './components/auth/schemas.yaml#/RevokeSessionRequest'
+    Client:
+      $ref: './components/auth/schemas.yaml#/Client'
+    ClientUser:
+      $ref: './components/auth/schemas.yaml#/ClientUser'
+    ClientService:
+      $ref: './components/auth/schemas.yaml#/ClientService'
+    ClientWithSecret:
+      $ref: './components/auth/schemas.yaml#/ClientWithSecret'
+    CreateClientRequest:
+      $ref: './components/auth/schemas.yaml#/CreateClientRequest'
+    UpdateClientRequest:
+      $ref: './components/auth/schemas.yaml#/UpdateClientRequest'
+    PaginatedClientsResponse:
+      $ref: './components/auth/schemas.yaml#/PaginatedClientsResponse'
+    Role:
+      $ref: './components/auth/schemas.yaml#/Role'
+    RoleWithPermissions:
+      $ref: './components/auth/schemas.yaml#/RoleWithPermissions'
+    RoleUsersResponse:
+      $ref: './components/auth/schemas.yaml#/RoleUsersResponse'
+    CreateRoleRequest:
+      $ref: './components/auth/schemas.yaml#/CreateRoleRequest'
+    UpdateRoleRequest:
+      $ref: './components/auth/schemas.yaml#/UpdateRoleRequest'
+    DuplicateRoleRequest:
+      $ref: './components/auth/schemas.yaml#/DuplicateRoleRequest'
+    SetPermissionsRequest:
+      $ref: './components/auth/schemas.yaml#/SetPermissionsRequest'
+    PaginatedRolesResponse:
+      $ref: './components/auth/schemas.yaml#/PaginatedRolesResponse'
+    Organization:
+      $ref: './components/auth/schemas.yaml#/Organization'
+    OrganizationMember:
+      $ref: './components/auth/schemas.yaml#/OrganizationMember'
+    CreateOrganizationRequest:
+      $ref: './components/auth/schemas.yaml#/CreateOrganizationRequest'
+    UpdateOrganizationRequest:
+      $ref: './components/auth/schemas.yaml#/UpdateOrganizationRequest'
+    AddOrganizationMemberRequest:
+      $ref: './components/auth/schemas.yaml#/AddOrganizationMemberRequest'
+    UpdateMemberRoleRequest:
+      $ref: './components/auth/schemas.yaml#/UpdateMemberRoleRequest'
+    SetMemberRolesRequest:
+      $ref: './components/auth/schemas.yaml#/SetMemberRolesRequest'
+    PaginatedOrganizationsResponse:
+      $ref: './components/auth/schemas.yaml#/PaginatedOrganizationsResponse'
+    OrganizationMembersResponse:
+      $ref: './components/auth/schemas.yaml#/OrganizationMembersResponse'
+    OrganizationMemberRolesResponse:
+      $ref: './components/auth/schemas.yaml#/OrganizationMemberRolesResponse'
+    Permission:
+      $ref: './components/auth/schemas.yaml#/Permission'
+    PaginatedPermissionsResponse:
+      $ref: './components/auth/schemas.yaml#/PaginatedPermissionsResponse'
+    SystemSettings:
+      $ref: './components/auth/schemas.yaml#/SystemSettings'
+    UpdateSettingsRequest:
+      $ref: './components/auth/schemas.yaml#/UpdateSettingsRequest'
+    SetupStatusResponse:
+      $ref: './components/auth/schemas.yaml#/SetupStatusResponse'
+    CompleteSetupRequest:
+      $ref: './components/auth/schemas.yaml#/CompleteSetupRequest'
+    CompleteSetupResponse:
+      $ref: './components/auth/schemas.yaml#/CompleteSetupResponse'
+    Declaration:
+      $ref: './components/auth/schemas.yaml#/Declaration'
+    ServiceAccessSummary:
+      $ref: './components/auth/schemas.yaml#/ServiceAccessSummary'
+    RegisterDeclarationResponse:
+      $ref: './components/auth/schemas.yaml#/RegisterDeclarationResponse'
+    Service:
+      $ref: './components/auth/schemas.yaml#/Service'
+    ServiceCredentials:
+      $ref: './components/auth/schemas.yaml#/ServiceCredentials'
+    ServiceWithCredentials:
+      $ref: './components/auth/schemas.yaml#/ServiceWithCredentials'
+    ServiceAccess:
+      $ref: './components/auth/schemas.yaml#/ServiceAccess'
+    ServiceAccessListItem:
+      $ref: './components/auth/schemas.yaml#/ServiceAccessListItem'
+    ServiceListItem:
+      $ref: './components/auth/schemas.yaml#/ServiceListItem'
+    ServiceSettings:
+      $ref: './components/auth/schemas.yaml#/ServiceSettings'
+    ServiceDetail:
+      $ref: './components/auth/schemas.yaml#/ServiceDetail'
+    CreateServiceRequest:
+      $ref: './components/auth/schemas.yaml#/CreateServiceRequest'
+    UpdateServiceRequest:
+      $ref: './components/auth/schemas.yaml#/UpdateServiceRequest'
+    RegenerateServiceSecretResponse:
+      $ref: './components/auth/schemas.yaml#/RegenerateServiceSecretResponse'
+    AccessDecisionRequest:
+      $ref: './components/auth/schemas.yaml#/AccessDecisionRequest'
+    AccessDecisionItem:
+      $ref: './components/auth/schemas.yaml#/AccessDecisionItem'
+    ApproveAccessResponse:
+      $ref: './components/auth/schemas.yaml#/ApproveAccessResponse'
+    RevokeAccessResponse:
+      $ref: './components/auth/schemas.yaml#/RevokeAccessResponse'
+    PaginatedServicesResponse:
+      $ref: './components/auth/schemas.yaml#/PaginatedServicesResponse'
+    PaginatedServiceAccessResponse:
+      $ref: './components/auth/schemas.yaml#/PaginatedServiceAccessResponse'
+    WebhookEvent:
+      $ref: './components/webhook-schemas.yaml#/WebhookEvent'
+    WebhookHeaders:
+      $ref: './components/webhook-schemas.yaml#/WebhookHeaders'
+    CreateArchiveRequest:
+      $ref: './components/files/schemas.yaml#/CreateArchiveRequest'
+    CreateArchiveResponse:
+      $ref: './components/files/schemas.yaml#/CreateArchiveResponse'
+    Bucket:
+      $ref: './components/files/schemas.yaml#/Bucket'
+    CorsConfig:
+      $ref: './components/files/schemas.yaml#/CorsConfig'
+    RateLimitConfig:
+      $ref: './components/files/schemas.yaml#/RateLimitConfig'
+    CreateBucketRequest:
+      $ref: './components/files/schemas.yaml#/CreateBucketRequest'
+    CreateBucketResponse:
+      $ref: './components/files/schemas.yaml#/CreateBucketResponse'
+    UpdateBucketRequest:
+      $ref: './components/files/schemas.yaml#/UpdateBucketRequest'
+    UpdateBucketResponse:
+      $ref: './components/files/schemas.yaml#/UpdateBucketResponse'
+    ListBucketsResponse:
+      $ref: './components/files/schemas.yaml#/ListBucketsResponse'
+    BucketPermissions:
+      $ref: './components/files/schemas.yaml#/BucketPermissions'
+    LifecyclePolicy:
+      $ref: './components/files/schemas.yaml#/LifecyclePolicy'
+    UpsertLifecyclePolicyRequest:
+      $ref: './components/files/schemas.yaml#/UpsertLifecyclePolicyRequest'
+    Object:
+      $ref: './components/files/schemas.yaml#/Object'
+    ObjectResponse:
+      $ref: './components/files/schemas.yaml#/ObjectResponse'
+    ListObjectsResponse:
+      $ref: './components/files/schemas.yaml#/ListObjectsResponse'
+    PrefixEntry:
+      $ref: './components/files/schemas.yaml#/PrefixEntry'
+    PrefixObjectEntry:
+      $ref: './components/files/schemas.yaml#/PrefixObjectEntry'
+    PrefixListEntry:
+      $ref: './components/files/schemas.yaml#/PrefixListEntry'
+    ListObjectPrefixesResponse:
+      $ref: './components/files/schemas.yaml#/ListObjectPrefixesResponse'
+    PatchObjectRequest:
+      $ref: './components/files/schemas.yaml#/PatchObjectRequest'
+    ObjectVersion:
+      $ref: './components/files/schemas.yaml#/ObjectVersion'
+    ObjectVersionListItem:
+      $ref: './components/files/schemas.yaml#/ObjectVersionListItem'
+    ListObjectVersionsResponse:
+      $ref: './components/files/schemas.yaml#/ListObjectVersionsResponse'
+    RestoreObjectVersionResponse:
+      $ref: './components/files/schemas.yaml#/RestoreObjectVersionResponse'
+    PresignRequest:
+      $ref: './components/files/schemas.yaml#/PresignRequest'
+    PresignResponse:
+      $ref: './components/files/schemas.yaml#/PresignResponse'
+    InitiateMultipartRequest:
+      $ref: './components/files/schemas.yaml#/InitiateMultipartRequest'
+    InitiateMultipartResponse:
+      $ref: './components/files/schemas.yaml#/InitiateMultipartResponse'
+    UploadPartResponse:
+      $ref: './components/files/schemas.yaml#/UploadPartResponse'
+    MultipartPartEntry:
+      $ref: './components/files/schemas.yaml#/MultipartPartEntry'
+    MultipartUploadInfo:
+      $ref: './components/files/schemas.yaml#/MultipartUploadInfo'
+    CompleteMultipartRequest:
+      $ref: './components/files/schemas.yaml#/CompleteMultipartRequest'
+    CompleteMultipartResponse:
+      $ref: './components/files/schemas.yaml#/CompleteMultipartResponse'
+    BucketPermission:
+      $ref: './components/files/schemas.yaml#/BucketPermission'
+    GrantPermissionRequest:
+      $ref: './components/files/schemas.yaml#/GrantPermissionRequest'
+    GrantPermissionResponse:
+      $ref: './components/files/schemas.yaml#/GrantPermissionResponse'
+    ListPermissionsResponse:
+      $ref: './components/files/schemas.yaml#/ListPermissionsResponse'
+    ShareKind:
+      $ref: './components/files/schemas.yaml#/ShareKind'
+    ShareStatus:
+      $ref: './components/files/schemas.yaml#/ShareStatus'
+    Share:
+      $ref: './components/files/schemas.yaml#/Share'
+    CreateShareRequest:
+      $ref: './components/files/schemas.yaml#/CreateShareRequest'
+    CreateObjectShareRequest:
+      $ref: './components/files/schemas.yaml#/CreateObjectShareRequest'
+    CreateArchiveShareRequest:
+      $ref: './components/files/schemas.yaml#/CreateArchiveShareRequest'
+    UpdateShareRequest:
+      $ref: './components/files/schemas.yaml#/UpdateShareRequest'
+    ListSharesResponse:
+      $ref: './components/files/schemas.yaml#/ListSharesResponse'
+    PasswordRequiredResponse:
+      $ref: './components/files/schemas.yaml#/PasswordRequiredResponse'
+    UnlockShareRequest:
+      $ref: './components/files/schemas.yaml#/UnlockShareRequest'
+    UnlockShareResponse:
+      $ref: './components/files/schemas.yaml#/UnlockShareResponse'
+    ErrorResponse:
+      $ref: './components/files/schemas.yaml#/ErrorResponse'
+    WebhookEndpointStatus:
+      $ref: './components/webhooks/schemas.yaml#/WebhookEndpointStatus'
+    WebhookDeliveryStatus:
+      $ref: './components/webhooks/schemas.yaml#/WebhookDeliveryStatus'
+    WebhookEndpoint:
+      $ref: './components/webhooks/schemas.yaml#/WebhookEndpoint'
+    CreateWebhookEndpointRequest:
+      $ref: './components/webhooks/schemas.yaml#/CreateWebhookEndpointRequest'
+    UpdateWebhookEndpointRequest:
+      $ref: './components/webhooks/schemas.yaml#/UpdateWebhookEndpointRequest'
+    ListWebhookEndpointsResponse:
+      $ref: './components/webhooks/schemas.yaml#/ListWebhookEndpointsResponse'
+    WebhookDelivery:
+      $ref: './components/webhooks/schemas.yaml#/WebhookDelivery'
+    ListWebhookDeliveriesResponse:
+      $ref: './components/webhooks/schemas.yaml#/ListWebhookDeliveriesResponse'
+    EventType:
+      $ref: './components/webhooks/schemas.yaml#/EventType'
+    ListEventTypesResponse:
+      $ref: './components/webhooks/schemas.yaml#/ListEventTypesResponse'
+    EmitEventRequest:
+      $ref: './components/webhooks/schemas.yaml#/EmitEventRequest'
+    EmitEventResponse:
+      $ref: './components/webhooks/schemas.yaml#/EmitEventResponse'
+    BatchEmitEventRequest:
+      $ref: './components/webhooks/schemas.yaml#/BatchEmitEventRequest'
+    BatchEmitEventResponse:
+      $ref: './components/webhooks/schemas.yaml#/BatchEmitEventResponse'
+    BulkRetryRequest:
+      $ref: './components/webhooks/schemas.yaml#/BulkRetryRequest'
+    BulkRetryResponse:
+      $ref: './components/webhooks/schemas.yaml#/BulkRetryResponse'
+    TestWebhookResponse:
+      $ref: './components/webhooks/schemas.yaml#/TestWebhookResponse'
+    DeliveryStats:
+      $ref: './components/webhooks/schemas.yaml#/DeliveryStats'
+    Action:
+      $ref: './components/audit/schemas.yaml#/Action'
+    AuditLogEntry:
+      $ref: './components/audit/schemas.yaml#/AuditLogEntry'
+    AuditLogEntryWithNames:
+      $ref: './components/audit/schemas.yaml#/AuditLogEntryWithNames'
+    AuditLogActor:
+      $ref: './components/audit/schemas.yaml#/AuditLogActor'
+    AuditLogOrganization:
+      $ref: './components/audit/schemas.yaml#/AuditLogOrganization'
+    AuditLogFacets:
+      $ref: './components/audit/schemas.yaml#/AuditLogFacets'
+    AuditLogEntryFields:
+      $ref: './components/audit/schemas.yaml#/AuditLogEntryFields'
+    CreateAuditLogEntryRequest:
+      $ref: './components/audit/schemas.yaml#/CreateAuditLogEntryRequest'
+    CreateBatchRequest:
+      $ref: './components/audit/schemas.yaml#/CreateBatchRequest'
+    CreateBatchResponse:
+      $ref: './components/audit/schemas.yaml#/CreateBatchResponse'
+    ListAuditLogEntriesResponse:
+      $ref: './components/audit/schemas.yaml#/ListAuditLogEntriesResponse'
+    OrganizationWebhookEvent:
+      $ref: './components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+    NotificationChannel:
+      $ref: './components/notifications/schemas.yaml#/NotificationChannel'
+    NotificationConnection:
+      $ref: './components/notifications/schemas.yaml#/NotificationConnection'
+    ListNotificationConnectionsResponse:
+      $ref: './components/notifications/schemas.yaml#/ListNotificationConnectionsResponse'
+    CreateNotificationConnectionRequest:
+      $ref: './components/notifications/schemas.yaml#/CreateNotificationConnectionRequest'
+    UpdateNotificationConnectionRequest:
+      $ref: './components/notifications/schemas.yaml#/UpdateNotificationConnectionRequest'
+    TestNotificationConnectionRequest:
+      $ref: './components/notifications/schemas.yaml#/TestNotificationConnectionRequest'
+    TestNotificationConnectionResponse:
+      $ref: './components/notifications/schemas.yaml#/TestNotificationConnectionResponse'
+    NotificationChannelInfo:
+      $ref: './components/notifications/schemas.yaml#/NotificationChannelInfo'
+    ListNotificationChannelsResponse:
+      $ref: './components/notifications/schemas.yaml#/ListNotificationChannelsResponse'
+    NotificationConnectionEventData:
+      $ref: './components/notifications/schemas.yaml#/NotificationConnectionEventData'
+    SendNotificationRequest:
+      $ref: './components/notifications/schemas.yaml#/SendNotificationRequest'
+    SendNotificationResponse:
+      $ref: './components/notifications/schemas.yaml#/SendNotificationResponse'
+    Notification:
+      $ref: './components/notifications/schemas.yaml#/Notification'
+    NotificationLogEntry:
+      $ref: './components/notifications/schemas.yaml#/NotificationLogEntry'
+    ListNotificationLogResponse:
+      $ref: './components/notifications/schemas.yaml#/ListNotificationLogResponse'
+    NotificationLogDelivery:
+      $ref: './components/notifications/schemas.yaml#/NotificationLogDelivery'
+    NotificationLogDetail:
+      $ref: './components/notifications/schemas.yaml#/NotificationLogDetail'
+    RetryNotificationResponse:
+      $ref: './components/notifications/schemas.yaml#/RetryNotificationResponse'
+    NotificationDelivery:
+      $ref: './components/notifications/schemas.yaml#/NotificationDelivery'
+
+  headers:
+    Retry-After:
+      $ref: './components/headers.yaml#/Retry-After'
+    ETag:
+      $ref: './components/files/headers.yaml#/ETag'
+    Content-Length:
+      $ref: './components/files/headers.yaml#/Content-Length'
+    Accept-Ranges:
+      $ref: './components/files/headers.yaml#/Accept-Ranges'
+    Content-Range:
+      $ref: './components/files/headers.yaml#/Content-Range'
+    X-RateLimit-Limit:
+      $ref: './components/headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: './components/headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: './components/headers.yaml#/X-RateLimit-Reset'
+
+webhooks:
+  auth.organization.created:
+    $ref: './paths/auth/admin/organizations.yaml#/auth.organization.created'
+  auth.organization.updated:
+    $ref: './paths/auth/admin/organizations.yaml#/auth.organization.updated'
+  auth.organization.archived:
+    $ref: './paths/auth/admin/organizations.yaml#/auth.organization.archived'
+  auth.organization.restored:
+    $ref: './paths/auth/admin/organizations.yaml#/auth.organization.restored'
+  auth.user.updated:
+    $ref: './paths/auth/admin/users.yaml#/auth.user.updated'
+  auth.user.roles-changed:
+    $ref: './paths/auth/admin/users.yaml#/auth.user.roles-changed'
+  auth.user.totp-enabled:
+    $ref: './paths/auth/oauth.yaml#/auth.user.totp-enabled'
+  auth.user.totp-disabled:
+    $ref: './paths/auth/account.yaml#/auth.user.totp-disabled'
+  auth.identity-provider.created:
+    $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.created'
+  auth.identity-provider.updated:
+    $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.updated'
+  auth.identity-provider.deactivated:
+    $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.deactivated'
+  auth.identity-provider.activated:
+    $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.activated'
+  auth.role.created:
+    $ref: './paths/auth/admin/roles.yaml#/auth.role.created'
+  auth.role.updated:
+    $ref: './paths/auth/admin/roles.yaml#/auth.role.updated'
+  auth.role.archived:
+    $ref: './paths/auth/admin/roles.yaml#/auth.role.archived'
+  auth.role.restored:
+    $ref: './paths/auth/admin/roles.yaml#/auth.role.restored'
+  auth.role.deleted:
+    $ref: './paths/auth/admin/roles.yaml#/auth.role.deleted'
+  auth.role.permissions-changed:
+    $ref: './paths/auth/admin/roles.yaml#/auth.role.permissions-changed'
+  auth.role.user-removed:
+    $ref: './paths/auth/admin/roles.yaml#/auth.role.user-removed'
+  auth.client.updated:
+    $ref: './paths/auth/admin/clients.yaml#/auth.client.updated'
+  auth.client.deleted:
+    $ref: './paths/auth/admin/clients.yaml#/auth.client.deleted'
+  auth.client.secret-regenerated:
+    $ref: './paths/auth/admin/clients.yaml#/auth.client.secret-regenerated'
+  auth.organization.member-added:
+    $ref: './paths/auth/admin/organizations.yaml#/auth.organization.member-added'
+  auth.organization.member-updated:
+    $ref: './paths/auth/admin/organizations.yaml#/auth.organization.member-updated'
+  auth.organization.member-removed:
+    $ref: './paths/auth/admin/organizations.yaml#/auth.organization.member-removed'
+  auth.organization.member-roles-changed:
+    $ref: './paths/auth/admin/organizations.yaml#/auth.organization.member-roles-changed'
+  auth.user.created:
+    $ref: './paths/auth/admin/users.yaml#/auth.user.created'
+  auth.user.password-changed:
+    $ref: './paths/auth/account.yaml#/auth.user.password-changed'
+  auth.user.sessions-revoked:
+    $ref: './paths/auth/account.yaml#/auth.user.sessions-revoked'
+  auth.user.recovery-codes-regenerated:
+    $ref: './paths/auth/account.yaml#/auth.user.recovery-codes-regenerated'
+  auth.user.identity-linked:
+    $ref: './paths/auth/admin/user-identities.yaml#/auth.user.identity-linked'
+  auth.user.identity-unlinked:
+    $ref: './paths/auth/admin/user-identities.yaml#/auth.user.identity-unlinked'
+  auth.user.totp-reset:
+    $ref: './paths/auth/admin/users.yaml#/auth.user.totp-reset'
+  auth.client.created:
+    $ref: './paths/auth/admin/clients.yaml#/auth.client.created'
+  auth.settings.updated:
+    $ref: './paths/auth/admin/settings.yaml#/auth.settings.updated'
+  core.service.previous-secret-revoked:
+    $ref: './paths/auth/admin/services.yaml#/core.service.previous-secret-revoked'
+  core.service.created:
+    $ref: './paths/auth/admin/services.yaml#/core.service.created'
+  core.service.updated:
+    $ref: './paths/auth/admin/services.yaml#/core.service.updated'
+  core.service.secret-regenerated:
+    $ref: './paths/auth/admin/services.yaml#/core.service.secret-regenerated'
+  core.signing-key.rotated:
+    $ref: './paths/auth/admin/signing-keys.yaml#/core.signing-key.rotated'
+  core.service.declared:
+    $ref: './paths/auth/admin/services.yaml#/core.service.declared'
+  core.service.access-requested:
+    $ref: './paths/auth/admin/services.yaml#/core.service.access-requested'
+  core.service.access-approved:
+    $ref: './paths/auth/admin/services.yaml#/core.service.access-approved'
+  core.service.access-revoked:
+    $ref: './paths/auth/admin/services.yaml#/core.service.access-revoked'
+  file-service.bucket.created:
+    $ref: './paths/files/webhook-events.yaml#/file-service.bucket.created'
+  file-service.bucket.updated:
+    $ref: './paths/files/webhook-events.yaml#/file-service.bucket.updated'
+  file-service.bucket.deleted:
+    $ref: './paths/files/webhook-events.yaml#/file-service.bucket.deleted'
+  file-service.object.created:
+    $ref: './paths/files/webhook-events.yaml#/file-service.object.created'
+  file-service.object.updated:
+    $ref: './paths/files/webhook-events.yaml#/file-service.object.updated'
+  file-service.object.deleted:
+    $ref: './paths/files/webhook-events.yaml#/file-service.object.deleted'
+  file-service.objects.bulk-deleted:
+    $ref: './paths/files/webhook-events.yaml#/file-service.objects.bulk-deleted'
+  file-service.object.version.created:
+    $ref: './paths/files/webhook-events.yaml#/file-service.object.version.created'
+  file-service.object.version.restored:
+    $ref: './paths/files/webhook-events.yaml#/file-service.object.version.restored'
+  file-service.object.version.deleted:
+    $ref: './paths/files/webhook-events.yaml#/file-service.object.version.deleted'
+  file-service.objects.versions.purged:
+    $ref: './paths/files/webhook-events.yaml#/file-service.objects.versions.purged'
+  file-service.permission.granted:
+    $ref: './paths/files/webhook-events.yaml#/file-service.permission.granted'
+  file-service.permission.revoked:
+    $ref: './paths/files/webhook-events.yaml#/file-service.permission.revoked'
+  file-service.multipart.initiated:
+    $ref: './paths/files/webhook-events.yaml#/file-service.multipart.initiated'
+  file-service.multipart.completed:
+    $ref: './paths/files/webhook-events.yaml#/file-service.multipart.completed'
+  file-service.multipart.aborted:
+    $ref: './paths/files/webhook-events.yaml#/file-service.multipart.aborted'
+  file-service.lifecycle.policy.updated:
+    $ref: './paths/files/webhook-events.yaml#/file-service.lifecycle.policy.updated'
+  file-service.lifecycle.policy.deleted:
+    $ref: './paths/files/webhook-events.yaml#/file-service.lifecycle.policy.deleted'
+  file-service.lifecycle.policy.applied:
+    $ref: './paths/files/webhook-events.yaml#/file-service.lifecycle.policy.applied'
+  file-service.share.created:
+    $ref: './paths/files/webhook-events.yaml#/file-service.share.created'
+  file-service.share.updated:
+    $ref: './paths/files/webhook-events.yaml#/file-service.share.updated'
+  file-service.share.revoked:
+    $ref: './paths/files/webhook-events.yaml#/file-service.share.revoked'
+  file-service.share.accessed:
+    $ref: './paths/files/webhook-events.yaml#/file-service.share.accessed'
+  webhook.test:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.test'
+  notification.connection.created:
+    $ref: './paths/notifications/connections.yaml#/notification.connection.created'
+  notification.connection.updated:
+    $ref: './paths/notifications/connections.yaml#/notification.connection.updated'
+  notification.connection.deleted:
+    $ref: './paths/notifications/connections.yaml#/notification.connection.deleted'
+  notification.sent:
+    $ref: './paths/notifications/send.yaml#/notification.sent'
+  notification.failed:
+    $ref: './paths/notifications/send.yaml#/notification.failed'

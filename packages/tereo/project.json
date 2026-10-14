@@ -1,0 +1,72 @@
+{
+  "name": "tereo",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "packages/tereo/src",
+  "targets": {
+    "generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "prisma generate",
+        "cwd": "packages/tereo"
+      },
+      "inputs": ["{projectRoot}/prisma/schema.prisma"],
+      "outputs": ["{projectRoot}/prisma/generated"],
+      "cache": true
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build", "generate"],
+      "options": {
+        "command": "tsc",
+        "cwd": "packages/tereo"
+      },
+      "outputs": ["{projectRoot}/dist"]
+    },
+    "check": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build", "generate"],
+      "options": {
+        "command": "tsc --noEmit",
+        "cwd": "packages/tereo"
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx watch ./src/index.ts",
+        "cwd": "packages/tereo"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run",
+        "cwd": "packages/tereo"
+      }
+    },
+    "test:docker": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "./docker/test/run.sh",
+        "cwd": "."
+      }
+    },
+    "clean": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "rm -rf dist tsconfig.tsbuildinfo",
+        "cwd": "packages/tereo"
+      }
+    },
+    "docker": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "inputs": ["production", "^production", "{workspaceRoot}/docker/**/*"],
+      "options": {
+        "command": "docker build -f docker/Dockerfile -t tereo .",
+        "cwd": "."
+      }
+    }
+  }
+}

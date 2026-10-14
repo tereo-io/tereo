@@ -1,0 +1,843 @@
+/admin/users:
+  get:
+    tags:
+      - Admin - Users
+    summary: List users
+    description: |
+      Returns a paginated list of users with filtering and sorting.
+
+      **Filter fields and operators:**
+      - `id`: `equals`, `in` (comma-separated, at most 100 ids) — resolves
+        the users a page of results names in one request; pass a `limit` at
+        least the number of ids
+      - `email`: `contains`, `equals`
+      - `name`: `contains`, `equals`
+      - `isActive`: `equals` (true/false)
+      - `createdAt`: range only — `filter[createdAt_gte]`, `filter[createdAt_lte]` (ISO date)
+
+      **Sort fields:** `id` (default), `email`, `name`, `createdAt`, `isActive`
+      (`sortDir` defaults to `desc`)
+
+      **Examples:**
+      - `?filter[email]=john&filter[email_op]=contains`
+      - `?filter[id]=<uuid>,<uuid>&filter[id_op]=in&limit=2`
+      - `?filter[isActive]=true` (defaults to equals)
+      - `?filter[createdAt_gte]=2024-01-01`
+
+      An unknown filter field or operator, a bad value, or an invalid cursor
+      returns `400` (`invalid_request` / `invalid_cursor`).
+    operationId: getAdminUsers
+    security:
+      - BearerAuth: [users.read]
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../../components/parameters.yaml#/SortParam'
+      - $ref: '../../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../../components/parameters.yaml#/FilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of users
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/PaginatedUsersResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.read permission
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Admin - Users
+    summary: Create user
+    description: |
+      Creates a new person user. `userType` may be omitted; only `human` is
+      accepted — a service account comes with its service, from
+      `POST /v1/admin/services`, and `service_account` here is a `400`.
+
+      The email is trimmed and lower-cased before it is stored, and
+      uniqueness ignores case: an email differing from an existing one only
+      in case returns `409 conflict`.
+
+      The password is optional. Without one the user has no password
+      (`hasPassword: false`) and signs in through an identity provider: issue
+      an invite with `POST /v1/admin/users/{id}/identity-invites`. A password,
+      when given, must meet complexity requirements:
+      - At least 12 characters
+      - Contains uppercase letter
+      - Contains lowercase letter
+      - Contains number
+      - Contains special character
+
+      An audit log entry is created for this action.
+      An `auth.user.created` webhook event is emitted.
+    operationId: postAdminUsers
+    security:
+      - BearerAuth: [users.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/CreateUserRequest'
+    responses:
+      '201':
+        description: User created successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/User'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.write permission
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: A user with this email already exists
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/users/{id}:
+  get:
+    tags:
+      - Admin - Users
+    summary: Get user by ID
+    description: Returns detailed information about a specific user
+    operationId: getAdminUser
+    security:
+      - BearerAuth: [users.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    responses:
+      '200':
+        description: User details
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/User'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid user id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Admin - Users
+    summary: Update user
+    description: |
+      Updates user information. Users are never deleted; deactivate one with
+      `isActive: false`, which also revokes all of the user's active sessions
+      and their access tokens and ends the user's SSO sessions in every
+      browser, so silent login (`prompt=none`) and org switching stop working.
+
+      The system user cannot be modified (`400 system_user`), nor a
+      service's service-account user (`403` — manage it under
+      `/v1/admin/services`). Admins cannot deactivate their own account
+      (`400 self_deactivation`), and a deactivation that would leave no
+      active human holding the `admin` permission through a global role is
+      refused (`409 conflict`). The email is trimmed and lower-cased;
+      changing it to one already in use, in any case, returns
+      `409 conflict`.
+
+      Setting a `password`, changing the `email`, or deactivating another
+      user needs a caller holding
+      every permission the user holds, from global roles or roles in any
+      organization (`403`, naming the permissions the caller lacks,
+      otherwise). The caller's permissions count from global roles only,
+      capped by a delegated token's scopes: no core API scope reaches
+      `admin`, so a third-party client's `core:admin` token cannot reset an
+      administrator. A password reset ends all of the
+      user's sessions and token families, in the transaction that sets it,
+      like `DELETE /v1/admin/users/{id}/sessions/all`: a caller resetting their
+      own password keeps the session they act from.
+
+      An audit log entry is created for this action; it records the changed
+      profile fields, and `passwordReset: true` in its metadata when a
+      password was set — never the password or its hash.
+      An `auth.user.updated` webhook event is emitted. When sessions were
+      ended, a second entry (`metadata.action` `sessions_revoked`) and an
+      `auth.user.sessions-revoked` event record them.
+    operationId: patchAdminUser
+    security:
+      - BearerAuth: [users.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/UpdateUserRequest'
+    responses:
+      '200':
+        description: User updated successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/User'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid body or user id (`invalid_request`), the target is the system user (`system_user`), or the caller is deactivating their own account (`self_deactivation`)
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.write permission, the user is a service's service account, or a password reset or email change of a user holding a permission the caller does not
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: Email already in use, or the deactivation would leave no active administrator
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/users/{id}/roles:
+  get:
+    tags:
+      - Admin - User Permissions
+    summary: Get user roles
+    description: |
+      Returns the user's global role assignments. Organization-scoped
+      assignments are listed per organization, under
+      `GET /v1/admin/organizations/{id}/members/{userId}/roles`.
+    operationId: getAdminUserRoles
+    security:
+      - BearerAuth: [users.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    responses:
+      '200':
+        description: User roles
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/UserRolesResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid user id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  put:
+    tags:
+      - Admin - User Permissions
+    summary: Set user roles
+    description: |
+      Replaces the user's global role assignments with `roleIds` (duplicates
+      are ignored) and returns them. Organization-scoped assignments (made
+      under `/v1/admin/organizations/{id}/members/{userId}/roles`) are kept. A
+      role the user already holds keeps its assignment, `expiresAt`
+      included; only roles left out are removed.
+
+      Refused for the system user (`400 system_user`) and for a service's
+      service-account user (`403` — a service's roles are approved under
+      `/v1/admin/services`). Every role id must name an existing, non-archived,
+      non-retired role, otherwise `400 unknown_role`. A change that would
+      leave no active human holding the `admin` permission through a global
+      role is refused (`409 conflict`).
+
+      Only grant what you hold: every permission of a role the user does
+      not already hold must be one the caller holds through a global role
+      (`admin` holds all; roles held in the token's organization do not
+      count), otherwise `403` naming the permissions. Roles the user keeps
+      are not checked. Removing any role from another user needs the caller
+      to hold every permission that user holds, in any scope (`403`
+      otherwise).
+
+      An audit log entry is created for this action.
+      An `auth.user.roles-changed` webhook event is emitted.
+    operationId: putAdminUserRoles
+    security:
+      - BearerAuth: [users.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/SetUserRolesRequest'
+    responses:
+      '200':
+        description: User roles updated
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/UserRolesResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid request body or user id, a role id that names no role or an archived or retired one (`unknown_role`), or the target is the system user (`system_user`)
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.write permission, the user is a service's service account, or a new role grants a permission the caller does not hold
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: User not found
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The change would leave no active administrator
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/users/{id}/permissions:
+  get:
+    tags:
+      - Admin - User Permissions
+    summary: Get user permissions
+    description: Returns the permissions a user holds through their global roles. Roles scoped to an organization count only in that organization (its tokens and checks naming it), so they are not included.
+    operationId: getAdminUserPermissions
+    security:
+      - BearerAuth: [users.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    responses:
+      '200':
+        description: User permissions
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/UserPermissionsResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid user id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/users/{id}/sessions:
+  get:
+    tags:
+      - Admin - User Sessions
+    summary: Get user sessions
+    description: |
+      Returns the user's active sessions (unrevoked, unexpired refresh tokens).
+      `isCurrent` marks the session the calling token belongs to.
+    operationId: getAdminUserSessions
+    security:
+      - BearerAuth: [users.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    responses:
+      '200':
+        description: User sessions
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/UserSessionsResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid user id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  delete:
+    tags:
+      - Admin - User Sessions
+    summary: Revoke user session
+    description: |
+      Signs out the browser one of the user's active sessions belongs to:
+      revokes the session (its refresh token and the access tokens issued
+      from it), ends the SSO session it was issued under, and revokes every
+      other token family obtained through that SSO session. That browser
+      cannot get new tokens with `prompt=none` or an org switch; the user's
+      other browsers are untouched.
+
+      Ending a session of another user needs a caller holding every
+      permission that user holds, from global roles or roles in any
+      organization; the caller's count from global roles only, capped by a
+      delegated token's scopes (`403`, naming the permissions lacking,
+      otherwise).
+
+      An audit log entry is created for this action.
+      An `auth.user.sessions-revoked` webhook event is emitted.
+    operationId: deleteAdminUserSession
+    security:
+      - BearerAuth: [users.delete]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/RevokeSessionRequest'
+    responses:
+      '204':
+        description: Session revoked successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.delete permission, or the user holds permissions the caller does not
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: User not found, or no active session with this id for the user
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/users/{id}/sessions/all:
+  delete:
+    tags:
+      - Admin - User Sessions
+    summary: Revoke all user sessions
+    description: |
+      Revokes all of the user's active sessions (refresh tokens and the access
+      tokens issued from them) and ends the user's SSO sessions in every
+      browser, so silent login (`prompt=none`) and org switching stop working
+      until the user signs in again. When the admin targets their own account,
+      the session the calling token belongs to, and the SSO session in its
+      browser, are kept unless `includeCurrentSession` is `true`. The body is
+      optional.
+
+      Ending the sessions of another user needs a caller holding every
+      permission that user holds, from global roles or roles in any
+      organization; the caller's count from global roles only, capped by a
+      delegated token's scopes (`403`, naming the permissions lacking,
+      otherwise).
+
+      When any session was revoked or SSO session ended, an audit log entry
+      is created and an
+      `auth.user.sessions-revoked` webhook event is emitted.
+    operationId: deleteAdminUserSessionsAll
+    security:
+      - BearerAuth: [users.delete]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              includeCurrentSession:
+                type: boolean
+                default: false
+    responses:
+      '200':
+        description: Sessions revoked
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - revokedCount
+                - currentSessionRevoked
+              properties:
+                revokedCount:
+                  type: integer
+                  description: Number of sessions that were revoked
+                currentSessionRevoked:
+                  type: boolean
+                  description: "Whether the session the calling token belongs to was among those revoked (only when admins target their own account with `includeCurrentSession: true`)"
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.delete permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/users/{id}/totp:
+  get:
+    tags:
+      - Admin - User TOTP
+    summary: Get user TOTP status
+    description: Returns TOTP configuration status for a user
+    operationId: getAdminUserTotp
+    security:
+      - BearerAuth: [users.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    responses:
+      '200':
+        description: TOTP status
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/AdminUserTotpStatusResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid user id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/users/{id}/totp/reset:
+  post:
+    tags:
+      - Admin - User TOTP
+    summary: Reset user TOTP
+    description: |
+      Resets a user's two-factor authentication: TOTP is disabled and the
+      user's recovery codes are deleted, so they must enrol again (at their
+      next login, when TOTP is required). No codes are returned — an admin
+      never sees a user's recovery codes. All of the user's sessions and
+      token families end in the same transaction.
+
+      Only a caller holding every permission the user holds (from global
+      roles or roles in any organization) may reset it (`403`, naming the
+      permissions the caller lacks, otherwise); the caller's permissions count
+      from global roles only, capped by a delegated token's scopes. The
+      system user (`400 system_user`) and a service's service-account user
+      (`403`) are refused, as on `PATCH /v1/admin/users/{id}`.
+
+      An audit log entry is created (the admin as actor, `metadata.action`
+      `totp_reset`), and an `auth.user.totp-reset` webhook event is emitted.
+      When sessions were ended, a second entry (`metadata.action`
+      `sessions_revoked`) and an `auth.user.sessions-revoked` event record
+      them.
+    operationId: postAdminUserTotpReset
+    security:
+      - BearerAuth: [users.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    responses:
+      '200':
+        description: TOTP reset
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - success
+                - message
+              properties:
+                success:
+                  type: boolean
+                message:
+                  type: string
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: TOTP is not enabled for this user (`totp_not_enabled`), the target is the system user (`system_user`), or invalid user id
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.write permission, the user is a service's service account, or the user holds a permission the caller does not
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+# ============================================
+# WEBHOOK EVENTS
+# ============================================
+
+auth.user.totp-reset:
+  post:
+    tags:
+      - Admin - User TOTP
+    summary: User TOTP reset
+    description: Fired when an admin resets a user's TOTP with `POST /v1/admin/users/{id}/totp/reset` — TOTP disabled and recovery codes deleted.
+    operationId: webhookUserTotpReset
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.totp-reset
+                  entityType:
+                    const: User
+                  data:
+                    type: object
+                    required: [userId, email]
+                    properties:
+                      userId:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.user.updated:
+  post:
+    tags:
+      - Admin - Users
+    summary: User updated
+    description: Fired when an admin updates a user. `data` is the user after the change.
+    operationId: webhookUserUpdated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.updated
+                  entityType:
+                    const: User
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/User'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.user.roles-changed:
+  post:
+    tags:
+      - Admin - Users
+    summary: User roles changed
+    description: Fired when a user's global role assignments are replaced.
+    operationId: webhookUserRolesChanged
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.roles-changed
+                  entityType:
+                    const: User
+                  data:
+                    type: object
+                    required: [userId, email, roleIds]
+                    properties:
+                      userId:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                      roleIds:
+                        type: array
+                        items:
+                          type: string
+                          format: uuid
+                        description: The user's role ids after the change
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.user.created:
+  post:
+    tags:
+      - Admin - Users
+    summary: User created
+    description: Fired when a user is created with `POST /v1/admin/users`.
+    operationId: webhookUserCreated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.created
+                  entityType:
+                    const: User
+                  data:
+                    type: object
+                    required: [id, email, name, isActive, userType, hasPassword, createdAt, updatedAt]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                      name:
+                        type: [string, 'null']
+                      isActive:
+                        type: boolean
+                      userType:
+                        type: string
+                        enum: [human, service_account]
+                      hasPassword:
+                        type: boolean
+                      createdAt:
+                        type: string
+                        format: date-time
+                      updatedAt:
+                        type: string
+                        format: date-time
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

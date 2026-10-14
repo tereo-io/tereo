@@ -1,0 +1,261 @@
+FilesLimitParam:
+  name: limit
+  in: query
+  description: Maximum number of items to return per page
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 1000
+    default: 100
+
+ShareLimitParam:
+  name: limit
+  in: query
+  description: Maximum number of shares to return per page
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 500
+    default: 50
+
+FilesSortParam:
+  name: sort
+  in: query
+  description: |
+    Field name to sort by. Each operation lists its sort fields and default;
+    any other value returns 400.
+  schema:
+    type: string
+
+BucketNameParam:
+  name: name
+  in: path
+  required: true
+  description: Bucket name (3-63 characters, lowercase alphanumeric with hyphens)
+  schema:
+    type: string
+    minLength: 3
+    maxLength: 63
+    pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+
+ObjectKeyParam:
+  name: objectKey
+  in: path
+  required: true
+  description: |
+    Object key (1-1024 characters). May contain `/` (it spans path segments).
+    Allowed characters: letters, digits and `/ _ - . ( ) [ ] { } + = @ # $ ! & ' ,`
+    and space. It may not contain `..` or `//`, nor start or end with `/`.
+    Writes refuse the keys the objects router answers itself — `prefixes`
+    and any key starting with `by-id/` or `by-key/`, in any letter case — with
+    `400 reserved_object_key`.
+  schema:
+    type: string
+    minLength: 1
+    maxLength: 1024
+    pattern: "^[a-zA-Z0-9/_\\-. ()\\[\\]{}+=@#$!&',]+$"
+
+ObjectIdParam:
+  name: id
+  in: path
+  required: true
+  description: |
+    Stable UUIDv7 object identifier. Returned by the upload endpoint and by
+    all list endpoints. Used by every id-addressed mutation route.
+  schema:
+    type: string
+    format: uuid
+
+VersionIdParam:
+  name: versionId
+  in: path
+  required: true
+  description: UUID identifier of a specific `ObjectVersion` row.
+  schema:
+    type: string
+    format: uuid
+
+UploadIdParam:
+  name: uploadId
+  in: path
+  required: true
+  description: UUID identifier of an in-flight multipart upload.
+  schema:
+    type: string
+    format: uuid
+
+PartNumberParam:
+  name: partNumber
+  in: path
+  required: true
+  description: Part number within a multipart upload (1-10000, must be unique per upload).
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 10000
+
+FilesUserIdParam:
+  name: userId
+  in: path
+  required: true
+  description: User ID (a UUID; anything else is `400 invalid_request`)
+  schema:
+    type: string
+    format: uuid
+
+IdempotencyKeyHeader:
+  name: Idempotency-Key
+  in: header
+  required: true
+  description: |
+    Client-chosen key that uniquely identifies this upload attempt. Retrying a
+    request with the same key replays the first response (cached for 24h) with
+    an `Idempotency-Replay: true` response header. A retry under the same key
+    with a different request (blob content, object key, tags or metadata for
+    an upload; the parts list for a multipart complete) returns 422
+    `idempotency_key_conflict`. A concurrent request with the same key returns
+    409 `idempotency_request_in_progress`. A missing or blank key, or one over 255
+    characters, returns 400
+    `idempotency_key_required`. Leading and trailing whitespace is trimmed.
+    Recommended: use a deterministic, content-bound value (e.g.
+    `invoice:{invoiceNumber}:pdf`) for replay safety across process restarts.
+    1-255 characters.
+  schema:
+    type: string
+    minLength: 1
+    maxLength: 255
+
+FilesFilterOperatorParam:
+  name: filter[field_op]
+  in: query
+  description: |
+    Filter operator. Replace `field` with the field name.
+    Supported operators: `equals`, `contains`, `in`, `gte`, `lte`, `gt`, `lt`, `startsWith`, `endsWith`;
+    each operation lists the ones each field allows. `in` takes a comma-separated list.
+    Range operators (gte/lte/gt/lt) can also be written as `filter[field_gte]=value`.
+    Defaults to `equals` if not specified.
+  schema:
+    type: string
+    enum: [equals, contains, in, gte, lte, gt, lt, startsWith, endsWith]
+    default: equals
+
+ShareIdParam:
+  name: id
+  in: path
+  required: true
+  description: Share identifier (UUIDv7), scoped to the parent bucket.
+  schema:
+    type: string
+    format: uuid
+
+# Signed-URL query parameters (/v1/files/signed/**). `expires`, `nonce`, `v` and
+# `sig` are required; every one except `op` is bound into the HMAC.
+
+SignedOpParam:
+  name: op
+  in: query
+  required: false
+  description: |
+    The signed operation (`read`, `write` or `archive`), included by the
+    signer for readability. It is not checked — the route decides the
+    operation the signature is verified against.
+  schema:
+    type: string
+    enum: [read, write, archive]
+
+SignedExpiresParam:
+  name: expires
+  in: query
+  required: true
+  description: Expiry as Unix seconds. Bound into the signature.
+  schema:
+    type: string
+    pattern: '^[0-9]+$'
+
+SignedNonceParam:
+  name: nonce
+  in: query
+  required: true
+  description: Random base64url nonce. Bound into the signature.
+  schema:
+    type: string
+
+SignedKeyVersionParam:
+  name: v
+  in: query
+  required: true
+  description: Version of the signing key (`FILE_SERVICE_SIGNING_KEY_V{n}`) that signed the URL.
+  schema:
+    type: string
+    pattern: '^[1-9][0-9]*$'
+
+SignedSigParam:
+  name: sig
+  in: query
+  required: true
+  description: Base64url HMAC-SHA256 signature.
+  schema:
+    type: string
+
+SignedShareParam:
+  name: share
+  in: query
+  required: false
+  description: |
+    Share id, present only on URLs minted for a share link. Bound into
+    the signature; when present the share's state is re-checked on every
+    request.
+  schema:
+    type: string
+    format: uuid
+
+SignedVersionParam:
+  name: version
+  in: query
+  required: false
+  description: |
+    Version id, present only on URLs minted for a share pinned to a version.
+    Bound into the signature; the download serves that version instead of
+    the current one (404 if it is a delete marker or no longer exists). Never
+    valid on a write URL.
+  schema:
+    type: string
+    format: uuid
+
+SignedByParam:
+  name: by
+  in: query
+  required: false
+  description: |
+    Id of the user who minted the URL, bound into the signature. An upload
+    through the URL is recorded as created by this user; URLs without it are
+    attributed to core's system user.
+  schema:
+    type: string
+    format: uuid
+
+RangeHeaderParam:
+  name: Range
+  in: header
+  required: false
+  description: |
+    One byte range of the content: `bytes=first-last`, `bytes=first-` or
+    `bytes=-suffixLength`. Answered with `206` and that range; `416` when it
+    starts past the end. Several ranges, another unit or a malformed value
+    get the whole content (`200`).
+  schema:
+    type: string
+  example: "bytes=0-1023"
+
+IfRangeHeaderParam:
+  name: If-Range
+  in: header
+  required: false
+  description: |
+    Send `Range` only if the content is unchanged: an entity tag that matches
+    the `ETag` (weak tags never do) or, where the response carries
+    `Last-Modified`, that date to the second. Otherwise the whole content is
+    sent.
+  schema:
+    type: string
+  example: '"5d41402abc4b2a76b9719d911017c592"'

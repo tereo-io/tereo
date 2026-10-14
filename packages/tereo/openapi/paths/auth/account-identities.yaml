@@ -1,0 +1,183 @@
+/account/identities:
+  get:
+    tags:
+      - Account - Sign-in Methods
+    summary: List linked sign-in providers
+    description: |
+      The identity provider accounts linked to the authenticated user. Open to any token with `core:account`, a delegated third-party
+      token included: it can see which providers are linked, never change
+      them.
+    operationId: getAccountIdentities
+    security:
+      - BearerAuth: []
+    responses:
+      "200":
+        description: The user's linked identities (possibly none)
+        headers:
+          X-RateLimit-Limit:
+            $ref: "../../components/headers.yaml#/X-RateLimit-Limit"
+          X-RateLimit-Remaining:
+            $ref: "../../components/headers.yaml#/X-RateLimit-Remaining"
+          X-RateLimit-Reset:
+            $ref: "../../components/headers.yaml#/X-RateLimit-Reset"
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "../../components/auth/schemas.yaml#/UserIdentity"
+      "401":
+        $ref: "../../components/responses.yaml#/UnauthorizedResponse"
+      "403":
+        $ref: "../../components/auth/responses.yaml#/AccountForbiddenResponse"
+      "429":
+        $ref: "../../components/responses.yaml#/RateLimitResponse"
+      "500":
+        $ref: "../../components/responses.yaml#/ServerErrorResponse"
+  post:
+    tags:
+      - Account - Sign-in Methods
+    summary: Start linking a sign-in provider
+    description: |
+      Begins connecting the user's own account at an identity provider, from
+      the account page. Only core's own UI may call this: a token issued to
+      any other client is refused with 403 `forbidden`, whatever its scopes,
+      because such a client could otherwise keep the `upstream_auth` cookie
+      and connect its own provider account to the user. The login must also be
+      recent, `auth_time` within 10 minutes, or the answer is 403
+      `reauth_required` and the UI signs the user in again with `max_age=0`
+      before retrying. Only a person can link (a service account is `403
+      forbidden`).
+
+      The response sets the `tereo_upstream_auth` cookie, carrying the
+      round trip's `state`, and answers `{ "redirect_url": ... }`: the UI
+      navigates the browser to it. A 404 means the slug is unknown or the
+      provider deactivated; 502 carries the provider failure code
+      (`upstream_failed`) when its discovery could not be reached.
+
+      The provider then returns the browser to
+      `GET /oauth/upstream/{slug}/callback`, which links the account and
+      redirects to the admin UI, never to a client's `redirect_uri`:
+
+      - `/account?linked=<slug>` on success;
+      - `/account?error=<code>` when linking failed: `upstream_cancelled`,
+        `upstream_failed`, `provider_inactive`, `account_inactive`,
+        `identity_in_use` (that provider account is linked to another user),
+        `already_linked` (the user already has this provider, or this exact
+        account) or `too_many_attempts` (too many failed callbacks from this
+        address);
+      - `/login?error=session_expired` when the round trip is gone: no or
+        mismatched cookie, or the session expired (10 minutes) or was
+        already used.
+
+      Linking checks no email: the user is signed in and chose the account.
+      An audit log entry is created and an `auth.user.identity-linked` webhook
+      event is emitted when the link completes.
+    operationId: postAccountIdentities
+    security:
+      - BearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../../components/auth/schemas.yaml#/StartIdentityLinkRequest"
+    responses:
+      "200":
+        description: Link started; navigate to `redirect_url`
+        headers:
+          Set-Cookie:
+            description: "`tereo_upstream_auth`, the round trip's `state`; `HttpOnly`, cleared by the callback"
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: "../../components/headers.yaml#/X-RateLimit-Limit"
+          X-RateLimit-Remaining:
+            $ref: "../../components/headers.yaml#/X-RateLimit-Remaining"
+          X-RateLimit-Reset:
+            $ref: "../../components/headers.yaml#/X-RateLimit-Reset"
+        content:
+          application/json:
+            schema:
+              $ref: "../../components/auth/schemas.yaml#/StartIdentityLinkResponse"
+      "400":
+        $ref: "../../components/responses.yaml#/BadRequestResponse"
+      "401":
+        $ref: "../../components/responses.yaml#/UnauthorizedResponse"
+      "403":
+        $ref: "../../components/auth/responses.yaml#/LinkForbiddenResponse"
+      "404":
+        $ref: "../../components/responses.yaml#/NotFoundResponse"
+        description: The provider is unknown or deactivated
+      "429":
+        $ref: "../../components/responses.yaml#/RateLimitResponse"
+      "500":
+        $ref: "../../components/responses.yaml#/ServerErrorResponse"
+      "502":
+        description: The identity provider could not be reached (`upstream_failed`)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum: [upstream_failed]
+                error_description:
+                  type: string
+
+/account/identities/{id}:
+  delete:
+    tags:
+      - Account - Sign-in Methods
+    summary: Unlink a sign-in provider
+    description: |
+      Removes one of the user's linked identities. As for linking, only core's
+      own UI may call this (403 `forbidden` otherwise) and the login must be
+      under 10 minutes old (403 `reauth_required`). `404` when the identity
+      is not the caller's.
+
+      Refused with 409 when it would lock the user out:
+
+      - `last_sign_in_method`: the user has no password and this is their only
+        identity;
+      - `sso_required`: the user's email domain is `ssoOnly` for this
+        identity's provider.
+
+      An audit log entry is created and an `auth.user.identity-unlinked`
+      webhook event is emitted.
+    operationId: deleteAccountIdentity
+    security:
+      - BearerAuth: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The identity's id, from `GET /v1/account/identities`
+        schema:
+          type: string
+          format: uuid
+    responses:
+      "204":
+        description: Identity unlinked
+        headers:
+          X-RateLimit-Limit:
+            $ref: "../../components/headers.yaml#/X-RateLimit-Limit"
+          X-RateLimit-Remaining:
+            $ref: "../../components/headers.yaml#/X-RateLimit-Remaining"
+          X-RateLimit-Reset:
+            $ref: "../../components/headers.yaml#/X-RateLimit-Reset"
+      "400":
+        $ref: "../../components/responses.yaml#/BadRequestResponse"
+      "401":
+        $ref: "../../components/responses.yaml#/UnauthorizedResponse"
+      "403":
+        $ref: "../../components/auth/responses.yaml#/LinkForbiddenResponse"
+      "404":
+        $ref: "../../components/responses.yaml#/NotFoundResponse"
+      "409":
+        $ref: "../../components/auth/responses.yaml#/IdentityConflictResponse"
+      "429":
+        $ref: "../../components/responses.yaml#/RateLimitResponse"
+      "500":
+        $ref: "../../components/responses.yaml#/ServerErrorResponse"

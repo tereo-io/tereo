@@ -1,0 +1,114 @@
+.t-user-menu-container {
+  position: relative;
+}
+
+.t-avatar-btn {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 2px solid var(--overlay-light-medium);
+  background-color: var(--overlay-light-weak);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: border-color 0.2s;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.t-avatar-btn:hover {
+  border-color: var(--text-color-light);
+}
+
+.t-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.t-avatar-icon {
+  color: var(--text-color-light);
+  font-size: 0.9rem;
+}
+
+.t-user-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  background-color: var(--background-color);
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  box-shadow:
+    0 0.5rem 1.5rem var(--shadow-color-hover),
+    0 0.25rem 0.5rem var(--shadow-color);
+  min-width: 15rem;
+  z-index: 200;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-0.5rem);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease,
+    visibility 0.2s;
+}
+
+.t-user-menu.open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.t-user-menu-header {
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.t-user-menu-name {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--text-color);
+}
+
+.t-user-menu-email {
+  font-size: 0.75rem;
+  color: var(--text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.t-user-menu-section {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.t-user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  color: var(--text-color);
+  text-decoration: none;
+  cursor: pointer;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.t-user-menu-item:hover {
+  background-color: var(--background-color-hover);
+}
+
+.t-user-menu-item svg {
+  width: 1rem;
+  color: var(--text-color-secondary);
+}

@@ -1,0 +1,132 @@
+WebhookEvent:
+  type: object
+  description: |
+    The envelope of every webhook delivery: the JSON body POSTed to a
+    subscribed endpoint. One is built per subscribed endpoint when an event
+    is fanned out — by the outbox reaper for core's own events, during the
+    request for `POST /v1/webhooks/events`, and by the test action for
+    `webhook.test` — so each endpoint's copy has its own `id` and
+    `occurredAt`. The body is stored with the delivery, so retries send it
+    unchanged.
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: |
+        Identifier of this payload, generated per endpoint at fan-out and
+        unchanged across retries. It is not the delivery id — that is the
+        `X-Webhook-Id` header.
+      examples:
+        - "0b6f3f8e-2a5c-4d1e-9f3b-7c2d8e4a1b90"
+    organizationId:
+      type: string
+      format: uuid
+      description: |
+        Organization the event was emitted for. Present on every emitted event
+        (see `OrganizationWebhookEvent`): auth and core events carry the
+        default organization, and files events are emitted only for buckets
+        that belong to an organization. Absent on `webhook.test` deliveries.
+      examples:
+        - "019dd4c2-e0b3-778e-b8db-a52e61927416"
+    eventType:
+      type: string
+      description: |
+        The event type (e.g. `auth.organization.archived`,
+        `file-service.object.created`, `webhook.test`); equals the
+        `X-Webhook-Event` header.
+      examples:
+        - "webhook.test"
+    entityType:
+      type: string
+      description: |
+        The type of entity the event is about (e.g. `Organization`,
+        `WebhookEndpoint`; files events use `bucket`, `object`, `share`, …).
+      examples:
+        - "WebhookEndpoint"
+    entityId:
+      type: string
+      description: |
+        Id of the entity the event is about, as a string. Buckets have integer
+        ids, so a bucket's `entityId` is numeric (e.g. `"42"`); objects, object
+        versions, multipart uploads and shares have UUIDs.
+      examples:
+        - "550e8400-e29b-41d4-a716-446655440000"
+    occurredAt:
+      type: string
+      format: date-time
+      description: |
+        When the payload was built at fan-out (shortly after the change
+        committed), not when the mutation itself happened.
+      examples:
+        - "2025-01-15T10:30:00.000Z"
+    data:
+      type: object
+      description: Event-specific payload; each event documents its own shape.
+      additionalProperties: true
+  required:
+    - id
+    - eventType
+    - entityType
+    - entityId
+    - occurredAt
+    - data
+
+OrganizationWebhookEvent:
+  description: |
+    The `WebhookEvent` envelope of an emitted event, which always carries
+    `organizationId`. Every event but `webhook.test` uses it.
+  allOf:
+    - $ref: '#/WebhookEvent'
+    - type: object
+      required:
+        - organizationId
+
+WebhookHeaders:
+  type: object
+  description: |
+    Headers core sets on every webhook delivery, alongside `Content-Type:
+    application/json` and after the endpoint's custom headers (which cannot
+    override them).
+  properties:
+    X-Webhook-Id:
+      type: string
+      format: uuid
+      description: |
+        The delivery id (`WebhookDelivery.id`; one per event per endpoint),
+        stable across retries of the same delivery — use it to deduplicate.
+        Not the body's `id`.
+      examples:
+        - "660e8400-e29b-41d4-a716-446655440001"
+    X-Webhook-Event:
+      type: string
+      description: The event type string (matches body `eventType`)
+      examples:
+        - "webhook.test"
+    X-Webhook-Timestamp:
+      type: string
+      pattern: '^[0-9]+$'
+      description: |
+        Unix time in seconds when this attempt was signed, as an integer
+        string. Part of the signed input.
+      examples:
+        - "1736937000"
+    X-Webhook-Signature:
+      type: string
+      pattern: '^sha256=[0-9a-f]{64}(,sha256=[0-9a-f]{64})*$'
+      description: |
+        `sha256=` followed by the lowercase hex HMAC-SHA256 of
+        `{X-Webhook-Timestamp}.{raw request body}`, keyed with the endpoint's
+        signing secret.
+
+        After the endpoint's secret is rotated, and until its
+        `previousSecretExpiresAt` (`WEBHOOK_SECRET_OVERLAP_HOURS`, 24 by
+        default), it lists one signature per secret, comma-separated, current
+        secret first (`sha256=<new>,sha256=<old>`); accept the request if any
+        value matches.
+      examples:
+        - "sha256=5d41402abc4b2a76b9719d911017c5925d41402abc4b2a76b9719d911017c592"
+  required:
+    - X-Webhook-Id
+    - X-Webhook-Event
+    - X-Webhook-Timestamp
+    - X-Webhook-Signature

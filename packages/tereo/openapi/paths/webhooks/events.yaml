@@ -1,0 +1,274 @@
+/webhooks/v1/events:
+  post:
+    tags:
+      - Events
+    summary: Emit an event
+    description: |
+      Emits an event to the organization's ACTIVE, unarchived webhook endpoints
+      subscribed to the given event type. For each matching endpoint, a delivery record
+      is created and queued for asynchronous delivery via BullMQ (up to 10 attempts
+      with exponential backoff).
+
+      Returns `202 Accepted` with the number of deliveries created. If no active
+      endpoints match, returns `202` with `deliveriesCreated: 0` and an audit log
+      entry is created to preserve the event details.
+
+      The event type must be registered (declared by a service through
+      `POST /v1/registry/declaration`) and not retired, or the request fails with
+      `400 invalid_event_type` / `400 event_type_retired`. `webhook.test` is
+      reserved for `POST /v1/webhooks/webhooks/{id}/test` and cannot be
+      emitted (`400 reserved_event_type`, checked first).
+
+      **Who may emit what (`403` otherwise):**
+      - Core's own event types (every type core declares: `auth.*`,
+        `file-service.*`, `core.service.*`, `core.signing-key.*`) are never
+        emitted over HTTP — core emits them itself — not even by
+        `webhooks.admin`.
+      - A caller that is a registered service may emit only the event types
+        it declares, even when it holds `webhooks.admin`.
+      - Any other caller needs `webhooks.admin`, which may emit any service's
+        event types.
+
+      **Organization:** a token with an `org_id` may emit only into that
+      organization; a service account's token without one, or a
+      `webhooks.admin` caller, into any; a person's token without one, into
+      none (`403`). This is checked after the body and the reserved type and
+      before `organizationId` is looked up, so a refused caller learns nothing
+      about which organizations exist. `organizationId` must be a UUID (`400`
+      otherwise) naming an existing organization — an archived one counts —
+      or the request fails with `400 unknown_organization`.
+
+      **Idempotency:** Requests may include an optional `idempotencyKey`. When
+      provided, submissions by the same caller with the same key,
+      `organizationId` and `eventType` are deduplicated for 24 hours (Redis
+      TTL): a duplicate gets the first request's result without creating
+      additional deliveries, and one that arrives while the first is still
+      processing gets `409 idempotency_request_in_progress` (retry it shortly). The
+      key also guards the event: the same key with a different event (any
+      field but the key) gets `422 idempotency_key_conflict`, finished or
+      not. The
+      claim on a key in progress lasts 60 seconds, so a request that died
+      mid-way frees its key. Keys are scoped to the authenticated caller, so
+      one caller's key never answers, or blocks, another's.
+
+      **Required permissions:**
+      - `webhooks.emit` — outside the read/write ladder: `webhooks.read`,
+        `webhooks.write` and `webhooks.delete` do not include it;
+        `webhooks.admin` does
+    operationId: emitEvent
+    security:
+      - BearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/webhooks/schemas.yaml#/EmitEventRequest'
+    responses:
+      '202':
+        description: Event accepted for delivery
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/EmitEventResponse'
+      '400':
+        description: |
+          A malformed request (`invalid_request`), an event type that is reserved,
+          unregistered or retired, or an `organizationId` that names no organization
+          (`unknown_organization`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum:
+                    - invalid_request
+                    - reserved_event_type
+                    - invalid_event_type
+                    - event_type_retired
+                    - unknown_organization
+                error_description:
+                  type: string
+                  examples:
+                    - "No organization with id: 019dd4c2-e0b3-778e-b8db-a52e61927416"
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '409':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksConflictResponse'
+      '422':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksIdempotencyKeyConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '503':
+        description: |
+          An event carries an `idempotencyKey` and Redis, which holds the keys,
+          is unreachable: the request is refused, and nothing is written, rather
+          than risk a duplicate. Retry after `Retry-After` seconds.
+        headers:
+          Retry-After:
+            $ref: '../../components/headers.yaml#/Retry-After'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum:
+                    - temporarily_unavailable
+                error_description:
+                  type: string
+
+/webhooks/v1/events/batch:
+  post:
+    tags:
+      - Events
+    summary: Batch emit events
+    description: |
+      Emits up to 100 events in a single API call. For each event, matching
+      endpoints are found and deliveries are created; an event with no
+      matching endpoint generates an audit log entry.
+
+      Returns `202 Accepted` with per-event results, in request order,
+      including the number of deliveries created for each event.
+
+      **All or nothing:** the whole batch is validated before anything is
+      written, and every event's deliveries and audit entries are then written
+      in one transaction — either every event's deliveries are written or
+      none is. Delivery jobs are queued after that transaction commits; once
+      it has, the request succeeds and its idempotency keys stay claimed.
+      Any of these fails the whole batch:
+      - `400` — a malformed event, `reserved_event_type` (`webhook.test`,
+        sent only by `POST /v1/webhooks/webhooks/{id}/test`),
+        `invalid_event_type` / `event_type_retired` (every event type must be
+        registered through `POST /v1/registry/declaration` and not retired), or
+        `duplicate_idempotency_key`, or `unknown_organization` (any event's
+        `organizationId` names no organization);
+      - `403` — any event names an organization or event type the caller may
+        not emit for (see `POST /v1/webhooks/events`);
+      - `409 idempotency_request_in_progress` / `422 idempotency_key_conflict` — see
+        below.
+
+      **Idempotency:** Each event may include an optional `idempotencyKey`,
+      deduplicated as on `POST /v1/webhooks/events` (same caller, key,
+      `organizationId` and `eventType`, 24 hours). Every key is claimed before anything is
+      written:
+      - a key whose earlier request has finished returns that request's cached
+        result in its place and creates nothing; the other events are still
+        processed;
+      - a key whose earlier request is still processing fails the whole batch
+        with `409 idempotency_request_in_progress`, and the keys this batch claimed are
+        released, so it can be retried as is;
+      - a key used before with a different event fails the whole batch with
+        `422 idempotency_key_conflict`, releasing the batch's claims;
+      - the same key twice in one batch (for the same organization and event
+        type) is `400 duplicate_idempotency_key`.
+
+      **Required permissions:**
+      - `webhooks.emit` (not included in `webhooks.read` / `write` /
+        `delete`; `webhooks.admin` includes it)
+    operationId: batchEmitEvents
+    security:
+      - BearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/webhooks/schemas.yaml#/BatchEmitEventRequest'
+    responses:
+      '202':
+        description: Events accepted for delivery
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/BatchEmitEventResponse'
+      '400':
+        description: |
+          A malformed request (`invalid_request`), an event type that is reserved,
+          unregistered or retired, two events sharing an idempotency key
+          (`duplicate_idempotency_key`), or an `organizationId` that names no organization
+          (`unknown_organization`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum:
+                    - invalid_request
+                    - reserved_event_type
+                    - invalid_event_type
+                    - event_type_retired
+                    - duplicate_idempotency_key
+                    - unknown_organization
+                error_description:
+                  type: string
+                  examples:
+                    - "No organization with id: 019dd4c2-e0b3-778e-b8db-a52e61927416"
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '409':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksConflictResponse'
+      '422':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksIdempotencyKeyConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '503':
+        description: |
+          An event carries an `idempotencyKey` and Redis, which holds the keys,
+          is unreachable: the request is refused, and nothing is written, rather
+          than risk a duplicate. Retry after `Retry-After` seconds.
+        headers:
+          Retry-After:
+            $ref: '../../components/headers.yaml#/Retry-After'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum:
+                    - temporarily_unavailable
+                error_description:
+                  type: string

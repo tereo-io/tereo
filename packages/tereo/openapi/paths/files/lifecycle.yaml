@@ -1,0 +1,150 @@
+/files/buckets/{name}/lifecycle:
+  get:
+    tags:
+      - Files - Buckets
+    summary: Get the bucket's lifecycle policy
+    description: |
+      Returns the bucket's retention policy if one is configured. A bucket
+      has at most one policy. Returns 404 if the bucket has no policy.
+
+      Policies are applied by the daily `lifecycle-sweep` BullMQ worker.
+      Object age (`expireObjectsAfterDays`) is counted from the object's last
+      write — its current version — not from when its key was created. Each
+      batch the sweep deletes is audited (`lifecycleSweep`, written by core's
+      system user) in the transaction that deletes it.
+
+      The policy is a bucket setting, read like the bucket itself (no
+      `file-service.objects.*` permission or object grant, and a public
+      bucket's policy is not public).
+
+      **Required permissions:**
+      - System: `file-service.buckets.read` AND (`file-service.admin`, or bucket creator or an active bucket grant, from the bucket's organization)
+    operationId: getLifecyclePolicy
+    security:
+      - BearerAuth: [file-service.buckets.read]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    responses:
+      '200':
+        description: Lifecycle policy
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/LifecyclePolicy'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid bucket name (`invalid_request`)
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing the file-service.buckets permission, not allowed to manage the bucket (including with a token for another organization), or no such bucket
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: No lifecycle policy is configured for this bucket, or (for a `file-service.admin` holder only) no such bucket; anyone else gets `403` for a missing bucket.
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  put:
+    tags:
+      - Files - Buckets
+    summary: Upsert the bucket's lifecycle policy
+    description: |
+      Creates or replaces the per-bucket lifecycle policy. All fields are
+      optional; omitted rules are treated as `null` (disabled). A bucket has
+      at most one policy.
+
+      The policy is a bucket setting, managed like the bucket itself.
+
+      **Required permissions:**
+      - System: `file-service.buckets.write` AND (bucket creator or `file-service.admin`)
+
+      An audit log entry is written, and a `file-service.lifecycle.policy.updated`
+      webhook event is emitted for a bucket that belongs to an organization.
+    operationId: upsertLifecyclePolicy
+    security:
+      - BearerAuth: [file-service.buckets.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/UpsertLifecyclePolicyRequest'
+    responses:
+      '200':
+        description: Policy upserted
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/LifecyclePolicy'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing the file-service.buckets permission, not allowed to manage the bucket (including with a token for another organization), or no such bucket
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket.
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  delete:
+    tags:
+      - Files - Buckets
+    summary: Delete the bucket's lifecycle policy
+    description: |
+      Removes the per-bucket lifecycle policy (if any). Idempotent — deleting
+      a missing policy still returns 204.
+
+      The policy is a bucket setting, managed like the bucket itself.
+
+      **Required permissions:**
+      - System: `file-service.buckets.delete` AND (bucket creator or `file-service.admin`)
+
+      When a policy was removed, an audit log entry is written and a
+      `file-service.lifecycle.policy.deleted` webhook event is emitted for a
+      bucket that belongs to an organization; deleting a missing policy
+      records neither.
+    operationId: deleteLifecyclePolicy
+    security:
+      - BearerAuth: [file-service.buckets.delete]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    responses:
+      '204':
+        $ref: '../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid bucket name (`invalid_request`)
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing the file-service.buckets permission, not allowed to manage the bucket (including with a token for another organization), or no such bucket
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket.
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

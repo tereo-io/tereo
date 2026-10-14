@@ -1,0 +1,97 @@
+# Local stack: tereo, Postgres and Redis.
+#
+#   docker compose up -d postgres redis   # just the backing services, for `npm run dev`
+#   docker compose up                     # everything; no .env needed
+#
+# On first start core generates its keys and logs a setup token:
+#   docker compose logs core | grep "not set up"
+# then POST /v1/setup with it (see README). The admin UI is in the image, at
+# http://localhost:4001.
+#
+# Host ports default away from 5432/6379 so the stack can run beside other
+# local databases; override with CORE_POSTGRES_PORT / CORE_REDIS_PORT. Both are
+# published on 127.0.0.1 only: their credentials are the public defaults below.
+name: tereo
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: core
+      POSTGRES_PASSWORD: core
+      POSTGRES_DB: core
+    ports:
+      - "127.0.0.1:${CORE_POSTGRES_PORT:-5442}:5432"
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U core -d core"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${CORE_REDIS_PORT:-6389}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Migrations and the idempotent seed, once per `up`, before core starts.
+  migrate:
+    image: tereo:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["./migrate-and-seed.sh"]
+    environment:
+      # The image defaults to production, whose PUBLIC_URL, TRUST_PROXY and
+      # CORS checks refuse a localhost stack.
+      NODE_ENV: &node-env development
+      DATABASE_URL: postgresql://core:core@postgres:5432/core
+      REDIS_URL: redis://redis:6379
+      # The seed registers ${UI_BASE_URL}/callback on the UI's login client.
+      UI_BASE_URL: &ui-base-url http://localhost:${CORE_PORT:-4001}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  core:
+    image: tereo:local
+    env_file:
+      - path: packages/tereo/.env
+        required: false
+    environment:
+      NODE_ENV: *node-env
+      # No CORE_KEK: development encrypts core.secrets with the public dev KEK.
+      # A production deployment must set one (docs/configuration.md).
+      ROLE: all
+      # Pinned over packages/tereo/.env, which is written for a core
+      # run with `npm run dev`: inside the container core listens on 4001, and
+      # its public URL is wherever CORE_PORT publishes it.
+      PORT: "4001"
+      PUBLIC_URL: http://localhost:${CORE_PORT:-4001}
+      DATABASE_URL: postgresql://core:core@postgres:5432/core
+      REDIS_URL: redis://redis:6379
+      # Core serves the UI itself; the Vite dev server is not involved.
+      UI_BASE_URL: *ui-base-url
+      FILE_SERVICE_STORAGE_PATH: /app/storage
+      FILE_SERVICE_TEMP_PATH: /app/storage/temp
+      # A local mail catcher speaks plaintext SMTP.
+      ALLOW_PLAINTEXT_SMTP: "true"
+    ports:
+      - "${CORE_PORT:-4001}:4001"
+    volumes:
+      - storage:/app/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres:
+  storage:

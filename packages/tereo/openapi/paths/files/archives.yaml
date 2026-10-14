@@ -1,0 +1,82 @@
+/files/buckets/{name}/archives:
+  post:
+    tags:
+      - Files - Archives
+    summary: Create an archive download request
+    description: |
+      Create a server-side archive snapshot of a bucket-scoped set of objects
+      — either a folder (by `prefix`) or an explicit list of keys (by `keys`)
+      — and return a presigned URL that streams the zip/tar when fetched.
+
+      Each object's current version is recorded at create time, and the URL
+      only ever produces those versions: an object overwritten, deleted or
+      purged afterwards is left out of the download, objects uploaded under
+      the prefix afterwards are not added, and once none is left the download
+      is `410 archive_gone`. Every archive
+      download is presigned — there is no authenticated-session shortcut, so
+      the returned URL works equally well for "download now" and for sharing
+      within its TTL.
+
+      Caps: `FILE_SERVICE_MAX_ARCHIVE_OBJECTS` (default 10,000) and
+      `FILE_SERVICE_MAX_ARCHIVE_TOTAL_BYTES` (default 50 GiB). Requests that
+      would exceed either cap return `400 archive_too_large`; a selection
+      that matches no live object returns `400 archive_empty`; an
+      `expiresInSeconds` above `FILE_SERVICE_MAX_PRESIGN_TTL_SECONDS` returns
+      `400 invalid_expiration` — checked first, before access or anything is
+      written, so a refused TTL leaves no archive request or audit entry
+      behind. Keys that match no live object, and objects with no current
+      content, are skipped (`objectCount` counts the ones archived).
+
+      Access is checked before the bucket is loaded: a caller without read
+      access gets `403` whether or not the bucket exists.
+
+      Once expired, the URL is refused (`403`). A daily sweep deletes archive
+      requests `FILE_SERVICE_SHARE_RETENTION_DAYS` (default 30) after they
+      expire, along with any share still pointing at one; their URLs are then
+      `404`.
+
+      An audit log entry is created for this action (`CREATE archiveRequest`).
+
+      **Required permissions:**
+      - System: `file-service.objects.read` (always — the route requires it, public bucket or not)
+      - AND bucket-level `canRead` (not needed on a public bucket in the caller's organization, nor for `file-service.admin`)
+
+      No webhook event is emitted.
+    operationId: createArchive
+    security:
+      - BearerAuth: [file-service.objects.read]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/CreateArchiveRequest'
+    responses:
+      '201':
+        description: Archive request created
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/CreateArchiveResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

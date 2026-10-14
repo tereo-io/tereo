@@ -1,0 +1,81 @@
+/.well-known/oauth-authorization-server:
+  get:
+    tags:
+      - Well-Known
+    summary: OAuth 2.0 Authorization Server Metadata
+    description: Returns OAuth 2.0 authorization server metadata (RFC 8414)
+    operationId: getOAuthMetadata
+    security: []
+    responses:
+      '200':
+        description: OAuth 2.0 authorization server metadata
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/OAuthAuthorizationServerMetadata'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/.well-known/openid-configuration:
+  get:
+    tags:
+      - Well-Known
+    summary: OpenID Connect Discovery
+    description: Returns OpenID Connect discovery metadata (OpenID Connect Discovery 1.0)
+    operationId: getOIDCConfiguration
+    security: []
+    responses:
+      '200':
+        description: OpenID Connect configuration
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/OpenIDConfiguration'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/.well-known/jwks.json:
+  get:
+    tags:
+      - Well-Known
+    summary: JSON Web Key Set
+    description: |
+      Returns the public keys used for verifying JWTs: the active key and,
+      after a rotation, the retired ones still within their retention. Select
+      the key by the token's `kid`.
+    operationId: getJWKS
+    security: []
+    responses:
+      '200':
+        description: JSON Web Key Set
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/JWKS'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

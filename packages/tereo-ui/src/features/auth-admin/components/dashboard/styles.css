@@ -1,0 +1,51 @@
+/* Recent lists */
+.t-recent-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.t-recent-list li {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.t-recent-list li:last-child {
+  border-bottom: none;
+}
+
+.t-recent-list a {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 0;
+  text-decoration: none;
+  color: inherit;
+  transition: background-color 0.2s;
+}
+
+.t-recent-list a:hover {
+  background-color: var(--background-color);
+  margin: 0 -1rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.t-recent-name {
+  font-weight: 500;
+  color: var(--text-color);
+}
+
+.t-view-all {
+  display: block;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+  text-align: center;
+  color: var(--primary-color);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.t-view-all:hover {
+  text-decoration: underline;
+}

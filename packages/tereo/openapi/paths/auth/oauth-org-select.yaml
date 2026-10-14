@@ -1,0 +1,115 @@
+/oauth/org-select:
+  get:
+    tags:
+      - OAuth2/OIDC - Authorization
+    summary: Get organization selection details
+    description: |
+      Returns the list of active organizations the authenticated user belongs to, together with
+      the OAuth client name and basic user info. This endpoint is part of the OAuth2 authorization
+      code flow and is called by the UI after a successful login when the user is a member of more
+      than one active organization. The user selects an organization, which is then submitted to
+      `POST /oauth/org-select/submit` to produce a consent session that feeds into
+      `GET /oauth/consent`.
+
+      **Authentication**: Unauthenticated; authorization is carried by the short-lived
+      `session` query parameter (an org-selection session token issued by `POST /oauth/authorize`),
+      which must match the `tereo_org_select_session_{client_id}` cookie set beside it:
+      the token travels in the page URL, so the user's email and organizations go only to the
+      browser holding the cookie. No bearer token or permissions are required.
+
+      400 `invalid_session` for an unknown session or a missing or mismatched
+      cookie, `session_expired` for an expired one.
+    operationId: getOrgSelect
+    security: []
+    parameters:
+      - name: session
+        in: query
+        required: true
+        description: Org-selection session token issued by the authorize endpoint.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+    responses:
+      '200':
+        description: Organization selection details for display
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/OrgSelectResponse'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/oauth/org-select/submit:
+  post:
+    tags:
+      - OAuth2/OIDC - Authorization
+    summary: Submit organization selection
+    description: |
+      Submits the user's organization selection during the OAuth2 authorization code flow.
+      Validates the org-selection session (including the HTTP-only session cookie), verifies
+      the user is an active member of the chosen organization, then creates a consent session
+      scoped to that organization and returns a redirect URL pointing at `/consent` in the UI,
+      which invokes `GET /oauth/consent` next.
+
+      **Authentication**: Unauthenticated; authorization is carried by the `session_token`
+      body field plus the org-selection session cookie set during `POST /oauth/authorize`.
+      No bearer token or permissions are required.
+
+      400 `invalid_session` for an unknown session or a missing or mismatched
+      cookie, `session_expired` for an expired one, `user_not_in_organization` when the
+      user is not a member of the organization, `organization_not_active` when
+      it is inactive or archived. The session is single-use: of concurrent submits of one session, one
+      goes through and the others are 400 `invalid_session`.
+    operationId: postOrgSelectSubmit
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/OrgSelectSubmitRequest'
+    responses:
+      '200':
+        description: Organization selection accepted; consent redirect URL returned
+        headers:
+          Set-Cookie:
+            description: Clears the org-selection session cookie and sets the consent session cookie.
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - redirect_url
+              properties:
+                redirect_url:
+                  type: string
+                  format: uri
+                  description: URL to redirect the user to the consent screen
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/CrossOriginRefusedResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

@@ -1,0 +1,1417 @@
+# Outbound webhook events of the files area, referenced from the root `webhooks:`.
+# Event types: src/definitions/eventTypes.ts; payloads: the emitTx(...) call sites.
+
+file-service.bucket.created:
+  post:
+    tags:
+      - Files - Buckets
+    summary: Bucket created
+    description: |-
+      Fired by `POST /v1/files/buckets`. `entityId` is the bucket's integer id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesBucketCreated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.bucket.created
+                  entityType:
+                    type: string
+                    enum:
+                      - bucket
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      policy:
+                        type: string
+                        enum:
+                          - public
+                          - private
+                      versioningEnabled:
+                        type: boolean
+                    required:
+                      - bucketName
+                      - policy
+                      - versioningEnabled
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.bucket.updated:
+  post:
+    tags:
+      - Files - Buckets
+    summary: Bucket updated
+    description: |-
+      Fired by `PUT /v1/files/buckets/{name}` when something changed; a call that changes nothing emits no event. `entityId` is the bucket's integer id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesBucketUpdated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.bucket.updated
+                  entityType:
+                    type: string
+                    enum:
+                      - bucket
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                    required:
+                      - bucketName
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.bucket.deleted:
+  post:
+    tags:
+      - Files - Buckets
+    summary: Bucket deleted
+    description: |-
+      Fired by `DELETE /v1/files/buckets/{name}` (soft delete). `entityId` is the bucket's integer id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesBucketDeleted
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.bucket.deleted
+                  entityType:
+                    type: string
+                    enum:
+                      - bucket
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                    required:
+                      - bucketName
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.object.created:
+  post:
+    tags:
+      - Files - Objects
+    summary: Object created
+    description: |-
+      Fired when an upload writes an object that did not exist before. `entityId` is the object id.
+
+      Covers authenticated uploads, presigned uploads and completed multipart uploads; `data.via` says which.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesObjectCreated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.object.created
+                  entityType:
+                    type: string
+                    enum:
+                      - object
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      objectKey:
+                        type: string
+                      contentType:
+                        type: string
+                      sizeBytes:
+                        type: string
+                        pattern: ^[0-9]+$
+                        description: Plaintext size in bytes, as a decimal string.
+                      etag:
+                        type: string
+                        description: MD5 of the content (hex); `<md5>-<parts>` for multipart uploads.
+                      tags:
+                        type: array
+                        items:
+                          type: string
+                      via:
+                        type: string
+                        enum:
+                          - direct
+                          - presigned
+                          - multipart
+                        description: '`direct` is `PUT /v1/files/buckets/{name}/objects/{objectKey}`, `presigned` is `PUT /v1/files/signed/objects/{bucket}/by-id/{id}`, `multipart` is `POST /v1/files/buckets/{name}/multipart/{uploadId}/complete`.'
+                    required:
+                      - bucketName
+                      - objectKey
+                      - contentType
+                      - sizeBytes
+                      - etag
+                      - tags
+                      - via
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.object.updated:
+  post:
+    tags:
+      - Files - Objects
+    summary: Object updated
+    description: |-
+      Fired when an upload (authenticated, presigned or multipart) overwrites an existing object, and on every `PATCH /v1/files/buckets/{name}/objects/by-id/{id}` (rename, metadata, tags, content type or `deleteAfter`). `entityId` is the object id.
+
+      The `data` shape depends on the path that fired it.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesObjectUpdated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.object.updated
+                  entityType:
+                    type: string
+                    enum:
+                      - object
+                  data:
+                    anyOf:
+                      - type: object
+                        description: Content write — an authenticated upload, a presigned upload, or a completed multipart upload.
+                        properties:
+                          bucketName:
+                            type: string
+                          objectKey:
+                            type: string
+                          contentType:
+                            type: string
+                          sizeBytes:
+                            type: string
+                            pattern: ^[0-9]+$
+                            description: Plaintext size in bytes, as a decimal string.
+                          etag:
+                            type: string
+                            description: MD5 of the content (hex); `<md5>-<parts>` for multipart uploads.
+                          tags:
+                            type: array
+                            items:
+                              type: string
+                          via:
+                            type: string
+                            enum:
+                              - direct
+                              - presigned
+                              - multipart
+                            description: '`direct` is `PUT /v1/files/buckets/{name}/objects/{objectKey}`, `presigned` is `PUT /v1/files/signed/objects/{bucket}/by-id/{id}`, `multipart` is `POST /v1/files/buckets/{name}/multipart/{uploadId}/complete`.'
+                        required:
+                          - bucketName
+                          - objectKey
+                          - contentType
+                          - sizeBytes
+                          - etag
+                          - tags
+                          - via
+                      - type: object
+                        description: '`PATCH /v1/files/buckets/{name}/objects/by-id/{id}` — rename, metadata/tags/content-type change, or a `deleteAfter`-only change.'
+                        properties:
+                          bucketName:
+                            type: string
+                          objectKey:
+                            type: string
+                            description: The object's key after the change.
+                          objectId:
+                            type: string
+                            format: uuid
+                          renamed:
+                            oneOf:
+                              - type: object
+                                properties:
+                                  previousKey:
+                                    type: string
+                                  newKey:
+                                    type: string
+                                required:
+                                  - previousKey
+                                  - newKey
+                              - type: 'null'
+                            description: Set when the PATCH renamed the object.
+                          branchedVersion:
+                            type: boolean
+                            description: Whether a metadata change created a new version (versioned buckets with `createNewVersion`).
+                        required:
+                          - bucketName
+                          - objectKey
+                          - objectId
+                          - renamed
+                          - branchedVersion
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.object.deleted:
+  post:
+    tags:
+      - Files - Objects
+    summary: Object deleted
+    description: |-
+      Fired by `DELETE /v1/files/buckets/{name}/objects/by-id/{id}` (soft delete, or a delete marker in a versioned bucket). `entityId` is the object id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesObjectDeleted
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.object.deleted
+                  entityType:
+                    type: string
+                    enum:
+                      - object
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      objectKey:
+                        type: string
+                      objectId:
+                        type: string
+                        format: uuid
+                      versionedTombstone:
+                        type: boolean
+                        description: True when the bucket is versioned and a delete marker was written.
+                    required:
+                      - bucketName
+                      - objectKey
+                      - objectId
+                      - versionedTombstone
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.objects.bulk-deleted:
+  post:
+    tags:
+      - Files - Objects
+    summary: Objects bulk-deleted
+    description: |-
+      Fired once per `POST /v1/files/buckets/{name}/objects/bulk-delete`; no per-object events are emitted. `entityId` is the bucket's integer id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesObjectsBulkDeleted
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.objects.bulk-deleted
+                  entityType:
+                    type: string
+                    enum:
+                      - bucket
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      filter:
+                        oneOf:
+                          - type: object
+                            properties:
+                              kind:
+                                type: string
+                                enum:
+                                  - prefix
+                              prefix:
+                                type: string
+                            required:
+                              - kind
+                              - prefix
+                          - type: object
+                            properties:
+                              kind:
+                                type: string
+                                enum:
+                                  - ids
+                              ids:
+                                type: array
+                                items:
+                                  type: string
+                                  format: uuid
+                            required:
+                              - kind
+                              - ids
+                        description: The request's selector.
+                      deletedCount:
+                        type: integer
+                      truncated:
+                        type: boolean
+                        description: True when the per-request cap stopped the delete early.
+                      versionedTombstone:
+                        type: boolean
+                      objects:
+                        type: array
+                        maxItems: 100
+                        description: The first 100 deleted objects; use `deletedCount` for the total.
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              format: uuid
+                            objectKey:
+                              type: string
+                          required:
+                            - id
+                            - objectKey
+                    required:
+                      - bucketName
+                      - filter
+                      - deletedCount
+                      - truncated
+                      - versionedTombstone
+                      - objects
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.object.version.created:
+  post:
+    tags:
+      - Files - Objects
+    summary: Object version created
+    description: |-
+      Fired in a versioning-enabled bucket for every new version a write creates: each upload (authenticated, presigned or multipart, alongside `file-service.object.created` / `.updated`) and `PATCH /v1/files/buckets/{name}/objects/by-id/{id}` with `createNewVersion`. `entityId` is the new version's id. Restores fire `file-service.object.version.restored` instead; delete markers fire `file-service.object.deleted`.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesObjectVersionCreated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.object.version.created
+                  entityType:
+                    type: string
+                    enum:
+                      - objectVersion
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      objectKey:
+                        type: string
+                      objectId:
+                        type: string
+                        format: uuid
+                      versionId:
+                        type: string
+                        format: uuid
+                      contentType:
+                        type:
+                          - string
+                          - 'null'
+                      sizeBytes:
+                        type:
+                          - string
+                          - 'null'
+                        pattern: ^[0-9]+$
+                        description: Plaintext size in bytes, as a decimal string.
+                      etag:
+                        type:
+                          - string
+                          - 'null'
+                      via:
+                        type: string
+                        enum:
+                          - direct
+                          - presigned
+                          - multipart
+                          - metadata
+                        description: The write that created the version; `metadata` is a `PATCH` with `createNewVersion`.
+                    required:
+                      - bucketName
+                      - objectKey
+                      - objectId
+                      - versionId
+                      - contentType
+                      - sizeBytes
+                      - etag
+                      - via
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.object.version.restored:
+  post:
+    tags:
+      - Files - Objects
+    summary: Object version restored
+    description: |-
+      Fired by `POST /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/restore`, including a restore that undeletes a deleted object. `entityId` is the id of the new current version created by the restore.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesObjectVersionRestored
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.object.version.restored
+                  entityType:
+                    type: string
+                    enum:
+                      - objectVersion
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      objectKey:
+                        type: string
+                      objectId:
+                        type: string
+                        format: uuid
+                      restoredFromVersionId:
+                        type: string
+                        format: uuid
+                        description: The version that was restored.
+                      undeleted:
+                        type: boolean
+                        description: True when the object had been deleted and the restore brought it back.
+                    required:
+                      - bucketName
+                      - objectKey
+                      - objectId
+                      - restoredFromVersionId
+                      - undeleted
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.object.version.deleted:
+  post:
+    tags:
+      - Files - Objects
+    summary: Object version deleted
+    description: |-
+      Fired by `DELETE /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}`. `entityId` is the deleted version's id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesObjectVersionDeleted
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.object.version.deleted
+                  entityType:
+                    type: string
+                    enum:
+                      - objectVersion
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      objectKey:
+                        type: string
+                      objectId:
+                        type: string
+                        format: uuid
+                    required:
+                      - bucketName
+                      - objectKey
+                      - objectId
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.objects.versions.purged:
+  post:
+    tags:
+      - Files - Objects
+    summary: Non-current versions purged
+    description: |-
+      Fired once per `POST /v1/files/buckets/{name}/objects/purge-non-current-versions`. `entityId` is the bucket's integer id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesObjectsVersionsPurged
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.objects.versions.purged
+                  entityType:
+                    type: string
+                    enum:
+                      - bucket
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      purgedCount:
+                        type: integer
+                      bytesFreed:
+                        type: string
+                        pattern: ^[0-9]+$
+                        description: Bytes released, as a decimal string.
+                      truncated:
+                        type: boolean
+                    required:
+                      - bucketName
+                      - purgedCount
+                      - bytesFreed
+                      - truncated
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.permission.granted:
+  post:
+    tags:
+      - Files - Permissions
+    summary: Bucket permission granted
+    description: |-
+      Fired by `POST /v1/files/buckets/{name}/permissions`, including re-granting a previously revoked permission, and by `POST /v1/files/buckets` for the creator's own grant (`canRead`, `canWrite` and `canDelete` all true, `grantedBy` the creator). `entityId` is the permission's integer id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesPermissionGranted
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.permission.granted
+                  entityType:
+                    type: string
+                    enum:
+                      - bucketPermission
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      userId:
+                        type: string
+                        format: uuid
+                        description: The user the permission was granted to.
+                      canRead:
+                        type: boolean
+                      canWrite:
+                        type: boolean
+                      canDelete:
+                        type: boolean
+                      grantedBy:
+                        type: string
+                        format: uuid
+                    required:
+                      - bucketName
+                      - userId
+                      - canRead
+                      - canWrite
+                      - canDelete
+                      - grantedBy
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.permission.revoked:
+  post:
+    tags:
+      - Files - Permissions
+    summary: Bucket permission revoked
+    description: |-
+      Fired by `DELETE /v1/files/buckets/{name}/permissions/{userId}`. `entityId` is the permission's integer id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesPermissionRevoked
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.permission.revoked
+                  entityType:
+                    type: string
+                    enum:
+                      - bucketPermission
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      userId:
+                        type: string
+                        format: uuid
+                        description: The user whose permission was revoked.
+                      revokedBy:
+                        type: string
+                        format: uuid
+                    required:
+                      - bucketName
+                      - userId
+                      - revokedBy
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.multipart.initiated:
+  post:
+    tags:
+      - Files - Multipart
+    summary: Multipart upload initiated
+    description: |-
+      Fired by `POST /v1/files/buckets/{name}/multipart`. `entityId` is the upload id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesMultipartInitiated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.multipart.initiated
+                  entityType:
+                    type: string
+                    enum:
+                      - multipartUpload
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      objectKey:
+                        type: string
+                      contentType:
+                        type: string
+                      expiresAt:
+                        type: string
+                        format: date-time
+                        description: When the upload expires if not completed.
+                    required:
+                      - bucketName
+                      - objectKey
+                      - contentType
+                      - expiresAt
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.multipart.completed:
+  post:
+    tags:
+      - Files - Multipart
+    summary: Multipart upload completed
+    description: |-
+      Fired by `POST /v1/files/buckets/{name}/multipart/{uploadId}/complete`. `entityId` is the upload id. The resulting object also fires `file-service.object.created` / `.updated` (with `via: multipart`), and `file-service.object.version.created` in a versioned bucket.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesMultipartCompleted
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.multipart.completed
+                  entityType:
+                    type: string
+                    enum:
+                      - multipartUpload
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      objectKey:
+                        type: string
+                      contentType:
+                        type: string
+                      sizeBytes:
+                        type: string
+                        pattern: ^[0-9]+$
+                        description: Plaintext size in bytes, as a decimal string.
+                      etag:
+                        type: string
+                      objectId:
+                        type: string
+                        format: uuid
+                        description: The object the upload wrote.
+                    required:
+                      - bucketName
+                      - objectKey
+                      - contentType
+                      - sizeBytes
+                      - etag
+                      - objectId
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.multipart.aborted:
+  post:
+    tags:
+      - Files - Multipart
+    summary: Multipart upload aborted
+    description: |-
+      Fired by `DELETE /v1/files/buckets/{name}/multipart/{uploadId}` and by the worker's multipart sweep when an upload expires uncompleted. `entityId` is the upload id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesMultipartAborted
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.multipart.aborted
+                  entityType:
+                    type: string
+                    enum:
+                      - multipartUpload
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      objectKey:
+                        type: string
+                      reason:
+                        type: string
+                        enum:
+                          - aborted
+                          - expired
+                        description: '`aborted` for the explicit DELETE, `expired` for the sweep.'
+                    required:
+                      - bucketName
+                      - objectKey
+                      - reason
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.lifecycle.policy.updated:
+  post:
+    tags:
+      - Files - Buckets
+    summary: Lifecycle policy updated
+    description: |-
+      Fired by `PUT /v1/files/buckets/{name}/lifecycle`, which creates or replaces the bucket's policy. `data` carries the policy as stored. `entityId` is the bucket's integer id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesLifecyclePolicyUpdated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.lifecycle.policy.updated
+                  entityType:
+                    type: string
+                    enum:
+                      - bucket
+                  data:
+                    type: object
+                    properties:
+                      bucketId:
+                        type: integer
+                        description: The bucket's integer id.
+                      bucketName:
+                        type: string
+                      expireObjectsAfterDays:
+                        type: [integer, 'null']
+                      expireVersionsAfterDays:
+                        type: [integer, 'null']
+                      purgeSoftDeletedAfterDays:
+                        type: [integer, 'null']
+                      enabled:
+                        type: boolean
+                    required:
+                      - bucketId
+                      - bucketName
+                      - expireObjectsAfterDays
+                      - expireVersionsAfterDays
+                      - purgeSoftDeletedAfterDays
+                      - enabled
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.lifecycle.policy.deleted:
+  post:
+    tags:
+      - Files - Buckets
+    summary: Lifecycle policy deleted
+    description: |-
+      Fired by `DELETE /v1/files/buckets/{name}/lifecycle` when the bucket had a policy; deleting a missing policy emits no event. `entityId` is the bucket's integer id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesLifecyclePolicyDeleted
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.lifecycle.policy.deleted
+                  entityType:
+                    type: string
+                    enum:
+                      - bucket
+                  data:
+                    type: object
+                    properties:
+                      bucketId:
+                        type: integer
+                        description: The bucket's integer id.
+                      bucketName:
+                        type: string
+                    required:
+                      - bucketId
+                      - bucketName
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.lifecycle.policy.applied:
+  post:
+    tags:
+      - Files - Buckets
+    summary: Lifecycle policy applied
+    description: |-
+      Fired by the worker's lifecycle sweep, once per bucket per stage per batch that processed anything. `entityId` is the bucket's integer id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesLifecyclePolicyApplied
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.lifecycle.policy.applied
+                  entityType:
+                    type: string
+                    enum:
+                      - bucket
+                  data:
+                    type: object
+                    properties:
+                      bucketId:
+                        type: integer
+                        description: The bucket's integer id.
+                      bucketName:
+                        type: string
+                      stage:
+                        type: string
+                        enum:
+                          - expireObjects
+                          - expireVersions
+                          - purgeSoftDeleted
+                          - perObjectTtl
+                      processed:
+                        type: integer
+                        description: Number of entities in `entityIds`.
+                      entityType:
+                        type: string
+                        enum:
+                          - object
+                          - objectVersion
+                      entityIds:
+                        type: array
+                        items:
+                          type: string
+                          format: uuid
+                      pendingCleanup:
+                        type: boolean
+                        deprecated: true
+                        description: Always false. The event is written in the batch's transaction, before storage reclaim is queued; a failed enqueue is picked up by the hourly orphan backstop.
+                    required:
+                      - bucketId
+                      - bucketName
+                      - stage
+                      - processed
+                      - entityType
+                      - entityIds
+                      - pendingCleanup
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.share.created:
+  post:
+    tags:
+      - Files - Shares
+    summary: Share created
+    description: |-
+      Fired by `POST /v1/files/buckets/{name}/shares`. `entityId` is the share id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesShareCreated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.share.created
+                  entityType:
+                    type: string
+                    enum:
+                      - share
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      kind:
+                        type: string
+                        enum:
+                          - OBJECT
+                          - ARCHIVE
+                      objectId:
+                        type:
+                          - string
+                          - 'null'
+                        format: uuid
+                        description: Set for OBJECT shares.
+                      archiveRequestId:
+                        type:
+                          - string
+                          - 'null'
+                        format: uuid
+                        description: Set for ARCHIVE shares.
+                    required:
+                      - bucketName
+                      - kind
+                      - objectId
+                      - archiveRequestId
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.share.updated:
+  post:
+    tags:
+      - Files - Shares
+    summary: Share updated
+    description: |-
+      Fired by `PATCH /v1/files/buckets/{name}/shares/by-id/{id}`. `entityId` is the share id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesShareUpdated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.share.updated
+                  entityType:
+                    type: string
+                    enum:
+                      - share
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      kind:
+                        type: string
+                        enum:
+                          - OBJECT
+                          - ARCHIVE
+                    required:
+                      - bucketName
+                      - kind
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.share.revoked:
+  post:
+    tags:
+      - Files - Shares
+    summary: Share revoked
+    description: |-
+      Fired by `DELETE /v1/files/buckets/{name}/shares/by-id/{id}` (soft revoke). `entityId` is the share id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesShareRevoked
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.share.revoked
+                  entityType:
+                    type: string
+                    enum:
+                      - share
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      kind:
+                        type: string
+                        enum:
+                          - OBJECT
+                          - ARCHIVE
+                    required:
+                      - bucketName
+                      - kind
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
+file-service.share.accessed:
+  post:
+    tags:
+      - Files - Shares
+    summary: Share accessed
+    description: |-
+      Fired when a share link hands out a download URL (`GET /v1/files/shared/{token}` redirecting to the file, or a successful `POST /v1/files/shared/{token}/unlock`). Only emitted when `FILE_SERVICE_EMIT_SHARE_ACCESS_EVENTS` is enabled (off by default; noisy). `entityId` is the share id.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesShareAccessed
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.share.accessed
+                  entityType:
+                    type: string
+                    enum:
+                      - share
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      kind:
+                        type: string
+                        enum:
+                          - OBJECT
+                          - ARCHIVE
+                      unlocked:
+                        type: boolean
+                        description: True when the URL came from `POST /v1/files/shared/{token}/unlock` (including for a share without a password).
+                    required:
+                      - bucketName
+                      - kind
+                      - unlocked
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.

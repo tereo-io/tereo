@@ -1,0 +1,115 @@
+AuditSortParam:
+  name: sort
+  in: query
+  description: |
+    Field to sort by. Audit entries sort by `createdAt` only, with `id` as the
+    tiebreaker; any other value is a `400`.
+  schema:
+    type: string
+    enum: [createdAt]
+    default: createdAt
+
+AuditIdParam:
+  name: id
+  in: path
+  required: true
+  description: Audit log entry unique identifier
+  schema:
+    type: string
+    format: uuid
+
+EntityTypeParam:
+  name: entityType
+  in: path
+  required: true
+  description: Entity type (e.g., "Order", "Product")
+  schema:
+    type: string
+    minLength: 1
+    maxLength: 100
+
+EntityIdParam:
+  name: entityId
+  in: path
+  required: true
+  description: Entity unique identifier
+  schema:
+    type: string
+    minLength: 1
+    maxLength: 500
+
+AuditFilterValueParam:
+  name: filter[field]
+  in: query
+  description: |
+    Filter value. Replace `field` with the field name to filter on.
+    See endpoint description for available filter fields and operators;
+    a field the endpoint does not list is a `400`. With the `in` operator the
+    value is a comma-separated list. Repeating a key
+    (`filter[x]=a&filter[x]=b`) ANDs the clauses, pairing each value with the
+    `filter[x_op]` at the same position (or one operator for all).
+    `createdAt` takes an ISO 8601 date or date-time, usually as
+    `filter[createdAt_gte]` / `filter[createdAt_lte]`; the two bounds combine
+    into one range whatever their order in the query string.
+  schema:
+    type: string
+
+EntityHistoryLimitParam:
+  name: limit
+  in: query
+  description: Maximum number of items to return per page (entity history)
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 1000
+    default: 50
+
+AuditFilterOperatorParam:
+  name: filter[field_op]
+  in: query
+  description: |
+    Filter operator. Replace `field` with the field name.
+    Supported operators: `equals`, `contains`, `in`, `gte`, `lte` — each field
+    allows only the ones its endpoint lists; any other is a `400`.
+    Defaults to `equals` if not specified. `contains` is case-insensitive.
+  schema:
+    type: string
+    enum: [equals, contains, in, gte, lte]
+    default: equals
+
+SearchParam:
+  name: filter[q]
+  in: query
+  required: false
+  description: |
+    Case-insensitive text search across `entityName` and the text of the
+    `changes` and `metadata` JSON (keys as well as values). `%` and `_` match
+    literally. Takes one value and no operator.
+
+    A search scans at most 31 days of entries: it ends at `filter[createdAt_lte]`
+    (or now) and starts at `filter[createdAt_gte]`, or 31 days before its end
+    when that is absent. When a bound is given more than once (suffix and
+    `_op` forms, or a repeated key), the tightest of each applies, and the cap
+    is checked against that merged range. A longer explicit range — by more
+    than 5 minutes, which absorbs client clock skew — is refused with
+    `400 search_window_too_large`.
+  schema:
+    type: string
+    minLength: 1
+    maxLength: 200
+
+OrganizationFilterParam:
+  name: filter[organizationId]
+  in: query
+  required: false
+  description: |
+    Which organization's entries to read: an organization id, or `none` for
+    system-wide entries (those with no organization). Without it, reads are
+    scoped to the token's `org_id`. Only `audit-logs.admin` may name another
+    organization or `none`; anyone else naming one gets `403`.
+  schema:
+    anyOf:
+      - type: string
+        format: uuid
+      - type: string
+        const: none

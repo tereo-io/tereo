@@ -1,0 +1,46 @@
+/* Sessions list — used by UserDetail and MyAccountPage. */
+
+.t-sessions-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.t-sessions-list > li {
+  margin-bottom: 0.5rem;
+}
+
+.t-sessions-list > li:last-child {
+  margin-bottom: 0;
+}
+
+.t-session-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.t-session-client {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+  font-weight: 600;
+}
+
+.t-session-scopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+}
+
+.t-session-current .v-bordered-section {
+  border-color: var(--primary-color);
+  background-color: color-mix(
+    in srgb,
+    var(--primary-color) 5%,
+    var(--background-color)
+  );
+}

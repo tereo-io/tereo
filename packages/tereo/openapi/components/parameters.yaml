@@ -1,0 +1,126 @@
+# Shared by every area. Variants that differ per area carry its prefix
+# (FilesLimitParam, AuditSortParam, …) and live in <area>/parameters.yaml.
+
+LimitParam:
+  name: limit
+  in: query
+  description: Maximum number of items to return per page (cursor pagination)
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 200
+    default: 50
+
+CursorParam:
+  name: cursor
+  in: query
+  description: |
+    Opaque cursor for keyset pagination. Pass the `nextCursor` value from the
+    prior page's response to fetch the next page. Omit on the first request.
+    Cursors are HMAC-signed and bound to the list that minted them (its
+    request path) and to the requested `sort` + `sortDir`; using one on
+    another list, or changing either, is `400 invalid_cursor`.
+  required: false
+  schema:
+    type: string
+
+SortParam:
+  name: sort
+  in: query
+  description: Field name to sort by
+  schema:
+    type: string
+
+SortDirParam:
+  name: sortDir
+  in: query
+  description: Sort direction
+  schema:
+    type: string
+    enum: [asc, desc]
+    default: desc
+
+IncludeArchivedParam:
+  name: includeArchived
+  in: query
+  description: |
+    When `true`, archived rows are included in the results. Defaults to
+    `false` — archived rows are hidden. Must be `true` or `false`; any other
+    value is a `400 invalid_request`.
+  required: false
+  schema:
+    type: string
+    enum: ['true', 'false']
+    default: 'false'
+
+FilterValueParam:
+  name: filter[field]
+  in: query
+  description: |
+    Filter value. Replace `field` with the field name to filter on.
+    See endpoint description for available filter fields and operators.
+  schema:
+    type: string
+
+FilterOperatorParam:
+  name: filter[field_op]
+  in: query
+  description: |
+    Filter operator. Replace `field` with the field name.
+    Supported operators: `equals`, `contains`, `in`, `gte`, `lte`, `gt`, `lt`, `startsWith`, `endsWith`.
+    `contains`, `startsWith` and `endsWith` ignore case and match the value literally
+    (`%`, `_` and `\` are not wildcards).
+    For range operators (gte/lte/gt/lt), use `filter[field_gte]` format instead.
+    Defaults to `equals` if not specified.
+  schema:
+    type: string
+    enum: [equals, contains, in, gte, lte, gt, lt, startsWith, endsWith]
+    default: equals
+
+# Headers on outbound webhook deliveries (see components/webhook-schemas.yaml)
+WebhookIdHeader:
+  name: X-Webhook-Id
+  in: header
+  required: true
+  description: |
+    The delivery id (one per event per endpoint); stable across retries, so it
+    can be used to deduplicate. Not the body's `id`.
+  schema:
+    type: string
+    format: uuid
+
+WebhookEventHeader:
+  name: X-Webhook-Event
+  in: header
+  required: true
+  description: The event type (matches the body's `eventType`)
+  schema:
+    type: string
+
+WebhookTimestampHeader:
+  name: X-Webhook-Timestamp
+  in: header
+  required: true
+  description: |
+    Unix time in seconds at which this attempt was signed, as an integer
+    string. Part of the signed input.
+  schema:
+    type: string
+    pattern: '^[0-9]+$'
+    examples:
+      - '1767225600'
+
+WebhookSignatureHeader:
+  name: X-Webhook-Signature
+  in: header
+  required: true
+  description: |
+    `sha256=` followed by the hex HMAC-SHA256, keyed with the endpoint's
+    signing secret, of `"<X-Webhook-Timestamp>.<raw request body>"`.
+
+    During the 24 hours after the endpoint's secret is rotated it lists one
+    signature per secret, comma-separated, current secret first
+    (`sha256=<new>,sha256=<old>`); accept the request if any value matches.
+  schema:
+    type: string
+    pattern: '^sha256=[0-9a-f]{64}(,sha256=[0-9a-f]{64})*$'

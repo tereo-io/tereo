@@ -1,0 +1,978 @@
+/admin/roles:
+  get:
+    tags:
+      - Admin - Roles
+    summary: List roles
+    description: |
+      Returns a paginated list of roles with filtering and sorting.
+
+      **Filter operators:**
+      - name: `contains`, `equals`
+      - displayName: `contains`, `equals`
+      - isActive: `equals` (true/false)
+      - serviceId: `equals`
+
+      **Sort fields:** `id` (default), `name`, `displayName`, `createdAt`, `isActive`
+      (default direction `desc`)
+
+      Archived roles are excluded by default; pass `includeArchived=true`
+      to include them. Retired system roles (dropped from their service's
+      declaration) are excluded unless `includeRetired=true`. Both flags
+      accept only `true` or `false`; anything else is a `400`.
+    operationId: getAdminRoles
+    security:
+      - BearerAuth: [roles.read]
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../../components/parameters.yaml#/SortParam'
+      - $ref: '../../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../../components/parameters.yaml#/FilterOperatorParam'
+      - $ref: '../../../components/parameters.yaml#/IncludeArchivedParam'
+      - $ref: '../../../components/auth/parameters.yaml#/IncludeRetiredParam'
+    responses:
+      '200':
+        description: Paginated list of roles
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/PaginatedRolesResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing roles.read permission
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Admin - Roles
+    summary: Create role
+    description: |
+      Creates a new role.
+
+      **Name requirements:**
+      - Must start with a letter
+      - Can contain letters, numbers, underscores, and hyphens
+      - 1-100 characters
+
+      The name must not be taken by another custom role, archived ones
+      included (`409`). System roles have their own names and never collide.
+
+      An audit log entry is created for this action.
+      An `auth.role.created` webhook event is emitted.
+    operationId: postAdminRoles
+    security:
+      - BearerAuth: [roles.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/CreateRoleRequest'
+    responses:
+      '201':
+        description: Role created successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/RoleWithPermissions'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing roles.write permission
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: A custom role with this name already exists (archived ones included)
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/roles/{id}:
+  get:
+    tags:
+      - Admin - Roles
+    summary: Get role by ID
+    description: |
+      Returns a role with its permissions. Archived roles are returned too
+      (they stay viewable, read-only).
+    operationId: getAdminRole
+    security:
+      - BearerAuth: [roles.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/RoleIdParam'
+    responses:
+      '200':
+        description: Role details
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/RoleWithPermissions'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing roles.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Admin - Roles
+    summary: Update role
+    description: |
+      Updates a role. A system role is declared in code: only `requires2fa`
+      can be changed on it — any other field is refused with `403`. A new
+      `name` must not be taken by another custom role, archived ones
+      included (`409 conflict`). Archived roles cannot be updated
+      (`409 resource_archived`). Changing `requires2fa` needs a caller
+      holding every permission the role grants (`403` otherwise), so only an
+      `admin` changes it on core's `admin` role; so does reactivating it
+      (`isActive: true`). Both count only the caller's global roles, not
+      those held in the token's organization.
+
+      Deactivating a role (`isActive: false`) revokes the access tokens of
+      the service clients holding it. People's tokens are not revoked:
+      permissions are read on every request, so they lose the role at once.
+      Deactivating a role that grants `admin` is refused when it would leave
+      no active administrator (`409 conflict`).
+
+      An audit log entry is created for this action.
+      An `auth.role.updated` webhook event is emitted.
+    operationId: patchAdminRole
+    security:
+      - BearerAuth: [roles.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/RoleIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/UpdateRoleRequest'
+    responses:
+      '200':
+        description: Role updated successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/RoleWithPermissions'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing roles.write permission, a field other than `requires2fa` was sent for a system role, or `requires2fa` was changed by a caller not holding every permission the role grants
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        description: A custom role with the new name already exists, or the deactivation would leave no active administrator (`conflict`), or the role is archived (`resource_archived`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum: [conflict, resource_archived]
+                error_description:
+                  type: string
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  delete:
+    tags:
+      - Admin - Roles
+    summary: Permanently delete role
+    description: |
+      Permanently deletes a role, archived or not. This is not reversible —
+      archive the role instead for routine retirement.
+
+      Role-permission and user-role assignments, and the role's place among
+      identity-provider domains' default roles, are removed with the role,
+      and the access tokens of the service clients that held it are revoked
+      (people's permissions are read on every request, so their tokens lose
+      the role at once). System roles cannot be deleted
+      (`403 Forbidden`). Deleting a role that grants `admin` is refused when
+      it would leave no active administrator (`409 conflict`).
+
+      An audit log entry is created for this action.
+      An `auth.role.deleted` webhook event is emitted.
+    operationId: deleteAdminRole
+    security:
+      - BearerAuth: [roles.delete]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/RoleIdParam'
+    responses:
+      '204':
+        description: Role permanently deleted
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing roles.delete permission, or the role is a system role
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The deletion would leave no active administrator
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/roles/{id}/duplicate:
+  post:
+    tags:
+      - Admin - Roles
+    summary: Duplicate role
+    description: |
+      Creates a new custom role from an existing role (system or custom):
+      same `requires2fa` and the source's non-retired permissions, under a
+      new `name`. `displayName` and `description` default to the source's.
+      The source must not be archived (`409 resource_archived`); the new
+      name must not be taken by another custom role, archived ones included
+      (`409 conflict`). The caller must hold every permission copied
+      through a global role (`admin` holds all), otherwise `403` naming the ones they lack.
+
+      An audit log entry is created for this action, and an
+      `auth.role.created` webhook event is emitted with `duplicatedFrom`
+      set to the source role's id.
+    operationId: duplicateAdminRole
+    security:
+      - BearerAuth: [roles.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/RoleIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/DuplicateRoleRequest'
+    responses:
+      '201':
+        description: Role created
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/RoleWithPermissions'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing roles.write permission, or the source grants a permission the caller does not hold
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        description: The source role is archived (`resource_archived`), or a custom role with this name exists (`conflict`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum: [conflict, resource_archived]
+                error_description:
+                  type: string
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/roles/{id}/archive:
+  post:
+    tags:
+      - Admin - Roles
+    summary: Archive role
+    description: |
+      Archives a role. The role must be deactivated first
+      (`isActive: false`) — archiving an active role returns `409 Conflict`.
+      System roles cannot be archived (`403 Forbidden`). Returns `404` when
+      the role does not exist, and `409 already_archived` when it is
+      already archived.
+
+      Archived roles are hidden from lists by default, grant nothing during
+      permission resolution, and are read-only except restore and hard
+      delete. No tokens are revoked here: archive requires the role to
+      already be deactivated, and deactivation is what revoked them.
+
+      An audit log entry is created for this action.
+      An `auth.role.archived` webhook event is emitted.
+    operationId: archiveAdminRole
+    security:
+      - BearerAuth: [roles.archive]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/RoleIdParam'
+    responses:
+      '204':
+        description: Role archived
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing roles.archive permission, or the role is a system role
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Role not found
+      '409':
+        description: The role is still active (`conflict`; deactivate it first), or already archived (`already_archived`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum: [conflict, already_archived]
+                error_description:
+                  type: string
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/roles/{id}/restore:
+  post:
+    tags:
+      - Admin - Roles
+    summary: Restore archived role
+    description: |
+      Restores an archived role. Returns `409 not_archived` when the role is
+      not archived. The role comes back still deactivated (`isActive: false`) —
+      it grants nothing until it is explicitly reactivated via
+      `PATCH /v1/admin/roles/{id}`.
+
+      An audit log entry is created for this action.
+      An `auth.role.restored` webhook event is emitted.
+    operationId: restoreAdminRole
+    security:
+      - BearerAuth: [roles.archive]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/RoleIdParam'
+    responses:
+      '200':
+        description: Role restored
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/RoleWithPermissions'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing roles.archive permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Role not found
+      '409':
+        $ref: '../../../components/responses.yaml#/NotArchivedResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/roles/{id}/permissions:
+  put:
+    tags:
+      - Admin - Role Permissions
+    summary: Set role permissions
+    description: |
+      Replaces all permission assignments of a custom role. System roles are
+      declared in code and refused with `403` — duplicate one as a custom
+      role to change its permissions. An unknown permission id is a `400`;
+      a retired permission may stay on the role but cannot be newly added.
+      A repeated id counts once. Archived roles are refused with
+      `409 resource_archived`. Dropping `admin` from a role is refused when
+      it would leave no active administrator (`409 conflict`).
+
+      Only grant what you hold: each permission not already on the role
+      must be one the caller holds through a global role (`admin` holds
+      all; roles held in the token's organization do not count), otherwise
+      `403` naming them. Permissions the role keeps are not checked.
+
+      While the role is assigned within any organization, a permission
+      that is not org-assignable cannot be added (`409 role_assigned_in_org`,
+      naming up to ten of those organizations and the permissions): there it
+      would grant nothing. Remove the org-scoped assignments first.
+
+      The access tokens of the service clients holding the role are revoked;
+      people's tokens are not, since their permissions are read on every
+      request.
+
+      An audit log entry is created for this action.
+      An `auth.role.permissions-changed` webhook event is emitted.
+    operationId: putAdminRolePermissions
+    security:
+      - BearerAuth: [roles.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/RoleIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/SetPermissionsRequest'
+    responses:
+      '200':
+        description: Role permissions updated
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/RoleWithPermissions'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Validation error, or a permission id that does not exist (or is retired and not already on the role)
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing roles.write permission, the role is a system role, or an added permission is one the caller does not hold
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        description: The change would leave no active administrator (`conflict`), the role is archived (`resource_archived`; restore it first), or it is assigned within an organization and a permission added is not org-assignable (`role_assigned_in_org`)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum: [conflict, resource_archived, role_assigned_in_org]
+                error_description:
+                  type: string
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/roles/{id}/users:
+  get:
+    tags:
+      - Admin - Role Users
+    summary: Get users with role
+    description: |
+      Returns every assignment of the role (global and in any
+      organization), ordered by email: a user holding it in several scopes
+      appears once per scope, told apart by `organizationId`. Works for
+      archived roles too.
+    operationId: getAdminRoleUsers
+    security:
+      - BearerAuth: [roles.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/RoleIdParam'
+    responses:
+      '200':
+        description: Users with this role
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/RoleUsersResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing roles.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/roles/{id}/users/{userId}:
+  delete:
+    tags:
+      - Admin - Role Users
+    summary: Remove role from user
+    description: |
+      Removes one assignment of the role: the user's global assignment, or
+      with `organizationId` the one scoped to that organization (each row of
+      `GET /v1/admin/roles/{id}/users` names its `organizationId`). An
+      org-scoped removal also takes the organization authority that setting
+      a member's roles does: `organizations.write`, or being an `admin` or
+      `owner` of that organization while it is active (`403` otherwise) —
+      and an organization `admin` cannot remove an `owner`'s role (`403`).
+      Removing a global assignment from another user needs a caller holding
+      every permission that user holds, from global roles or roles in any
+      organization; the caller's count from global roles only, capped by a
+      delegated token's scopes (`403`, naming the permissions lacking,
+      otherwise), as `PUT /v1/admin/users/{id}/roles` does.
+      Returns `404` when the
+      role does not exist or the user holds no such assignment of it. A
+      service's service-account user is refused with `403` — revoke its
+      access under `/v1/admin/services`. Removing the last administrator's
+      global `admin` grant is refused (`409 conflict`). Archived roles are
+      refused with `409 resource_archived`.
+
+      Permissions are resolved on every request, so the user's tokens and
+      sessions lose what the assignment granted at once; none is revoked.
+
+      An audit log entry is created for this action.
+      An `auth.role.user-removed` webhook event is emitted.
+    operationId: deleteAdminRoleUser
+    security:
+      - BearerAuth: [roles.delete]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/RoleIdParam'
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: organizationId
+        in: query
+        required: false
+        description: The organization of an org-scoped assignment; omit for the global one.
+        schema:
+          type: string
+          format: uuid
+    responses:
+      '204':
+        description: Role removed from user successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing roles.delete permission, the user is a service's service account, or (with `organizationId`) the caller has no authority over the organization
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: Role or user not found, or the user holds no assignment of the role in that scope
+      '409':
+        description: The removal would leave no active administrator (`conflict`), or the role is archived (`resource_archived`); restore it first
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  enum: [conflict, resource_archived]
+                error_description:
+                  type: string
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+# ============================================
+# WEBHOOK EVENTS
+# ============================================
+
+auth.role.created:
+  post:
+    tags:
+      - Admin - Roles
+    summary: Role created
+    description: |
+      Fired when a custom role is created, directly or by duplicating another
+      role. `data` is the new role; a duplicate also carries `duplicatedFrom`,
+      the source role's id.
+    operationId: webhookRoleCreated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.role.created
+                  entityType:
+                    const: Role
+                  data:
+                    allOf:
+                      - $ref: '../../../components/auth/schemas.yaml#/RoleWithPermissions'
+                      - type: object
+                        properties:
+                          duplicatedFrom:
+                            type: string
+                            format: uuid
+                            description: Id of the role this one was duplicated from. Absent for a plain create.
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.role.updated:
+  post:
+    tags:
+      - Admin - Roles
+    summary: Role updated
+    description: Fired when a role is updated. `data` is the role after the change.
+    operationId: webhookRoleUpdated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.role.updated
+                  entityType:
+                    const: Role
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/RoleWithPermissions'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.role.archived:
+  post:
+    tags:
+      - Admin - Roles
+    summary: Role archived
+    description: Fired when a role is archived.
+    operationId: webhookRoleArchived
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.role.archived
+                  entityType:
+                    const: Role
+                  data:
+                    type: object
+                    required: [id, name]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      name:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.role.restored:
+  post:
+    tags:
+      - Admin - Roles
+    summary: Role restored
+    description: Fired when an archived role is restored (still deactivated).
+    operationId: webhookRoleRestored
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.role.restored
+                  entityType:
+                    const: Role
+                  data:
+                    type: object
+                    required: [id, name]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      name:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.role.deleted:
+  post:
+    tags:
+      - Admin - Roles
+    summary: Role permanently deleted
+    description: Fired when a role is permanently deleted; its assignments are removed with it.
+    operationId: webhookRoleDeleted
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.role.deleted
+                  entityType:
+                    const: Role
+                  data:
+                    type: object
+                    required: [id, name]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      name:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.role.permissions-changed:
+  post:
+    tags:
+      - Admin - Role Permissions
+    summary: Role permissions changed
+    description: Fired when a role's permission set is replaced.
+    operationId: webhookRolePermissionsChanged
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.role.permissions-changed
+                  entityType:
+                    const: Role
+                  data:
+                    type: object
+                    required: [id, name, permissionIds]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      name:
+                        type: string
+                      permissionIds:
+                        type: array
+                        items:
+                          type: string
+                          format: uuid
+                        description: The permission ids sent in the request
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.role.user-removed:
+  post:
+    tags:
+      - Admin - Role Users
+    summary: User removed from role
+    description: Fired when a user is removed from a role. `entityId` is `<roleId>:<userId>` for a global assignment and `<roleId>:<userId>:<organizationId>` for an org-scoped one.
+    operationId: webhookRoleUserRemoved
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.role.user-removed
+                  entityType:
+                    const: RoleAssignment
+                  data:
+                    type: object
+                    required: [roleId, userId, organizationId, roleName]
+                    properties:
+                      roleId:
+                        type: string
+                        format: uuid
+                      userId:
+                        type: string
+                        format: uuid
+                      organizationId:
+                        type: [string, 'null']
+                        format: uuid
+                        description: The organization the removed assignment was scoped to; null for a global one.
+                      roleName:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

@@ -1,0 +1,939 @@
+/webhooks/v1/webhooks:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  get:
+    tags:
+      - Webhook Endpoints
+    summary: List webhook endpoints
+    description: |
+      Returns a paginated list of the organization's webhook endpoints.
+      Signing secrets and custom header values are masked in the response.
+
+      The organization is the token's `org_id`, or the `X-Organization-ID`
+      header for a `webhooks.admin` caller (400 when malformed, 404 when no
+      such organization; 403 when neither is present).
+
+      **Required permissions:**
+      - `webhooks.read`
+
+      **Filter fields and operators:**
+      - `status`: `equals`, `in`
+      - `url`: `contains`
+      - `description`: `contains`
+      - `eventType`: `equals`, `contains` — matches endpoints subscribed to
+        such an event type
+      - `archived`: `equals` (`true` lists only archived endpoints, `false`
+        only unarchived ones). Without it archived endpoints are hidden unless
+        `includeArchived=true`; when both are given, `filter[archived]` wins.
+
+      `contains` is case-insensitive.
+
+      **Sort fields:** `createdAt`, `updatedAt`
+
+      **Examples:**
+      - `?filter[status]=ACTIVE`
+      - `?filter[status]=ACTIVE,PAUSED&filter[status_op]=in`
+      - `?filter[url]=example.com&filter[url_op]=contains`
+      - `?filter[description]=billing&filter[description_op]=contains`
+      - `?filter[eventType]=auth.user.created`
+      - `?filter[eventType]=auth.user&filter[eventType_op]=contains`
+      - `?filter[archived]=true`
+      - `?sort=createdAt&sortDir=asc`
+    operationId: listWebhookEndpoints
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksLimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../components/parameters.yaml#/SortParam'
+      - $ref: '../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksFilterOperatorParam'
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIncludeArchivedParam'
+    responses:
+      '200':
+        description: Paginated list of webhook endpoints
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/ListWebhookEndpointsResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+  post:
+    tags:
+      - Webhook Endpoints
+    summary: Create a webhook endpoint
+    description: |
+      Creates a new webhook endpoint for the organization. The full signing
+      secret is returned only in the creation response — subsequent GET requests
+      will return a masked version. Custom header values are masked as
+      `********` in this and every other response.
+
+      Fails with `400 invalid_event_type` when an event type is unregistered
+      or retired, `400 reserved_event_type` when it is `webhook.test` (sent
+      only by the test action), and `400 invalid_url` /
+      `private_url_not_allowed` when the URL is unusable.
+
+      An endpoint acts as the user who created it: it is sent an event only
+      while they are active and could read it — the event type's read
+      permission, and for a file event, read access to its bucket. Create
+      refuses (`403`) an event type the caller could not read.
+
+      **Required permissions:**
+      - `webhooks.write`
+
+      An audit log entry is created for this action.
+    operationId: createWebhookEndpoint
+    security:
+      - BearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/webhooks/schemas.yaml#/CreateWebhookEndpointRequest'
+    responses:
+      '201':
+        description: Webhook endpoint created successfully (includes full signing secret)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpoint'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/webhooks/{id}:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  get:
+    tags:
+      - Webhook Endpoints
+    summary: Get a webhook endpoint
+    description: |
+      Retrieves a single webhook endpoint by its identifier.
+      The signing secret and custom header values are masked in the response.
+
+      **Required permissions:**
+      - `webhooks.read`
+    operationId: getWebhookEndpoint
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+    responses:
+      '200':
+        description: Webhook endpoint details
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpoint'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+  patch:
+    tags:
+      - Webhook Endpoints
+    summary: Update a webhook endpoint
+    description: |
+      Updates an existing webhook endpoint. All fields are optional.
+      Status can only be set to `ACTIVE` or `PAUSED` via this endpoint.
+      The signing secret and custom header values are masked in the response.
+      A custom header sent with the mask `********` as its value keeps its
+      stored value; the mask for a header with no stored value is refused
+      with `400 masked_header_value`. The URL and event types
+      are validated as on create, and the caller must be able to read every
+      event type the endpoint ends up subscribed to (`403` otherwise).
+      Archived endpoints are rejected (`409 resource_archived`).
+
+      **Required permissions:**
+      - `webhooks.write`
+
+      An audit log entry is created for this action, with custom header
+      values masked.
+    operationId: updateWebhookEndpoint
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/webhooks/schemas.yaml#/UpdateWebhookEndpointRequest'
+    responses:
+      '200':
+        description: Webhook endpoint updated successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpoint'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+  delete:
+    tags:
+      - Webhook Endpoints
+    summary: Permanently delete a webhook endpoint
+    description: |
+      Permanently deletes a webhook endpoint (hard delete). Intended for internal
+      maintenance only — for routine retirement, use `POST /v1/webhooks/webhooks/{id}/archive`.
+
+      Returns `409 Conflict` while the endpoint still has delivery history
+      referencing it (`ON DELETE RESTRICT`); it becomes deletable once retention
+      purges those delivery rows.
+
+      **Required permissions:**
+      - `webhooks.delete`
+
+      An audit log entry is created for this action.
+    operationId: deleteWebhookEndpoint
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+    responses:
+      '204':
+        $ref: '../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/webhooks/{id}/archive:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  post:
+    tags:
+      - Webhook Endpoints
+    summary: Archive a webhook endpoint
+    description: |
+      Archives (retires) a webhook endpoint by setting `archivedAt`. Archived
+      endpoints never receive event deliveries and are hidden from the default
+      list (pass `filter[archived]=true` or `includeArchived=true` to see them).
+      Already archived is `409 already_archived`. Archiving is independent of
+      `status` and can be applied from any status. Reversible via
+      `POST /v1/webhooks/webhooks/{id}/restore`.
+
+      **Required permissions:**
+      - `webhooks.archive`
+
+      An audit log entry is created for this action.
+    operationId: archiveWebhookEndpoint
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+    responses:
+      '200':
+        description: Webhook endpoint archived successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpoint'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/webhooks/{id}/restore:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  post:
+    tags:
+      - Webhook Endpoints
+    summary: Restore an archived webhook endpoint
+    description: |
+      Clears `archivedAt` on a previously archived endpoint. The endpoint's
+      `status` is left untouched, so it resumes delivering only if it was `ACTIVE`
+      when archived. Returns `409 not_archived` if the endpoint is not archived.
+
+      **Required permissions:**
+      - `webhooks.archive`
+
+      An audit log entry is created for this action.
+    operationId: restoreWebhookEndpoint
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+    responses:
+      '200':
+        description: Webhook endpoint restored successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpoint'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/responses.yaml#/NotArchivedResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/webhooks/{id}/rotate-secret:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  post:
+    tags:
+      - Webhook Endpoints
+    summary: Rotate signing secret
+    description: |
+      Generates a new signing secret for the webhook endpoint and returns it in
+      full. The replaced secret keeps signing deliveries for
+      `WEBHOOK_SECRET_OVERLAP_HOURS` (24 by default; `previousSecretExpiresAt`
+      in the response): until then every delivery's `X-Webhook-Signature`
+      carries a signature for each secret, `sha256=<new>,sha256=<old>`. When
+      the overlap is configured to 0 the replaced secret stops signing at once
+      and `previousSecretExpiresAt` is null. Rotating again during the overlap
+      keeps only the secret just replaced. End the overlap early with
+      `POST /v1/webhooks/webhooks/{id}/revoke-previous-secret`. The previous secret is
+      never returned. Archived endpoints cannot be rotated
+      (`409 resource_archived`). No webhook event is emitted.
+
+      **Required permissions:**
+      - `webhooks.admin`
+
+      An audit log entry is created for this action.
+    operationId: rotateWebhookSecret
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+    responses:
+      '200':
+        description: Signing secret rotated successfully (includes full new signing secret)
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpoint'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/webhooks/{id}/revoke-previous-secret:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  post:
+    tags:
+      - Webhook Endpoints
+    summary: Revoke the previous signing secret
+    description: |
+      Ends a rotation overlap early: the previous signing secret stops signing
+      deliveries at once, and only the current secret signs from then on.
+      Succeeds when there is no overlap (still writing the audit entry).
+      Archived endpoints are rejected (`409 resource_archived`). No webhook
+      event is emitted.
+
+      **Required permissions:**
+      - `webhooks.admin`
+
+      An audit log entry is created for this action.
+    operationId: revokePreviousWebhookSecret
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+    responses:
+      '200':
+        description: Previous secret revoked; the endpoint, with its secret masked and `previousSecretExpiresAt` null
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpoint'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/webhooks/{id}/test:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  post:
+    tags:
+      - Webhook Endpoints
+    summary: Send a test webhook delivery
+    description: |
+      Generates a synthetic `webhook.test` event and enqueues a delivery to the
+      webhook endpoint. This is the only way `webhook.test` is sent: it cannot
+      be emitted or subscribed to (`400 reserved_event_type`). Only
+      endpoints with `ACTIVE` status can be tested
+      (`400 invalid_endpoint_status`), and archived endpoints cannot be tested
+      (`409 resource_archived`).
+
+      Returns `202 Accepted` with the created delivery identifier. The delivery
+      is processed asynchronously via BullMQ with the same retry semantics as
+      regular deliveries (up to 10 attempts with exponential backoff).
+
+      **Required permissions:**
+      - `webhooks.write`
+
+      An audit log entry is created for this action.
+    operationId: testWebhookEndpoint
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+    responses:
+      '202':
+        description: Test delivery accepted and queued
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/TestWebhookResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/webhooks/{id}/stats:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  get:
+    tags:
+      - Webhook Endpoints
+    summary: Get delivery statistics for a webhook endpoint
+    description: |
+      Returns aggregated delivery statistics for a specific webhook endpoint,
+      including total counts by status, success rate, average attempts, and
+      a last-24-hours breakdown. The counts cover the deliveries created in
+      the last 30 days (`windowDays`), so the query reads a bounded range of
+      the daily delivery partitions however long retention keeps them.
+
+      **Required permissions:**
+      - `webhooks.read`
+    operationId: getEndpointStats
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+    responses:
+      '200':
+        description: Delivery statistics for the endpoint
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/DeliveryStats'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/webhooks/{id}/deliveries:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  get:
+    tags:
+      - Webhook Deliveries
+    summary: List deliveries for a webhook endpoint
+    description: |
+      Returns a paginated list of delivery attempts for a specific webhook endpoint.
+
+      **Required permissions:**
+      - `webhooks.read`
+
+      **Filter fields and operators:**
+      - `status`: `equals`, `in`
+      - `eventType`: `equals`
+      - `createdAt`: a range, as `filter[createdAt_gte]` and/or
+        `filter[createdAt_lte]` (ISO 8601, a date in the years 1-9999) — the
+        same window as the bulk retry's `createdAfter` / `createdBefore`
+
+      A filter value containing a NUL character is a `400`.
+
+      **Sort fields:** `createdAt`
+
+      **Examples:**
+      - `?filter[status]=FAILED`
+      - `?filter[createdAt_gte]=2026-01-01T00:00:00Z&filter[createdAt_lte]=2026-01-31T23:59:59Z`
+      - `?filter[status]=PENDING,FAILED&filter[status_op]=in`
+      - `?filter[eventType]=order.created`
+      - `?sort=createdAt&sortDir=desc`
+    operationId: listWebhookDeliveries
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksLimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../components/parameters.yaml#/SortParam'
+      - $ref: '../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksFilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of webhook deliveries
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/ListWebhookDeliveriesResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/webhooks/{id}/deliveries/retry:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  post:
+    tags:
+      - Webhook Deliveries
+    summary: Bulk retry failed deliveries
+    description: |
+      Resets failed deliveries for a specific webhook endpoint back to `PENDING`
+      status with zero attempts (and `lastAttemptAt`, the response fields and
+      `errorMessage` cleared) and re-queues them for delivery, newest first.
+      Only deliveries with `FAILED` status are eligible for retry. Archived
+      endpoints are rejected (`409 resource_archived`), and so is an endpoint
+      that is not `ACTIVE` (`400 invalid_endpoint_status`; re-enable it first).
+      A delivery being reset by a concurrent retry is skipped, so it is never
+      queued twice.
+
+      Supports optional filters by date range (`createdAfter` / `createdBefore`,
+      inclusive), event type, and a limit on the number of deliveries to retry
+      (default 100, max 1000).
+
+      An audit log entry is created for this action when any delivery is reset.
+
+      **Required permissions:**
+      - `webhooks.write`
+    operationId: bulkRetryDeliveries
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/webhooks/schemas.yaml#/BulkRetryRequest'
+    responses:
+      '202':
+        description: Deliveries accepted for retry
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/BulkRetryResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/webhooks/{id}/deliveries/{deliveryId}:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  get:
+    tags:
+      - Webhook Deliveries
+    summary: Get a webhook delivery
+    description: |
+      Retrieves a single webhook delivery by its identifier, including the full
+      payload, delivery status, HTTP response details, and error information.
+
+      **Required permissions:**
+      - `webhooks.read`
+    operationId: getWebhookDelivery
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+      - $ref: '../../components/webhooks/parameters.yaml#/DeliveryIdParam'
+    responses:
+      '200':
+        description: Webhook delivery details
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/WebhookDelivery'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/webhooks/v1/webhooks/{id}/deliveries/{deliveryId}/retry:
+  parameters:
+    - $ref: '../../components/webhooks/parameters.yaml#/OrganizationIdHeader'
+  post:
+    tags:
+      - Webhook Deliveries
+    summary: Retry a failed webhook delivery
+    description: |
+      Resets a single failed delivery back to `PENDING` status with zero
+      attempts (and `lastAttemptAt`, the response fields and `errorMessage`
+      cleared) and re-queues it for delivery. Only deliveries with `FAILED`
+      status are eligible for retry (`400 invalid_delivery_status` otherwise,
+      including when a concurrent retry reset it first). Archived endpoints are
+      rejected (`409 resource_archived`), and so is an endpoint that is not
+      `ACTIVE` (`400 invalid_endpoint_status`; re-enable it first).
+
+      Returns `202 Accepted` with the updated delivery record. An audit log
+      entry is created for this action.
+
+      **Required permissions:**
+      - `webhooks.write`
+    operationId: retryWebhookDelivery
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/webhooks/parameters.yaml#/WebhooksIdParam'
+      - $ref: '../../components/webhooks/parameters.yaml#/DeliveryIdParam'
+    responses:
+      '202':
+        description: Delivery accepted for retry
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/webhooks/schemas.yaml#/WebhookDelivery'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/webhooks/responses.yaml#/WebhooksConflictResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+# ============================================
+# Outbound webhook events
+# ============================================
+
+webhook.test:
+  post:
+    tags:
+      - Webhook Events
+    summary: Test delivery
+    description: |
+      Sent by core to a single endpoint on request (`POST /v1/webhooks/webhooks/{id}/test`);
+      it is never emitted, and no endpoint may subscribe to it (`400 reserved_event_type`).
+      Unlike emitted events, the envelope has no `organizationId`.
+
+      Verify `X-Webhook-Signature` as described under "Receiving Deliveries".
+    operationId: webhookTest
+    security: []
+    parameters:
+      - name: X-Webhook-Id
+        in: header
+        required: true
+        description: Delivery id (the `deliveryId` the test request returned); stable across retries
+        schema:
+          type: string
+          format: uuid
+      - name: X-Webhook-Event
+        in: header
+        required: true
+        description: The event type
+        schema:
+          type: string
+          enum: ["webhook.test"]
+      - name: X-Webhook-Timestamp
+        in: header
+        required: true
+        description: Unix time in seconds when this attempt was signed
+        schema:
+          type: string
+          pattern: '^[0-9]+$'
+          examples:
+            - "1736937000"
+      - name: X-Webhook-Signature
+        in: header
+        required: true
+        description: |
+          `sha256=` + lowercase hex HMAC-SHA256 of `{X-Webhook-Timestamp}.{raw body}`,
+          keyed with the endpoint's signing secret
+
+          After the endpoint's secret is rotated, and until its
+          `previousSecretExpiresAt`, it lists one signature per secret,
+          comma-separated, current secret first (`sha256=<new>,sha256=<old>`);
+          accept the request if any value matches.
+        schema:
+          type: string
+          pattern: '^sha256=[0-9a-f]{64}(,sha256=[0-9a-f]{64})*$'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/WebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum: ["webhook.test"]
+                  entityType:
+                    type: string
+                    enum: ["WebhookEndpoint"]
+                  entityId:
+                    type: string
+                    format: uuid
+                    description: Id of the endpoint being tested
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        enum: ["This is a test webhook delivery"]
+                      timestamp:
+                        type: string
+                        format: date-time
+                        description: ISO 8601 time the test was requested
+                    required:
+                      - message
+                      - timestamp
+          examples:
+            test:
+              value:
+                id: "0b6f3f8e-2a5c-4d1e-9f3b-7c2d8e4a1b90"
+                eventType: "webhook.test"
+                entityType: "WebhookEndpoint"
+                entityId: "550e8400-e29b-41d4-a716-446655440000"
+                occurredAt: "2025-01-15T10:30:00.000Z"
+                data:
+                  message: "This is a test webhook delivery"
+                  timestamp: "2025-01-15T10:30:00.000Z"
+    responses:
+      '2XX':
+        description: |
+          Webhook received. Any 2xx within 30 seconds marks the delivery
+          successful; anything else (including a redirect) is retried.

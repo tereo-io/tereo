@@ -1,0 +1,345 @@
+/files/buckets:
+  get:
+    tags:
+      - Files - Buckets
+    summary: List buckets
+    description: |
+      Returns a paginated list of the buckets the caller created or holds an
+      active grant on (every bucket for a `file-service.admin` holder). Buckets
+      of another organization are left out.
+
+      **Required permissions:**
+      - System: `file-service.buckets.read`
+
+      **Filter operators:**
+      - name: `contains`, `equals`
+      - description: `contains`, `equals`
+      - policy: `equals`, `in` (public/private)
+      - currentUsageBytes: `gte`, `lte`, `gt`, `lt`
+
+      **Sort fields:** `name`, `description`, `policy`, `currentUsageBytes`,
+      `createdAt` (default `createdAt`, `desc`). Buckets with no
+      `description` sort last ascending and first descending, and paging
+      carries on through them.
+
+      **Examples:**
+      - `?filter[name]=uploads&filter[name_op]=contains`
+      - `?filter[policy]=public` (defaults to equals)
+      - `?filter[currentUsageBytes_gte]=1000000`
+      - `?sort=name&sortDir=asc`
+    operationId: listBuckets
+    security:
+      - BearerAuth: [file-service.buckets.read]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/FilesLimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesSortParam'
+      - $ref: '../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesFilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of buckets
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ListBucketsResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid filter, sort, limit or cursor (`invalid_cursor`)
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.buckets.read permission
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Files - Buckets
+    summary: Create bucket
+    description: |
+      Creates a new bucket. Bucket names must be unique across the deployment,
+      and may not start with a registered service's (or core's) namespace followed by `-`
+      — those names are reserved for declared buckets.
+
+      **Required permissions:**
+      - System: `file-service.buckets.write`
+
+      **Requirements:**
+      - Bucket name: 3-63 characters, lowercase alphanumeric with hyphens
+      - Name must start and end with alphanumeric character
+      - Maximum storage quota: 1 TB (1099511627776 bytes)
+
+      The caller becomes the bucket's creator: they manage its settings and
+      grants. In the same transaction they are also granted full object
+      access (`canRead`, `canWrite`, `canDelete`) — an ordinary grant, listed
+      under `GET /v1/files/buckets/{name}/permissions` and revocable like any
+      other; once revoked, the creator still manages the bucket but needs a
+      grant again to read or write its objects.
+
+      Audit log entries are created for the bucket and for the grant and, for
+      a bucket in an organization, `file-service.bucket.created` and
+      `file-service.permission.granted` webhook events are emitted.
+    operationId: createBucket
+    security:
+      - BearerAuth: [file-service.buckets.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/CreateBucketRequest'
+    responses:
+      '201':
+        description: Bucket created successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/CreateBucketResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.buckets.write permission
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: Conflict - a bucket with this name already exists, or the name is in a reserved namespace
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}:
+  get:
+    tags:
+      - Files - Buckets
+    summary: Get bucket details
+    description: |
+      Returns detailed information about a specific bucket. `liveUsageBytes`
+      is included for versioning-enabled buckets.
+
+      **Required permissions:**
+      - System: `file-service.buckets.read` AND (`file-service.admin`, or bucket creator or an active bucket grant, from the bucket's organization)
+    operationId: getBucket
+    security:
+      - BearerAuth: [file-service.buckets.read]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    responses:
+      '200':
+        description: Bucket details
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/Bucket'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid bucket name (`invalid_request`)
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.buckets.read permission, no access to the bucket, a token for another organization, or no such bucket
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  put:
+    tags:
+      - Files - Buckets
+    summary: Update bucket
+    description: |
+      Updates bucket properties.
+
+      **Required permissions:**
+      - System: `file-service.buckets.write` AND (bucket creator or `file-service.admin`)
+
+      **Updatable fields:**
+      - description
+      - policy (public/private)
+      - versioningEnabled, autoThumbnails
+      - storageQuotaBytes (max 1 TB), corsConfig, rateLimitConfig (null clears)
+
+      **Declared buckets** (`serviceId` set): the declaring service owns the name, existence and
+      description, which its declaration re-applies on registration. A changed `description` is
+      refused with `409 bucket_declared`; every other field may be tuned by an admin and is kept.
+
+      Turning `versioningEnabled` off while historical versions exist returns
+      `400 versioning_disable_blocked`.
+
+      When something changed, an audit log entry is created and, for a
+      bucket in an organization, a `file-service.bucket.updated` webhook event
+      is emitted; a call that changes nothing writes neither.
+    operationId: updateBucket
+    security:
+      - BearerAuth: [file-service.buckets.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/UpdateBucketRequest'
+    responses:
+      '200':
+        description: Bucket updated successfully
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/UpdateBucketResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.buckets.write permission, not the bucket's creator (or `file-service.admin`), or no such bucket
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_declared` - the description of a declared bucket is set by its service; `version_conflict` - concurrent update'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  delete:
+    tags:
+      - Files - Buckets
+    summary: Delete bucket
+    description: |
+      Deletes a bucket and all its contents (soft delete).
+
+      **Required permissions:**
+      - System: `file-service.buckets.delete` AND (bucket creator or `file-service.admin`)
+
+      A bucket a service declared (`serviceId` set) exists for as long as the service declares it:
+      no one can delete it (`409 bucket_declared`), retired or not.
+
+      **Warning:** This operation will delete all objects in the bucket. This action cannot be undone.
+
+      An audit log entry is created and, for a bucket in an organization, a
+      `file-service.bucket.deleted` webhook event is emitted.
+    operationId: deleteBucket
+    security:
+      - BearerAuth: [file-service.buckets.delete]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    responses:
+      '204':
+        $ref: '../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid bucket name (`invalid_request`)
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing file-service.buckets.delete permission, not the bucket's creator (or `file-service.admin`), or no such bucket
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_declared` - a declared bucket cannot be deleted'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/my-permissions:
+  get:
+    tags:
+      - Files - Buckets
+    summary: Get my bucket permissions
+    description: |
+      Returns what the caller can do in a specific bucket: all `true` for a
+      `file-service.admin` holder, otherwise each flag of the caller's active
+      grant AND the role permission the object routes require with it
+      (`file-service.objects.read` / `.write` / `.delete`) — the caller's
+      effective access. A delegated token's permissions are already cut to its
+      scopes' ceiling, so a `core:files.read` token reports `canWrite` and
+      `canDelete` as `false` whatever the grant. `canRead` is also `true` on a
+      public bucket. Every field is a boolean — `false` without an active
+      grant. Being the bucket's creator adds nothing: the creator's access is
+      the grant made at create time, and is gone once revoked. `canWrite` is
+      `false` for everyone, admins included, on a retired bucket, which is
+      read-only.
+
+      A missing bucket, or one of another organization, is refused with `403`
+      (a `file-service.admin` holder gets `404` for a missing one).
+
+      **Required permissions:**
+      - None beyond a valid token (authenticated users can check their own permissions)
+    operationId: getMyBucketPermissions
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    responses:
+      '200':
+        description: User's bucket permissions
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/BucketPermissions'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid bucket name (`invalid_request`)
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - no such bucket, or the bucket belongs to another organization
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

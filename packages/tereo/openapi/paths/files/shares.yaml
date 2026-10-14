@@ -1,0 +1,639 @@
+/files/buckets/{name}/shares:
+  post:
+    tags:
+      - Files - Shares
+    summary: Create a share link
+    description: |
+      Create a revocable, DB-backed share link for either a single object
+      (`kind=OBJECT`) or a server-built archive (`kind=ARCHIVE`). The
+      archive form accepts the same `prefix` / `keys` shape as the
+      archives endpoint and builds the underlying `ArchiveRequest` in the
+      same transaction as the share row.
+
+      The returned `url` points at the public `/v1/files/shared/:token` endpoint.
+      Share URLs are safe to send to external recipients: they can be
+      password-protected (`password`), download-capped (`maxDownloads`),
+      or both, and always expires (`expiresAt`). The password and cap can
+      be cleared later via PATCH, and the share can be revoked immediately
+      via DELETE.
+
+      The `urlFilename` field only affects the URL's appearance and the
+      browser's default save filename — the server still identifies the
+      share by its opaque random token.
+
+      `expiresAt` must be in the future and within
+      `FILE_SERVICE_MAX_SHARE_TTL_SECONDS` (`400 invalid_expiration`);
+      without one, the share expires that long after creation. An
+      ARCHIVE share has the same caps and errors as `POST /v1/files/buckets/{name}/archives`
+      (`archive_too_large`, `archive_empty`). An OBJECT share pinned to a
+      delete marker (`versionId`) is `400 cannot_share_delete_marker`.
+
+      **Required permissions:**
+      - System: `file-service.shares.write`
+      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
+        bucket in the caller's organization, nor for `file-service.admin`)
+
+      An audit log entry is created and, for a bucket in an organization, a
+      `file-service.share.created` webhook event is emitted.
+    operationId: createShare
+    security:
+      - BearerAuth: [file-service.shares.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/CreateShareRequest'
+    responses:
+      '201':
+        description: Share created
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/Share'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Bucket, object or pinned version not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: Token collision (retry)
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  get:
+    tags:
+      - Files - Shares
+    summary: List shares in a bucket
+    description: |
+      Returns a cursor-paginated list of shares for the bucket, including
+      revoked ones. Use the returned `status` field to classify each row
+      (`active`, `revoked`, `expired`, `exhausted`). A daily sweep deletes
+      shares `FILE_SERVICE_SHARE_RETENTION_DAYS` (default 30) after they are
+      revoked or expire; an ARCHIVE share also goes when its archive request
+      is swept, on the same grace after the archive expires.
+
+      **Required permissions:**
+      - System: `file-service.shares.read`
+      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
+        bucket in the caller's organization, nor for `file-service.admin`)
+
+      **Filter fields and operators:**
+      - `kind`: `equals`, `in` (`OBJECT`, `ARCHIVE`)
+      - `objectId`: `equals`
+      - `createdByUserId`: `equals` (a UUID)
+      - `revokedAt`: `equals`, `gt`, `gte`, `lt`, `lte`
+
+      **Sort fields:** `createdAt`, `expiresAt`, `downloadCount` (default `createdAt`, `desc`).
+      Shares with no `expiresAt` sort last ascending and first descending,
+      and paging carries on through them.
+    operationId: listShares
+    security:
+      - BearerAuth: [file-service.shares.read]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ShareLimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesSortParam'
+      - $ref: '../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../components/files/parameters.yaml#/FilesFilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of shares
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ListSharesResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid filter, sort, limit or cursor (`invalid_cursor`)
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/shares/by-id/{id}:
+  get:
+    tags:
+      - Files - Shares
+    summary: Get a share by id
+    description: |
+      **Required permissions:**
+      - System: `file-service.shares.read`
+      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
+        bucket in the caller's organization, nor for `file-service.admin`)
+
+      A share of another bucket returns 404.
+    operationId: getShare
+    security:
+      - BearerAuth: [file-service.shares.read]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ShareIdParam'
+    responses:
+      '200':
+        description: Share record
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/Share'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`id` is not a UUID'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Files - Shares
+    summary: Update a share
+    description: |
+      Update one or more mutable fields. Pass `null` to clear an optional
+      field (e.g. `{ "password": null }` removes password protection;
+      `{ "expiresAt": null }` sets the longest expiry allowed,
+      `FILE_SERVICE_MAX_SHARE_TTL_SECONDS` from now — a share never goes
+      without one). For an ARCHIVE share, a later expiry also extends its
+      archive's, which otherwise ends a minute after the share's original
+      expiry. Fields not
+      mentioned in the body are left untouched. `kind`, target, token,
+      and `downloadCount` are immutable. A revoked share cannot be updated
+      (`409 share_revoked`) — reported only after the permission check.
+      Shares go on in a retired bucket, so editing one there is allowed.
+
+      **Required permissions:**
+      - System: `file-service.shares.write`
+      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
+        bucket in the caller's organization, nor for `file-service.admin`); a caller who did not create the share also
+        needs `file-service.objects.write` AND bucket-level `canWrite`
+
+      An audit log entry is created and, for a bucket in an organization, a
+      `file-service.share.updated` webhook event is emitted.
+    operationId: updateShare
+    security:
+      - BearerAuth: [file-service.shares.write]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ShareIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/UpdateShareRequest'
+    responses:
+      '200':
+        description: Updated share
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/Share'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing permission or grant, or no such bucket
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`share_revoked` - the share is revoked and can no longer be edited'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  delete:
+    tags:
+      - Files - Shares
+    summary: Revoke a share
+    description: |
+      Soft-revoke: sets `revokedAt` and makes subsequent public downloads
+      return 404. Idempotent — re-revoking an already-revoked share also
+      returns 204, once the permission check below has passed (`403` first).
+
+      **Required permissions:**
+      - System: `file-service.shares.delete`
+      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
+        bucket in the caller's organization, nor for `file-service.admin`); a caller who did not create the share also
+        needs `file-service.objects.delete` AND bucket-level `canDelete`
+
+      An audit log entry is created and, for a bucket in an organization, a
+      `file-service.share.revoked` webhook event is emitted.
+    operationId: revokeShare
+    security:
+      - BearerAuth: [file-service.shares.delete]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+      - $ref: '../../components/files/parameters.yaml#/ShareIdParam'
+    responses:
+      '204':
+        $ref: '../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`id` is not a UUID'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/shared/{token}:
+  head:
+    tags:
+      - Files - Shares
+    summary: Probe a share's status without downloading (public)
+    description: |
+      Public, unauthenticated status probe. Never counts a download, never
+      mints a URL and never audits — link unfurlers and the UI's share page
+      can call it any number of times. The cosmetic `/v1/files/shared/{token}/{filename}`
+      form answers the same way.
+
+      It reveals no more than `GET` would:
+
+      | Share state | Response |
+      |---|---|
+      | No password | `200` with the file's details in headers |
+      | Password required | `401`, no details (unlock to learn more) |
+      | Not serveable (missing / revoked / expired / exhausted) | `404` |
+
+      The detail headers are listed in `Access-Control-Expose-Headers` so a
+      cross-origin `fetch(url, { method: "HEAD" })` can read them.
+    operationId: probeShare
+    security: []
+    parameters:
+      - name: token
+        in: path
+        required: true
+        description: The share's token (base64url). A malformed token returns 400.
+        schema:
+          type: string
+          minLength: 3
+          maxLength: 64
+          pattern: '^[A-Za-z0-9_-]{3,64}$'
+    responses:
+      '200':
+        description: The share is open and serveable.
+        headers:
+          Content-Type:
+            description: |
+              The file's MIME type — the object version's, or
+              `application/zip` / `application/x-tar` for an archive.
+            schema:
+              type: string
+          Content-Disposition:
+            description: '`attachment` with the filename a download would use: an ASCII `filename` and the real name in RFC 5987 `filename*`.'
+            schema:
+              type: string
+          X-Share-Kind:
+            description: What the share points at.
+            schema:
+              type: string
+              enum: [OBJECT, ARCHIVE]
+          X-Share-Size-Bytes:
+            description: |
+              Size of the object in bytes. Omitted for archives, whose
+              compressed size is not known until they are built.
+            schema:
+              type: string
+              examples:
+                - '2048576'
+          X-Share-Downloads-Remaining:
+            description: Downloads left before the share is exhausted. Omitted when unlimited.
+            schema:
+              type: integer
+              minimum: 0
+          X-Share-Expires-At:
+            description: When the share expires (ISO 8601). Omitted only for a share created before expiries were required, until the daily share sweep gives it one.
+            schema:
+              type: string
+              format: date-time
+          Cache-Control:
+            schema:
+              type: string
+              examples:
+                - private, no-store
+      '400':
+        description: Malformed token. No body (HEAD).
+      '401':
+        description: |
+          Password required. No body (HEAD) and no file details; POST the
+          password to `/v1/files/shared/{token}/unlock`.
+      '404':
+        description: Not serveable. Same answer for every state; no body (HEAD).
+      '429':
+        description: Rate limit exceeded. No body (HEAD).
+  get:
+    tags:
+      - Files - Shares
+    summary: Download via share token (public)
+    description: |
+      Public, unauthenticated endpoint. Resolves the share by `token`.
+
+      **Content negotiation** on the `Accept` request header controls the
+      response for password-protected shares, so the same URL serves both
+      humans and automation cleanly:
+
+      | Share state | `Accept: text/html` (browsers) | `Accept: application/json` or `*/*` (curl, scripts, SDKs) |
+      |---|---|---|
+      | No password | `302` → short-TTL presigned download URL | `302` → short-TTL presigned download URL |
+      | Password required | `302` → `${FILE_SERVICE_SHARE_UI_BASE_URL}/shared/{token}` (the UI's unlock page; the base defaults to `UI_BASE_URL`) | `401 { requiresPassword: true }` |
+      | Not serveable (missing / revoked / expired / exhausted) | `404` | `404` |
+
+      A `302` to the download URL counts one download against `maxDownloads`
+      and writes a `shareAccess` audit entry (plus a
+      `file-service.share.accessed` webhook event when
+      `FILE_SERVICE_EMIT_SHARE_ACCESS_EVENTS` is on). Every request here
+      counts, a `Range` one included; an object share's presigned URL serves
+      byte ranges itself (`GET /v1/files/signed/objects/{bucket}/by-id/{id}`), so
+      a client seeking through the content should keep using the URL it was
+      redirected to while it is valid. Archive downloads serve no ranges.
+
+      For a share with `maxDownloads` the presigned URL (here or from
+      `/unlock`) is **single-use**: its first request spends it, a `HEAD` or
+      `Range` request included, and any later request gets the same `403` as an
+      expired or tampered URL. Fetch a capped share's content in one request.
+      Uncapped shares' URLs stay replayable until they expire.
+
+      Every unserveable state returns the same `404` — the endpoint is not
+      a validity oracle.
+
+      One optional path segment after `:token` (`GET /v1/files/shared/{token}/{filename}`)
+      is accepted and ignored — it is how "custom URL" cosmetics (`/v1/files/shared/abc/my-report.pdf`) work without carrying
+      routing meaning. When the browser redirect to the UI fires, the
+      filename suffix is forwarded so the address bar stays consistent.
+    operationId: downloadShare
+    security: []
+    parameters:
+      - name: token
+        in: path
+        required: true
+        description: The share's token (base64url). A malformed token returns 400.
+        schema:
+          type: string
+          minLength: 3
+          maxLength: 64
+          pattern: '^[A-Za-z0-9_-]{3,64}$'
+      - name: Accept
+        in: header
+        required: false
+        description: |
+          Drives content negotiation for password-protected shares.
+          Browsers send `text/html,...` → 302 to UI. SDKs and CLI tools
+          should send `application/json` to guarantee the JSON 401 shape.
+        schema:
+          type: string
+          examples:
+            - application/json
+            - text/html
+    responses:
+      '302':
+        description: |
+          Redirect. `Location` is either the short-TTL presigned download
+          URL (any `Accept`, no password) or the admin UI unlock page
+          (`Accept: text/html` + password).
+        headers:
+          Location:
+            schema:
+              type: string
+              format: uri
+      '401':
+        description: Password required. Clients POST the password to `/v1/files/shared/{token}/unlock`.
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/PasswordRequiredResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Malformed token
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+
+/files/shared/{token}/{filename}:
+  description: |
+    The cosmetic-filename form of a share URL. `HEAD` and `GET` answer exactly
+    like their `/v1/files/shared/{token}` counterparts (documented there), except
+    that a browser redirect to the unlock page keeps the segment
+    (`${FILE_SERVICE_SHARE_UI_BASE_URL}/shared/{token}/{filename}`).
+  parameters:
+    - name: token
+      in: path
+      required: true
+      description: The share's token (base64url). A malformed token returns 400.
+      schema:
+        type: string
+        minLength: 3
+        maxLength: 64
+        pattern: '^[A-Za-z0-9_-]{3,64}$'
+    - name: filename
+      in: path
+      required: true
+      description: |
+        Cosmetic filename segment (the share's `urlFilename`, or the default
+        the share URL carries). Ignored when resolving the share; kept on
+        the browser redirect to the unlock page.
+      schema:
+        type: string
+  head:
+    tags:
+      - Files - Shares
+    summary: Probe a share's status, cosmetic-filename form (public)
+    description: |
+      Same as `HEAD /v1/files/shared/{token}`; the trailing `filename` segment is
+      ignored.
+    operationId: probeShareWithFilename
+    security: []
+    responses:
+      '200':
+        description: The share is open and serveable. Same headers as `HEAD /v1/files/shared/{token}`.
+      '400':
+        description: Malformed token. No body (HEAD).
+      '401':
+        description: Password required. No body (HEAD).
+      '404':
+        description: Not serveable. No body (HEAD).
+      '429':
+        description: Rate limit exceeded. No body (HEAD).
+  get:
+    tags:
+      - Files - Shares
+    summary: Download via share token, cosmetic-filename form (public)
+    description: |
+      Same as `GET /v1/files/shared/{token}`; the trailing `filename` segment is
+      ignored when resolving the share. A browser redirect to the unlock page
+      keeps it (`${FILE_SERVICE_SHARE_UI_BASE_URL}/shared/{token}/{filename}`).
+    operationId: downloadShareWithFilename
+    security: []
+    parameters:
+      - name: Accept
+        in: header
+        required: false
+        description: |
+          Drives content negotiation for password-protected shares, as on
+          `GET /v1/files/shared/{token}`.
+        schema:
+          type: string
+          examples:
+            - application/json
+            - text/html
+    responses:
+      '302':
+        description: |
+          Redirect. `Location` is either the short-TTL presigned download
+          URL (any `Accept`, no password) or the admin UI unlock page, with
+          the filename segment (`Accept: text/html` + password).
+        headers:
+          Location:
+            schema:
+              type: string
+              format: uri
+      '401':
+        description: Password required. Clients POST the password to `/v1/files/shared/{token}/unlock`.
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/PasswordRequiredResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Malformed token
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+
+/files/shared/{token}/unlock:
+  post:
+    tags:
+      - Files - Shares
+    summary: Unlock a password-protected share
+    description: |
+      Rate-limited per `(token, ip)`: every attempt counts, and a success
+      resets the count. On correct password, returns a short-TTL presigned
+      URL the client can navigate to and counts one download. On incorrect
+      password, returns `401 invalid_password`. After
+      `FILE_SERVICE_SHARE_UNLOCK_MAX_ATTEMPTS` attempts inside
+      `FILE_SERVICE_SHARE_UNLOCK_WINDOW_SECONDS`, returns
+      `429 too_many_requests` with `retry_after` and `Retry-After`. A
+      password share also backs off per token, whatever the address: after
+      10 attempts without a correct password, each next one must wait a
+      delay that doubles from 1 second up to 15 minutes (`429` meanwhile);
+      a correct password resets it. So that anyone with the link cannot
+      lock the recipients out, an address's first attempt in its
+      `(token, ip)` window is still checked during the delay: the correct
+      password unlocks, a wrong one gets the same `429`. A share without a
+      password also answers with a URL. An unserveable share returns `404`
+      without counting an attempt. The limiter fails closed: while Redis is
+      unreachable an attempt is refused with `503 temporarily_unavailable`
+      and `Retry-After`, rather than going uncounted.
+    operationId: unlockShare
+    security: []
+    parameters:
+      - name: token
+        in: path
+        required: true
+        description: The share's token (base64url). A malformed token returns 400.
+        schema:
+          type: string
+          minLength: 3
+          maxLength: 64
+          pattern: '^[A-Za-z0-9_-]{3,64}$'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/files/schemas.yaml#/UnlockShareRequest'
+    responses:
+      '200':
+        description: Unlock succeeded. Navigate to `url` to download.
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/UnlockShareResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: Malformed token or body
+      '401':
+        description: Invalid password (`invalid_password`).
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ErrorResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+        description: |
+          Too many unlock attempts for this token and IP, or for this token
+          from any address (its backoff delay), or the general rate
+          limit (`too_many_requests`, with `retry_after` and `Retry-After`).
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'

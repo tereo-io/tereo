@@ -1,0 +1,303 @@
+/files/signed/objects/{bucket}/by-id/{id}:
+  parameters:
+    - name: bucket
+      in: path
+      required: true
+      description: Bucket name. Bound into the signature.
+      schema:
+        type: string
+    - name: id
+      in: path
+      required: true
+      description: |
+        The object's UUID. Bound into the signature, so the URL survives a
+        rename of the object between signing and use.
+      schema:
+        type: string
+        format: uuid
+    - $ref: '../../components/files/parameters.yaml#/SignedOpParam'
+    - $ref: '../../components/files/parameters.yaml#/SignedExpiresParam'
+    - $ref: '../../components/files/parameters.yaml#/SignedNonceParam'
+    - $ref: '../../components/files/parameters.yaml#/SignedKeyVersionParam'
+    - $ref: '../../components/files/parameters.yaml#/SignedSigParam'
+    - $ref: '../../components/files/parameters.yaml#/SignedShareParam'
+    - $ref: '../../components/files/parameters.yaml#/SignedByParam'
+    - $ref: '../../components/files/parameters.yaml#/SignedVersionParam'
+
+  get:
+    tags:
+      - Files - Signed URLs
+    summary: Download an object via a presigned URL
+    description: |
+      Streams the current version of the object, or the version a share is
+      pinned to (`version`). The URL is minted by
+      `POST /v1/files/buckets/{name}/objects/by-id/{id}/presign` with
+      `operation: read`, or by `GET /v1/files/shared/{token}` / `POST /v1/files/shared/{token}/unlock`
+      for an object share (those carry `share`, and `version` when the share
+      is pinned to one).
+
+      **Authentication:** none — the HMAC signature over
+      `(bucket, id, operation, expires, nonce, v[, share][, by][, version])` is verified
+      instead. A URL signed for `write` does not verify here. When `share`
+      is present, the share must still be serveable (not revoked, expired or
+      exhausted) on every hit.
+
+      `disposition` and `filename` are presentation hints outside the
+      signature: they can only force `attachment` and rename the download,
+      never weaken disposition. Unsafe types (HTML, JavaScript, SVG, …) are
+      always served as attachments.
+
+      Supports one byte range (`Range`, and `If-Range` with the `ETag`) as
+      on `GET /v1/files/buckets/{name}/objects/{objectKey}`, so media can seek
+      through a share's URL while it is valid.
+
+      Counts against the bucket's per-bucket rate limit, if configured (the
+      signature is checked first).
+
+      An audit log entry (`presignedDownload`) is created for each download,
+      ranges included.
+    operationId: downloadViaSignedUrl
+    security: []
+    parameters:
+      - name: disposition
+        in: query
+        required: false
+        description: 'Only `attachment` is honored; it forces `Content-Disposition: attachment`.'
+        schema:
+          type: string
+          enum: [attachment]
+      - name: filename
+        in: query
+        required: false
+        description: Overrides the download filename in `Content-Disposition` (sanitized).
+        schema:
+          type: string
+      - $ref: '../../components/files/parameters.yaml#/RangeHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/IfRangeHeaderParam'
+    responses:
+      '200':
+        description: The object's bytes.
+        headers:
+          Content-Type:
+            $ref: '../../components/files/headers.yaml#/Content-Type'
+          Content-Length:
+            $ref: '../../components/files/headers.yaml#/Content-Length'
+          Accept-Ranges:
+            $ref: '../../components/files/headers.yaml#/Accept-Ranges'
+          ETag:
+            $ref: '../../components/files/headers.yaml#/ETag'
+          Content-Disposition:
+            description: '`inline` or `attachment`, with an ASCII `filename` (other characters become `_`) and the real name in RFC 5987 `filename*`.'
+            schema:
+              type: string
+          Cache-Control:
+            schema:
+              type: string
+              enum: ['private, max-age=60']
+          X-Content-Type-Options:
+            $ref: '../../components/files/headers.yaml#/X-Content-Type-Options'
+          Content-Security-Policy:
+            $ref: '../../components/files/headers.yaml#/Content-Security-Policy'
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      '206':
+        $ref: '../../components/files/responses.yaml#/PartialContentResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '403':
+        $ref: '../../components/files/responses.yaml#/SignatureRejectedResponse'
+      '404':
+        description: Bucket or object not found, or the object has no current content (or the pinned version is a delete marker or gone).
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ErrorResponse'
+      '416':
+        $ref: '../../components/files/responses.yaml#/RangeNotSatisfiableResponse'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+  put:
+    tags:
+      - Files - Signed URLs
+    summary: Upload an object via a presigned URL
+    description: |
+      Replaces the content of an existing object with the raw request body.
+      The URL is minted by `POST /v1/files/buckets/{name}/objects/by-id/{id}/presign`
+      with `operation: write`; the object must already exist. The write goes
+      to the object by id, under the key it holds when the write commits, so a
+      rename while the body uploads is followed. Share-bound URLs are refused.
+
+      **Authentication:** none — the HMAC signature is verified instead. A
+      URL signed for `read` does not verify here.
+
+      The body is the file's bytes (not multipart). Its `Content-Type`
+      header becomes the object's content type: a single `type/subtype`,
+      optionally with a `charset` (anything else — a list of types, other
+      parameters — is `400 invalid_content_type`, checked before the body is
+      read), and the content passes the same MIME / executable blocklist as
+      authenticated uploads. The upload is capped
+      at `FILE_SERVICE_MAX_UPLOAD_SIZE_MB`, and the bucket must not be
+      retired. Counts against the bucket's per-bucket rate limit, if
+      configured.
+
+      An audit log entry is created for this action, and — when the bucket
+      belongs to an organization — a `file-service.object.updated` (or
+      `file-service.object.created`) webhook event is emitted with
+      `via: "presigned"`.
+    operationId: uploadViaSignedUrl
+    security: []
+    requestBody:
+      required: true
+      description: The object's raw bytes.
+      content:
+        application/octet-stream:
+          schema:
+            type: string
+            format: binary
+        '*/*':
+          schema:
+            type: string
+            format: binary
+    responses:
+      '200':
+        description: Object content replaced.
+        headers:
+          ETag:
+            $ref: '../../components/files/headers.yaml#/ETag'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ObjectResponse'
+      '201':
+        description: Object content written for the first time.
+        headers:
+          ETag:
+            $ref: '../../components/files/headers.yaml#/ETag'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ObjectResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`invalid_request` - a missing signature parameter; `invalid_content_type`, `blocked_file_type`, `unrecognized_text_file_type`; `reserved_object_key` - the object is stored under a reserved key (`prefixes`, or starting with `by-id/`, `by-key/` or `.thumbnails/`)'
+      '403':
+        $ref: '../../components/files/responses.yaml#/SignatureRejectedResponse'
+      '404':
+        description: Bucket or object not found, including an object deleted while the body uploaded.
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ErrorResponse'
+      '409':
+        description: |
+          The bucket is retired (`bucket_retired`) and read-only, or a
+          concurrent write conflicted (`conflict` / `version_conflict`).
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ErrorResponse'
+      '413':
+        $ref: '../../components/files/responses.yaml#/PayloadTooLargeResponse'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '507':
+        $ref: '../../components/files/responses.yaml#/InsufficientStorageResponse'
+
+/files/signed/archives/{id}:
+  get:
+    tags:
+      - Files - Signed URLs
+    summary: Download an archive via a presigned URL
+    description: |
+      Streams the zip or tar built from an archive snapshot: the object
+      versions recorded when the archive was created. An entry whose object
+      has since been overwritten, deleted or purged is left out; entries are
+      named by the object's current key. The URL is the
+      `url` returned by `POST /v1/files/buckets/{name}/archives`, or the redirect
+      target of `GET /v1/files/shared/{token}` for an archive share (those carry
+      `share`). The bucket is not in the path: it is resolved from the
+      archive and bound into the signature.
+
+      **Authentication:** none — the HMAC signature is verified instead.
+      When `share` is present, the share must still be serveable on every
+      hit. Re-downloads within the URL's TTL are allowed. The archive itself
+      must not have expired.
+
+      The response is streamed without `Content-Length`. If an error occurs
+      after the body has started, the connection is reset.
+
+      An audit log entry (`archiveDownload`) is created for each download.
+    operationId: downloadArchiveViaSignedUrl
+    security: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Archive request id. Bound into the signature.
+        schema:
+          type: string
+          format: uuid
+      - $ref: '../../components/files/parameters.yaml#/SignedOpParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedExpiresParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedNonceParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedKeyVersionParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedSigParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedShareParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedByParam'
+    responses:
+      '200':
+        description: The archive stream.
+        headers:
+          Content-Disposition:
+            description: '`attachment` with an ASCII `filename` (other characters become `_`) and the real archive filename in RFC 5987 `filename*`.'
+            schema:
+              type: string
+          Cache-Control:
+            schema:
+              type: string
+              enum: ['private, no-store']
+          Content-Security-Policy:
+            $ref: '../../components/files/headers.yaml#/Content-Security-Policy'
+        content:
+          application/zip:
+            schema:
+              type: string
+              format: binary
+          application/x-tar:
+            schema:
+              type: string
+              format: binary
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`invalid_request` - a missing signature parameter; `archive_too_large` - the entries still served exceed `FILE_SERVICE_MAX_ARCHIVE_TOTAL_BYTES` (checked again at download)'
+      '403':
+        $ref: '../../components/files/responses.yaml#/SignatureRejectedResponse'
+      '404':
+        description: |
+          Archive request (or an `id` that is not a UUID) or its bucket not
+          found — checked before the signature, since the archive names the
+          bucket the signature binds. An archive request is deleted
+          `FILE_SERVICE_SHARE_RETENTION_DAYS` (default 30) after it expires,
+          so its URL turns from `403` to `404` then.
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ErrorResponse'
+      '410':
+        description: '`archive_gone` - no entry of the archive still has the content it was archived with.'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/ErrorResponse'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

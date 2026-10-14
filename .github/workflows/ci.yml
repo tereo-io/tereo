@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    if: github.head_ref != 'release/version-bump'
+    runs-on: ubuntu-latest
+    env:
+      NX_BASE: origin/master
+      # A push to master has nothing "affected" relative to origin/master, so it
+      # runs every project; a PR runs only what it touches.
+      NX_SCOPE: ${{ github.event_name == 'pull_request' && 'affected' || 'run-many' }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          # The runner's cached 22.x can lag; dependencies need >= 22.22.2.
+          check-latest: true
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx nx run-many -t generate --parallel=4
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Check import order
+        run: npm run sort-imports:check
+
+      - name: Lint
+        run: npm run lint
+
+      # Lints, then bundles; the committed bundle must match the source.
+      - name: Lint and bundle OpenAPI spec
+        run: |
+          npm run openapi:build -w tereo
+          git diff --exit-code packages/tereo/openapi/bundled-openapi.yaml
+
+      - name: Type check
+        run: npx nx $NX_SCOPE -t check --parallel=4
+
+      - name: Build
+        run: npx nx $NX_SCOPE -t build --parallel=4
+
+      - name: Test
+        run: npx nx $NX_SCOPE -t test:docker --parallel=4
+
+      # The release image, built and started on this x86 runner: migrate and
+      # seed a fresh database, then wait for core's health check and load the
+      # UI, so a broken Dockerfile or image fails here rather than at release.
+      - name: Smoke-test Docker image
+        run: |
+          docker compose -p smoke up -d --build --wait --wait-timeout 300 core
+          curl -sf http://localhost:4001/health
+          curl -sf -o /dev/null -H 'Accept: text/html' http://localhost:4001/setup
+
+      - name: Show smoke-test logs
+        if: failure()
+        run: docker compose -p smoke logs --no-color migrate core || true
+
+      - name: Tear down test stack
+        if: always()
+        run: |
+          docker/test/run.sh down -v --remove-orphans || true
+          docker compose -p smoke down -v --remove-orphans || true

@@ -1,0 +1,270 @@
+# Responses only this area uses; the shared ones are in ../responses.yaml
+
+AccountForbiddenResponse:
+  description: |
+    Forbidden (`insufficient_scope`) - a delegated token whose core API
+    scopes do not include `core:account`. `WWW-Authenticate` names the scope
+    that would admit it. See `BearerAuth`.
+  headers:
+    WWW-Authenticate:
+      description: '`Bearer error="insufficient_scope", scope="core:account"`'
+      schema:
+        type: string
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum: [insufficient_scope]
+          error_description:
+            type: string
+      example:
+        error: "insufficient_scope"
+        error_description: "This token's scopes do not reach /v1/account; it needs one of: core:account"
+
+LoginTotpSetupForbiddenResponse:
+  description: |
+    Forbidden - `totp_disabled` while the system 2FA policy (`totpPolicy`)
+    is `disabled`, or `access_denied` when the request carries core's
+    credential cookies from an origin that may not act on them (see
+    `CrossOriginRefusedResponse`).
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum: [totp_disabled, access_denied]
+          error_description:
+            type: string
+      example:
+        error: "totp_disabled"
+        error_description: "Two-factor authentication is disabled by the system administrator."
+
+CheckPermissionForbiddenResponse:
+  description: |
+    Forbidden - `forbidden` when the client may not ask about this user or
+    organization (see the operation), or `access_denied` when the request
+    carries core's credential cookies from an origin that may not act on them
+    (see `CrossOriginRefusedResponse`).
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum: [forbidden, access_denied]
+          error_description:
+            type: string
+      example:
+        error: "forbidden"
+        error_description: "This client may only ask about its own organization"
+
+CrossOriginRefusedResponse:
+  description: |
+    Forbidden (`access_denied`) - the request carries core's credential
+    cookies but comes from a page that may not act on them: `Sec-Fetch-Site`
+    is neither `same-origin` nor `same-site` with an allowed `Origin`, or,
+    without `Sec-Fetch-Site`, `Origin` is not allowed. Allowed origins are
+    core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) and
+    `CORS_ALLOWED_ORIGINS`. See "Cookie-Authenticated Requests".
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum: [access_denied]
+          error_description:
+            type: string
+      example:
+        error: "access_denied"
+        error_description: "Cross-origin request refused: this origin may not act on the browser's session"
+
+OAuth2ErrorResponse:
+  description: |
+    OAuth2 error response. The operation's description says which codes it
+    returns with which status: client authentication failures are 401
+    `invalid_client`, wrong credentials or codes 401 `access_denied` /
+    `invalid_code`, everything else 400.
+  headers:
+    WWW-Authenticate:
+      description: '`Basic realm="oauth"` on a 401 `invalid_client` (RFC 6749 §5.2)'
+      schema:
+        type: string
+    Set-Cookie:
+      description: Clears cookies where the operation says so — e.g. `trt_{client_id}` / `tsi_{client_id}` on a failed cookie-mode refresh at `POST /oauth/token`
+      schema:
+        type: string
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: OAuth2 error code
+            type: string
+            enum:
+              - invalid_request
+              - invalid_client
+              - invalid_grant
+              - unauthorized_client
+              - unsupported_grant_type
+              - invalid_scope
+              - access_denied
+              - invalid_session
+              - session_expired
+              - user_not_in_organization
+              - organization_not_active
+              - invalid_code
+              - totp_not_configured
+              - no_recovery_codes
+              - invalid_setup_grant
+              - invalid_setup_token
+              - setup_expired
+              - totp_already_enabled
+              - interaction_required
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+ArchivedResponse:
+  description: Conflict - the resource is archived; restore it before modifying it
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - resource_archived
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+UnprocessableEntityResponse:
+  description: Unprocessable entity - the request is well-formed but cannot be applied
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: A specific error code (e.g. `invalid_declaration`, `role_unavailable`)
+            type: string
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+LinkForbiddenResponse:
+  description: |
+    Forbidden. `forbidden`: the token was not issued to core's own UI (a
+    third-party client's `core:account` token may list linked accounts but
+    never link or unlink one), or the user is not a person. `reauth_required`:
+    the login is more than 10 minutes old; the UI signs the user in again with
+    `max_age=0`, then retries. An insufficient `core:account` scope is
+    `insufficient_scope`, as on every `/v1/account` route.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - forbidden
+              - reauth_required
+              - insufficient_scope
+          error_description:
+            type: string
+      example:
+        error: reauth_required
+        error_description: Sign in again to change how you sign in
+
+IdentityConflictResponse:
+  description: |
+    Conflict. `last_sign_in_method`: the user has no password and this is
+    their only linked identity. `sso_required`: the user's email domain is
+    `ssoOnly` for this identity's provider.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - last_sign_in_method
+              - sso_required
+          error_description:
+            type: string
+      example:
+        error: last_sign_in_method
+        error_description: This is the account's only way to sign in

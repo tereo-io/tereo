@@ -1,0 +1,88 @@
+/* Webhooks section */
+
+.t-webhook-url {
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.t-webhook-tabs-header {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 2px solid var(--border-color);
+  margin-bottom: 1rem;
+}
+
+.t-webhook-event-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.t-webhook-event-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border-color);
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.t-webhook-event-list li:last-child {
+  border-bottom: none;
+}
+
+.t-webhook-header-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.5rem;
+  align-items: end;
+}
+
+.t-webhook-code {
+  margin: 0;
+  padding: 0.75rem;
+  max-height: 20rem;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  font-family: monospace;
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.t-webhook-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.t-webhook-help {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.t-webhook-deliveries-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+
+.t-webhook-org-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.t-webhook-org-select {
+  min-width: 16rem;
+}
+
+.t-webhook-org-bar .v-alert {
+  flex: 1;
+  margin: 0;
+}

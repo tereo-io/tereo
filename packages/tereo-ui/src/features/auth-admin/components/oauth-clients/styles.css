@@ -1,0 +1,33 @@
+.t-client-type {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-transform: capitalize;
+}
+
+.t-client-type-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-transform: capitalize;
+}
+
+.t-uri-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.t-uri-list li {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border-color);
+  word-break: break-all;
+}
+
+.t-uri-list li:last-child {
+  border-bottom: none;
+}
+
+.t-owner-email {
+  margin-left: 0.5rem;
+}

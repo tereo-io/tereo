@@ -1,0 +1,224 @@
+# Shared by every area. Variants that differ per area carry its prefix
+# (FilesConflictResponse, AuditForbiddenResponse, …) and live in
+# <area>/responses.yaml.
+
+UnauthorizedResponse:
+  description: Unauthorized - missing, invalid, expired or revoked access token; a token whose session (refresh token) was revoked, rotated or superseded, or whose client was deleted (both also clear the `trt_{client_id}` / `tsi_{client_id}` cookies); an inactive user; or a token issued to a client other than core's UI or a service, without core API scopes (not for core's API — see `BearerAuth`)
+  headers:
+    X-RateLimit-Limit:
+      $ref: './headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: './headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: './headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Unauthorized error code
+            type: string
+            enum:
+              - unauthorized
+              - invalid_token
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+ForbiddenResponse:
+  description: Forbidden - insufficient permissions (`forbidden`), or a delegated token whose core API scopes do not reach this area (`insufficient_scope`, with a `WWW-Authenticate` challenge naming the scopes that would)
+  headers:
+    X-RateLimit-Limit:
+      $ref: './headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: './headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: './headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Forbidden error code
+            type: string
+            enum:
+              - forbidden
+              - insufficient_scope
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+NotFoundResponse:
+  description: Not found
+  headers:
+    X-RateLimit-Limit:
+      $ref: './headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: './headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: './headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Not found error code
+            type: string
+            enum:
+              - not_found
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+ServerErrorResponse:
+  description: Internal server error
+  headers:
+    X-RateLimit-Limit:
+      $ref: './headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: './headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: './headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Server error code
+            type: string
+            enum:
+              - server_error
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+RateLimitResponse:
+  description: Too many requests
+  headers:
+    Retry-After:
+      $ref: './headers.yaml#/Retry-After'
+    X-RateLimit-Limit:
+      $ref: './headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: './headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: './headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: A standardized error code indicating rate limit has been exceeded
+            type: string
+            enum:
+              - too_many_requests
+          error_description:
+            description: A human-readable explanation specific to this occurrence of the error
+            type: string
+            example: "Rate limit exceeded. Try again in 1 seconds."
+          retry_after:
+            description: Time in seconds to wait before retrying
+            type: integer
+            minimum: 0
+            example: 1
+
+ServiceUnavailableResponse:
+  description: |
+    The credential limiter cannot reach Redis, so the attempt is refused rather
+    than counted nowhere. Retry later.
+  headers:
+    Retry-After:
+      $ref: './headers.yaml#/Retry-After'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - temporarily_unavailable
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+NoContentResponse:
+  description: Successfully deleted (no content)
+  headers:
+    X-RateLimit-Limit:
+      $ref: './headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: './headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: './headers.yaml#/X-RateLimit-Reset'
+
+BadRequestResponse:
+  description: Invalid request - validation error
+  headers:
+    X-RateLimit-Limit:
+      $ref: './headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: './headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: './headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: A standardized error code
+            type: string
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+ConflictResponse:
+  description: Conflict - resource already exists
+  headers:
+    X-RateLimit-Limit:
+      $ref: './headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: './headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: './headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            description: Conflict error code
+            type: string
+            enum:
+              - conflict
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+
+NotArchivedResponse:
+  description: Conflict - the resource is not archived, so there is nothing to restore
+  headers:
+    X-RateLimit-Limit:
+      $ref: './headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: './headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: './headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - not_archived
+          error_description:
+            description: A human-readable explanation of the error
+            type: string

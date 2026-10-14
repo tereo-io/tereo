@@ -1,0 +1,22 @@
+NotificationConnectionIdParam:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid
+
+NotificationChannelFilterParam:
+  name: channel
+  in: query
+  required: false
+  schema:
+    $ref: './schemas.yaml#/NotificationChannel'
+
+NotificationIdParam:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid

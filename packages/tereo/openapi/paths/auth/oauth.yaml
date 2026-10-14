@@ -1,0 +1,1495 @@
+/oauth/authorize:
+  get:
+    tags:
+      - OAuth2/OIDC - Authorization
+    summary: OAuth2 authorization endpoint (GET)
+    description: |
+      Initiates the OAuth2 authorization flow. Always answers with a 302:
+
+      - `prompt=none`: with a live user session (the
+        `tereo_user_session_{client_id}` cookie) for an active user, for core's
+        own login client (`tereo-ui`) straight to `redirect_uri` with `code`
+        and `state`, since a first-party client needs no consent; for any other
+        client back to `redirect_uri` with `error=consent_required`, since the
+        consent screen cannot be shown silently (OIDC Core 3.1.2.6) — use an
+        interactive request. Otherwise (no session, an inactive user — whose
+        session cookie is cleared — or a login older than `max_age`) back to
+        `redirect_uri` with `error=login_required` (or `error=invalid_scope`),
+        `error_description` and `state`. A request whose `acr_values` demands
+        `urn:auth-service:mfa` over a session whose login had no second factor
+        gets `error=interaction_required` instead.
+      - `org_id` (without `prompt=login`) with a live user session for an
+        active user who is a member of that active organization, a login no
+        older than `max_age` and valid scopes: to `{UI}/consent?session=…` for
+        that organization, skipping login — or, for core's own login client,
+        straight to `redirect_uri` with `code` and `state`, as with
+        `prompt=none`. This is the one continuation without a password that
+        shows a third-party client the consent screen. An inactive user (session cookie cleared), a too-old
+        login, or a login without a second factor when `acr_values` demands
+        one falls through to the login page below.
+      - otherwise to `{UI}/login` with the OAuth request parameters, setting the
+        `tereo_session_{client_id}` cookie that `POST /oauth/authorize`
+        requires. `prompt=login` leaves the existing user session alone: an
+        abandoned login keeps the browser signed in. The login, once it
+        succeeds, continues this browser's session for the same user, or
+        replaces another user's.
+
+      Every redirect to `redirect_uri`, with a `code` or an `error`, also
+      carries `iss`, core's issuer (RFC 9207); so do the `redirect_url`s that
+      `POST /oauth/authorize`, `/oauth/consent` and the 2FA steps return.
+
+      User sessions and their cookie: the cookie carries a random token; core
+      stores only its SHA-256. Every password login sets a new token, so one
+      held from before it no longer works; `prompt=none` and `org_id`
+      continuations keep it.
+
+      A user session never outlives its original expiry (`USER_SESSION_TTL`,
+      7 days by default, from the password login): continuing it with
+      `prompt=none` or `org_id` does not extend it.
+
+      The consent redirects set the `tereo_consent_session_{client_id}`
+      cookie. Every redirect to a login-flow page (consent, org-select, 2FA)
+      also carries the authorize request's own parameters (`client_id`,
+      `redirect_uri`, `response_type`, `scope`, `state`, `code_challenge`,
+      `code_challenge_method`, and `nonce`, `max_age`, `acr_values`, `prompt`
+      when given) beside the session token, so the page's "Back to sign in" can
+      restart `/oauth/authorize` for the client that began the login. They are
+      never read back from the URL: each step uses its stored session. Errors before a redirect is possible are returned as JSON: 400
+      `invalid_request` (validation, unregistered `redirect_uri`, unknown
+      `client_id` — never redirected, since the redirect URI can't be trusted),
+      400 `unauthorized_client` (client lacks the authorization_code grant).
+
+      `claims`, `login_hint` and `ui_locales` are validated but not used.
+    operationId: getAuthorize
+    security: []
+    parameters:
+      - name: response_type
+        in: query
+        required: true
+        schema:
+          type: string
+          enum: [code]
+      - name: client_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+      - name: redirect_uri
+        in: query
+        required: true
+        description: Must match a registered redirect URI for the client. Cannot contain a fragment, or use a `javascript:`, `data:`, `vbscript:`, `blob:` or `file:` scheme (refused even if registered).
+        schema:
+          type: string
+          format: uri
+          minLength: 1
+          maxLength: 2048
+      - name: scope
+        in: query
+        schema:
+          type: string
+          maxLength: 1000
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 512
+      - name: nonce
+        in: query
+        description: Required for OpenID Connect flows with id_token
+        schema:
+          type: string
+          maxLength: 512
+      - name: code_challenge
+        in: query
+        required: true
+        description: PKCE code challenge — the unpadded base64url SHA-256 of the code verifier, always 43 characters
+        schema:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: '^[A-Za-z0-9_-]+$'
+      - name: code_challenge_method
+        in: query
+        required: true
+        schema:
+          type: string
+          enum: [S256]
+      - name: max_age
+        in: query
+        description: Maximum authentication age in seconds
+        schema:
+          type: integer
+          minimum: 0
+      - name: acr_values
+        in: query
+        description: |
+          Requested Authentication Context Class Reference values, from
+          `acr_values_supported`. Naming `urn:auth-service:mfa` without
+          `urn:auth-service:pwd` makes a second factor required, not merely
+          preferred: the login goes through the 2FA step (or 2FA setup for a
+          user without TOTP), and no code is issued without one. The ID
+          token's `acr` reports the class the login actually reached.
+        schema:
+          type: string
+          maxLength: 512
+      - name: prompt
+        in: query
+        description: |
+          A space-separated list of `none`, `login`, `consent` and
+          `select_account` (accepted, ignored). `none` cannot be combined with
+          another value: that, or an unknown value, is 400 `invalid_request`.
+        schema:
+          type: string
+          maxLength: 64
+          examples:
+            - login
+            - login consent
+      - name: claims
+        in: query
+        description: Requested claims as JSON string
+        schema:
+          type: string
+          maxLength: 4096
+      - name: response_mode
+        in: query
+        schema:
+          type: string
+          enum: [query]
+      - name: login_hint
+        in: query
+        description: Hint about the user's identifier
+        schema:
+          type: string
+          maxLength: 256
+      - name: ui_locales
+        in: query
+        description: Preferred UI locales
+        schema:
+          type: string
+          maxLength: 128
+      - name: org_id
+        in: query
+        description: Organization hint. With a live user session that is a member of this active organization, login is skipped and consent is requested for it.
+        schema:
+          type: string
+          format: uuid
+    responses:
+      '302':
+        description: Redirect to the login page, the consent page, or `redirect_uri` with an error (see the description)
+        headers:
+          Location:
+            description: The redirect target
+            schema:
+              type: string
+              format: uri
+          Set-Cookie:
+            description: The auth-session or consent-session cookie (the user-session cookie when a first-party code is issued at once); clears the user-session cookie for an expired session or an inactive user
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+  post:
+    tags:
+      - OAuth2/OIDC - Authorization
+    summary: Submit login credentials
+    description: |
+      Submits user credentials to authenticate during authorization flow.
+
+      After the password check, `redirect_url` points to one of:
+
+      - `{UI}/login/2fa?session=…` (plus the OAuth request parameters, for
+        "Back to sign in" only) when the user has TOTP enabled (always the
+        case when `acr_values` demands `urn:auth-service:mfa`) — the session
+        token is also set in the `tereo_2fa_session_{client_id}` cookie
+        and both go to `POST /oauth/totp/verify`.
+      - `{UI}/login/2fa/setup?setup_grant=…&client_id=…&redirect_uri=…&state=…`
+        (plus the other OAuth request parameters) when 2FA is required — by
+        policy, a role, or `acr_values` demanding `urn:auth-service:mfa` — but
+        the user has not enrolled. `setup_grant` is an opaque, single-use grant,
+        valid for `TOTP_VERIFICATION_TTL` (5 minutes by default) and bound to
+        the user and this OAuth request; it is also set in the
+        `tereo_2fa_setup_grant_{client_id}` cookie. The UI passes it to
+        `POST /oauth/totp/setup`. The OAuth parameters in the URL are only for
+        restarting `/oauth/authorize` once setup is done.
+      - `{UI}/consent?session=…` or, for a member of several active
+        organizations, `{UI}/login/org-select?session=…` otherwise (setting the
+        consent- or org-select-session cookie), each with the OAuth request
+        parameters as on the 2FA page.
+      - `{UI}/login/link-required?grant=…&provider=<slug>` (plus the OAuth
+        request parameters) when the email's domain is SSO-only and the user
+        has not linked its provider. `grant` is an opaque, single-use link
+        grant, valid for `TOTP_VERIFICATION_TTL` and also set in the
+        `tereo_identity_link_grant_{client_id}` cookie (path `/oauth`);
+        it allows nothing but `GET /oauth/upstream/{slug}/start?grant=…`, which
+        links the provider, clears the password and completes the login
+        through it. The auth-session cookie is cleared.
+      - `redirect_uri` with `error=invalid_scope` when a requested scope is not
+        allowed for the client.
+      - `redirect_uri` with `error=unmet_authentication_requirements` when
+        `acr_values` demands `urn:auth-service:mfa`, the user has no TOTP, and
+        the `totpPolicy` is `disabled`, so they cannot enrol.
+
+      Requires the `tereo_session_{client_id}` cookie set by
+      `GET /oauth/authorize`: without it (never set, or expired) the answer
+      is 400 `invalid_session`, as for a lost session at the 2FA,
+      org-select and consent steps — the sign-in has to start over. Wrong email or
+      password, an inactive user or a service account is 401 `access_denied`
+      — all four take the same time to answer, so the response does not reveal
+      whether the email exists. Every submission counts against the client
+      and IP before anything is checked, and a successful login gives back
+      its own attempt but clears none of the others, whatever the account: a
+      sixth failure in five minutes is 429 for the rest of the window (503
+      `temporarily_unavailable` when the limiter cannot reach Redis). Per
+      account, five failures start a delay before the next attempt that
+      doubles up to 15 minutes; an attempt during it is 429 with
+      `Retry-After`, unless the browser carries a valid known-device cookie
+      for that account (see below). An
+      unknown `client_id` is 400 `invalid_request`, a client without the
+      authorization_code grant 400 `unauthorized_client`.
+
+      **SSO-only domains.** Only once the password is correct: a user whose
+      email domain is SSO-only and who has linked that domain's provider (or
+      any user there while the provider is inactive) gets 403
+      `sso_required`, with the provider's slug in `provider`; the UI sends
+      them to its start URL. An unknown email or wrong password at such a
+      domain answers exactly as anywhere else.
+
+      **Known device.** A login that needs no 2FA sets the
+      `tereo_known_device` cookie here (httpOnly, `SameSite=Lax`,
+      path `/oauth`, 90 days); with 2FA, `POST /oauth/totp/verify` or
+      `/oauth/totp/recovery` sets it. It binds the user, its issue time and
+      the user's current password, signed with `KNOWN_DEVICE_KEY`. While the
+      account is in its delay, a submission carrying a valid cookie for the
+      same account is let through: the client-and-IP limit and the password
+      check still apply, a wrong password still lengthens the account's
+      delay, and five wrong passwords per cookie in 15 minutes are 429. A
+      cookie for another account, altered, older than 90 days or issued before
+      a password change or reset is ignored. Signing out leaves it.
+    operationId: postAuthorize
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/AuthorizeSubmitRequest'
+    responses:
+      '200':
+        description: Authentication successful, redirect URL provided
+        headers:
+          Set-Cookie:
+            description: Sets the 2FA, 2FA setup grant, link grant, consent or org-select session cookie and clears the auth-session cookie; without 2FA, also sets the known-device cookie
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - redirect_url
+              properties:
+                redirect_url:
+                  type: string
+                  format: uri
+                  description: URL to send the user to next (see the description)
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '401':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        description: |
+          `sso_required` for a correct password on an SSO-only domain (see
+          the description), or `access_denied` for a cross-origin request
+          carrying core's cookies (see "Cookie-Authenticated Requests").
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - error
+                - error_description
+              properties:
+                error:
+                  type: string
+                  enum: [sso_required, access_denied]
+                error_description:
+                  type: string
+                provider:
+                  type: string
+                  description: With `sso_required`, the slug of the provider to sign in with
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/consent:
+  get:
+    tags:
+      - OAuth2/OIDC - Authorization
+    summary: Display consent screen
+    description: |
+      Returns what the consent screen shows for a consent session. The
+      `tereo_consent_session_{client_id}` cookie must match `session`:
+      the token travels in the page URL, so the user's details go only to the
+      browser holding the cookie. An unknown or expired session, or a missing
+      or mismatched cookie, is 400 `invalid_session`.
+    operationId: getConsent
+    security: []
+    parameters:
+      - name: session
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+    responses:
+      '200':
+        description: Consent details for display
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/ConsentDetailsResponse'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - OAuth2/OIDC - Authorization
+    summary: Submit consent decision
+    description: |
+      Submits the user's consent decision. Requires the
+      `tereo_consent_session_{client_id}` cookie to match
+      `session_token`; the session is consumed either way.
+
+      Approval issues an authorization code — `redirect_url` is `redirect_uri`
+      with `code` and `state` — and starts a user session (7 days) in the
+      `tereo_user_session_{client_id}` cookie. Denial returns
+      `redirect_uri` with `error=access_denied`.
+
+      A fresh sign-in — one whose `auth_time` no SSO session carries yet, so
+      not a `prompt=none` or `org_id` continuation — writes a `LOGIN` audit
+      entry (entity `User`, in the organization signed in to) with `metadata`
+      `{ client_id, sid, auth_methods }`, in the transaction that creates the
+      session and code.
+
+      400 `invalid_session` for an unknown session or a missing/mismatched
+      cookie, 400 `session_expired` for an expired one.
+    operationId: postConsent
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/ConsentSubmitRequest'
+    responses:
+      '200':
+        description: Consent decision processed successfully
+        headers:
+          Set-Cookie:
+            description: Clears the consent-session cookie; on approval sets the user-session cookie
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - redirect_url
+              properties:
+                redirect_url:
+                  type: string
+                  format: uri
+                  description: URL to redirect the user to (with authorization code or error)
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/CrossOriginRefusedResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/token:
+  post:
+    tags:
+      - OAuth2/OIDC - Tokens
+    summary: Token endpoint
+    description: |
+      Exchange authorization code, client credentials, or refresh token for access token.
+      Supports three grant types:
+      - authorization_code (requires code_verifier for PKCE)
+      - client_credentials
+      - refresh_token (can be in body or the `trt_{client_id}` cookie)
+
+      Confidential clients authenticate with HTTP Basic (`client_secret_basic`
+      only; client id and secret form-urlencoded before base64, per RFC 6749
+      §2.3.1); public clients send `client_id` in the body. A body `client_id`
+      beside Basic credentials must name the same client. Errors:
+
+      - 400 `invalid_request` — validation, missing `client_id` or refresh
+        token, or a body `client_id` that differs from the Basic one
+      - 400 `unsupported_grant_type`
+      - 400 `invalid_grant` — missing `code_verifier`, a bad, expired, used or
+        revoked code or refresh token, a concurrent request for the same one, a
+        code or refresh token whose user is inactive, an authorization code
+        whose authentication is older than the `max_age` it was requested with
+        (re-authentication required), an authorization code whose SSO
+        session has ended (logout, or a sign-out of other sessions) since it
+        was issued, or a code or refresh token issued for an organization the
+        user has since left or that has since been deactivated (such a refresh
+        token is revoked). A refresh or code exchange in flight when the
+        user's sessions end, or their organization is deactivated, either
+        completes first and its tokens are revoked with the rest, or fails
+        with `invalid_grant`.
+      - 400 `invalid_scope` — a scope the client may not request, or, on a
+        refresh, a scope the refresh token was not granted
+      - 400 `unauthorized_client` (grant not allowed for the client;
+        client_credentials from a public client, a client without a service
+        account, one whose service account is inactive — a deactivated
+        service — or one belonging to an inactive organization)
+      - `invalid_client` — 400 for an unknown `client_id` sent in the body, 401
+        (with `WWW-Authenticate: Basic`) for an unknown client in Basic auth
+        or a failed confidential-client authentication
+      - 429 `too_many_requests` — 10 wrong client secrets from one IP for
+        one client within 5 minutes; further attempts from that IP, even with
+        the right secret, are refused until the window passes. A successful
+        authentication clears the count, which `/oauth/introspect` and
+        `/oauth/revoke` share
+
+      Every `/oauth/*` response carries `Cache-Control: no-store` and
+      `Pragma: no-cache` (RFC 6749 §5.1).
+
+      With `refresh_token_response_mode=cookie` the refresh token is set in the
+      `trt_{client_id}` cookie (path `/oauth`) and omitted from the body, and a
+      readable `tsi_{client_id}` session-indicator cookie is set. A refresh
+      that takes its token from the `trt_{client_id}` cookie and fails with
+      400 `invalid_grant` (revoked, rotated, expired or unknown token, or an
+      inactive user) clears both cookies in that 400 response, so the browser
+      stops retrying it. A refresh that only lost the race to a concurrent
+      one with the same token ("is being processed", or a token rotated in
+      the last 30 seconds) leaves them.
+
+      Replaying a rotated refresh token within 30 seconds of its rotation
+      (two tabs refreshing at once) is `invalid_grant` that leaves the token
+      family and the cookies alone; later, it is treated as theft and the
+      whole family is revoked. A token revoked by logout or `/oauth/revoke`
+      is plain `invalid_grant`.
+
+      Refresh tokens rotate on every use, but a token family has an absolute
+      lifetime: `JWT_REFRESH_TOKEN_TTL` from the authorization-code exchange. A
+      rotated refresh token keeps the family's original expiry. A refresh may
+      narrow the access token's scopes (`scope`) but not widen them; the
+      rotated refresh token keeps the whole grant (RFC 6749 §6), so a later
+      refresh without `scope` gets all of it again. A refused scope does not
+      spend the refresh token.
+
+      A refresh token is issued at the code exchange only to a client with
+      the `refresh_token` grant type.
+
+      A grant that includes core API scopes (`core:*`) adds `core` to the
+      access token's `aud`, beside the client's approved audiences; see
+      `BearerAuth` for what such a token may do in core's API.
+
+      Only access tokens are accepted as bearer tokens: they carry the header
+      `typ: at+jwt` (RFC 9068). An ID token, which shares the signing key, is
+      typed `JWT` and carries no `jti`, `client_id` or `scope`, and is refused
+      (401 at resource routes and `/oauth/userinfo`, `active: false` at
+      introspection). A `JWT`-typed access token from before the change is
+      accepted only if issued before the verifying server started.
+    operationId: postToken
+    security:
+      - ClientCredentials: []
+      - {}
+    requestBody:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            oneOf:
+              - $ref: '../../components/auth/schemas.yaml#/AuthorizationCodeTokenRequest'
+              - $ref: '../../components/auth/schemas.yaml#/ClientCredentialsTokenRequest'
+              - $ref: '../../components/auth/schemas.yaml#/RefreshTokenRequest'
+            discriminator:
+              propertyName: grant_type
+    responses:
+      '200':
+        description: Token issued successfully
+        headers:
+          Set-Cookie:
+            description: The `trt_{client_id}` and `tsi_{client_id}` cookies, when refresh_token_response_mode=cookie
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/TokenResponse'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '401':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/CrossOriginRefusedResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/introspect:
+  post:
+    tags:
+      - OAuth2/OIDC - Tokens
+    summary: Token introspection endpoint
+    description: |
+      Introspect an access token (RFC 7662). Anything that is not a valid,
+      unexpired, unrevoked access token — refresh tokens included — is
+      `{ active: false }`, as is a token whose session (refresh token) has been
+      rotated or revoked, whose client has been deleted, or whose user or
+      service account is inactive — the same check `requireAuth` makes. A
+      client may introspect its own tokens, and tokens whose audience includes
+      the slug of the service it belongs to.
+
+      `permissions` are the user's live permissions, whatever client the
+      token was issued to: the ceilings of core API scopes limit what a token
+      may do in core's own API, not what an app is told about its user.
+
+      Confidential clients authenticate with HTTP Basic; a public client sends
+      its `client_id` in the body. A missing or unknown client or failed
+      authentication is 401 `invalid_client` with `WWW-Authenticate: Basic`;
+      a body `client_id` that differs from the Basic one is 400
+      `invalid_request`; repeated wrong secrets are 429 `too_many_requests`,
+      counted with `/oauth/token`'s (see there). `token_type_hint` is only a
+      hint: an unknown value is ignored.
+    operationId: postIntrospect
+    security:
+      - ClientCredentials: []
+      - {}
+    requestBody:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/IntrospectRequest'
+    responses:
+      '200':
+        description: Token introspection result
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/IntrospectResponse'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '401':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/CrossOriginRefusedResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/revoke:
+  post:
+    tags:
+      - OAuth2/OIDC - Tokens
+    summary: Token revocation endpoint
+    description: |
+      Revoke an access or refresh token (RFC 7009).
+      Token can be provided in request body or the `trt_{client_id}` cookie.
+      Revoking a refresh token also revokes the access tokens of its session,
+      and is a logout of that browser: the SSO session the refresh token was
+      issued under ends, every other token family issued under that SSO
+      session (that browser's other sign-ins for the client) is revoked, and
+      the client's `tereo_user_session_{client_id}` cookie is cleared,
+      so silent login no longer mints tokens there. Other browsers stay
+      signed in. The response is an empty 200 whether or not the token was
+      valid — unknown, already revoked or another client's — but a request
+      with neither `token` nor the refresh cookie is 400 `invalid_request`
+      (RFC 7009 §2.1).
+
+      An access token is revoked only when it carries core's signature and
+      was issued to the calling client. An ID token is not an access token:
+      sent as `token`, it revokes nothing.
+
+      Confidential clients authenticate with HTTP Basic; a public client sends
+      its `client_id` in the body. A missing or unknown `client_id` or failed
+      authentication is 401 `invalid_client` with `WWW-Authenticate: Basic`;
+      a body `client_id` that differs from the Basic one is 400
+      `invalid_request`; repeated wrong secrets are 429 `too_many_requests`,
+      counted with `/oauth/token`'s (see there). `token_type_hint` is only a
+      hint: an unknown value is ignored.
+    operationId: postRevoke
+    security:
+      - ClientCredentials: []
+      - {}
+    requestBody:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/RevokeRequest'
+    responses:
+      '200':
+        description: Token revoked, or not a live token of this client's (an empty body either way)
+        headers:
+          Set-Cookie:
+            description: Clears the `trt_{client_id}` and `tsi_{client_id}` cookies if the refresh-token cookie was sent, and the `tereo_user_session_{client_id}` cookie when a refresh token's SSO session was ended
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '401':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/CrossOriginRefusedResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/userinfo:
+  get:
+    tags:
+      - OAuth2/OIDC - User Info
+    summary: UserInfo endpoint
+    description: |
+      Get the authenticated user's profile information (OpenID Connect). The
+      token must carry `openid`. The standard claims follow the token's
+      scopes (`profile`, `email`). `roles`, `permissions` and
+      `organizations` — core's authorization — are returned only when the
+      token was issued to core's UI or to a service's client, or carries a
+      core API scope (`core:*`); for any other client all three are omitted.
+      `org_id` and `org_name` are the token's organization; they are omitted
+      when that organization has since been archived or deleted.
+
+      403 `insufficient_scope`, with `WWW-Authenticate: Bearer
+      error="insufficient_scope", scope="openid"`, for a token without
+      `openid`.
+
+      401 `invalid_token`, with `WWW-Authenticate: Bearer
+      error="invalid_token"`, for a missing, invalid, expired or revoked
+      token, and — the same check `requireAuth` makes — one whose session
+      (refresh token) was rotated or revoked, whose client was deleted or
+      whose user is inactive; also for a client_credentials token, which has
+      no end user.
+    operationId: getUserInfo
+    security:
+      - BearerAuth: []
+    responses:
+      '200':
+        description: User information
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/UserInfoResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - OAuth2/OIDC - User Info
+    summary: UserInfo endpoint (POST)
+    description: |
+      The same as `GET /oauth/userinfo` (OpenID Connect Core 5.3.1 requires
+      both methods). The access token is sent in the `Authorization` header;
+      the request has no body.
+    operationId: postUserInfo
+    security:
+      - BearerAuth: []
+    responses:
+      '200':
+        description: User information
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/UserInfoResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/end-session:
+  get:
+    tags:
+      - OAuth2/OIDC - Session
+    summary: End session endpoint (GET)
+    description: |
+      OpenID Connect RP-initiated logout for **this browser only**.
+
+      **Without `id_token_hint` the session is not ended here.** Nothing shows
+      such a request came from the client — any page can send a browser to
+      this URL — so after the checks below the response is a 302 to the UI's
+      confirmation page, `{UI}/logout?client_id=…&confirm_token=…` (with
+      `post_logout_redirect_uri` and `state` when given), setting the
+      `tereo_logout_confirm_{client_id}` cookie (httpOnly, SameSite=Lax,
+      `/oauth`, 10 minutes) to the same random token. Only `POST
+      /oauth/end-session/confirm`, sent with both, ends the session. With a
+      valid `id_token_hint` the session ends at once, as below — unless the
+      browser's `tereo_user_session_{client_id}` or `trt_{client_id}`
+      cookie belongs to a user other than the hint's `sub`. Any site can hold
+      an ID token of its own user for the client, so such a request is
+      treated as one without a hint: nothing ends, no session cookie is
+      cleared, and the browser goes to the confirmation page.
+
+      One of `client_id` or `id_token_hint` is required (400 `invalid_request`,
+      "client_id or id_token_hint is required", or "post_logout_redirect_uri
+      requires client_id or id_token_hint" when a redirect URI was given). The client is the hint's
+      `aud`, else `client_id`.
+
+      What ends is the browser's own sign-in:
+
+      - the SSO session named by the `tereo_user_session_{client_id}`
+        cookie;
+      - the SSO session in the hint's `sid` claim, only if it belongs to the
+        hint's `sub`;
+      - the token family of the `trt_{client_id}` refresh-token cookie.
+
+      Those SSO sessions end, and every refresh- and access-token family
+      issued under them is revoked, along with the cookie's family. The
+      user's other browsers and devices stay signed in — `DELETE
+      /v1/account/sessions` is "sign out everywhere". With nothing identifying
+      the browser (no cookies, and a hint without a usable `sid`), nothing is
+      revoked; the cookies are still cleared and the logout succeeds.
+
+      On success the client's session cookies
+      (`tereo_user_session_{client_id}` and the other login-flow
+      cookies) and its `trt_{client_id}` / `tsi_{client_id}` cookies are
+      cleared. If revoking fails the response is 500 and no cookie is cleared:
+      a caller told it is logged out must be.
+
+      Each user whose session or token family ends gets a `LOGOUT` audit
+      entry (entity `User`), written in the revoking transaction, with
+      `metadata` `{ client_id, sids, sessionIds, method: "id_token_hint" }` —
+      `sids` the SSO sessions ended, `sessionIds` every refresh token revoked
+      with them (the cookie's token family and every sibling family obtained
+      through those SSO sessions).
+
+      `id_token_hint` is verified: it must carry core's signature and issuer
+      and must not be an access token. An expired hint is accepted (per
+      RP-Initiated Logout) only within `ID_TOKEN_HINT_GRACE_SECONDS` (3600
+      seconds) of its `exp`; one expired longer ago is 400 `invalid_request`
+      ("Invalid id_token_hint"). Its `aud` must be a known client ("Invalid
+      id_token_hint: unknown audience") and must match `client_id` when both
+      are given. An unknown `client_id` is 400 `invalid_request` ("Invalid
+      client_id").
+
+      `post_logout_redirect_uri` needs a client (`client_id` or
+      `id_token_hint`) and must exactly match one of that client's
+      `postLogoutRedirectUris` (a `javascript:`, `data:`, `vbscript:`,
+      `blob:` or `file:` URI is refused even if registered); with a hint the response is then a 302 to it
+      (with `state`), otherwise 200 `{ success: true }`. There is no redirect to an
+      unregistered URI. Every validation failure above, a redirect URI
+      without a client, and an unregistered `post_logout_redirect_uri` are 400
+      `invalid_request`.
+    operationId: getEndSession
+    security: []
+    parameters:
+      - name: id_token_hint
+        in: query
+        description: |
+          A previously issued ID token. Its signature and issuer are verified;
+          it may have expired, but by no more than 3600 seconds
+          (`ID_TOKEN_HINT_GRACE_SECONDS`). Its `sid` names the SSO session to
+          end.
+        schema:
+          type: string
+          maxLength: 8192
+      - name: post_logout_redirect_uri
+        in: query
+        schema:
+          type: string
+          format: uri
+          maxLength: 2048
+      - name: state
+        in: query
+        schema:
+          type: string
+          maxLength: 512
+      - name: client_id
+        in: query
+        schema:
+          type: string
+          maxLength: 64
+    responses:
+      '200':
+        description: Logout successful (with a valid id_token_hint and no post_logout_redirect_uri)
+        headers:
+          Set-Cookie:
+            description: Clears the client's SSO and login-flow session cookies and its `trt_{client_id}` and `tsi_{client_id}` cookies
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - success
+              properties:
+                success:
+                  type: boolean
+      '302':
+        description: |
+          With a valid id_token_hint and a post_logout_redirect_uri: logged out,
+          redirect to it. Without a hint: nothing ended, redirect to the UI's
+          sign-out confirmation page.
+        headers:
+          Location:
+            description: '`post_logout_redirect_uri` with `state` when given; without a hint, `{UI}/logout?client_id=…&confirm_token=…` (with `post_logout_redirect_uri` and `state` when given)'
+            schema:
+              type: string
+              format: uri
+          Set-Cookie:
+            description: With a hint, clears the client's SSO and login-flow session cookies and its `trt_{client_id}` and `tsi_{client_id}` cookies; without one, sets only `tereo_logout_confirm_{client_id}`
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - OAuth2/OIDC - Session
+    summary: End session endpoint (POST)
+    description: |
+      `GET /oauth/end-session` with the parameters in the body (JSON or
+      form-encoded); same behaviour and responses.
+    operationId: postEndSession
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/EndSessionRequest'
+        application/x-www-form-urlencoded:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/EndSessionRequest'
+    responses:
+      '200':
+        description: Logout successful (with a valid id_token_hint and no post_logout_redirect_uri)
+        headers:
+          Set-Cookie:
+            description: Clears the client's SSO and login-flow session cookies and its `trt_{client_id}` and `tsi_{client_id}` cookies
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - success
+              properties:
+                success:
+                  type: boolean
+      '302':
+        description: As for GET — logged out and redirected with a hint; without one, nothing ended and redirected to the UI's sign-out confirmation page
+        headers:
+          Location:
+            description: '`post_logout_redirect_uri` with `state` when given; without a hint, `{UI}/logout?client_id=…&confirm_token=…` (with `post_logout_redirect_uri` and `state` when given)'
+            schema:
+              type: string
+              format: uri
+          Set-Cookie:
+            description: With a hint, clears the client's SSO and login-flow session cookies and its `trt_{client_id}` and `tsi_{client_id}` cookies; without one, sets only `tereo_logout_confirm_{client_id}`
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/CrossOriginRefusedResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/end-session/confirm:
+  get:
+    tags:
+      - OAuth2/OIDC - Session
+    summary: Sign-out confirmation details
+    description: |
+      What the UI's sign-out confirmation page shows: the client's name and
+      where to sign in to it again. Requires the
+      `tereo_logout_confirm_{client_id}` cookie that `/oauth/end-session`
+      set, equal to `confirm_token`; otherwise 400 `invalid_session`. An
+      unknown `client_id` is 400 `invalid_request`. Reads only.
+
+      `sign_in_url` is the admin UI's root for core's own login client, and
+      otherwise the origin of the client's first registered redirect URI.
+    operationId: getEndSessionConfirm
+    security: []
+    parameters:
+      - name: client_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+      - name: confirm_token
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+    responses:
+      '200':
+        description: The confirmation's client
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/EndSessionConfirmDetails'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - OAuth2/OIDC - Session
+    summary: Confirm sign-out
+    description: |
+      The user confirmed signing out on the UI's confirmation page: ends this
+      browser's session with the client exactly as `/oauth/end-session` does
+      with a hint (the SSO session of the
+      `tereo_user_session_{client_id}` cookie and the family of the
+      `trt_{client_id}` cookie; other browsers stay signed in), and clears the
+      same cookies plus the confirm cookie. The `LOGOUT` audit entry is as for
+      `/oauth/end-session`, with `method: "confirm"`.
+
+      `confirm_token` must equal the `tereo_logout_confirm_{client_id}`
+      cookie, which SameSite keeps off cross-site posts and which is cleared on
+      success, so a token works once and only from the browser it was given to;
+      otherwise 400 `invalid_session` and nothing ends.
+      `post_logout_redirect_uri` must be registered for the client (400
+      `invalid_request`).
+
+      The answer is JSON for the page to follow: `redirect_url` is
+      `post_logout_redirect_uri` with `state`, or null without one.
+    operationId: postEndSessionConfirm
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/EndSessionConfirmRequest'
+        application/x-www-form-urlencoded:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/EndSessionConfirmRequest'
+    responses:
+      '200':
+        description: Signed out
+        headers:
+          Set-Cookie:
+            description: Clears the client's SSO, login-flow and confirm cookies and its `trt_{client_id}` and `tsi_{client_id}` cookies
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/EndSessionConfirmResponse'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/CrossOriginRefusedResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/check-permission:
+  post:
+    tags:
+      - OAuth2/OIDC - Permissions
+    summary: Check single permission
+    description: |
+      Check if a user has a specific permission (service-to-service).
+      Permissions are hierarchical (`admin` ⊃ `delete` ⊃ `write` ⊃ `read`).
+
+      Requires HTTP Basic credentials of a confidential client: missing or
+      wrong credentials, an unknown client or a public client are 401
+      `invalid_client` with `WWW-Authenticate: Basic`.
+
+      A client of an organization may only ask about that organization's
+      members, and is answered with their permissions in it; an
+      `organization_id`, if given, must be the client's. A user who is not a
+      member, or does not exist, is the same 403. A client of no organization
+      must be a service's: it is answered from the user's global roles only,
+      may not name an organization, and gets 404 `not_found` for an unknown
+      user. Any other client — a login client created under
+      `/v1/admin/clients` — is refused. Each refusal is 403 `forbidden`,
+      decided before the user is looked up. The client is authenticated
+      before the body is validated.
+    operationId: postCheckPermission
+    security:
+      - ClientCredentials: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/CheckPermissionRequest'
+    responses:
+      '200':
+        description: Permission check result
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/CheckPermissionResponse'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '401':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/CheckPermissionForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/check-permission/batch:
+  post:
+    tags:
+      - OAuth2/OIDC - Permissions
+    summary: Check multiple permissions
+    description: |
+      Check up to 100 permissions at once (service-to-service).
+      Authentication and errors as for `POST /oauth/check-permission`.
+    operationId: postCheckPermissionBatch
+    security:
+      - ClientCredentials: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/CheckPermissionsBatchRequest'
+    responses:
+      '200':
+        description: Permission check results
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/CheckPermissionsBatchResponse'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '401':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/CheckPermissionForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/totp/verify:
+  post:
+    tags:
+      - OAuth2/OIDC - TOTP
+    summary: Verify TOTP code during login
+    description: |
+      Verify a time-based one-time password during the authentication flow,
+      for the 2FA session issued by `POST /oauth/authorize`. Requires the
+      `tereo_2fa_session_{client_id}` cookie to match `session_token`.
+
+      400 `invalid_session` (unknown session, missing or mismatched cookie),
+      `session_expired`, `totp_not_configured`; 401 `invalid_code` for a wrong
+      code. Five attempts per user in five minutes — across this endpoint,
+      `/oauth/totp/recovery` and `/oauth/totp/setup/verify`, and across
+      logins, so signing in again with the password does not reset it — lock
+      the user out with 429 for the rest of the window. A right code clears
+      the count.
+
+      A code is accepted once: a code from the same 30-second step as one
+      already accepted for this user, or an earlier step, is 401
+      `invalid_code` and counts toward the lockout. That includes the code
+      that completed TOTP setup.
+
+      The 2FA session is single-use too: of two concurrent requests with a
+      right code, the second is 401 `invalid_code` when it carries the same
+      code and 400 `invalid_session` when it carries another.
+
+      `redirect_url` is the consent screen, or the organization picker for a
+      member of several active organizations.
+    operationId: postTotpVerify
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/TotpVerifyRequest'
+    responses:
+      '200':
+        description: TOTP verification successful
+        headers:
+          Set-Cookie:
+            description: Clears the 2FA-session cookie; sets the known-device cookie and the consent- or org-select-session cookie
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - redirect_url
+              properties:
+                redirect_url:
+                  type: string
+                  format: uri
+                  description: URL of the consent screen or the organization picker
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '401':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/CrossOriginRefusedResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/totp/recovery:
+  post:
+    tags:
+      - OAuth2/OIDC - TOTP
+    summary: Use recovery code
+    description: |
+      Use a recovery code instead of TOTP during 2FA.
+      Recovery codes are automatically transformed to uppercase and dashes are removed.
+      Session, cookie, errors and lockout as for `POST /oauth/totp/verify`,
+      plus 400 `no_recovery_codes` when the user has none left. The code and
+      the 2FA session are consumed atomically: a code or session already used
+      by a concurrent request is 400 `invalid_session`.
+
+      An audit log entry (User, `metadata.action: recovery_code_used`, the
+      user as actor) is created in the same transaction.
+    operationId: postTotpRecovery
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/TotpRecoveryRequest'
+    responses:
+      '200':
+        description: Recovery code accepted
+        headers:
+          Set-Cookie:
+            description: Clears the 2FA-session cookie; sets the known-device cookie and the consent- or org-select-session cookie
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - redirect_url
+              properties:
+                redirect_url:
+                  type: string
+                  format: uri
+                  description: URL of the consent screen or the organization picker
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '401':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/CrossOriginRefusedResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/totp/setup:
+  post:
+    tags:
+      - OAuth2/OIDC - TOTP
+    summary: Initiate TOTP setup during login
+    description: |
+      Begin TOTP setup during the authorization flow, for the user who just
+      passed the password step of `POST /oauth/authorize`. Requires the
+      `setup_grant` from that step's redirect, sent with the
+      `tereo_2fa_setup_grant_{client_id}` cookie set beside it; the
+      user and the OAuth request come from the grant, which is consumed by the
+      call. A missing, unknown, reused or cookie-mismatched grant is refused
+      with 400 `invalid_setup_grant`, an expired one with 400 `setup_expired`,
+      and a user who already has TOTP with 400 `totp_already_enabled`.
+
+      Refused with 403 `totp_disabled` while the system 2FA policy is
+      `disabled`.
+    operationId: postTotpSetup
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/TotpSetupInitiateRequest'
+    responses:
+      '200':
+        description: TOTP setup initiated
+        headers:
+          Set-Cookie:
+            description: Clears the setup-grant cookie
+            schema:
+              type: string
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/TotpSetupResponse'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/LoginTotpSetupForbiddenResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/totp/setup/verify:
+  post:
+    tags:
+      - OAuth2/OIDC - TOTP
+    summary: Complete TOTP setup
+    description: |
+      Verify and complete TOTP setup during OAuth flow. Refused with 403
+      `totp_disabled` while the system 2FA policy is `disabled`, including for
+      a setup started before the change. 400 `invalid_setup_token` or
+      `setup_expired` for the setup session, 401 `invalid_code` for a wrong
+      code. Attempts count toward the user's lockout shared with
+      `POST /oauth/totp/verify` (five per user in five minutes, then 429 for
+      the rest of the window). The code that completes setup is spent: it
+      is refused at the 2FA step that follows, which needs the next one.
+
+      An audit log entry is created for this action. An
+      `auth.user.totp-enabled` webhook event is emitted.
+    operationId: postTotpSetupVerify
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/TotpSetupVerifyRequest'
+    responses:
+      '200':
+        description: TOTP setup completed
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/TotpSetupVerifyResponse'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '401':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/LoginTotpSetupForbiddenResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+# ============================================
+# WEBHOOK EVENTS
+# ============================================
+
+auth.user.totp-enabled:
+  post:
+    tags:
+      - OAuth2/OIDC - TOTP
+    summary: User enabled TOTP
+    description: Fired when a user completes TOTP setup, during the OAuth flow or from `/v1/account/totp/setup/verify`.
+    operationId: webhookUserTotpEnabled
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.totp-enabled
+                  entityType:
+                    const: User
+                  data:
+                    type: object
+                    required: [userId, email]
+                    properties:
+                      userId:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
