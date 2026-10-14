@@ -10,14 +10,14 @@
   ],
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@nx/js": "22.7.12",
+    "@nx/js": "23.3.0",
     "@swc-node/register": "^1.12.1",
     "@swc/core": "^1.16.18",
     "@types/node": "^25.9.9",
     "eslint": "^9.39.5",
     "eslint-import-resolver-typescript": "^4.4.5",
     "eslint-plugin-import": "^2.32.0",
-    "nx": "22.7.12",
+    "nx": "23.3.0",
     "prettier": "^3.9.10",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
@@ -29,7 +29,10 @@
     "follow-redirects": "^1.16.0",
     "yaml": "^2.9.0",
     "@hono/node-server": "1.19.14",
-    "ioredis": "^5.11.1"
+    "ioredis": "^5.11.1",
+    "nx": {
+      "undici": "^7.29.1"
+    }
   },
   "engines": {
     "node": "22.x.x"
