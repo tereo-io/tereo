@@ -13,7 +13,7 @@ import {
 const jobsFor = async (parentObjectId: string) =>
   (
     await getThumbnailGenerationQueue().getJobs(
-      ["wait", "delayed", "active", "paused", "completed", "failed"],
+      ["wait", "delayed", "active", "completed", "failed"],
       0,
       -1
     )

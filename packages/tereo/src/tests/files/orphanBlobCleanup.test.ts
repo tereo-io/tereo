@@ -15,7 +15,7 @@ import {
 
 const jobsFor = async (hash: string) => {
   const jobs = await getOrphanBlobCleanupQueue().getJobs(
-    ["wait", "delayed", "active", "paused", "completed", "failed"],
+    ["wait", "delayed", "active", "completed", "failed"],
     0,
     -1
   );
