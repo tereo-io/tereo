@@ -3,13 +3,16 @@ name: Version Plan Check
 on:
   pull_request:
     branches: [master]
+  # Started by create-version-pr.yml on release/version-bump, where the job is
+  # skipped: a skipped job still satisfies the required check.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   check-version-plan:
-    if: github.head_ref != 'release/version-bump'
+    if: github.head_ref != 'release/version-bump' && github.ref_name != 'release/version-bump'
     runs-on: ubuntu-latest
 
     steps:

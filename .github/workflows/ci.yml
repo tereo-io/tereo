@@ -5,6 +5,9 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # Started by create-version-pr.yml on release/version-bump: its PR is opened
+  # with the built-in token, which triggers no pull_request workflows.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -15,7 +18,6 @@ permissions:
 
 jobs:
   ci:
-    if: github.head_ref != 'release/version-bump'
     runs-on: ubuntu-latest
     env:
       NX_BASE: origin/master
