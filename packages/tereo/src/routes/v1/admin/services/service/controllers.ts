@@ -21,6 +21,10 @@ import {
   validateParams,
 } from "../../../../../utils/validateReq.js";
 import {
+  revokeServiceTokens,
+  updateServiceTx,
+} from "../../../../../utils/services.js";
+import {
   ForbiddenError,
   ManagedByProvisioningError,
   NotFoundError,
@@ -59,11 +63,6 @@ const getEditableAppService = async (req: Request) => {
   const service = await getAppService(req);
   if (service.provisioned) throw new ManagedByProvisioningError();
   return service;
-};
-
-/** Stop every outstanding token of the service's client. */
-const revokeServiceTokens = async (clientRowId: string) => {
-  await db.accessTokens.revokeByClientId(clientRowId);
 };
 
 /**
@@ -141,53 +140,9 @@ export const updateService = async (req: Request, res: Response) => {
   const body = validateBody(UpdateServiceSchema, req);
   const existing = await getEditableAppService(req);
 
-  const updated = await db.$transaction(async (tx) => {
-    await tx.service.update({
-      where: { id: existing.id },
-      data: { name: body.name, isActive: body.isActive },
-    });
-    if (body.isActive !== undefined) {
-      await tx.user.update({
-        where: { id: existing.accountUserId },
-        data: { isActive: body.isActive },
-      });
-    }
-    if (body.name !== undefined) {
-      await tx.oAuthClient.update({
-        where: { id: existing.client.id },
-        data: { name: body.name },
-      });
-    }
-    const after = await db.services.get(existing.id, tx);
-    await logAuditTx(tx, {
-      auth,
-      action: "UPDATE",
-      entityType: "Service",
-      entityId: after.id,
-      entityName: after.slug,
-      changes: {
-        ...(body.name !== undefined && {
-          name: { old: existing.name, new: after.name },
-        }),
-        ...(body.isActive !== undefined && {
-          isActive: { old: existing.isActive, new: after.isActive },
-        }),
-      },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "core.service.updated",
-      entityType: "Service",
-      entityId: after.id,
-      data: {
-        id: after.id,
-        slug: after.slug,
-        name: after.name,
-        isActive: after.isActive,
-      },
-    });
-    return after;
-  });
+  const updated = await db.$transaction((tx) =>
+    updateServiceTx(tx, existing, body, auth)
+  );
 
   if (body.isActive === false) await revokeServiceTokens(existing.client.id);
   res.json(formatService(updated));

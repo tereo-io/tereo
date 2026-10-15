@@ -2,6 +2,7 @@ import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganizati
 import { disconnectTokenSockets } from "../../../../../websocket/emitters/index.js";
 import { UserType } from "../../../../../../prisma/generated/client/index.js";
 import { UpdateClientSchema, type UpdateClientInput } from "./schemas.js";
+import { deleteLoginClientTx } from "../../../../../utils/clients.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { formatClient } from "../../../../../utils/transformers.js";
 import { hasPermission } from "../../../../../utils/permissions.js";
@@ -219,40 +220,9 @@ export const deleteClient = async (req: Request, res: Response) => {
   if (existingClient.clientId === LOGIN_CLIENT.clientId) {
     throw new ConflictError("The admin UI's login client cannot be deleted");
   }
-  const jtis = await db.$transaction(async (tx) => {
-    const jtis = await db.accessTokens.revokeByClientId(params.id, tx);
-    // History names the client's service-account user, not the client, so
-    // the user outlives it — deactivated, never deleted.
-    const serviceAccount = await db.users.getByOAuthClientId(params.id);
-    if (serviceAccount) {
-      await db.users.update(serviceAccount.id, { isActive: false }, tx);
-    }
-    await db.clients.deleteClient(params.id, tx);
-    await logAuditTx(tx, {
-      auth: user,
-      action: "DELETE",
-      entityType: "OAuthClient",
-      entityId: existingClient.id,
-      entityName: existingClient.name,
-      metadata: {
-        clientId: existingClient.clientId,
-        revokedAccessTokens: jtis.length,
-        serviceAccountUserId: serviceAccount?.id ?? null,
-      },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.client.deleted",
-      entityType: "OAuthClient",
-      entityId: existingClient.id,
-      data: {
-        id: existingClient.id,
-        clientId: existingClient.clientId,
-        name: existingClient.name,
-      },
-    });
-    return jtis;
-  });
+  const jtis = await db.$transaction((tx) =>
+    deleteLoginClientTx(tx, existingClient, user)
+  );
   disconnectTokenSockets(jtis);
 
   res.status(204).send();

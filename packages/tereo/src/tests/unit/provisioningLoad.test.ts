@@ -264,7 +264,14 @@ describe("parseProvisioning", () => {
             access: { audiences: ["core", "vanquished-inventory"] },
           }),
         ],
-        clients: [{ clientId: "ui", name: "UI", audience: ["core"] }],
+        clients: [
+          {
+            clientId: "ui",
+            name: "UI",
+            audience: ["core"],
+            redirectUris: ["https://app.example.com/callback"],
+          },
+        ],
       }),
       baseEnv()
     );
@@ -275,12 +282,18 @@ describe("parseProvisioning", () => {
     const problems = problemsOf(
       file({
         clients: [
-          { clientId: "a", name: "A", clientType: "confidential" },
+          {
+            clientId: "a",
+            name: "A",
+            clientType: "confidential",
+            redirectUris: ["https://app.example.com/callback"],
+          },
           {
             clientId: "b",
             name: "B",
             clientType: "public",
             secretFrom: "ORDERS_SECRET",
+            redirectUris: ["https://app.example.com/callback"],
           },
         ],
       }),
@@ -304,6 +317,27 @@ describe("parseProvisioning", () => {
     expect(problems.join("\n")).toContain("services[0].name");
     expect(problems.join("\n")).toContain("services[0].slug");
     expect(problems.join("\n")).toContain("clients[0].clientId");
+  });
+
+  it("reports an authorization_code client without a redirect URI", () => {
+    const problems = problemsOf(
+      file({
+        clients: [
+          { clientId: "ui", name: "UI" },
+          {
+            clientId: "refresh-only",
+            name: "Refresh",
+            clientType: "confidential",
+            secretFrom: "ORDERS_SECRET",
+            grantTypes: ["refresh_token"],
+          },
+        ],
+      }),
+      baseEnv()
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("clients[ui]");
+    expect(problems[0]).toContain("redirect URI");
   });
 
   it("reports unsafe redirect URIs", () => {

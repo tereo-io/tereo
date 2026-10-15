@@ -9,6 +9,7 @@ import { randomBytes } from "crypto";
 import env from "../../env.js";
 import {
   applyProvisioning,
+  deprovisionMissing,
   provision,
 } from "../../utils/provisioning/index.js";
 import {
@@ -470,6 +471,101 @@ describe("applyProvisioning", () => {
     );
     expect((await serviceRow(service.slug)).unprovisionedAt).toBeNull();
     expect((await clientRow(client.clientId)).unprovisionedAt).toBeNull();
+  });
+
+  describe("retirement", () => {
+    const HOUR = 60 * 60 * 1000;
+    const grace = env.REGISTRY_RETIREMENT_GRACE_HOURS * HOUR;
+
+    const liveTokens = async (clientRowId: string) =>
+      prisma.accessToken.count({
+        where: { clientId: clientRowId, revokedAt: null },
+      });
+
+    it("deactivates a service unprovisioned longer than the grace and revokes its tokens", async () => {
+      const service = serviceSpec();
+      await applyProvisioning(file([service]));
+      await serviceToken(service);
+      const before = await serviceRow(service.slug);
+      expect(await liveTokens(before.client!.id)).toBeGreaterThan(0);
+
+      const now = new Date();
+      await applyProvisioning(file(), now);
+      const result = await deprovisionMissing(
+        new Date(now.getTime() + grace + HOUR)
+      );
+      expect(result.services).toBeGreaterThanOrEqual(1);
+
+      const row = await serviceRow(service.slug);
+      expect(row.isActive).toBe(false);
+      expect(row.client?.serviceAccountUser?.isActive).toBe(false);
+      expect(await liveTokens(row.client!.id)).toBe(0);
+      const audit = await prisma.auditLogEntry.findFirst({
+        where: { entityId: row.id, action: "UPDATE" },
+        orderBy: { createdAt: "desc" },
+      });
+      expect(audit?.userId).toBe(SYSTEM_USER_ID);
+    });
+
+    it("deletes a login client unprovisioned longer than the grace", async () => {
+      const client = clientSpec();
+      await applyProvisioning(file([], [client]));
+      const id = (await clientRow(client.clientId)).id;
+
+      const now = new Date();
+      await applyProvisioning(file(), now);
+      const result = await deprovisionMissing(
+        new Date(now.getTime() + grace + HOUR)
+      );
+      expect(result.clients).toBeGreaterThanOrEqual(1);
+
+      expect(
+        await prisma.oAuthClient.findUnique({
+          where: { clientId: client.clientId },
+        })
+      ).toBeNull();
+      const audit = await prisma.auditLogEntry.findFirst({
+        where: { entityId: id, action: "DELETE" },
+      });
+      expect(audit?.userId).toBe(SYSTEM_USER_ID);
+
+      // Nothing of it is left to conflict with the entry returning.
+      const back = await applyProvisioning(file([], [client]));
+      expect(back.created).toContain(`client:${client.clientId}`);
+    });
+
+    it("leaves entries inside the grace untouched", async () => {
+      const service = serviceSpec();
+      const client = clientSpec();
+      await applyProvisioning(file([service], [client]));
+      await serviceToken(service);
+
+      const now = new Date();
+      await applyProvisioning(file(), now);
+      await deprovisionMissing(new Date(now.getTime() + grace - HOUR));
+
+      const row = await serviceRow(service.slug);
+      expect(row.isActive).toBe(true);
+      expect(await liveTokens(row.client!.id)).toBeGreaterThan(0);
+      await clientRow(client.clientId);
+    });
+
+    it("reactivates a deactivated service when it returns to the file", async () => {
+      const service = serviceSpec();
+      await applyProvisioning(file([service]));
+      const now = new Date();
+      await applyProvisioning(file(), now);
+      await deprovisionMissing(new Date(now.getTime() + grace + HOUR));
+      expect((await serviceRow(service.slug)).isActive).toBe(false);
+
+      const back = await applyProvisioning(file([service]));
+      expect(back.updated).toContain(`service:${service.slug}`);
+      const row = await serviceRow(service.slug);
+      expect(row.isActive).toBe(true);
+      expect(row.unprovisionedAt).toBeNull();
+      expect(row.client?.serviceAccountUser?.isActive).toBe(true);
+      expect(await fetchToken(service.clientId, service.plainSecret)).toBe(200);
+    });
   });
 
   it("applies once when two starts race", async () => {

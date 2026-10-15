@@ -218,6 +218,14 @@ export const parseProvisioning = (
       );
     else if (c.secretFrom) uses.push({ label: c.label, envName: c.secretFrom });
 
+    if (
+      c.grantTypes.includes("authorization_code") &&
+      c.redirectUris.length === 0
+    )
+      problems.push(
+        `${c.label}: a client with the authorization_code grant needs at least one redirect URI`
+      );
+
     c.redirectUris.forEach((uri, i) => {
       if (!isSafeRedirectUri(uri))
         problems.push(`${c.label}: redirectUris[${i}] is not a safe URL`);

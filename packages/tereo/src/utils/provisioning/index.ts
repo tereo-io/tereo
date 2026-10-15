@@ -3,7 +3,11 @@ import { loadProvisioning } from "./load.js";
 import { logger } from "../logger.js";
 import env from "../../env.js";
 
-export { applyProvisioning, type ProvisioningResult } from "./apply.js";
+export {
+  applyProvisioning,
+  deprovisionMissing,
+  type ProvisioningResult,
+} from "./apply.js";
 export { ProvisioningError, loadProvisioning } from "./load.js";
 
 /** Apply `PROVISIONING_FILE`, if set. A file that cannot be applied throws. */

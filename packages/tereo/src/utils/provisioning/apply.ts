@@ -1,14 +1,22 @@
 import { assertNamespaceAvailable, namespacesOverlap } from "../registry.js";
+import { disconnectTokenSockets } from "../../websocket/emitters/index.js";
 import { CORE_SERVICE, SYSTEM_USER_ID } from "../../definitions/index.js";
-import { createServiceTx, serviceAccountEmail } from "../services.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
 import { approveProvisionedAccess } from "../serviceAccess.js";
 import { prisma, type Prisma } from "../db/prisma.js";
+import { deleteLoginClientTx } from "../clients.js";
 import { formatClient } from "../transformers.js";
 import { AppError } from "../errors.js";
+import { logger } from "../logger.js";
 import db from "../db/index.js";
 import env from "../../env.js";
+import {
+  createServiceTx,
+  revokeServiceTokens,
+  serviceAccountEmail,
+  updateServiceTx,
+} from "../services.js";
 import {
   ProvisioningError,
   type ProvisionedClientSpec,
@@ -52,7 +60,7 @@ const loadState = async (tx: Tx, p: Provisioning) => {
   // One query at a time: a transaction runs on one connection.
   const services = await tx.service.findMany({
     where: { slug: { in: slugs } },
-    include: { client: true },
+    include: { client: { include: { serviceAccountUser: true } } },
   });
   const clients = await tx.oAuthClient.findMany({
     where: { clientId: { in: clientIds } },
@@ -310,7 +318,29 @@ const applyService = async (
     result.updated.push(entry);
   }
 
-  const client = existing.client!;
+  const client = existing.client;
+  const accountUser = client?.serviceAccountUser;
+  if (!client || !accountUser)
+    throw new Error(
+      `Service ${existing.slug} has no client or service account; its rows are inconsistent`
+    );
+
+  if (!existing.isActive) {
+    await updateServiceTx(
+      tx,
+      {
+        id: existing.id,
+        name: spec.name,
+        isActive: false,
+        client,
+        accountUserId: accountUser.id,
+      },
+      { isActive: true },
+      SYSTEM_ACTOR
+    );
+    result.updated.push(entry);
+  }
+
   if (client.clientSecret !== spec.secretHash) {
     const previousSecretExpiresAt = await rotateSecret(
       tx,
@@ -583,4 +613,73 @@ export const applyProvisioning = async (
   });
   for (const service of services) await approveProvisionedAccess(service.id);
   return result;
+};
+
+const PROVISIONING_LOCK = "provisioning";
+
+/**
+ * Retire what has been missing from the provisioning file longer than the
+ * grace period: a service is deactivated and its tokens revoked, a login
+ * client is deleted. Run hourly by the worker; `now` is a parameter for tests.
+ */
+export const deprovisionMissing = async (
+  now: Date = new Date()
+): Promise<{ services: number; clients: number }> => {
+  const cutoff = new Date(
+    now.getTime() - env.REGISTRY_RETIREMENT_GRACE_HOURS * 60 * 60 * 1000
+  );
+  const { serviceClientIds, jtis, services, clients } =
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
+        const stale = { provisioned: true, unprovisionedAt: { lte: cutoff } };
+        const dueServices = await tx.service.findMany({
+          where: { ...stale, isActive: true },
+          include: { client: { include: { serviceAccountUser: true } } },
+        });
+        const serviceClientIds: string[] = [];
+        for (const service of dueServices) {
+          const accountUser = service.client?.serviceAccountUser;
+          if (!service.client || !accountUser)
+            throw new Error(
+              `Service ${service.slug} has no client or service account; its rows are inconsistent`
+            );
+          await updateServiceTx(
+            tx,
+            {
+              id: service.id,
+              name: service.name,
+              isActive: true,
+              client: service.client,
+              accountUserId: accountUser.id,
+            },
+            { isActive: false },
+            SYSTEM_ACTOR
+          );
+          serviceClientIds.push(service.client.id);
+        }
+
+        const dueClients = await tx.oAuthClient.findMany({
+          where: { ...stale, service: { is: null } },
+        });
+        const jtis: string[] = [];
+        for (const client of dueClients)
+          jtis.push(...(await deleteLoginClientTx(tx, client, SYSTEM_ACTOR)));
+        return {
+          serviceClientIds,
+          jtis,
+          services: dueServices.length,
+          clients: dueClients.length,
+        };
+      },
+      { timeout: 30_000 }
+    );
+  for (const id of serviceClientIds) await revokeServiceTokens(id);
+  disconnectTokenSockets(jtis);
+  if (services > 0 || clients > 0)
+    logger.info(
+      { services, clients },
+      "Retired entries removed from the provisioning file"
+    );
+  return { services, clients };
 };

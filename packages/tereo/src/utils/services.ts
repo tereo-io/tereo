@@ -96,3 +96,73 @@ export const createServiceTx = async (
   });
   return db.services.get(created.id, tx);
 };
+
+export interface ServiceToUpdate {
+  id: string;
+  name: string;
+  isActive: boolean;
+  client: { id: string };
+  accountUserId: string;
+}
+
+/** Stop every outstanding token of the service's client. */
+export const revokeServiceTokens = async (clientRowId: string) => {
+  await db.accessTokens.revokeByClientId(clientRowId);
+};
+
+/**
+ * Rename, deactivate or reactivate a service, audited and announced. The
+ * caller revokes the tokens of a service it deactivated.
+ */
+export const updateServiceTx = async (
+  tx: Prisma.TransactionClient,
+  existing: ServiceToUpdate,
+  body: { name?: string; isActive?: boolean },
+  actor: { userId: string; email: string | null }
+) => {
+  await tx.service.update({
+    where: { id: existing.id },
+    data: { name: body.name, isActive: body.isActive },
+  });
+  if (body.isActive !== undefined) {
+    await tx.user.update({
+      where: { id: existing.accountUserId },
+      data: { isActive: body.isActive },
+    });
+  }
+  if (body.name !== undefined) {
+    await tx.oAuthClient.update({
+      where: { id: existing.client.id },
+      data: { name: body.name },
+    });
+  }
+  const after = await db.services.get(existing.id, tx);
+  await logAuditTx(tx, {
+    auth: actor,
+    action: "UPDATE",
+    entityType: "Service",
+    entityId: after.id,
+    entityName: after.slug,
+    changes: {
+      ...(body.name !== undefined && {
+        name: { old: existing.name, new: after.name },
+      }),
+      ...(body.isActive !== undefined && {
+        isActive: { old: existing.isActive, new: after.isActive },
+      }),
+    },
+  });
+  await emitTx(tx, {
+    organizationId: getDefaultOrganizationId(),
+    eventType: "core.service.updated",
+    entityType: "Service",
+    entityId: after.id,
+    data: {
+      id: after.id,
+      slug: after.slug,
+      name: after.name,
+      isActive: after.isActive,
+    },
+  });
+  return after;
+};
