@@ -1,4 +1,4 @@
-import { ensureTestOrganization } from "../utils/principals.js";
+import { generateTotpSecret, encryptTotpSecret } from "../../utils/totp.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
@@ -11,9 +11,15 @@ import {
 } from "../utils/browserLogin.js";
 import {
   BASE_URL,
+  createAdminUser,
   createTestClient,
   createTestUser,
+  generateTotpCode,
 } from "./utils/test-helpers.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../utils/principals.js";
 
 /**
  * Which client a login flow belongs to, beyond its first step:
@@ -27,8 +33,78 @@ import {
 
 const THIRD_PARTY_REDIRECT = "http://localhost:3100/first-party-test/callback";
 
+const SKIPPING_REDIRECT = "http://localhost:3100/skips-consent/callback";
+
 let thirdParty: Awaited<ReturnType<typeof createTestClient>>;
+let skipping: { id: string; clientId: string };
+let skippingCore: { id: string; clientId: string };
 let loginRedirectUri = "";
+
+const createSkippingClient = async (scopes: string[] = ["openid"]) => {
+  const token = await getTestPrincipalToken({ permissions: ["clients.write"] });
+  const res = await fetch(`${BASE_URL}/v1/admin/clients`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: "Skips consent",
+      clientType: "public",
+      redirectUris: [SKIPPING_REDIRECT],
+      scopes,
+      grantTypes: ["authorization_code", "refresh_token"],
+      consentRequired: false,
+    }),
+  });
+  expect(res.status).toBe(201);
+  return (await res.json()) as { id: string; clientId: string };
+};
+
+const exchange = (
+  clientId: string,
+  redirectUri: string,
+  code: string,
+  verifier: string
+) =>
+  fetch(`${BASE_URL}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: verifier,
+    }),
+  });
+
+/** A password login up to the first answer after it, consent not posted. */
+const loginOnly = async (
+  clientId: string,
+  redirectUri: string,
+  email: string,
+  password: string,
+  extra: Record<string, string> = {}
+) => {
+  const jar: CookieJar = new Map();
+  const { params, pkce, response } = authorize(
+    jar,
+    clientId,
+    redirectUri,
+    extra
+  );
+  absorbCookies(jar, await response);
+  const submit = await fetch(`${BASE_URL}/oauth/authorize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookieHeader(jar) },
+    body: JSON.stringify({ ...params, email, password }),
+  });
+  absorbCookies(jar, submit);
+  expect(submit.status).toBe(200);
+  const { redirect_url } = (await submit.json()) as { redirect_url: string };
+  return { url: new URL(redirect_url), pkce, jar };
+};
 
 const authorize = (
   jar: CookieJar,
@@ -77,6 +153,8 @@ beforeAll(async () => {
     where: { clientId: LOGIN_CLIENT.clientId },
   });
   loginRedirectUri = loginClient.redirectUris[0];
+  skipping = await createSkippingClient();
+  skippingCore = await createSkippingClient(["openid", "core:account"]);
 });
 
 describe("prompt=none consent", () => {
@@ -119,6 +197,44 @@ describe("prompt=none consent", () => {
     expect(
       await prisma.consentSession.count({ where: { userId: user.id } })
     ).toBe(0);
+  });
+
+  it("answers prompt=none with a code for a consentRequired:false client", async () => {
+    const { jar } = await signIn(skipping.clientId, SKIPPING_REDIRECT);
+    const { pkce, response } = authorize(
+      jar,
+      skipping.clientId,
+      SKIPPING_REDIRECT,
+      { prompt: "none" }
+    );
+    const res = await response;
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get("location") ?? "");
+    expect(location.searchParams.get("error")).toBeNull();
+    const code = location.searchParams.get("code");
+    expect(code).toBeTruthy();
+    const tokens = await exchange(
+      skipping.clientId,
+      SKIPPING_REDIRECT,
+      code!,
+      pkce.verifier
+    );
+    expect(tokens.status).toBe(200);
+  });
+
+  it("answers a consentRequired:false client consent_required when it asks for a core scope", async () => {
+    const { jar } = await signIn(skippingCore.clientId, SKIPPING_REDIRECT);
+    const { response } = authorize(
+      jar,
+      skippingCore.clientId,
+      SKIPPING_REDIRECT,
+      { prompt: "none", scope: "openid core:account" }
+    );
+    const res = await response;
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get("location") ?? "");
+    expect(location.searchParams.get("error")).toBe("consent_required");
+    expect(location.searchParams.get("code")).toBeNull();
   });
 
   it("answers a third-party client consent_required, since it cannot show consent", async () => {
@@ -197,6 +313,22 @@ describe("org_id switch consent", () => {
     ).toBe(0);
   });
 
+  it("issues the code at once on an org_id switch for a consentRequired:false client", async () => {
+    const { user, jar } = await signIn(skipping.clientId, SKIPPING_REDIRECT);
+    const orgId = await joinOrg(user.id);
+    const { response } = authorize(jar, skipping.clientId, SKIPPING_REDIRECT, {
+      org_id: orgId,
+    });
+    const res = await response;
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get("location") ?? "");
+    expect(`${location.origin}${location.pathname}`).toBe(SKIPPING_REDIRECT);
+    expect(location.searchParams.get("code")).toBeTruthy();
+    expect(
+      await prisma.consentSession.count({ where: { userId: user.id } })
+    ).toBe(0);
+  });
+
   it("still shows a third-party client the consent screen", async () => {
     const { user, jar } = await signIn(
       thirdParty.clientId,
@@ -215,6 +347,204 @@ describe("org_id switch consent", () => {
     const location = new URL(res.headers.get("location") ?? "");
     expect(location.pathname).toMatch(/\/consent$/);
     expect(location.searchParams.get("code")).toBeNull();
+  });
+});
+
+describe("consent after password login", () => {
+  it("issues the code at once for a consentRequired:false client", async () => {
+    const user = await createTestUser();
+    const { url, pkce } = await loginOnly(
+      skipping.clientId,
+      SKIPPING_REDIRECT,
+      user.email,
+      user.plainPassword
+    );
+    expect(`${url.origin}${url.pathname}`).toBe(SKIPPING_REDIRECT);
+    expect(url.searchParams.get("state")).toBe(pkce.state);
+    const code = url.searchParams.get("code");
+    expect(code).toBeTruthy();
+    expect(
+      await prisma.consentSession.count({ where: { userId: user.id } })
+    ).toBe(0);
+
+    const tokens = await exchange(
+      skipping.clientId,
+      SKIPPING_REDIRECT,
+      code!,
+      pkce.verifier
+    );
+    expect(tokens.status).toBe(200);
+  });
+
+  it("issues the code at once for core's own login client", async () => {
+    const user = await createTestUser();
+    const { url } = await loginOnly(
+      LOGIN_CLIENT.clientId,
+      loginRedirectUri,
+      user.email,
+      user.plainPassword
+    );
+    expect(`${url.origin}${url.pathname}`).toBe(loginRedirectUri);
+    expect(url.searchParams.get("code")).toBeTruthy();
+    expect(
+      await prisma.consentSession.count({ where: { userId: user.id } })
+    ).toBe(0);
+  });
+
+  it("issues the code at once after the org picker for a consentRequired:false client", async () => {
+    const user = await createTestUser();
+    for (const label of ["picker-a", "picker-b"]) {
+      const organizationId = await ensureTestOrganization(
+        `first-party-${label}-${user.id}`
+      );
+      await prisma.organizationMember.create({
+        data: { organizationId, userId: user.id },
+      });
+    }
+    const { url, jar } = await loginOnly(
+      skipping.clientId,
+      SKIPPING_REDIRECT,
+      user.email,
+      user.plainPassword
+    );
+    expect(url.pathname).toMatch(/\/login\/org-select$/);
+    const session = url.searchParams.get("session");
+
+    const membership = await prisma.organizationMember.findFirstOrThrow({
+      where: { userId: user.id },
+    });
+    const pick = await fetch(`${BASE_URL}/oauth/org-select/submit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader(jar),
+      },
+      body: JSON.stringify({
+        session_token: session,
+        organization_id: membership.organizationId,
+      }),
+    });
+    expect(pick.status).toBe(200);
+    const { redirect_url } = (await pick.json()) as { redirect_url: string };
+    const done = new URL(redirect_url);
+    expect(`${done.origin}${done.pathname}`).toBe(SKIPPING_REDIRECT);
+    expect(done.searchParams.get("code")).toBeTruthy();
+    expect(
+      await prisma.consentSession.count({ where: { userId: user.id } })
+    ).toBe(0);
+  });
+
+  it("shows a consentRequired:false client the consent screen when it asks for a core scope", async () => {
+    const user = await createTestUser();
+    const { url } = await loginOnly(
+      skippingCore.clientId,
+      SKIPPING_REDIRECT,
+      user.email,
+      user.plainPassword,
+      { scope: "openid core:account" }
+    );
+    expect(url.pathname).toMatch(/\/consent$/);
+    expect(url.searchParams.get("code")).toBeNull();
+    expect(
+      await prisma.consentSession.count({ where: { userId: user.id } })
+    ).toBe(1);
+  });
+
+  it("still skips consent for that client when it asks for no core scope", async () => {
+    const user = await createTestUser();
+    const { url } = await loginOnly(
+      skippingCore.clientId,
+      SKIPPING_REDIRECT,
+      user.email,
+      user.plainPassword
+    );
+    expect(`${url.origin}${url.pathname}`).toBe(SKIPPING_REDIRECT);
+    expect(url.searchParams.get("code")).toBeTruthy();
+    expect(
+      await prisma.consentSession.count({ where: { userId: user.id } })
+    ).toBe(0);
+  });
+
+  it("issues the code at once after password and TOTP for a consentRequired:false client", async () => {
+    const user = await createTestUser();
+    const secret = generateTotpSecret();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        totpSecret: encryptTotpSecret(secret),
+        totpEnabled: true,
+        totpEnabledAt: new Date(),
+      },
+    });
+    const { url, jar } = await loginOnly(
+      skipping.clientId,
+      SKIPPING_REDIRECT,
+      user.email,
+      user.plainPassword
+    );
+    expect(url.pathname).toBe("/login/2fa");
+
+    const verify = await fetch(`${BASE_URL}/oauth/totp/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader(jar),
+      },
+      body: JSON.stringify({
+        session_token: url.searchParams.get("session"),
+        totp_code: generateTotpCode(secret),
+      }),
+    });
+    expect(verify.status).toBe(200);
+    const { redirect_url } = (await verify.json()) as { redirect_url: string };
+    const done = new URL(redirect_url);
+    expect(`${done.origin}${done.pathname}`).toBe(SKIPPING_REDIRECT);
+    expect(done.searchParams.get("code")).toBeTruthy();
+    expect(
+      await prisma.consentSession.count({ where: { userId: user.id } })
+    ).toBe(0);
+  });
+
+  it("still shows a default client the consent screen after password login", async () => {
+    const user = await createTestUser();
+    const { url } = await loginOnly(
+      thirdParty.clientId,
+      THIRD_PARTY_REDIRECT,
+      user.email,
+      user.plainPassword
+    );
+    expect(url.pathname).toMatch(/\/consent$/);
+    expect(url.searchParams.get("code")).toBeNull();
+    expect(
+      await prisma.consentSession.count({ where: { userId: user.id } })
+    ).toBe(1);
+  });
+
+  it("gives a consentRequired:false client's token no core API access beyond its scopes", async () => {
+    const admin = await createAdminUser();
+    const { url, pkce } = await loginOnly(
+      skipping.clientId,
+      SKIPPING_REDIRECT,
+      admin.email,
+      admin.plainPassword
+    );
+    const tokens = await exchange(
+      skipping.clientId,
+      SKIPPING_REDIRECT,
+      url.searchParams.get("code")!,
+      pkce.verifier
+    );
+    expect(tokens.status).toBe(200);
+    const { access_token } = (await tokens.json()) as { access_token: string };
+
+    const users = await fetch(`${BASE_URL}/v1/admin/users`, {
+      headers: { Authorization: `Bearer ${access_token}` },
+    });
+    // Not issued for core's API at all, however much the user may do there.
+    expect(users.status).toBe(401);
+    expect(((await users.json()) as { error: string }).error).toBe(
+      "invalid_token"
+    );
   });
 });
 

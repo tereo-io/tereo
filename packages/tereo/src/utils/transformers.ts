@@ -16,6 +16,8 @@ export const formatClient = (
     scopes: string[];
     grantTypes: string[];
     audience: string[];
+    consentRequired: boolean;
+    provisioned: boolean;
     ownerId: string;
     organizationId: string | null;
     createdAt: Date;
@@ -48,6 +50,8 @@ export const formatClient = (
     scopes: client.scopes,
     grantTypes: client.grantTypes,
     audience: client.audience,
+    consentRequired: client.consentRequired,
+    provisioned: client.provisioned,
     ownerId: client.ownerId,
     organizationId: client.organizationId,
     // Set when the client is a service's: core refuses to edit, delete or
@@ -181,6 +185,7 @@ export const formatService = (service: ServiceWithClient) => ({
   name: service.name,
   namespace: service.namespace,
   isActive: service.isActive,
+  provisioned: service.provisioned,
   clientId: service.client?.clientId ?? null,
   serviceAccountUserId: service.client?.serviceAccountUser?.id ?? null,
   serviceAccountUser: toUserRef(service.client?.serviceAccountUser),

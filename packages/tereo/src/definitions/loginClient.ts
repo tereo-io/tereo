@@ -1,3 +1,5 @@
+import { coreScopesOf } from "./coreScopes.js";
+
 // The admin UI's public OAuth client. Its client_id is fixed so the UI can be
 // built without knowing anything about the deployment; tereo-ui
 // carries the same literal. Databases seeded before it was fixed have a
@@ -51,10 +53,23 @@ export const loginClientRedirectUris = (
 };
 
 /**
- * Clients that are part of core itself, so the user has nothing to approve:
- * a silent (`prompt=none`) authorize for one issues its code without the
- * consent screen. Their tokens act in core's API with the user's full rights,
- * whatever their scopes. Identified by their fixed client_id.
+ * Clients that are part of core itself. Their tokens act in core's API with
+ * the user's full rights, whatever their scopes. Identified by their fixed
+ * client_id.
  */
 export const isFirstPartyClient = (clientId: string): boolean =>
   clientId === LOGIN_CLIENT.clientId;
+
+/**
+ * Whether the user is spared the consent screen for this request: always for
+ * core's own client; for one an admin marked `consentRequired: false`, only
+ * when it asks for no core API scope, since those act in core as the user.
+ * Only the screen is skipped; what the client's tokens may do in core's API
+ * is decided by `isFirstPartyClient` and the scopes.
+ */
+export const skipsConsent = (
+  client: { clientId: string; consentRequired: boolean },
+  scopes: string[]
+): boolean =>
+  isFirstPartyClient(client.clientId) ||
+  (!client.consentRequired && coreScopesOf(scopes).length === 0);

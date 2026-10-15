@@ -147,7 +147,7 @@ pending, the request is `approved` again. Revoking clears the record: a later ap
 Core's own roles are not recorded this way. They change only with core's code, so an approved core
 role grants whatever core's current version gives it.
 
-Core's roles for app services:
+Core's roles for app services, requested by their bare name. Only these can be requested; any other core role (`admin`, `platform_admin`, `*_admin`) is refused with `422 invalid_requested_access`, as is any `core/<name>` spelling. Approval checks again: a core role outside this list is never granted to a service (`422 role_not_requestable`). `tenant_resolver` and `user_resolver` are requestable too.
 
 | Role | Grants |
 |------|--------|
@@ -175,6 +175,21 @@ changes its declaration a new version.
 | Bucket | Read-only: uploads, copies, multipart and new versions get `409 bucket_retired`. Reads, downloads, shares and deletes still work. No data is touched |
 
 Nothing is deleted. Re-declaring an item brings it back.
+
+## Provisioned services
+
+A deploy can create services from a file instead of `POST /v1/admin/services`
+([provisioning](provisioning.md)). A provisioned service is read-only through the admin API: rename,
+deactivate and `regenerate-secret` answer `409 managed_by_provisioning`, and its secret is rotated
+by changing the environment variable the file names. `revoke-previous-secret` still works, to end a
+rotation's overlap early. Registration is
+unchanged: the service declares at boot, and its requests are approved or revoked as for any other.
+
+The file can list the roles and audiences the service may have (`access`). A matching request is
+approved at once, as core's system user, but only if it has never been decided. A request that
+returned to `pending` because another service's role gained permissions, and one an admin revoked,
+wait for an admin. A service dropped from the file is deactivated after
+`REGISTRY_RETIREMENT_GRACE_HOURS`, and reactivated if it returns.
 
 ## Core
 

@@ -2,6 +2,7 @@ import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganizati
 import { disconnectTokenSockets } from "../../../../../websocket/emitters/index.js";
 import { UserType } from "../../../../../../prisma/generated/client/index.js";
 import { UpdateClientSchema, type UpdateClientInput } from "./schemas.js";
+import { deleteLoginClientTx } from "../../../../../utils/clients.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { formatClient } from "../../../../../utils/transformers.js";
 import { hasPermission } from "../../../../../utils/permissions.js";
@@ -9,7 +10,6 @@ import { LOGIN_CLIENT } from "../../../../../definitions/index.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
-import { verifyScopes } from "../utils.js";
 import {
   validateBody,
   validateParams,
@@ -18,6 +18,7 @@ import {
   BadRequestError,
   ConflictError,
   ForbiddenError,
+  ManagedByProvisioningError,
 } from "../../../../../utils/errors.js";
 import {
   logAuditTx,
@@ -28,6 +29,11 @@ import {
   ClientIdParamSchema,
   PUBLIC_CLIENT_ALLOWED_GRANTS,
 } from "../schemas.js";
+import {
+  assertMayChangeAudience,
+  verifyAudience,
+  verifyScopes,
+} from "../utils.js";
 
 /** A service's client is managed with its service, under /admin/services. */
 const refuseServiceClient = async (id: string) => {
@@ -38,18 +44,29 @@ const refuseServiceClient = async (id: string) => {
   }
 };
 
+const refuseProvisioned = (client: { provisioned: boolean }) => {
+  if (client.provisioned) throw new ManagedByProvisioningError();
+};
+
 /**
  * The admin UI's client type, grant types and redirect URIs follow from
  * UI_BASE_URL and are set at every start (`loginClientConfig`); an edit would
- * only lock the UI out until the next one.
+ * only lock the UI out until the next one. Consent is always skipped for it
+ * and its audience comes from its scopes, so those two have no effect.
  */
 const refuseLockedLoginClientFields = (body: UpdateClientInput) => {
-  const locked = (["redirectUris", "grantTypes", "clientType"] as const).filter(
-    (field) => body[field] !== undefined
-  );
+  const locked = (
+    [
+      "redirectUris",
+      "grantTypes",
+      "clientType",
+      "consentRequired",
+      "audience",
+    ] as const
+  ).filter((field) => body[field] !== undefined);
   if (locked.length > 0) {
     throw new ConflictError(
-      `The admin UI's login client derives ${locked.join(", ")} from UI_BASE_URL; they cannot be edited`
+      `The admin UI's login client fixes ${locked.join(", ")}; they cannot be edited`
     );
   }
 };
@@ -86,10 +103,18 @@ export const updateClient = async (req: Request, res: Response) => {
 
   const existingClient = await db.clients.get(params.id);
   assertOwnerOrAdmin(existingClient.ownerId, user, "update");
+  refuseProvisioned(existingClient);
   if (existingClient.clientId === LOGIN_CLIENT.clientId) {
     refuseLockedLoginClientFields(body);
   }
   if (body.scopes) await verifyScopes(body.scopes);
+  const audience = body.audience && (await verifyAudience(body.audience));
+  if (
+    audience &&
+    audience.join("\n") !== [...existingClient.audience].sort().join("\n")
+  ) {
+    assertMayChangeAudience(user);
+  }
 
   // Validate ownership transfer
   if (body.ownerId && body.ownerId !== existingClient.ownerId) {
@@ -144,6 +169,7 @@ export const updateClient = async (req: Request, res: Response) => {
       {
         id: params.id,
         ...body,
+        audience,
         ...(secret && { clientSecret: secret.hashedSecret }),
       },
       tx
@@ -189,44 +215,14 @@ export const deleteClient = async (req: Request, res: Response) => {
 
   const existingClient = await db.clients.get(params.id);
   assertOwnerOrAdmin(existingClient.ownerId, user, "delete");
+  refuseProvisioned(existingClient);
   // The admin UI signs in through it; without it nobody could.
   if (existingClient.clientId === LOGIN_CLIENT.clientId) {
     throw new ConflictError("The admin UI's login client cannot be deleted");
   }
-  const jtis = await db.$transaction(async (tx) => {
-    const jtis = await db.accessTokens.revokeByClientId(params.id, tx);
-    // History names the client's service-account user, not the client, so
-    // the user outlives it — deactivated, never deleted.
-    const serviceAccount = await db.users.getByOAuthClientId(params.id);
-    if (serviceAccount) {
-      await db.users.update(serviceAccount.id, { isActive: false }, tx);
-    }
-    await db.clients.deleteClient(params.id, tx);
-    await logAuditTx(tx, {
-      auth: user,
-      action: "DELETE",
-      entityType: "OAuthClient",
-      entityId: existingClient.id,
-      entityName: existingClient.name,
-      metadata: {
-        clientId: existingClient.clientId,
-        revokedAccessTokens: jtis.length,
-        serviceAccountUserId: serviceAccount?.id ?? null,
-      },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.client.deleted",
-      entityType: "OAuthClient",
-      entityId: existingClient.id,
-      data: {
-        id: existingClient.id,
-        clientId: existingClient.clientId,
-        name: existingClient.name,
-      },
-    });
-    return jtis;
-  });
+  const jtis = await db.$transaction((tx) =>
+    deleteLoginClientTx(tx, existingClient, user)
+  );
   disconnectTokenSockets(jtis);
 
   res.status(204).send();
@@ -239,6 +235,7 @@ export const regenerateClientSecret = async (req: Request, res: Response) => {
 
   const client = await db.clients.get(params.id);
   assertOwnerOrAdmin(client.ownerId, user, "regenerate the secret of");
+  refuseProvisioned(client);
   if (client.clientType === "public") {
     throw new BadRequestError(
       "invalid_request",

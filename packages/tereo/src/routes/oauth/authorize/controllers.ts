@@ -3,9 +3,9 @@ import { validateBody, validateQuery } from "../../../utils/validateReq.js";
 import { authorizeRequestParams, getClientForAuthorize } from "./utils.js";
 import { UserType } from "../../../../prisma/generated/client/index.js";
 import type { AuthorizeRequest, AuthorizeSubmit } from "./schemas.js";
-import { isFirstPartyClient } from "../../../definitions/index.js";
 import type { StepWriter } from "../../../utils/db/loginFlows.js";
 import { knownDeviceFor } from "../../../utils/knownDevice.js";
+import { skipsConsent } from "../../../definitions/index.js";
 import { emailDomain } from "../../../utils/email.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
@@ -167,9 +167,9 @@ export const authorizeGetHandler = async (req: Request, res: Response) => {
       userSessionId: userSession.id,
     };
 
-    // Core's own clients need no approval. Any other client needs the
-    // consent screen, which a silent request cannot show (OIDC Core 3.1.2.6).
-    if (!isFirstPartyClient(client.clientId)) {
+    // A client that needs approval needs the consent screen, which a silent
+    // request cannot show (OIDC Core 3.1.2.6).
+    if (!skipsConsent(client, authorization.scopes)) {
       res.redirect(
         authorizationResponseUrl(query.redirect_uri, {
           error: "consent_required",
@@ -236,8 +236,7 @@ export const authorizeGetHandler = async (req: Request, res: Response) => {
             userSessionId: userSession.id,
           };
 
-          // Core's own clients need no approval, as with prompt=none.
-          if (isFirstPartyClient(client.clientId)) {
+          if (skipsConsent(client, authorization.scopes)) {
             res.redirect(
               await issueAuthorizationCode(req, res, client, authorization)
             );
@@ -355,7 +354,7 @@ export const authorizePostHandler = async (req: Request, res: Response) => {
   }
 
   res.json(
-    await continueAfterFirstFactor(res, {
+    await continueAfterFirstFactor(req, res, {
       user,
       client,
       request: authorizeRequestParams(body),

@@ -114,10 +114,10 @@ export const totpVerifyHandler = async (req: Request, res: Response) => {
     }
   );
   const result = await handlePostAuthOrgSelection(
+    req,
     res,
     verification.userId,
-    verification.clientId,
-    client.clientId,
+    client,
     verification.redirectUri,
     verification.scopes,
     verification.state || null,
@@ -240,10 +240,10 @@ export const totpRecoveryHandler = async (req: Request, res: Response) => {
     }
   );
   const result = await handlePostAuthOrgSelection(
+    req,
     res,
     verification.userId,
-    verification.clientId,
-    client.clientId,
+    client,
     verification.redirectUri,
     verification.scopes,
     verification.state || null,

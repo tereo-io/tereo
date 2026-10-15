@@ -1,10 +1,12 @@
 import RegenerateSecretButton from "./buttons/RegenerateSecretButton";
 import { faLock, faUnlock } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import DeleteClientButton from "./buttons/DeleteClientButton";
 import EditClientButton from "./buttons/EditClientButton";
 import useClient from "../../api/oauth-clients/useClient";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
+import { CORE_LOGIN_CLIENT_ID } from "../../constants";
 import { PageHeader } from "@/components/PageHeader";
 import { useParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
@@ -55,8 +57,9 @@ export const ClientDetail = () => {
       <PageHeader
         title={client.name}
         subtitle={`${client.clientType} client`}
+        badges={client.provisioned ? <ProvisionedBadge /> : undefined}
         actions={
-          client.service || !canManage
+          client.service || client.provisioned || !canManage
             ? []
             : [
                 ...(hasPermission("clients.write")
@@ -122,6 +125,14 @@ export const ClientDetail = () => {
                     },
                   ]
                 : []),
+              ...(client.clientId === CORE_LOGIN_CLIENT_ID
+                ? []
+                : [
+                    {
+                      label: "User approval",
+                      value: client.consentRequired ? "Asked" : "Not asked",
+                    },
+                  ]),
               {
                 label: "Created",
                 value: new Date(client.createdAt).toLocaleString(),

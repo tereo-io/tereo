@@ -45,6 +45,33 @@ env: {}
 # Further env sources, e.g. a ConfigMap or Secret of your own.
 extraEnvFrom: []
 
+# Services and login clients core creates and keeps at every start, as the
+# provisioning file's contents (packages/tereo/docs/provisioning.md). Empty
+# renders no ConfigMap and sets no PROVISIONING_FILE. Secrets are never
+# written here: `secretFrom` names an environment variable, and that variable
+# must be a key of secrets.existingSecret (or the Secret built by
+# secrets.externalSecret), or come from extraEnvFrom. Each value must be a
+# tereo_sk_ secret (npm run cli -- generate-secret). Core refuses to start if a
+# name is unset or a value is weak. Editing this restarts the pods.
+#
+# provisioning:
+#   services:
+#     - slug: billing-service
+#       name: Billing
+#       secretFrom: BILLING_CLIENT_SECRET
+#       access:
+#         roles: [file_user, audit_writer]
+#         audiences: [orders-service]
+#   clients:
+#     - clientId: billing-web
+#       name: Billing web app
+#       clientType: public
+#       redirectUris: [https://billing.example.com/callback]
+#       scopes: [openid, profile, email]
+#       audience: [billing-service]
+#       consentRequired: false
+provisioning: {}
+
 secrets:
   # A Secret you manage, holding DATABASE_URL, CORE_KEK (openssl rand -base64
   # 32), and REDIS_URL, or REDIS_PASSWORD when using Sentinel. Every key in it

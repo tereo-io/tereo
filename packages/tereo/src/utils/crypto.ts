@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual, createHash, createHmac } from "crypto";
 import { hashPassword, verifyPassword } from "./password.js";
+import { newClientSecretValue } from "./secretRules.js";
 import { authCodeHmacKey } from "./keys.js";
 
 export interface GeneratedClientSecret {
@@ -27,7 +28,7 @@ export const generateClientId = (): string => {
 };
 
 export const generateClientSecret = (): GeneratedClientSecret => {
-  const plainSecret = generateRandomString(64);
+  const plainSecret = newClientSecretValue();
   return { plainSecret, hashedSecret: hashFlowToken(plainSecret) };
 };
 

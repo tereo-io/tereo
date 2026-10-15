@@ -24,9 +24,15 @@ spec:
       {{- include "tereo.selectorLabels" (dict "root" $ "component" .component) | nindent 6 }}
   template:
     metadata:
-      {{- with $.Values.podAnnotations }}
+      {{- if or $.Values.podAnnotations $.Values.provisioning }}
       annotations:
+        {{- with $.Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $.Values.provisioning }}
+        # The file is read at start: a changed file rolls the pods.
+        checksum/provisioning: {{ toYaml $.Values.provisioning | sha256sum }}
+        {{- end }}
       {{- end }}
       labels:
         {{- include "tereo.labels" $ | nindent 8 }}
@@ -56,6 +62,10 @@ spec:
             - name: ROLE
               value: {{ .role }}
             {{- include "tereo.env" $ | nindent 12 }}
+            {{- if $.Values.provisioning }}
+            - name: PROVISIONING_FILE
+              value: /etc/tereo/provisioning.yaml
+            {{- end }}
           envFrom:
             {{- include "tereo.envFrom" $ | nindent 12 }}
           ports:
@@ -95,6 +105,11 @@ spec:
           volumeMounts:
             - name: storage
               mountPath: /app/storage
+            {{- if $.Values.provisioning }}
+            - name: provisioning
+              mountPath: /etc/tereo
+              readOnly: true
+            {{- end }}
       volumes:
         - name: storage
           {{- if $.Values.persistence.enabled }}
@@ -103,6 +118,11 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if $.Values.provisioning }}
+        - name: provisioning
+          configMap:
+            name: {{ include "tereo.fullname" $ }}-provisioning
+        {{- end }}
       {{- with $.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

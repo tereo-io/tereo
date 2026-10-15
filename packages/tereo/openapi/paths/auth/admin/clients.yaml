@@ -98,7 +98,10 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing clients.write permission
+        description: Forbidden - missing clients.write permission, or a non-empty `audience` without `services.approve`
+      '422':
+        $ref: '../../../components/auth/responses.yaml#/UnprocessableEntityResponse'
+        description: An `audience` slug that names core or no service (`invalid_audience`)
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -150,7 +153,7 @@
     summary: Update client
     description: |
       Updates a login client. A service's client (`service` set) is refused
-      with `409`. Only its owner or a holder of `clients.admin` may update it
+      with `409`, as is a provisioned one (`409 managed_by_provisioning`). Only its owner or a holder of `clients.admin` may update it
       (`403` otherwise). After the change a public client must
       still use only `authorization_code` / `refresh_token`
       (`400 invalid_request`) and have a redirect URI (`400 invalid_request`).
@@ -164,8 +167,8 @@
 
       The admin UI's own client (`tereo-ui`) derives its
       `redirectUris`, `grantTypes` and `clientType` from core's configuration
-      and has them set again on every start: a change to any of them is
-      refused with `409`. Its `redirectUris` are exactly
+      and has them set again on every start, and fixes its `consentRequired`
+      and `audience`: a change to any of these is refused with `409`. Its `redirectUris` are exactly
       `${UI_BASE_URL}/callback` in production; elsewhere that callback comes
       first, beside the loopback callbacks of other local cores sharing the
       database.
@@ -208,13 +211,16 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing clients.write permission, or the caller is neither the client's owner nor holds `clients.admin`
+        description: Forbidden - missing clients.write permission, the caller is neither the client's owner nor holds `clients.admin`, or the change sets or changes `audience` without `services.approve`
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: Client not found
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes` or `clientType`
+        description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes`, `clientType`, `consentRequired` or `audience`
+      '422':
+        $ref: '../../../components/auth/responses.yaml#/UnprocessableEntityResponse'
+        description: An `audience` slug that names core or no service (`invalid_audience`)
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -225,7 +231,7 @@
     summary: Delete client
     description: |
       Deletes a login client. A service's client (`service` set) is refused
-      with `409`. Only its owner or a holder of `clients.admin` may delete it
+      with `409`, as is a provisioned one (`409 managed_by_provisioning`). Only its owner or a holder of `clients.admin` may delete it
       (`403` otherwise). The admin UI's login client (`tereo-ui`)
       cannot be deleted (`409`). The client's access tokens are
       revoked, and its service-account user, if any, is deactivated (never
@@ -260,7 +266,7 @@
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The client belongs to a service (its `service` is set; manage it under /v1/admin/services), or it is the admin UI's login client
+        description: The client belongs to a service (its `service` is set; manage it under /v1/admin/services), it is declared in the provisioning file (`managed_by_provisioning`), or it is the admin UI's login client
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -272,7 +278,8 @@
     summary: Regenerate client secret
     description: |
       Generates a new client secret; the old one stops working at once. A
-      service's client (`service` set) is refused with `409`; regenerate it
+      service's client (`service` set) is refused with `409`, as is a
+      provisioned client (`409 managed_by_provisioning`); regenerate a service's
       under /v1/admin/services — checked first, so a service's client answers
       `409` to anyone holding `clients.write`. Then an unknown id is `404`,
       and only the client's owner or a holder of `clients.admin` may
@@ -312,7 +319,7 @@
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services
+        description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`)
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':

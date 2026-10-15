@@ -1029,8 +1029,10 @@ paths:
 
         A declaration that breaks a rule is refused whole: names outside the
         service's namespace, duplicates, a system role granting a permission
-        the declaration doesn't declare, or requested access that doesn't exist
-        return `422` with every problem listed; items owned
+        the declaration doesn't declare, requested access that doesn't exist,
+        a core role services may not request, or a core role spelled
+        `core/<name>` (core roles are named bare) return `422` with every
+        problem listed; items owned
         by another service or an admin return `409`. The body may be up to 1 MB.
 
         When it changes anything, an audit log entry is created and a
@@ -5222,7 +5224,10 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing clients.write permission
+          description: Forbidden - missing clients.write permission, or a non-empty `audience` without `services.approve`
+        '422':
+          $ref: '#/components/responses/UnprocessableEntityResponse'
+          description: An `audience` slug that names core or no service (`invalid_audience`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5275,7 +5280,7 @@ paths:
       summary: Update client
       description: |
         Updates a login client. A service's client (`service` set) is refused
-        with `409`. Only its owner or a holder of `clients.admin` may update it
+        with `409`, as is a provisioned one (`409 managed_by_provisioning`). Only its owner or a holder of `clients.admin` may update it
         (`403` otherwise). After the change a public client must
         still use only `authorization_code` / `refresh_token`
         (`400 invalid_request`) and have a redirect URI (`400 invalid_request`).
@@ -5289,8 +5294,8 @@ paths:
 
         The admin UI's own client (`tereo-ui`) derives its
         `redirectUris`, `grantTypes` and `clientType` from core's configuration
-        and has them set again on every start: a change to any of them is
-        refused with `409`. Its `redirectUris` are exactly
+        and has them set again on every start, and fixes its `consentRequired`
+        and `audience`: a change to any of these is refused with `409`. Its `redirectUris` are exactly
         `${UI_BASE_URL}/callback` in production; elsewhere that callback comes
         first, beside the loopback callbacks of other local cores sharing the
         database.
@@ -5334,13 +5339,16 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing clients.write permission, or the caller is neither the client's owner nor holds `clients.admin`
+          description: Forbidden - missing clients.write permission, the caller is neither the client's owner nor holds `clients.admin`, or the change sets or changes `audience` without `services.approve`
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Client not found
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes` or `clientType`
+          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes`, `clientType`, `consentRequired` or `audience`
+        '422':
+          $ref: '#/components/responses/UnprocessableEntityResponse'
+          description: An `audience` slug that names core or no service (`invalid_audience`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5351,7 +5359,7 @@ paths:
       summary: Delete client
       description: |
         Deletes a login client. A service's client (`service` set) is refused
-        with `409`. Only its owner or a holder of `clients.admin` may delete it
+        with `409`, as is a provisioned one (`409 managed_by_provisioning`). Only its owner or a holder of `clients.admin` may delete it
         (`403` otherwise). The admin UI's login client (`tereo-ui`)
         cannot be deleted (`409`). The client's access tokens are
         revoked, and its service-account user, if any, is deactivated (never
@@ -5387,7 +5395,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The client belongs to a service (its `service` is set; manage it under /v1/admin/services), or it is the admin UI's login client
+          description: The client belongs to a service (its `service` is set; manage it under /v1/admin/services), it is declared in the provisioning file (`managed_by_provisioning`), or it is the admin UI's login client
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5399,7 +5407,8 @@ paths:
       summary: Regenerate client secret
       description: |
         Generates a new client secret; the old one stops working at once. A
-        service's client (`service` set) is refused with `409`; regenerate it
+        service's client (`service` set) is refused with `409`, as is a
+        provisioned client (`409 managed_by_provisioning`); regenerate a service's
         under /v1/admin/services — checked first, so a service's client answers
         `409` to anyone holding `clients.write`. Then an unknown id is `404`,
         and only the client's owner or a holder of `clients.admin` may
@@ -5440,7 +5449,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services
+          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7762,7 +7771,9 @@ paths:
         Renames, deactivates or reactivates a service. The name is copied to
         its OAuth client; `isActive` is copied to its service-account user.
         Deactivating revokes all of the service's outstanding tokens. Core's
-        own row cannot be changed (`403`).
+        own row cannot be changed (`403`). A provisioned service is refused
+        with `409 managed_by_provisioning`: its name and secret come from the
+        provisioning file.
 
         An audit log entry is created for this action.
         A `core.service.updated` webhook event is emitted.
@@ -7802,6 +7813,9 @@ paths:
           description: Forbidden - missing services.write permission, or the service is core
         '404':
           $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7816,7 +7830,9 @@ paths:
         secret keeps working for `SERVICE_SECRET_OVERLAP_HOURS` (until
         `previousSecretExpiresAt`) so running copies survive the rollout; end
         the overlap early with `POST /v1/admin/services/{id}/revoke-previous-secret`.
-        Core's own row cannot be changed (`403`).
+        Core's own row cannot be changed (`403`). A provisioned service is
+        refused with `409 managed_by_provisioning`: rotate its secret in the
+        deployment's environment instead.
 
         An audit log entry is created for this action.
         A `core.service.secret-regenerated` webhook event is emitted.
@@ -7849,6 +7865,9 @@ paths:
           description: Forbidden - missing services.write permission, or the service is core
         '404':
           $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7860,7 +7879,9 @@ paths:
       summary: Revoke previous service secret
       description: |
         Ends the secret overlap now: only the current secret works from here
-        on. Core's own row cannot be changed (`403`).
+        on. Core's own row cannot be changed (`403`). Allowed on a provisioned
+        service too: the provisioning file cannot end an overlap, and a leaked
+        old secret must not wait it out.
 
         An audit log entry is created for this action.
         A `core.service.previous-secret-revoked` webhook event is emitted.
@@ -7908,7 +7929,8 @@ paths:
         audience is added to its client's `audience`. Requests already approved
         are skipped. All ids must belong to this service (`404` otherwise);
         a requested role that no longer exists or is retired fails the whole
-        call with `422 role_unavailable`. Core's own row cannot be changed
+        call with `422 role_unavailable`, and a core role services may not
+        request with `422 role_not_requestable`. Core's own row cannot be changed
         (`403`).
 
         Only grant what you hold: every permission of a requested role the
@@ -7964,7 +7986,7 @@ paths:
           description: Service not found, or an access request id is not this service's
         '422':
           $ref: '#/components/responses/UnprocessableEntityResponse'
-          description: A requested role no longer exists or is retired (`role_unavailable`)
+          description: A requested role no longer exists or is retired (`role_unavailable`), or is a core role services may not hold (`role_not_requestable`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -21030,6 +21052,8 @@ components:
         - scopes
         - grantTypes
         - audience
+        - consentRequired
+        - provisioned
         - ownerId
         - organizationId
         - service
@@ -21083,6 +21107,20 @@ components:
           type: array
           items:
             type: string
+          description: Slugs of the services this client's tokens may name.
+        consentRequired:
+          type: boolean
+          description: |
+            Whether users approve the app on a consent screen after signing in.
+            A request for any `core:*` scope shows the consent screen even when
+            `false`. Core's own login client never asks, and refuses a change
+            (`409`).
+        provisioned:
+          type: boolean
+          description: |
+            True for a client declared in the provisioning file. It changes only
+            there: updating, deleting or regenerating its secret here is `409
+            managed_by_provisioning`.
         ownerId:
           type: string
           format: uuid
@@ -21220,6 +21258,27 @@ components:
             enum:
               - authorization_code
               - refresh_token
+        audience:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          default: []
+          description: |
+            Slugs of services (other than core) that this client's tokens may
+            name. Changing it needs `services.approve` as well as `clients.write`
+            (`403` otherwise); an unknown slug, or core's, is `422
+            invalid_audience`. Locked (`409`) on core's own login client.
+        consentRequired:
+          type: boolean
+          default: true
+          description: |
+            Whether users approve the app on a consent screen after signing in.
+            A request for any `core:*` scope shows the consent screen even when
+            `false`. Core's own login client never asks, and refuses a change
+            (`409`).
     UpdateClientRequest:
       type: object
       properties:
@@ -21265,6 +21324,25 @@ components:
             enum:
               - authorization_code
               - refresh_token
+        audience:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          description: |
+            Slugs of services (other than core) that this client's tokens may
+            name. Changing it needs `services.approve` as well as `clients.write`
+            (`403` otherwise); an unknown slug, or core's, is `422
+            invalid_audience`. Locked (`409`) on core's own login client.
+        consentRequired:
+          type: boolean
+          description: |
+            Whether users approve the app on a consent screen after signing in.
+            A request for any `core:*` scope shows the consent screen even when
+            `false`. Core's own login client never asks, and refuses a change
+            (`409`).
         ownerId:
           type: string
           format: uuid
@@ -22116,7 +22194,7 @@ components:
                 minLength: 1
                 maxLength: 200
               default: []
-              description: A core system role by `name`, or another service's as `<slug>/<name>`.
+              description: A requestable core system role by its bare `name` (never `core/<name>`), or another service's as `<slug>/<name>`.
             audiences:
               type: array
               maxItems: 100
@@ -22184,6 +22262,7 @@ components:
         - name
         - namespace
         - isActive
+        - provisioned
         - clientId
         - serviceAccountUserId
         - serviceAccountUser
@@ -22209,6 +22288,12 @@ components:
           description: Prefix of everything the service declares. Fixed once set.
         isActive:
           type: boolean
+        provisioned:
+          type: boolean
+          description: |
+            True for a service declared in the provisioning file. Only its access
+            and the end of a secret overlap are decided here: updating it or
+            regenerating its secret is `409 managed_by_provisioning`.
         clientId:
           type:
             - string

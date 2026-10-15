@@ -52,8 +52,9 @@ export interface BrowserLoginOptions {
 }
 
 /**
- * Password login through to approved consent. Returns the authorization code
- * and its verifier; the jar ends holding the SSO cookie.
+ * Password login through to a code: approved consent, or none for a client
+ * that skips it. Returns the authorization code and its verifier; the jar
+ * ends holding the SSO cookie.
  */
 export const browserLogin = async ({
   clientId,
@@ -94,7 +95,16 @@ export const browserLogin = async ({
   absorbCookies(jar, submit);
   expect(submit.status).toBe(200);
   const { redirect_url } = (await submit.json()) as { redirect_url: string };
-  const session = new URL(redirect_url).searchParams.get("session");
+  const afterLogin = new URL(redirect_url).searchParams;
+  if (afterLogin.has("code")) {
+    return {
+      jar,
+      code: afterLogin.get("code")!,
+      verifier: pkce.verifier,
+      redirectUrl: redirect_url,
+    };
+  }
+  const session = afterLogin.get("session");
   expect(session).toBeTruthy();
 
   const consent = await fetch(`${BASE_URL}/oauth/consent`, {

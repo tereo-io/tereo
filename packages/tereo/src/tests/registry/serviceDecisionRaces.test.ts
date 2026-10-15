@@ -3,32 +3,18 @@ import { CORE_SERVICE_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { CORE_URL } from "../utils/coreUrl.js";
 import { describe, expect, it } from "vitest";
+import { fetchJson } from "../utils/http.js";
 import db from "../../utils/db/index.js";
 import { randomBytes } from "crypto";
 
 const rand = () => `x${randomBytes(5).toString("hex")}`;
 
-const api = async (
+const api = (
   method: string,
   path: string,
   token: string | null,
   body?: unknown
-) => {
-  const response = await fetch(`${CORE_URL}${path}`, {
-    method,
-    headers: {
-      ...(token && { Authorization: `Bearer ${token}` }),
-      ...(body !== undefined && { "Content-Type": "application/json" }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await response.text();
-  return {
-    status: response.status,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    body: (text ? JSON.parse(text) : null) as any,
-  };
-};
+) => fetchJson(method, `${CORE_URL}${path}`, token, body);
 
 interface Credentials {
   clientId: string;

@@ -77,10 +77,12 @@ export async function teardown() {
   const files = await import("./files/utils/test-helpers.js");
   const webhooks = await import("./webhooks/utils/test-helpers.js");
   const audit = await import("./audit/utils/test-helpers.js");
+  const provisioning = await import("./provisioning/utils/test-helpers.js");
   for (const cleanup of [
     files.cleanupAllTestEntities,
     webhooks.cleanupAllTestEntities,
     audit.cleanupAllTestEntities,
+    provisioning.cleanupAllTestEntities,
   ]) {
     await cleanup().catch(() => undefined);
   }

@@ -1,9 +1,15 @@
-import { authorizeRestartParams, uiUrl } from "./authorization.js";
+import { skipsConsent } from "../definitions/index.js";
 import type { StepWriter } from "./db/loginFlows.js";
 import { generateRandomString } from "./crypto.js";
-import type { Response } from "express";
+import type { Request, Response } from "express";
 import db from "./db/index.js";
 import env from "../env.js";
+import {
+  authorizeRestartParams,
+  issueAuthorizationCode,
+  grantAfterLogin,
+  uiUrl,
+} from "./authorization.js";
 import {
   setConsentSessionCookie,
   setOrgSelectSessionCookie,
@@ -11,10 +17,10 @@ import {
 } from "./cookies.js";
 
 export const handlePostAuthOrgSelection = async (
+  req: Request,
   res: Response,
   userId: string,
-  clientInternalId: string,
-  clientId: string,
+  client: { id: string; clientId: string; consentRequired: boolean },
   redirectUri: string,
   scopes: string[],
   state: string | null,
@@ -30,7 +36,7 @@ export const handlePostAuthOrgSelection = async (
   writeStep: StepWriter = db.loginFlows.writeStep
 ): Promise<{ redirect_url: string }> => {
   const restart = authorizeRestartParams({
-    clientId,
+    clientId: client.clientId,
     redirectUri,
     scopes,
     state,
@@ -52,13 +58,42 @@ export const handlePostAuthOrgSelection = async (
 
   if (orgId !== null || activeOrgs.length === 0) {
     // 0 orgs (platform admin) or 1 org (auto-select)
+    if (skipsConsent(client, scopes)) {
+      // Nothing is written for the user to continue, but the step that led
+      // here (a TOTP verification) is still spent: one code, one login.
+      await writeStep(async () => undefined);
+      clearAuthSessionCookie(res, client.clientId);
+      const redirectUrl = await issueAuthorizationCode(
+        req,
+        res,
+        client,
+        grantAfterLogin(
+          {
+            userId,
+            redirectUri,
+            scopes,
+            state,
+            codeChallenge,
+            codeChallengeMethod,
+            nonce,
+            authTime,
+            maxAge,
+            acrValues,
+            authMethods,
+          },
+          orgId
+        )
+      );
+      return { redirect_url: redirectUrl };
+    }
+
     const consentSessionToken = generateRandomString(32);
     await writeStep((tx) =>
       db.consent.createConsentSession(
         {
           sessionToken: consentSessionToken,
           userId,
-          clientId: clientInternalId,
+          clientId: client.id,
           organizationId: orgId,
           redirectUri,
           scopes,
@@ -77,8 +112,8 @@ export const handlePostAuthOrgSelection = async (
       )
     );
 
-    setConsentSessionCookie(res, consentSessionToken, clientId);
-    clearAuthSessionCookie(res, clientId);
+    setConsentSessionCookie(res, consentSessionToken, client.clientId);
+    clearAuthSessionCookie(res, client.clientId);
 
     return {
       redirect_url: uiUrl("/consent", {
@@ -95,7 +130,7 @@ export const handlePostAuthOrgSelection = async (
       {
         sessionToken,
         userId,
-        clientId: clientInternalId,
+        clientId: client.id,
         redirectUri,
         scopes,
         state,
@@ -113,8 +148,8 @@ export const handlePostAuthOrgSelection = async (
     )
   );
 
-  setOrgSelectSessionCookie(res, sessionToken, clientId);
-  clearAuthSessionCookie(res, clientId);
+  setOrgSelectSessionCookie(res, sessionToken, client.clientId);
+  clearAuthSessionCookie(res, client.clientId);
 
   return {
     redirect_url: uiUrl("/login/org-select", {

@@ -1,9 +1,9 @@
+import { ROLES, isRequestableCoreRole } from "../definitions/roles.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { PERMISSION_CATALOG } from "../definitions/permissions.js";
 import { compareSemver, SEMVER_PATTERN } from "./semver.js";
 import type { Declaration } from "../definitions/index.js";
 import { emitTx, logAuditTx } from "./outbox.js";
-import { ROLES } from "../definitions/roles.js";
 import type { Prisma } from "./db/prisma.js";
 import { prisma } from "./db/prisma.js";
 import { logger } from "./logger.js";
@@ -12,6 +12,7 @@ import env from "../env.js";
 import { z } from "zod";
 import {
   CORE_RESERVED_NAMESPACES,
+  CORE_SERVICE,
   CORE_SERVICE_ID,
   SYSTEM_USER_ID,
 } from "../definitions/index.js";
@@ -121,7 +122,7 @@ export interface RegistryService {
 // ---------------------------------------------------------------------------
 
 /** `a` and `b` claim overlapping names: equal, or one a hyphenated extension. */
-const overlaps = (a: string, b: string) =>
+export const namespacesOverlap = (a: string, b: string) =>
   a === b || a.startsWith(`${b}-`) || b.startsWith(`${a}-`);
 
 /**
@@ -155,7 +156,7 @@ export const assertNamespaceAvailable = async (
       (s) => s.namespace
     ),
   ];
-  const clash = taken.find((other) => overlaps(namespace, other));
+  const clash = taken.find((other) => namespacesOverlap(namespace, other));
   if (clash) {
     throw new ConflictError(
       `Namespace "${namespace}" overlaps "${clash}", which is already taken`
@@ -386,7 +387,7 @@ const accessView = (row: AccessView): AccessView => ({
   status: row.status,
 });
 
-const listAccess = async (serviceId: string, tx: Tx = prisma) =>
+export const listAccess = async (serviceId: string, tx: Tx = prisma) =>
   (
     await tx.serviceAccess.findMany({
       where: { serviceId },
@@ -835,8 +836,20 @@ const applyRequestedAccess = async (
 
   const problems: string[] = [];
   for (const target of roles) {
-    if (!(await resolveRoleTarget(target, tx))) {
+    if (target.startsWith(`${CORE_SERVICE.slug}/`)) {
+      problems.push(
+        `role "${target}": core roles are named bare, without "${CORE_SERVICE.slug}/"`
+      );
+      continue;
+    }
+    const role = await resolveRoleTarget(target, tx);
+    if (!role) {
       problems.push(`role "${target}" does not exist or is retired`);
+    } else if (
+      role.serviceId === CORE_SERVICE_ID &&
+      !isRequestableCoreRole(role.name)
+    ) {
+      problems.push(`role "${target}" cannot be requested by a service`);
     }
   }
   for (const slug of audiences) {

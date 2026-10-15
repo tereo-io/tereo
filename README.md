@@ -214,7 +214,8 @@ Notifications (email connections, sending, delivery) are in [packages/tereo/docs
 |---------|-----|
 | `EADDRINUSE` on 4001 | The Docker `core` container and `npm run dev` (or the test suite) both use 4001; stop one |
 | `Port 4000 is already in use` from the UI | Free it, or move the dev server as in step 3 |
-| Lost the setup token | Restart core; it logs a new one while setup is pending |
+| Lost the setup token | Restart core; it logs a new one while setup is pending. With `SETUP_TOKEN` set, core never logs it: use the value you set |
+| Core exits with `Invalid provisioning file` | It lists every problem, naming the variable or entry; see [provisioning](packages/tereo/docs/provisioning.md) |
 | UI login fails with `Invalid redirect URI` | Core's `UI_BASE_URL` must match where the UI runs (:4000 for `npm run dev`, `:4001` for the built UI); restart core after changing it |
 | `Cannot find module '…/prisma/generated/client/index.js'` | `npx prisma generate` in `packages/tereo` |
 | Core exits with a configuration error | The message names the variable; see [configuration](packages/tereo/docs/configuration.md) |
@@ -241,6 +242,10 @@ waits for approval, and what they drop is retired. They reach core through `@ter
 client, boot-time registration, and a transactional outbox. The admin UI, `tereo-ui`, ships in
 core's image with setup, services, auth admin, files, webhooks, notifications, the audit log and
 API docs.
+A deploy can declare its services and login clients in a [provisioning file](packages/tereo/docs/provisioning.md)
+that core applies at every start, with secrets from the environment and access pre-approved, and
+`SETUP_TOKEN` lets first-boot setup run unattended. Login clients carry an admin-set `audience` and a
+`consentRequired` flag, and app service secrets share one `tereo_sk_` format.
 CI checks formatting, import order, lint and types, runs the suite in Docker with real users and
 tokens, and starts the release image against a fresh database.
 

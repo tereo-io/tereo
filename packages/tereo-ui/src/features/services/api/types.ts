@@ -11,6 +11,7 @@ export interface ServiceSummary {
 
 /** A service as `GET /admin/services` returns it. */
 export interface Service extends ServiceSummary {
+  provisioned: boolean;
   /** Null only for core's own row, which has no OAuth client. */
   clientId: string | null;
   serviceAccountUserId: string | null;

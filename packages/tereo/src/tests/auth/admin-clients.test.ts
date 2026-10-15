@@ -132,6 +132,25 @@ describe("Admin Clients Endpoints", () => {
       expect(data.clientId).toBeDefined();
     });
 
+    it("defaults consentRequired to true", async () => {
+      const response = await fetch(`${BASE_URL}/v1/admin/clients`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: `Consent default ${generateUniqueId()}`,
+          clientType: "public",
+          redirectUris: ["http://localhost:3000/callback"],
+          grantTypes: ["authorization_code"],
+        }),
+      });
+      expect(response.status).toBe(HTTP_STATUS.CREATED);
+      const data = (await response.json()) as ClientResponse;
+      expect(data.consentRequired).toBe(true);
+    });
+
     it("persists postLogoutRedirectUris", async () => {
       const postLogoutRedirectUris = ["http://localhost:3000/logged-out"];
       const response = await fetch(`${BASE_URL}/v1/admin/clients`, {
@@ -344,6 +363,27 @@ describe("Admin Clients Endpoints", () => {
 
       expect(response.status).toBe(HTTP_STATUS.OK);
       expect(data.name).toBe("Updated Client Name");
+    });
+
+    it("updates consentRequired and reads it back", async () => {
+      const url = `${BASE_URL}/v1/admin/clients/${managedClient.id}`;
+      const headers = {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      };
+      const patch = await fetch(url, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ consentRequired: false }),
+      });
+      expect(patch.status).toBe(HTTP_STATUS.OK);
+      expect(((await patch.json()) as ClientResponse).consentRequired).toBe(
+        false
+      );
+      const get = await fetch(url, { headers });
+      expect(((await get.json()) as ClientResponse).consentRequired).toBe(
+        false
+      );
     });
 
     it("should update redirect URIs", async () => {
@@ -872,5 +912,141 @@ describe("Admin Clients Endpoints", () => {
       });
       expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
     });
+  });
+});
+
+describe("Admin Clients: audience and the login client's locked fields", () => {
+  let approver: string;
+  let writer: string;
+  let clientsAdmin: string;
+  let slugA: string;
+  let slugB: string;
+
+  const send = (token: string, method: string, path: string, body?: unknown) =>
+    fetch(`${BASE_URL}/v1/admin/clients${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+  const loginClientBody = (extra: Record<string, unknown> = {}) => ({
+    name: `Login ${generateUniqueId()}`,
+    clientType: "public",
+    redirectUris: ["http://localhost:3000/callback"],
+    grantTypes: ["authorization_code"],
+    ...extra,
+  });
+
+  beforeAll(async () => {
+    approver = await getTestPrincipalToken({
+      permissions: ["clients.write", "clients.read", "services.approve"],
+    });
+    writer = await getTestPrincipalToken({
+      permissions: ["clients.write", "clients.read"],
+    });
+    clientsAdmin = await getTestPrincipalToken({
+      permissions: ["clients.admin"],
+    });
+    slugA = await makeServiceOf((await createTestClient()).id);
+    slugB = await makeServiceOf((await createTestClient()).id);
+  });
+
+  it("sets a login client's audience to existing services", async () => {
+    const created = await send(
+      approver,
+      "POST",
+      "",
+      loginClientBody({ audience: [slugB, slugA, slugB] })
+    );
+    expect(created.status).toBe(HTTP_STATUS.CREATED);
+    const client = (await created.json()) as ClientResponse;
+    expect(client.audience).toEqual([slugA, slugB].sort());
+
+    const patched = await send(approver, "PATCH", `/${client.id}`, {
+      audience: [slugA],
+    });
+    expect(patched.status).toBe(HTTP_STATUS.OK);
+    expect(((await patched.json()) as ClientResponse).audience).toEqual([
+      slugA,
+    ]);
+  });
+
+  it("defaults the audience to empty", async () => {
+    const created = await send(writer, "POST", "", loginClientBody());
+    expect(created.status).toBe(HTTP_STATUS.CREATED);
+    expect(((await created.json()) as ClientResponse).audience).toEqual([]);
+  });
+
+  it("refuses an audience naming core, an unknown slug, or nothing", async () => {
+    const response = await send(
+      approver,
+      "POST",
+      "",
+      loginClientBody({ audience: ["core", "no-such-service", slugA] })
+    );
+    expect(response.status).toBe(422);
+    const data = (await response.json()) as ErrorResponse;
+    expect(data.error).toBe("invalid_audience");
+    expect(data.error_description).toContain("core");
+    expect(data.error_description).toContain("no-such-service");
+    expect(data.error_description).not.toContain(slugA);
+
+    const empty = await send(
+      approver,
+      "POST",
+      "",
+      loginClientBody({ audience: [""] })
+    );
+    expect(empty.status).toBe(HTTP_STATUS.BAD_REQUEST);
+  });
+
+  it("requires services.approve to set or change an audience", async () => {
+    const refused = await send(
+      writer,
+      "POST",
+      "",
+      loginClientBody({ audience: [slugA] })
+    );
+    expect(refused.status).toBe(HTTP_STATUS.FORBIDDEN);
+
+    const created = await send(
+      approver,
+      "POST",
+      "",
+      loginClientBody({ audience: [slugA] })
+    );
+    const client = (await created.json()) as ClientResponse;
+    const owned = await getTestPrincipalToken({
+      permissions: ["clients.admin"],
+    });
+
+    const change = await send(owned, "PATCH", `/${client.id}`, {
+      audience: [slugB],
+    });
+    expect(change.status).toBe(HTTP_STATUS.FORBIDDEN);
+
+    const unchanged = await send(owned, "PATCH", `/${client.id}`, {
+      name: "Renamed",
+      audience: [slugA],
+    });
+    expect(unchanged.status).toBe(HTTP_STATUS.OK);
+  });
+
+  it("refuses to edit consentRequired or audience on core's login client", async () => {
+    const loginClient = await prisma.oAuthClient.findUniqueOrThrow({
+      where: { clientId: LOGIN_CLIENT.clientId },
+    });
+    for (const body of [{ consentRequired: false }, { audience: [slugA] }]) {
+      const response = await send(
+        clientsAdmin,
+        "PATCH",
+        `/${loginClient.id}`,
+        body
+      );
+      expect(response.status).toBe(HTTP_STATUS.CONFLICT);
+    }
   });
 });

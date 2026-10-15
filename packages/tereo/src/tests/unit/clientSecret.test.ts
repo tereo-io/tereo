@@ -17,7 +17,7 @@ const client = (
 describe("client secrets", () => {
   it("are stored as the SHA-256 hex of the plain secret", () => {
     const { plainSecret, hashedSecret } = generateClientSecret();
-    expect(plainSecret).toMatch(/^[0-9a-f]{64}$/);
+    expect(plainSecret).toMatch(/^tereo_sk_[A-Za-z0-9_-]{43}$/);
     expect(hashedSecret).toBe(sha256Hex(plainSecret));
   });
 

@@ -1,3 +1,4 @@
+import { deprovisionMissing } from "../utils/provisioning/index.js";
 import { retireMissing } from "../utils/registry.js";
 import { TrackedWorker } from "./workerRegistry.js";
 import { getRedisClient } from "../utils/redis.js";
@@ -11,7 +12,8 @@ import {
 } from "../utils/bullmq.js";
 
 // Hourly — retire permissions, system roles, buckets and event types missing
-// from their service's declaration for longer than the grace period (24 h by
+// from their service's declaration, and services and clients missing from the
+// provisioning file, for longer than the grace period (24 h by
 // default). Hourly is fine-grained enough against a grace measured in hours.
 const REGISTRY_RETIREMENT_QUEUE = "core-registry-retirement";
 const JOB_INTERVAL_MS = 60 * 60 * 1000;
@@ -31,6 +33,7 @@ export async function startRegistryRetirement(): Promise<void> {
     async () => {
       if (isShuttingDown()) return;
       await retireMissing();
+      await deprovisionMissing();
     },
     { connection: getRedisClient().duplicate(), concurrency: 1 }
   );

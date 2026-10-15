@@ -1,4 +1,5 @@
 import "../preload.js";
+import { runGenerateSecretCli } from "./generateSecret/index.js";
 import { runOutboxReplayCli } from "./outboxReplay/index.js";
 import { disconnectDatabase } from "../utils/db/prisma.js";
 import { runRewrapCli } from "./rewrapMasterKey/index.js";
@@ -17,6 +18,9 @@ async function main() {
     console.error(
       "  outbox-replay        Return dead-lettered outbox rows to the reaper"
     );
+    console.error(
+      "  generate-secret      Print a new client secret in the tereo_sk_ format"
+    );
     process.exit(command ? 0 : 1);
   }
 
@@ -24,6 +28,8 @@ async function main() {
     await runRewrapCli(args.slice(1));
   } else if (command === "outbox-replay") {
     await runOutboxReplayCli(args.slice(1));
+  } else if (command === "generate-secret") {
+    runGenerateSecretCli();
   } else {
     console.error(`Unknown command: ${command}`);
     process.exit(1);

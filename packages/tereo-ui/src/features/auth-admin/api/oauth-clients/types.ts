@@ -16,8 +16,11 @@ export interface OAuthClient {
   scopes: string[];
   /** A service's client also lists `client_credentials`. */
   grantTypes: (GrantType | "client_credentials")[];
-  /** Read-only here: a service's audiences are approved under /admin/services. */
+  /** Service slugs this client's tokens may name; a service's own client is managed under /admin/services. */
   audience: string[];
+  /** Whether users approve the app after signing in; core's own login client never asks. */
+  consentRequired: boolean;
+  provisioned: boolean;
   ownerId: string;
   /**
    * Set for a service's client, which is managed under /admin/services: core
@@ -41,6 +44,8 @@ export interface CreateClientInput {
   postLogoutRedirectUris?: string[];
   scopes?: string[];
   grantTypes: GrantType[];
+  audience?: string[];
+  consentRequired?: boolean;
 }
 
 export interface UpdateClientInput {
@@ -50,6 +55,8 @@ export interface UpdateClientInput {
   postLogoutRedirectUris?: string[];
   scopes?: string[];
   grantTypes?: GrantType[];
+  audience?: string[];
+  consentRequired?: boolean;
   ownerId?: string;
 }
 

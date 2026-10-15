@@ -30,6 +30,18 @@ export const get = async (
   return service;
 };
 
+/** The ones of these slugs that name a service. */
+export const findSlugs = async (
+  slugs: string[],
+  tx: Prisma.TransactionClient = prisma
+): Promise<Set<string>> => {
+  const found = await tx.service.findMany({
+    where: { slug: { in: slugs } },
+    select: { slug: true },
+  });
+  return new Set(found.map((s) => s.slug));
+};
+
 /** The service an OAuth client (by row id) belongs to, if any. */
 export const getByClientId = (clientId: string) =>
   prisma.service.findUnique({ where: { clientId } });

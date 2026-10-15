@@ -5,6 +5,7 @@ import { CORE_VERSION } from "../../utils/version.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes, randomUUID } from "crypto";
 import { CORE_URL } from "../utils/coreUrl.js";
+import { fetchJson } from "../utils/http.js";
 import db from "../../utils/db/index.js";
 import FormData from "form-data";
 import env from "../../env.js";
@@ -44,27 +45,12 @@ beforeAll(async () => {
 
 const rand = () => `x${randomBytes(5).toString("hex")}`;
 
-const api = async (
+const api = (
   method: string,
   path: string,
   token: string | null,
   body?: unknown
-) => {
-  const response = await fetch(`${ROOT}${path}`, {
-    method,
-    headers: {
-      ...(token && { Authorization: `Bearer ${token}` }),
-      ...(body !== undefined && { "Content-Type": "application/json" }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await response.text();
-  return {
-    status: response.status,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    body: (text ? JSON.parse(text) : null) as any,
-  };
-};
+) => fetchJson(method, `${ROOT}${path}`, token, body);
 
 interface Credentials {
   clientId: string;
@@ -605,6 +591,91 @@ describe("requested access", () => {
       })
     );
     expect(res.status).toBe(422);
+  });
+
+  it("refuses a request for a core role that is not requestable", async () => {
+    const service = await addService();
+    const res = await declare(
+      await tokenFor(service),
+      declarationFor(service.namespace, {
+        requestedAccess: { roles: ["admin"] },
+      })
+    );
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("invalid_requested_access");
+    expect(res.body.error_description).toContain(
+      'role "admin" cannot be requested by a service'
+    );
+  });
+
+  it.each(["core/admin", "core/platform_admin"])(
+    "refuses %s, a core admin role behind the core/ prefix",
+    async (target) => {
+      const service = await addService();
+      const res = await declare(
+        await tokenFor(service),
+        declarationFor(service.namespace, {
+          requestedAccess: { roles: [target] },
+        })
+      );
+      expect(res.status).toBe(422);
+      expect(res.body.error).toBe("invalid_requested_access");
+      expect(
+        await prisma.serviceAccess.count({ where: { serviceId: service.id } })
+      ).toBe(0);
+    }
+  );
+
+  it("refuses a requestable core role behind the core/ prefix", async () => {
+    const service = await addService();
+    const res = await declare(
+      await tokenFor(service),
+      declarationFor(service.namespace, {
+        requestedAccess: { roles: ["core/file_user"] },
+      })
+    );
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("invalid_requested_access");
+    expect(res.body.error_description).toContain("named bare");
+  });
+
+  it.each(["admin", "core/admin"])(
+    "refuses to approve a %s row that slipped onto file",
+    async (target) => {
+      const service = await addService();
+      await tokenFor(service);
+      const row = await prisma.serviceAccess.create({
+        data: { serviceId: service.id, kind: "role", target },
+      });
+      const res = await api(
+        "POST",
+        `/v1/admin/services/${service.id}/access/approve`,
+        adminToken,
+        { ids: [row.id] }
+      );
+      expect(res.status).toBe(422);
+      expect(
+        (
+          await prisma.serviceAccess.findUniqueOrThrow({
+            where: { id: row.id },
+          })
+        ).status
+      ).toBe("pending");
+    }
+  );
+
+  it("still accepts a requestable core role", async () => {
+    const service = await addService();
+    const res = await declare(
+      await tokenFor(service),
+      declarationFor(service.namespace, {
+        requestedAccess: { roles: ["file_user"] },
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.access).toEqual([
+      expect.objectContaining({ target: "file_user", status: "pending" }),
+    ]);
   });
 
   it("lets an approved audience introspect the service's tokens", async () => {

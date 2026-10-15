@@ -74,7 +74,8 @@ limits add `X-RateLimit-*` headers.
 ## Specific codes
 
 An area keeps its own code where a client plausibly branches on it, e.g. `user_not_in_organization`,
-`masked_header_value`, `bucket_declared` / `bucket_retired`, `role_assigned_in_org`,
+`masked_header_value`, `bucket_declared` / `bucket_retired`, `managed_by_provisioning` (409: a
+service or login client declared in the provisioning file), `role_assigned_in_org`,
 `blocked_file_type`, `invalid_event_type`, `reserved_event_type`. Pass it to the class
 (`ConflictError(message, "bucket_retired")`, `BadRequestError(code, message)`) rather than
 building an `AppError` by status.

@@ -1438,6 +1438,8 @@ Client:
     - scopes
     - grantTypes
     - audience
+    - consentRequired
+    - provisioned
     - ownerId
     - organizationId
     - service
@@ -1486,6 +1488,20 @@ Client:
       type: array
       items:
         type: string
+      description: Slugs of the services this client's tokens may name.
+    consentRequired:
+      type: boolean
+      description: |
+        Whether users approve the app on a consent screen after signing in.
+        A request for any `core:*` scope shows the consent screen even when
+        `false`. Core's own login client never asks, and refuses a change
+        (`409`).
+    provisioned:
+      type: boolean
+      description: |
+        True for a client declared in the provisioning file. It changes only
+        there: updating, deleting or regenerating its secret here is `409
+        managed_by_provisioning`.
     ownerId:
       type: string
       format: uuid
@@ -1613,6 +1629,27 @@ CreateClientRequest:
       items:
         type: string
         enum: [authorization_code, refresh_token]
+    audience:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 64
+      default: []
+      description: |
+        Slugs of services (other than core) that this client's tokens may
+        name. Changing it needs `services.approve` as well as `clients.write`
+        (`403` otherwise); an unknown slug, or core's, is `422
+        invalid_audience`. Locked (`409`) on core's own login client.
+    consentRequired:
+      type: boolean
+      default: true
+      description: |
+        Whether users approve the app on a consent screen after signing in.
+        A request for any `core:*` scope shows the consent screen even when
+        `false`. Core's own login client never asks, and refuses a change
+        (`409`).
 
 UpdateClientRequest:
   type: object
@@ -1655,6 +1692,25 @@ UpdateClientRequest:
       items:
         type: string
         enum: [authorization_code, refresh_token]
+    audience:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: |
+        Slugs of services (other than core) that this client's tokens may
+        name. Changing it needs `services.approve` as well as `clients.write`
+        (`403` otherwise); an unknown slug, or core's, is `422
+        invalid_audience`. Locked (`409`) on core's own login client.
+    consentRequired:
+      type: boolean
+      description: |
+        Whether users approve the app on a consent screen after signing in.
+        A request for any `core:*` scope shows the consent screen even when
+        `false`. Core's own login client never asks, and refuses a change
+        (`409`).
     ownerId:
       type: string
       format: uuid
@@ -2445,7 +2501,7 @@ Declaration:
             minLength: 1
             maxLength: 200
           default: []
-          description: A core system role by `name`, or another service's as `<slug>/<name>`.
+          description: A requestable core system role by its bare `name` (never `core/<name>`), or another service's as `<slug>/<name>`.
         audiences:
           type: array
           maxItems: 100
@@ -2512,6 +2568,7 @@ Service:
     - name
     - namespace
     - isActive
+    - provisioned
     - clientId
     - serviceAccountUserId
     - serviceAccountUser
@@ -2537,6 +2594,12 @@ Service:
       description: Prefix of everything the service declares. Fixed once set.
     isActive:
       type: boolean
+    provisioned:
+      type: boolean
+      description: |
+        True for a service declared in the provisioning file. Only its access
+        and the end of a secret overlap are decided here: updating it or
+        regenerating its secret is `409 managed_by_provisioning`.
     clientId:
       type: [string, 'null']
       description: OAuth `client_id` of the service's confidential client

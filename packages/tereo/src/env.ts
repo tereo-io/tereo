@@ -286,6 +286,11 @@ const EnvFields = z
     // core serves it, and to the Vite dev server (http://localhost:4000)
     // otherwise. Must be https in production.
     UI_BASE_URL: z.string().url().optional(),
+    // Token for first-boot setup, so it can run unattended. Unset, core
+    // generates one and logs it.
+    SETUP_TOKEN: z.string().min(24).optional(),
+    // YAML declaring the services and login clients core reconciles at start.
+    PROVISIONING_FILE: z.string().optional(),
     // The admin UI's build, served at the root when present (the Docker image has
     // it). Missing, core serves the API alone.
     UI_DIST_PATH: z.string().default(DEFAULT_UI_DIST_PATH),

@@ -100,6 +100,16 @@ in Redis, and each scheduled job runs once however many pods there are. Two thin
   [`ci/replicas-values.yaml`](https://github.com/tereo-io/tereo/blob/master/charts/tereo/ci/replicas-values.yaml)
   is a complete example, with the pods spread across nodes.
 
+## Provisioning
+
+Declare the services and login clients core should have under `provisioning`, as the provisioning
+file's contents ([reference](https://github.com/tereo-io/tereo/blob/master/packages/tereo/docs/provisioning.md)).
+The chart puts them in a ConfigMap, mounts it at `/etc/tereo/provisioning.yaml` and sets
+`PROVISIONING_FILE`; unset, none of that is rendered. A change rolls the pods
+(`checksum/provisioning`). Never write a secret there: `secretFrom` names an environment variable,
+which must be a key of the Secret in `secrets.existingSecret` (or come from `extraEnvFrom`). See
+[`ci/provisioning-values.yaml`](https://github.com/tereo-io/tereo/blob/master/charts/tereo/ci/provisioning-values.yaml).
+
 ## First start
 
 Core logs a one-time setup token until the first admin exists:
@@ -108,4 +118,5 @@ Core logs a one-time setup token until the first admin exists:
 kubectl logs deploy/core-tereo | grep "not set up"
 ```
 
-Complete setup at `${publicUrl}/setup`.
+Complete setup at `${publicUrl}/setup`. To run it unattended, add `SETUP_TOKEN` (24 characters or
+more) to the Secret: core then accepts it, logs no token, and ignores it once setup is done.

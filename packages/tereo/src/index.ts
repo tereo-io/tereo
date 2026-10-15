@@ -1,6 +1,7 @@
 import "./preload.js";
 import { ensureBlobDirectory, ensureTempDirectory } from "./utils/storage.js";
 import { closeHttpServer, tuneServerKeepAlive } from "./utils/httpServer.js";
+import { ProvisioningError, provision } from "./utils/provisioning/index.js";
 import { ensureDefaultOrganization } from "./utils/defaultOrganization.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
 import { loadKeys, startSigningKeyRefresh } from "./utils/keys.js";
@@ -75,6 +76,14 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
       await registerCore();
       // The UI's redirect URI follows UI_BASE_URL.
       await ensureLoginClient();
+      // Services and login clients the deploy declares; a file that cannot
+      // be applied stops the start.
+      await provision().catch((err) => {
+        if (err instanceof ProvisioningError)
+          for (const problem of err.problems)
+            logger.error({ problem }, "Provisioning file refused");
+        throw err;
+      });
       // Moves secrets in table columns off a previous KEK, as loadKeys() did
       // for core.secrets, so none is left under it unused.
       const resealed = await resealRowSecrets();

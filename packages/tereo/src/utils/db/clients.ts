@@ -13,6 +13,7 @@ interface CreateClientData extends CreateClientInput {
   clientId: string;
   clientSecret: string | null;
   ownerId: string;
+  provisioned?: boolean;
 }
 
 interface UpdateClientData extends UpdateClientInput {
@@ -36,6 +37,9 @@ export interface ClientRecord {
   postLogoutRedirectUris: string[];
   grantTypes: string[];
   audience: string[];
+  consentRequired: boolean;
+  provisioned: boolean;
+  unprovisionedAt: Date | null;
   ownerId: string;
   organizationId: string | null;
   serviceAccountUser: {
@@ -173,7 +177,10 @@ export const create = async (
       postLogoutRedirectUris: data.postLogoutRedirectUris,
       scopes: data.scopes,
       grantTypes: data.grantTypes,
+      consentRequired: data.consentRequired,
+      audience: data.audience,
       ownerId: data.ownerId,
+      provisioned: data.provisioned,
     },
     include: { serviceAccountUser: true },
   });
@@ -194,6 +201,8 @@ export const update = async (
       postLogoutRedirectUris: data.postLogoutRedirectUris,
       scopes: data.scopes,
       grantTypes: data.grantTypes,
+      consentRequired: data.consentRequired,
+      audience: data.audience,
       ...(data.ownerId && { ownerId: data.ownerId }),
     },
     include: { serviceAccountUser: true },
