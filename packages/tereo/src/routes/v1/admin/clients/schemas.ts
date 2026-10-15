@@ -20,6 +20,8 @@ export const UriSchema = z
   .refine(isSafeRedirectUri, { message: UNSAFE_REDIRECT_URI_MESSAGE });
 export const ScopeSchema = z.string().min(1).max(100);
 
+export const AudienceSchema = z.array(z.string().min(1).max(64)).max(100);
+
 export const PUBLIC_CLIENT_ALLOWED_GRANTS = [
   "authorization_code",
   "refresh_token",
@@ -34,6 +36,7 @@ export const CreateClientSchema = z
     scopes: z.array(ScopeSchema).max(100).default([]),
     grantTypes: z.array(GrantTypeEnum).min(1),
     consentRequired: z.boolean().default(true),
+    audience: AudienceSchema.default([]),
   })
   .refine(
     (data) => {

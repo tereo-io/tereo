@@ -681,6 +681,70 @@ describe("OAuth Introspect Endpoint", () => {
       expect(data.aud).toBe(serviceBSlug);
     });
 
+    it("lets a service in a login client's audience introspect that client's user tokens", async () => {
+      const { browserLogin } = await import("../utils/browserLogin.js");
+      const { prisma } = await import("../../utils/db/prisma.js");
+      const inAudience = await createTestClient({
+        clientType: "confidential",
+        scopes: [],
+      });
+      const outside = await createTestClient({
+        clientType: "confidential",
+        scopes: [],
+      });
+      const slug = await makeServiceOf(inAudience.id);
+      await makeServiceOf(outside.id);
+      const loginClient = await createTestClient({
+        clientType: "public",
+        scopes: ["openid", "profile", "email"],
+      });
+      await prisma.oAuthClient.update({
+        where: { clientId: loginClient.clientId },
+        data: { audience: [slug], consentRequired: false },
+      });
+
+      const redirectUri = loginClient.redirectUris[0];
+      const { code, verifier } = await browserLogin({
+        clientId: loginClient.clientId,
+        redirectUri,
+        scope: "openid profile email",
+        email: testUser.email,
+        password: testUser.plainPassword,
+      });
+      const tokenResponse = await fetch(`${BASE_URL}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: redirectUri,
+          client_id: loginClient.clientId,
+          code_verifier: verifier,
+        }),
+      });
+      const { access_token } = (await tokenResponse.json()) as TokenResponse;
+
+      const introspectAs = async (service: typeof inAudience) => {
+        const credentials = Buffer.from(
+          `${service.clientId}:${service.plainSecret}`
+        ).toString("base64");
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${credentials}`,
+          },
+          body: JSON.stringify({ token: access_token }),
+        });
+        return (await response.json()) as IntrospectResponse;
+      };
+
+      const allowed = await introspectAs(inAudience);
+      expect(allowed.active).toBe(true);
+      expect(allowed.aud).toBe(slug);
+      expect((await introspectAs(outside)).active).toBe(false);
+    });
+
     it("should deny resource server introspecting token not in audience", async () => {
       // Create Service A without Service B in audience
       await createTestClient({

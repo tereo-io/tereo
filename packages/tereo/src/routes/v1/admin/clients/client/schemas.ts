@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  AudienceSchema,
   GrantTypeEnum,
   ClientTypeEnum,
   ScopeSchema,
@@ -15,6 +16,7 @@ export const UpdateClientSchema = z.object({
   grantTypes: z.array(GrantTypeEnum).min(1).optional(),
   ownerId: z.guid().optional(),
   consentRequired: z.boolean().optional(),
+  audience: AudienceSchema.optional(),
 });
 
 export type UpdateClientInput = z.infer<typeof UpdateClientSchema>;

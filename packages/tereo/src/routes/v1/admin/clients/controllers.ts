@@ -6,7 +6,6 @@ import { emitTx, logAuditTx } from "../../../../utils/outbox.js";
 import { validateUser } from "../../../../utils/auth.js";
 import type { Request, Response } from "express";
 import db from "../../../../utils/db/index.js";
-import { verifyScopes } from "./utils.js";
 import {
   applyCursorToWhere,
   buildCursorPageResponse,
@@ -15,12 +14,19 @@ import {
   generateClientId,
   generateClientSecret,
 } from "../../../../utils/crypto.js";
+import {
+  assertMayChangeAudience,
+  verifyAudience,
+  verifyScopes,
+} from "./utils.js";
 
 export const createClient = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const body = validateBody(CreateClientSchema, req);
 
   await verifyScopes(body.scopes);
+  const audience = await verifyAudience(body.audience);
+  if (audience.length > 0) assertMayChangeAudience(auth);
   const clientId = generateClientId();
 
   const isPublic = body.clientType === "public";
@@ -37,6 +43,7 @@ export const createClient = async (req: Request, res: Response) => {
     const client = await db.clients.create(
       {
         ...body,
+        audience,
         clientId,
         clientSecret: hashedSecret,
         ownerId: auth.userId,
@@ -56,6 +63,7 @@ export const createClient = async (req: Request, res: Response) => {
         clientType: fullClient.clientType,
         grantTypes: fullClient.grantTypes,
         scopes: fullClient.scopes,
+        audience: fullClient.audience,
       },
     });
     await emitTx(tx, {

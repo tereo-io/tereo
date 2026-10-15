@@ -9,7 +9,6 @@ import { LOGIN_CLIENT } from "../../../../../definitions/index.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
-import { verifyScopes } from "../utils.js";
 import {
   validateBody,
   validateParams,
@@ -28,6 +27,11 @@ import {
   ClientIdParamSchema,
   PUBLIC_CLIENT_ALLOWED_GRANTS,
 } from "../schemas.js";
+import {
+  assertMayChangeAudience,
+  verifyAudience,
+  verifyScopes,
+} from "../utils.js";
 
 /** A service's client is managed with its service, under /admin/services. */
 const refuseServiceClient = async (id: string) => {
@@ -41,15 +45,22 @@ const refuseServiceClient = async (id: string) => {
 /**
  * The admin UI's client type, grant types and redirect URIs follow from
  * UI_BASE_URL and are set at every start (`loginClientConfig`); an edit would
- * only lock the UI out until the next one.
+ * only lock the UI out until the next one. Consent is always skipped for it
+ * and its audience comes from its scopes, so those two have no effect.
  */
 const refuseLockedLoginClientFields = (body: UpdateClientInput) => {
-  const locked = (["redirectUris", "grantTypes", "clientType"] as const).filter(
-    (field) => body[field] !== undefined
-  );
+  const locked = (
+    [
+      "redirectUris",
+      "grantTypes",
+      "clientType",
+      "consentRequired",
+      "audience",
+    ] as const
+  ).filter((field) => body[field] !== undefined);
   if (locked.length > 0) {
     throw new ConflictError(
-      `The admin UI's login client derives ${locked.join(", ")} from UI_BASE_URL; they cannot be edited`
+      `The admin UI's login client fixes ${locked.join(", ")}; they cannot be edited`
     );
   }
 };
@@ -90,6 +101,13 @@ export const updateClient = async (req: Request, res: Response) => {
     refuseLockedLoginClientFields(body);
   }
   if (body.scopes) await verifyScopes(body.scopes);
+  const audience = body.audience && (await verifyAudience(body.audience));
+  if (
+    audience &&
+    audience.join("\n") !== [...existingClient.audience].sort().join("\n")
+  ) {
+    assertMayChangeAudience(user);
+  }
 
   // Validate ownership transfer
   if (body.ownerId && body.ownerId !== existingClient.ownerId) {
@@ -144,6 +162,7 @@ export const updateClient = async (req: Request, res: Response) => {
       {
         id: params.id,
         ...body,
+        audience,
         ...(secret && { clientSecret: secret.hashedSecret }),
       },
       tx
