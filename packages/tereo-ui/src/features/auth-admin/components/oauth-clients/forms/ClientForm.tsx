@@ -1,3 +1,6 @@
+import { CORE_SERVICE_ID, useServices } from "@/features/services";
+import { CORE_LOGIN_CLIENT_ID } from "../../../constants";
+import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 import type {
   OAuthClient,
@@ -10,7 +13,9 @@ import {
   Form,
   Input,
   Select,
+  Checkbox,
   CheckboxGroup,
+  MultiSelect,
   TextArea,
   Col,
 } from "@kosmeo-ui/react";
@@ -60,6 +65,26 @@ export const ClientForm = ({ client, onSubmit, formId }: ClientFormProps) => {
       : ["authorization_code", "refresh_token"]
   );
 
+  const { hasPermission } = useAuth();
+  const { data: services = [] } = useServices();
+  const [audience, setAudience] = useState<string[]>(client?.audience ?? []);
+  const [consentRequired, setConsentRequired] = useState(
+    client?.consentRequired ?? true
+  );
+
+  // Core refuses both settings on its own login client.
+  const isCoreLoginClient = client?.clientId === CORE_LOGIN_CLIENT_ID;
+  const canSetAudience = hasPermission("services.approve");
+  const audienceOptions = services.filter((s) => s.id !== CORE_SERVICE_ID);
+  // A slug of a service that is no longer listed stays selectable to remove.
+  const selectedServices = audience.map(
+    (slug) =>
+      audienceOptions.find((s) => s.slug === slug) ?? {
+        slug,
+        name: slug,
+      }
+  );
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -85,6 +110,16 @@ export const ClientForm = ({ client, onSubmit, formId }: ClientFormProps) => {
         JSON.stringify(loginGrants(client.grantTypes).sort())
       )
         updates.grantTypes = grantTypes;
+      if (!isCoreLoginClient) {
+        if (consentRequired !== client.consentRequired)
+          updates.consentRequired = consentRequired;
+        if (
+          canSetAudience &&
+          JSON.stringify([...audience].sort()) !==
+            JSON.stringify([...client.audience].sort())
+        )
+          updates.audience = audience;
+      }
       onSubmit(updates);
     } else {
       // Create mode
@@ -95,6 +130,8 @@ export const ClientForm = ({ client, onSubmit, formId }: ClientFormProps) => {
         postLogoutRedirectUris,
         scopes,
         grantTypes,
+        consentRequired,
+        ...(canSetAudience ? { audience } : {}),
       });
     }
   };
@@ -151,6 +188,26 @@ export const ClientForm = ({ client, onSubmit, formId }: ClientFormProps) => {
           onChange={(e) => setScopesText(e.target.value)}
           placeholder="openid profile email offline_access"
         />
+
+        {!isCoreLoginClient && (
+          <>
+            {canSetAudience && (
+              <MultiSelect
+                label="Audience"
+                options={audienceOptions}
+                labelKey="name"
+                value={selectedServices as typeof audienceOptions}
+                onChange={(values) => setAudience(values.map((s) => s.slug))}
+                placeholder="Services this client's tokens may be used with"
+              />
+            )}
+            <Checkbox
+              label="Ask users to approve this app"
+              checked={consentRequired}
+              onChange={(e) => setConsentRequired(e.target.checked)}
+            />
+          </>
+        )}
       </Col>
     </Form>
   );

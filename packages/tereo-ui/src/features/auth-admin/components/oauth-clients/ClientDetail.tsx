@@ -5,6 +5,7 @@ import DeleteClientButton from "./buttons/DeleteClientButton";
 import EditClientButton from "./buttons/EditClientButton";
 import useClient from "../../api/oauth-clients/useClient";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
+import { CORE_LOGIN_CLIENT_ID } from "../../constants";
 import { PageHeader } from "@/components/PageHeader";
 import { useParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
@@ -122,6 +123,14 @@ export const ClientDetail = () => {
                     },
                   ]
                 : []),
+              ...(client.clientId === CORE_LOGIN_CLIENT_ID
+                ? []
+                : [
+                    {
+                      label: "User approval",
+                      value: client.consentRequired ? "Asked" : "Not asked",
+                    },
+                  ]),
               {
                 label: "Created",
                 value: new Date(client.createdAt).toLocaleString(),

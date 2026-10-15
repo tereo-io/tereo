@@ -1438,6 +1438,7 @@ Client:
     - scopes
     - grantTypes
     - audience
+    - consentRequired
     - ownerId
     - organizationId
     - service
@@ -1486,6 +1487,12 @@ Client:
       type: array
       items:
         type: string
+      description: Slugs of the services this client's tokens may name.
+    consentRequired:
+      type: boolean
+      description: |
+        Whether users approve the app on a consent screen after signing in.
+        Core's own login client never asks, and refuses a change (`409`).
     ownerId:
       type: string
       format: uuid
@@ -1613,6 +1620,26 @@ CreateClientRequest:
       items:
         type: string
         enum: [authorization_code, refresh_token]
+    audience:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 64
+      default: []
+      description: |
+        Slugs of services (other than core and, for a service's own client,
+        itself) that this client's tokens may name. Changing it needs
+        `services.approve` as well as `clients.write` (`403` otherwise); an
+        unknown slug is `400 invalid_audience`. Locked (`409`) on core's own
+        login client.
+    consentRequired:
+      type: boolean
+      default: true
+      description: |
+        Whether users approve the app on a consent screen after signing in.
+        Core's own login client never asks, and refuses a change (`409`).
 
 UpdateClientRequest:
   type: object
@@ -1655,6 +1682,24 @@ UpdateClientRequest:
       items:
         type: string
         enum: [authorization_code, refresh_token]
+    audience:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: |
+        Slugs of services (other than core and, for a service's own client,
+        itself) that this client's tokens may name. Changing it needs
+        `services.approve` as well as `clients.write` (`403` otherwise); an
+        unknown slug is `400 invalid_audience`. Locked (`409`) on core's own
+        login client.
+    consentRequired:
+      type: boolean
+      description: |
+        Whether users approve the app on a consent screen after signing in.
+        Core's own login client never asks, and refuses a change (`409`).
     ownerId:
       type: string
       format: uuid
