@@ -1,0 +1,11 @@
+{{- if .Values.provisioning }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tereo.fullname" . }}-provisioning
+  labels:
+    {{- include "tereo.labels" . | nindent 4 }}
+data:
+  provisioning.yaml: |
+    {{- toYaml .Values.provisioning | nindent 4 }}
+{{- end }}

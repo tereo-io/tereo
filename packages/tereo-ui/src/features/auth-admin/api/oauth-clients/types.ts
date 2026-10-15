@@ -20,6 +20,8 @@ export interface OAuthClient {
   audience: string[];
   /** Whether users approve the app after signing in; core's own login client never asks. */
   consentRequired: boolean;
+  /** Declared in the provisioning file: core refuses to edit, delete or regenerate it here. */
+  provisioned: boolean;
   ownerId: string;
   /**
    * Set for a service's client, which is managed under /admin/services: core

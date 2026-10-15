@@ -1,6 +1,7 @@
 import useInfiniteClients from "../../api/oauth-clients/useInfiniteClients";
 import DeleteClientListButton from "./buttons/DeleteClientListButton";
 import { faLock, faUnlock } from "@fortawesome/free-solid-svg-icons";
+import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { OAuthClient } from "../../api/oauth-clients/types";
 import CreateClientModal from "./modals/CreateClientModal";
@@ -40,6 +41,7 @@ export const ClientList = () => {
             {client.service && (
               <Badge variant="primary">service: {client.service.name}</Badge>
             )}
+            {client.provisioned && <ProvisionedBadge />}
           </>
         ),
       },
@@ -89,6 +91,7 @@ export const ClientList = () => {
         align: "center",
         cellElement: (client) =>
           !client.service &&
+          !client.provisioned &&
           mayDelete &&
           (client.ownerId === me || isClientsAdmin) ? (
             <DeleteClientListButton client={client} />

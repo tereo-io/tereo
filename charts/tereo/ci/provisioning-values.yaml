@@ -1,0 +1,28 @@
+publicUrl: https://core.example.com
+trustProxy: "1"
+secrets:
+  # Holds DATABASE_URL, CORE_KEK, REDIS_URL, and the secrets named by
+  # secretFrom below (BILLING_CLIENT_SECRET, ...).
+  existingSecret: tereo-secrets
+worker:
+  enabled: true
+persistence:
+  accessModes:
+    - ReadWriteMany
+provisioning:
+  services:
+    - slug: billing-service
+      name: Billing
+      secretFrom: BILLING_CLIENT_SECRET
+      access:
+        roles: [file_user]
+        audiences: [orders-service]
+  clients:
+    - clientId: billing-web
+      name: Billing web app
+      clientType: public
+      redirectUris:
+        - https://billing.example.com/callback
+      scopes: [openid, profile, email]
+      audience: [billing-service]
+      consentRequired: false

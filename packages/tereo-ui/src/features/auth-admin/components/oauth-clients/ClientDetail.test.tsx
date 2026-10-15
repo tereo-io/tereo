@@ -22,6 +22,7 @@ const client: OAuthClient = {
   grantTypes: ["authorization_code"],
   audience: ["billing"],
   consentRequired: false,
+  provisioned: false,
   ownerId: "u1",
   service: null,
   createdAt: "2026-10-01T00:00:00Z",
@@ -63,5 +64,30 @@ describe("ClientDetail", () => {
 
     await screen.findByText("Client Details");
     expect(screen.queryByText("User approval")).not.toBeInTheDocument();
+  });
+
+  it("offers edit, regenerate and delete on a hand-made client", async () => {
+    renderDetail(client);
+
+    await screen.findByText("Client Details");
+    expect(screen.getByTitle("Edit")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /regenerate/i })
+    ).toBeInTheDocument();
+    expect(screen.getByTitle("Delete")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Managed by provisioning")
+    ).not.toBeInTheDocument();
+  });
+
+  it("badges a provisioned client and hides every change", async () => {
+    renderDetail({ ...client, provisioned: true });
+
+    expect(await screen.findByText("Managed by provisioning")).toBeVisible();
+    expect(screen.queryByTitle("Edit")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /regenerate/i })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Delete")).not.toBeInTheDocument();
   });
 });

@@ -216,7 +216,9 @@
       Renames, deactivates or reactivates a service. The name is copied to
       its OAuth client; `isActive` is copied to its service-account user.
       Deactivating revokes all of the service's outstanding tokens. Core's
-      own row cannot be changed (`403`).
+      own row cannot be changed (`403`). A provisioned service is refused
+      with `409 managed_by_provisioning`: its name and secret come from the
+      provisioning file.
 
       An audit log entry is created for this action.
       A `core.service.updated` webhook event is emitted.
@@ -255,6 +257,9 @@
         description: Forbidden - missing services.write permission, or the service is core
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -270,7 +275,9 @@
       secret keeps working for `SERVICE_SECRET_OVERLAP_HOURS` (until
       `previousSecretExpiresAt`) so running copies survive the rollout; end
       the overlap early with `POST /v1/admin/services/{id}/revoke-previous-secret`.
-      Core's own row cannot be changed (`403`).
+      Core's own row cannot be changed (`403`). A provisioned service is
+      refused with `409 managed_by_provisioning`: rotate its secret in the
+      deployment's environment instead.
 
       An audit log entry is created for this action.
       A `core.service.secret-regenerated` webhook event is emitted.
@@ -302,6 +309,9 @@
         description: Forbidden - missing services.write permission, or the service is core
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -314,7 +324,8 @@
     summary: Revoke previous service secret
     description: |
       Ends the secret overlap now: only the current secret works from here
-      on. Core's own row cannot be changed (`403`).
+      on. Core's own row cannot be changed (`403`). A provisioned service is
+      refused with `409 managed_by_provisioning`.
 
       An audit log entry is created for this action.
       A `core.service.previous-secret-revoked` webhook event is emitted.
@@ -346,6 +357,9 @@
         description: Forbidden - missing services.write permission, or the service is core
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':

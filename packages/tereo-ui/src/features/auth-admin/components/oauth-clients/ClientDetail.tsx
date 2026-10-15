@@ -1,6 +1,7 @@
 import RegenerateSecretButton from "./buttons/RegenerateSecretButton";
 import { faLock, faUnlock } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import DeleteClientButton from "./buttons/DeleteClientButton";
 import EditClientButton from "./buttons/EditClientButton";
 import useClient from "../../api/oauth-clients/useClient";
@@ -56,8 +57,9 @@ export const ClientDetail = () => {
       <PageHeader
         title={client.name}
         subtitle={`${client.clientType} client`}
+        badges={client.provisioned ? <ProvisionedBadge /> : undefined}
         actions={
-          client.service || !canManage
+          client.service || client.provisioned || !canManage
             ? []
             : [
                 ...(hasPermission("clients.write")

@@ -1,3 +1,4 @@
+import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import useInfiniteServices from "../api/useInfiniteServices";
 import CreateServiceModal from "./modals/CreateServiceModal";
 import { ServiceStatusBadge } from "./StatusBadges";
@@ -26,17 +27,25 @@ export const ServiceList = () => {
       {
         title: "Name",
         dataKey: "name",
-        cellElement: (s) =>
-          s.id === CORE_SERVICE_ID ? (
-            <span>
-              {s.name}{" "}
-              <Badge size="sm" subtle variant="secondary">
-                core
-              </Badge>
-            </span>
-          ) : (
-            s.name
-          ),
+        cellElement: (s) => (
+          <span>
+            {s.name}
+            {s.id === CORE_SERVICE_ID && (
+              <>
+                {" "}
+                <Badge size="sm" subtle variant="secondary">
+                  core
+                </Badge>
+              </>
+            )}
+            {s.provisioned && (
+              <>
+                {" "}
+                <ProvisionedBadge />
+              </>
+            )}
+          </span>
+        ),
       },
       {
         title: "Slug",

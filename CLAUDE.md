@@ -25,7 +25,11 @@ Read [README.md](README.md) first; its *Current state* section lists what is don
 - App services **register** their permissions, system roles, buckets and event types at boot, under
   their namespace; requested access waits for an admin; dropped items retire (`utils/registry.ts`,
   [docs/registry.md](packages/tereo/docs/registry.md)).
-- First launch: core generates its keys into `core.secrets` and logs a setup token until
+- A deploy can declare services and login clients in a **provisioning file** (`PROVISIONING_FILE`,
+  `utils/provisioning/`, [docs/provisioning.md](packages/tereo/docs/provisioning.md)): reconciled
+  at every start, all-or-nothing, secrets by env-var name; its rows are `provisioned` and read-only
+  through the admin API (`409 managed_by_provisioning`).
+- First launch: core generates its keys into `core.secrets` and logs a setup token (or accepts `SETUP_TOKEN`) until
   `POST /v1/setup` creates the first admin, through the admin UI's setup screen.
 - App services use **one SDK, `@tereo-io/sdk`** (`packages/tereo-sdk`): `createCoreClient` over one set
   of credentials, `register()` at boot, and `core.outbox` for audit entries and events in the app's
