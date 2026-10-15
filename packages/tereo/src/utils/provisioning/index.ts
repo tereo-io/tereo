@@ -10,7 +10,6 @@ export {
 } from "./apply.js";
 export { ProvisioningError, loadProvisioning } from "./load.js";
 
-/** Apply `PROVISIONING_FILE`, if set. A file that cannot be applied throws. */
 export const provision = async (): Promise<void> => {
   const provisioning = await loadProvisioning(env.PROVISIONING_FILE);
   if (!provisioning) return;

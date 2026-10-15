@@ -77,7 +77,6 @@ export class ConflictError extends AppError {
   }
 }
 
-/** The row comes from the provisioning file; change it there. */
 export class ManagedByProvisioningError extends AppError {
   constructor(
     message = "Managed by the provisioning file; change it there and restart core"

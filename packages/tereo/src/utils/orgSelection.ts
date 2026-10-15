@@ -7,6 +7,7 @@ import env from "../env.js";
 import {
   authorizeRestartParams,
   issueAuthorizationCode,
+  grantAfterLogin,
   uiUrl,
 } from "./authorization.js";
 import {
@@ -62,21 +63,27 @@ export const handlePostAuthOrgSelection = async (
       // here (a TOTP verification) is still spent: one code, one login.
       await writeStep(async () => undefined);
       clearAuthSessionCookie(res, client.clientId);
-      const redirectUrl = await issueAuthorizationCode(req, res, client, {
-        userId,
-        organizationId: orgId,
-        redirectUri,
-        scopes,
-        state,
-        codeChallenge,
-        codeChallengeMethod,
-        nonce,
-        authTime,
-        maxAge,
-        acrValues,
-        authMethods,
-        userSessionId: null,
-      });
+      const redirectUrl = await issueAuthorizationCode(
+        req,
+        res,
+        client,
+        grantAfterLogin(
+          {
+            userId,
+            redirectUri,
+            scopes,
+            state,
+            codeChallenge,
+            codeChallengeMethod,
+            nonce,
+            authTime,
+            maxAge,
+            acrValues,
+            authMethods,
+          },
+          orgId
+        )
+      );
       return { redirect_url: redirectUrl };
     }
 

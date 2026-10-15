@@ -1,6 +1,7 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { prisma, type Prisma } from "../../../../../utils/db/prisma.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
+import { rotatedSecretFields } from "../../../../../utils/clients.js";
 import { CORE_SERVICE_ID } from "../../../../../definitions/index.js";
 import { formatService } from "../../../../../utils/transformers.js";
 import { resolveRoleTarget } from "../../../../../utils/registry.js";
@@ -58,7 +59,6 @@ const getAppService = async (req: Request, tx?: Tx) => {
   };
 };
 
-/** A service from the provisioning file changes there; its access is decided here. */
 const getEditableAppService = async (req: Request) => {
   const service = await getAppService(req);
   if (service.provisioned) throw new ManagedByProvisioningError();
@@ -156,7 +156,6 @@ export const regenerateSecret = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const service = await getEditableAppService(req);
   const { plainSecret, hashedSecret } = generateClientSecret();
-  const overlapMs = env.SERVICE_SECRET_OVERLAP_HOURS * 60 * 60 * 1000;
 
   const { clientId, previousSecretExpiresAt } = await db.$transaction(
     async (tx) => {
@@ -169,19 +168,15 @@ export const regenerateSecret = async (req: Request, res: Response) => {
         WHERE "id" = ${service.client.id}::uuid
         FOR UPDATE`;
       if (!client) throw new NotFoundError("Client not found");
-      const previousSecretExpiresAt =
-        overlapMs > 0 && client.client_secret
-          ? new Date(Date.now() + overlapMs)
-          : null;
+      const data = rotatedSecretFields(
+        client.client_secret,
+        hashedSecret,
+        new Date()
+      );
+      const { previousSecretExpiresAt } = data;
       await tx.oAuthClient.update({
         where: { id: service.client.id },
-        data: {
-          clientSecret: hashedSecret,
-          previousSecretHash: previousSecretExpiresAt
-            ? client.client_secret
-            : null,
-          previousSecretExpiresAt,
-        },
+        data,
       });
       await logAuditTx(tx, {
         auth,

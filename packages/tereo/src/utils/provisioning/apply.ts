@@ -1,11 +1,11 @@
 import { assertNamespaceAvailable, namespacesOverlap } from "../registry.js";
 import { disconnectTokenSockets } from "../../websocket/emitters/index.js";
-import { CORE_SERVICE, SYSTEM_USER_ID } from "../../definitions/index.js";
+import { deleteLoginClientTx, rotatedSecretFields } from "../clients.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
 import { approveProvisionedAccess } from "../serviceAccess.js";
+import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma, type Prisma } from "../db/prisma.js";
-import { deleteLoginClientTx } from "../clients.js";
 import { formatClient } from "../transformers.js";
 import { AppError } from "../errors.js";
 import { logger } from "../logger.js";
@@ -25,6 +25,8 @@ import {
 } from "./load.js";
 
 type Tx = Prisma.TransactionClient;
+
+const PROVISIONING_LOCK = "provisioning";
 
 export interface ProvisioningResult {
   created: string[];
@@ -91,10 +93,6 @@ const loadState = async (tx: Tx, p: Provisioning) => {
 
 type State = Awaited<ReturnType<typeof loadState>>;
 
-/**
- * Every reason the file cannot be applied to this database. Nothing is
- * written before these are all known, so a refused file changes nothing.
- */
 const findProblems = async (
   tx: Tx,
   p: Provisioning,
@@ -204,12 +202,9 @@ const findProblems = async (
         problems.push(`${label}: scope "${scope}" is not registered`);
 
     // Services this file creates may be named before they exist.
-    for (const slug of sortedUnique(spec.audience)) {
-      if (slug === CORE_SERVICE.slug)
-        problems.push(`${label}: audience must not name "${slug}"`);
-      else if (!state.serviceSlugs.has(slug) && !fileSlugs.has(slug))
+    for (const slug of sortedUnique(spec.audience))
+      if (!state.serviceSlugs.has(slug) && !fileSlugs.has(slug))
         problems.push(`${label}: audience "${slug}" is not a service`);
-    }
 
     if (spec.secretEnv && spec.secretHash)
       checkSecret(label, spec.secretEnv, spec.secretHash, existing?.id);
@@ -218,30 +213,30 @@ const findProblems = async (
   return problems;
 };
 
-const overlapUntil = (now: Date, hadSecret: boolean): Date | null => {
-  const overlapMs = env.SERVICE_SECRET_OVERLAP_HOURS * 60 * 60 * 1000;
-  return overlapMs > 0 && hadSecret
-    ? new Date(now.getTime() + overlapMs)
-    : null;
-};
-
-/** The secret `regenerate-secret` would set, keeping the old one for the overlap. */
 const rotateSecret = async (
   tx: Tx,
   client: { id: string; clientSecret: string | null },
   hash: string,
   now: Date
 ) => {
-  const previousSecretExpiresAt = overlapUntil(now, !!client.clientSecret);
-  await tx.oAuthClient.update({
-    where: { id: client.id },
-    data: {
-      clientSecret: hash,
-      previousSecretHash: previousSecretExpiresAt ? client.clientSecret : null,
-      previousSecretExpiresAt,
-    },
-  });
-  return previousSecretExpiresAt;
+  const data = rotatedSecretFields(client.clientSecret, hash, now);
+  await tx.oAuthClient.update({ where: { id: client.id }, data });
+  return data.previousSecretExpiresAt;
+};
+
+const serviceRows = <
+  C extends { serviceAccountUser: { id: string } | null },
+>(service: {
+  slug: string;
+  client: C | null;
+}) => {
+  const client = service.client;
+  const accountUser = client?.serviceAccountUser;
+  if (!client || !accountUser)
+    throw new Error(
+      `Service ${service.slug} has no client or service account; its rows are inconsistent`
+    );
+  return { client, accountUserId: accountUser.id };
 };
 
 const applyService = async (
@@ -318,12 +313,7 @@ const applyService = async (
     result.updated.push(entry);
   }
 
-  const client = existing.client;
-  const accountUser = client?.serviceAccountUser;
-  if (!client || !accountUser)
-    throw new Error(
-      `Service ${existing.slug} has no client or service account; its rows are inconsistent`
-    );
+  const { client, accountUserId } = serviceRows(existing);
 
   if (!existing.isActive) {
     await updateServiceTx(
@@ -333,7 +323,7 @@ const applyService = async (
         name: spec.name,
         isActive: false,
         client,
-        accountUserId: accountUser.id,
+        accountUserId,
       },
       { isActive: true },
       SYSTEM_ACTOR
@@ -515,10 +505,6 @@ const applyClient = async (
   }
 };
 
-/**
- * Provisioned rows the file no longer lists are marked with when they went
- * missing; the retirement job removes them after the grace period.
- */
 const markMissing = async (
   tx: Tx,
   p: Provisioning,
@@ -546,6 +532,18 @@ const markMissing = async (
       changes: { unprovisionedAt: { old: null, new: now } },
       metadata: { action: "unprovisioned" },
     });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "core.service.updated",
+      entityType: "Service",
+      entityId: service.id,
+      data: {
+        id: service.id,
+        slug: service.slug,
+        name: service.name,
+        isActive: service.isActive,
+      },
+    });
     result.unprovisioned.push(`service:${service.slug}`);
   }
 
@@ -558,7 +556,7 @@ const markMissing = async (
     },
   });
   for (const client of clients) {
-    await tx.oAuthClient.update({
+    const updated = await tx.oAuthClient.update({
       where: { id: client.id },
       data: { unprovisionedAt: now },
     });
@@ -570,6 +568,13 @@ const markMissing = async (
       entityName: client.name,
       changes: { unprovisionedAt: { old: null, new: now } },
       metadata: { action: "unprovisioned", clientId: client.clientId },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.client.updated",
+      entityType: "OAuthClient",
+      entityId: client.id,
+      data: formatClient(updated) as Record<string, unknown>,
     });
     result.unprovisioned.push(`client:${client.clientId}`);
   }
@@ -586,7 +591,7 @@ export const applyProvisioning = async (
 ): Promise<ProvisioningResult> => {
   const result = await prisma.$transaction(
     async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('provisioning', 0))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
       const state = await loadState(tx, p);
       const problems = await findProblems(tx, p, state);
       if (problems.length > 0) throw new ProvisioningError(problems);
@@ -615,13 +620,7 @@ export const applyProvisioning = async (
   return result;
 };
 
-const PROVISIONING_LOCK = "provisioning";
-
-/**
- * Retire what has been missing from the provisioning file longer than the
- * grace period: a service is deactivated and its tokens revoked, a login
- * client is deleted. Run hourly by the worker; `now` is a parameter for tests.
- */
+// `now` is a parameter for tests.
 export const deprovisionMissing = async (
   now: Date = new Date()
 ): Promise<{ services: number; clients: number }> => {
@@ -639,24 +638,20 @@ export const deprovisionMissing = async (
         });
         const serviceClientIds: string[] = [];
         for (const service of dueServices) {
-          const accountUser = service.client?.serviceAccountUser;
-          if (!service.client || !accountUser)
-            throw new Error(
-              `Service ${service.slug} has no client or service account; its rows are inconsistent`
-            );
+          const { client, accountUserId } = serviceRows(service);
           await updateServiceTx(
             tx,
             {
               id: service.id,
               name: service.name,
               isActive: true,
-              client: service.client,
-              accountUserId: accountUser.id,
+              client,
+              accountUserId,
             },
             { isActive: false },
             SYSTEM_ACTOR
           );
-          serviceClientIds.push(service.client.id);
+          serviceClientIds.push(client.id);
         }
 
         const dueClients = await tx.oAuthClient.findMany({

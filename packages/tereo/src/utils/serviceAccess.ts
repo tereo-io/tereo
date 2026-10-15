@@ -8,6 +8,7 @@ import { isRequestableCoreRole } from "../definitions/roles.js";
 import { prisma, type Prisma } from "./db/prisma.js";
 import { emitTx, logAuditTx } from "./outbox.js";
 import { withUserRefs } from "./users.js";
+import { z } from "zod";
 
 type Tx = Prisma.TransactionClient;
 
@@ -310,10 +311,10 @@ export const approveAccessTx = async (
   return rows;
 };
 
-interface ProvisionedAccess {
-  roles: string[];
-  audiences: string[];
-}
+const ProvisionedAccessSchema = z.object({
+  roles: z.array(z.string()),
+  audiences: z.array(z.string()),
+});
 
 /**
  * Approve, as core, the service's requests its provisioning file lists. Only
@@ -338,9 +339,10 @@ export const approveProvisionedAccess = async (
     },
   });
   if (!service?.provisioned || service.unprovisionedAt) return;
-  const access = service.provisionedAccess as ProvisionedAccess | null;
+  const parsed = ProvisionedAccessSchema.safeParse(service.provisionedAccess);
+  const access = parsed.success ? parsed.data : { roles: [], audiences: [] };
   const accountUserId = service.client?.serviceAccountUser?.id;
-  if (!access || !service.client || !accountUserId) return;
+  if (!service.client || !accountUserId) return;
   if (access.roles.length + access.audiences.length === 0) return;
 
   const undecided = (tx: Tx) =>

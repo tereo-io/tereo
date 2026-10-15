@@ -159,7 +159,7 @@ model User {
 model OAuthClient {
   id                      String     @id @default(uuid(7)) @db.Uuid
   clientId                String     @unique @map("client_id") @db.VarChar(64)
-  clientSecret            String?    @map("client_secret") @db.VarChar(255)
+  clientSecret            String?    @unique @map("client_secret") @db.VarChar(255)
   clientType              ClientType @default(confidential) @map("client_type")
   name                    String     @db.VarChar(100)
   redirectUris            String[]   @map("redirect_uris")
@@ -175,7 +175,7 @@ model OAuthClient {
   // so running copies of a service survive the rollout.
   previousSecretHash      String?    @map("previous_secret_hash") @db.VarChar(255)
   previousSecretExpiresAt DateTime?  @map("previous_secret_expires_at")
-  // Created from the provisioning file: read-only through the admin API.
+  // Created from the provisioning file.
   provisioned             Boolean    @default(false)
   // When a provisioned login client was first missing from the file.
   unprovisionedAt         DateTime?  @map("unprovisioned_at")
@@ -1522,8 +1522,7 @@ model Service {
   // The semver of the declaration last applied; an older one is ignored.
   declarationVersion String?   @map("declaration_version") @db.VarChar(64)
   declaredAt         DateTime? @map("declared_at")
-  // Created from the provisioning file: read-only through the admin API,
-  // except access decisions.
+  // Created from the provisioning file.
   provisioned        Boolean   @default(false)
   // When a provisioned service was first missing from the file.
   unprovisionedAt    DateTime? @map("unprovisioned_at")

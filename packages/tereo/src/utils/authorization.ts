@@ -86,6 +86,31 @@ export interface ApprovedAuthorization {
   userSessionId: string | null;
 }
 
+type LoginFlow = Omit<
+  ApprovedAuthorization,
+  "organizationId" | "userSessionId"
+>;
+
+/** The approval of a flow whose user just signed in with credentials. */
+export const grantAfterLogin = (
+  flow: LoginFlow,
+  organizationId: string | null
+): ApprovedAuthorization => ({
+  userId: flow.userId,
+  organizationId,
+  redirectUri: flow.redirectUri,
+  scopes: flow.scopes,
+  state: flow.state,
+  codeChallenge: flow.codeChallenge,
+  codeChallengeMethod: flow.codeChallengeMethod,
+  nonce: flow.nonce,
+  authTime: flow.authTime,
+  maxAge: flow.maxAge,
+  acrValues: flow.acrValues,
+  authMethods: flow.authMethods,
+  userSessionId: null,
+});
+
 /**
  * Issues the authorization code for an approved request and starts (or
  * continues) this browser's SSO session, setting its cookie. Returns the

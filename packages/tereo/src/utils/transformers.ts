@@ -51,7 +51,6 @@ export const formatClient = (
     grantTypes: client.grantTypes,
     audience: client.audience,
     consentRequired: client.consentRequired,
-    // From the provisioning file: core refuses to edit, delete or regenerate it.
     provisioned: client.provisioned,
     ownerId: client.ownerId,
     organizationId: client.organizationId,
@@ -186,7 +185,6 @@ export const formatService = (service: ServiceWithClient) => ({
   name: service.name,
   namespace: service.namespace,
   isActive: service.isActive,
-  // From the provisioning file: only its access can be decided here.
   provisioned: service.provisioned,
   clientId: service.client?.clientId ?? null,
   serviceAccountUserId: service.client?.serviceAccountUser?.id ?? null,

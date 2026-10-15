@@ -180,8 +180,9 @@ Nothing is deleted. Re-declaring an item brings it back.
 
 A deploy can create services from a file instead of `POST /v1/admin/services`
 ([provisioning](provisioning.md)). A provisioned service is read-only through the admin API: rename,
-deactivate, `regenerate-secret` and `revoke-previous-secret` answer `409 managed_by_provisioning`,
-and its secret is rotated by changing the environment variable the file names. Registration is
+deactivate and `regenerate-secret` answer `409 managed_by_provisioning`, and its secret is rotated
+by changing the environment variable the file names. `revoke-previous-secret` still works, to end a
+rotation's overlap early. Registration is
 unchanged: the service declares at boot, and its requests are approved or revoked as for any other.
 
 The file can list the roles and audiences the service may have (`access`). A matching request is

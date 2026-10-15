@@ -9,6 +9,7 @@ import env from "../../../env.js";
 import {
   authorizeRestartParams,
   issueAuthorizationCode,
+  grantAfterLogin,
   uiUrl,
 } from "../../../utils/authorization.js";
 import {
@@ -123,21 +124,12 @@ export const orgSelectSubmitHandler = async (req: Request, res: Response) => {
   clearOrgSelectSessionCookie(res, client.clientId);
 
   if (skipsConsent(client, session.scopes)) {
-    const redirectUrl = await issueAuthorizationCode(req, res, client, {
-      userId: session.userId,
-      organizationId: body.organization_id,
-      redirectUri: session.redirectUri,
-      scopes: session.scopes,
-      state: session.state,
-      codeChallenge: session.codeChallenge,
-      codeChallengeMethod: session.codeChallengeMethod,
-      nonce: session.nonce,
-      authTime: session.authTime,
-      maxAge: session.maxAge,
-      acrValues: session.acrValues,
-      authMethods: session.authMethods,
-      userSessionId: null,
-    });
+    const redirectUrl = await issueAuthorizationCode(
+      req,
+      res,
+      client,
+      grantAfterLogin(session, body.organization_id)
+    );
     res.json({ redirect_url: redirectUrl });
     return;
   }

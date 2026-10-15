@@ -2,6 +2,7 @@ import { CORE_SERVICE_ID, SYSTEM_USER_ID } from "../../definitions/index.js";
 import { getTestPrincipalToken } from "../utils/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
+import { fetchJson } from "../utils/http.js";
 import db from "../../utils/db/index.js";
 import {
   BASE_URL,
@@ -19,29 +20,11 @@ import {
 
 const CLIENT_IP = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250) + 1}`;
 
-const call = async (
-  method: string,
-  path: string,
-  token: string,
-  body?: unknown
-) => {
-  const response = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers: {
-      // Its own client address: the limiters run at production values.
-      "X-Forwarded-For": CLIENT_IP,
-      Authorization: `Bearer ${token}`,
-      ...(body !== undefined && { "Content-Type": "application/json" }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
+const call = (method: string, path: string, token: string, body?: unknown) =>
+  // Its own client address: the limiters run at production values.
+  fetchJson(method, `${BASE_URL}${path}`, token, body, {
+    "X-Forwarded-For": CLIENT_IP,
   });
-  const text = await response.text();
-  return {
-    status: response.status,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    body: (text ? JSON.parse(text) : null) as any,
-  };
-};
 
 const permissionId = async (name: string) =>
   (await prisma.permission.findUniqueOrThrow({ where: { name } })).id;

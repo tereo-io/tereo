@@ -2,6 +2,7 @@ import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { emitTx, logAuditTx } from "./outbox.js";
 import type { Prisma } from "./db/prisma.js";
 import db from "./db/index.js";
+import env from "../env.js";
 
 interface ClientToDelete {
   id: string;
@@ -10,10 +11,9 @@ interface ClientToDelete {
 }
 
 /**
- * Delete a login client: its tokens are revoked and its service-account
- * user, if any, is deactivated (history names that user, so it outlives
- * the client). Returns the revoked jtis; the caller disconnects their sockets
- * once the transaction commits.
+ * A service-account user is deactivated, not deleted: history names it.
+ * Returns the revoked jtis; the caller disconnects their sockets once the
+ * transaction commits.
  */
 export const deleteLoginClientTx = async (
   tx: Prisma.TransactionClient,
@@ -46,4 +46,23 @@ export const deleteLoginClientTx = async (
     data: { id: client.id, clientId: client.clientId, name: client.name },
   });
   return jtis;
+};
+
+/**
+ * A client's secret columns once `newHash` replaces `oldHash`. The old secret
+ * keeps working for `SERVICE_SECRET_OVERLAP_HOURS`, if there was one.
+ */
+export const rotatedSecretFields = (
+  oldHash: string | null,
+  newHash: string,
+  now: Date
+) => {
+  const overlapMs = env.SERVICE_SECRET_OVERLAP_HOURS * 60 * 60 * 1000;
+  const previousSecretExpiresAt =
+    overlapMs > 0 && oldHash ? new Date(now.getTime() + overlapMs) : null;
+  return {
+    clientSecret: newHash,
+    previousSecretHash: previousSecretExpiresAt ? oldHash : null,
+    previousSecretExpiresAt,
+  };
 };

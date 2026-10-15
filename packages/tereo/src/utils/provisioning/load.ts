@@ -273,6 +273,7 @@ export const parseProvisioning = (
 
 export const loadProvisioning = async (
   path: string | undefined,
+  // Not env.ts: the file names the variables its secrets come from.
   env: NodeJS.ProcessEnv = process.env
 ): Promise<Provisioning | null> => {
   if (!path) return null;

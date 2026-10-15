@@ -1,12 +1,18 @@
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
+import { removeLoginClients, removeServices } from "./utils/test-helpers.js";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getTestPrincipalToken } from "../utils/principals.js";
 import { generateClientSecret } from "../../utils/crypto.js";
-import { SYSTEM_USER_ID } from "../../definitions/index.js";
-import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import { CORE_URL } from "../utils/coreUrl.js";
+import { fetchJson } from "../utils/http.js";
 import { randomBytes } from "crypto";
 import env from "../../env.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../webhooks/utils/test-helpers.js";
 import {
   applyProvisioning,
   deprovisionMissing,
@@ -18,8 +24,14 @@ import {
   type ProvisionedServiceSpec,
   type Provisioning,
 } from "../../utils/provisioning/load.js";
+import {
+  DEFAULT_ORGANIZATION_ID,
+  SYSTEM_USER_ID,
+} from "../../definitions/index.js";
 
 let adminToken: string;
+const createdSlugs: string[] = [];
+const createdClientIds: string[] = [];
 
 beforeAll(async () => {
   // Events are written in this process, outside the server.
@@ -37,6 +49,11 @@ beforeAll(async () => {
   });
 });
 
+afterAll(async () => {
+  await removeServices(createdSlugs);
+  await removeLoginClients(createdClientIds);
+});
+
 const rand = () => `p${randomBytes(5).toString("hex")}`;
 
 const newSecret = () => {
@@ -48,6 +65,7 @@ const serviceSpec = (
   extra: Partial<ProvisionedServiceSpec> = {}
 ): ProvisionedServiceSpec & { plainSecret: string } => {
   const slug = extra.slug ?? `prov-${rand()}`;
+  createdSlugs.push(slug);
   const secret = newSecret();
   return {
     slug,
@@ -64,20 +82,24 @@ const serviceSpec = (
 
 const clientSpec = (
   extra: Partial<ProvisionedClientSpec> = {}
-): ProvisionedClientSpec => ({
-  clientId: `prov-client-${rand()}`,
-  name: "Provisioned app",
-  clientType: "public",
-  secretEnv: null,
-  secretHash: null,
-  redirectUris: ["https://app.example.com/callback"],
-  postLogoutRedirectUris: [],
-  scopes: ["openid", "profile"],
-  grantTypes: ["authorization_code", "refresh_token"],
-  audience: [],
-  consentRequired: true,
-  ...extra,
-});
+): ProvisionedClientSpec => {
+  const spec: ProvisionedClientSpec = {
+    clientId: `prov-client-${rand()}`,
+    name: "Provisioned app",
+    clientType: "public",
+    secretEnv: null,
+    secretHash: null,
+    redirectUris: ["https://app.example.com/callback"],
+    postLogoutRedirectUris: [],
+    scopes: ["openid", "profile"],
+    grantTypes: ["authorization_code", "refresh_token"],
+    audience: [],
+    consentRequired: true,
+    ...extra,
+  };
+  createdClientIds.push(spec.clientId);
+  return spec;
+};
 
 const file = (
   services: ProvisionedServiceSpec[] = [],
@@ -112,22 +134,8 @@ const fetchToken = async (clientId: string, clientSecret: string) => {
   return response.status;
 };
 
-const api = async (method: string, path: string, body?: unknown) => {
-  const response = await fetch(`${CORE_URL}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${adminToken}`,
-      ...(body !== undefined && { "Content-Type": "application/json" }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await response.text();
-  return {
-    status: response.status,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    body: (text ? JSON.parse(text) : null) as any,
-  };
-};
+const api = (method: string, path: string, body?: unknown) =>
+  fetchJson(method, `${CORE_URL}${path}`, adminToken, body);
 
 const serviceRow = (slug: string) =>
   prisma.service.findUniqueOrThrow({
@@ -412,6 +420,7 @@ describe("applyProvisioning", () => {
       slug: `hand-${rand()}`,
     });
     expect(created.status).toBe(201);
+    createdSlugs.push(created.body.slug);
     const handClient = await api("POST", "/v1/admin/clients", {
       name: "Hand made app",
       clientType: "public",
@@ -419,6 +428,7 @@ describe("applyProvisioning", () => {
       grantTypes: ["authorization_code"],
     });
     expect(handClient.status, JSON.stringify(handClient.body)).toBe(201);
+    createdClientIds.push(handClient.body.clientId);
 
     const fresh = serviceSpec();
     const problems = await problemsOf(
@@ -446,6 +456,10 @@ describe("applyProvisioning", () => {
   });
 
   it("marks an entry missing from the file as unprovisioned, and clears it when it returns", async () => {
+    const endpoint = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      { eventTypes: ["core.service.updated", "auth.client.updated"] }
+    );
     const service = serviceSpec();
     const client = clientSpec();
     await applyProvisioning(file([service], [client]));
@@ -458,8 +472,26 @@ describe("applyProvisioning", () => {
         `client:${client.clientId}`,
       ])
     );
-    expect((await serviceRow(service.slug)).unprovisionedAt).toEqual(now);
-    expect((await clientRow(client.clientId)).unprovisionedAt).toEqual(now);
+    const s = await serviceRow(service.slug);
+    const c = await clientRow(client.clientId);
+    expect(s.unprovisionedAt).toEqual(now);
+    expect(c.unprovisionedAt).toEqual(now);
+
+    // emitTx → core.outbox → reaper → fan-out creates the delivery.
+    for (const [eventType, entityId] of [
+      ["core.service.updated", s.id],
+      ["auth.client.updated", c.id],
+    ]) {
+      const where = {
+        webhookEndpointId: endpoint.id,
+        eventType,
+        payload: { path: ["entityId"], equals: entityId },
+      };
+      await waitFor(
+        async () => (await prisma.webhookDelivery.count({ where })) > 0,
+        10_000
+      );
+    }
 
     // A later start without it keeps the first time it went missing.
     await applyProvisioning(file(), new Date(now.getTime() + 60_000));

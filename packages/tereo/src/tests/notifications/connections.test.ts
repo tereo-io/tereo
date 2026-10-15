@@ -7,6 +7,7 @@ import { prisma } from "../../utils/db/prisma.js";
 import { currentKek } from "../../utils/keys.js";
 import { randomBytes, randomUUID } from "crypto";
 import { CORE_URL } from "../utils/coreUrl.js";
+import { fetchJson } from "../utils/http.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
@@ -28,27 +29,12 @@ let adminUserId: string;
 
 const rand = () => randomBytes(4).toString("hex");
 
-const api = async (
+const api = (
   method: string,
   path: string,
   token: string | null,
   body?: unknown
-) => {
-  const response = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      ...(token && { Authorization: `Bearer ${token}` }),
-      ...(body !== undefined && { "Content-Type": "application/json" }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await response.text();
-  return {
-    status: response.status,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    body: (text ? JSON.parse(text) : null) as any,
-  };
-};
+) => fetchJson(method, `${BASE}${path}`, token, body);
 
 const settings = (port = 2525, over: Record<string, unknown> = {}) => ({
   host: "127.0.0.1",

@@ -11,7 +11,6 @@ export interface ServiceSummary {
 
 /** A service as `GET /admin/services` returns it. */
 export interface Service extends ServiceSummary {
-  /** Declared in the provisioning file: only its access is decided here. */
   provisioned: boolean;
   /** Null only for core's own row, which has no OAuth client. */
   clientId: string | null;

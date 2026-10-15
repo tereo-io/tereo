@@ -16,14 +16,9 @@ export interface CreateServiceInput {
   provisionedAccess?: { roles: string[]; audiences: string[] };
 }
 
-/** The email of a service's service-account user. */
 export const serviceAccountEmail = (slug: string) =>
   `${slug}@services.tereo.internal`;
 
-/**
- * Add a service: its confidential client (client_credentials only), the
- * service-account user it acts as, and its row, audited and announced.
- */
 export const createServiceTx = async (
   tx: Prisma.TransactionClient,
   input: CreateServiceInput,
@@ -105,15 +100,11 @@ export interface ServiceToUpdate {
   accountUserId: string;
 }
 
-/** Stop every outstanding token of the service's client. */
 export const revokeServiceTokens = async (clientRowId: string) => {
   await db.accessTokens.revokeByClientId(clientRowId);
 };
 
-/**
- * Rename, deactivate or reactivate a service, audited and announced. The
- * caller revokes the tokens of a service it deactivated.
- */
+// The caller revokes the tokens of a service it deactivated.
 export const updateServiceTx = async (
   tx: Prisma.TransactionClient,
   existing: ServiceToUpdate,
