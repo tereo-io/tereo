@@ -151,8 +151,8 @@ jobs:
           annotations: ${{ steps.meta.outputs.annotations }}
           sbom: true
           cache-from: type=gha
-          # The image is pushed before the cache export, so a cache the runner
-          # can't write must not fail the job and skip the chart push and tag.
+          # The cache only speeds up builds: a failed export must not fail the
+          # job and skip the chart push and tag.
           cache-to: type=gha,mode=max,ignore-error=true
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
