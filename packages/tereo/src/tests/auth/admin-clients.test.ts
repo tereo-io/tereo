@@ -132,6 +132,25 @@ describe("Admin Clients Endpoints", () => {
       expect(data.clientId).toBeDefined();
     });
 
+    it("defaults consentRequired to true", async () => {
+      const response = await fetch(`${BASE_URL}/v1/admin/clients`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: `Consent default ${generateUniqueId()}`,
+          clientType: "public",
+          redirectUris: ["http://localhost:3000/callback"],
+          grantTypes: ["authorization_code"],
+        }),
+      });
+      expect(response.status).toBe(HTTP_STATUS.CREATED);
+      const data = (await response.json()) as ClientResponse;
+      expect(data.consentRequired).toBe(true);
+    });
+
     it("persists postLogoutRedirectUris", async () => {
       const postLogoutRedirectUris = ["http://localhost:3000/logged-out"];
       const response = await fetch(`${BASE_URL}/v1/admin/clients`, {
@@ -344,6 +363,27 @@ describe("Admin Clients Endpoints", () => {
 
       expect(response.status).toBe(HTTP_STATUS.OK);
       expect(data.name).toBe("Updated Client Name");
+    });
+
+    it("updates consentRequired and reads it back", async () => {
+      const url = `${BASE_URL}/v1/admin/clients/${managedClient.id}`;
+      const headers = {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      };
+      const patch = await fetch(url, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ consentRequired: false }),
+      });
+      expect(patch.status).toBe(HTTP_STATUS.OK);
+      expect(((await patch.json()) as ClientResponse).consentRequired).toBe(
+        false
+      );
+      const get = await fetch(url, { headers });
+      expect(((await get.json()) as ClientResponse).consentRequired).toBe(
+        false
+      );
     });
 
     it("should update redirect URIs", async () => {

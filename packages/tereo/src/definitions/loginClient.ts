@@ -51,10 +51,20 @@ export const loginClientRedirectUris = (
 };
 
 /**
- * Clients that are part of core itself, so the user has nothing to approve:
- * a silent (`prompt=none`) authorize for one issues its code without the
- * consent screen. Their tokens act in core's API with the user's full rights,
- * whatever their scopes. Identified by their fixed client_id.
+ * Clients that are part of core itself. Their tokens act in core's API with
+ * the user's full rights, whatever their scopes. Identified by their fixed
+ * client_id.
  */
 export const isFirstPartyClient = (clientId: string): boolean =>
   clientId === LOGIN_CLIENT.clientId;
+
+/**
+ * Whether the user is spared the consent screen for this client: core's own,
+ * or one an admin marked `consentRequired: false`. Only the screen is
+ * skipped; what the client's tokens may do in core's API is decided by
+ * `isFirstPartyClient` alone.
+ */
+export const skipsConsent = (client: {
+  clientId: string;
+  consentRequired: boolean;
+}): boolean => isFirstPartyClient(client.clientId) || !client.consentRequired;

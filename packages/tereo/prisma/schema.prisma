@@ -168,6 +168,9 @@ model OAuthClient {
   grantTypes              String[]   @map("grant_types")
   // Service slugs whose holders may introspect this client's tokens.
   audience                String[]   @default([])
+  // false: the user is not asked to approve this client after signing in.
+  // Says nothing about what its tokens may do in core's API.
+  consentRequired         Boolean    @default(true) @map("consent_required")
   // After a regenerate, the replaced secret keeps working until it expires,
   // so running copies of a service survive the rollout.
   previousSecretHash      String?    @map("previous_secret_hash") @db.VarChar(255)

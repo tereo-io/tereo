@@ -1,11 +1,16 @@
-import { authorizeRestartParams, uiUrl } from "../../../utils/authorization.js";
 import { validateBody, validateQuery } from "../../../utils/validateReq.js";
 import { OrgSelectGetSchema, OrgSelectSubmitSchema } from "./schemas.js";
 import { OAuth2Error, BadRequestError } from "../../../utils/errors.js";
 import { generateRandomString } from "../../../utils/crypto.js";
+import { skipsConsent } from "../../../definitions/index.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
 import env from "../../../env.js";
+import {
+  authorizeRestartParams,
+  issueAuthorizationCode,
+  uiUrl,
+} from "../../../utils/authorization.js";
 import {
   setConsentSessionCookie,
   clearOrgSelectSessionCookie,
@@ -116,6 +121,26 @@ export const orgSelectSubmitHandler = async (req: Request, res: Response) => {
     );
   }
   clearOrgSelectSessionCookie(res, client.clientId);
+
+  if (skipsConsent(client)) {
+    const redirectUrl = await issueAuthorizationCode(req, res, client, {
+      userId: session.userId,
+      organizationId: body.organization_id,
+      redirectUri: session.redirectUri,
+      scopes: session.scopes,
+      state: session.state,
+      codeChallenge: session.codeChallenge,
+      codeChallengeMethod: session.codeChallengeMethod,
+      nonce: session.nonce,
+      authTime: session.authTime,
+      maxAge: session.maxAge,
+      acrValues: session.acrValues,
+      authMethods: session.authMethods,
+      userSessionId: null,
+    });
+    res.json({ redirect_url: redirectUrl });
+    return;
+  }
 
   const consentSessionToken = generateRandomString(32);
   await db.consent.createConsentSession({

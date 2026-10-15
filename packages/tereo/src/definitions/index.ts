@@ -19,6 +19,7 @@ export { SYSTEM_USER, SYSTEM_USER_ID } from "./systemUser.js";
 export {
   LOGIN_CLIENT,
   isFirstPartyClient,
+  skipsConsent,
   loginClientConfig,
   loginClientRedirectUris,
 } from "./loginClient.js";

@@ -119,18 +119,20 @@ const idTokenFor = async (code: string, verifier: string) => {
   return decodeJwt(((await res.json()) as { id_token: string }).id_token);
 };
 
-/** A password-only login through consent; the jar keeps the SSO session. */
+/** A password-only login through to a code; the jar keeps the SSO session. */
 const passwordLogin = async (
   jar: CookieJar,
   user: { email: string; plainPassword: string },
   acrValues?: string
 ) => {
   const { next, pkce } = await submitLogin(jar, user, acrValues);
-  expect(next.pathname).toMatch(/\/consent$/);
-  const done = await post(jar, "/oauth/consent", {
-    session_token: next.searchParams.get("session"),
-    approved: true,
-  });
+  // Core's own login client skips consent: the code comes with the login.
+  const done = next.searchParams.has("code")
+    ? next
+    : await post(jar, "/oauth/consent", {
+        session_token: next.searchParams.get("session"),
+        approved: true,
+      });
   return { code: done.searchParams.get("code")!, verifier: pkce.verifier };
 };
 
@@ -180,13 +182,9 @@ describe("acr_values=urn:auth-service:mfa", () => {
     const { next, pkce } = await submitLogin(jar, user, MFA);
     expect(next.pathname).toMatch(/\/login\/2fa$/);
 
-    const consent = await post(jar, "/oauth/totp/verify", {
+    const done = await post(jar, "/oauth/totp/verify", {
       session_token: next.searchParams.get("session"),
       totp_code: generateTotpCode(user.secret),
-    });
-    const done = await post(jar, "/oauth/consent", {
-      session_token: consent.searchParams.get("session"),
-      approved: true,
     });
     const idToken = await idTokenFor(
       done.searchParams.get("code")!,

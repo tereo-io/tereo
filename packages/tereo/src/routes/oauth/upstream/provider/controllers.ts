@@ -378,7 +378,7 @@ const completeLogin = async (
   );
   if (!linked) throw fail("no_account");
 
-  return await continueProviderLogin(res, provider, user, linked.id, {
+  return await continueProviderLogin(req, res, provider, user, linked.id, {
     client,
     request,
   });
@@ -386,6 +386,7 @@ const completeLogin = async (
 
 /** The provider was the first factor: on to TOTP, organization and consent. */
 const continueProviderLogin = async (
+  req: Request,
   res: Response,
   provider: IdentityProvider,
   user: User,
@@ -394,7 +395,12 @@ const continueProviderLogin = async (
     client,
     request,
   }: {
-    client: { id: string; clientId: string; scopes: string[] };
+    client: {
+      id: string;
+      clientId: string;
+      scopes: string[];
+      consentRequired: boolean;
+    };
     request: AuthorizeRequestParams;
   }
 ): Promise<string> => {
@@ -418,7 +424,7 @@ const continueProviderLogin = async (
     })
   );
 
-  const { redirect_url } = await continueAfterFirstFactor(res, {
+  const { redirect_url } = await continueAfterFirstFactor(req, res, {
     user,
     client,
     request,
@@ -612,6 +618,7 @@ const completeForcedLink = async (
   clearIdentityLinkGrantCookie(res, client.clientId);
 
   return await continueProviderLogin(
+    req,
     res,
     provider,
     { ...user, passwordHash: null },

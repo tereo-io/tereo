@@ -2,8 +2,8 @@ import type { AuthorizeRequestParams } from "./authorization.js";
 import { handlePostAuthOrgSelection } from "./orgSelection.js";
 import type { StepWriter } from "./db/loginFlows.js";
 import { issueKnownDevice } from "./knownDevice.js";
+import type { Request, Response } from "express";
 import { OAuth2Error } from "./errors.js";
-import type { Response } from "express";
 import db from "./db/index.js";
 import env from "../env.js";
 import {
@@ -38,7 +38,12 @@ export const buildRedirectUrl = (
 /** A user whose first factor (password or provider) has just been checked. */
 export interface FirstFactorContinuation {
   user: { id: string; totpEnabled: boolean; passwordHash: string | null };
-  client: { id: string; clientId: string; scopes: string[] };
+  client: {
+    id: string;
+    clientId: string;
+    scopes: string[];
+    consentRequired: boolean;
+  };
   request: AuthorizeRequestParams;
   /** The `amr` so far: `["pwd"]`, `["fed"]` or `["fed", "mfa"]`. */
   authMethods: string[];
@@ -74,6 +79,7 @@ export const writeStepWhilePasswordIs =
  * finishes records the first factor too.
  */
 export const continueAfterFirstFactor = async (
+  req: Request,
   res: Response,
   {
     user,
@@ -203,10 +209,10 @@ export const continueAfterFirstFactor = async (
   issueKnownDevice(res, user);
 
   return handlePostAuthOrgSelection(
+    req,
     res,
     user.id,
-    client.id,
-    client.clientId,
+    client,
     request.redirectUri,
     request.scopes,
     request.state,

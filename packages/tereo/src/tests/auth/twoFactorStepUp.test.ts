@@ -99,11 +99,13 @@ const signIn = async (
       totp_code: generateTotpCode(user.secret),
     });
   }
-  expect(next.pathname).toMatch(/\/consent$/);
-  const done = await post(jar, "/oauth/consent", {
-    session_token: next.searchParams.get("session"),
-    approved: true,
-  });
+  // Core's own login client skips consent: the code comes with the login.
+  const done = next.searchParams.has("code")
+    ? next
+    : await post(jar, "/oauth/consent", {
+        session_token: next.searchParams.get("session"),
+        approved: true,
+      });
   const res = await fetch(`${BASE_URL}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

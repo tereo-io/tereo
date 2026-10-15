@@ -14,6 +14,7 @@ export const UpdateClientSchema = z.object({
   scopes: z.array(ScopeSchema).max(100).optional(),
   grantTypes: z.array(GrantTypeEnum).min(1).optional(),
   ownerId: z.guid().optional(),
+  consentRequired: z.boolean().optional(),
 });
 
 export type UpdateClientInput = z.infer<typeof UpdateClientSchema>;

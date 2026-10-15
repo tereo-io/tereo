@@ -33,6 +33,7 @@ export const CreateClientSchema = z
     postLogoutRedirectUris: z.array(UriSchema).max(50).default([]),
     scopes: z.array(ScopeSchema).max(100).default([]),
     grantTypes: z.array(GrantTypeEnum).min(1),
+    consentRequired: z.boolean().default(true),
   })
   .refine(
     (data) => {

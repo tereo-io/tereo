@@ -36,6 +36,7 @@ export interface ClientRecord {
   postLogoutRedirectUris: string[];
   grantTypes: string[];
   audience: string[];
+  consentRequired: boolean;
   ownerId: string;
   organizationId: string | null;
   serviceAccountUser: {
@@ -173,6 +174,7 @@ export const create = async (
       postLogoutRedirectUris: data.postLogoutRedirectUris,
       scopes: data.scopes,
       grantTypes: data.grantTypes,
+      consentRequired: data.consentRequired,
       ownerId: data.ownerId,
     },
     include: { serviceAccountUser: true },
@@ -194,6 +196,7 @@ export const update = async (
       postLogoutRedirectUris: data.postLogoutRedirectUris,
       scopes: data.scopes,
       grantTypes: data.grantTypes,
+      consentRequired: data.consentRequired,
       ...(data.ownerId && { ownerId: data.ownerId }),
     },
     include: { serviceAccountUser: true },
