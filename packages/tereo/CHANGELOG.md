@@ -1,3 +1,13 @@
+## 0.2.1 (2026-10-15)
+
+### 🩹 Fixes
+
+- The admin UI uses `@kosmeo-ui/react` 0.2.0: WCAG AA contrast and accessible-name fixes throughout, and modals now also close when the backdrop is clicked, as well as on Escape. ([#10](https://github.com/tereo-io/tereo/pull/10))
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.2.0 (2026-10-15)
 
 ### 🚀 Features
