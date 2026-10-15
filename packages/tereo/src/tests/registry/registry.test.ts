@@ -607,6 +607,35 @@ describe("requested access", () => {
     expect(res.status).toBe(422);
   });
 
+  it("refuses a request for a core role that is not requestable", async () => {
+    const service = await addService();
+    const res = await declare(
+      await tokenFor(service),
+      declarationFor(service.namespace, {
+        requestedAccess: { roles: ["admin"] },
+      })
+    );
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("invalid_requested_access");
+    expect(res.body.error_description).toContain(
+      'role "admin" cannot be requested by a service'
+    );
+  });
+
+  it("still accepts a requestable core role", async () => {
+    const service = await addService();
+    const res = await declare(
+      await tokenFor(service),
+      declarationFor(service.namespace, {
+        requestedAccess: { roles: ["file_user"] },
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.access).toEqual([
+      expect.objectContaining({ target: "file_user", status: "pending" }),
+    ]);
+  });
+
   it("lets an approved audience introspect the service's tokens", async () => {
     const issuer = await addService();
     const resource = await addService();

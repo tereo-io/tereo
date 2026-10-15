@@ -19,6 +19,8 @@ export interface RoleDefinition {
   description: string;
   /** Permission names this role grants. */
   permissions: string[];
+  /** Core's roles only: an app service may request it in its declaration. */
+  requestable?: boolean;
 }
 
 export interface BucketDefinition {

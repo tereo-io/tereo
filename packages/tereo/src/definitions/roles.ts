@@ -29,6 +29,7 @@ export const ROLES: RoleDefinition[] = [
   },
   {
     name: "tenant_resolver",
+    requestable: true,
     displayName: "Tenant Resolver",
     description:
       "Allows a backend service account to resolve organization (tenant) context",
@@ -36,6 +37,7 @@ export const ROLES: RoleDefinition[] = [
   },
   {
     name: "user_resolver",
+    requestable: true,
     displayName: "User Resolver",
     description:
       "Allows a backend service account to resolve user display details (name, email)",
@@ -55,6 +57,7 @@ export const ROLES: RoleDefinition[] = [
   },
   {
     name: "file_user",
+    requestable: true,
     displayName: "File User",
     description:
       "Read the settings of, and read, write and delete objects in, buckets the holder has been granted",
@@ -67,20 +70,31 @@ export const ROLES: RoleDefinition[] = [
   },
   {
     name: "webhook_publisher",
+    requestable: true,
     displayName: "Webhook Publisher",
     description: "Emit webhook events of the event types its service declares",
     permissions: ["webhooks.emit"],
   },
   {
     name: "audit_writer",
+    requestable: true,
     displayName: "Audit Writer",
     description: "Write audit log entries",
     permissions: ["audit-logs.write"],
   },
   {
     name: "notification_sender",
+    requestable: true,
     displayName: "Notification Sender",
     description: "Send notifications",
     permissions: ["notifications.send"],
   },
 ];
+
+const REQUESTABLE = new Set(
+  ROLES.filter((role) => role.requestable).map((role) => role.name)
+);
+
+/** Whether an app service may request this core role by its bare name. */
+export const isRequestableCoreRole = (name: string): boolean =>
+  REQUESTABLE.has(name);
