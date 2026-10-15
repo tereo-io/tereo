@@ -41,6 +41,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if eq .component "api" }}
+      # The preStop sleep counts against the grace period; core's own drain
+      # needs the default 30 s after SIGTERM.
+      terminationGracePeriodSeconds: {{ add 30 (int $.Values.preStopSleepSeconds) }}
+      {{- end }}
       securityContext:
         {{- toYaml $.Values.podSecurityContext | nindent 8 }}
       containers:
@@ -75,6 +80,14 @@ spec:
               port: http
             periodSeconds: 10
             timeoutSeconds: 5
+          {{- if and (eq .component "api") (gt (int $.Values.preStopSleepSeconds) 0) }}
+          # The pod leaves the Service's endpoints as this starts, but the
+          # ingress takes a moment to notice; core serves until then.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "{{ int $.Values.preStopSleepSeconds }}"]
+          {{- end }}
           securityContext:
             {{- toYaml $.Values.securityContext | nindent 12 }}
           resources:
