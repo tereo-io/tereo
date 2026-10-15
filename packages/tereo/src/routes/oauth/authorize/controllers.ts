@@ -169,7 +169,7 @@ export const authorizeGetHandler = async (req: Request, res: Response) => {
 
     // A client that needs approval needs the consent screen, which a silent
     // request cannot show (OIDC Core 3.1.2.6).
-    if (!skipsConsent(client)) {
+    if (!skipsConsent(client, authorization.scopes)) {
       res.redirect(
         authorizationResponseUrl(query.redirect_uri, {
           error: "consent_required",
@@ -236,7 +236,7 @@ export const authorizeGetHandler = async (req: Request, res: Response) => {
             userSessionId: userSession.id,
           };
 
-          if (skipsConsent(client)) {
+          if (skipsConsent(client, authorization.scopes)) {
             res.redirect(
               await issueAuthorizationCode(req, res, client, authorization)
             );

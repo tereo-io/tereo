@@ -122,7 +122,7 @@ export const orgSelectSubmitHandler = async (req: Request, res: Response) => {
   }
   clearOrgSelectSessionCookie(res, client.clientId);
 
-  if (skipsConsent(client)) {
+  if (skipsConsent(client, session.scopes)) {
     const redirectUrl = await issueAuthorizationCode(req, res, client, {
       userId: session.userId,
       organizationId: body.organization_id,

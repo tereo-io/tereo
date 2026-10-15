@@ -139,15 +139,16 @@ nobody controls would receive its codes. `PATCH /v1/admin/clients/:id` refuses t
 cannot be deleted.
 
 **Audience and consent.** A login client carries two admin-set fields. `audience` lists the slugs
-of services its tokens may name: each must be an existing service other than core and, for a
-service's own client, other than itself (`400 invalid_audience`), and changing it needs
-`services.approve` as well as `clients.write`. `consentRequired` (default `true`) says whether a
-user approves the app on the consent screen after signing in. With `false`, the consent step is
-skipped everywhere a consent session would be made: silent authorize, org switch, and after a
-password login (and its TOTP step) or the org picker. That holds for core's own login client too, so
-the admin UI shows no consent screen after a password login. The user still signs in, and the client still gets only the scopes it is registered for.
-Skipping consent grants no core API access: core's API still needs the `core:*` scopes and the
-user's permissions. Core's own login client never asks and refuses a change to either field. Both
+of services its tokens may name: each must be an existing service other than core
+(`422 invalid_audience`), and changing it needs `services.approve` as well as `clients.write`.
+`consentRequired` (default `true`) says whether a user approves the app on the consent screen after
+signing in. With `false`, the consent step is skipped everywhere a consent session would be made:
+silent authorize, org switch, and after a password login (and its TOTP step) or the org picker —
+but only for a request with no `core:*` scope. A request for any core scope always shows the
+consent screen (and `prompt=none` gets `consent_required`), since those scopes act in core's API as
+the user. Core's own login client always skips it, so the admin UI shows no consent screen after a
+password login. The user still signs in, and the client still gets only the scopes it is registered
+for. Core's own login client never asks and refuses a change to either field. Both
 fields can come from the [provisioning file](provisioning.md), whose clients are read-only here
 (`409 managed_by_provisioning`).
 
@@ -712,8 +713,8 @@ login step or the consent screen — carries `iss`, the issuer (RFC 9207, built 
 expired, older than `max_age`, or belongs to a deactivated user. With `org_id`, the same cases fall
 through to the password login. A code older than its `max_age` is refused at `/oauth/token` with
 `400 invalid_grant`. For core's own login client (`isFirstPartyClient` in `definitions/`) and for a client with
-`consentRequired: false`, `prompt=none` or an `org_id` switch with a live session skips the consent
-screen and redirects with the code. Any other client is answered `error=consent_required` (with `state`) at its `redirect_uri`
+`consentRequired: false` asking for no `core:*` scope, `prompt=none` or an `org_id` switch with a
+live session skips the consent screen and redirects with the code. Any other client is answered `error=consent_required` (with `state`) at its `redirect_uri`
 for `prompt=none` — consent is not remembered, and a silent request cannot show the consent screen
 (OIDC Core 3.1.2.6) — and sent to `{UI}/consent` for an `org_id` switch. `prompt=login` goes to the password
 login without touching the SSO session (any site can send a browser there); the login, once it
