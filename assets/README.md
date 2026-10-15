@@ -2,8 +2,8 @@
 
 | File | Use |
 |---|---|
-| `tereo-banner.svg` | 1200×500, the README header (`tereo-banner.png`: 2400×1000, where SVG is not rendered) |
-| `tereo-mark.svg` | 256×256, avatars, the Helm chart icon and the admin UI's app icons (`tereo-mark.png` 256×256, `tereo-mark@2x.png` 512×512) |
+| `tereo-banner.svg` | 1200×500, the README header |
+| `tereo-mark.svg` | 256×256, avatars, the Helm chart icon and the admin UI's app icons |
 | `tereo-favicon.svg` | 256×256 with heavier lines, for 16–32 px: the admin UI's favicons and top-bar mark |
 | `tereo-social.svg` | 1280×640, the repository's social preview (`tereo-social.png` is the file GitHub takes, under *Settings → Social preview*) |
 
