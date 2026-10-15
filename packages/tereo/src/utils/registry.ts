@@ -12,6 +12,7 @@ import env from "../env.js";
 import { z } from "zod";
 import {
   CORE_RESERVED_NAMESPACES,
+  CORE_SERVICE,
   CORE_SERVICE_ID,
   SYSTEM_USER_ID,
 } from "../definitions/index.js";
@@ -835,9 +836,19 @@ const applyRequestedAccess = async (
 
   const problems: string[] = [];
   for (const target of roles) {
-    if (!(await resolveRoleTarget(target, tx))) {
+    if (target.startsWith(`${CORE_SERVICE.slug}/`)) {
+      problems.push(
+        `role "${target}": core roles are named bare, without "${CORE_SERVICE.slug}/"`
+      );
+      continue;
+    }
+    const role = await resolveRoleTarget(target, tx);
+    if (!role) {
       problems.push(`role "${target}" does not exist or is retired`);
-    } else if (!target.includes("/") && !isRequestableCoreRole(target)) {
+    } else if (
+      role.serviceId === CORE_SERVICE_ID &&
+      !isRequestableCoreRole(role.name)
+    ) {
       problems.push(`role "${target}" cannot be requested by a service`);
     }
   }

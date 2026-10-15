@@ -4,6 +4,7 @@ import { assertCanGrant, globalGrantablePermissions } from "./grants.js";
 import { NotFoundError, UnprocessableEntityError } from "./errors.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { lockRegistries, resolveRoleTarget } from "./registry.js";
+import { isRequestableCoreRole } from "../definitions/roles.js";
 import { prisma, type Prisma } from "./db/prisma.js";
 import { emitTx, logAuditTx } from "./outbox.js";
 import { withUserRefs } from "./users.js";
@@ -259,6 +260,12 @@ export const approveAccessTx = async (
     });
 
     if (role.serviceId === CORE_SERVICE_ID) {
+      if (!isRequestableCoreRole(role.name)) {
+        throw new UnprocessableEntityError(
+          "role_not_requestable",
+          `Role "${row.target}" cannot be granted to a service`
+        );
+      }
       if (!held) {
         assertGrantable(granted.map((rp) => rp.permission.name));
         await tx.userRole.create({

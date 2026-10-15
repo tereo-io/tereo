@@ -256,6 +256,20 @@ describe("parseProvisioning", () => {
     expect(problems[0]).toContain('"admin"');
   });
 
+  it("reports a core role spelled with the core/ prefix in access.roles", () => {
+    const problems = problemsOf(
+      file({
+        services: [
+          service({ access: { roles: ["core/admin", "core/file_user"] } }),
+        ],
+      }),
+      baseEnv()
+    );
+    expect(problems).toHaveLength(2);
+    expect(problems[0]).toContain('"core/admin"');
+    expect(problems[1]).toContain('"core/file_user"');
+  });
+
   it("reports an audience naming core or the service itself", () => {
     const problems = problemsOf(
       file({

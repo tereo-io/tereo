@@ -27,8 +27,10 @@
 
       A declaration that breaks a rule is refused whole: names outside the
       service's namespace, duplicates, a system role granting a permission
-      the declaration doesn't declare, or requested access that doesn't exist
-      return `422` with every problem listed; items owned
+      the declaration doesn't declare, requested access that doesn't exist,
+      a core role services may not request, or a core role spelled
+      `core/<name>` (core roles are named bare) return `422` with every
+      problem listed; items owned
       by another service or an admin return `409`. The body may be up to 1 MB.
 
       When it changes anything, an audit log entry is created and a

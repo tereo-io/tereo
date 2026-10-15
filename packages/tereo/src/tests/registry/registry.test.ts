@@ -622,6 +622,62 @@ describe("requested access", () => {
     );
   });
 
+  it.each(["core/admin", "core/platform_admin"])(
+    "refuses %s, a core admin role behind the core/ prefix",
+    async (target) => {
+      const service = await addService();
+      const res = await declare(
+        await tokenFor(service),
+        declarationFor(service.namespace, {
+          requestedAccess: { roles: [target] },
+        })
+      );
+      expect(res.status).toBe(422);
+      expect(res.body.error).toBe("invalid_requested_access");
+      expect(
+        await prisma.serviceAccess.count({ where: { serviceId: service.id } })
+      ).toBe(0);
+    }
+  );
+
+  it("refuses a requestable core role behind the core/ prefix", async () => {
+    const service = await addService();
+    const res = await declare(
+      await tokenFor(service),
+      declarationFor(service.namespace, {
+        requestedAccess: { roles: ["core/file_user"] },
+      })
+    );
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("invalid_requested_access");
+    expect(res.body.error_description).toContain("named bare");
+  });
+
+  it.each(["admin", "core/admin"])(
+    "refuses to approve a %s row that slipped onto file",
+    async (target) => {
+      const service = await addService();
+      await tokenFor(service);
+      const row = await prisma.serviceAccess.create({
+        data: { serviceId: service.id, kind: "role", target },
+      });
+      const res = await api(
+        "POST",
+        `/v1/admin/services/${service.id}/access/approve`,
+        adminToken,
+        { ids: [row.id] }
+      );
+      expect(res.status).toBe(422);
+      expect(
+        (
+          await prisma.serviceAccess.findUniqueOrThrow({
+            where: { id: row.id },
+          })
+        ).status
+      ).toBe("pending");
+    }
+  );
+
   it("still accepts a requestable core role", async () => {
     const service = await addService();
     const res = await declare(
