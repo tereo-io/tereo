@@ -71,6 +71,34 @@ non-https `publicUrl`, `trustProxy: "true"`, or no secret.
   remove the app for good.
 - **Probes.** Readiness is `/health`, which reports 503 while Postgres or Redis is down; liveness
   only checks the port, so an outage does not restart core.
+- **Stopping.** An API pod sleeps `preStopSleepSeconds` (5) before core gets SIGTERM, so the ingress
+  has stopped routing to it before it shuts down. Raise it if your ingress is slower to notice.
+
+## More than one API pod
+
+Core keeps no session in memory: rate limits, socket.io's cross-pod messages and the job queues are
+in Redis, and each scheduled job runs once however many pods there are. Two things need setting:
+
+- **A `ReadWriteMany` files volume**, shared by every pod (see *Files* above).
+- **Sticky sessions for socket.io's long-polling fallback.** Clients connect by WebSocket first, which
+  needs nothing. A client that cannot falls back to long-polling, and every request of that session
+  must reach the pod that opened it; without stickiness most of them reach another pod and fail with
+  400, and that client gets no live updates. With Traefik, set it on the Service:
+
+  ```yaml
+  replicaCount: 3
+  service:
+    annotations:
+      traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+      traefik.ingress.kubernetes.io/service.sticky.cookie.name: tereo_affinity
+      traefik.ingress.kubernetes.io/service.sticky.cookie.secure: "true"
+      traefik.ingress.kubernetes.io/service.sticky.cookie.httponly: "true"
+  ```
+
+  With ingress-nginx, on the Ingress: `ingress.annotations` with
+  `nginx.ingress.kubernetes.io/affinity: cookie`.
+  [`ci/replicas-values.yaml`](https://github.com/tereo-io/tereo/blob/master/charts/tereo/ci/replicas-values.yaml)
+  is a complete example, with the pods spread across nodes.
 
 ## First start
 

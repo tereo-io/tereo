@@ -75,6 +75,14 @@ spec:
               port: http
             periodSeconds: 10
             timeoutSeconds: 5
+          {{- if and (eq .component "api") (gt (int $.Values.preStopSleepSeconds) 0) }}
+          # The pod leaves the Service's endpoints as this starts, but the ingress takes a
+          # moment to notice; core keeps serving until it has, then shuts down on SIGTERM.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "{{ int $.Values.preStopSleepSeconds }}"]
+          {{- end }}
           securityContext:
             {{- toYaml $.Values.securityContext | nindent 12 }}
           resources:
