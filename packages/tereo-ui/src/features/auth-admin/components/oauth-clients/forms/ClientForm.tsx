@@ -1,5 +1,5 @@
+import { CORE_LOGIN_CLIENT_ID } from "@/features/auth-admin/constants";
 import { CORE_SERVICE_ID, useServices } from "@/features/services";
-import { CORE_LOGIN_CLIENT_ID } from "../../../constants";
 import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 import type {
@@ -19,6 +19,11 @@ import {
   TextArea,
   Col,
 } from "@kosmeo-ui/react";
+
+interface AudienceOption {
+  slug: string;
+  name: string;
+}
 
 interface ClientFormProps {
   client?: OAuthClient;
@@ -74,10 +79,15 @@ export const ClientForm = ({ client, onSubmit, formId }: ClientFormProps) => {
 
   // Core refuses both settings on its own login client.
   const isCoreLoginClient = client?.clientId === CORE_LOGIN_CLIENT_ID;
-  const canSetAudience = hasPermission("services.approve");
-  const audienceOptions = services.filter((s) => s.id !== CORE_SERVICE_ID);
+  // The picker lists services, which needs services.read; approve alone does
+  // not imply it.
+  const canSetAudience =
+    hasPermission("services.approve") && hasPermission("services.read");
+  const audienceOptions: AudienceOption[] = services.filter(
+    (s) => s.id !== CORE_SERVICE_ID
+  );
   // A slug of a service that is no longer listed stays selectable to remove.
-  const selectedServices = audience.map(
+  const selectedServices: AudienceOption[] = audience.map(
     (slug) =>
       audienceOptions.find((s) => s.slug === slug) ?? {
         slug,
@@ -196,7 +206,7 @@ export const ClientForm = ({ client, onSubmit, formId }: ClientFormProps) => {
                 label="Audience"
                 options={audienceOptions}
                 labelKey="name"
-                value={selectedServices as typeof audienceOptions}
+                value={selectedServices}
                 onChange={(values) => setAudience(values.map((s) => s.slug))}
                 placeholder="Services this client's tokens may be used with"
               />

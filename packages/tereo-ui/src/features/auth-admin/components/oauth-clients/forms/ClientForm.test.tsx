@@ -1,5 +1,6 @@
 import type { OAuthClient } from "../../../api/oauth-clients/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CORE_SERVICE_ID } from "@/features/services";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { screen } from "@testing-library/react";
@@ -10,10 +11,8 @@ vi.mock("@/lib/auth", async () =>
   (await import("@/test/authMock")).mockAuthModule()
 );
 
-const CORE_ID = "00000000-0000-7000-8000-000000000002";
-
 const services = [
-  { id: CORE_ID, slug: "core", name: "Core", namespace: "core" },
+  { id: CORE_SERVICE_ID, slug: "core", name: "Core", namespace: "core" },
   { id: "s1", slug: "billing", name: "Billing", namespace: "billing" },
   { id: "s2", slug: "crm", name: "CRM", namespace: "crm" },
 ];
@@ -99,6 +98,27 @@ describe("ClientForm audience and consent", () => {
     expect(
       screen.getByLabelText("Ask users to approve this app")
     ).toBeInTheDocument();
+  });
+
+  it("hides the audience control and sends none with approve but not read", async () => {
+    authMock.permissions = ["services.approve"];
+    const user = userEvent.setup();
+    const onSubmit = renderForm();
+
+    expect(screen.queryByText("Audience")).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText(/^Name/), "New App");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("audience");
+  });
+
+  it("sends no audience on edit with approve but not read", async () => {
+    authMock.permissions = ["services.approve"];
+    const user = userEvent.setup();
+    const onSubmit = renderForm({ ...stored, audience: ["billing"] });
+
+    await user.click(screen.getByLabelText("Ask users to approve this app"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSubmit.mock.calls[0][0]).toEqual({ consentRequired: false });
   });
 
   it("sends only the consent change when editing", async () => {
