@@ -96,7 +96,7 @@ describe("lifecycle sweep fan-out", () => {
 
     const policyQueue = getLifecyclePolicyQueue();
     const jobs = await policyQueue.getJobs(
-      ["wait", "delayed", "active", "paused"],
+      ["wait", "delayed", "active"],
       0,
       -1
     );
@@ -112,7 +112,7 @@ describe("lifecycle sweep fan-out", () => {
     // paused for this test file (see beforeAll), so the job sits in `paused`
     // and we assert against that state rather than racing the worker.
     const ttlJobs = await getLifecyclePerObjectTtlQueue().getJobs(
-      ["wait", "delayed", "active", "paused", "completed"],
+      ["wait", "delayed", "active", "completed"],
       0,
       -1
     );

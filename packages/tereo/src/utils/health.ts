@@ -25,8 +25,8 @@ export interface DependencyHealth {
 
 /** Pings Postgres and Redis, each bounded so a hung one fails fast. */
 export async function probeDependencies(): Promise<DependencyHealth> {
-  let dbOk = false;
-  let redisOk = false;
+  let dbOk: boolean;
+  let redisOk: boolean;
   try {
     dbOk = (await withTimeout(dbHealthCheck())) !== "timeout";
   } catch {

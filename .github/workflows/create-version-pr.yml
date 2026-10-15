@@ -16,11 +16,14 @@ jobs:
       !contains(github.event.pull_request.labels.*.name, 'automated-version-bump')
     runs-on: ubuntu-latest
     # The built-in token pushes the bump branch and opens its PR. A PR it opens
-    # triggers no workflows, and CI skips release/version-bump anyway. It is
-    # not left in .git/config: only the push step and the gh steps see it.
+    # triggers no workflows, so the last step starts the PR's required checks
+    # itself. It is not left in .git/config: only the push step and the gh
+    # steps see it.
     permissions:
       contents: write
       pull-requests: write
+      # Starts CI and the version-plan check on the bump branch.
+      actions: write
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -119,3 +122,13 @@ jobs:
             --body "Automated version bump based on conventional commits." \
             --label "automated-version-bump"
           echo "Created version bump PR"
+
+      # The PR's required checks never start on their own (see ci.yml), so run
+      # them on every new head of the branch.
+      - name: Run required checks on the bump branch
+        if: steps.check-plans.outputs.has_plans == 'true' && steps.commit.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run ci.yml --ref release/version-bump
+          gh workflow run version-plan-check.yml --ref release/version-bump

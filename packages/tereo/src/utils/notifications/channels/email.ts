@@ -149,7 +149,7 @@ async function transportFor(
         { err, connectionId: connection.id },
         "SMTP host did not resolve"
       );
-      throw new Error("The SMTP host did not resolve");
+      throw new Error("The SMTP host did not resolve", { cause: err });
     }
   }
   const transport = nodemailer.createTransport({

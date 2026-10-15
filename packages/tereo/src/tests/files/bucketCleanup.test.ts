@@ -72,7 +72,7 @@ describe("bucket cleanup job", () => {
     // job for a small bucket may race to "completed" before this assertion
     // runs. Include "completed" so we don't flake on instant processing.
     const jobs = await getBucketCleanupQueue().getJobs(
-      ["wait", "delayed", "active", "paused", "completed"],
+      ["wait", "delayed", "active", "completed"],
       0,
       -1
     );

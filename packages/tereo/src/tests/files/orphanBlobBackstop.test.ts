@@ -83,7 +83,7 @@ describe("orphanBlobBackstop worker", () => {
     await processOrphanBlobBackstop();
     const jobs = (
       await queue.getJobs(
-        ["wait", "delayed", "active", "paused", "completed", "failed"],
+        ["wait", "delayed", "active", "completed", "failed"],
         0,
         -1
       )

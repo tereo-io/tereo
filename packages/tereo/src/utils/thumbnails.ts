@@ -1,8 +1,8 @@
 import type { EncryptedBlobKeyMaterial } from "./encryption.js";
 import { openBlobStream, saveBlobBuffer } from "./storage.js";
+import sharp, { type Metadata } from "sharp";
 import { logger } from "./logger.js";
 import db from "./db/index.js";
-import sharp from "sharp";
 
 export type ThumbnailSize = "thumb" | "small" | "medium";
 
@@ -65,7 +65,7 @@ export async function generateThumbnails(
   input: GenerateThumbnailsInput
 ): Promise<void> {
   // The stored content type is the uploader's word; the decoder's is not.
-  let probe: sharp.Metadata;
+  let probe: Metadata;
   try {
     const source = openBlobStream(input.blobMeta, input.blobHash);
     const inspector = sharp(DECODE_OPTIONS);

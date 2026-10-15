@@ -69,6 +69,10 @@ export async function mapUniqueViolation<T>(
  * The columns of the unique constraint `err` violated, or null when it is not
  * a unique violation. Through the pg driver adapter, Prisma's `P2002` names
  * them in `meta.driverAdapterError.cause.constraint.fields`, not `meta.target`.
+ * Since Prisma 7.10 the adapter names only the index; its columns come back as
+ * one name, the index's minus the table prefix and `_key` suffix
+ * (`user_identities_user_id_provider_id_key` → `user_id_provider_id`), since
+ * column names hold underscores too.
  */
 export function uniqueViolationFields(err: unknown): string[] | null {
   if (typeof err !== "object" || err === null) return null;
@@ -88,6 +92,14 @@ export function uniqueViolationFields(err: unknown): string[] | null {
   if (!isUnique) return null;
   const fields = cause?.constraint?.fields ?? e.meta?.target;
   if (Array.isArray(fields)) return fields.map(String);
+  const index = cause?.constraint?.index;
+  if (typeof index === "string") {
+    const prefix = typeof cause?.table === "string" ? `${cause.table}_` : "";
+    const columns = index.startsWith(prefix)
+      ? index.slice(prefix.length)
+      : index;
+    return [columns.replace(/_key$/, "")];
+  }
   if (typeof fields === "string") return [fields];
   return [];
 }
@@ -95,7 +107,8 @@ export function uniqueViolationFields(err: unknown): string[] | null {
 interface AdapterCause {
   kind?: unknown;
   originalCode?: unknown;
-  constraint?: { fields?: unknown };
+  constraint?: { fields?: unknown; index?: unknown };
+  table?: unknown;
 }
 
 /**

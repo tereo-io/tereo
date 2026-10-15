@@ -20,6 +20,25 @@ describe("uniqueViolationFields", () => {
     expect(uniqueViolationFields(err)).toEqual(["user_id", "provider_id"]);
   });
 
+  it("reads the columns from the index name when that is all it has", () => {
+    const err = {
+      code: "P2002",
+      meta: {
+        modelName: "UserIdentity",
+        driverAdapterError: {
+          name: "DriverAdapterError",
+          cause: {
+            originalCode: "23505",
+            kind: "UniqueConstraintViolation",
+            constraint: { index: "user_identities_user_id_provider_id_key" },
+            table: "user_identities",
+          },
+        },
+      },
+    };
+    expect(uniqueViolationFields(err)).toEqual(["user_id_provider_id"]);
+  });
+
   it("reads meta.target as an array", () => {
     expect(
       uniqueViolationFields({ code: "P2002", meta: { target: ["email"] } })

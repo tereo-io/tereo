@@ -22,3 +22,5 @@ vitest.config.*.timestamp*
 .claude/worktrees/
 # Copied from core by the UI's openapi:sync
 packages/tereo-ui/public/openapi/
+
+.nx/migrate-runs

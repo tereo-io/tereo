@@ -79,12 +79,15 @@ export const resolveLoginIdentity = async (
 };
 
 // The adapter names database columns; tolerate Prisma's field names too.
+// `fields` may be one underscore-joined name, as uniqueViolationFields gives
+// when the driver names only the index; it is in the index's column order.
 const sameColumns = (fields: string[], expected: string[]): boolean => {
   const norm = (f: string) => f.replace(/_/g, "").toLowerCase();
   const got = new Set(fields.map(norm));
-  return (
-    got.size === expected.length && expected.every((f) => got.has(norm(f)))
-  );
+  if (got.size === expected.length && expected.every((f) => got.has(norm(f)))) {
+    return true;
+  }
+  return norm(fields.join("")) === norm(expected.join(""));
 };
 
 const signInLinked = async (
