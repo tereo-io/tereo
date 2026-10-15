@@ -11,7 +11,13 @@
 .t-topbar-brand {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
   margin-right: 2rem;
+}
+
+.t-topbar-mark {
+  width: 1.75rem;
+  height: 1.75rem;
 }
 
 .t-topbar-logo {
