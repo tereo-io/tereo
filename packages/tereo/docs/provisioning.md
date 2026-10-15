@@ -171,7 +171,7 @@ active again. A deleted login client is created anew.
 
 ## Managed rows
 
-A provisioned service or client changes only in the file. The admin API and UI refuse to edit,
+A provisioned service or client changes only in the file. The admin API refuses to edit,
 delete, deactivate or regenerate the secret of one, with `409` and code `managed_by_provisioning`:
 
 | Row | Refused | Still allowed |
@@ -179,5 +179,5 @@ delete, deactivate or regenerate the secret of one, with `409` and code `managed
 | Service | `PATCH /v1/admin/services/:id` (rename, deactivate), `regenerate-secret`, `revoke-previous-secret` | Approving and revoking its access |
 | Login client | `PATCH`, `DELETE`, `regenerate-secret` on `/v1/admin/clients/:id` | Reading it |
 
-Responses carry `provisioned: true`, and the admin UI shows a "Managed by provisioning" badge with
-the change controls hidden.
+Responses carry `provisioned: true`, and the admin UI shows a "Managed by provisioning" badge and
+hides the change controls.

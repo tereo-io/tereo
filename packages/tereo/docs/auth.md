@@ -143,8 +143,9 @@ of services its tokens may name: each must be an existing service other than cor
 service's own client, other than itself (`400 invalid_audience`), and changing it needs
 `services.approve` as well as `clients.write`. `consentRequired` (default `true`) says whether a
 user approves the app on the consent screen after signing in. With `false`, the consent step is
-skipped everywhere a consent session would be made (silent authorize, org switch, post-login, org
-picker); the user still signs in, and the client still gets only the scopes it is registered for.
+skipped everywhere a consent session would be made: silent authorize, org switch, and after a
+password login (and its TOTP step) or the org picker. That holds for core's own login client too, so
+the admin UI shows no consent screen after a password login. The user still signs in, and the client still gets only the scopes it is registered for.
 Skipping consent grants no core API access: core's API still needs the `core:*` scopes and the
 user's permissions. Core's own login client never asks and refuses a change to either field. Both
 fields can come from the [provisioning file](provisioning.md), whose clients are read-only here
