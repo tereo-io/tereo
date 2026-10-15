@@ -209,10 +209,14 @@ export const regenerateSecret = async (req: Request, res: Response) => {
   });
 };
 
-/** End the overlap now: only the current secret works from here on. */
+/**
+ * End the overlap now: only the current secret works from here on. Allowed on
+ * a provisioned service too, since the file cannot express it and a leaked
+ * old secret must not wait out the overlap.
+ */
 export const revokePreviousSecret = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const service = await getEditableAppService(req);
+  const service = await getAppService(req);
 
   const updated = await db.$transaction(async (tx) => {
     await tx.oAuthClient.update({

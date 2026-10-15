@@ -54,8 +54,8 @@ export const ServiceDetail = () => {
   }
 
   const isCore = service.id === CORE_SERVICE_ID;
-  const canWrite =
-    !isCore && !service.provisioned && hasPermission("services.write");
+  const canEndOverlap = !isCore && hasPermission("services.write");
+  const canWrite = canEndOverlap && !service.provisioned;
   const overlapUntil =
     service.previousSecretExpiresAt &&
     new Date(service.previousSecretExpiresAt) > new Date()
@@ -114,7 +114,7 @@ export const ServiceDetail = () => {
           <Alert variant="primary">
             This service comes from the provisioning file. Change its name or
             secret there and restart core. Its access requests are still decided
-            here.
+            here, and a rotated secret&apos;s overlap can still be ended early.
           </Alert>
         )}
         {!service.isActive && (
@@ -132,7 +132,7 @@ export const ServiceDetail = () => {
                 core while the new one rolls out. End the overlap once every
                 copy uses the new secret.
               </span>
-              {canWrite && (
+              {canEndOverlap && (
                 <div>
                   <RevokePreviousSecretButton service={service} />
                 </div>

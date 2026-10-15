@@ -97,4 +97,17 @@ describe("ServiceDetail", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /approve/i })).toBeEnabled();
   });
+
+  it("lets an admin end a provisioned service's secret overlap", async () => {
+    renderDetail({
+      ...service,
+      provisioned: true,
+      previousSecretExpiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+
+    expect(await screen.findByText("Two secrets work right now")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /end overlap/i })
+    ).toBeInTheDocument();
+  });
 });

@@ -1029,8 +1029,10 @@ paths:
 
         A declaration that breaks a rule is refused whole: names outside the
         service's namespace, duplicates, a system role granting a permission
-        the declaration doesn't declare, or requested access that doesn't exist
-        return `422` with every problem listed; items owned
+        the declaration doesn't declare, requested access that doesn't exist,
+        a core role services may not request, or a core role spelled
+        `core/<name>` (core roles are named bare) return `422` with every
+        problem listed; items owned
         by another service or an admin return `409`. The body may be up to 1 MB.
 
         When it changes anything, an audit log entry is created and a
@@ -5223,6 +5225,9 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
           description: Forbidden - missing clients.write permission
+        '422':
+          $ref: '#/components/responses/UnprocessableEntityResponse'
+          description: An `audience` slug that names core or no service (`invalid_audience`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5341,6 +5346,9 @@ paths:
         '409':
           $ref: '#/components/responses/ConflictResponse'
           description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes` or `clientType`
+        '422':
+          $ref: '#/components/responses/UnprocessableEntityResponse'
+          description: An `audience` slug that names core or no service (`invalid_audience`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7871,8 +7879,9 @@ paths:
       summary: Revoke previous service secret
       description: |
         Ends the secret overlap now: only the current secret works from here
-        on. Core's own row cannot be changed (`403`). A provisioned service is
-        refused with `409 managed_by_provisioning`.
+        on. Core's own row cannot be changed (`403`). Allowed on a provisioned
+        service too: the provisioning file cannot end an overlap, and a leaked
+        old secret must not wait it out.
 
         An audit log entry is created for this action.
         A `core.service.previous-secret-revoked` webhook event is emitted.
@@ -7905,9 +7914,6 @@ paths:
           description: Forbidden - missing services.write permission, or the service is core
         '404':
           $ref: '#/components/responses/NotFoundResponse'
-        '409':
-          $ref: '#/components/responses/ConflictResponse'
-          description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7923,7 +7929,8 @@ paths:
         audience is added to its client's `audience`. Requests already approved
         are skipped. All ids must belong to this service (`404` otherwise);
         a requested role that no longer exists or is retired fails the whole
-        call with `422 role_unavailable`. Core's own row cannot be changed
+        call with `422 role_unavailable`, and a core role services may not
+        request with `422 role_not_requestable`. Core's own row cannot be changed
         (`403`).
 
         Only grant what you hold: every permission of a requested role the
@@ -7979,7 +7986,7 @@ paths:
           description: Service not found, or an access request id is not this service's
         '422':
           $ref: '#/components/responses/UnprocessableEntityResponse'
-          description: A requested role no longer exists or is retired (`role_unavailable`)
+          description: A requested role no longer exists or is retired (`role_unavailable`), or is a core role services may not hold (`role_not_requestable`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -21105,7 +21112,9 @@ components:
           type: boolean
           description: |
             Whether users approve the app on a consent screen after signing in.
-            Core's own login client never asks, and refuses a change (`409`).
+            A request for any `core:*` scope shows the consent screen even when
+            `false`. Core's own login client never asks, and refuses a change
+            (`409`).
         provisioned:
           type: boolean
           description: |
@@ -21258,17 +21267,18 @@ components:
             maxLength: 64
           default: []
           description: |
-            Slugs of services (other than core and, for a service's own client,
-            itself) that this client's tokens may name. Changing it needs
-            `services.approve` as well as `clients.write` (`403` otherwise); an
-            unknown slug is `400 invalid_audience`. Locked (`409`) on core's own
-            login client.
+            Slugs of services (other than core) that this client's tokens may
+            name. Changing it needs `services.approve` as well as `clients.write`
+            (`403` otherwise); an unknown slug, or core's, is `422
+            invalid_audience`. Locked (`409`) on core's own login client.
         consentRequired:
           type: boolean
           default: true
           description: |
             Whether users approve the app on a consent screen after signing in.
-            Core's own login client never asks, and refuses a change (`409`).
+            A request for any `core:*` scope shows the consent screen even when
+            `false`. Core's own login client never asks, and refuses a change
+            (`409`).
     UpdateClientRequest:
       type: object
       properties:
@@ -21322,16 +21332,17 @@ components:
             minLength: 1
             maxLength: 64
           description: |
-            Slugs of services (other than core and, for a service's own client,
-            itself) that this client's tokens may name. Changing it needs
-            `services.approve` as well as `clients.write` (`403` otherwise); an
-            unknown slug is `400 invalid_audience`. Locked (`409`) on core's own
-            login client.
+            Slugs of services (other than core) that this client's tokens may
+            name. Changing it needs `services.approve` as well as `clients.write`
+            (`403` otherwise); an unknown slug, or core's, is `422
+            invalid_audience`. Locked (`409`) on core's own login client.
         consentRequired:
           type: boolean
           description: |
             Whether users approve the app on a consent screen after signing in.
-            Core's own login client never asks, and refuses a change (`409`).
+            A request for any `core:*` scope shows the consent screen even when
+            `false`. Core's own login client never asks, and refuses a change
+            (`409`).
         ownerId:
           type: string
           format: uuid
@@ -22183,7 +22194,7 @@ components:
                 minLength: 1
                 maxLength: 200
               default: []
-              description: A core system role by `name`, or another service's as `<slug>/<name>`.
+              description: A requestable core system role by its bare `name` (never `core/<name>`), or another service's as `<slug>/<name>`.
             audiences:
               type: array
               maxItems: 100
@@ -22281,8 +22292,8 @@ components:
           type: boolean
           description: |
             True for a service declared in the provisioning file. Only its access
-            is decided here: updating it, regenerating or revoking its secret is
-            `409 managed_by_provisioning`.
+            and the end of a secret overlap are decided here: updating it or
+            regenerating its secret is `409 managed_by_provisioning`.
         clientId:
           type:
             - string

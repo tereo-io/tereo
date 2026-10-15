@@ -6,8 +6,12 @@ services, their secrets and their access already in place, with no one calling `
 /v1/admin/services` by hand. Use it when the environment is built from code (GitOps, the Helm chart,
 Compose); services and clients made in the admin UI keep working beside it.
 
-Set `PROVISIONING_FILE` to the file's path. Unset, nothing happens. With the Helm chart, put the
-file's contents under the `provisioning` value; the chart mounts it and sets the variable.
+Set `PROVISIONING_FILE` to the file's path. Unset, nothing happens: core neither applies nor
+retires anything, so rows a file provisioned earlier stay `provisioned` — read-only in the admin API
+— and are never retired. To release them, deploy an empty file (`services: []`, `clients: []`)
+instead: its entries are then removed as below, after `REGISTRY_RETIREMENT_GRACE_HOURS`. With the
+Helm chart, put the file's contents under the `provisioning` value; the chart mounts it and sets the
+variable.
 
 ## The file
 
@@ -41,12 +45,12 @@ Both lists are optional, and unknown keys are refused, so a typo is caught rathe
 |-------|------|
 | `services[].slug`, `namespace` | Lowercase words joined by hyphens; each unique in the file. The namespace prefixes everything the service declares ([registry](registry.md)) |
 | `services[].clientId` | The service's OAuth client ID. Unique across services and clients |
-| `services[].access.roles` | Only roles marked requestable: `tenant_resolver`, `user_resolver`, `file_user`, `webhook_publisher`, `audit_writer`, `notification_sender`. `admin`, `platform_admin` and the `*_admin` roles are refused |
+| `services[].access.roles` | Only roles marked requestable, named bare: `tenant_resolver`, `user_resolver`, `file_user`, `webhook_publisher`, `audit_writer`, `notification_sender`. `admin`, `platform_admin`, the `*_admin` roles and any `core/<name>` spelling are refused |
 | `services[].access.audiences` | Not core, and not the service itself |
 | `clients[].clientType` | A `public` client has no secret (`secretFrom` is an error); a `confidential` one needs it |
 | `clients[].redirectUris`, `postLogoutRedirectUris` | Safe URLs: `https`, or loopback `http` |
 | `clients[].audience` | Not core. Unlike a hand-made client's audience, no `services.approve` is involved: the file is the deploy's decision |
-| `clients[].consentRequired` | `false` skips consent for this client after a login. It grants no core API access |
+| `clients[].consentRequired` | `false` skips consent for this client after a login, unless the request asks for a `core:*` scope: those always show the consent screen. It grants no core API access |
 
 A login client's `scopes` and `audience` take effect as they do for clients made in the admin UI
 ([auth](auth.md)).
@@ -78,7 +82,7 @@ Core refuses a secret that
 - is used by two entries in the file;
 - is the same value as another environment variable of core (so a database password pasted into a
   client secret is caught);
-- is the service's previous secret (see rotation below).
+- is the entry's previous secret (see rotation below).
 
 Every message names the variable and the rule. A secret's value, or any part of it, is never printed,
 logged or put in an audit entry. Secrets core generates itself (a client made in the admin UI,
@@ -153,8 +157,17 @@ from `access` does not revoke what was approved; revoke it in the admin UI.
 Change the environment variable's value (a new `generate-secret`, updated in the Secret) and
 restart core. The old secret moves to the service's previous secret and keeps working for
 `SERVICE_SECRET_OVERLAP_HOURS`, as with `regenerate-secret`, while you roll the new value out to the
-service. Core refuses to start if the new value is the previous secret, which is what happens when
-a deploy is rolled back to the old Secret: the message says to generate a new secret.
+service. A confidential login client rotates the same way: change its `secretFrom` variable and
+restart, and its old secret keeps working for the same overlap.
+
+If the old secret leaked, end a service's overlap at once with
+`POST /v1/admin/services/:id/revoke-previous-secret` (the admin UI's "End Overlap Now"). That route
+is allowed on a provisioned service, since the file cannot express it.
+
+Core refuses to start if the new value is the previous secret, which is what happens when a deploy
+is rolled back to the old Secret: the message says to generate a new secret. The guard covers only
+the most recent previous secret. A secret from two or more rotations back is accepted again, so
+always generate a fresh one rather than reusing an old value.
 
 ## Removing an entry
 
@@ -176,8 +189,8 @@ delete, deactivate or regenerate the secret of one, with `409` and code `managed
 
 | Row | Refused | Still allowed |
 |-----|---------|---------------|
-| Service | `PATCH /v1/admin/services/:id` (rename, deactivate), `regenerate-secret`, `revoke-previous-secret` | Approving and revoking its access |
+| Service | `PATCH /v1/admin/services/:id` (rename, deactivate), `regenerate-secret` | Approving and revoking its access; `revoke-previous-secret`, to end a rotation's overlap at once |
 | Login client | `PATCH`, `DELETE`, `regenerate-secret` on `/v1/admin/clients/:id` | Reading it |
 
 Responses carry `provisioned: true`, and the admin UI shows a "Managed by provisioning" badge and
-hides the change controls.
+hides the change controls, keeping access decisions and "End Overlap Now".

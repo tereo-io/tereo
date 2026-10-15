@@ -604,7 +604,6 @@ describe("applyProvisioning", () => {
       await api("DELETE", `/v1/admin/clients/${c.id}`),
       await api("PATCH", `/v1/admin/services/${s.id}`, { name: "Edited" }),
       await api("POST", `/v1/admin/services/${s.id}/regenerate-secret`),
-      await api("POST", `/v1/admin/services/${s.id}/revoke-previous-secret`),
     ];
     for (const res of attempts) {
       expect(res.status, JSON.stringify(res.body)).toBe(409);
@@ -617,6 +616,27 @@ describe("applyProvisioning", () => {
     expect(shown.body.provisioned).toBe(true);
     const shownService = await api("GET", `/v1/admin/services/${s.id}`);
     expect(shownService.body.provisioned).toBe(true);
+  });
+
+  it("lets an admin end a provisioned service's secret overlap at once", async () => {
+    const service = serviceSpec();
+    await applyProvisioning(file([service]));
+    const next = newSecret();
+    await applyProvisioning(file([{ ...service, secretHash: next.hash }]));
+    expect(await fetchToken(service.clientId, service.plainSecret)).toBe(200);
+    const s = await serviceRow(service.slug);
+
+    const res = await api(
+      "POST",
+      `/v1/admin/services/${s.id}/revoke-previous-secret`
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.provisioned).toBe(true);
+    expect((await serviceRow(service.slug)).client?.previousSecretHash).toBe(
+      null
+    );
+    expect(await fetchToken(service.clientId, service.plainSecret)).toBe(401);
+    expect(await fetchToken(service.clientId, next.plain)).toBe(200);
   });
 
   it("still lets an admin approve or revoke a provisioned service's access", async () => {

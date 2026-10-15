@@ -324,8 +324,9 @@
     summary: Revoke previous service secret
     description: |
       Ends the secret overlap now: only the current secret works from here
-      on. Core's own row cannot be changed (`403`). A provisioned service is
-      refused with `409 managed_by_provisioning`.
+      on. Core's own row cannot be changed (`403`). Allowed on a provisioned
+      service too: the provisioning file cannot end an overlap, and a leaked
+      old secret must not wait it out.
 
       An audit log entry is created for this action.
       A `core.service.previous-secret-revoked` webhook event is emitted.
@@ -357,9 +358,6 @@
         description: Forbidden - missing services.write permission, or the service is core
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
-      '409':
-        $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -376,7 +374,8 @@
       audience is added to its client's `audience`. Requests already approved
       are skipped. All ids must belong to this service (`404` otherwise);
       a requested role that no longer exists or is retired fails the whole
-      call with `422 role_unavailable`. Core's own row cannot be changed
+      call with `422 role_unavailable`, and a core role services may not
+      request with `422 role_not_requestable`. Core's own row cannot be changed
       (`403`).
 
       Only grant what you hold: every permission of a requested role the
@@ -431,7 +430,7 @@
         description: Service not found, or an access request id is not this service's
       '422':
         $ref: '../../../components/auth/responses.yaml#/UnprocessableEntityResponse'
-        description: A requested role no longer exists or is retired (`role_unavailable`)
+        description: A requested role no longer exists or is retired (`role_unavailable`), or is a core role services may not hold (`role_not_requestable`)
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
