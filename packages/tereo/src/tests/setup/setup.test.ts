@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { issueSetupToken } from "../../utils/setup.js";
+import { announceSetupIfPending, issueSetupToken } from "../../utils/setup.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { logger } from "../../utils/logger.js";
+import env from "../../env.js";
 import axios from "axios";
 import {
   BASE_URL,
@@ -12,6 +13,15 @@ import {
   DEFAULT_ORGANIZATION_ID,
   LOGIN_CLIENT,
 } from "../../definitions/index.js";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  vi,
+} from "vitest";
 
 /**
  * First-boot setup against the suite's server. The suite runs with setup
@@ -239,5 +249,39 @@ describe("First-boot setup", () => {
       HTTP_STATUS.CREATED,
       HTTP_STATUS.NOT_FOUND,
     ]);
+  });
+
+  describe("with SETUP_TOKEN", () => {
+    const TOKEN = "deploy-supplied-setup-token-0123456789";
+    const original = env.SETUP_TOKEN;
+
+    beforeEach(() => {
+      env.SETUP_TOKEN = TOKEN;
+    });
+    afterAll(() => {
+      env.SETUP_TOKEN = original;
+    });
+
+    it("uses SETUP_TOKEN as the setup token and does not log it", async () => {
+      const warn = vi.spyOn(logger, "warn");
+      await announceSetupIfPending();
+      const calls = [...warn.mock.calls];
+      warn.mockRestore();
+      expect(calls.length).toBeGreaterThan(0);
+      expect(JSON.stringify(calls)).not.toContain(TOKEN);
+
+      const response = await request(setupBody(TOKEN));
+      expect(response.status).toBe(HTTP_STATUS.CREATED);
+    });
+
+    it("accepts SETUP_TOKEN across restarts until setup completes", async () => {
+      await announceSetupIfPending();
+      await announceSetupIfPending();
+      expect(await prisma.setupToken.count()).toBe(1);
+      expect((await request(setupBody(TOKEN))).status).toBe(
+        HTTP_STATUS.CREATED
+      );
+      expect(await prisma.setupToken.count()).toBe(0);
+    });
   });
 });

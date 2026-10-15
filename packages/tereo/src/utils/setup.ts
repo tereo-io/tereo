@@ -63,6 +63,20 @@ export const issueSetupToken = async (): Promise<string> => {
 /** At startup: print a setup token if setup is still pending. */
 export const announceSetupIfPending = async (): Promise<void> => {
   if (await isSetupComplete()) return;
+  if (env.SETUP_TOKEN) {
+    const hash = hashToken(env.SETUP_TOKEN);
+    const expiresAt = new Date("9999-12-31T23:59:59Z");
+    await prisma.setupToken.upsert({
+      where: { hash },
+      create: { hash, expiresAt },
+      update: { expiresAt },
+    });
+    logger.warn(
+      { setupUrl: `${env.UI_BASE_URL}/setup` },
+      "Core is not set up; use the token from SETUP_TOKEN"
+    );
+    return;
+  }
   const token = await issueSetupToken();
   const url = `${env.UI_BASE_URL}/setup`;
   logger.warn(

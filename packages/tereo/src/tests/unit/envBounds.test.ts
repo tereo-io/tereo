@@ -51,6 +51,11 @@ describe("env bounds", () => {
     expect(parse({ [name]: "1.5" }).success).toBe(false);
   });
 
+  it("rejects a SETUP_TOKEN shorter than 24 characters", () => {
+    expect(parse({ SETUP_TOKEN: "x".repeat(23) }).success).toBe(false);
+    expect(parse({ SETUP_TOKEN: "x".repeat(24) }).success).toBe(true);
+  });
+
   it("accepts values at the limits", () => {
     expect(
       parse({
