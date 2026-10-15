@@ -106,8 +106,8 @@ resources:
 service:
   type: ClusterIP
   port: 80
-  # Annotations on the Service. With more than one API pod, socket.io's long-polling
-  # fallback needs each session pinned to one pod; Traefik does that from the Service:
+  # More than one API pod needs sticky sessions for socket.io's polling
+  # fallback (see the README). With Traefik:
   #   traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
   #   traefik.ingress.kubernetes.io/service.sticky.cookie.name: tereo_affinity
   #   traefik.ingress.kubernetes.io/service.sticky.cookie.secure: "true"
@@ -115,8 +115,8 @@ service:
   # ingress-nginx does it from the Ingress instead (ingress.annotations).
   annotations: {}
 
-# Seconds an API pod keeps serving after it is told to stop, before core starts shutting
-# down, so the ingress has stopped sending it requests by then. 0 disables the delay.
+# Seconds an API pod keeps serving after it is told to stop, so the ingress has
+# stopped sending it requests before core shuts down. 0 disables the delay.
 preStopSleepSeconds: 5
 
 ingress:

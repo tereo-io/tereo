@@ -82,6 +82,9 @@ files: blobs live on the volume, so every core pod must share it.
 {{- if eq (toString .Values.trustProxy) "true" }}
 {{- fail "trustProxy \"true\" is refused by core: it would trust any client's X-Forwarded-For" }}
 {{- end }}
+{{- if not (regexMatch "^[0-9]+$" (toString .Values.preStopSleepSeconds)) }}
+{{- fail "preStopSleepSeconds must be a whole number of seconds, 0 or more" }}
+{{- end }}
 {{- if and (not .Values.secrets.externalSecret.enabled) (not .Values.secrets.existingSecret) }}
 {{- fail "set secrets.existingSecret, or enable secrets.externalSecret, for DATABASE_URL, CORE_KEK and Redis" }}
 {{- end }}
