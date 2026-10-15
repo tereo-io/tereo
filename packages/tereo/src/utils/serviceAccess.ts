@@ -367,8 +367,12 @@ export const approveProvisionedAccess = async (
       candidates.map((r) => r.id)
     );
     await lockedAudience(tx, service.client!.id);
+    // Only rows whose owners are locked above: locking another owner now,
+    // after the client row, would invert the admin path's lock order.
+    const locked = new Set(candidates.map((r) => r.id));
     const ids: string[] = [];
     for (const row of await undecided(tx)) {
+      if (!locked.has(row.id)) continue;
       if (row.kind === "role" && !(await resolveRoleTarget(row.target, tx)))
         continue;
       ids.push(row.id);

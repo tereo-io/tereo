@@ -675,6 +675,58 @@ describe("applyProvisioning", () => {
 });
 
 describe("pre-approved access", () => {
+  it("does not auto-approve a service the file no longer lists", async () => {
+    const spec = serviceSpec({
+      access: { roles: ["file_user"], audiences: [] },
+    });
+    await applyProvisioning(file([spec]));
+    await applyProvisioning(file([]));
+    expect((await serviceRow(spec.slug)).unprovisionedAt).not.toBeNull();
+
+    const body = await register(spec, { roles: ["file_user"] });
+    expect(statusOf(body, "role", "file_user")).toBe("pending");
+    expect(await holdsRole(spec.slug, "file_user")).toBe(false);
+  });
+
+  it("leaves a pre-approved request for a retired role pending", async () => {
+    const owner = serviceSpec();
+    const role = `${owner.namespace}_item_reader`;
+    const target = `${owner.slug}/${role}`;
+    const consumer = serviceSpec();
+    await applyProvisioning(file([owner, consumer]));
+    await register(
+      owner,
+      {},
+      {
+        permissions: [
+          { name: `${owner.namespace}.items.read`, displayName: "Read" },
+        ],
+        systemRoles: [
+          {
+            name: role,
+            displayName: "Item reader",
+            permissions: [`${owner.namespace}.items.read`],
+          },
+        ],
+      }
+    );
+    await register(consumer, { roles: [target] });
+    const o = await serviceRow(owner.slug);
+    await prisma.role.update({
+      where: { serviceId_name: { serviceId: o.id, name: role } },
+      data: { retiredAt: new Date() },
+    });
+
+    await applyProvisioning(
+      file([owner, { ...consumer, access: { roles: [target], audiences: [] } }])
+    );
+    // register() asserts the registry answers 200.
+    const body = await register(consumer, {}, { version: "1.0.1" });
+    expect(statusOf(body, "role", target)).toBe("pending");
+    const c = await serviceRow(consumer.slug);
+    expect((await accessRow(c.id, "role", target)).decidedAt).toBeNull();
+  });
+
   it("approves a registered request the file pre-approves", async () => {
     const spec = serviceSpec({
       access: { roles: ["file_user"], audiences: [] },
