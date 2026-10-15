@@ -1,11 +1,8 @@
-import { getDefaultOrganizationId } from "../../../../utils/defaultOrganization.js";
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
-import { BadRequestError, ConflictError } from "../../../../utils/errors.js";
-import { UserType } from "../../../../../prisma/generated/client/index.js";
-import { assertNamespaceAvailable } from "../../../../utils/registry.js";
 import { withDeciders } from "../../../../utils/serviceAccess.js";
 import { formatService } from "../../../../utils/transformers.js";
-import { emitTx, logAuditTx } from "../../../../utils/outbox.js";
+import { createServiceTx } from "../../../../utils/services.js";
+import { BadRequestError } from "../../../../utils/errors.js";
 import { validateUser } from "../../../../utils/auth.js";
 import type { Request, Response } from "express";
 import db from "../../../../utils/db/index.js";
@@ -54,65 +51,19 @@ export const createService = async (req: Request, res: Response) => {
   const clientId = generateClientId();
   const { plainSecret, hashedSecret } = generateClientSecret();
 
-  const service = await db.$transaction(async (tx) => {
-    if (await tx.service.findUnique({ where: { slug } })) {
-      throw new ConflictError(`A service with slug "${slug}" already exists`);
-    }
-    await assertNamespaceAvailable(namespace, tx);
-    const email = `${slug}@services.tereo.internal`;
-    if (await tx.user.findUnique({ where: { email } })) {
-      throw new ConflictError(`A user with email "${email}" already exists`);
-    }
-
-    const client = await tx.oAuthClient.create({
-      data: {
-        clientId,
-        clientSecret: hashedSecret,
-        clientType: "confidential",
-        name: body.name,
-        redirectUris: [],
-        scopes: [],
-        grantTypes: ["client_credentials"],
-        audience: [],
-        ownerId: auth.userId,
-      },
-    });
-    await tx.user.create({
-      data: {
-        email,
-        name: body.name,
-        passwordHash: "!",
-        userType: UserType.service_account,
-        oauthClientId: client.id,
-      },
-    });
-    const created = await tx.service.create({
-      data: {
+  const service = await db.$transaction((tx) =>
+    createServiceTx(
+      tx,
+      {
         slug,
         name: body.name,
         namespace,
-        clientId: client.id,
-        createdBy: auth.userId,
+        clientId,
+        clientSecretHash: hashedSecret,
       },
-    });
-
-    await logAuditTx(tx, {
-      auth,
-      action: "CREATE",
-      entityType: "Service",
-      entityId: created.id,
-      entityName: slug,
-      metadata: { name: body.name, namespace, clientId },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "core.service.created",
-      entityType: "Service",
-      entityId: created.id,
-      data: { id: created.id, slug, name: body.name, namespace },
-    });
-    return db.services.get(created.id, tx);
-  });
+      auth
+    )
+  );
 
   res.status(201).json({
     ...formatService(service),

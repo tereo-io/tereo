@@ -17,6 +17,7 @@ import {
   BadRequestError,
   ConflictError,
   ForbiddenError,
+  ManagedByProvisioningError,
 } from "../../../../../utils/errors.js";
 import {
   logAuditTx,
@@ -40,6 +41,10 @@ const refuseServiceClient = async (id: string) => {
       "This client belongs to a service; manage it under /admin/services"
     );
   }
+};
+
+const refuseProvisioned = (client: { provisioned: boolean }) => {
+  if (client.provisioned) throw new ManagedByProvisioningError();
 };
 
 /**
@@ -97,6 +102,7 @@ export const updateClient = async (req: Request, res: Response) => {
 
   const existingClient = await db.clients.get(params.id);
   assertOwnerOrAdmin(existingClient.ownerId, user, "update");
+  refuseProvisioned(existingClient);
   if (existingClient.clientId === LOGIN_CLIENT.clientId) {
     refuseLockedLoginClientFields(body);
   }
@@ -208,6 +214,7 @@ export const deleteClient = async (req: Request, res: Response) => {
 
   const existingClient = await db.clients.get(params.id);
   assertOwnerOrAdmin(existingClient.ownerId, user, "delete");
+  refuseProvisioned(existingClient);
   // The admin UI signs in through it; without it nobody could.
   if (existingClient.clientId === LOGIN_CLIENT.clientId) {
     throw new ConflictError("The admin UI's login client cannot be deleted");
@@ -258,6 +265,7 @@ export const regenerateClientSecret = async (req: Request, res: Response) => {
 
   const client = await db.clients.get(params.id);
   assertOwnerOrAdmin(client.ownerId, user, "regenerate the secret of");
+  refuseProvisioned(client);
   if (client.clientType === "public") {
     throw new BadRequestError(
       "invalid_request",

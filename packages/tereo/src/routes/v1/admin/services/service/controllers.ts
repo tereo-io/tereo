@@ -23,6 +23,7 @@ import {
 } from "../../../../../utils/grants.js";
 import {
   ForbiddenError,
+  ManagedByProvisioningError,
   NotFoundError,
   UnprocessableEntityError,
 } from "../../../../../utils/errors.js";
@@ -53,6 +54,13 @@ const getAppService = async (req: Request, tx?: Tx) => {
     client: service.client,
     accountUserId: service.client.serviceAccountUser.id,
   };
+};
+
+/** A service from the provisioning file changes there; its access is decided here. */
+const getEditableAppService = async (req: Request) => {
+  const service = await getAppService(req);
+  if (service.provisioned) throw new ManagedByProvisioningError();
+  return service;
 };
 
 /** Stop every outstanding token of the service's client. */
@@ -133,7 +141,7 @@ export const getService = async (req: Request, res: Response) => {
 export const updateService = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const body = validateBody(UpdateServiceSchema, req);
-  const existing = await getAppService(req);
+  const existing = await getEditableAppService(req);
 
   const updated = await db.$transaction(async (tx) => {
     await tx.service.update({
@@ -193,7 +201,7 @@ export const updateService = async (req: Request, res: Response) => {
  */
 export const regenerateSecret = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const service = await getAppService(req);
+  const service = await getEditableAppService(req);
   const { plainSecret, hashedSecret } = generateClientSecret();
   const overlapMs = env.SERVICE_SECRET_OVERLAP_HOURS * 60 * 60 * 1000;
 
@@ -251,7 +259,7 @@ export const regenerateSecret = async (req: Request, res: Response) => {
 /** End the overlap now: only the current secret works from here on. */
 export const revokePreviousSecret = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const service = await getAppService(req);
+  const service = await getEditableAppService(req);
 
   const updated = await db.$transaction(async (tx) => {
     await tx.oAuthClient.update({

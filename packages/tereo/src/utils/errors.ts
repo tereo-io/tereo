@@ -77,6 +77,16 @@ export class ConflictError extends AppError {
   }
 }
 
+/** The row comes from the provisioning file; change it there. */
+export class ManagedByProvisioningError extends AppError {
+  constructor(
+    message = "Managed by the provisioning file; change it there and restart core"
+  ) {
+    super(409, "managed_by_provisioning", message);
+    this.name = "ManagedByProvisioningError";
+  }
+}
+
 /**
  * A request with the same idempotency key is still running: one code for
  * uploads, emits and audit writes. Retry shortly.

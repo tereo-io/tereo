@@ -121,7 +121,7 @@ export interface RegistryService {
 // ---------------------------------------------------------------------------
 
 /** `a` and `b` claim overlapping names: equal, or one a hyphenated extension. */
-const overlaps = (a: string, b: string) =>
+export const namespacesOverlap = (a: string, b: string) =>
   a === b || a.startsWith(`${b}-`) || b.startsWith(`${a}-`);
 
 /**
@@ -155,7 +155,7 @@ export const assertNamespaceAvailable = async (
       (s) => s.namespace
     ),
   ];
-  const clash = taken.find((other) => overlaps(namespace, other));
+  const clash = taken.find((other) => namespacesOverlap(namespace, other));
   if (clash) {
     throw new ConflictError(
       `Namespace "${namespace}" overlaps "${clash}", which is already taken`

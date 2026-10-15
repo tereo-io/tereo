@@ -1,6 +1,6 @@
+import { CLIENT_SECRET_PREFIX, secretStrengthProblem } from "../secretRules.js";
 import { isRequestableCoreRole } from "../../definitions/roles.js";
 import { CORE_SERVICE } from "../../definitions/coreService.js";
-import { secretStrengthProblem } from "../secretRules.js";
 import { isSafeRedirectUri } from "../redirectUris.js";
 import { ProvisioningFileSchema } from "./schema.js";
 import { hashFlowToken } from "../crypto.js";
@@ -68,6 +68,11 @@ const describeIssue = (issue: z.core.$ZodIssue): string => {
 const withoutServiceSuffix = (slug: string) =>
   slug.replace(/-service$/, "") || slug;
 
+// A secret pasted where its variable's name belongs would otherwise be
+// echoed in the problems below.
+const looksLikeSecret = (envName: string) =>
+  envName.startsWith(CLIENT_SECRET_PREFIX) || envName.length > 64;
+
 interface SecretUse {
   label: string;
   envName: string;
@@ -83,6 +88,12 @@ const resolveSecrets = (
   const labelsByValue = new Map<string, string[]>();
 
   for (const { label, envName } of uses) {
+    if (looksLikeSecret(envName)) {
+      problems.push(
+        `${label}: secretFrom does not look like an environment variable name`
+      );
+      continue;
+    }
     const value = env[envName];
     if (!value) {
       problems.push(`${label}: ${envName} is not set`);
@@ -108,7 +119,7 @@ const resolveSecrets = (
   const secretVars = new Set(uses.map((u) => u.envName));
   for (const { label, envName } of uses) {
     const value = env[envName];
-    if (!value) continue;
+    if (!value || looksLikeSecret(envName)) continue;
     for (const [other, otherValue] of Object.entries(env)) {
       if (other !== envName && !secretVars.has(other) && otherValue === value)
         problems.push(

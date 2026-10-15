@@ -3,20 +3,24 @@ import { z } from "zod";
 
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+// Lengths are the columns' (slug, namespace and client_id 64, name 100).
 const Slug = z
   .string()
+  .max(64)
   .regex(NAMESPACE_PATTERN, "must be lowercase words joined by hyphens");
 const EnvName = z
   .string()
   .regex(ENV_NAME_PATTERN, "must be an environment variable name");
 const Text = z.string().min(1, "must not be empty");
+const Name = Text.max(100);
+const ClientId = Text.max(64);
 
 const ServiceEntry = z
   .object({
     slug: Slug,
-    name: Text,
+    name: Name,
     namespace: Slug.optional(),
-    clientId: Text.optional(),
+    clientId: ClientId.optional(),
     secretFrom: EnvName,
     access: z
       .object({
@@ -30,8 +34,8 @@ const ServiceEntry = z
 
 const ClientEntry = z
   .object({
-    clientId: Text,
-    name: Text,
+    clientId: ClientId,
+    name: Name,
     clientType: z.enum(["public", "confidential"]).default("public"),
     secretFrom: EnvName.optional(),
     redirectUris: z.array(Text).default([]),

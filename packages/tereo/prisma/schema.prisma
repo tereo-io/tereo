@@ -175,6 +175,10 @@ model OAuthClient {
   // so running copies of a service survive the rollout.
   previousSecretHash      String?    @map("previous_secret_hash") @db.VarChar(255)
   previousSecretExpiresAt DateTime?  @map("previous_secret_expires_at")
+  // Created from the provisioning file: read-only through the admin API.
+  provisioned             Boolean    @default(false)
+  // When a provisioned login client was first missing from the file.
+  unprovisionedAt         DateTime?  @map("unprovisioned_at")
   ownerId                 String     @map("owner_id") @db.Uuid
   organizationId          String?    @map("organization_id") @db.Uuid
   createdAt               DateTime   @default(now()) @map("created_at")
@@ -1518,6 +1522,13 @@ model Service {
   // The semver of the declaration last applied; an older one is ignored.
   declarationVersion String?   @map("declaration_version") @db.VarChar(64)
   declaredAt         DateTime? @map("declared_at")
+  // Created from the provisioning file: read-only through the admin API,
+  // except access decisions.
+  provisioned        Boolean   @default(false)
+  // When a provisioned service was first missing from the file.
+  unprovisionedAt    DateTime? @map("unprovisioned_at")
+  // The file's `access`: requests matching it are approved without an admin.
+  provisionedAccess  Json      @default("{\"roles\":[],\"audiences\":[]}") @map("provisioned_access")
   createdBy          String    @map("created_by") @db.Uuid
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")

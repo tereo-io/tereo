@@ -163,6 +163,28 @@ describe("parseProvisioning", () => {
     ]);
   });
 
+  it("does not echo a secretFrom that looks like a secret", () => {
+    const pasted = newClientSecretValue().replace(/-/g, "_");
+    const long = "A".repeat(65);
+    const problems = problemsOf(
+      file({
+        services: [
+          service({ secretFrom: pasted }),
+          service({
+            slug: "vanquished-orders",
+            name: "Orders",
+            secretFrom: long,
+          }),
+        ],
+      }),
+      {}
+    );
+    expect(problems).toEqual([
+      "services[vanquished-inventory]: secretFrom does not look like an environment variable name",
+      "services[vanquished-orders]: secretFrom does not look like an environment variable name",
+    ]);
+  });
+
   it("reports a secret failing the format or strength rules", () => {
     const weak = "tereo_sk_" + "ab".repeat(21) + "c";
     for (const value of ["hunter2", weak]) {
@@ -267,6 +289,21 @@ describe("parseProvisioning", () => {
     expect(problems).toHaveLength(2);
     expect(problems[0]).toContain("clients[a]");
     expect(problems[1]).toContain("clients[b]");
+  });
+
+  it("reports a name, slug or clientId longer than its column", () => {
+    const problems = problemsOf(
+      file({
+        services: [
+          service({ name: "N".repeat(101), slug: `s${"a".repeat(64)}` }),
+        ],
+        clients: [{ clientId: "c".repeat(65), name: "App" }],
+      })
+    );
+    expect(problems).toHaveLength(3);
+    expect(problems.join("\n")).toContain("services[0].name");
+    expect(problems.join("\n")).toContain("services[0].slug");
+    expect(problems.join("\n")).toContain("clients[0].clientId");
   });
 
   it("reports unsafe redirect URIs", () => {
