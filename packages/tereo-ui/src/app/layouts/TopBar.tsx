@@ -16,6 +16,7 @@ export const TopBar = () => {
   return (
     <header className="t-topbar">
       <div className="t-topbar-brand">
+        <img className="t-topbar-mark" src="/favicon.svg" alt="" />
         <span className="t-topbar-logo">Tereo</span>
       </div>
       <nav className="t-topbar-nav">
