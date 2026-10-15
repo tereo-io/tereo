@@ -1,9 +1,9 @@
+import { ROLES, isRequestableCoreRole } from "../definitions/roles.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { PERMISSION_CATALOG } from "../definitions/permissions.js";
 import { compareSemver, SEMVER_PATTERN } from "./semver.js";
 import type { Declaration } from "../definitions/index.js";
 import { emitTx, logAuditTx } from "./outbox.js";
-import { ROLES } from "../definitions/roles.js";
 import type { Prisma } from "./db/prisma.js";
 import { prisma } from "./db/prisma.js";
 import { logger } from "./logger.js";
@@ -837,6 +837,8 @@ const applyRequestedAccess = async (
   for (const target of roles) {
     if (!(await resolveRoleTarget(target, tx))) {
       problems.push(`role "${target}" does not exist or is retired`);
+    } else if (!target.includes("/") && !isRequestableCoreRole(target)) {
+      problems.push(`role "${target}" cannot be requested by a service`);
     }
   }
   for (const slug of audiences) {

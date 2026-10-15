@@ -32,6 +32,9 @@ const normalizeToken = (token: string) =>
     .replace(/O/g, "0")
     .replace(/[IL]/g, "1");
 
+// Marks a token that came from SETUP_TOKEN: generated ones expire in a day.
+const ENV_TOKEN_EXPIRY = new Date("9999-12-31T23:59:59Z");
+
 const hashToken = (token: string) =>
   createHash("sha256").update(normalizeToken(token)).digest("hex");
 
@@ -63,6 +66,25 @@ export const issueSetupToken = async (): Promise<string> => {
 /** At startup: print a setup token if setup is still pending. */
 export const announceSetupIfPending = async (): Promise<void> => {
   if (await isSetupComplete()) return;
+  if (env.SETUP_TOKEN) {
+    const hash = hashToken(env.SETUP_TOKEN);
+    await prisma.$transaction([
+      prisma.setupToken.deleteMany({ where: { hash: { not: hash } } }),
+      prisma.setupToken.upsert({
+        where: { hash },
+        create: { hash, expiresAt: ENV_TOKEN_EXPIRY },
+        update: { expiresAt: ENV_TOKEN_EXPIRY },
+      }),
+    ]);
+    logger.warn(
+      { setupUrl: `${env.UI_BASE_URL}/setup` },
+      "Core is not set up; use the token from SETUP_TOKEN"
+    );
+    return;
+  }
+  await prisma.setupToken.deleteMany({
+    where: { expiresAt: { gte: ENV_TOKEN_EXPIRY } },
+  });
   const token = await issueSetupToken();
   const url = `${env.UI_BASE_URL}/setup`;
   logger.warn(

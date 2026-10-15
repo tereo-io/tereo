@@ -147,7 +147,7 @@ pending, the request is `approved` again. Revoking clears the record: a later ap
 Core's own roles are not recorded this way. They change only with core's code, so an approved core
 role grants whatever core's current version gives it.
 
-Core's roles for app services:
+Core's roles for app services. Only these can be requested; any other core role (`admin`, `platform_admin`, `*_admin`) is refused with `422 invalid_requested_access`. `tenant_resolver` and `user_resolver` are requestable too.
 
 | Role | Grants |
 |------|--------|
