@@ -1,0 +1,57 @@
+{{- if .Values.migrations.enabled }}
+{{- /*
+Migrations and the idempotent seed, before core's pods start or roll. A hook
+runs before the release's other resources exist, so the Job takes core's
+configuration inline and the namespace's default ServiceAccount.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "tereo.fullname" . }}-migrate
+  labels:
+    {{- include "tereo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "tereo.selectorLabels" (dict "root" . "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "tereo.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["./migrate-and-seed.sh"]
+          env:
+            {{- include "tereo.env" . | nindent 12 }}
+          envFrom:
+            {{- include "tereo.envFrom" . | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.migrations.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

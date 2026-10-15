@@ -153,6 +153,25 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        if: steps.version.outputs.release == 'true'
+        with:
+          version: v4.2.0
+
+      # The chart is released with the image it runs: same version, and its
+      # appVersion picks that image's tag.
+      - name: Push the Helm chart
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          helm package charts/tereo --version "$VERSION" --app-version "$VERSION" --destination dist-chart
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
+          helm push "dist-chart/tereo-$VERSION.tgz" "oci://ghcr.io/$OWNER/charts"
+
       - name: Tag the release
         if: steps.version.outputs.release == 'true'
         env:

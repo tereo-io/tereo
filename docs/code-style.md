@@ -153,5 +153,6 @@ in `.nx/version-plans/`. When the PR merges, CI opens a `chore(release): bump ve
 
 Merging that PR runs `publish.yml`, which releases each group whose version has no tag yet: the SDK
 to npm, and core's image to `ghcr.io/tereo-io/tereo` as `<version>`, `<major>.<minor>` and `latest`
-(amd64 and arm64). It then pushes the tag. Run it by hand (`workflow_dispatch`) for the first release
+(amd64 and arm64), with the Helm chart in `charts/tereo` at the same version to
+`oci://ghcr.io/tereo-io/charts/tereo`. It then pushes the tag. Run it by hand (`workflow_dispatch`) for the first release
 or to retry one that failed.

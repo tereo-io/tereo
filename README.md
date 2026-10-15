@@ -170,7 +170,11 @@ registration in full.
 
 ### 5. Deploy to production
 
-Run the published image, `ghcr.io/tereo-io/tereo` (amd64 and arm64), pinned to a release such as
+On Kubernetes, install the Helm chart, released with the image at the same version:
+`oci://ghcr.io/tereo-io/charts/tereo`. [charts/tereo](charts/tereo/README.md) covers the Secret
+it reads and its values; it runs migrations as a hook and refuses a configuration core would.
+
+Elsewhere, run the published image, `ghcr.io/tereo-io/tereo` (amd64 and arm64), pinned to a release such as
 `0.1.0`, with `NODE_ENV=production`, the image's default. Core refuses to start without:
 
 | Variable | Notes |
@@ -250,4 +254,3 @@ release (0.1 → 0.2) may change the API, the SDK or the configuration; each pac
 | # | Gap | Notes |
 |---|-----|-------|
 | 1 | **Object storage** | Files are on local disk (`FILE_SERVICE_STORAGE_PATH`), so every core process must share one volume, and core cannot scale out, until an S3 backend exists |
-| 2 | **Helm chart** | Not started; the image and the compose stack are ready |

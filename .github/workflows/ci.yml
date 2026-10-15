@@ -57,6 +57,18 @@ jobs:
           npm run openapi:build -w tereo
           git diff --exit-code packages/tereo/openapi/bundled-openapi.yaml
 
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.2.0
+
+      # Every example values file must lint; the chart's guards fail rendering
+      # on a configuration core would refuse.
+      - name: Lint Helm chart
+        run: |
+          for values in charts/tereo/ci/*.yaml; do
+            helm lint --strict charts/tereo -f "$values"
+          done
+
       - name: Type check
         run: npx nx $NX_SCOPE -t check --parallel=4
 

@@ -1,0 +1,105 @@
+{{- include "tereo.validate" . }}
+{{- $roles := list (dict "component" "api" "role" (ternary "api" "all" .Values.worker.enabled) "replicas" .Values.replicaCount "port" 4001 "resources" .Values.resources) }}
+{{- if .Values.worker.enabled }}
+{{- $roles = append $roles (dict "component" "worker" "role" "worker" "replicas" .Values.worker.replicaCount "port" 4002 "resources" (default .Values.resources .Values.worker.resources)) }}
+{{- end }}
+{{- range $roles }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tereo.fullname" $ }}{{ if eq .component "worker" }}-worker{{ end }}
+  labels:
+    {{- include "tereo.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ .component }}
+spec:
+  replicas: {{ .replicas }}
+  {{- if and $.Values.persistence.enabled (not (has "ReadWriteMany" $.Values.persistence.accessModes)) }}
+  # A ReadWriteOnce volume attaches to one node: stop the old pod first.
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "tereo.selectorLabels" (dict "root" $ "component" .component) | nindent 6 }}
+  template:
+    metadata:
+      {{- with $.Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "tereo.labels" $ | nindent 8 }}
+        {{- include "tereo.selectorLabels" (dict "root" $ "component" .component) | nindent 8 }}
+        {{- with $.Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "tereo.serviceAccountName" $ }}
+      automountServiceAccountToken: false
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: tereo
+          image: {{ include "tereo.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          env:
+            - name: ROLE
+              value: {{ .role }}
+            {{- include "tereo.env" $ | nindent 12 }}
+          envFrom:
+            {{- include "tereo.envFrom" $ | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .port }}
+          # Liveness only asks whether the process answers: /health reports
+          # 503 while Postgres or Redis is down, which a restart cannot fix.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+          volumeMounts:
+            - name: storage
+              mountPath: /app/storage
+      volumes:
+        - name: storage
+          {{- if $.Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "tereo.claimName" $ }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with $.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
