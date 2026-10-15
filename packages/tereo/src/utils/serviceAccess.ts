@@ -8,6 +8,7 @@ import { isRequestableCoreRole } from "../definitions/roles.js";
 import { prisma, type Prisma } from "./db/prisma.js";
 import { emitTx, logAuditTx } from "./outbox.js";
 import { withUserRefs } from "./users.js";
+import { logger } from "./logger.js";
 import { z } from "zod";
 
 type Tx = Prisma.TransactionClient;
@@ -340,6 +341,12 @@ export const approveProvisionedAccess = async (
   });
   if (!service?.provisioned || service.unprovisionedAt) return;
   const parsed = ProvisionedAccessSchema.safeParse(service.provisionedAccess);
+  if (!parsed.success) {
+    logger.warn(
+      { serviceId: service.id, err: parsed.error },
+      "Unreadable provisioned access; approving nothing"
+    );
+  }
   const access = parsed.success ? parsed.data : { roles: [], audiences: [] };
   const accountUserId = service.client?.serviceAccountUser?.id;
   if (!service.client || !accountUserId) return;

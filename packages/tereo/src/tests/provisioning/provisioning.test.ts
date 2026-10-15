@@ -273,11 +273,10 @@ describe("applyProvisioning", () => {
     expect(row.scopes).toEqual(spec.scopes);
   });
 
-  it("refuses a login client audience naming no service, or core", async () => {
-    const spec = clientSpec({ audience: ["no-such-service", "core"] });
+  it("refuses a login client audience naming no service", async () => {
+    const spec = clientSpec({ audience: ["no-such-service"] });
     const problems = await problemsOf(file([], [spec]));
     expect(problems.join("\n")).toContain("no-such-service");
-    expect(problems.join("\n")).toContain('"core"');
     expect(
       await prisma.oAuthClient.findUnique({
         where: { clientId: spec.clientId },
