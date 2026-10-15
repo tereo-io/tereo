@@ -151,6 +151,10 @@ Every package is versioned with Nx release version plans, in two release groups:
 A PR that changes a package needs a plan for its group: `npm run version-plan`, then commit the file
 in `.nx/version-plans/`. When the PR merges, CI opens a `chore(release): bump versions` PR.
 
+Before 1.0, a plan's bump is one step smaller than its name: `major` for a breaking change gives
+0.1 → 0.2, `minor` for a feature and `patch` for a fix both give 0.1.0 → 0.1.1. Plan a breaking
+change as `major`.
+
 Merging that PR runs `publish.yml`, which releases each group whose version has no tag yet: the SDK
 to npm, and core's image to `ghcr.io/tereo-io/tereo` as `<version>`, `<major>.<minor>` and `latest`
 (amd64 and arm64), with the Helm chart in `charts/tereo` at the same version to
