@@ -140,6 +140,71 @@ const clientRow = (clientId: string) =>
 const auditCount = (entityIds: string[]) =>
   prisma.auditLogEntry.count({ where: { entityId: { in: entityIds } } });
 
+const serviceToken = async (spec: {
+  clientId: string;
+  plainSecret: string;
+}) => {
+  const response = await fetch(`${CORE_URL}/oauth/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${spec.clientId}:${spec.plainSecret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { access_token: string }).access_token;
+};
+
+/** Register a declaration as the service, requesting the given access. */
+const register = async (
+  spec: { clientId: string; plainSecret: string; namespace: string },
+  requestedAccess: { roles?: string[]; audiences?: string[] },
+  extra: Record<string, unknown> = {}
+) => {
+  const response = await fetch(`${CORE_URL}/v1/registry/declaration`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${await serviceToken(spec)}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      version: "1.0.0",
+      requestedAccess,
+      ...extra,
+    }),
+  });
+  const body = (await response.json()) as {
+    access: { id: string; kind: string; target: string; status: string }[];
+  };
+  expect(response.status, JSON.stringify(body)).toBe(200);
+  return body;
+};
+
+const statusOf = (
+  body: { access: { kind: string; target: string; status: string }[] },
+  kind: string,
+  target: string
+) => body.access.find((a) => a.kind === kind && a.target === target)?.status;
+
+const accessRow = async (
+  serviceId: string,
+  kind: "role" | "audience",
+  target: string
+) =>
+  prisma.serviceAccess.findUniqueOrThrow({
+    where: { serviceId_kind_target: { serviceId, kind, target } },
+  });
+
+const holdsRole = async (slug: string, roleName: string) => {
+  const userId = (await serviceRow(slug)).client!.serviceAccountUser!.id;
+  return (
+    (await prisma.userRole.count({
+      where: { userId, role: { name: roleName }, organizationId: null },
+    })) > 0
+  );
+};
+
 describe("applyProvisioning", () => {
   it("creates a service with its client, service-account user and given secret", async () => {
     const spec = serviceSpec({
@@ -162,7 +227,7 @@ describe("applyProvisioning", () => {
     expect(row.client?.grantTypes).toEqual(["client_credentials"]);
     expect(row.client?.clientSecret).toBe(spec.secretHash);
     expect(row.client?.serviceAccountUser?.userType).toBe("service_account");
-    // Approving access is the next task's: nothing is approved here.
+    // Access is approved only once the service requests it.
     expect(
       await prisma.serviceAccess.count({ where: { serviceId: row.id } })
     ).toBe(0);
@@ -510,6 +575,145 @@ describe("applyProvisioning", () => {
       expect(entry.userId).toBe(SYSTEM_USER_ID);
       expect(entry.writerUserId).toBe(SYSTEM_USER_ID);
     }
+  });
+});
+
+describe("pre-approved access", () => {
+  it("approves a registered request the file pre-approves", async () => {
+    const spec = serviceSpec({
+      access: { roles: ["file_user"], audiences: [] },
+    });
+    await applyProvisioning(file([spec]));
+
+    const body = await register(spec, { roles: ["file_user"] });
+    expect(statusOf(body, "role", "file_user")).toBe("approved");
+    const s = await serviceRow(spec.slug);
+    const row = await accessRow(s.id, "role", "file_user");
+    expect(row.decidedBy).toBe(SYSTEM_USER_ID);
+    expect(row.decidedAt).not.toBeNull();
+    expect(await holdsRole(spec.slug, "file_user")).toBe(true);
+    const audit = await prisma.auditLogEntry.findFirst({
+      where: {
+        entityId: s.id,
+        metadata: { path: ["action"], equals: "access_approved" },
+      },
+    });
+    expect(audit?.userId).toBe(SYSTEM_USER_ID);
+  });
+
+  it("leaves a request the file does not list pending", async () => {
+    const spec = serviceSpec({
+      access: { roles: ["file_user"], audiences: [] },
+    });
+    await applyProvisioning(file([spec]));
+
+    const body = await register(spec, {
+      roles: ["file_user", "webhook_publisher"],
+    });
+    expect(statusOf(body, "role", "file_user")).toBe("approved");
+    expect(statusOf(body, "role", "webhook_publisher")).toBe("pending");
+    expect(await holdsRole(spec.slug, "webhook_publisher")).toBe(false);
+  });
+
+  it("approves pending requests already on file when the file starts listing them", async () => {
+    const spec = serviceSpec();
+    await applyProvisioning(file([spec]));
+    const body = await register(spec, { roles: ["file_user"] });
+    expect(statusOf(body, "role", "file_user")).toBe("pending");
+
+    await applyProvisioning(
+      file([{ ...spec, access: { roles: ["file_user"], audiences: [] } }])
+    );
+    const s = await serviceRow(spec.slug);
+    const row = await accessRow(s.id, "role", "file_user");
+    expect(row.status).toBe("approved");
+    expect(row.decidedBy).toBe(SYSTEM_USER_ID);
+    expect(await holdsRole(spec.slug, "file_user")).toBe(true);
+  });
+
+  it("does not re-approve a request an admin revoked", async () => {
+    const spec = serviceSpec({
+      access: { roles: ["file_user"], audiences: [] },
+    });
+    await applyProvisioning(file([spec]));
+    await register(spec, { roles: ["file_user"] });
+    const s = await serviceRow(spec.slug);
+    const row = await accessRow(s.id, "role", "file_user");
+
+    const revoked = await api(
+      "POST",
+      `/v1/admin/services/${s.id}/access/revoke`,
+      { ids: [row.id] }
+    );
+    expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
+
+    await applyProvisioning(file([spec]));
+    const body = await register(
+      spec,
+      { roles: ["file_user"] },
+      { version: "1.0.1" }
+    );
+    expect(statusOf(body, "role", "file_user")).toBe("revoked");
+    expect(await holdsRole(spec.slug, "file_user")).toBe(false);
+  });
+
+  it("does not auto-approve a request reopened because the role gained permissions", async () => {
+    const owner = serviceSpec();
+    const ns = owner.namespace;
+    const role = `${ns}_item_reader`;
+    const target = `${owner.slug}/${role}`;
+    const consumer = serviceSpec({
+      access: { roles: [target], audiences: [] },
+    });
+    await applyProvisioning(file([owner, consumer]));
+
+    const ownerDeclaration = (version: string, grants: string[]) => ({
+      version,
+      permissions: [
+        { name: `${ns}.items.read`, displayName: "Read items" },
+        { name: `${ns}.items.write`, displayName: "Write items" },
+      ],
+      systemRoles: [
+        { name: role, displayName: "Item reader", permissions: grants },
+      ],
+    });
+    await register(owner, {}, ownerDeclaration("1.0.0", [`${ns}.items.read`]));
+
+    const body = await register(consumer, { roles: [target] });
+    expect(statusOf(body, "role", target)).toBe("approved");
+
+    await register(
+      owner,
+      {},
+      ownerDeclaration("1.0.1", [`${ns}.items.read`, `${ns}.items.write`])
+    );
+    const c = await serviceRow(consumer.slug);
+    expect((await accessRow(c.id, "role", target)).status).toBe("pending");
+
+    await applyProvisioning(file([owner, consumer]));
+    const again = await register(
+      consumer,
+      { roles: [target] },
+      { version: "1.0.1" }
+    );
+    expect(statusOf(again, "role", target)).toBe("pending");
+    const row = await accessRow(c.id, "role", target);
+    expect(row.status).toBe("pending");
+    expect(row.approvedPermissionIds).toHaveLength(1);
+  });
+
+  it("approves a pre-approved audience, adding it to the service's client audience", async () => {
+    const target = serviceSpec();
+    const spec = serviceSpec({
+      access: { roles: [], audiences: [target.slug] },
+    });
+    await applyProvisioning(file([target, spec]));
+
+    const body = await register(spec, { audiences: [target.slug] });
+    expect(statusOf(body, "audience", target.slug)).toBe("approved");
+    expect((await serviceRow(spec.slug)).client?.audience).toEqual([
+      target.slug,
+    ]);
   });
 });
 

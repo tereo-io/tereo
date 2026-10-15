@@ -386,7 +386,7 @@ const accessView = (row: AccessView): AccessView => ({
   status: row.status,
 });
 
-const listAccess = async (serviceId: string, tx: Tx = prisma) =>
+export const listAccess = async (serviceId: string, tx: Tx = prisma) =>
   (
     await tx.serviceAccess.findMany({
       where: { serviceId },

@@ -3,6 +3,7 @@ import { CORE_SERVICE, SYSTEM_USER_ID } from "../../definitions/index.js";
 import { createServiceTx, serviceAccountEmail } from "../services.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
+import { approveProvisionedAccess } from "../serviceAccess.js";
 import { prisma, type Prisma } from "../db/prisma.js";
 import { formatClient } from "../transformers.js";
 import { AppError } from "../errors.js";
@@ -552,8 +553,8 @@ const markMissing = async (
 export const applyProvisioning = async (
   p: Provisioning,
   now: Date = new Date()
-): Promise<ProvisioningResult> =>
-  prisma.$transaction(
+): Promise<ProvisioningResult> => {
+  const result = await prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('provisioning', 0))`;
       const state = await loadState(tx, p);
@@ -575,3 +576,11 @@ export const applyProvisioning = async (
     },
     { timeout: 30_000 }
   );
+  // Requests registered before the file listed them.
+  const services = await prisma.service.findMany({
+    where: { slug: { in: p.services.map((s) => s.slug) } },
+    select: { id: true },
+  });
+  for (const service of services) await approveProvisionedAccess(service.id);
+  return result;
+};
