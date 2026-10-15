@@ -84,6 +84,7 @@ notes as a range; a value outside its range stops core at startup with the varia
 | `REDIS_PASSWORD` | — | Sentinel connections only |
 | `TRUST_PROXY` | `loopback` outside production | Required in production. Express `trust proxy`: `loopback`, `linklocal`, `uniquelocal`, a hop count, a comma-separated IP/CIDR list, or `true`/`false`; `true` is refused in production |
 | `CORS_ALLOWED_ORIGINS` | `UI_BASE_URL`'s origin outside production | Comma-separated. Required in production |
+| `SETUP_TOKEN` | generated and logged | 24 characters or more. Core accepts it as the first-boot setup token until setup completes, so setup can run unattended; it is never logged. It replaces any other setup token, so changing or unsetting it before setup completes retires the old one. Compared case-insensitively, ignoring whitespace and hyphens |
 | `INTERNAL_NETWORK_CIDRS` | RFC 1918, loopback, `fc00::/7`, `fe80::/10` | Comma-separated CIDRs whose service-account callers, connecting directly (no proxy header), get the general rate limit's internal tier, keyed per client, instead of the external one. Read straight from the environment by `utils/rateLimit.ts`, outside the schema, so a bad entry is logged and skipped rather than refused |
 
 ### Keys
@@ -203,7 +204,6 @@ env (no overlap).
 | `FILE_SERVICE_STORAGE_PATH` | `./storage` | Blobs live under `blobs/` |
 | `FILE_SERVICE_TEMP_PATH` | `./storage/temp` | multer spools single-request uploads here unencrypted while they are processed, so put it on an encrypted volume or a tmpfs. See [files.md](files.md#multipart-uploads) |
 | `FILE_SERVICE_PUBLIC_BASE_URL` | `${PUBLIC_URL}/v1/files` | Base of presigned and share URLs; not localhost in production |
-| `SETUP_TOKEN` | generated and logged | 24 characters or more. Core accepts it as the first-boot setup token until setup completes, so setup can run unattended; it is never logged |
 | `FILE_SERVICE_SHARE_UI_BASE_URL` | `UI_BASE_URL` | Where password-protected shares send browsers to unlock |
 | `FILE_SERVICE_MAX_UPLOAD_SIZE_MB` | `100` | Above 0, at most 10240. Single-request uploads; larger files use multipart |
 | `FILE_SERVICE_MIN_PART_SIZE_MB` | `5` | Above 0, at most 5120 |

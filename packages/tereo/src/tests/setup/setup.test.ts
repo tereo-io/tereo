@@ -283,5 +283,28 @@ describe("First-boot setup", () => {
       );
       expect(await prisma.setupToken.count()).toBe(0);
     });
+
+    it("stops accepting a previous SETUP_TOKEN after it changes", async () => {
+      await announceSetupIfPending();
+      const next = "another-deploy-supplied-token-9876543210";
+      env.SETUP_TOKEN = next;
+      await announceSetupIfPending();
+
+      expect((await request(setupBody(TOKEN))).status).toBe(
+        HTTP_STATUS.UNAUTHORIZED
+      );
+      expect((await request(setupBody(next))).status).toBe(HTTP_STATUS.CREATED);
+    });
+
+    it("stops accepting a SETUP_TOKEN once it is unset", async () => {
+      await announceSetupIfPending();
+      env.SETUP_TOKEN = undefined;
+      await announceSetupIfPending();
+
+      expect((await request(setupBody(TOKEN))).status).toBe(
+        HTTP_STATUS.UNAUTHORIZED
+      );
+      expect(await prisma.setupToken.count()).toBe(1);
+    });
   });
 });
