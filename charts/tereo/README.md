@@ -63,6 +63,12 @@ non-https `publicUrl`, `trustProxy: "true"`, or no secret.
   or `worker.enabled` only on such a volume (or an `existingClaim` you know is shared).
 - **Workers.** By default one Deployment runs everything (`ROLE=all`). `worker.enabled` splits the
   background workers into their own Deployment (`ROLE=worker`, health on port 4002).
+- **External secrets.** The ExternalSecret is a hook too, ahead of the migration Job, so the
+  Secret exists before anything reads it. It is recreated on each upgrade; the Secret it fills is
+  orphaned and retained, so running pods never lose it.
+- **Uninstall** leaves the files claim, and with `secrets.externalSecret` the ExternalSecret and its
+  Secret, since Helm does not delete hooks. A reinstall picks them up again; delete them by hand to
+  remove the app for good.
 - **Probes.** Readiness is `/health`, which reports 503 while Postgres or Redis is down; liveness
   only checks the port, so an outage does not restart core.
 

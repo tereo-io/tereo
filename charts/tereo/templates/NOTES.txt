@@ -12,6 +12,11 @@ and the API docs at {{ .Values.publicUrl }}/docs.
 No Ingress was created: route {{ .Values.publicUrl }} to the service
 {{ include "tereo.fullname" . }}:{{ .Values.service.port }} yourself.
 {{- end }}
+{{- if .Values.secrets.externalSecret.enabled }}
+
+The ExternalSecret {{ include "tereo.fullname" . }} and the Secret it fills are kept
+when the release is uninstalled; Helm does not delete hooks.
+{{- end }}
 {{- if not .Values.persistence.enabled }}
 
 persistence is disabled: stored files are on an emptyDir and are lost when the
