@@ -1,0 +1,20 @@
+apiVersion: v2
+name: tereo
+description: Tereo, a self-hosted application core (auth, files, webhooks, notifications, audit), deployed once per app
+type: application
+# Both are set from packages/tereo's version when publish.yml packages the
+# chart, so the chart and the image it runs are released together.
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/tereo-io/tereo
+sources:
+  - https://github.com/tereo-io/tereo
+icon: https://raw.githubusercontent.com/tereo-io/tereo/master/assets/tereo-mark.svg
+keywords:
+  - auth
+  - oauth
+  - oidc
+  - webhooks
+  - audit
+annotations:
+  artifacthub.io/license: Apache-2.0

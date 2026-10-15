@@ -1,0 +1,28 @@
+Tereo {{ .Chart.AppVersion }} is installed as {{ include "tereo.fullname" . }}.
+
+Until the first admin exists, core logs a one-time setup token on every start:
+
+  kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "tereo.fullname" . }} | grep "not set up"
+
+Complete setup at {{ .Values.publicUrl }}/setup with that token (valid 24 hours;
+restarting the pod logs a new one). The admin UI is then at {{ .Values.publicUrl }}
+and the API docs at {{ .Values.publicUrl }}/docs.
+{{- if not .Values.ingress.enabled }}
+
+No Ingress was created: route {{ .Values.publicUrl }} to the service
+{{ include "tereo.fullname" . }}:{{ .Values.service.port }} yourself.
+{{- end }}
+{{- if .Values.secrets.externalSecret.enabled }}
+
+The ExternalSecret {{ include "tereo.fullname" . }} and the Secret it fills are kept
+when the release is uninstalled; Helm does not delete hooks.
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+
+persistence is disabled: stored files are on an emptyDir and are lost when the
+pod is replaced.
+{{- else }}
+
+Stored files are on the claim {{ include "tereo.claimName" . }}, which is kept
+when the release is uninstalled.
+{{- end }}

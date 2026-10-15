@@ -14,6 +14,8 @@ other packages are `@tereo-io/sdk`, which app services use to reach core, and th
 `packages/tereo-ui` (Vite + React, port 4000 in development), which calls core directly and is
 built on [`@kosmeo-ui/react`](https://github.com/kosmeo-ui/kosmeo-ui) from npm. Its production build ships in
 core's image and core serves it at `/`, around core's API under `/v1`.
+The Helm chart is `charts/tereo` (external Postgres and Redis; migrations as a hook), released with
+the image at the same version.
 Outbound HTTP goes through the request handler [`@dianemo/core`](https://github.com/dianemo/dianemo).
 
 Read [README.md](README.md) first; its *Current state* section lists what is done and what is not.

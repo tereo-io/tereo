@@ -1,0 +1,11 @@
+publicUrl: https://core.example.com
+trustProxy: "1"
+secrets:
+  existingSecret: tereo-secrets
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    - secretName: core-tls
+      hosts:
+        - core.example.com

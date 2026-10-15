@@ -1,0 +1,146 @@
+# Tereo is deployed once per app: each install is one app's core, with its own
+# database, Redis, keys and admin. Postgres and Redis are not part of this
+# chart; point it at yours through the secret below.
+
+image:
+  repository: ghcr.io/tereo-io/tereo
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Core's externally reachable https:// URL (required). The OIDC issuer, share
+# and presigned links and the admin UI's address are built from it.
+publicUrl: ""
+
+# Browser origins allowed to call core. Empty means just publicUrl's origin,
+# which is where core serves its own admin UI.
+corsAllowedOrigins: []
+
+# The proxies in front of core (required): "1" for a single ingress hop, a CIDR
+# list, or "false" when nothing proxies. "true" is refused by core.
+trustProxy: ""
+
+# Where core's admin UI is served. Empty means publicUrl, where core serves it.
+uiBaseUrl: ""
+
+redis:
+  # Leave both empty to use REDIS_URL from the secret. Set both for Sentinel;
+  # the password then comes from REDIS_PASSWORD in the secret.
+  sentinels: ""
+  masterName: ""
+
+# OTLP/HTTP endpoint for traces, e.g. http://otel-collector:4318. Empty
+# disables export.
+otelExporterEndpoint: ""
+
+logLevel: info
+
+# Further plain settings, as NAME: value (see docs/configuration.md).
+env: {}
+
+# Further env sources, e.g. a ConfigMap or Secret of your own.
+extraEnvFrom: []
+
+secrets:
+  # A Secret you manage, holding DATABASE_URL, CORE_KEK (openssl rand -base64
+  # 32), and REDIS_URL, or REDIS_PASSWORD when using Sentinel. Every key in it
+  # becomes an environment variable.
+  existingSecret: ""
+
+  # Or let External Secrets Operator build that Secret from your store.
+  externalSecret:
+    enabled: false
+    refreshInterval: 1h
+    secretStoreRef:
+      name: ""
+      kind: ClusterSecretStore
+    # ExternalSecret `data` entries, e.g.
+    #   - secretKey: DATABASE_URL
+    #     remoteRef:
+    #       key: tereo-database-url
+    data: []
+    # ExternalSecret `dataFrom` entries.
+    dataFrom: []
+
+# Runs the image's migrate-and-seed.sh (migrations, then the idempotent seed)
+# as a Helm hook before each install and upgrade. Under ArgoCD it runs as a
+# PreSync hook.
+migrations:
+  enabled: true
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  resources: {}
+
+# Core keeps file blobs on this volume. More than one core pod (replicaCount
+# above 1, or worker.enabled) needs a ReadWriteMany volume.
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+
+# The API pods. With worker.enabled false they also run the background
+# workers (ROLE=all).
+replicaCount: 1
+
+# A separate Deployment for the background workers (ROLE=worker), leaving the
+# API pods ROLE=api.
+worker:
+  enabled: false
+  replicaCount: 1
+  resources: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Defaults to publicUrl's host.
+  host: ""
+  tls: []
+  #  - secretName: tereo-tls
+  #    hosts:
+  #      - core.example.com
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+# The image runs as the nodejs user, 1001.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

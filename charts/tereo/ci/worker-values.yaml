@@ -1,0 +1,16 @@
+publicUrl: https://core.example.com
+trustProxy: 10.0.0.0/8
+corsAllowedOrigins:
+  - https://core.example.com
+  - https://app.example.com
+secrets:
+  existingSecret: tereo-secrets
+replicaCount: 2
+worker:
+  enabled: true
+persistence:
+  accessModes:
+    - ReadWriteMany
+otelExporterEndpoint: http://otel-collector.observability:4318
+env:
+  FILE_SERVICE_MAX_UPLOAD_SIZE_MB: 200
