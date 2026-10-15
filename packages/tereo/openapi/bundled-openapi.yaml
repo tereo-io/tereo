@@ -5275,7 +5275,7 @@ paths:
       summary: Update client
       description: |
         Updates a login client. A service's client (`service` set) is refused
-        with `409`. Only its owner or a holder of `clients.admin` may update it
+        with `409`, as is a provisioned one (`409 managed_by_provisioning`). Only its owner or a holder of `clients.admin` may update it
         (`403` otherwise). After the change a public client must
         still use only `authorization_code` / `refresh_token`
         (`400 invalid_request`) and have a redirect URI (`400 invalid_request`).
@@ -5340,7 +5340,7 @@ paths:
           description: Client not found
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes` or `clientType`
+          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes` or `clientType`
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5351,7 +5351,7 @@ paths:
       summary: Delete client
       description: |
         Deletes a login client. A service's client (`service` set) is refused
-        with `409`. Only its owner or a holder of `clients.admin` may delete it
+        with `409`, as is a provisioned one (`409 managed_by_provisioning`). Only its owner or a holder of `clients.admin` may delete it
         (`403` otherwise). The admin UI's login client (`tereo-ui`)
         cannot be deleted (`409`). The client's access tokens are
         revoked, and its service-account user, if any, is deactivated (never
@@ -5387,7 +5387,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The client belongs to a service (its `service` is set; manage it under /v1/admin/services), or it is the admin UI's login client
+          description: The client belongs to a service (its `service` is set; manage it under /v1/admin/services), it is declared in the provisioning file (`managed_by_provisioning`), or it is the admin UI's login client
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5399,7 +5399,8 @@ paths:
       summary: Regenerate client secret
       description: |
         Generates a new client secret; the old one stops working at once. A
-        service's client (`service` set) is refused with `409`; regenerate it
+        service's client (`service` set) is refused with `409`, as is a
+        provisioned client (`409 managed_by_provisioning`); regenerate a service's
         under /v1/admin/services — checked first, so a service's client answers
         `409` to anyone holding `clients.write`. Then an unknown id is `404`,
         and only the client's owner or a holder of `clients.admin` may
@@ -5440,7 +5441,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services
+          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7762,7 +7763,9 @@ paths:
         Renames, deactivates or reactivates a service. The name is copied to
         its OAuth client; `isActive` is copied to its service-account user.
         Deactivating revokes all of the service's outstanding tokens. Core's
-        own row cannot be changed (`403`).
+        own row cannot be changed (`403`). A provisioned service is refused
+        with `409 managed_by_provisioning`: its name and secret come from the
+        provisioning file.
 
         An audit log entry is created for this action.
         A `core.service.updated` webhook event is emitted.
@@ -7802,6 +7805,9 @@ paths:
           description: Forbidden - missing services.write permission, or the service is core
         '404':
           $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7816,7 +7822,9 @@ paths:
         secret keeps working for `SERVICE_SECRET_OVERLAP_HOURS` (until
         `previousSecretExpiresAt`) so running copies survive the rollout; end
         the overlap early with `POST /v1/admin/services/{id}/revoke-previous-secret`.
-        Core's own row cannot be changed (`403`).
+        Core's own row cannot be changed (`403`). A provisioned service is
+        refused with `409 managed_by_provisioning`: rotate its secret in the
+        deployment's environment instead.
 
         An audit log entry is created for this action.
         A `core.service.secret-regenerated` webhook event is emitted.
@@ -7849,6 +7857,9 @@ paths:
           description: Forbidden - missing services.write permission, or the service is core
         '404':
           $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7860,7 +7871,8 @@ paths:
       summary: Revoke previous service secret
       description: |
         Ends the secret overlap now: only the current secret works from here
-        on. Core's own row cannot be changed (`403`).
+        on. Core's own row cannot be changed (`403`). A provisioned service is
+        refused with `409 managed_by_provisioning`.
 
         An audit log entry is created for this action.
         A `core.service.previous-secret-revoked` webhook event is emitted.
@@ -7893,6 +7905,9 @@ paths:
           description: Forbidden - missing services.write permission, or the service is core
         '404':
           $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -21031,6 +21046,7 @@ components:
         - grantTypes
         - audience
         - consentRequired
+        - provisioned
         - ownerId
         - organizationId
         - service
@@ -21090,6 +21106,12 @@ components:
           description: |
             Whether users approve the app on a consent screen after signing in.
             Core's own login client never asks, and refuses a change (`409`).
+        provisioned:
+          type: boolean
+          description: |
+            True for a client declared in the provisioning file. It changes only
+            there: updating, deleting or regenerating its secret here is `409
+            managed_by_provisioning`.
         ownerId:
           type: string
           format: uuid
@@ -22229,6 +22251,7 @@ components:
         - name
         - namespace
         - isActive
+        - provisioned
         - clientId
         - serviceAccountUserId
         - serviceAccountUser
@@ -22254,6 +22277,12 @@ components:
           description: Prefix of everything the service declares. Fixed once set.
         isActive:
           type: boolean
+        provisioned:
+          type: boolean
+          description: |
+            True for a service declared in the provisioning file. Only its access
+            is decided here: updating it, regenerating or revoking its secret is
+            `409 managed_by_provisioning`.
         clientId:
           type:
             - string

@@ -28,6 +28,7 @@ const stored: OAuthClient = {
   grantTypes: ["authorization_code", "refresh_token"],
   audience: [],
   consentRequired: true,
+  provisioned: false,
   ownerId: "u1",
   service: null,
   createdAt: "2026-10-01T00:00:00Z",

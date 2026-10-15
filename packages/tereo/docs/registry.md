@@ -176,6 +176,20 @@ changes its declaration a new version.
 
 Nothing is deleted. Re-declaring an item brings it back.
 
+## Provisioned services
+
+A deploy can create services from a file instead of `POST /v1/admin/services`
+([provisioning](provisioning.md)). A provisioned service is read-only through the admin API: rename,
+deactivate, `regenerate-secret` and `revoke-previous-secret` answer `409 managed_by_provisioning`,
+and its secret is rotated by changing the environment variable the file names. Registration is
+unchanged: the service declares at boot, and its requests are approved or revoked as for any other.
+
+The file can list the roles and audiences the service may have (`access`). A matching request is
+approved at once, as core's system user, but only if it has never been decided. A request that
+returned to `pending` because another service's role gained permissions, and one an admin revoked,
+wait for an admin. A service dropped from the file is deactivated after
+`REGISTRY_RETIREMENT_GRACE_HOURS`, and reactivated if it returns.
+
 ## Core
 
 Core's declaration is `CORE_DECLARATION` (`definitions/declaration.ts`), versioned with core's

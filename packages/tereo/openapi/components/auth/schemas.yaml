@@ -1439,6 +1439,7 @@ Client:
     - grantTypes
     - audience
     - consentRequired
+    - provisioned
     - ownerId
     - organizationId
     - service
@@ -1493,6 +1494,12 @@ Client:
       description: |
         Whether users approve the app on a consent screen after signing in.
         Core's own login client never asks, and refuses a change (`409`).
+    provisioned:
+      type: boolean
+      description: |
+        True for a client declared in the provisioning file. It changes only
+        there: updating, deleting or regenerating its secret here is `409
+        managed_by_provisioning`.
     ownerId:
       type: string
       format: uuid
@@ -2557,6 +2564,7 @@ Service:
     - name
     - namespace
     - isActive
+    - provisioned
     - clientId
     - serviceAccountUserId
     - serviceAccountUser
@@ -2582,6 +2590,12 @@ Service:
       description: Prefix of everything the service declares. Fixed once set.
     isActive:
       type: boolean
+    provisioned:
+      type: boolean
+      description: |
+        True for a service declared in the provisioning file. Only its access
+        is decided here: updating it, regenerating or revoking its secret is
+        `409 managed_by_provisioning`.
     clientId:
       type: [string, 'null']
       description: OAuth `client_id` of the service's confidential client
