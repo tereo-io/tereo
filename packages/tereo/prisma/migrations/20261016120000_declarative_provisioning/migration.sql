@@ -35,3 +35,9 @@ WHERE "status" = 'pending' AND "decided_at" IS NULL;
 -- provisioning apply brings it up to what the role grants.
 UPDATE "core"."service_access" SET "status" = 'approved'
 WHERE "status" = 'pending';
+
+-- Services that registered a declaration are adopted by provisioning: the
+-- deploy's documents now declare them, and one they leave out retires.
+UPDATE "core"."services" SET "provisioned" = true
+WHERE "declaration_hash" IS NOT NULL
+  AND "id" <> '00000000-0000-7000-8000-000000000002';
