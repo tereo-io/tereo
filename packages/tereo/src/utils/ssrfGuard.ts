@@ -23,6 +23,11 @@ import net from "net";
 //      validated IPs. The caller must fetch through it so the socket lands on
 //      the checked IP rather than a second, rebindable DNS lookup. The worker
 //      also never follows redirects, so a 3xx can't bounce it internal.
+//
+// One exception (`allowPrivateHost`): a service's own provisioned endpoints
+// may reach its declared internalHost at a private address, in both layers.
+// Unspecified, loopback, link-local and multicast addresses stay refused even
+// then, whether written in the URL or resolved from it.
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
 
@@ -120,11 +125,7 @@ function embeddedV4(ip: string): string | null {
   return null;
 }
 
-/**
- * True for an address in a special-purpose range, including one reached
- * through an IPv4-mapped, NAT64 or 6to4 IPv6 address. Anything that isn't an
- * IP address is treated as unsafe.
- */
+/** `ip` in `ranges`, directly or through an embedded IPv4 address. */
 const inRanges = (ranges: net.BlockList, ip: string): boolean => {
   const family = net.isIP(ip);
   if (family === 4) return ranges.check(ip, "ipv4");
@@ -135,6 +136,11 @@ const inRanges = (ranges: net.BlockList, ip: string): boolean => {
   return v4 !== null && ranges.check(v4, "ipv4");
 };
 
+/**
+ * True for an address in a special-purpose range, including one reached
+ * through an IPv4-mapped, NAT64 or 6to4 IPv6 address. Anything that isn't an
+ * IP address is treated as unsafe.
+ */
 export function isPrivateOrReservedIp(ip: string): boolean {
   return inRanges(BLOCKED_RANGES, ip);
 }
