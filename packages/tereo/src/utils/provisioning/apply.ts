@@ -1093,11 +1093,17 @@ const applyServicesContent = async (
         now,
         documentMeta(entry)
       );
-      for (const [verb, keys] of Object.entries(changes))
+      const { lostPermissions, ...byVerb } = changes;
+      for (const [verb, keys] of Object.entries(byVerb))
         for (const key of keys)
           result.access.push(`service:${row.slug} ${verb} ${key}`);
-      // Tokens carry the permissions: a narrowed role's are stale too.
-      if (changes.revoked.length > 0 || changes.narrowed.length > 0)
+      // Tokens carry the permissions: a narrowed role's are stale too, even
+      // when the same role also gained others.
+      if (
+        changes.revoked.length > 0 ||
+        changes.narrowed.length > 0 ||
+        lostPermissions
+      )
         revokedClients.push(client.id);
     });
   }

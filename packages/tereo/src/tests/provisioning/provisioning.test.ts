@@ -1041,6 +1041,30 @@ describe("access", () => {
     });
   });
 
+  it("revokes tokens when a role swaps one permission for another", async () => {
+    const owner = serviceDoc();
+    Object.assign(
+      owner.service,
+      ownerDeclaration(owner.service.namespace, ["read"])
+    );
+    const consumer = serviceDoc({
+      access: { roles: [roleTarget(owner)], audiences: [] },
+    });
+    await apply(owner, consumer);
+    const token = await serviceToken(consumer);
+
+    const swapped = withService(
+      owner,
+      ownerDeclaration(owner.service.namespace, ["write"]),
+      { version: "1.1.0" }
+    );
+    const result = await apply(swapped, consumer);
+    expect(result.access).toEqual([
+      `service:${consumer.service.slug} extended role:${roleTarget(owner)}`,
+    ]);
+    expect((await tokenRow(token)).revokedAt).not.toBeNull();
+  });
+
   it("revokes access removed from the set", async () => {
     const owner = serviceDoc();
     Object.assign(owner.service, ownerDeclaration(owner.service.namespace));
