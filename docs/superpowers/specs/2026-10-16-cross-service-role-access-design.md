@@ -1,6 +1,6 @@
 # Cross-service role access (vanquished gap 0k)
 
-Date: 2026-10-16. Status: design approved in conversation; spec awaiting review.
+Date: 2026-10-16. Status: superseded by 2026-10-16-declarative-provisioning-design.md.
 
 ## Problem
 
@@ -94,11 +94,16 @@ For growth, a file-eligible row is not flipped to `pending` at all: it is re-app
 
 **Locks.** The two new paths run in the declaring service's registration transaction, which already
 holds that service's registry lock. They only touch rows naming the declaring service's own roles,
-so `lockRoleOwners` takes the same (re-entrant, transaction-scoped) advisory lock, and
-`lockedAudience` then locks the consumer's client row — the admin path's order, registry before
-client. No other service's registry lock is taken, which is what the existing comment in
-`routes/v1/registry/controllers.ts` guards against. The plan must confirm this with a concurrency
-test (target registration racing an admin decision on the same consumer).
+so `lockRoleOwners` takes the same (re-entrant, transaction-scoped) advisory lock. No other
+service's registry lock is taken, which is what the existing comment in
+`routes/v1/registry/controllers.ts` guards against.
+
+The admin revoke path locks the consumer's client row (`lockedAudience`) and then updates its
+access rows. `reopenGrownAccess` updates access rows before any client row is locked, so approving
+inside it would invert that order. The registration therefore locks the client rows of every
+provisioned consumer with a row naming one of its roles — sorted by id, `FOR UPDATE` — before
+`reopenGrownAccess` runs. The order everywhere is then registry lock, client rows, access rows. A
+concurrency test (target registration racing an admin revoke on the same consumer) confirms it.
 
 Doing this in the transaction, rather than after commit, means no window in which file-listed
 access sits `pending` (or emits a spurious access-requested event) and nothing to recover if the
@@ -106,9 +111,12 @@ process dies between commit and approval.
 
 ### 4. SDK
 
-No change. `register()` keeps retrying with backoff; it simply stops seeing boot-order 422s, so
-services report ready as soon as they register. A request still pending means `403` on the calls
-that need it, as today.
+`register()` retries `422 invalid_requested_access` today (`isRetryable`,
+`tereo-sdk/src/clients/registry.ts`), because it meant "not registered yet". After this change it
+means a malformed request that no retry fixes, so the SDK gives up on it at once, like
+`invalid_declaration`. Services report ready as soon as they register; a request still pending
+means `403` on the calls that need it, as today. The SDK's `AccessView` type gains
+`targetDeclared`. The `sdk` release group gets a minor bump.
 
 ## Docs
 
