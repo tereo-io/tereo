@@ -13,6 +13,7 @@ export interface CreateServiceInput {
   clientId: string;
   clientSecretHash: string;
   provisioned?: boolean;
+  internalHost?: string | null;
   /** Added to the audit entry's metadata. */
   auditMetadata?: Record<string, unknown>;
 }
@@ -66,6 +67,7 @@ export const createServiceTx = async (
       clientId: client.id,
       createdBy: actor.userId,
       provisioned: input.provisioned,
+      internalHost: input.internalHost ?? null,
     },
   });
 

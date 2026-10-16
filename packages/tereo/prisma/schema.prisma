@@ -1527,6 +1527,9 @@ model Service {
   namespace          String    @unique @db.VarChar(64)
   clientId           String?   @unique @map("client_id") @db.Uuid
   isActive           Boolean   @default(true) @map("is_active")
+  // Set by provisioning: the host its own webhook endpoints may reach at a
+  // private address (utils/ssrfGuard.ts).
+  internalHost       String?   @map("internal_host") @db.VarChar(253)
   declarationHash    String?   @map("declaration_hash") @db.Char(64)
   // The semver of the declaration last applied; an older one is ignored.
   declarationVersion String?   @map("declaration_version") @db.VarChar(64)

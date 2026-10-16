@@ -333,6 +333,7 @@ const applyService = async (
         clientId: spec.clientId,
         clientSecretHash: spec.secretHash,
         provisioned: true,
+        internalHost: spec.internalHost,
         auditMetadata: meta,
       },
       SYSTEM_ACTOR
@@ -342,13 +343,21 @@ const applyService = async (
   }
 
   const changes = computeChanges(
-    { name: existing.name, unprovisionedAt: existing.unprovisionedAt },
-    { name: spec.name, unprovisionedAt: null }
+    {
+      name: existing.name,
+      internalHost: existing.internalHost,
+      unprovisionedAt: existing.unprovisionedAt,
+    },
+    { name: spec.name, internalHost: spec.internalHost, unprovisionedAt: null }
   );
   if (changes) {
     await tx.service.update({
       where: { id: existing.id },
-      data: { name: spec.name, unprovisionedAt: null },
+      data: {
+        name: spec.name,
+        internalHost: spec.internalHost,
+        unprovisionedAt: null,
+      },
     });
     if (existing.client && existing.client.name !== spec.name)
       await tx.oAuthClient.update({

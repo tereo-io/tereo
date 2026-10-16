@@ -102,6 +102,13 @@ const checkSetUniqueness = (
     problems
   );
   checkUnique(
+    "internalHost",
+    services.flatMap(({ file, service }) =>
+      service.internalHost ? [{ value: service.internalHost, file }] : []
+    ),
+    problems
+  );
+  checkUnique(
     "clientId",
     set.documents.flatMap((d) => [
       ...(d.service ? [{ value: d.service.clientId, file: d.file }] : []),

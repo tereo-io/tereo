@@ -61,6 +61,8 @@ const ServiceEntry = z
     name: Name,
     namespace: Slug.optional(),
     clientId: ClientId.optional(),
+    // Checked and normalized by load (parseInternalHost).
+    internalHost: z.string().max(253).optional(),
     secretFrom: EnvName,
     access: z
       .object({

@@ -157,6 +157,7 @@ export async function provisionServices(
       name: `Service ${slug}`,
       namespace: secret.namespace,
       clientId: slug,
+      internalHost: null,
       secretEnv: "SERVICE_SECRET",
       secretHash: secret.hash,
       access: {

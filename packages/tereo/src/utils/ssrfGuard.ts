@@ -30,12 +30,18 @@ const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
 // business reaching: private, loopback, link-local (incl. cloud metadata),
 // CGNAT, documentation, benchmarking, multicast and reserved.
 const BLOCKED_RANGES = new net.BlockList();
-const BLOCKED_V4: [string, number][] = [
+// Unspecified, loopback, link-local and multicast/reserved: refused even for
+// a service's own internalHost.
+const ALWAYS_BLOCKED_V4: [string, number][] = [
   ["0.0.0.0", 8],
-  ["10.0.0.0", 8],
-  ["100.64.0.0", 10],
   ["127.0.0.0", 8],
   ["169.254.0.0", 16],
+  ["224.0.0.0", 3],
+];
+const BLOCKED_V4: [string, number][] = [
+  ...ALWAYS_BLOCKED_V4,
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
   ["172.16.0.0", 12],
   ["192.0.0.0", 24],
   ["192.0.2.0", 24],
@@ -44,30 +50,42 @@ const BLOCKED_V4: [string, number][] = [
   ["198.18.0.0", 15],
   ["198.51.100.0", 24],
   ["203.0.113.0", 24],
-  ["224.0.0.0", 3],
 ];
-const BLOCKED_V6: [string, number][] = [
+// The IPv6 counterparts, plus translation and tunnel ranges whose embedded
+// IPv4 address cannot be checked here.
+const ALWAYS_BLOCKED_V6: [string, number][] = [
   ["::", 96], // unspecified, loopback, IPv4-compatible
   ["::ffff:0:0:0", 96], // IPv4-translated (SIIT)
   // Local-use NAT64 (RFC 8215): the operator's own translator, which may map
   // the embedded IPv4 address anywhere, private ranges included.
   ["64:ff9b:1::", 48],
+  ["2001::", 32], // Teredo, which embeds an obfuscated IPv4 client address
+  ["fe80::", 10], // link-local
+  ["ff00::", 8], // multicast
+];
+const BLOCKED_V6: [string, number][] = [
+  ...ALWAYS_BLOCKED_V6,
   ["100::", 64], // discard
-  // IETF protocol assignments: Teredo (which embeds an IPv4 client address),
-  // benchmarking, ORCHID and anycast service addresses.
+  // IETF protocol assignments: benchmarking, ORCHID and anycast service
+  // addresses.
   ["2001::", 23],
   ["2001:db8::", 32], // documentation
   ["3fff::", 20], // documentation
   ["fc00::", 7], // unique-local
-  ["fe80::", 10], // link-local
   ["fec0::", 10], // site-local
-  ["ff00::", 8], // multicast
 ];
+const ALWAYS_BLOCKED_RANGES = new net.BlockList();
 for (const [address, prefix] of BLOCKED_V4) {
   BLOCKED_RANGES.addSubnet(address, prefix, "ipv4");
 }
 for (const [address, prefix] of BLOCKED_V6) {
   BLOCKED_RANGES.addSubnet(address, prefix, "ipv6");
+}
+for (const [address, prefix] of ALWAYS_BLOCKED_V4) {
+  ALWAYS_BLOCKED_RANGES.addSubnet(address, prefix, "ipv4");
+}
+for (const [address, prefix] of ALWAYS_BLOCKED_V6) {
+  ALWAYS_BLOCKED_RANGES.addSubnet(address, prefix, "ipv6");
 }
 
 /** The eight 16-bit groups of a valid IPv6 address without a zone id. */
@@ -107,14 +125,27 @@ function embeddedV4(ip: string): string | null {
  * through an IPv4-mapped, NAT64 or 6to4 IPv6 address. Anything that isn't an
  * IP address is treated as unsafe.
  */
-export function isPrivateOrReservedIp(ip: string): boolean {
+const inRanges = (ranges: net.BlockList, ip: string): boolean => {
   const family = net.isIP(ip);
-  if (family === 4) return BLOCKED_RANGES.check(ip, "ipv4");
+  if (family === 4) return ranges.check(ip, "ipv4");
   if (family !== 6) return true;
   const addr = ip.replace(/%.*$/, "");
-  if (BLOCKED_RANGES.check(addr, "ipv6")) return true;
+  if (ranges.check(addr, "ipv6")) return true;
   const v4 = embeddedV4(addr);
-  return v4 !== null && BLOCKED_RANGES.check(v4, "ipv4");
+  return v4 !== null && ranges.check(v4, "ipv4");
+};
+
+export function isPrivateOrReservedIp(ip: string): boolean {
+  return inRanges(BLOCKED_RANGES, ip);
+}
+
+/**
+ * True for an unspecified, loopback, link-local or multicast address (or one
+ * reached through a translation range): never a webhook target, not even a
+ * service's own internalHost. Anything that isn't an IP address is unsafe.
+ */
+export function isAlwaysBlockedIp(ip: string): boolean {
+  return inRanges(ALWAYS_BLOCKED_RANGES, ip);
 }
 
 /** A URL's host as a name or bare address: IPv6 literals lose their brackets. */
@@ -124,6 +155,93 @@ const isLocalhostName = (host: string): boolean => {
   const name = host.toLowerCase().replace(/\.$/, "");
   return name === "localhost" || name.endsWith(".localhost");
 };
+
+/** A URL's host as compared with an internalHost: no trailing dot. */
+const comparableHost = (url: URL): string => hostOf(url).replace(/\.$/, "");
+
+const HOSTNAME_LABEL = /^(?!-)[a-z0-9-]{1,63}(?<!-)$/;
+
+/**
+ * A service's internalHost: a DNS hostname or a single IP literal its own
+ * webhook endpoints may reach at a private address. Returns it normalized
+ * (lowercase, no trailing dot, IPs in their canonical form). Throws
+ * `invalid_internal_host` for anything else — a CIDR, a scheme, port or path,
+ * a non-canonical IP spelling — and for a localhost name or an unspecified,
+ * loopback, link-local or multicast address.
+ */
+export function parseInternalHost(value: string): {
+  kind: "hostname" | "ip";
+  host: string;
+} {
+  const invalid = (why: string): never => {
+    throw new BadRequestError("invalid_internal_host", why);
+  };
+  const refuseAlwaysBlocked = (ip: string) => {
+    if (isAlwaysBlockedIp(ip))
+      invalid(
+        "may not be an unspecified, loopback, link-local or multicast address"
+      );
+  };
+
+  if (!value) return invalid("must not be empty");
+  if (value.includes("/")) {
+    return invalid(
+      "must be a hostname or a single IP address, not a CIDR, URL or path"
+    );
+  }
+
+  if (net.isIPv6(value)) {
+    if (value.includes("%")) return invalid("may not carry an IPv6 zone id");
+    // The URL parser writes an IPv6 address in its canonical, compressed form.
+    const host = hostOf(new URL(`http://[${value}]`));
+    refuseAlwaysBlocked(host);
+    return { kind: "ip", host };
+  }
+  if (net.isIPv4(value)) {
+    refuseAlwaysBlocked(value);
+    return { kind: "ip", host: value };
+  }
+
+  const host = value.toLowerCase().replace(/\.$/, "");
+  if (
+    host.length > 253 ||
+    !host.split(".").every((l) => HOSTNAME_LABEL.test(l))
+  )
+    return invalid(
+      "must be a hostname or a single IP address, without a scheme, port or path"
+    );
+  // Shorthand and numeric IPv4 spellings (127.1, 0x7f000001, 2130706433) that
+  // a URL would read as an address.
+  let asUrlHost: string;
+  try {
+    asUrlHost = hostOf(new URL(`http://${host}`));
+  } catch {
+    return invalid("must be a valid hostname");
+  }
+  if (net.isIP(asUrlHost))
+    return invalid("must write an IP address in its standard form");
+  if (isLocalhostName(host)) return invalid("may not be a localhost name");
+  return { kind: "hostname", host };
+}
+
+/** `allowPrivateHost` normalized, or null when it allows nothing. */
+const allowedPrivateHost = (allowPrivateHost?: string): string | null => {
+  if (!allowPrivateHost) return null;
+  try {
+    return parseInternalHost(allowPrivateHost).host;
+  } catch {
+    return null;
+  }
+};
+
+export interface PrivateHostOption {
+  /**
+   * A service's internalHost: a URL whose host is exactly this may reach a
+   * private or reserved address, still never an unspecified, loopback,
+   * link-local or multicast one.
+   */
+  allowPrivateHost?: string;
+}
 
 /** A host resolved to, or written as, a private or reserved address. */
 export class BlockedAddressError extends Error {
@@ -153,11 +271,13 @@ export interface ResolvedAddress {
  * BullMQ retries). IP literals are checked directly.
  */
 export async function resolveSafeAddresses(
-  hostname: string
+  hostname: string,
+  { allowPrivate = false }: { allowPrivate?: boolean } = {}
 ): Promise<ResolvedAddress[]> {
+  const blocked = allowPrivate ? isAlwaysBlockedIp : isPrivateOrReservedIp;
   const literalFamily = net.isIP(hostname);
   if (literalFamily) {
-    if (isPrivateOrReservedIp(hostname)) {
+    if (blocked(hostname)) {
       throw new BlockedAddressError(
         `Refusing to deliver to private/internal address ${hostname}`
       );
@@ -175,7 +295,7 @@ export async function resolveSafeAddresses(
     );
   }
   for (const r of records) {
-    if (isPrivateOrReservedIp(r.address)) {
+    if (blocked(r.address)) {
       throw new BlockedAddressError(
         `Refusing to deliver to private/internal address ${r.address} for host ${hostname}`
       );
@@ -221,7 +341,10 @@ export function createPinnedDispatcher(addresses: ResolvedAddress[]): Agent {
  * statically unsafe or could never be delivered to. Call from the public
  * create/update endpoints.
  */
-export function assertSafeWebhookUrlForRegistration(rawUrl: string): void {
+export function assertSafeWebhookUrlForRegistration(
+  rawUrl: string,
+  opts: PrivateHostOption = {}
+): void {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -248,10 +371,11 @@ export function assertSafeWebhookUrlForRegistration(rawUrl: string): void {
   // are checked at delivery time (resolving here would couple registration to
   // DNS).
   const host = hostOf(url);
-  if (
-    isLocalhostName(host) ||
-    (net.isIP(host) && isPrivateOrReservedIp(host))
-  ) {
+  const blocked =
+    comparableHost(url) === allowedPrivateHost(opts.allowPrivateHost)
+      ? isAlwaysBlockedIp
+      : isPrivateOrReservedIp;
+  if (isLocalhostName(host) || (net.isIP(host) && blocked(host))) {
     throw new BadRequestError(
       "private_url_not_allowed",
       "Webhook URL may not target a private or reserved address"
@@ -266,7 +390,10 @@ export function assertSafeWebhookUrlForRegistration(rawUrl: string): void {
  * check and the connect. Throws if the URL is non-http(s), unresolvable, or
  * resolves to a private/reserved address.
  */
-export async function assertExternalTargetSafe(rawUrl: string): Promise<Agent> {
+export async function assertExternalTargetSafe(
+  rawUrl: string,
+  opts: PrivateHostOption = {}
+): Promise<Agent> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -276,6 +403,9 @@ export async function assertExternalTargetSafe(rawUrl: string): Promise<Agent> {
   if (!ALLOWED_PROTOCOLS.has(url.protocol)) {
     throw new Error(`Refusing to deliver to non-http(s) URL: ${url.protocol}`);
   }
-  const addresses = await resolveSafeAddresses(hostOf(url));
+  const addresses = await resolveSafeAddresses(hostOf(url), {
+    allowPrivate:
+      comparableHost(url) === allowedPrivateHost(opts.allowPrivateHost),
+  });
   return createPinnedDispatcher(addresses);
 }

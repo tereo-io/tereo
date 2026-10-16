@@ -39,7 +39,9 @@ const include = {
     orderBy: { eventType: "asc" },
   },
   creator: userRefSelect,
-  ownerService: { select: { id: true, slug: true, name: true } },
+  ownerService: {
+    select: { id: true, slug: true, name: true, internalHost: true },
+  },
 } satisfies Prisma.WebhookEndpointInclude;
 
 type EndpointRow = Prisma.WebhookEndpointGetPayload<{

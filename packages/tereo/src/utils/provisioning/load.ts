@@ -1,12 +1,15 @@
 import { CLIENT_SECRET_PREFIX, secretStrengthProblem } from "../secretRules.js";
 import { ProvisioningDocumentSchema, type CustomRoleEntry } from "./schema.js";
-import { assertSafeWebhookUrlForRegistration } from "../ssrfGuard.js";
 import { isSafeRedirectUri } from "../redirectUris.js";
 import { readFile, readdir, stat } from "fs/promises";
 import { hashFlowToken } from "../crypto.js";
 import { AppError } from "../errors.js";
 import { basename, join } from "path";
 import type { z } from "zod";
+import {
+  assertSafeWebhookUrlForRegistration,
+  parseInternalHost,
+} from "../ssrfGuard.js";
 
 export class ProvisioningError extends Error {
   constructor(public problems: string[]) {
@@ -103,6 +106,8 @@ export interface ResolvedService {
   name: string;
   namespace: string;
   clientId: string;
+  /** Normalized; its own webhooks may reach it at a private address. */
+  internalHost: string | null;
   secretEnv: string;
   secretHash: string;
   access: ServiceOutput["access"];
@@ -288,17 +293,29 @@ export const parseDocuments = (
   }
 
   const uses: SecretUse[] = [];
+  const internalHosts = new Map<string, string>();
   for (const { file, data } of parsedDocs) {
     const { service } = data;
     if (service) {
       const label = `${file}: services[${service.slug}]`;
       uses.push({ label, envName: service.secretFrom, owner: null });
+      if (service.internalHost !== undefined) {
+        try {
+          internalHosts.set(file, parseInternalHost(service.internalHost).host);
+        } catch (err) {
+          if (!(err instanceof AppError)) throw err;
+          problems.push(`${label}: internalHost ${err.message}`);
+        }
+      }
       for (const w of service.webhooks) {
         const where = `${label}: webhooks[${w.key}]`;
         // The API's rule, without DNS: in-cluster names pass, and are
-        // checked again at delivery.
+        // checked again at delivery. Only the service's own internalHost
+        // may be a private address.
         try {
-          assertSafeWebhookUrlForRegistration(w.url);
+          assertSafeWebhookUrlForRegistration(w.url, {
+            allowPrivateHost: internalHosts.get(file),
+          });
         } catch (err) {
           if (!(err instanceof AppError)) throw err;
           problems.push(
@@ -336,6 +353,7 @@ export const parseDocuments = (
             namespace:
               data.service.namespace ?? withoutServiceSuffix(data.service.slug),
             clientId: data.service.clientId ?? data.service.slug,
+            internalHost: internalHosts.get(file) ?? null,
             secretEnv: data.service.secretFrom,
             secretHash: hashOf(data.service.secretFrom),
             access: data.service.access,

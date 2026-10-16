@@ -33,6 +33,10 @@
           "minLength": 1,
           "maxLength": 64
         },
+        "internalHost": {
+          "type": "string",
+          "maxLength": 253
+        },
         "secretFrom": {
           "type": "string",
           "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"

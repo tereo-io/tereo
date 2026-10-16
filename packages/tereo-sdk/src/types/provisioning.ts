@@ -60,6 +60,12 @@ export interface ServiceProvisioning {
   /** Defaults to the slug without a trailing `-service`. */
   namespace?: string;
   clientId?: string;
+  /**
+   * The service's own private hostname or IP address (no scheme, port, path
+   * or CIDR). Its webhooks may target it even when it resolves to a private
+   * address; loopback, link-local, unspecified and multicast are never allowed.
+   */
+  internalHost?: string;
   /** Name of the environment variable, in core's environment, that holds the client secret. */
   secretFrom: string;
   /** Access the service asks for; approved by the document itself. */

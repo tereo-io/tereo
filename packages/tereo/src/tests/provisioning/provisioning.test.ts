@@ -96,6 +96,7 @@ const serviceDoc = (
       name: `Service ${slug}`,
       namespace: slug,
       clientId: slug,
+      internalHost: null,
       secretEnv: "SERVICE_SECRET",
       secretHash: secret.hash,
       access: { roles: [], audiences: [] },
