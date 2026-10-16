@@ -31,17 +31,20 @@
     "./handler": {
       "types": "./dist/handler.d.ts",
       "default": "./dist/handler.js"
-    }
+    },
+    "./provisioning.schema.json": "./provisioning.schema.json"
   },
   "files": [
     "dist",
     "src",
+    "provisioning.schema.json",
     "!dist/tests",
     "!src/tests",
     "!**/*.tsbuildinfo",
     "NOTICE"
   ],
   "scripts": {
+    "prebuild": "cp ../tereo/provisioning.schema.json .",
     "build": "tsc",
     "check": "tsc --noEmit",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
@@ -69,6 +72,7 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.9.9",
+    "ajv": "^8.20.0",
     "express": "^5.3.0",
     "typescript": "^6.0.3",
     "vitest": "^5.0.4"

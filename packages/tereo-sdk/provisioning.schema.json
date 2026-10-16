@@ -1,0 +1,411 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?$"
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "namespace": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "secretFrom": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "access": {
+          "default": {
+            "roles": [],
+            "audiences": []
+          },
+          "type": "object",
+          "properties": {
+            "roles": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "audiences": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "permissions": {
+          "default": [],
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "pattern": "^[a-z0-9][a-z0-9._-]*$"
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "description": {
+                "default": "",
+                "type": "string",
+                "maxLength": 500
+              },
+              "orgAssignable": {
+                "default": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "displayName"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "systemRoles": {
+          "default": [],
+          "maxItems": 200,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "pattern": "^[a-z][a-z0-9_-]*$"
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "description": {
+                "default": "",
+                "type": "string",
+                "maxLength": 500
+              },
+              "permissions": {
+                "default": [],
+                "maxItems": 1000,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              }
+            },
+            "required": [
+              "name",
+              "displayName"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "buckets": {
+          "default": [],
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "bucketName": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 63,
+                "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "policy": {
+                "default": "private",
+                "type": "string",
+                "enum": [
+                  "public",
+                  "private"
+                ]
+              },
+              "storageQuotaBytes": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "bucketName"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "eventTypes": {
+          "default": [],
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "eventType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "pattern": "^[a-z0-9][a-z0-9._-]*$"
+              },
+              "description": {
+                "default": "",
+                "type": "string",
+                "maxLength": 500
+              },
+              "readPermission": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "eventType"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "webhooks": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "events": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "secretFrom": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              "organizations": {
+                "default": "all",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "all"
+                  },
+                  {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  }
+                ]
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "key",
+              "url",
+              "events",
+              "secretFrom"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "slug",
+        "name",
+        "secretFrom"
+      ],
+      "additionalProperties": false
+    },
+    "clients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "clientType": {
+            "default": "public",
+            "type": "string",
+            "enum": [
+              "public",
+              "confidential"
+            ]
+          },
+          "secretFrom": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "redirectUris": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "postLogoutRedirectUris": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "scopes": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "grantTypes": {
+            "default": [
+              "authorization_code",
+              "refresh_token"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "authorization_code",
+                "refresh_token"
+              ]
+            }
+          },
+          "audience": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "consentRequired": {
+            "default": true,
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "clientId",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "orgAssignable": {
+            "default": false,
+            "type": "boolean"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        },
+        "required": [
+          "name",
+          "displayName",
+          "permissions"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "additionalProperties": false
+}

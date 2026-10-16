@@ -70,6 +70,21 @@ writeFileSync("billing.json", JSON.stringify(doc, null, 2) + "\n");
 - A document needs at least one of `service`, `clients` (`LoginClientProvisioning[]`, sign-in
   clients for apps) or `roles` (`CustomRole[]`).
 
+## Editor validation
+
+The package ships core's JSON Schema as `@tereo-io/sdk/provisioning.schema.json`. Point the
+document's `$schema` line at it and an editor flags unknown keys and bad values as you type:
+
+```json
+{
+  "$schema": "./node_modules/@tereo-io/sdk/provisioning.schema.json",
+  "version": "1.0.0"
+}
+```
+
+`$schema` is allowed in the document and ignored by core. The `ProvisioningDocument` type has
+the same optional `$schema` field.
+
 ## Deploying it
 
 The pipeline collects each service's file into core's provisioning folder and restarts or

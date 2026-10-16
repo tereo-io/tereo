@@ -1,5 +1,7 @@
 import type { ProvisioningDocument } from "../index.js";
 import { describe, expect, it } from "vitest";
+import { Ajv2020 } from "ajv/dist/2020.js";
+import { readFileSync } from "node:fs";
 
 const full: ProvisioningDocument = {
   $schema: "./provisioning.schema.json",
@@ -108,5 +110,30 @@ describe("ProvisioningDocument", () => {
       },
     ];
     expect(docs).toHaveLength(3);
+  });
+});
+
+describe("provisioning schema", () => {
+  const schema = JSON.parse(
+    readFileSync(
+      new URL("../../provisioning.schema.json", import.meta.url),
+      "utf8"
+    )
+  );
+  const validate = new Ajv2020({ strict: false }).compile(schema);
+
+  it("matches core's schema", () => {
+    expect(validate(full), JSON.stringify(validate.errors)).toBe(true);
+    expect(
+      validate({ version: "1.0.0" }),
+      JSON.stringify(validate.errors)
+    ).toBe(true);
+    expect(validate({ version: "1.0.0", extra: true })).toBe(false);
+    expect(
+      validate({
+        version: "1.0.0",
+        service: { slug: "a", name: "A", secretFrom: "A", extra: 1 },
+      })
+    ).toBe(false);
   });
 });
