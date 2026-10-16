@@ -7,6 +7,7 @@ import { prisma } from "./db/prisma.js";
 import db from "./db/index.js";
 import {
   ForbiddenError,
+  ManagedByIntegrationError,
   ManagedByProvisioningError,
   NotFoundError,
 } from "./errors.js";
@@ -151,8 +152,10 @@ export const createRecipientCheck = (
 /**
  * The endpoint, if the caller may see it in `scope`: for an integration, one
  * it owns; otherwise the scope organization's own, or, with `webhooks.admin`,
- * an owned endpoint sent every organization's events. Any other is a 404, as
- * if it did not exist.
+ * an owned endpoint sent every organization's events. An endpoint an
+ * integration owns is seen by anyone else only with `webhooks.admin`: it is
+ * sent what the integration may read, so whoever could redirect it could read
+ * that too. Any other is a 404, as if it did not exist.
  */
 export const getVisibleEndpoint = async (
   id: string,
@@ -160,13 +163,33 @@ export const getVisibleEndpoint = async (
   { organizationId, owner }: WebhookScope
 ) => {
   const endpoint = await db.webhookEndpoints.getById(id);
+  const isAdmin = hasPermission(viewer.permissions, PERMISSIONS.WEBHOOKS.ADMIN);
   const visible = owner
     ? endpoint.ownerServiceId === owner.id
-    : endpoint.organizationId === null
-      ? hasPermission(viewer.permissions, PERMISSIONS.WEBHOOKS.ADMIN)
-      : endpoint.organizationId === organizationId;
+    : endpoint.ownerService?.kind === "integration" && !isAdmin
+      ? false
+      : endpoint.organizationId === null
+        ? isAdmin
+        : endpoint.organizationId === organizationId;
   if (!visible) throw new NotFoundError("Webhook endpoint not found");
   return endpoint;
+};
+
+/**
+ * 409 `managed_by_integration` unless the caller is the integration that owns
+ * `endpoint`, if one does. Anyone else (an admin, see `getVisibleEndpoint`)
+ * may only pause, archive, restore or delete it.
+ */
+export const assertNotManagedByIntegration = (
+  endpoint: {
+    ownerServiceId: string | null;
+    ownerService: { kind: string } | null;
+  },
+  { owner }: WebhookScope
+): void => {
+  if (endpoint.ownerService?.kind !== "integration") return;
+  if (owner?.id === endpoint.ownerServiceId) return;
+  throw new ManagedByIntegrationError();
 };
 
 /** 409 `managed_by_provisioning`: a provisioned endpoint changes only through its file. */

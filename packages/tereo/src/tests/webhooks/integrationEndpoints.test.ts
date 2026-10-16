@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import { CORE_URL } from "../utils/coreUrl.js";
 import { fetchJson } from "../utils/http.js";
+import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import {
   cleanup,
@@ -57,6 +58,25 @@ const createEndpoint = async (token: string, eventTypes: string[]) => {
   });
   expect(res.status, JSON.stringify(res.body)).toBe(201);
   return res.body;
+};
+
+/** A delivery to `endpointId` written directly; its id. */
+const storedDelivery = async (
+  endpointId: string,
+  status: "PENDING" | "FAILED" = "PENDING"
+) => {
+  const delivery = await db.webhookDeliveries.create({
+    webhookEndpointId: endpointId,
+    eventType: readable.eventType,
+    payload: { id: randomUUID(), organizationId: orgA, data: {} },
+  });
+  if (status !== "PENDING") {
+    await prisma.webhookDelivery.updateMany({
+      where: { id: delivery.id },
+      data: { status, attempts: 1, completedAt: new Date() },
+    });
+  }
+  return delivery.id;
 };
 
 /** Emits one `readable` event in `organizationId`; that event's deliveries per endpoint. */
@@ -203,8 +223,11 @@ describe("isolation", () => {
 
   it("can't see or change another integration's endpoint, nor its organization's", async () => {
     for (const id of [bEndpointId, humanEndpointId]) {
+      const delivery = await storedDelivery(id);
       const attempts: [string, string, unknown?][] = [
         ["GET", `/${id}`],
+        ["GET", `/${id}/deliveries/${delivery}`],
+        ["POST", `/${id}/deliveries/${delivery}/retry`],
         ["PATCH", `/${id}`, { description: "mine now" }],
         ["DELETE", `/${id}`],
         ["GET", `/${id}/deliveries`],
@@ -227,20 +250,88 @@ describe("isolation", () => {
     expect(untouched.description).not.toBe("mine now");
   });
 
-  it("leaves other callers' view unchanged", async () => {
+  it("hides an integration's endpoint from organization users without webhooks.admin", async () => {
     const own = await createEndpoint(aToken, [readable.eventType]);
-    const outsider = await getTestPrincipalToken({
+    const member = await getTestPrincipalToken({
       organizationId: orgA,
-      permissions: [readable.readPermission],
+      permissions: [
+        "webhooks.write",
+        "webhooks.delete",
+        readable.readPermission,
+      ],
     });
-    expect((await call("GET", "", outsider)).status).toBe(403);
-    expect((await call("GET", `/${own.id}`, outsider)).status).toBe(403);
-    const reader = await getTestPrincipalToken({
+    for (const token of [humanToken, member]) {
+      const list = await call("GET", "?limit=100", token);
+      expect(list.status).toBe(200);
+      const ids = list.body.data.map((e: { id: string }) => e.id);
+      expect(ids).toContain(humanEndpointId);
+      expect(ids).not.toContain(own.id);
+
+      const attempts: [string, string, unknown?][] = [
+        ["GET", `/${own.id}`],
+        ["PATCH", `/${own.id}`, { url: "https://example.com/stolen" }],
+        ["PATCH", `/${own.id}`, { status: "PAUSED" }],
+        ["GET", `/${own.id}/stats`],
+        ["GET", `/${own.id}/deliveries`],
+        ["POST", `/${own.id}/test`],
+      ];
+      // humanToken lacks webhooks.archive/delete: refused before any lookup.
+      if (token === member) {
+        attempts.push(["POST", `/${own.id}/archive`], ["DELETE", `/${own.id}`]);
+      }
+      for (const [method, path, body] of attempts) {
+        const res = await call(method, path, token, body);
+        expect(res.status, `${method} ${path}`).toBe(404);
+      }
+    }
+    const untouched = await prisma.webhookEndpoint.findUniqueOrThrow({
+      where: { id: own.id },
+    });
+    expect(untouched).toMatchObject({ url: own.url, status: "ACTIVE" });
+  });
+
+  it("lets webhooks.admin see, pause, archive and delete it, but not change it", async () => {
+    const own = await createEndpoint(aToken, [readable.eventType]);
+    const id = own.id;
+    const delivery = await storedDelivery(id, "FAILED");
+    const admin = await getTestPrincipalToken({
       organizationId: orgA,
-      permissions: ["webhooks.read"],
+      permissions: ["webhooks.admin"],
     });
-    const res = await call("GET", `/${own.id}`, reader);
-    expect(res.status).toBe(200);
+
+    const list = await call("GET", "?limit=100", admin);
+    expect(list.body.data.map((e: { id: string }) => e.id)).toContain(id);
+    expect((await call("GET", `/${id}`, admin)).status).toBe(200);
+    expect((await call("GET", `/${id}/stats`, admin)).status).toBe(200);
+    expect((await call("GET", `/${id}/deliveries`, admin)).status).toBe(200);
+    expect(
+      (await call("GET", `/${id}/deliveries/${delivery}`, admin)).status
+    ).toBe(200);
+
+    const refused: [string, string, unknown?][] = [
+      ["PATCH", `/${id}`, { url: "https://example.com/stolen" }],
+      ["PATCH", `/${id}`, { status: "PAUSED", description: "x" }],
+      ["POST", `/${id}/rotate-secret`],
+      ["POST", `/${id}/revoke-previous-secret`],
+      ["POST", `/${id}/test`],
+      ["POST", `/${id}/deliveries/retry`, {}],
+      ["POST", `/${id}/deliveries/${delivery}/retry`],
+    ];
+    for (const [method, path, body] of refused) {
+      const res = await call(method, path, admin, body);
+      expect(res.status, `${method} ${path}`).toBe(409);
+      expect(res.body.error).toBe("managed_by_integration");
+    }
+
+    const paused = await call("PATCH", `/${id}`, admin, { status: "PAUSED" });
+    expect(paused.status).toBe(200);
+    expect(paused.body).toMatchObject({ status: "PAUSED", url: own.url });
+    expect((await call("POST", `/${id}/archive`, admin)).status).toBe(200);
+    expect((await call("POST", `/${id}/restore`, admin)).status).toBe(200);
+    await prisma.webhookDelivery.deleteMany({
+      where: { webhookEndpointId: id },
+    });
+    expect((await call("DELETE", `/${id}`, admin)).status).toBe(204);
   });
 });
 

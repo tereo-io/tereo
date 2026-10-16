@@ -12,9 +12,15 @@ export const emitEventSchema = z.object({
   idempotencyKey: pgText().min(1).max(255).optional(),
   /**
    * Slugs of services or integrations: the event goes only to endpoints they
-   * own. Absent, to every subscriber.
+   * own. Absent, to every subscriber. Sorted and without repeats, so the
+   * same addressees hash and store alike.
    */
-  recipients: z.array(pgText().min(1).max(64)).min(1).max(50).optional(),
+  recipients: z
+    .array(pgText().min(1).max(64))
+    .min(1)
+    .max(50)
+    .transform((slugs) => [...new Set(slugs)].sort())
+    .optional(),
 });
 
 export const batchEmitEventSchema = z.object({

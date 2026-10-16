@@ -16,6 +16,7 @@ import {
 } from "../../../../../utils/webhookHeaders.js";
 import {
   assertMaySubscribe,
+  assertNotManagedByIntegration,
   assertNotProvisioned,
   getVisibleEndpoint,
 } from "../../../../../utils/webhookAccess.js";
@@ -82,7 +83,13 @@ export const updateWebhookEndpoint = async (req: Request, res: Response) => {
   const statusOnly = Object.entries(body).every(
     ([key, value]) => key === "status" || value === undefined
   );
-  if (!statusOnly) assertNotProvisioned(existing);
+  if (!statusOnly) {
+    assertNotProvisioned(existing);
+    assertNotManagedByIntegration(existing, scope);
+  }
+  // An admin pausing an integration's endpoint changes nothing it is sent.
+  const adminPause =
+    statusOnly && !scope.owner && existing.ownerService?.kind === "integration";
 
   // SSRF guard on URL changes (same rationale as create).
   if (body.url) {
@@ -103,7 +110,7 @@ export const updateWebhookEndpoint = async (req: Request, res: Response) => {
   }
   // The endpoint is sent what its creator may read; whoever changes where it
   // goes or what it carries must be able to read all of it too.
-  if (!existing.provisioned) {
+  if (!existing.provisioned && !adminPause) {
     assertMaySubscribe(
       auth.permissions,
       await db.eventTypes.findMany(body.eventTypes ?? existing.eventTypes)
@@ -248,6 +255,7 @@ export const rotateSecret = async (req: Request, res: Response) => {
 
   const existing = await getVisibleEndpoint(id, auth, scope);
   assertNotProvisioned(existing);
+  assertNotManagedByIntegration(existing, scope);
   // Archived-endpoint rejection is enforced by guardArchived on the rotate route.
 
   const overlapMs = env.WEBHOOK_SECRET_OVERLAP_HOURS * 60 * 60 * 1000;
@@ -286,6 +294,7 @@ export const revokePreviousSecret = async (req: Request, res: Response) => {
 
   const existing = await getVisibleEndpoint(id, auth, scope);
   assertNotProvisioned(existing);
+  assertNotManagedByIntegration(existing, scope);
 
   const updated = await db.$transaction(async (tx) => {
     const result = await db.webhookEndpoints.revokePreviousSecret(id, tx);
@@ -310,6 +319,7 @@ export const testWebhookEndpoint = async (req: Request, res: Response) => {
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
 
   const endpoint = await getVisibleEndpoint(id, auth, scope);
+  assertNotManagedByIntegration(endpoint, scope);
   // Archived-endpoint rejection is enforced by guardArchived on the test route.
 
   if (endpoint.status !== "ACTIVE") {

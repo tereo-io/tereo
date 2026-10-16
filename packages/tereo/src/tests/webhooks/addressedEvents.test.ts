@@ -135,6 +135,18 @@ describe("addressed events over HTTP", () => {
     );
   });
 
+  it("stores recipients sorted and without repeats", async () => {
+    const deliveries = await emit([platform.slug, a.slug, platform.slug]);
+    expect(endpointsOf(deliveries)).toEqual(
+      [aEndpoint, platformEndpoint].sort()
+    );
+    for (const delivery of deliveries) {
+      expect(delivery.payload).toMatchObject({
+        recipients: [a.slug, platform.slug].sort(),
+      });
+    }
+  });
+
   it("delivers nothing to a recipient that may not read the event", async () => {
     const d = await createIntegration(adminToken, org);
     const { roleId } = await grant(d, [readable.readPermission]);

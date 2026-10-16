@@ -8,6 +8,7 @@ import { webhookDeliveryIdParamSchema } from "./schemas.js";
 import db from "../../../../../../../utils/db/index.js";
 import { Request, Response } from "express";
 import {
+  assertNotManagedByIntegration,
   getVisibleEndpoint,
   redactUnreadable,
 } from "../../../../../../../utils/webhookAccess.js";
@@ -39,6 +40,7 @@ export const retryDelivery = async (req: Request, res: Response) => {
   const { id, deliveryId } = validateParams(webhookDeliveryIdParamSchema, req);
 
   const endpoint = await getVisibleEndpoint(id, auth, scope);
+  assertNotManagedByIntegration(endpoint, scope);
   if (endpoint.archivedAt) {
     throw new ArchivedError(
       "Webhook endpoint is archived; restore it before retrying deliveries"

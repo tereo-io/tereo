@@ -34,13 +34,19 @@ export const listWebhookEndpoints = async (req: Request, res: Response) => {
 
   const archivedFiltered = !!req.query["filter[archived]"];
   // As getVisibleEndpoint shows them: an integration's own; otherwise the
-  // organization's, and owned endpoints sent every organization's events
-  // only for webhooks.admin.
+  // organization's, with owned endpoints sent every organization's events
+  // and integrations' endpoints only for webhooks.admin.
   const visible = owner
     ? { ownerServiceId: owner.id }
     : hasPermission(auth.permissions, PERMISSIONS.WEBHOOKS.ADMIN)
       ? { OR: [{ organizationId }, { organizationId: null }] }
-      : { organizationId };
+      : {
+          organizationId,
+          OR: [
+            { ownerServiceId: null },
+            { ownerService: { is: { kind: "service" as const } } },
+          ],
+        };
   const where = applyCursorToWhere(query, {
     ...visible,
     ...(includeArchived || archivedFiltered ? {} : { archivedAt: null }),

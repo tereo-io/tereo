@@ -86,6 +86,16 @@ export class ManagedByProvisioningError extends AppError {
   }
 }
 
+/** A webhook endpoint an integration manages: only it changes it, beyond a pause or removal. */
+export class ManagedByIntegrationError extends AppError {
+  constructor(
+    message = "Managed by the integration that owns it; an admin may only pause, archive or delete it"
+  ) {
+    super(409, "managed_by_integration", message);
+    this.name = "ManagedByIntegrationError";
+  }
+}
+
 /**
  * A request with the same idempotency key is still running: one code for
  * uploads, emits and audit writes. Retry shortly.
