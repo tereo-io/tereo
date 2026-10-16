@@ -28,8 +28,14 @@ const RegenerateIntegrationSecretButton = ({
       },
     });
 
+  const handleCancel = () => {
+    setConfirming(false);
+    regenerateMutation.reset();
+  };
+
   const handleSaved = () => {
     setResult(null);
+    regenerateMutation.reset();
     toast.success("Secret regenerated");
   };
 
@@ -41,13 +47,13 @@ const RegenerateIntegrationSecretButton = ({
 
       <Modal
         show={confirming}
-        onClose={() => setConfirming(false)}
+        onClose={handleCancel}
         title="Regenerate Secret"
         footerButtons={[
           <Button
             key="cancel"
             variant="secondary"
-            onClick={() => setConfirming(false)}
+            onClick={handleCancel}
             disabled={regenerateMutation.isPending}
           >
             Cancel

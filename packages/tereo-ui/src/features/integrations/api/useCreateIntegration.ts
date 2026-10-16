@@ -22,6 +22,8 @@ const useCreateIntegration = () => {
 
   return useMutation({
     mutationFn,
+    // The result holds the one-time secret; drop it from the cache on reset.
+    gcTime: 0,
     onSuccess: () => invalidateIntegrations(queryClient),
     onError: (error: AxiosError<ApiErrorBody>) => {
       toast.error(

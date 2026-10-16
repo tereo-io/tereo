@@ -45,10 +45,13 @@ describe("CreateIntegrationModal", () => {
     expect(authMock.axios.post).toHaveBeenCalledWith("/v1/admin/integrations", {
       name: "Acme",
     });
+    await userEvent.click(screen.getByRole("button", { name: "Reveal" }));
+    expect(document.body.textContent).toContain("s3cret-value");
+    await userEvent.click(
+      screen.getByRole("button", { name: /saved these credentials/i })
+    );
     await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: /saved these credentials/i })
-      ).toBeVisible()
+      expect(document.body.textContent).not.toContain("s3cret-value")
     );
   });
 });
