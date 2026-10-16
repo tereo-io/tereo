@@ -268,7 +268,7 @@ export async function cleanupAllTestEntities() {
  * referenced, row and file. A blob row left behind outlives the run: the next
  * upload of the same content shares it, so its file must stay readable.
  */
-export async function removeBuckets(bucketIds: string[]) {
+export async function removeBuckets(bucketIds: number[]) {
   if (bucketIds.length === 0) return;
   const fs = await import("fs/promises");
 
