@@ -1,5 +1,5 @@
+import { applyProvisioning, type ProvisioningResult } from "./apply.js";
 import { loadProvisioningSet } from "./load.js";
-import { applyProvisioning } from "./apply.js";
 import { logger } from "../logger.js";
 import env from "../../env.js";
 
@@ -10,10 +10,15 @@ export {
 } from "./apply.js";
 export { ProvisioningError, loadProvisioningSet } from "./load.js";
 
-export const provision = async (): Promise<void> => {
-  const set = await loadProvisioningSet(env.PROVISIONING_PATH);
-  if (!set) return;
-  const result = await applyProvisioning(set);
+export const provision = async (
+  options: { path?: string; dryRun?: boolean } = {}
+): Promise<ProvisioningResult | null> => {
+  const set = await loadProvisioningSet(options.path ?? env.PROVISIONING_PATH);
+  if (!set) return null;
+  const result = await applyProvisioning(set, new Date(), {
+    dryRun: options.dryRun,
+  });
+  if (options.dryRun) return result;
   const changed = Object.values(result).some((entries) => entries.length > 0);
   logger.info(
     {
@@ -28,4 +33,5 @@ export const provision = async (): Promise<void> => {
     },
     changed ? "Applied the provisioning documents" : "Provisioning unchanged"
   );
+  return result;
 };

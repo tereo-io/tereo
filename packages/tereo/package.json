@@ -22,6 +22,7 @@
     "test:logs": "../../docker/test/run.sh logs -f runner",
     "test:clean": "../../docker/test/run.sh down -v",
     "cli": "tsx src/cli/index.ts",
+    "provisioning:schema": "tsx scripts/provisioning-schema.ts",
     "openapi:lint": "redocly lint",
     "openapi:build": "redocly lint && redocly bundle"
   },

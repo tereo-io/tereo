@@ -1094,50 +1094,66 @@ const applyServicesContent = async (
  * every problem is reported before anything is written. Serialized, so
  * replicas starting together apply it once.
  */
+class DryRunRollback extends Error {
+  constructor(public result: ProvisioningResult) {
+    super("dry run");
+  }
+}
+
 export const applyProvisioning = async (
   set: ProvisioningSet,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options: { dryRun?: boolean } = {}
 ): Promise<ProvisioningResult> => {
   const invalid = validateSet(set);
   if (invalid.length > 0) throw new ProvisioningError(invalid);
   const p = entriesOf(set);
 
-  const { result, revokedClients, roleChanges } = await prisma.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
-      const state = await loadState(tx, p);
-      // Before any row is written: admin decisions take these first, then
-      // rows.
-      await lockRegistries(
-        tx,
-        [...state.services.values()].map((s) => s.id)
-      );
-      const problems = await findProblems(tx, p, state);
-      if (problems.length > 0) throw new ProvisioningError(problems);
+  let applied;
+  try {
+    applied = await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
+        const state = await loadState(tx, p);
+        // Before any row is written: admin decisions take these first, then
+        // rows.
+        await lockRegistries(
+          tx,
+          [...state.services.values()].map((s) => s.id)
+        );
+        const problems = await findProblems(tx, p, state);
+        if (problems.length > 0) throw new ProvisioningError(problems);
 
-      const result: ProvisioningResult = {
-        created: [],
-        updated: [],
-        rotated: [],
-        unprovisioned: [],
-        declared: [],
-        access: [],
-        roles: [],
-      };
-      for (const entry of p.services)
-        await applyService(tx, entry, state, now, result);
-      const content = await applyServicesContent(tx, p, now, result);
-      if (content.problems.length > 0)
-        throw new ProvisioningError(content.problems);
-      const roleChanges = await applyRoles(tx, p, result);
-      await applyWebhooks(tx, p, now, result);
-      for (const entry of p.clients)
-        await applyClient(tx, entry, state, now, result);
-      await markMissing(tx, p, now, result);
-      return { result, revokedClients: content.revokedClients, roleChanges };
-    },
-    { timeout: 120_000 }
-  );
+        const result: ProvisioningResult = {
+          created: [],
+          updated: [],
+          rotated: [],
+          unprovisioned: [],
+          declared: [],
+          access: [],
+          roles: [],
+        };
+        for (const entry of p.services)
+          await applyService(tx, entry, state, now, result);
+        const content = await applyServicesContent(tx, p, now, result);
+        if (content.problems.length > 0)
+          throw new ProvisioningError(content.problems);
+        const roleChanges = await applyRoles(tx, p, result);
+        await applyWebhooks(tx, p, now, result);
+        for (const entry of p.clients)
+          await applyClient(tx, entry, state, now, result);
+        await markMissing(tx, p, now, result);
+        // A dry run computed the result against the real rows; roll it back.
+        if (options.dryRun) throw new DryRunRollback(result);
+        return { result, revokedClients: content.revokedClients, roleChanges };
+      },
+      { timeout: 120_000 }
+    );
+  } catch (err) {
+    if (err instanceof DryRunRollback) return err.result;
+    throw err;
+  }
+  const { result, revokedClients, roleChanges } = applied;
   // Their next token lacks what was revoked.
   for (const id of revokedClients) await revokeServiceTokens(id);
   for (const id of roleChanges.permissionsChanged) {
