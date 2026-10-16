@@ -20,6 +20,9 @@ export function loadTestEnv(): Record<string, string> {
   // A stand-in for the admin UI's build, so the suite covers the UI whether or
   // not the real one has been built.
   const UI_DIST_PATH = path.join(here, "fixtures/ui-dist");
+  // The partition tests wait out this timeout a dozen times. Kept above
+  // Postgres's 1s deadlock_timeout, so their deadlock still is one.
+  const PARTITION_DDL_LOCK_TIMEOUT_MS = "2000";
   if (process.env.DOCKER_TEST === "true") {
     return {
       ...(Object.fromEntries(
@@ -29,6 +32,7 @@ export function loadTestEnv(): Record<string, string> {
       OIDC_ALLOW_PRIVATE_ISSUERS: "true",
       // The fake SMTP server speaks plaintext.
       ALLOW_PLAINTEXT_SMTP: "true",
+      PARTITION_DDL_LOCK_TIMEOUT_MS,
     };
   }
   const envPath = path.resolve(here, "../../.env");
@@ -62,6 +66,7 @@ export function loadTestEnv(): Record<string, string> {
     OIDC_ALLOW_PRIVATE_ISSUERS: "true",
     // The fake SMTP server speaks plaintext.
     ALLOW_PLAINTEXT_SMTP: "true",
+    PARTITION_DDL_LOCK_TIMEOUT_MS,
   };
 }
 

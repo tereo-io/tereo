@@ -139,7 +139,7 @@ filtered on by name.
   logged and left for the next run, and never stops the partitions ahead being created
 
 Creating or dropping a partition takes `ACCESS EXCLUSIVE` on `audit_log_entries`, so both run
-under a 5-second `lock_timeout` (`runPartitionDdl`, `src/utils/db/partitionDdl.ts`): behind a long
+under a 5-second `lock_timeout` (`PARTITION_DDL_LOCK_TIMEOUT_MS`; `runPartitionDdl`, `src/utils/db/partitionDdl.ts`): behind a long
 read they give up with a warning rather than queue every audited insert behind themselves, and the
 next run retries. A create that gives up skips the later days too; with partitions made 7 days
 ahead, a skipped run costs nothing. A partition that already exists takes no lock.

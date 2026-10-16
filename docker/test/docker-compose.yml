@@ -1,5 +1,6 @@
 # Isolated integration-test stack: throwaway Postgres and Redis on tmpfs, no
-# published ports, and the test runner. Driven by docker/test/run.sh.
+# published ports, and the test runner. Driven by docker/test/run.sh, which
+# starts one of these per shard of the suite.
 name: tereo-test
 
 services:
@@ -29,6 +30,8 @@ services:
       retries: 30
 
   runner:
+    # Tagged, so every shard's stack runs the one image built for the run.
+    image: tereo-test-runner
     build:
       context: ../..
       dockerfile: docker/test/Dockerfile
@@ -40,6 +43,8 @@ services:
     # Keys are generated into the fresh database, like a first deploy.
     environment:
       DOCKER_TEST: "true"
+      # This stack's shard of the suite, `<index>/<count>`; unset runs it all.
+      TEST_SHARD: ${TEST_SHARD:-}
       NODE_ENV: "test"
       LOG_LEVEL: "silent"
       DATABASE_URL: postgresql://core:core@postgres:5432/core_test

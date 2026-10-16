@@ -1,6 +1,7 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { prisma } from "../utils/db/prisma.js";
 import db from "../utils/db/index.js";
+import env from "../env.js";
 import { Client } from "pg";
 import {
   ensureCurrentPartitions,
@@ -193,7 +194,10 @@ describe("creating a partition while its parent is in use", () => {
   it("retries on start until a lock held past one timeout is released", async () => {
     await dropFar();
     const release = await holdParent('"audit"."audit_log_entries"');
-    const releasing = new Promise((r) => setTimeout(r, 7_000)).then(release);
+    // Past the first attempt's timeout, well before the last one's.
+    const releasing = new Promise((r) =>
+      setTimeout(r, env.PARTITION_DDL_LOCK_TIMEOUT_MS * 1.4)
+    ).then(release);
     try {
       await ensureCurrentPartitions(FAR_DAY);
     } finally {

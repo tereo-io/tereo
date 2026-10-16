@@ -21,7 +21,7 @@ npx vitest run src/tests/unit                         # core's unit tests (globa
 npx vitest                                            # watch (npm run test:watch)
 npx vitest run --coverage                             # npm run test:coverage
 
-docker/test/run.sh             # from the repo root: isolated Docker stack, then torn down
+docker/test/run.sh             # from the repo root: 4 isolated Docker stacks, one shard each (TEST_SHARDS)
                                # (`npm test` in the package runs this; CI runs `nx affected -t test:docker`)
 
 cd packages/tereo-sdk && npx vitest run     # SDK unit tests, no server or database

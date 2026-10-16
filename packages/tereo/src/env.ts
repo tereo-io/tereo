@@ -426,6 +426,9 @@ const EnvFields = z
     // audit
     // -------------------------------------------------------------------------
     AUDIT_RETENTION_DAYS: int(1, 3650, 90),
+    // How long creating or dropping a partition of the audit, webhook-delivery
+    // or notification tables waits for its parent's lock before giving up.
+    PARTITION_DDL_LOCK_TIMEOUT_MS: int(100, 60_000, 5_000),
 
     // -------------------------------------------------------------------------
     // notifications

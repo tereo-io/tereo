@@ -234,6 +234,7 @@ env (no overlap).
 | `WEBHOOK_SECRET_OVERLAP_HOURS` | `24` | 0–8760. How long a rotated-out endpoint secret still signs |
 | `WEBHOOK_STALE_DELIVERY_SECONDS` | `300` | 1–86400. Before an untouched, never-attempted pending delivery is queued again (an attempted one waits 24h) |
 | `AUDIT_RETENTION_DAYS` | `90` | 1–3650 |
+| `PARTITION_DDL_LOCK_TIMEOUT_MS` | `5000` | 100–60000. How long creating or dropping a partition of the audit, webhook-delivery or notification tables waits for its table's lock before giving up until the next run |
 | `OUTBOX_DEAD_LETTER_RETENTION_DAYS` | `30` | 1–3650. How long a dead-lettered `core.outbox` row is kept for `npm run cli -- outbox-replay` before the daily sweep deletes it. See [webhooks.md](webhooks.md#dead-letters) |
 
 ### Notifications
