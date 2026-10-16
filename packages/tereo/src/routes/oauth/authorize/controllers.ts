@@ -1,6 +1,7 @@
 import { AppError, NotFoundError, OAuth2Error } from "../../../utils/errors.js";
 import { validateBody, validateQuery } from "../../../utils/validateReq.js";
 import { authorizeRequestParams, getClientForAuthorize } from "./utils.js";
+import { maySelectOrganization } from "../../../utils/supportAccess.js";
 import { UserType } from "../../../../prisma/generated/client/index.js";
 import type { AuthorizeRequest, AuthorizeSubmit } from "./schemas.js";
 import type { StepWriter } from "../../../utils/db/loginFlows.js";
@@ -214,11 +215,13 @@ export const authorizeGetHandler = async (req: Request, res: Response) => {
         const scopesValid = requestedScopes.every((s) =>
           client.scopes.includes(s)
         );
-        // A member of an active organization switches without a password;
-        // anything else falls through to the password login.
+        // A member of an active organization, or a support-access holder,
+        // switches without a password; anything else falls through to the
+        // password login.
         if (
           scopesValid &&
-          (await isActiveMember(query.org_id, userSession.userId))
+          (await maySelectOrganization(userSession.userId, query.org_id))
+            .allowed
         ) {
           const authorization = {
             userId: userSession.userId,
@@ -433,19 +436,6 @@ const restartParams = (request: AuthorizeRequest) =>
 const isAuthTooOld = (authTime: Date, maxAge: number | undefined) =>
   maxAge !== undefined &&
   Math.floor((Date.now() - authTime.getTime()) / 1000) > maxAge;
-
-const isActiveMember = async (organizationId: string, userId: string) => {
-  const membership = await db.organizations.getMembership(
-    organizationId,
-    userId
-  );
-  if (!membership) return false;
-  const org = await db.organizations.get(organizationId).catch((err) => {
-    if (err instanceof NotFoundError) return null;
-    throw err;
-  });
-  return !!org?.isActive;
-};
 
 const isUserActive = async (userId: string) => {
   const user = await db.users.get(userId).catch((err) => {

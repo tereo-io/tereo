@@ -36,6 +36,11 @@ const authEvents: EventTypeDefinition[] = [
     eventType: "auth.organization.member-roles-changed",
     description: "Organization member's org-scoped role assignments changed",
   },
+  {
+    eventType: "auth.organization.support-access",
+    description:
+      "A user entered the organization through support access, without a membership",
+  },
   { eventType: "auth.user.created", description: "User created" },
   { eventType: "auth.user.updated", description: "User profile updated" },
   {

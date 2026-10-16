@@ -1,6 +1,7 @@
 import { validateBody, validateQuery } from "../../../utils/validateReq.js";
 import { OrgSelectGetSchema, OrgSelectSubmitSchema } from "./schemas.js";
 import { OAuth2Error, BadRequestError } from "../../../utils/errors.js";
+import { maySelectOrganization } from "../../../utils/supportAccess.js";
 import { generateRandomString } from "../../../utils/crypto.js";
 import { skipsConsent } from "../../../definitions/index.js";
 import type { Request, Response } from "express";
@@ -92,22 +93,24 @@ export const orgSelectSubmitHandler = async (req: Request, res: Response) => {
     );
   }
 
-  // Verify user is a member of the selected organization
-  const membership = await db.organizations.getMembership(
-    body.organization_id,
-    session.userId
+  // A member, or a support-access holder, of an active organization. An
+  // archived organization keeps its members but is never offered (the GET
+  // leaves it out); a member picking it anyway is the inactive case.
+  const selection = await maySelectOrganization(
+    session.userId,
+    body.organization_id
   );
-  if (!membership) {
-    throw new BadRequestError(
-      "user_not_in_organization",
-      "User is not a member of the selected organization"
+  if (!selection.allowed) {
+    const membership = await db.organizations.getMembership(
+      body.organization_id,
+      session.userId
     );
-  }
-
-  // An archived organization keeps its members but is never offered (the
-  // GET leaves it out); picking it anyway is the inactive case, not a 404.
-  const org = await db.organizations.getAny(body.organization_id);
-  if (!org.isActive || org.archivedAt) {
+    if (!membership) {
+      throw new BadRequestError(
+        "user_not_in_organization",
+        "User is not a member of the selected organization"
+      );
+    }
     throw new BadRequestError(
       "organization_not_active",
       "Organization is not active"

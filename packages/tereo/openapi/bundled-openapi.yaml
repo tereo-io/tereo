@@ -1099,8 +1099,10 @@ paths:
           `urn:auth-service:mfa` over a session whose login had no second factor
           gets `error=interaction_required` instead.
         - `org_id` (without `prompt=login`) with a live user session for an
-          active user who is a member of that active organization, a login no
-          older than `max_age` and valid scopes: to `{UI}/consent?session=…` for
+          active user who is a member of that active organization (or, for any
+          active organization, holds `organizations.support-access` through a
+          global role — support access), a login no older than `max_age` and
+          valid scopes: to `{UI}/consent?session=…` for
           that organization, skipping login — or, for core's own login client,
           straight to `redirect_uri` with `code` and `state`, as with
           `prompt=none`. This is the one continuation without a password that
@@ -1256,7 +1258,7 @@ paths:
             maxLength: 128
         - name: org_id
           in: query
-          description: Organization hint. With a live user session that is a member of this active organization, login is skipped and consent is requested for it.
+          description: Organization hint. With a live user session that is a member of this active organization, or that holds `organizations.support-access` globally, login is skipped and consent is requested for it. A support-access selection acts with the user's global roles only, writes an audit entry (`metadata.action` `support_access`) and emits `auth.organization.support-access` under the organization.
           schema:
             type: string
             format: uuid
@@ -1928,7 +1930,9 @@ paths:
       description: |
         Submits the user's organization selection during the OAuth2 authorization code flow.
         Validates the org-selection session (including the HTTP-only session cookie), verifies
-        the user is an active member of the chosen organization, then creates a consent session
+        the user is a member of the chosen active organization (or holds
+        `organizations.support-access` through a global role, which audits and emits
+        `auth.organization.support-access` when the code is issued), then creates a consent session
         scoped to that organization and returns a redirect URL pointing at `/consent` in the UI,
         which invokes `GET /oauth/consent` next.
 
@@ -1938,7 +1942,7 @@ paths:
 
         400 `invalid_session` for an unknown session or a missing or mismatched
         cookie, `session_expired` for an expired one, `user_not_in_organization` when the
-        user is not a member of the organization, `organization_not_active` when
+        user is neither a member of the organization nor a support-access holder, `organization_not_active` when
         it is inactive or archived. The session is single-use: of concurrent submits of one session, one
         goes through and the others are 400 `invalid_session`.
       operationId: postOrgSelectSubmit
@@ -15063,6 +15067,51 @@ webhooks:
                             type: string
                             format: uuid
                           description: The member's org-scoped role ids after the change
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.organization.support-access:
+    post:
+      tags:
+        - Admin - Organizations
+      summary: Organization entered through support access
+      description: Fired when a holder of `organizations.support-access` who is not a member selects the organization at login (`org_id` switch, org picker or post-login hint) and an authorization code is issued for it. Not fired on refresh. An audit entry with `metadata.action` `support_access` is written with it.
+      operationId: webhookOrganizationSupportAccess
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.organization.support-access
+                    entityType:
+                      const: Organization
+                    data:
+                      type: object
+                      required:
+                        - userId
+                        - organizationId
+                        - clientId
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        organizationId:
+                          type: string
+                          format: uuid
+                        clientId:
+                          type: string
+                          description: The OAuth client the code was issued to
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.

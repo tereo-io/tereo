@@ -1937,6 +1937,8 @@ webhooks:
     $ref: './paths/auth/admin/organizations.yaml#/auth.organization.member-removed'
   auth.organization.member-roles-changed:
     $ref: './paths/auth/admin/organizations.yaml#/auth.organization.member-roles-changed'
+  auth.organization.support-access:
+    $ref: './paths/auth/admin/organizations.yaml#/auth.organization.support-access'
   auth.user.created:
     $ref: './paths/auth/admin/users.yaml#/auth.user.created'
   auth.user.password-changed:

@@ -1129,3 +1129,46 @@ auth.organization.member-roles-changed:
     responses:
       '2XX':
         description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.organization.support-access:
+  post:
+    tags:
+      - Admin - Organizations
+    summary: Organization entered through support access
+    description: Fired when a holder of `organizations.support-access` who is not a member selects the organization at login (`org_id` switch, org picker or post-login hint) and an authorization code is issued for it. Not fired on refresh. An audit entry with `metadata.action` `support_access` is written with it.
+    operationId: webhookOrganizationSupportAccess
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.organization.support-access
+                  entityType:
+                    const: Organization
+                  data:
+                    type: object
+                    required: [userId, organizationId, clientId]
+                    properties:
+                      userId:
+                        type: string
+                        format: uuid
+                      organizationId:
+                        type: string
+                        format: uuid
+                      clientId:
+                        type: string
+                        description: The OAuth client the code was issued to
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

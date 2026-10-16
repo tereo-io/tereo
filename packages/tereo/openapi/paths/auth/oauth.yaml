@@ -19,8 +19,10 @@
         `urn:auth-service:mfa` over a session whose login had no second factor
         gets `error=interaction_required` instead.
       - `org_id` (without `prompt=login`) with a live user session for an
-        active user who is a member of that active organization, a login no
-        older than `max_age` and valid scopes: to `{UI}/consent?session=…` for
+        active user who is a member of that active organization (or, for any
+        active organization, holds `organizations.support-access` through a
+        global role — support access), a login no older than `max_age` and
+        valid scopes: to `{UI}/consent?session=…` for
         that organization, skipping login — or, for core's own login client,
         straight to `redirect_uri` with `code` and `state`, as with
         `prompt=none`. This is the one continuation without a password that
@@ -173,7 +175,7 @@
           maxLength: 128
       - name: org_id
         in: query
-        description: Organization hint. With a live user session that is a member of this active organization, login is skipped and consent is requested for it.
+        description: Organization hint. With a live user session that is a member of this active organization, or that holds `organizations.support-access` globally, login is skipped and consent is requested for it. A support-access selection acts with the user's global roles only, writes an audit entry (`metadata.action` `support_access`) and emits `auth.organization.support-access` under the organization.
         schema:
           type: string
           format: uuid

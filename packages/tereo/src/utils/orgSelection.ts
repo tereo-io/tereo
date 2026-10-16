@@ -1,3 +1,4 @@
+import { maySelectOrganization } from "./supportAccess.js";
 import { skipsConsent } from "../definitions/index.js";
 import type { StepWriter } from "./db/loginFlows.js";
 import { generateRandomString } from "./crypto.js";
@@ -56,10 +57,16 @@ export const handlePostAuthOrgSelection = async (
   const userOrgs = await db.organizations.getUserOrganizations(userId);
   const activeOrgs = userOrgs.filter((o) => o.isActive);
 
-  // If org hint provided and user is a member, auto-select that org
+  // An org hint the user may select (a membership, or support access) is
+  // taken; otherwise a single membership is.
   let orgId: string | null = null;
-  if (orgHint && activeOrgs.some((o) => o.id === orgHint)) orgId = orgHint;
-  else if (activeOrgs.length === 1) orgId = activeOrgs[0].id;
+  if (
+    orgHint &&
+    (activeOrgs.some((o) => o.id === orgHint) ||
+      (await maySelectOrganization(userId, orgHint)).allowed)
+  ) {
+    orgId = orgHint;
+  } else if (activeOrgs.length === 1) orgId = activeOrgs[0].id;
 
   if (orgId !== null || activeOrgs.length === 0) {
     // 0 orgs (platform admin) or 1 org (auto-select)
