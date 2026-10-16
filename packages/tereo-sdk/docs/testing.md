@@ -44,7 +44,7 @@ Parts after the user id are optional and in any order. Without `perms`, the toke
 test can act as a service user whose id is a real UUID; without it, the id stays `service`.
 `testServiceUserId` is validated whenever it is passed, even without `testMode`, and a bad value
 throws at creation. Values in a token (client id, org id and name, permissions) cannot contain `|`
-or `=`, which delimit the parts.
+or `=`, which delimit the parts: such a value is split or truncated, not rejected.
 `parseTestToken(token, defaultPermissions, { serviceUserId })`
 (exported) returns the `ActiveIntrospectionResponse` a token stands for, or `null` when it is not a
 test token.

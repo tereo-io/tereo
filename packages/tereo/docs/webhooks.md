@@ -121,8 +121,8 @@ events to the service. They are ordinary endpoints with an owner:
   private address declares [`internalHost`](provisioning.md#internal-webhook-targets): its own
   provisioned endpoints may then name exactly that host, at load and at every delivery.
   Loopback, link-local, unspecified and multicast addresses stay refused even when named, and
-  endpoints made through the API, or owned by another service or an integration, never get the
-  exception.
+  only the service's own provisioned endpoints get the exception: endpoints made through the API, or
+  owned by another service or an integration, never do.
 - Provisioned endpoints answer `409 managed_by_provisioning` to `PATCH` (except one carrying only
   `status`, to re-enable), `DELETE`, archive, restore, rotate-secret and revoke-previous-secret.
   Delivery views, retries and test sends work. An endpoint a document drops is archived at once.
@@ -202,15 +202,20 @@ same `/v1/webhooks/webhooks` routes, with its own client-credentials token:
   access) of the integration's account in the event's organization, without `webhooks.read`. A
   deactivated integration's account is inactive, so it is sent nothing new. Its delivery views
   redact by the same rule.
-- Other callers are unchanged: `webhooks.admin` sees, pauses and deletes a platform integration's
-  endpoints, and an org-bound one's are its organization's endpoints like any other.
+- Everyone but the owning integration sees its endpoints only with `webhooks.admin`: without it they
+  are absent from lists and a direct id is a 404, because the endpoint is sent what the integration
+  may read and whoever could redirect it could read that too. An admin may pause it (a PATCH
+  carrying only `status`), archive, restore and delete it, and read its deliveries. Any other PATCH
+  field, rotate-secret, revoke-previous-secret, test sends and single or bulk delivery retries are
+  `409 managed_by_integration`.
 
 ## Addressed events
 
 `POST /v1/webhooks/events` (and each event of a batch), `emitTx` and the SDK's `core.outbox.emit`
 take an optional `recipients`: up to 50 slugs of services or integrations. An addressed event is
 sent only to ACTIVE endpoints those recipients own, in the event's organization or of all
-organizations, each still subject to its owner's read permission; no other subscriber gets it. An
+organizations, each still subject to its owner's read permission; no other subscriber gets it.
+Slugs are de-duplicated and sorted before the event is stored and hashed. An
 unknown slug is `400 unknown_recipient` on emit, and dead-letters an outbox row. The delivery's
 payload carries `recipients`. Who may emit the event type is unchanged. An unaddressed event goes
 to every subscriber, as before.

@@ -12337,6 +12337,12 @@ paths:
         endpoint refuses every change except a body carrying only `status` (to
         re-enable it): `409 managed_by_provisioning`.
 
+        An endpoint an integration owns is visible to anyone but that
+        integration only with `webhooks.admin` (others: absent from lists, 404).
+        Such an admin may PATCH `{status}` only; any other field is
+        `409 managed_by_integration`, as are rotate-secret,
+        revoke-previous-secret, test sends and retries.
+
         **Required permissions:**
         - `webhooks.write`
 
@@ -19660,7 +19666,12 @@ components:
         first, `idempotency_request_in_progress`
         when an event with the same idempotency key is still being processed,
         `managed_by_provisioning` when the endpoint is declared in a service's
-        provisioning document and the change must be made there.
+        provisioning document and the change must be made there,
+        `managed_by_integration` when an integration owns the endpoint and the
+        caller is not that integration: a `webhooks.admin` holder may only pause
+        it (a `status`-only PATCH), archive, restore or delete it, and any other
+        PATCH field, rotate-secret, revoke-previous-secret, test send or retry
+        is refused.
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -19682,6 +19693,7 @@ components:
                   - resource_archived
                   - idempotency_request_in_progress
                   - managed_by_provisioning
+                  - managed_by_integration
               error_description:
                 description: A human-readable explanation of the error
                 type: string

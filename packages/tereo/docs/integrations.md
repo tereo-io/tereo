@@ -16,7 +16,7 @@ Integrations.
 
 | | Org-bound | Platform |
 |---|---|---|
-| Created with | an `organizationId` (an active, unarchived organization) | none |
+| Created with | an `organizationId` (an existing, unarchived organization; an inactive one is accepted) | none |
 | Tokens carry | that `org_id` | no organization |
 | Roles | custom, **org-assignable** roles, held as the account's roles **in that organization** | any custom or system role, held **globally** |
 | Account | a member of the organization | a user with global roles |
@@ -76,14 +76,15 @@ integration uses org-assignable custom roles of the set; a platform one may also
 
 An integration manages its own webhook endpoints through `/v1/webhooks/webhooks` with its token,
 with no `webhooks.*` permission; it sees and changes only the endpoints it owns, and delivery to
-them is gated on the integration's own read permissions. The full rules (URL checks, secret, who
-else can see them) are in [webhooks](webhooks.md#integration-owned-endpoints).
+them is gated on the integration's own read permissions. Others see them only with
+`webhooks.admin`, who may pause, archive, restore and delete them but not change or rotate them
+(`409 managed_by_integration`). The full rules are in [webhooks](webhooks.md#integration-owned-endpoints).
 
 ## Addressed events
 
 An app service can send an event to specific integrations (or services) rather than to every
 subscriber: `recipients` on `POST /v1/webhooks/events`, `emitTx` or the SDK's `core.outbox.emit`
-lists their slugs, and only those owners' endpoints receive it, each still subject to its own read
+lists their slugs (de-duplicated and sorted), and only those owners' endpoints receive it, each still subject to its own read
 permission. See [webhooks](webhooks.md#addressed-events).
 
 ## Events and audit

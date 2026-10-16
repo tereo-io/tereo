@@ -207,6 +207,12 @@
       endpoint refuses every change except a body carrying only `status` (to
       re-enable it): `409 managed_by_provisioning`.
 
+      An endpoint an integration owns is visible to anyone but that
+      integration only with `webhooks.admin` (others: absent from lists, 404).
+      Such an admin may PATCH `{status}` only; any other field is
+      `409 managed_by_integration`, as are rotate-secret,
+      revoke-previous-secret, test sends and retries.
+
       **Required permissions:**
       - `webhooks.write`
 

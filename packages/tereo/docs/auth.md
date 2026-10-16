@@ -83,15 +83,15 @@ token still holds only what the user holds and the scope's ceiling covers.
 organizations, 50 per page by default, sorted by `name` or `slug` (default `name`, ascending), as
 `{ id, name, slug, memberRole, member }`. `search` (2 to 100 characters, case-insensitive on name
 and slug) filters them. Archived and inactive organizations never appear. For a holder of
-`organizations.support-access`, a search also returns non-member organizations (`member: false`,
+`organizations.support-access` whose token's ceiling covers it (`core:organizations`, or core's own UI), a search also returns non-member organizations (`member: false`,
 `memberRole: null`); without `search`, the list is memberships only.
 
 ### Support access
 
 `organizations.support-access` is a global-only permission (not org-assignable) that lets a
 person sign in **into any active, unarchived organization they are not a member of**, to help its
-users. Holders are whoever has a role carrying it, and `organizations.admin` and `admin` include it
-through the hierarchy, so platform admins have it too. It works at every point that picks an
+users. Holders are whoever has a role carrying `organizations.support-access` directly, and root
+`admin`, which includes every permission, so platform admins have it too. It works at every point that picks an
 organization (`org_id` on `/oauth/authorize`, the org picker, a login's organization hint) and when
 a code or refresh token is exchanged, so removing the permission ends the grant at the next refresh
 (`invalid_grant`, revoked as for a lost membership). The resulting token names the organization,

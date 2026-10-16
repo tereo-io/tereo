@@ -214,7 +214,7 @@ private IP, or a name that resolves to one) declares it:
   refused.
 - Loopback, link-local (including the cloud metadata address), unspecified and multicast addresses,
   and ranges that embed an IPv4 core cannot check, are refused **even when named**.
-- The exception covers only the service's **own provisioned** endpoints, and only a URL whose host
+- The exception covers only the service's own provisioned endpoints, and only a URL whose host
   equals `internalHost`; it applies at load and again at every delivery, which also checks the
   addresses a name resolves to and does not follow redirects. Endpoints made through the API or by
   another service or an integration never get it.
@@ -244,6 +244,8 @@ Login clients, as made in the admin UI.
 Machine clients for **external parties** (a carrier, a partner's system): see
 [integrations](integrations.md) for what they are and hold. An integration signs in with
 `client_credentials`, declares nothing and has no namespace.
+
+Shown alongside `customer.json` above, whose `customer-service` it names as an audience:
 
 ```json
 {
