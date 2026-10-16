@@ -291,6 +291,27 @@ describe("provisioned integrations", () => {
     expect(text).toContain(`service slug "${service.slug}"`);
   });
 
+  it("refuses a platform integration a role carrying admin", async () => {
+    const adminRole = roleEntry(["admin"], false);
+    const { plainSecret: _p, ...integration } = integrationSpec({
+      roles: ["admin", adminRole.name],
+    });
+    const problems = await problemsOf(
+      doc({ roles: [adminRole], integrations: [integration] })
+    );
+    const label = `integrations[${integration.slug}]`;
+    expect(problems).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          `${label}: roles "admin" carries the admin permission; integrations can't hold it`
+        ),
+        expect.stringContaining(
+          `${label}: roles "${adminRole.name}" carries the admin permission; integrations can't hold it`
+        ),
+      ])
+    );
+  });
+
   it("refuses an organization that does not exist", async () => {
     const { plainSecret: _p, ...integration } = integrationSpec({
       organizationId: "00000000-0000-7000-8000-00000000dead",

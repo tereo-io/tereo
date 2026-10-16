@@ -277,7 +277,7 @@ Shown alongside `customer.json` above, whose `customer-service` it names as an a
 | `name` | Required, max 100 |
 | `organizationId` | Optional UUID. Set: **org-bound**, its tokens carry this organization. Absent: **platform**. Fixed once created; the organization must exist and not be archived |
 | `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)); rotates as a service's does |
-| `roles` | Role names it holds. Org-bound: `orgAssignable` custom roles of the set. Platform: also core's roles and `<slug>/<name>` system roles of services in the set |
+| `roles` | Role names it holds. Org-bound: `orgAssignable` custom roles of the set. Platform: also core's roles and `<slug>/<name>` system roles of services in the set. Never a role carrying `admin` |
 | `audiences` | Services of the set whose APIs it may call (introspectable by them); not core, not an integration |
 
 The roles and audiences are set as the system user at apply, replaced to match the document; a

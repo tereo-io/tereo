@@ -38,8 +38,8 @@ same rules as granting to a person:
 - **The approver holds what they grant**: the caller must hold every permission the roles carry
   (`403` naming those lacking), as in [auth](auth.md#granting-only-what-you-hold). Removing roles
   is not checked against what the caller holds.
-- An integration can never hold a role carrying the root `admin` permission. This is being
-  enforced in a follow-up; do not rely on it being refused yet, and do not give one.
+- An integration can never hold a role carrying the root `admin` permission, whoever grants it:
+  `403 role_not_allowed_for_integration`. Provisioning refuses one too.
 
 A change to roles revokes the integration's tokens, so the new set applies at once.
 

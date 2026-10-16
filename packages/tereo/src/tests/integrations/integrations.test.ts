@@ -283,6 +283,24 @@ describe("roles", () => {
     ]);
   });
 
+  it("refuses a role carrying admin, even to an approver holding it", async () => {
+    const created = await createIntegration();
+    const roleId = await customRole(["admin"]);
+    const granter = await getTestPrincipalToken({
+      permissions: ["integrations.write", "admin"],
+    });
+    const res = await api(
+      "PUT",
+      `/v1/admin/integrations/${created.id}/roles`,
+      { roleIds: [roleId] },
+      granter
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("role_not_allowed_for_integration");
+    const got = await api("GET", `/v1/admin/integrations/${created.id}`);
+    expect(got.body.roles).toEqual([]);
+  });
+
   it("grants global roles to a platform integration", async () => {
     const created = await createIntegration();
     const roleId = await customRole(["users.read"]);

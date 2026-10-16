@@ -362,7 +362,8 @@ const checkCustomRoles = (
 /**
  * An integration's roles and audiences, against the set and core. Org-bound,
  * it holds only org-assignable custom roles; a platform one also core's roles
- * and services' system roles (`<slug>/<name>`).
+ * and services' system roles (`<slug>/<name>`). Neither holds a role carrying
+ * `admin`.
  */
 const checkIntegration = (
   set: ProvisioningSet,
@@ -386,8 +387,28 @@ const checkIntegration = (
           .find((s) => s.service.slug === slug)
           ?.service.systemRoles.some((r) => r.name === name);
   };
+  const permissionsOf = (target: string): string[] => {
+    const { slug, name } = splitRoleTarget(target);
+    if (slug === null)
+      return (
+        customRoles.get(name)?.permissions ??
+        ROLES.find((r) => r.name === name)?.permissions ??
+        []
+      );
+    return (
+      services
+        .find((s) => s.service.slug === slug)
+        ?.service.systemRoles.find((r) => r.name === name)?.permissions ?? []
+    );
+  };
   for (const role of integration.roles) {
     const where = `${label}: roles "${role}"`;
+    if (permissionsOf(role).includes("admin")) {
+      problems.push(
+        `${where} carries the admin permission; integrations can't hold it`
+      );
+      continue;
+    }
     const custom = customRoles.get(role);
     if (integration.organizationId) {
       if (custom?.orgAssignable) continue;

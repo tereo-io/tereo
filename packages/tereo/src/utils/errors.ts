@@ -96,6 +96,14 @@ export class ManagedByIntegrationError extends AppError {
   }
 }
 
+/** Integrations never hold a role carrying the root `admin` permission. */
+export class RoleNotAllowedForIntegrationError extends AppError {
+  constructor(message: string) {
+    super(403, "role_not_allowed_for_integration", message);
+    this.name = "RoleNotAllowedForIntegrationError";
+  }
+}
+
 /**
  * A request with the same idempotency key is still running: one code for
  * uploads, emits and audit writes. Retry shortly.

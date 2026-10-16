@@ -1,5 +1,6 @@
 import useSetIntegrationRoles from "../../api/useSetIntegrationRoles";
 import useAllRoles from "@/features/auth-admin/api/roles/useAllRoles";
+import type { Role } from "@/features/auth-admin/api/roles/types";
 import type { Integration } from "../../api/types";
 import { useState } from "react";
 import {
@@ -15,10 +16,14 @@ import {
 export const GLOBAL_ROLES_WARNING =
   "This integration is not bound to an organization, so the roles you pick here are global roles: they apply in every organization.";
 
+const carriesAdmin = (role: Role) =>
+  (role.permissions ?? []).some((p) => p.name === "admin" && !p.retired);
+
 /**
  * Org-bound integrations get custom roles whose permissions are all
  * org-assignable (core refuses anything else); platform ones get any active
  * role, which is global. Roles already held stay listed so saving keeps them.
+ * A role carrying `admin` is never offered: core refuses it to integrations.
  */
 const EditIntegrationRolesButton = ({
   integration,
@@ -36,6 +41,7 @@ const EditIntegrationRolesButton = ({
     (r) =>
       r.isActive &&
       !r.retiredAt &&
+      !carriesAdmin(r) &&
       (held.has(r.id) ||
         (orgBound
           ? !r.isSystem &&

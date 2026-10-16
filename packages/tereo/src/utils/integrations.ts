@@ -14,6 +14,7 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  RoleNotAllowedForIntegrationError,
   UnprocessableEntityError,
 } from "./errors.js";
 
@@ -253,7 +254,7 @@ const isApprover = (
  * org-bound (org-assignable custom roles only), global roles otherwise. An
  * approver must hold what is newly granted; a plain actor (provisioning, as
  * the system user) is not checked for that. Its tokens are revoked when the
- * roles change. Returns whether they did.
+ * roles change. Returns whether they did. No role carrying `admin`, ever.
  */
 export const setIntegrationRolesTx = async (
   tx: Tx,
@@ -272,6 +273,17 @@ export const setIntegrationRolesTx = async (
   ).map((ur) => ur.roleId);
   const held = new Set(heldIds);
   const added = wanted.filter((id) => !held.has(id));
+
+  const carryingAdmin = (await db.roles.getByIds(wanted, tx)).filter((role) =>
+    db.roles.grantedPermissionNames([role]).includes("admin")
+  );
+  if (carryingAdmin.length > 0) {
+    throw new RoleNotAllowedForIntegrationError(
+      `Integrations can't hold a role carrying the admin permission: ${carryingAdmin
+        .map((r) => r.name)
+        .join(", ")}`
+    );
+  }
 
   if (orgId) {
     // Provisioning grants as one holding everything; the other rules stand.
