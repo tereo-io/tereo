@@ -39,6 +39,17 @@ export const newEndpointSecret = async (
 
 type StoredSecrets = EndpointSigningSecrets & { id: string };
 
+/**
+ * The endpoint's current secret in the clear, for comparing with a new one.
+ * Nothing is written back: safe inside a transaction that may hold the row.
+ */
+export const openSigningSecret = async (endpoint: {
+  id: string;
+  signingSecret: string;
+}): Promise<string> =>
+  (await openRowSecret(endpointSecretName(endpoint.id), endpoint.signingSecret))
+    .value;
+
 /** Opens one column, writing it back resealed while it still holds `stored`. */
 const openColumn = async (
   endpointId: string,

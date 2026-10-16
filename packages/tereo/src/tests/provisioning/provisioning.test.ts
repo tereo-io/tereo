@@ -1,7 +1,7 @@
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import type { CustomRoleEntry } from "../../utils/provisioning/schema.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { openEndpointSecrets } from "../../utils/webhookSecrets.js";
 import { generateClientSecret } from "../../utils/crypto.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { logger } from "../../utils/logger.js";
@@ -26,6 +26,7 @@ import {
   type ProvisioningSet,
   type ResolvedClient,
   type ResolvedService,
+  type ResolvedWebhook,
 } from "../../utils/provisioning/load.js";
 import {
   DEFAULT_ORGANIZATION_ID,
@@ -36,6 +37,10 @@ import {
   removeRoles,
   removeServices,
 } from "./utils/test-helpers.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../utils/principals.js";
 
 let adminToken: string;
 const createdSlugs: string[] = [];
@@ -1369,6 +1374,170 @@ describe("custom roles", () => {
       expect(restored.unprovisionedAt).toBeNull();
       expect(restored.isActive).toBe(true);
     });
+  });
+});
+
+describe("webhooks", () => {
+  const ORG_CREATED = "auth.organization.created";
+  const ORG_UPDATED = "auth.organization.updated";
+
+  const webhook = (extra: Partial<ResolvedWebhook> = {}): ResolvedWebhook => ({
+    key: "org-events",
+    url: "https://example.com/owned",
+    events: [ORG_CREATED],
+    organizations: "all",
+    description: null,
+    secretEnv: "ORG_EVENTS_WEBHOOK_SECRET",
+    secretPlain: randomBytes(32).toString("hex"),
+    ...extra,
+  });
+
+  /** A service that reads organization events, subscribed through `webhooks`. */
+  const subscriber = (...webhooks: ResolvedWebhook[]) =>
+    serviceDoc({
+      access: { roles: ["tenant_resolver"], audiences: [] },
+      webhooks,
+    });
+
+  const endpointRow = (provisioningKey: string) =>
+    prisma.webhookEndpoint.findUniqueOrThrow({
+      where: { provisioningKey },
+      include: { subscriptions: { orderBy: { eventType: "asc" } } },
+    });
+
+  const eventsOf = (row: Awaited<ReturnType<typeof endpointRow>>) =>
+    row.subscriptions.map((s) => s.eventType);
+
+  it("creates an owned endpoint for every organization", async () => {
+    const w = webhook({ description: "Organization events" });
+    const d = subscriber(w);
+    const result = await apply(d);
+    const key = `${d.service.slug}:org-events`;
+    expect(result.created).toContain(`webhook:${key}`);
+
+    const s = await serviceRow(d.service.slug);
+    const row = await endpointRow(key);
+    expect(row.organizationId).toBeNull();
+    expect(row.ownerServiceId).toBe(s.id);
+    expect(row.createdBy).toBe(s.client!.serviceAccountUser!.id);
+    expect(row.provisioned).toBe(true);
+    expect(row.status).toBe("ACTIVE");
+    expect(row.url).toBe(w.url);
+    expect(row.description).toBe("Organization events");
+    expect(eventsOf(row)).toEqual([ORG_CREATED]);
+    expect((await openEndpointSecrets(row)).signingSecret).toBe(w.secretPlain);
+
+    const audit = await prisma.auditLogEntry.findFirstOrThrow({
+      where: { entityId: row.id, action: "CREATE" },
+    });
+    expect(audit.userId).toBe(SYSTEM_USER_ID);
+    expect(audit.metadata).toMatchObject({ file: d.file, version: d.version });
+  });
+
+  it("creates one endpoint per listed organization", async () => {
+    const orgs = [
+      await ensureTestOrganization("owned-webhooks-1"),
+      await ensureTestOrganization("owned-webhooks-2"),
+    ].sort();
+    const d = subscriber(webhook({ organizations: orgs }));
+    await apply(d);
+
+    const s = await serviceRow(d.service.slug);
+    const rows = await prisma.webhookEndpoint.findMany({
+      where: { ownerServiceId: s.id },
+      orderBy: { organizationId: "asc" },
+    });
+    expect(rows.map((r) => r.organizationId)).toEqual(orgs);
+    expect(rows.map((r) => r.provisioningKey)).toEqual(
+      orgs.map((org) => `${d.service.slug}:org-events:${org}`)
+    );
+  });
+
+  it("refuses an organization that does not exist", async () => {
+    const missing = "00000000-0000-7000-8000-00000000dead";
+    const d = subscriber(webhook({ organizations: [missing] }));
+    const problems = await problemsOf(d);
+    expect(problems).toEqual([
+      `${d.file}: services[${d.service.slug}]: webhooks[org-events]: no organization with id ${missing}`,
+    ]);
+  });
+
+  it("updates url, events and description in place on reapply", async () => {
+    const w = webhook();
+    const d = subscriber(w);
+    await apply(d);
+    const key = `${d.service.slug}:org-events`;
+    const before = await endpointRow(key);
+
+    const changed = withService(d, {
+      webhooks: [
+        {
+          ...w,
+          url: "https://example.com/moved",
+          events: [ORG_UPDATED, ORG_CREATED],
+          description: "Moved",
+        },
+      ],
+    });
+    const result = await apply(changed);
+    expect(result.updated).toEqual([`webhook:${key}`]);
+
+    const after = await endpointRow(key);
+    expect(after.id).toBe(before.id);
+    expect(after.url).toBe("https://example.com/moved");
+    expect(after.description).toBe("Moved");
+    expect(eventsOf(after)).toEqual([ORG_CREATED, ORG_UPDATED]);
+    expect(after.previousSigningSecret).toBeNull();
+
+    const again = await apply(changed);
+    expect(again.updated).toEqual([]);
+    expect(again.created).toEqual([]);
+  });
+
+  it("rotates the secret when the env value changes", async () => {
+    const w = webhook();
+    const d = subscriber(w);
+    await apply(d);
+    const key = `${d.service.slug}:org-events`;
+
+    const next = randomBytes(32).toString("hex");
+    const result = await apply(
+      withService(d, { webhooks: [{ ...w, secretPlain: next }] })
+    );
+    expect(result.rotated).toEqual([`webhook:${key}`]);
+
+    const row = await endpointRow(key);
+    expect(row.previousSecretExpiresAt).not.toBeNull();
+    const secrets = await openEndpointSecrets(row);
+    expect(secrets.signingSecret).toBe(next);
+    expect(secrets.previousSigningSecret).toBe(w.secretPlain);
+  });
+
+  it("archives a webhook dropped from the file at once, and restores it when it returns", async () => {
+    const d = subscriber(webhook());
+    await apply(d);
+    const key = `${d.service.slug}:org-events`;
+
+    const dropped = await apply(withService(d, { webhooks: [] }));
+    expect(dropped.unprovisioned).toEqual([`webhook:${key}`]);
+    expect((await endpointRow(key)).archivedAt).not.toBeNull();
+
+    const back = await apply(d);
+    expect(back.updated).toEqual([`webhook:${key}`]);
+    expect((await endpointRow(key)).archivedAt).toBeNull();
+  });
+
+  it("leaves a disabled endpoint disabled on reapply", async () => {
+    const d = subscriber(webhook());
+    await apply(d);
+    const key = `${d.service.slug}:org-events`;
+    await prisma.webhookEndpoint.update({
+      where: { provisioningKey: key },
+      data: { status: "DISABLED" },
+    });
+
+    await apply(d);
+    expect((await endpointRow(key)).status).toBe("DISABLED");
   });
 });
 

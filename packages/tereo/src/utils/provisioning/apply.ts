@@ -4,6 +4,7 @@ import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
 import { formatClient, formatRole } from "../transformers.js";
 import { syncProvisionedAccessTx } from "../serviceAccess.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import { openSigningSecret } from "../webhookSecrets.js";
 import { prisma, type Prisma } from "../db/prisma.js";
 import type { CustomRoleEntry } from "./schema.js";
 import { validateSet } from "./validate.js";
@@ -34,6 +35,7 @@ import {
   type ProvisioningSet,
   type ResolvedClient,
   type ResolvedService,
+  type ResolvedWebhook,
 } from "./load.js";
 
 type Tx = Prisma.TransactionClient;
@@ -41,9 +43,11 @@ type Tx = Prisma.TransactionClient;
 const PROVISIONING_LOCK = "provisioning";
 
 export interface ProvisioningResult {
+  /** Services, clients and webhooks (`webhook:<provisioning key>`). */
   created: string[];
   updated: string[];
   rotated: string[];
+  /** Webhooks here were archived; the rest retire after the grace. */
   unprovisioned: string[];
   /** Services whose declaration was applied. */
   declared: string[];
@@ -251,6 +255,27 @@ const findProblems = async (
     if (spec.secretEnv && spec.secretHash)
       checkSecret(label, spec.secretEnv, spec.secretHash, existing?.id);
   }
+
+  const listed = p.services.flatMap((entry) =>
+    entry.service.webhooks.flatMap((w) =>
+      w.organizations === "all"
+        ? []
+        : w.organizations.map((id) => ({ entry, key: w.key, id }))
+    )
+  );
+  const known = new Set(
+    (
+      await tx.organization.findMany({
+        where: { id: { in: sortedUnique(listed.map((l) => l.id)) } },
+        select: { id: true },
+      })
+    ).map((o) => o.id)
+  );
+  for (const { entry, key, id } of listed)
+    if (!known.has(id))
+      problems.push(
+        `${serviceLabel(entry)}: webhooks[${key}]: no organization with id ${id}`
+      );
 
   for (const entry of p.roles)
     if (state.roles.get(entry.role.name)?.provisioned === false)
@@ -701,6 +726,176 @@ const applyRoles = async (
   return { permissionsChanged, statusChanged };
 };
 
+/** Where a webhook entry goes: one endpoint for all organizations, or one per listed one. */
+const webhookTargets = (slug: string, w: ResolvedWebhook) =>
+  w.organizations === "all"
+    ? [{ provisioningKey: `${slug}:${w.key}`, organizationId: null }]
+    : sortedUnique(w.organizations).map((organizationId) => ({
+        provisioningKey: `${slug}:${w.key}:${organizationId}`,
+        organizationId,
+      }));
+
+/**
+ * Creates or updates each service's webhook endpoints, keyed by
+ * `provisioningKey`, and archives at once those no longer in the set. Status
+ * is left alone: an endpoint auto-disabled stays so until an admin re-enables
+ * it.
+ */
+const applyWebhooks = async (
+  tx: Tx,
+  p: Entries,
+  now: Date,
+  result: ProvisioningResult
+) => {
+  const wanted: string[] = [];
+  const overlapMs = env.WEBHOOK_SECRET_OVERLAP_HOURS * 60 * 60 * 1000;
+
+  for (const from of p.services) {
+    const meta = documentMeta(from);
+    const row = await tx.service.findUniqueOrThrow({
+      where: { slug: from.service.slug },
+      include: { client: { include: { serviceAccountUser: true } } },
+    });
+    const { accountUserId } = serviceRows(row);
+
+    for (const w of from.service.webhooks) {
+      const events = sortedUnique(w.events);
+      for (const { provisioningKey, organizationId } of webhookTargets(
+        row.slug,
+        w
+      )) {
+        wanted.push(provisioningKey);
+        const entry = `webhook:${provisioningKey}`;
+        const existing = await tx.webhookEndpoint.findUnique({
+          where: { provisioningKey },
+          include: { subscriptions: { select: { eventType: true } } },
+        });
+
+        if (!existing) {
+          const { endpoint } = await db.webhookEndpoints.create(
+            {
+              organizationId,
+              createdBy: accountUserId,
+              ownerServiceId: row.id,
+              provisioned: true,
+              provisioningKey,
+              url: w.url,
+              description: w.description,
+              eventTypes: events,
+              signingSecret: w.secretPlain,
+            },
+            tx
+          );
+          await logAuditTx(tx, {
+            auth: SYSTEM_ACTOR,
+            organizationId,
+            action: "CREATE",
+            entityType: "WebhookEndpoint",
+            entityId: endpoint.id,
+            metadata: {
+              url: w.url,
+              eventTypes: events,
+              provisioningKey,
+              ...meta,
+            },
+          });
+          result.created.push(entry);
+          continue;
+        }
+
+        // Opened before the row is written, and compared in the clear: the
+        // stored value is sealed.
+        const rotates = (await openSigningSecret(existing)) !== w.secretPlain;
+
+        const held = sortedUnique(
+          existing.subscriptions.map((s) => s.eventType)
+        );
+        const changes = computeChanges(
+          {
+            url: existing.url,
+            description: existing.description,
+            eventTypes: held,
+          },
+          { url: w.url, description: w.description, eventTypes: events }
+        );
+        const restored = existing.archivedAt !== null;
+        if (changes || restored) {
+          await db.webhookEndpoints.update(
+            existing.id,
+            {
+              url: w.url,
+              description: w.description,
+              ...(changes?.eventTypes && { eventTypes: events }),
+            },
+            tx
+          );
+          if (restored) await db.webhookEndpoints.restore(existing.id, tx);
+          await logAuditTx(tx, {
+            auth: SYSTEM_ACTOR,
+            organizationId,
+            action: restored ? "RESTORE" : "UPDATE",
+            entityType: "WebhookEndpoint",
+            entityId: existing.id,
+            changes,
+            metadata: { action: "provisioned", provisioningKey, ...meta },
+          });
+          result.updated.push(entry);
+        }
+
+        if (rotates) {
+          const previousSecretExpiresAt =
+            overlapMs > 0 ? new Date(now.getTime() + overlapMs) : null;
+          await db.webhookEndpoints.rotateSecret(
+            existing.id,
+            previousSecretExpiresAt,
+            tx,
+            w.secretPlain
+          );
+          await logAuditTx(tx, {
+            auth: SYSTEM_ACTOR,
+            organizationId,
+            action: "UPDATE",
+            entityType: "WebhookEndpoint",
+            entityId: existing.id,
+            metadata: {
+              action: "secret_rotated",
+              previousSecretExpiresAt,
+              provisioningKey,
+              ...meta,
+            },
+          });
+          result.rotated.push(entry);
+        }
+      }
+    }
+  }
+
+  // No deliveries to a URL the deploy removed, so no grace.
+  const dropped = await tx.webhookEndpoint.findMany({
+    where: {
+      provisioned: true,
+      archivedAt: null,
+      provisioningKey: { notIn: wanted },
+    },
+    select: { id: true, organizationId: true, provisioningKey: true },
+  });
+  for (const endpoint of dropped) {
+    await db.webhookEndpoints.archive(endpoint.id, tx);
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      organizationId: endpoint.organizationId,
+      action: "ARCHIVE",
+      entityType: "WebhookEndpoint",
+      entityId: endpoint.id,
+      metadata: {
+        action: "unprovisioned",
+        provisioningKey: endpoint.provisioningKey,
+      },
+    });
+    result.unprovisioned.push(`webhook:${endpoint.provisioningKey}`);
+  }
+};
+
 const markMissing = async (
   tx: Tx,
   p: Entries,
@@ -924,6 +1119,7 @@ export const applyProvisioning = async (
       if (content.problems.length > 0)
         throw new ProvisioningError(content.problems);
       const roleChanges = await applyRoles(tx, p, result);
+      await applyWebhooks(tx, p, now, result);
       for (const entry of p.clients)
         await applyClient(tx, entry, state, now, result);
       await markMissing(tx, p, now, result);

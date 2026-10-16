@@ -91,7 +91,7 @@ async function planEvent(
   const mayReceive = createRecipientCheck(event, readPermission);
   const endpointIds: string[] = [];
   for (const endpoint of endpoints) {
-    if (await mayReceive(endpoint.createdBy)) endpointIds.push(endpoint.id);
+    if (await mayReceive(endpoint)) endpointIds.push(endpoint.id);
   }
   return { event, endpointIds };
 }

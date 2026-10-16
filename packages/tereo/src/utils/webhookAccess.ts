@@ -2,15 +2,21 @@ import { PERMISSIONS } from "../definitions/permissions.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { canReadBucket } from "./bucketAccess.js";
 import { hasPermission } from "./permissions.js";
-import { ForbiddenError } from "./errors.js";
 import { prisma } from "./db/prisma.js";
 import db from "./db/index.js";
+import {
+  ForbiddenError,
+  ManagedByProvisioningError,
+  NotFoundError,
+} from "./errors.js";
 
 /**
  * A webhook endpoint acts as the user who created it: it is sent an event only
  * while that user is active and could read the event themselves — through
- * `webhooks.read` and the event type's `readPermission` in the endpoint's
- * organization, and for a file event, read access to the bucket it names.
+ * `webhooks.read` and the event type's `readPermission` in the event's
+ * organization, and for a file event, read access to the bucket it names. An
+ * endpoint a service owns acts as the service's account, which needs no
+ * `webhooks.read`: its subscriptions come from provisioning, not the API.
  */
 
 /** File events carry their bucket in `data.bucketName`. */
@@ -77,10 +83,15 @@ export interface FanoutEvent {
 const mayReadEvent = async (
   actor: { userId: string; permissions: string[] },
   event: FanoutEvent,
-  readPermission: string | null
+  readPermission: string | null,
+  { requireWebhooksRead = true }: { requireWebhooksRead?: boolean } = {}
 ): Promise<boolean> => {
   const { permissions } = actor;
-  if (!hasPermission(permissions, PERMISSIONS.WEBHOOKS.READ)) return false;
+  if (
+    requireWebhooksRead &&
+    !hasPermission(permissions, PERMISSIONS.WEBHOOKS.READ)
+  )
+    return false;
   if (readPermission && !hasPermission(permissions, readPermission)) {
     return false;
   }
@@ -100,32 +111,66 @@ const mayReadEvent = async (
   );
 };
 
+export interface RecipientEndpoint {
+  createdBy: string;
+  ownerServiceId: string | null;
+}
+
 /**
- * Whether an endpoint created by `createdBy` may be sent `event`. Build one per
- * event: each creator's answer is computed once however many endpoints they
- * made.
+ * Whether `endpoint` may be sent `event`. Build one per event: each creator's
+ * answer is computed once however many endpoints they made.
  */
 export const createRecipientCheck = (
   event: FanoutEvent,
   readPermission: string | null
-): ((createdBy: string) => Promise<boolean>) => {
+): ((endpoint: RecipientEndpoint) => Promise<boolean>) => {
   const answers = new Map<string, Promise<boolean>>();
 
-  const decide = async (userId: string): Promise<boolean> => {
+  const decide = async (userId: string, owned: boolean): Promise<boolean> => {
     if (userId === SYSTEM_USER_ID) return true;
     const permissions = await actingPermissions(userId, event.organizationId);
     if (!permissions) return false;
-    return mayReadEvent({ userId, permissions }, event, readPermission);
+    return mayReadEvent({ userId, permissions }, event, readPermission, {
+      requireWebhooksRead: !owned,
+    });
   };
 
-  return (createdBy) => {
-    let answer = answers.get(createdBy);
+  return ({ createdBy, ownerServiceId }) => {
+    const owned = ownerServiceId !== null;
+    const key = `${createdBy}:${owned}`;
+    let answer = answers.get(key);
     if (!answer) {
-      answer = decide(createdBy);
-      answers.set(createdBy, answer);
+      answer = decide(createdBy, owned);
+      answers.set(key, answer);
     }
     return answer;
   };
+};
+
+/**
+ * The endpoint, if the caller may see it in `organizationId`: that
+ * organization's own, or, with `webhooks.admin`, an owned endpoint sent every
+ * organization's events. Any other is a 404, as if it did not exist.
+ */
+export const getVisibleEndpoint = async (
+  id: string,
+  viewer: { permissions: string[] },
+  organizationId: string
+) => {
+  const endpoint = await db.webhookEndpoints.getById(id);
+  const visible =
+    endpoint.organizationId === null
+      ? hasPermission(viewer.permissions, PERMISSIONS.WEBHOOKS.ADMIN)
+      : endpoint.organizationId === organizationId;
+  if (!visible) throw new NotFoundError("Webhook endpoint not found");
+  return endpoint;
+};
+
+/** 409 `managed_by_provisioning`: a provisioned endpoint changes only through its file. */
+export const assertNotProvisioned = (endpoint: {
+  provisioned: boolean;
+}): void => {
+  if (endpoint.provisioned) throw new ManagedByProvisioningError();
 };
 
 interface StoredDelivery {

@@ -13,8 +13,9 @@ import {
 } from "../../../utils/registry.js";
 
 // Production never deletes a service; tests do, with everything that would
-// otherwise hold it: its declared roles and permissions, its access rows, and
-// its service-account user with that user's roles and audit entries.
+// otherwise hold it: its webhook endpoints and event types, its declared roles
+// and permissions, its access rows, and its service-account user with that
+// user's roles and audit entries.
 export async function removeServices(slugs: string[]) {
   const services = await prisma.service.findMany({
     where: { slug: { in: slugs } },
@@ -25,6 +26,25 @@ export async function removeServices(slugs: string[]) {
   const userIds = services.flatMap((s) =>
     s.client?.serviceAccountUser ? [s.client.serviceAccountUser.id] : []
   );
+  const endpoints = {
+    OR: [{ ownerServiceId: { in: ids } }, { createdBy: { in: userIds } }],
+  };
+  const eventTypes = (
+    await prisma.eventType.findMany({
+      where: { serviceId: { in: ids } },
+      select: { eventType: true },
+    })
+  ).map((e) => e.eventType);
+  await prisma.webhookDelivery.deleteMany({
+    where: {
+      OR: [{ webhookEndpoint: endpoints }, { eventType: { in: eventTypes } }],
+    },
+  });
+  await prisma.webhookEndpoint.deleteMany({ where: endpoints });
+  await prisma.webhookEndpointEventType.deleteMany({
+    where: { eventType: { in: eventTypes } },
+  });
+  await prisma.eventType.deleteMany({ where: { serviceId: { in: ids } } });
   await prisma.serviceAccess.deleteMany({ where: { serviceId: { in: ids } } });
   await prisma.role.deleteMany({ where: { serviceId: { in: ids } } });
   await prisma.permission.deleteMany({ where: { serviceId: { in: ids } } });
