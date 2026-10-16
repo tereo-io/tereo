@@ -3,7 +3,8 @@
 An **integration** is a machine client for an external party: a carrier, a partner's system, a
 vendor's webhook consumer. It signs in with `client_credentials`, acts as a service account, and
 holds only the roles an admin gives it. It is not an app service: it declares nothing (no
-permissions, roles, buckets or event types), has no namespace and never registers anything.
+permissions, roles, buckets or event types), has no namespace and never registers anything. It
+cannot emit events: `POST /v1/webhooks/events` refuses it (`403`) whatever it holds.
 
 It is a `core.services` row with `kind = 'integration'`, `namespace` null and an optional fixed
 `organization_id`, so it shares the service slug space (a slug is either a service or an

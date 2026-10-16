@@ -19,16 +19,21 @@ export const assertNotSystemUser = (id: string) => {
   }
 };
 
-/** A service's account is managed with its service, under /admin/services. */
+/**
+ * A service's or an integration's account is managed with it, under
+ * /admin/services or /admin/integrations.
+ */
 export const assertNotServiceAccount = async (user: {
   oauthClientId: string | null;
 }) => {
-  if (
-    user.oauthClientId &&
-    (await db.services.getByClientId(user.oauthClientId))
-  ) {
+  const owner = user.oauthClientId
+    ? await db.services.getByClientId(user.oauthClientId)
+    : null;
+  if (owner) {
     throw new ForbiddenError(
-      "This user is a service account; manage it under /admin/services"
+      owner.kind === "integration"
+        ? "This user is an integration's account; manage it under /admin/integrations"
+        : "This user is a service account; manage it under /admin/services"
     );
   }
 };

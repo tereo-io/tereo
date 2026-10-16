@@ -351,6 +351,61 @@ describe("organization member routes", () => {
   });
 });
 
+describe("other admin routes", () => {
+  it("point an integration's account and client to /admin/integrations", async () => {
+    const created = await createIntegration();
+    const row = await prisma.service.findUniqueOrThrow({
+      where: { id: created.id },
+      include: { client: { include: { serviceAccountUser: true } } },
+    });
+    const userId = row.client!.serviceAccountUser!.id;
+    const roleId = await customRole(["webhooks.read"]);
+    const admin = await getTestPrincipalToken({
+      permissions: ["users.write", "clients.write", "roles.delete"],
+    });
+    for (const [method, path, body] of [
+      ["PATCH", `/v1/admin/users/${userId}`, { isActive: false }],
+      ["DELETE", `/v1/admin/roles/${roleId}/users/${userId}`, undefined],
+      ["PATCH", `/v1/admin/clients/${row.clientId}`, { name: "x" }],
+    ] as const) {
+      const res = await api(method, path, body, admin);
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.body.error_description).toContain("integration");
+      expect(res.body.error_description).toContain("/admin/integrations");
+    }
+  });
+
+  it("names an integration that tries to emit an event", async () => {
+    const created = await createIntegration();
+    const granter = await getTestPrincipalToken({
+      permissions: ["integrations.write", "webhooks.emit"],
+    });
+    const granted = await api(
+      "PUT",
+      `/v1/admin/integrations/${created.id}/roles`,
+      { roleIds: [await customRole(["webhooks.emit"])] },
+      granter
+    );
+    expect(granted.status).toBe(200);
+    const res = await api(
+      "POST",
+      "/v1/webhooks/events",
+      {
+        organizationId: orgId,
+        eventType: `test.unregistered.${rand()}`,
+        entityType: "Item",
+        entityId: "item-1",
+        data: {},
+      },
+      await tokenOf(created)
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body.error_description).toBe(
+      `Integration ${created.slug} can't emit events`
+    );
+  });
+});
+
 describe("audiences", () => {
   it("puts the services named in its tokens' aud, and refuses anything else", async () => {
     const serviceSlug = `int-svc-${rand()}`;
