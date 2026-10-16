@@ -1,11 +1,11 @@
 import { pgErrorCodes } from "../prismaErrors.js";
 import { prisma } from "./prisma.js";
+import env from "../../env.js";
 
 // Creating, detaching or dropping a partition takes ACCESS EXCLUSIVE on its
 // parent. Left to wait behind a long read, it would queue every insert into the
-// parent behind itself; past this wait it gives up instead, and the next run
-// retries.
-const LOCK_TIMEOUT = "5s";
+// parent behind itself; past PARTITION_DDL_LOCK_TIMEOUT_MS it gives up
+// instead, and the next run retries.
 
 // A lock not granted in time, and a deadlock: dropping a notifications or
 // deliveries partition also locks the table on the other side of their
@@ -25,7 +25,7 @@ export const runPartitionDdl = async (
     await prisma.$transaction(
       async (tx) => {
         await tx.$executeRawUnsafe(
-          `SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`
+          `SET LOCAL lock_timeout = ${env.PARTITION_DDL_LOCK_TIMEOUT_MS}`
         );
         for (const sql of statements) await tx.$executeRawUnsafe(sql);
       },

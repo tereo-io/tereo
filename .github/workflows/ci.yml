@@ -15,15 +15,17 @@ concurrency:
 
 permissions:
   contents: read
+  # nx-set-shas looks up this workflow's last successful run on master.
+  actions: read
 
 jobs:
   ci:
     runs-on: ubuntu-latest
     env:
-      NX_BASE: origin/master
-      # A push to master has nothing "affected" relative to origin/master, so it
-      # runs every project; a PR runs only what it touches.
-      NX_SCOPE: ${{ github.event_name == 'pull_request' && 'affected' || 'run-many' }}
+      # A PR or a push to master runs only the projects it affects (NX_BASE and
+      # NX_HEAD come from nx-set-shas). The version-bump branch, started by
+      # hand, has no earlier run to compare with and runs every project.
+      NX_SCOPE: ${{ github.event_name == 'workflow_dispatch' && 'run-many' || 'affected' }}
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -38,6 +40,13 @@ jobs:
           check-latest: true
 
       - run: npm ci
+
+      # A PR's base is where it branched from master; a push's is the last
+      # commit whose CI passed on master, so a failed or cancelled run's
+      # changes are tested again by the next one.
+      - uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
+        with:
+          main-branch-name: master
 
       - name: Generate Prisma client
         run: npx nx run-many -t generate --parallel=4
@@ -76,8 +85,12 @@ jobs:
       - name: Build
         run: npx nx $NX_SCOPE -t build --parallel=4
 
+      # tereo's suite runs in TEST_SHARDS isolated stacks at once
+      # (docker/test/run.sh), one per core of the runner.
       - name: Test
         run: npx nx $NX_SCOPE -t test:docker --parallel=4
+        env:
+          TEST_SHARDS: 4
 
       # The release image, built and started on this x86 runner: migrate and
       # seed a fresh database, then wait for core's health check and load the

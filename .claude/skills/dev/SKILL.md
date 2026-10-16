@@ -135,9 +135,10 @@ first admin always comes from setup.
 - The suite starts its **own server on port 4001** — stop `npm run dev` or the
   compose `core` container first.
 - Files run serially (shared server and database); expect a few minutes.
-- `docker/test/run.sh` needs only Docker: it builds a runner, runs the suite in
-  a throwaway stack, and tears it down. Pass compose args through, e.g.
-  `docker/test/run.sh logs -f runner`.
+- `docker/test/run.sh` needs only Docker: it builds a runner, splits the suite
+  into `TEST_SHARDS` shards (default 4) run at once, each in its own throwaway
+  stack, and tears them down. Compose args pass through to every shard's
+  stack, e.g. `docker/test/run.sh logs -f runner`.
 - SDK tests: `npx nx run @tereo-io/sdk:test`.
 
 ### After Prisma schema changes

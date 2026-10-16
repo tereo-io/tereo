@@ -116,7 +116,7 @@ npm run dev                                   # http://localhost:4000, calling c
 
 `docker compose up` builds the image from source — the UI included — runs `migrate` (migrations +
 seed) and then core, with the UI at http://localhost:4001. `docker/test/run.sh` runs the suite in
-an isolated stack, against a fixture UI build. Neither needs a `.env`.
+isolated stacks, one per shard (`TEST_SHARDS`, default 4), against a fixture UI build. Neither needs a `.env`.
 
 **URL layout**: core's own API is under `/v1` (`routes/v1/`); `/oauth`, `/.well-known`, `/health`
 and `/ws` stay at the root. The admin UI takes every other path — `RESERVED_PREFIXES` in
