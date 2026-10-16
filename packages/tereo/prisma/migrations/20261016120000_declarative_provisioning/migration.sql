@@ -8,6 +8,9 @@ ADD COLUMN     "provisioned" BOOLEAN NOT NULL DEFAULT false,
 ADD COLUMN     "provisioning_key" VARCHAR(300),
 ALTER COLUMN "organization_id" DROP NOT NULL;
 
+-- AlterTable
+ALTER TABLE "core"."services" DROP COLUMN "provisioned_access";
+
 -- CreateIndex
 CREATE UNIQUE INDEX "webhook_endpoints_provisioning_key_key" ON "webhooks"."webhook_endpoints"("provisioning_key");
 
@@ -21,3 +24,14 @@ ALTER TABLE "webhooks"."webhook_endpoints" ADD CONSTRAINT "webhook_endpoints_own
 ALTER TABLE "webhooks"."webhook_endpoints"
   ADD CONSTRAINT "webhook_endpoints_org_or_owner"
   CHECK ("organization_id" IS NOT NULL OR "owner_service_id" IS NOT NULL);
+
+-- Requests left from registration that nobody decided; provisioning
+-- approves what it lists.
+DELETE FROM "core"."service_access"
+WHERE "status" = 'pending' AND "decided_at" IS NULL;
+
+-- Approved access a role's growth reopened kept its role assignment, which
+-- deleting the row would cascade to; it is approved again, and the next
+-- provisioning apply brings it up to what the role grants.
+UPDATE "core"."service_access" SET "status" = 'approved'
+WHERE "status" = 'pending';
