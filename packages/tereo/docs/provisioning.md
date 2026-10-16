@@ -48,6 +48,48 @@ documents for clients and roles of its own.
 
 ### `service`
 
+A complete example set of three files. `customer.json` and `product.json` are service documents;
+`deploy.json` is a deploy's own, with a login client and a custom role. The product service gets
+the customer service's `customer_reader` role, which lets it read `customer.created`, the event its
+webhook subscribes to.
+
+`customer.json`:
+
+```json
+{
+  "version": "2.1.0",
+  "service": {
+    "slug": "customer-service",
+    "name": "Customer",
+    "secretFrom": "CUSTOMER_CLIENT_SECRET",
+    "permissions": [
+      {
+        "name": "customer.customers.read",
+        "displayName": "Read customers",
+        "description": "List and read customers",
+        "orgAssignable": true
+      }
+    ],
+    "systemRoles": [
+      {
+        "name": "customer_reader",
+        "displayName": "Customer reader",
+        "permissions": ["customer.customers.read"]
+      }
+    ],
+    "eventTypes": [
+      {
+        "eventType": "customer.created",
+        "description": "Customer created",
+        "readPermission": "customer.customers.read"
+      }
+    ]
+  }
+}
+```
+
+`product.json`:
+
 ```json
 {
   "version": "1.4.0",
@@ -59,7 +101,7 @@ documents for clients and roles of its own.
     "secretFrom": "PRODUCT_CLIENT_SECRET",
     "access": {
       "roles": ["file_user", "customer-service/customer_reader"],
-      "audiences": ["pricing-service"]
+      "audiences": ["customer-service"]
     },
     "permissions": [
       {
@@ -86,15 +128,23 @@ documents for clients and roles of its own.
     ],
     "webhooks": [
       {
-        "key": "org-events",
+        "key": "customer-events",
         "url": "http://product.shop.svc.cluster.local/webhooks/core",
-        "events": ["auth.organization.created", "product.item.created"],
+        "events": ["customer.created"],
         "secretFrom": "PRODUCT_WEBHOOK_SECRET",
         "organizations": "all",
-        "description": "Core events for the product service"
+        "description": "Customer events for the product service"
       }
     ]
-  },
+  }
+}
+```
+
+`deploy.json`:
+
+```json
+{
+  "version": "1.0.0",
   "clients": [
     {
       "clientId": "product-admin",
@@ -111,14 +161,13 @@ documents for clients and roles of its own.
       "name": "support",
       "displayName": "Support",
       "orgAssignable": false,
-      "permissions": ["organizations.support-access", "product.items.read"]
+      "permissions": ["users.read", "customer.customers.read", "product.items.read"]
     }
   ]
 }
 ```
 
-(`clients` and `roles` are shown here for completeness; a service's own document usually holds
-only `version` and `service`.)
+A service's own document usually holds only `version` and `service`.
 
 | Field | Rule |
 |-------|------|
@@ -249,9 +298,9 @@ created from its `key` (`<service slug>:<key>`, so reapplying is idempotent).
 ## Secrets
 
 A document never holds a secret. `secretFrom` names an environment variable of the core process, and
-core reads the value from there. The same goes for webhook secrets. Under Helm that means the variable must be a key of
-`secrets.existingSecret` (or of the Secret `secrets.externalSecret` builds), or come from
-`extraEnvFrom`; core's pods get every key of those as environment variables.
+core reads the value from there. The same goes for webhook secrets. Under Helm that means the
+variable must be a key of `secrets.existingSecret` (or of the Secret `secrets.externalSecret`
+builds), or come from `extraEnvFrom`; core's pods get every key of those as environment variables.
 
 A secret is `tereo_sk_` followed by 43 base64url characters (32 random bytes). Generate one with:
 
