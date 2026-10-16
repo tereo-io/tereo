@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import dns from "dns/promises";
 import {
   BlockedAddressError,
   assertExternalTargetSafe,
@@ -226,6 +227,41 @@ describe("allowPrivateHost", () => {
         allowPrivateHost: "localhost",
       })
     ).rejects.toBeInstanceOf(BlockedAddressError);
+  });
+
+  describe("a named host's DNS answers", () => {
+    const resolveTo = (...addresses: string[]) =>
+      vi.spyOn(dns, "lookup").mockResolvedValue(
+        addresses.map((address) => ({
+          address,
+          family: address.includes(":") ? 6 : 4,
+        })) as never
+      );
+    const deliver = () =>
+      assertExternalTargetSafe("http://svc.internal:8080/x", {
+        allowPrivateHost: "svc.internal",
+      });
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it.each(["127.0.0.1", "169.254.169.254", "::ffff:127.0.0.1"])(
+      "refuses one resolving to %s",
+      async (address) => {
+        resolveTo(address);
+        await expect(deliver()).rejects.toBeInstanceOf(BlockedAddressError);
+      }
+    );
+
+    it("refuses mixed records with one loopback address", async () => {
+      resolveTo("10.35.2.2", "127.0.0.1");
+      await expect(deliver()).rejects.toBeInstanceOf(BlockedAddressError);
+    });
+
+    it("accepts a private address", async () => {
+      resolveTo("10.35.2.2");
+      const agent = await deliver();
+      await agent.close();
+    });
   });
 
   it("lets the named host pass registration as a private literal, nothing else", () => {
