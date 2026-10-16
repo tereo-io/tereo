@@ -622,11 +622,16 @@ const applyIntegration = async (
 };
 
 /**
- * The role a provisioned integration names: a custom role, core's, or
- * `<slug>/<name>` a service's system role. Validation checked the names
- * against the set; the database is checked here.
+ * The role a provisioned integration names: `<slug>/<name>` a service's
+ * system role; a bare name the set's custom role when the set declares one,
+ * else core's (never a custom role an admin made). Validation checked the
+ * names against the set; the database is checked here.
  */
-const resolveIntegrationRole = async (tx: Tx, target: string) => {
+const resolveIntegrationRole = async (
+  tx: Tx,
+  target: string,
+  setRoleNames: Set<string>
+) => {
   const slash = target.indexOf("/");
   const live = { archivedAt: null, retiredAt: null };
   if (slash !== -1) {
@@ -639,16 +644,12 @@ const resolveIntegrationRole = async (tx: Tx, target: string) => {
       select: { id: true },
     });
   }
-  return (
-    (await tx.role.findFirst({
-      where: { name: target, serviceId: null, ...live },
-      select: { id: true },
-    })) ??
-    (await tx.role.findFirst({
-      where: { name: target, serviceId: CORE_SERVICE_ID, ...live },
-      select: { id: true },
-    }))
-  );
+  return tx.role.findFirst({
+    where: setRoleNames.has(target)
+      ? { name: target, serviceId: null, provisioned: true, ...live }
+      : { name: target, serviceId: CORE_SERVICE_ID, ...live },
+    select: { id: true },
+  });
 };
 
 /** Roles and audiences, once the roles and services they name exist. */
@@ -658,6 +659,7 @@ const applyIntegrationsAccess = async (
   result: ProvisioningResult
 ): Promise<string[]> => {
   const problems: string[] = [];
+  const setRoleNames = new Set(p.roles.map(({ role }) => role.name));
   for (const from of p.integrations) {
     const spec = from.integration;
     const label = integrationLabel(from);
@@ -671,7 +673,7 @@ const applyIntegrationsAccess = async (
     const roleIds: string[] = [];
     const missing: string[] = [];
     for (const name of sortedUnique(spec.roles)) {
-      const role = await resolveIntegrationRole(tx, name);
+      const role = await resolveIntegrationRole(tx, name, setRoleNames);
       if (role) roleIds.push(role.id);
       else missing.push(name);
     }

@@ -232,6 +232,32 @@ describe("provisioned integrations", () => {
     expect(claims.permissions).toContain("users.read");
   });
 
+  it("resolves a core role's name to core's role, never an admin-made custom role", async () => {
+    const permission = await prisma.permission.findUniqueOrThrow({
+      where: { name: "webhooks.read" },
+    });
+    await prisma.role.create({
+      data: {
+        name: "user_resolver",
+        displayName: "Admin-made lookalike",
+        rolePermissions: { create: [{ permissionId: permission.id }] },
+      },
+    });
+    try {
+      const { plainSecret, ...integration } = integrationSpec({
+        roles: ["user_resolver"],
+      });
+      await applyProvisioning({
+        documents: [doc({ integrations: [integration] })],
+      });
+      const claims = await tokenClaims(integration.clientId, plainSecret);
+      expect(claims.permissions).toContain("users.read");
+      expect(claims.permissions).not.toContain("webhooks.read");
+    } finally {
+      await removeRoles(["user_resolver"]);
+    }
+  });
+
   it("changes roles on reapply, and marks a dropped integration unprovisioned then deactivates it", async () => {
     const { plainSecret, ...integration } = integrationSpec({
       roles: ["user_resolver"],
