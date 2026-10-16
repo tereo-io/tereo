@@ -256,7 +256,8 @@ apply it once. A set that has not changed writes nothing and audits nothing.
 3. **Custom roles**: created or updated, their permission set replaced.
 4. **Access**: every `access` entry becomes an approved access row, decided by the system user.
    **Access follows the role**: an entry for another service's role grants whatever the role holds
-   now, so when its service adds a permission to the role, the next apply extends the holder.
+   now, so when its service adds a permission to the role, the next apply extends the holder; when
+   it removes one, the holder is narrowed and its tokens, which carry the permission, are revoked.
    There is no approval step and nothing waits `pending`.
    - Access **removed from the file is revoked** at that apply (the role assignment goes, the
      service's tokens are revoked); listed again later, it is granted again.
@@ -386,7 +387,9 @@ npm run cli -- provision [--path <path>] [--dry-run]
 npm run cli -- provisioning-schema
 ```
 
-- `provision` loads, validates and applies `--path` or `PROVISIONING_PATH`, as start does, and prints
+- `provision` registers core's own declaration first, as start does, so documents may use what this
+  release of core declares before any of its pods has started. It then loads, validates and applies
+  `--path` or `PROVISIONING_PATH`, and prints
   what changed as JSON (`created`, `updated`, `rotated`, `unprovisioned`, `declared`, `access`,
   `roles`). It needs core's environment: the database, `CORE_KEK` (or stored keys), the
   `secretFrom` variables and `REDIS_URL`, through which it delivers live permission pushes to
@@ -394,7 +397,7 @@ npm run cli -- provisioning-schema
   so and exits 0.
 - `--dry-run` validates and checks against the database, then rolls back, printing what would
   change. It writes nothing to the provisioned state. On a never-started database it can still
-  create the rows `loadKeys()` and the default organization need.
+  create the rows `loadKeys()` and the default organization need, and registers core's declaration.
 - `provisioning-schema` prints the JSON Schema.
 
 Run `provision --dry-run` in a pipeline before rolling out, to catch a bad set before core refuses
@@ -472,4 +475,9 @@ From service registration:
    client and account that declares nothing). List every role and audience the service needs in
    `access`: a request still `pending` from a registration is deleted by the migration.
 4. The admin UI's Access Requests page and the `core.service.access-requested` event type are gone.
+5. The migration adopts every service that registered a declaration on 0.2.0: it becomes
+   provisioned. Add each one to the folder with the same `slug`, `namespace` and `clientId`, or
+   the first apply that leaves it out starts its retirement, and it is deactivated
+   `REGISTRY_RETIREMENT_GRACE_HOURS` later. A service an admin created that never registered
+   stays admin-managed.
 
