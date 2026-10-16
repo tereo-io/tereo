@@ -45,7 +45,7 @@ info:
 
     ### Webhooks
     - **Webhook endpoint management** - Register, update, pause, archive, and delete webhook endpoints per organization
-    - **Event type registry** - Read-only view of the event types each service declares at boot
+    - **Event type registry** - Read-only view of the event types each service declares (core in code, app services in provisioning documents)
     - **Asynchronous event delivery** - BullMQ-powered delivery with up to 10 attempts and exponential backoff
     - **Delivery tracking** - Full visibility into delivery status, HTTP responses, and error details
     - **Signing secrets** - HMAC signing secrets for payload verification with secret rotation support
@@ -881,7 +881,7 @@ tags:
   - name: Webhook Deliveries
     description: Webhook delivery tracking and inspection
   - name: Event Types
-    description: The event type registry (read-only; services declare their event types at boot)
+    description: The event type registry (read-only; services declare their event types, core in code and app services in provisioning documents)
   - name: Events
     description: Event emission to webhook endpoints
   - name: Webhook Events

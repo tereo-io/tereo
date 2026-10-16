@@ -27,9 +27,9 @@ export const ServiceCredentialsDisplay = ({
       value={<SecretDisplay value={env.CORE_URL} />}
     />
     <p className="v-help-text">
-      Configure the service with these three variables. On every start it
-      registers what it owns with <code>POST /registry/declaration</code>; any
-      roles or audiences it requests then wait for approval on its page here.
+      Configure the service with these three variables. A service added here
+      gets credentials only; app services that own permissions, roles, buckets
+      or event types are declared in provisioning documents.
     </p>
   </Col>
 );

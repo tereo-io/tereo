@@ -52,7 +52,7 @@ openapi/
 │   └── notifications/      # parameters, responses, schemas
 └── paths/
     ├── auth/               # health, well-known, oauth, oauth-upstream, oauth-org-select, account,
-    │   │                   #   account-identities, setup, registry, and admin:
+    │   │                   #   account-identities, setup, and admin:
     │   └── admin/          #   clients, identity-providers, organizations, permissions, roles, services,
     │                       #   settings, signing-keys, users, user-identities
     ├── files/              # buckets, lifecycle, objects, multipart, archives, permissions, shares,

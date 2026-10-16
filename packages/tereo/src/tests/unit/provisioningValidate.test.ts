@@ -493,6 +493,46 @@ describe("validateSet", () => {
     expect(withAccess(["tenant_resolver"])).toEqual([]);
   });
 
+  it("refuses a system role granting another service's permission", () => {
+    const problems = validate(
+      doc("a.json", {
+        service: alpha({
+          systemRoles: [
+            {
+              name: "alpha_sneaky",
+              displayName: "Sneaky",
+              description: "",
+              permissions: ["alpha.items.read", "beta.items.read"],
+            },
+          ],
+        }),
+      }),
+      doc("b.json", { service: beta() })
+    );
+    expect(problems).toContain(
+      'a.json: services[alpha-service]: system role "alpha_sneaky" grants permissions this declaration does not declare: beta.items.read'
+    );
+  });
+
+  it("refuses an event type read with a permission nobody declares", () => {
+    const problems = validate(
+      doc("a.json", {
+        service: alpha({
+          eventTypes: [
+            {
+              eventType: "alpha.item.created",
+              description: "",
+              readPermission: "nobody.read",
+            },
+          ],
+        }),
+      })
+    );
+    expect(problems).toContain(
+      "a.json: services[alpha-service]: event types read with a permission neither this declaration nor core declares: alpha.item.created (nobody.read)"
+    );
+  });
+
   it("passes declaration rules through, prefixed with the file", () => {
     const problems = validate(
       doc("a.json", {
