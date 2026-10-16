@@ -22,17 +22,18 @@ Read [README.md](README.md) first; its *Current state* section lists what is don
 
 ## How app services fit in
 
-- App services **register** their permissions, system roles, buckets and event types at boot, under
-  their namespace; requested access waits for an admin; dropped items retire (`utils/registry.ts`,
-  [docs/registry.md](packages/tereo/docs/registry.md)).
-- A deploy can declare services and login clients in a **provisioning file** (`PROVISIONING_PATH`,
-  `utils/provisioning/`, [docs/provisioning.md](packages/tereo/docs/provisioning.md)): reconciled
-  at every start, all-or-nothing, secrets by env-var name; its rows are `provisioned` and read-only
+- App services do not register. A deploy declares them in **provisioning documents**: a folder of JSON
+  (`PROVISIONING_PATH`, `utils/provisioning/`, [docs/provisioning.md](packages/tereo/docs/provisioning.md)),
+  each with a `version` and a `service` (permissions, system roles, buckets, event types, `access`,
+  webhooks), `clients` and custom `roles`. Core validates the whole set across documents and applies
+  it in one transaction at every start and with `npm run cli -- provision`; all-or-nothing, secrets
+  by env-var name, access follows the role, dropped items retire
+  ([docs/registry.md](packages/tereo/docs/registry.md)). Its rows are `provisioned` and read-only
   through the admin API (`409 managed_by_provisioning`).
 - First launch: core generates its keys into `core.secrets` and logs a setup token (or accepts `SETUP_TOKEN`) until
   `POST /v1/setup` creates the first admin, through the admin UI's setup screen.
 - App services use **one SDK, `@tereo-io/sdk`** (`packages/tereo-sdk`): `createCoreClient` over one set
-  of credentials, `register()` at boot, and `core.outbox` for audit entries and events in the app's
+  of credentials, the provisioning document types, and `core.outbox` for audit entries and events in the app's
   own transactions.
 
 
@@ -46,7 +47,7 @@ One ordinary package, shared by every area:
 | `src/env.ts` | The one env schema. `src/preload.ts` must be the first import of every entry point |
 | `src/telemetry/` | OpenTelemetry, loaded with `--import` before the app (see `docs/telemetry.md`) |
 | `src/definitions/` | Core's own declaration (`CORE_DECLARATION`: permissions, system roles, buckets, event types — registered on every start), its service row and reserved namespaces, default org, system user |
-| `src/routes/` | Mirrors the URL. `index.ts` is the root: `health/`, `oauth/` and `well-known/` at the root, core's own API under `v1/` (`account/`, `admin/`, `setup/`, `files/`, `webhooks/`, `notifications/`, `audit/`, `registry/`), and last the admin UI's build, served at `/` |
+| `src/routes/` | Mirrors the URL. `index.ts` is the root: `health/`, `oauth/` and `well-known/` at the root, core's own API under `v1/` (`account/`, `admin/`, `setup/`, `files/`, `webhooks/`, `notifications/`, `audit/`), and last the admin UI's build, served at `/` |
 | `src/middleware/`, `src/utils/`, `src/utils/db/`, `src/jobs/` | Shared. `db` is one object across all tables |
 | `src/websocket/` | socket.io on `/ws` (Redis adapter): pushes permission changes to signed-in users |
 | `src/cli/` | Operator commands, `npm run cli -- <command>` (e.g. `rewrap-master-key`) |
@@ -132,8 +133,8 @@ only a warning when the source is missing. The page is lazy-loaded; Redoc stays 
 
 **Keys** come from env if set, otherwise from `core.secrets`, generated on first start —
 `loadKeys()` (`utils/keys.ts`) must run before anything signs, verifies or decrypts. The seed creates
-no person; the first admin comes from setup (`utils/setup.ts`). App services are added with
-`POST /v1/admin/services` and register with `POST /v1/registry/declaration`.
+no person; the first admin comes from setup (`utils/setup.ts`). App services come from
+provisioning documents (nothing registers over HTTP); `POST /v1/admin/services` makes one that declares nothing.
 
 `@tereo-io/sdk` depends on the published `@dianemo/core` `^2.0.0`. Nothing in `tereo`
 depends on it.

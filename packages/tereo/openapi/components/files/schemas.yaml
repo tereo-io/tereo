@@ -180,7 +180,7 @@ Bucket:
       $ref: '../schemas.yaml#/UserRef'
     serviceId:
       description: |
-        The service that declared the bucket at registration; null for a bucket a
+        The service that declared the bucket in its provisioning document; null for a bucket a
         user created. A declared bucket cannot be deleted and its description is
         set by the service; admins may tune its other settings and grants.
       type: [string, 'null']

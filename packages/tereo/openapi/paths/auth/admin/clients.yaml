@@ -217,7 +217,7 @@
         description: Client not found
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes`, `clientType`, `consentRequired` or `audience`
+        description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes`, `clientType`, `consentRequired` or `audience`
       '422':
         $ref: '../../../components/auth/responses.yaml#/UnprocessableEntityResponse'
         description: An `audience` slug that names core or no service (`invalid_audience`)
@@ -266,7 +266,7 @@
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The client belongs to a service (its `service` is set; manage it under /v1/admin/services), it is declared in the provisioning file (`managed_by_provisioning`), or it is the admin UI's login client
+        description: The client belongs to a service (its `service` is set; manage it under /v1/admin/services), it is declared in the provisioning documents (`managed_by_provisioning`), or it is the admin UI's login client
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -319,7 +319,7 @@
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`)
+        description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`)
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':

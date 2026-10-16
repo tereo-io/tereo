@@ -5263,7 +5263,7 @@ paths:
           description: Client not found
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes`, `clientType`, `consentRequired` or `audience`
+          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes`, `clientType`, `consentRequired` or `audience`
         '422':
           $ref: '#/components/responses/UnprocessableEntityResponse'
           description: An `audience` slug that names core or no service (`invalid_audience`)
@@ -5313,7 +5313,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The client belongs to a service (its `service` is set; manage it under /v1/admin/services), it is declared in the provisioning file (`managed_by_provisioning`), or it is the admin UI's login client
+          description: The client belongs to a service (its `service` is set; manage it under /v1/admin/services), it is declared in the provisioning documents (`managed_by_provisioning`), or it is the admin UI's login client
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5367,7 +5367,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`)
+          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5586,7 +5586,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: A custom role with the new name already exists, or the deactivation would leave no active administrator (`conflict`), or the role is archived (`resource_archived`)
+          description: A custom role with the new name already exists, or the deactivation would leave no active administrator (`conflict`), or the role is archived (`resource_archived`), or the role is declared in the provisioning documents (`managed_by_provisioning`; change it there)
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
@@ -5655,7 +5655,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The deletion would leave no active administrator
+          description: The deletion would leave no active administrator (`conflict`), or the role is declared in the provisioning documents (`managed_by_provisioning`; change it there)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5783,7 +5783,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
           description: Role not found
         '409':
-          description: The role is still active (`conflict`; deactivate it first), or already archived (`already_archived`)
+          description: The role is still active (`conflict`; deactivate it first), or already archived (`already_archived`), or the role is declared in the provisioning documents (`managed_by_provisioning`; change it there)
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
@@ -5852,6 +5852,7 @@ paths:
           description: Role not found
         '409':
           $ref: '#/components/responses/NotArchivedResponse'
+          description: The role is not archived (`not_archived`), or it is declared in the provisioning documents (`managed_by_provisioning`; change it there)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5923,7 +5924,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: The change would leave no active administrator (`conflict`), the role is archived (`resource_archived`; restore it first), or it is assigned within an organization and a permission added is not org-assignable (`role_assigned_in_org`)
+          description: The change would leave no active administrator (`conflict`), the role is archived (`resource_archived`; restore it first), or it is assigned within an organization and a permission added is not org-assignable (`role_assigned_in_org`), or the role is declared in the provisioning documents (`managed_by_provisioning`; change it there)
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
@@ -7689,7 +7690,7 @@ paths:
         Deactivating revokes all of the service's outstanding tokens. Core's
         own row cannot be changed (`403`). A provisioned service is refused
         with `409 managed_by_provisioning`: its name and secret come from the
-        provisioning file.
+        provisioning documents.
 
         An audit log entry is created for this action.
         A `core.service.updated` webhook event is emitted.
@@ -7731,7 +7732,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
+          description: The service is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7783,7 +7784,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
+          description: The service is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7796,7 +7797,7 @@ paths:
       description: |
         Ends the secret overlap now: only the current secret works from here
         on. Core's own row cannot be changed (`403`). Allowed on a provisioned
-        service too: the provisioning file cannot end an overlap, and a leaked
+        service too: the provisioning documents cannot end an overlap, and a leaked
         old secret must not wait it out.
 
         An audit log entry is created for this action.
@@ -8312,7 +8313,7 @@ paths:
         - storageQuotaBytes (max 1 TB), corsConfig, rateLimitConfig (null clears)
 
         **Declared buckets** (`serviceId` set): the declaring service owns the name, existence and
-        description, which its declaration re-applies on registration. A changed `description` is
+        description, which its declaration re-applies when it changes. A changed `description` is
         refused with `409 bucket_declared`; every other field may be tuned by an admin and is kept.
 
         Turning `versioningEnabled` off while historical versions exist returns
@@ -10647,7 +10648,7 @@ paths:
 
         **Notes:**
         - On a declared bucket, the declaring service's own grant cannot be revoked
-          (`409 bucket_declared`): its declaration re-applies it on registration
+          (`409 bucket_declared`): its declaration re-applies it when it changes
         - Revoked permissions are soft-deleted (marked with revokedAt timestamp)
 
         An audit log entry is created and, for a bucket in an organization, a
@@ -11819,7 +11820,9 @@ paths:
         with `400 masked_header_value`. The URL and event types
         are validated as on create, and the caller must be able to read every
         event type the endpoint ends up subscribed to (`403` otherwise).
-        Archived endpoints are rejected (`409 resource_archived`).
+        Archived endpoints are rejected (`409 resource_archived`). A provisioned
+        endpoint refuses every change except a body carrying only `status` (to
+        re-enable it): `409 managed_by_provisioning`.
 
         **Required permissions:**
         - `webhooks.write`
@@ -11875,7 +11878,8 @@ paths:
 
         Returns `409 Conflict` while the endpoint still has delivery history
         referencing it (`ON DELETE RESTRICT`); it becomes deletable once retention
-        purges those delivery rows.
+        purges those delivery rows. A provisioned endpoint is refused with
+        `409 managed_by_provisioning`.
 
         **Required permissions:**
         - `webhooks.delete`
@@ -11916,7 +11920,8 @@ paths:
         list (pass `filter[archived]=true` or `includeArchived=true` to see them).
         Already archived is `409 already_archived`. Archiving is independent of
         `status` and can be applied from any status. Reversible via
-        `POST /v1/webhooks/webhooks/{id}/restore`.
+        `POST /v1/webhooks/webhooks/{id}/restore`. A provisioned endpoint is
+        refused with `409 managed_by_provisioning`.
 
         **Required permissions:**
         - `webhooks.archive`
@@ -12000,6 +12005,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '409':
           $ref: '#/components/responses/NotArchivedResponse'
+          description: The endpoint is not archived (`not_archived`), or it is provisioned (`managed_by_provisioning`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -12022,7 +12028,9 @@ paths:
         keeps only the secret just replaced. End the overlap early with
         `POST /v1/webhooks/webhooks/{id}/revoke-previous-secret`. The previous secret is
         never returned. Archived endpoints cannot be rotated
-        (`409 resource_archived`). No webhook event is emitted.
+        (`409 resource_archived`). A provisioned endpoint's secret comes from its
+        document's environment variable: `409 managed_by_provisioning`. No
+        webhook event is emitted.
 
         **Required permissions:**
         - `webhooks.admin`
@@ -12072,8 +12080,8 @@ paths:
         Ends a rotation overlap early: the previous signing secret stops signing
         deliveries at once, and only the current secret signs from then on.
         Succeeds when there is no overlap (still writing the audit entry).
-        Archived endpoints are rejected (`409 resource_archived`). No webhook
-        event is emitted.
+        Archived endpoints are rejected (`409 resource_archived`), and provisioned
+        ones too (`409 managed_by_provisioning`). No webhook event is emitted.
 
         **Required permissions:**
         - `webhooks.admin`
@@ -18827,7 +18835,9 @@ components:
         delete), `already_archived` when archiving an archived endpoint,
         `resource_archived` when the endpoint is archived and must be restored
         first, `idempotency_request_in_progress`
-        when an event with the same idempotency key is still being processed.
+        when an event with the same idempotency key is still being processed,
+        `managed_by_provisioning` when the endpoint is declared in a service's
+        provisioning document and the change must be made there.
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -18848,6 +18858,7 @@ components:
                   - already_archived
                   - resource_archived
                   - idempotency_request_in_progress
+                  - managed_by_provisioning
               error_description:
                 description: A human-readable explanation of the error
                 type: string
@@ -20967,7 +20978,7 @@ components:
         provisioned:
           type: boolean
           description: |
-            True for a client declared in the provisioning file. It changes only
+            True for a client declared in the provisioning documents. It changes only
             there: updating, deleting or regenerating its secret here is `409
             managed_by_provisioning`.
         ownerId:
@@ -21231,6 +21242,7 @@ components:
         - serviceId
         - service
         - requires2fa
+        - provisioned
         - retiredAt
         - archivedAt
         - createdAt
@@ -21249,6 +21261,13 @@ components:
             - 'null'
         isActive:
           type: boolean
+        provisioned:
+          type: boolean
+          description: |
+            True for a custom role declared in the provisioning documents. It
+            changes only there: editing, deleting, archiving, restoring or
+            changing its permissions here is `409 managed_by_provisioning`.
+            Assigning it and duplicating it are allowed.
         isSystem:
           type: boolean
           description: True for a system role, declared in code by a service (`serviceId` set); read-only except `requires2fa`.
@@ -21687,7 +21706,7 @@ components:
     Permission:
       type: object
       description: |
-        A permission declared by a service and registered at boot. Read-only to
+        A permission declared by a service in its provisioning document. Read-only to
         admins.
       required:
         - id
@@ -21932,7 +21951,7 @@ components:
         provisioned:
           type: boolean
           description: |
-            True for a service declared in the provisioning file. Only its access
+            True for a service declared in the provisioning documents. Only its access
             and the end of a secret overlap are decided here: updating it or
             regenerating its secret is `409 managed_by_provisioning`.
         clientId:
@@ -22334,7 +22353,7 @@ components:
           items:
             type: string
             format: uuid
-          description: Ids of the service's access requests
+          description: Ids of the service's access rows
     AccessDecisionItem:
       type: object
       required:
@@ -22743,7 +22762,7 @@ components:
           $ref: '#/components/schemas/UserRef'
         serviceId:
           description: |
-            The service that declared the bucket at registration; null for a bucket a
+            The service that declared the bucket in its provisioning document; null for a bucket a
             user created. A declared bucket cannot be deleted and its description is
             set by the service; admins may tune its other settings and grants.
           type:
@@ -24537,13 +24556,57 @@ components:
           examples:
             - 550e8400-e29b-41d4-a716-446655440000
         organizationId:
-          type: string
+          type:
+            - string
+            - 'null'
           format: uuid
           description: |
             Tenant identifier — an `Organization.id` (UUIDv7).
             Bootstrap-time endpoints register under the default organization.
+            `null` for a provisioned endpoint of all organizations, which
+            receives the events of every organization.
           examples:
             - 019dd4c2-e0b3-778e-b8db-a52e61927416
+        provisioned:
+          type: boolean
+          description: |
+            True for an endpoint declared in a service's provisioning document.
+            It changes only there: editing, deleting, archiving, restoring or
+            rotating its secret here is `409 managed_by_provisioning`; a
+            status-only update (to re-enable it) is allowed.
+        ownerServiceId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The service that owns the endpoint; `null` for endpoints made through the API.
+        ownerService:
+          description: The service `ownerServiceId` names; `null` for endpoints made through the API.
+          oneOf:
+            - type: object
+              required:
+                - id
+                - slug
+                - name
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                slug:
+                  type: string
+                name:
+                  type: string
+            - type: 'null'
+        provisioningKey:
+          type:
+            - string
+            - 'null'
+          description: |
+            Identifies the endpoint in its document: `<service slug>:<key>`, plus
+            `:<organization id>` when the document lists organizations. `null`
+            for endpoints made through the API.
+          examples:
+            - product-service:org-events
         url:
           type: string
           format: uri

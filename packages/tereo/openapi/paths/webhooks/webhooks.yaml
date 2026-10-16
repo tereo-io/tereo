@@ -195,7 +195,9 @@
       with `400 masked_header_value`. The URL and event types
       are validated as on create, and the caller must be able to read every
       event type the endpoint ends up subscribed to (`403` otherwise).
-      Archived endpoints are rejected (`409 resource_archived`).
+      Archived endpoints are rejected (`409 resource_archived`). A provisioned
+      endpoint refuses every change except a body carrying only `status` (to
+      re-enable it): `409 managed_by_provisioning`.
 
       **Required permissions:**
       - `webhooks.write`
@@ -252,7 +254,8 @@
 
       Returns `409 Conflict` while the endpoint still has delivery history
       referencing it (`ON DELETE RESTRICT`); it becomes deletable once retention
-      purges those delivery rows.
+      purges those delivery rows. A provisioned endpoint is refused with
+      `409 managed_by_provisioning`.
 
       **Required permissions:**
       - `webhooks.delete`
@@ -294,7 +297,8 @@
       list (pass `filter[archived]=true` or `includeArchived=true` to see them).
       Already archived is `409 already_archived`. Archiving is independent of
       `status` and can be applied from any status. Reversible via
-      `POST /v1/webhooks/webhooks/{id}/restore`.
+      `POST /v1/webhooks/webhooks/{id}/restore`. A provisioned endpoint is
+      refused with `409 managed_by_provisioning`.
 
       **Required permissions:**
       - `webhooks.archive`
@@ -379,6 +383,7 @@
         $ref: '../../components/responses.yaml#/NotFoundResponse'
       '409':
         $ref: '../../components/responses.yaml#/NotArchivedResponse'
+        description: The endpoint is not archived (`not_archived`), or it is provisioned (`managed_by_provisioning`)
       '429':
         $ref: '../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -402,7 +407,9 @@
       keeps only the secret just replaced. End the overlap early with
       `POST /v1/webhooks/webhooks/{id}/revoke-previous-secret`. The previous secret is
       never returned. Archived endpoints cannot be rotated
-      (`409 resource_archived`). No webhook event is emitted.
+      (`409 resource_archived`). A provisioned endpoint's secret comes from its
+      document's environment variable: `409 managed_by_provisioning`. No
+      webhook event is emitted.
 
       **Required permissions:**
       - `webhooks.admin`
@@ -453,8 +460,8 @@
       Ends a rotation overlap early: the previous signing secret stops signing
       deliveries at once, and only the current secret signs from then on.
       Succeeds when there is no overlap (still writing the audit entry).
-      Archived endpoints are rejected (`409 resource_archived`). No webhook
-      event is emitted.
+      Archived endpoints are rejected (`409 resource_archived`), and provisioned
+      ones too (`409 managed_by_provisioning`). No webhook event is emitted.
 
       **Required permissions:**
       - `webhooks.admin`

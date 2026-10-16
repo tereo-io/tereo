@@ -37,7 +37,7 @@ never create permissions or edit system roles.
       `<area>.<resource>.<verb>` (e.g. `auth.organization.created`). `emitTx`
       throws on any event type not listed here
 - [ ] Never declare under a namespace an app service owns — app services declare
-      their own through `POST /v1/registry/declaration` (`docs/registry.md`)
+      their own in provisioning documents (`docs/provisioning.md`)
 
 ## Step 2: Database model (`prisma/schema.prisma`)
 
@@ -72,7 +72,7 @@ never create permissions or edit system roles.
 
 The folder tree mirrors the URL: the protocol endpoints at the root (`oauth/`, `well-known/`,
 wired in `routes/index.ts`); everything else is core's API under `v1/` (`v1/account/`, `v1/admin/`,
-`v1/setup/`, `v1/files/`, `v1/webhooks/`, `v1/audit/`, `v1/registry/`), wired in
+`v1/setup/`, `v1/files/`, `v1/webhooks/`, `v1/audit/`), wired in
 `routes/v1/index.ts`. A new API route goes under `routes/v1/`. Follow the `routes` skill for
 where each file goes and the registration order — `tests/unit/routeLayout.test.ts` enforces the layout.
 
@@ -92,7 +92,7 @@ where each file goes and the registration order — `tests/unit/routeLayout.test
       singular subfolder (`<resource>/index.ts`, `Router({ mergeParams: true })`)
       mounted with `router.use("/:id", …)`; see `routes/v1/admin/services/`
   - `requireAuth` on the parent router (`admin/`, `files/`, `webhooks/`,
-    `audit/` and `registry/` index files already apply it)
+    and `audit/` index files already apply it)
   - `requirePermission("<name>")` on every route
 - [ ] Mount the router in its parent `index.ts`
 - [ ] ESM: `.js` on every relative import, directory imports included

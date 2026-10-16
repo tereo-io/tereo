@@ -2,7 +2,7 @@ import type { Bucket } from "../../api/buckets/types";
 import { Badge } from "@kosmeo-ui/react";
 
 /**
- * "service" for a bucket a service declared at registration, "retired" once
+ * "service" for a bucket a service declared by provisioning, "retired" once
  * that service stops declaring it (read-only).
  */
 const BucketOriginBadges = ({ bucket }: { bucket: Bucket }) => (

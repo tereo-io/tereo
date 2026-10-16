@@ -43,7 +43,7 @@ export interface Bucket {
   /** User id of the creator — a service-account user for declared buckets. */
   createdBy: string;
   creator: UserRef;
-  /** Set when a service declared the bucket at registration. */
+  /** Set when a service declared the bucket in its provisioning document. */
   serviceId: string | null;
   organizationId: string | null;
   /** Null for a bucket in no organization. */

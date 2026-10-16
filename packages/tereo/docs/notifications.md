@@ -24,8 +24,8 @@ All three are global-only.
 `notifications.send` itself, or the global `admin` permission, which covers everything.
 
 An app service sends through the system role `notification_sender`, which holds
-`notifications.send`. It requests the role in `requestedAccess.roles` and an admin approves it
-([registry.md](registry.md)); until then its sends are refused.
+`notifications.send`. Its provisioning document lists the role in `access.roles` ([provisioning](provisioning.md));
+until that is applied, its sends are refused.
 
 ## Channels
 
@@ -204,12 +204,10 @@ It runs the same checks as the API, as the system user, with every bucket readab
 
 ### From an app service
 
-Declare the role at registration, once an admin approves it the app can send:
+List the role in the app's provisioning document, and once it is applied the app can send:
 
-```ts
-await core.register({
-  requestedAccess: { roles: ["notification_sender"] } /* ... */,
-});
+```json
+{ "version": "1.0.0", "service": { "slug": "orders-service", "access": { "roles": ["notification_sender"] } } }
 ```
 
 - `core.notifications.send(input)` calls `POST /v1/notifications` and returns `{ id, status }`.

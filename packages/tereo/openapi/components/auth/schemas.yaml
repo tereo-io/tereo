@@ -1499,7 +1499,7 @@ Client:
     provisioned:
       type: boolean
       description: |
-        True for a client declared in the provisioning file. It changes only
+        True for a client declared in the provisioning documents. It changes only
         there: updating, deleting or regenerating its secret here is `409
         managed_by_provisioning`.
     ownerId:
@@ -1751,6 +1751,7 @@ Role:
     - serviceId
     - service
     - requires2fa
+    - provisioned
     - retiredAt
     - archivedAt
     - createdAt
@@ -1767,6 +1768,13 @@ Role:
       type: [string, 'null']
     isActive:
       type: boolean
+    provisioned:
+      type: boolean
+      description: |
+        True for a custom role declared in the provisioning documents. It
+        changes only there: editing, deleting, archiving, restoring or
+        changing its permissions here is `409 managed_by_provisioning`.
+        Assigning it and duplicating it are allowed.
     isSystem:
       type: boolean
       description: True for a system role, declared in code by a service (`serviceId` set); read-only except `requires2fa`.
@@ -1973,7 +1981,7 @@ PaginatedRolesResponse:
 Permission:
   type: object
   description: |
-    A permission declared by a service and registered at boot. Read-only to
+    A permission declared by a service in its provisioning document. Read-only to
     admins.
   required: [id, name, displayName, description, serviceId, serviceName, orgAssignable, missingSince, retiredAt, createdAt, updatedAt]
   properties:
@@ -2392,7 +2400,7 @@ Service:
     provisioned:
       type: boolean
       description: |
-        True for a service declared in the provisioning file. Only its access
+        True for a service declared in the provisioning documents. Only its access
         and the end of a secret overlap are decided here: updating it or
         regenerating its secret is `409 managed_by_provisioning`.
     clientId:
@@ -2726,7 +2734,7 @@ AccessDecisionRequest:
       items:
         type: string
         format: uuid
-      description: Ids of the service's access requests
+      description: Ids of the service's access rows
 
 AccessDecisionItem:
   type: object

@@ -43,8 +43,7 @@ packages/tereo/
 
 URL → folder: `routes/index.ts` is the root of the tree. It mounts `/health` (`routes/health/`),
 core's own API under `/v1` (`routes/v1/`, composed in `routes/v1/index.ts` with each area's
-body-size limit: `v1/account/`, `v1/admin/`, `v1/setup/`, `v1/files/`, `v1/webhooks/`, `v1/audit/`,
-`v1/registry/`), the protocol endpoints at the root (`routes/oauth/`, `routes/well-known/`), and
+body-size limit: `v1/account/`, `v1/admin/`, `v1/setup/`, `v1/files/`, `v1/webhooks/`, `v1/audit/`), the protocol endpoints at the root (`routes/oauth/`, `routes/well-known/`), and
 last the admin UI, which takes every browser path outside the reserved prefixes in `utils/ui.ts`.
 A new API route goes under `routes/v1/`.
 
@@ -159,7 +158,7 @@ adding or moving a route.
 Core's permissions, system roles, buckets and event types are **code** in `src/definitions/`
 (`CORE_DECLARATION`), registered by `registerCore()` on every start. Removing one there retires it
 after `REGISTRY_RETIREMENT_GRACE_HOURS`. Admins never create permissions or edit system roles. App
-services declare theirs through `POST /v1/registry/declaration` (see `docs/registry.md`).
+services declare theirs in their provisioning documents (see `docs/provisioning.md`, `docs/registry.md`).
 
 ## Audit Entries + Webhook Events (Transactional)
 
@@ -208,7 +207,7 @@ the `outbox` skill.
   preflights → `cors()` → `authRequestLog` → `routes` (`routes/index.ts`) → catch-all
   `NotFoundError` → `errorHandler`.
 - `routes/index.ts`: `/.well-known`, `/health` (DB + Redis probe, 503 `degraded` on failure),
-  `/oauth`, `/v1` (`routes/v1/index.ts`: `/files`, `/webhooks`, `/audit`, `/registry`, `/account`,
+  `/oauth`, `/v1` (`routes/v1/index.ts`: `/files`, `/webhooks`, `/audit`, `/account`,
   `/admin`, `/setup`, each with its body limit — `smallBodyParsers` from
   `middleware/bodyParsers.ts` for the auth ones), then the admin UI.
 - `index.ts` start order: `loadKeys()` (before anything signs, verifies or decrypts) → Redis →

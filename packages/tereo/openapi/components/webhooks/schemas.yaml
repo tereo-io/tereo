@@ -33,13 +33,48 @@ WebhookEndpoint:
       examples:
         - "550e8400-e29b-41d4-a716-446655440000"
     organizationId:
-      type: string
+      type: [string, 'null']
       format: uuid
       description: |
         Tenant identifier — an `Organization.id` (UUIDv7).
         Bootstrap-time endpoints register under the default organization.
+        `null` for a provisioned endpoint of all organizations, which
+        receives the events of every organization.
       examples:
         - "019dd4c2-e0b3-778e-b8db-a52e61927416"
+    provisioned:
+      type: boolean
+      description: |
+        True for an endpoint declared in a service's provisioning document.
+        It changes only there: editing, deleting, archiving, restoring or
+        rotating its secret here is `409 managed_by_provisioning`; a
+        status-only update (to re-enable it) is allowed.
+    ownerServiceId:
+      type: [string, 'null']
+      format: uuid
+      description: The service that owns the endpoint; `null` for endpoints made through the API.
+    ownerService:
+      description: The service `ownerServiceId` names; `null` for endpoints made through the API.
+      oneOf:
+        - type: object
+          required: [id, slug, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            slug:
+              type: string
+            name:
+              type: string
+        - type: 'null'
+    provisioningKey:
+      type: [string, 'null']
+      description: |
+        Identifies the endpoint in its document: `<service slug>:<key>`, plus
+        `:<organization id>` when the document lists organizations. `null`
+        for endpoints made through the API.
+      examples:
+        - "product-service:org-events"
     url:
       type: string
       format: uri

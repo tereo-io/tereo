@@ -1,11 +1,15 @@
-# Services and registration
+# Services and declarations
 
-An app service — a billing service, a reporting service — reaches core with one OAuth client, and tells
-core on every start what it owns. Core does the same for itself, in-process.
+An app service, a billing service or a reporting service, reaches core with one OAuth client. What it
+owns (permissions, roles, buckets, event types), the access it has and the webhooks it receives are
+declared by its [provisioning document](provisioning.md), which core applies at start and from the
+CLI. Nothing registers over HTTP. Core declares its own items in-process.
 
 ## Adding a service
 
-An admin with `services.write` adds it:
+A service normally comes from a [provisioning document](provisioning.md), which also declares what
+it owns. An admin with `services.write` can add one by hand, a service with a client and account that
+declares nothing:
 
 ```http
 POST /v1/admin/services
@@ -30,83 +34,54 @@ POST /v1/admin/services
 - The service gets a confidential client (`client_credentials` only) and a service-account user it
   acts as. `/v1/admin/clients` makes login clients only and refuses to touch a service's client.
 - Configure the service with `CORE_URL`, `CORE_CLIENT_ID`, `CORE_CLIENT_SECRET`.
+- A hand-made service has no permissions, roles, buckets or event types of its own, and no access
+  until an admin approves some (below).
 
 | Route | Permission | Does |
 |-------|------------|------|
-| `GET /v1/admin/services` | `services.read` | List; each row carries `pendingAccessCount` |
-| `GET /v1/admin/services/access` | `services.read` | Access requests across every service, each with its `service` (`id`, `slug`, `name`) — the approval inbox. Filter `status`, `kind`, `serviceId`, `target` (`?filter[status]=pending`); sort `requestedAt` (default, newest first) or `id` |
-| `GET /v1/admin/services/:id` | `services.read` | One service with everything it declared (retired included), its access requests, and `settings` |
+| `GET /v1/admin/services` | `services.read` | List |
+| `GET /v1/admin/services/access` | `services.read` | Access rows across every service, each with its `service` (`id`, `slug`, `name`). Filter `status`, `kind`, `serviceId`, `target` (`?filter[status]=approved`); sort `requestedAt` (default, newest first) or `id` |
+| `GET /v1/admin/services/:id` | `services.read` | One service with everything it declared (retired included), its access, and `settings` |
 | `PATCH /v1/admin/services/:id` `{ name?, isActive? }` | `services.write` | Rename; deactivate (its tokens stop at once) or reactivate |
 | `POST /v1/admin/services/:id/regenerate-secret` | `services.write` | New secret, shown once. The old one keeps working for `SERVICE_SECRET_OVERLAP_HOURS` (24) |
 | `POST /v1/admin/services/:id/revoke-previous-secret` | `services.write` | End that overlap now |
-| `POST /v1/admin/services/:id/access/approve` `{ ids }` | `services.approve` | Grant requested roles and audiences |
+| `POST /v1/admin/services/:id/access/approve` `{ ids }` | `services.approve` | Grant access rows, such as one an admin revoked |
 | `POST /v1/admin/services/:id/access/revoke` `{ ids }` | `services.approve` | Take them away; the service's tokens are revoked |
 
 Services are never deleted. Core's own row is not managed through this API.
 
 Access rows, on the detail and in the list, name who last decided them: `decidedBy` (the user id) plus
-`decider` (`{ id, email, name }`), `decidedByEmail` and `decidedByName`, all `null` until the first
-decision. A request for another service's role also carries `approvedPermissions` and
-`pendingPermissions` ([below](#another-services-role)); both are `null` on other rows. The detail's `settings` states
+`decider` (`{ id, email, name }`), `decidedByEmail` and `decidedByName`. A row for another
+service's role also carries `approvedPermissions`, what the role granted when last decided
+([below](#another-services-role)). The detail's `settings` states
 `secretOverlapHours` (`SERVICE_SECRET_OVERLAP_HOURS`) and `retirementGraceHours`
 (`REGISTRY_RETIREMENT_GRACE_HOURS`) as this deployment has them, so the admin UI can say what a
 regeneration or a dropped item will actually do.
 
-## Registering
+## What a declaration holds
 
-On every start. With [`@tereo-io/sdk`](../../tereo-sdk/README.md) that is
-`core.register(declaration)`, which retries as described below; over plain HTTP, with a token from
-`POST /oauth/token` (`grant_type=client_credentials`):
-
-```jsonc
-POST /v1/registry/declaration
-{
-  "version": "1.4.0",                              // the release's semver
-  "permissions": [{ "name": "product.items.read", "displayName": "Read items", "description": "…",
-                    "orgAssignable": true }],
-  "systemRoles": [{ "name": "product_reader", "displayName": "Product reader",
-                    "permissions": ["product.items.read"] }],
-  "buckets":     [{ "bucketName": "product-images", "policy": "private" }],
-  "eventTypes":  [{ "eventType": "product.item.created", "description": "Item created",
-                    "readPermission": "product.items.read" }],
-  "requestedAccess": {
-    "roles": ["file_user", "webhook_publisher"],   // core's; "<slug>/<name>" for another service's
-    "audiences": ["reporting-service"]                   // services allowed to introspect our tokens
-  }
-}
-```
-
-```jsonc
-// 200
-{ "service": "product-service", "applied": true, "changed": true,
-  "access": [{ "id": "…", "kind": "role", "target": "file_user", "status": "pending" }, …] }
-```
+A service's document carries its declaration (`permissions`, `systemRoles`, `buckets`,
+`eventTypes`), applied when the service is created or the declaration changes:
 
 - **Namespaced.** Permissions and event types are `<namespace>` or `<namespace>.…`; buckets are
-  `<namespace>-…`; system roles are `<namespace>_<name>` (`product_reader`), or the declaration is
-  a `400 invalid_role_name` and nothing is applied. A system role may grant only permissions the
-  same declaration lists, and may not share a name with one of core's (`user_resolver`, which the
-  namespace `user` could spell). An event type's optional `readPermission` must be one the
-  declaration lists or one of core's: a webhook endpoint is sent the event only while its creator
-  holds it ([webhooks.md](webhooks.md)). Anything else is a `422` listing every problem, and nothing
-  is applied.
-- **Versioned.** `version` is required: the release's semver, `MAJOR.MINOR.PATCH` with an optional
-  `-prerelease` (else `400`). Core stores the version it applied beside the hash. A declaration
-  older than that is ignored — `200` with `applied: false`, nothing written, and a warning logged
-  with the service and both versions — so a replica of an earlier release cannot undo a rollout.
-  An equal or newer one is applied (`applied: true`) as below.
+  `<namespace>-…`; system roles are `<namespace>_<name>` (`product_reader`). A system role may grant
+  only permissions the same declaration lists, and may not share a name with one of core's
+  (`user_resolver`, which the namespace `user` could spell). An event type's optional
+  `readPermission` must be one the declaration lists or one of core's: a webhook endpoint is sent
+  the event only while its creator holds it ([webhooks.md](webhooks.md)). A violation is a
+  provisioning problem naming the file, and nothing is applied.
+- **Versioned.** The document's `version` is stored beside the declaration's hash. A lower version
+  than stored is applied with a warning, since the documents are the deploy's intended state
+  ([applying](provisioning.md#applying)).
 - **Idempotent.** The declaration is hashed (order-insensitive; `version` is not part of it).
-  Unchanged since last time: `changed: false`, nothing written but a newer version. Copies starting
-  together apply it once.
+  Unchanged since last time, nothing is written but a newer version.
 - **Org-assignable.** `orgAssignable` (default false) marks a permission a role assigned within an
   organization may grant. Set it only where every use of the permission stays inside the caller's
   organization; an org-scoped role grants nothing else ([auth.md](auth.md#organizations-roles-members-activation)).
-- **What is updated.** Permissions: display text and `orgAssignable`. Event types: display text and `readPermission`. System roles: display text and
-  permissions. Buckets: the description; policy and quota are set only when the bucket is created.
-  The service gets a read/write/delete grant on each, restored whenever a changed declaration is
-  applied (an unchanged one writes nothing; admins can't revoke the grant anyway).
-- **Retry until accepted**, with backoff, and report not-ready meanwhile. A request for a role that
-  does not exist yet (another service has not registered) is a `422` until it does.
+- **What is updated.** Permissions: display text and `orgAssignable`. Event types: display text and
+  `readPermission`. System roles: display text and permissions. Buckets: the description; policy and
+  quota are set only when the bucket is created. The service gets a read/write/delete grant on each,
+  restored whenever a changed declaration is applied (admins can't revoke the grant anyway).
 
 ## Declared buckets
 
@@ -118,36 +93,36 @@ The declaring service owns a bucket's name and existence; admins tune the rest.
 | The service (the bucket's creator) | The same, through its own token |
 | Anyone | Not delete it, retired or not: `409 bucket_declared` |
 
-Two edits are refused with `409 bucket_declared` because the next registration would undo them:
+Two edits are refused with `409 bucket_declared` because the next apply would undo them:
 changing the description, and revoking the service's own grant. Everything else an admin sets is
 kept — the declaration never re-applies it. Bucket responses carry `createdBy`, `serviceId`,
 `serviceName`, `missingSince` and `retiredAt`.
 
-## Access needs approval
+## Access
 
-`requestedAccess` is a request. New items are `pending` until an admin approves them; until then the
-service's calls that need them get `403`. Approving a role assigns it to the service account;
-approving an audience adds it to the client's `audience`, which appears in tokens issued afterwards.
+A service's `access.roles` and `access.audiences` are granted by provisioning, as core's system
+user: there is no request and no approval queue. Granting a role assigns it to the service account;
+an audience is added to the client's `audience`, which appears in tokens issued afterwards. Until
+then the service's calls that need it get `403`.
 
-Requests are additive. Dropping an item from a later declaration leaves its approval in place — a
-rolling deploy alternating old and new declarations must not make access flap. Removing access is
-the admin's `revoke`. A revoked item stays revoked when requested again; an admin can approve it.
+Access removed from the document is revoked at the next apply, and granted again if listed again.
+An admin with `services.approve` can still revoke a row, which stays revoked while the document lists
+it, and approve it again ([provisioning](provisioning.md#applying)).
 
 ### Another service's role
 
-Approving `<slug>/<name>` records the permissions the role grants at that moment
-(`approvedPermissions`), and the service holds only those through it. When the role's own service
-later declares more permissions for it, the request returns to `pending`, naming the additions in
-`pendingPermissions`, and `core.service.access-requested` fires for the consuming service with
-them. The service keeps what was approved meanwhile; the additions grant nothing until an admin
-approves the request again, which records the role's current permissions and requires the approver
-to hold the added ones. A role that loses permissions grants less at once, and if it drops what was
-pending, the request is `approved` again. Revoking clears the record: a later approval starts over.
+`access.roles` may name `<slug>/<name>`, a system role of another service of the set. The row
+records the permissions the role grants (`approvedPermissions`), and the service holds those. Access
+follows the role: when the role's service adds permissions, the next apply extends the holder; a role
+that loses permissions grants less at once. Because every reference is checked across the whole set
+at load, two services can grant each other roles in the same deploy.
 
-Core's own roles are not recorded this way. They change only with core's code, so an approved core
-role grants whatever core's current version gives it.
+A service's account does not hold its own permissions. A webhook on the service's own events
+therefore needs a role in `access.roles` that grants the event's `readPermission`.
 
-Core's roles for app services, requested by their bare name. Only these can be requested; any other core role (`admin`, `platform_admin`, `*_admin`) is refused with `422 invalid_requested_access`, as is any `core/<name>` spelling. Approval checks again: a core role outside this list is never granted to a service (`422 role_not_requestable`). `tenant_resolver` and `user_resolver` are requestable too.
+Core's own roles are requestable by their bare name only; any other core role (`admin`,
+`platform_admin`, `*_admin`) or a `core/<name>` spelling is refused at load. `tenant_resolver` and
+`user_resolver` are requestable too.
 
 | Role | Grants |
 |------|--------|
@@ -156,16 +131,17 @@ Core's roles for app services, requested by their bare name. Only these can be r
 | `audit_writer` | `audit-logs.write` |
 | `notification_sender` | `notifications.send` |
 
+Core's roles change only with core's code, so a granted core role gives whatever core's current
+version gives it.
+
 ## Retirement
 
-An item a declaration stops listing gets `missingSince`; re-declaring clears it. The worker's hourly
+An item a service's document stops declaring gets `missingSince`; declaring it again clears it. The worker's hourly
 `registry-retirement` job retires anything missing for longer than `REGISTRY_RETIREMENT_GRACE_HOURS`
 (24) — long enough for a rolling deploy to finish.
 
-A declaration is applied whole whenever its hash differs from the stored one and its version is not
-older than the stored one. A replica of an older release that restarts after a rollout is therefore
-ignored. Two builds declaring the same version, though, still take turns: give every release that
-changes its declaration a new version.
+A declaration is applied whole whenever its hash differs from the stored one. Give every release
+that changes its declaration a new `version`, so the stored version tells which release applied it.
 
 | Retired | Effect |
 |---------|--------|
@@ -178,18 +154,11 @@ Nothing is deleted. Re-declaring an item brings it back.
 
 ## Provisioned services
 
-A deploy can create services from a file instead of `POST /v1/admin/services`
-([provisioning](provisioning.md)). A provisioned service is read-only through the admin API: rename,
-deactivate and `regenerate-secret` answer `409 managed_by_provisioning`, and its secret is rotated
-by changing the environment variable the file names. `revoke-previous-secret` still works, to end a
-rotation's overlap early. Registration is
-unchanged: the service declares at boot, and its requests are approved or revoked as for any other.
-
-The file can list the roles and audiences the service may have (`access`). A matching request is
-approved at once, as core's system user, but only if it has never been decided. A request that
-returned to `pending` because another service's role gained permissions, and one an admin revoked,
-wait for an admin. A service dropped from the file is deactivated after
-`REGISTRY_RETIREMENT_GRACE_HOURS`, and reactivated if it returns.
+A provisioned service is read-only through the admin API: rename, deactivate and
+`regenerate-secret` answer `409 managed_by_provisioning`, and its secret is rotated by changing the
+environment variable its document names. `access/approve`, `access/revoke` and
+`revoke-previous-secret` still work. A service dropped from the documents is deactivated after
+`REGISTRY_RETIREMENT_GRACE_HOURS`, and reactivated if it returns ([provisioning](provisioning.md#removing-an-entry)).
 
 ## Core
 

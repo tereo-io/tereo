@@ -89,7 +89,7 @@ export const DeclaredItemsSection = ({
     <BorderedSection title="Declared">
       <Col>
         <p className="v-help-text">
-          What the service registered under its namespace. An item a later
+          What the service declared under its namespace. An item a later
           declaration stops listing is marked missing, and retires once it has
           been missing for {graceHours}: a retired permission or role grants
           nothing, a retired event type takes no new events, a retired bucket
@@ -97,7 +97,9 @@ export const DeclaredItemsSection = ({
           brings it back.
         </p>
         {!service.declaredAt && (
-          <p className="v-help-text">This service has not registered yet.</p>
+          <p className="v-help-text">
+            No declaration has been applied for this service yet.
+          </p>
         )}
         <Tabs
           active={tab}

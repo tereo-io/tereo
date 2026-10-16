@@ -20,7 +20,7 @@ configuration is not.
 |---------|-------------|
 | `tereo` | **The service** — auth (OAuth2/OIDC), file storage, webhook delivery and audit logging in one process, port 4001 |
 | `tereo-ui` | The admin UI (Vite + React): auth admin and My Account, file storage, webhooks and the audit log, talking to core directly. Ships in core's image and is served by core at `/`; port 4000 in development |
-| `@tereo-io/sdk` | The SDK app services use to reach core: `createCoreClient` gives `auth`, `files`, `webhooks` and `audit` over the service's one set of credentials. `core.register()` registers its declaration at boot, and `core.outbox` writes audit entries and events in the app's own transactions |
+| `@tereo-io/sdk` | The SDK app services use to reach core: `createCoreClient` gives `auth`, `files`, `webhooks` and `audit` over the service's one set of credentials. its types describe the service's provisioning document, and `core.outbox` writes audit entries and events in the app's own transactions |
 
 ## Getting started
 
@@ -137,16 +137,20 @@ The admin UI's components come from [`@kosmeo-ui/react`](https://github.com/kosm
 ### 4. Add an app service
 
 An app reaches core through [`@tereo-io/sdk`](packages/tereo-sdk/README.md) with its
-own client credentials:
+own client credentials, and what it owns is declared in a JSON provisioning document:
 
-1. In the admin UI, open **Services → Add Service** and give it a name. `Product Service` gets the
-   slug `product-service` and the namespace `product`, which prefixes everything it registers. The
-   client id and secret are shown once. (`POST /v1/admin/services` with `{"name": "Product Service"}`
-   does the same, but needs an admin's bearer token, which only the UI's login flow issues.)
-2. Give the app its environment: `CORE_URL` (core's base URL), `CORE_CLIENT_ID`,
-   `CORE_CLIENT_SECRET` and `REQUEST_HANDLER_KEY` (32+ characters of your own). `LOG_LEVEL`
-   (default `info`) and `SERVICE_NAME` (the label on the SDK's log lines) are optional.
-3. In the app, create the client and register what it owns on every start:
+1. Write the app's document (`version` plus `service`), with a slug such as `product-service` and the
+   namespace `product`, which prefixes everything it declares. List the roles it needs under
+   `access.roles` and name the environment variable holding its client secret in `secretFrom`.
+   The SDK's types let the app's build generate the file from typed TypeScript.
+2. Put it in the folder `PROVISIONING_PATH` points at, give core the secret
+   (`npm run cli -- generate-secret`) under the variable's name, and apply it: restart core, or
+   run `npm run cli -- provision` (`--dry-run` first to check the set).
+3. Give the app its environment: `CORE_URL` (core's base URL), `CORE_CLIENT_ID` (the service's
+   client ID), `CORE_CLIENT_SECRET` (the same secret) and `REQUEST_HANDLER_KEY` (32+ characters of
+   your own). `LOG_LEVEL` (default `info`) and `SERVICE_NAME` (the label on the SDK's log lines) are
+   optional.
+4. In the app, create the client; nothing is registered at boot:
 
    ```ts
    import { createCoreClient } from "@tereo-io/sdk";
@@ -154,19 +158,12 @@ own client credentials:
    // redis: an ioredis client with { maxRetriesPerRequest: null }
    const core = createCoreClient({ service: "product-service", redis }); // reads CORE_URL, CORE_CLIENT_ID, …
    await core.start();
-   await core.register({
-     permissions: [{ name: "product.items.read", displayName: "Read items", orgAssignable: true }],
-     buckets: [{ bucketName: "product-images", policy: "private" }],
-     requestedAccess: { roles: ["file_user", "audit_writer"] },
-   });
    ```
 
-4. Back in **Services**, approve the roles and audiences the app requested. Registration itself
-   succeeds straight away and the SDK logs what is still pending; until it is approved, the calls
-   that need it are refused.
-
-[packages/tereo/docs/registry.md](packages/tereo/docs/registry.md) covers
-registration in full.
+(`POST /v1/admin/services` or **Services → Add Service** in the admin UI still makes a service
+that declares nothing, for integrations.)
+[packages/tereo/docs/provisioning.md](packages/tereo/docs/provisioning.md) covers the documents in
+full, and [registry.md](packages/tereo/docs/registry.md) what a declaration holds.
 
 ### 5. Deploy to production
 
@@ -215,7 +212,7 @@ Notifications (email connections, sending, delivery) are in [packages/tereo/docs
 | `EADDRINUSE` on 4001 | The Docker `core` container and `npm run dev` (or the test suite) both use 4001; stop one |
 | `Port 4000 is already in use` from the UI | Free it, or move the dev server as in step 3 |
 | Lost the setup token | Restart core; it logs a new one while setup is pending. With `SETUP_TOKEN` set, core never logs it: use the value you set |
-| Core exits with `Invalid provisioning file` | It lists every problem, naming the variable or entry; see [provisioning](packages/tereo/docs/provisioning.md) |
+| Core exits with `Invalid provisioning` | It lists every problem, naming the file and the variable or entry; see [provisioning](packages/tereo/docs/provisioning.md) |
 | UI login fails with `Invalid redirect URI` | Core's `UI_BASE_URL` must match where the UI runs (:4000 for `npm run dev`, `:4001` for the built UI); restart core after changing it |
 | `Cannot find module '…/prisma/generated/client/index.js'` | `npx prisma generate` in `packages/tereo` |
 | Core exits with a configuration error | The message names the variable; see [configuration](packages/tereo/docs/configuration.md) |
@@ -236,14 +233,16 @@ are set from `UI_BASE_URL` on every start (in production that one callback repla
 **What works:** one process and one database, with in-process calls between auth, files,
 webhooks, audit and notifications. Every actor and organization column is a foreign key into
 `auth`, and users and organizations are deactivated rather than deleted. `docker compose up` on a
-clean checkout builds, migrates, generates keys and waits for setup. App services are added by an
-admin and register their permissions, roles, buckets and event types at boot; what they ask for
-waits for approval, and what they drop is retired. They reach core through `@tereo-io/sdk` — one
-client, boot-time registration, and a transactional outbox. The admin UI, `tereo-ui`, ships in
+clean checkout builds, migrates, generates keys and waits for setup. App services are
+declared by provisioning documents: permissions, roles, buckets, event types, access and webhook
+subscriptions, applied at start; what a document drops is retired. They reach core through
+`@tereo-io/sdk` — one client, the document types, and a transactional outbox. The admin UI, `tereo-ui`, ships in
 core's image with setup, services, auth admin, files, webhooks, notifications, the audit log and
 API docs.
-A deploy can declare its services and login clients in a [provisioning file](packages/tereo/docs/provisioning.md)
-that core applies at every start, with secrets from the environment and access pre-approved, and
+A deploy declares its services, login clients and custom roles in a folder of JSON
+[provisioning documents](packages/tereo/docs/provisioning.md) that core validates as one set and
+applies at every start and with `npm run cli -- provision`, with secrets from the environment and
+access granted by the documents, and
 `SETUP_TOKEN` lets first-boot setup run unattended. Login clients carry an admin-set `audience` and a
 `consentRequired` flag, and app service secrets share one `tereo_sk_` format.
 CI checks formatting, import order, lint and types, runs the suite in Docker with real users and

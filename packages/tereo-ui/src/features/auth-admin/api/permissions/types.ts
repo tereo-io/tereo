@@ -1,6 +1,6 @@
 /**
  * A permission as core returns it. Permissions are declared in code by the
- * service that owns them and registered at boot — admins only read them.
+ * service that owns them and applied from its provisioning document — admins only read them.
  */
 export interface Permission {
   id: string;

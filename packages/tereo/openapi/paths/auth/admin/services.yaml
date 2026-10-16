@@ -216,7 +216,7 @@
       Deactivating revokes all of the service's outstanding tokens. Core's
       own row cannot be changed (`403`). A provisioned service is refused
       with `409 managed_by_provisioning`: its name and secret come from the
-      provisioning file.
+      provisioning documents.
 
       An audit log entry is created for this action.
       A `core.service.updated` webhook event is emitted.
@@ -257,7 +257,7 @@
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
+        description: The service is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -309,7 +309,7 @@
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
+        description: The service is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -323,7 +323,7 @@
     description: |
       Ends the secret overlap now: only the current secret works from here
       on. Core's own row cannot be changed (`403`). Allowed on a provisioned
-      service too: the provisioning file cannot end an overlap, and a leaked
+      service too: the provisioning documents cannot end an overlap, and a leaked
       old secret must not wait it out.
 
       An audit log entry is created for this action.

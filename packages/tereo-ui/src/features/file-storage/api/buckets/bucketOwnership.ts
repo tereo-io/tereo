@@ -24,7 +24,7 @@ export const canDeleteBucket = (
 ): boolean =>
   !!bucket && !bucket.serviceId && canManageBucket(bucket, userId, isAdmin);
 
-/** The declaring service's own grant, which every registration re-applies. */
+/** The declaring service's own grant, which every changed declaration re-applies. */
 export const isDeclaringServiceGrant = (
   bucket: Bucket | undefined,
   grantUserId: string
@@ -34,6 +34,6 @@ export const isDeclaringServiceGrant = (
 export const isBucketRetired = (bucket: Bucket | undefined): boolean =>
   !!bucket?.retiredAt;
 
-/** A bucket a service declared at registration. */
+/** A bucket a service declared by provisioning. */
 export const isDeclaredBucket = (bucket: Bucket | undefined): boolean =>
   !!bucket?.serviceId;

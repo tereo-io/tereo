@@ -106,8 +106,8 @@ export const ServiceDetail = () => {
       <Col size="lg">
         {isCore && (
           <Alert variant="primary">
-            Core&apos;s own declaration is registered from its code on every
-            start. It is shown here for reference and cannot be changed.
+            Core&apos;s own declaration is applied from its code on every start.
+            It is shown here for reference and cannot be changed.
           </Alert>
         )}
         {service.provisioned && (
