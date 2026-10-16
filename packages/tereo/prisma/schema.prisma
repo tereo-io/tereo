@@ -347,18 +347,21 @@ model Permission {
 // unique per service. A custom role has none: made by an admin, unique by
 // name among custom roles (partial unique index in migration SQL).
 model Role {
-  id           String    @id @default(uuid(7)) @db.Uuid
-  name         String    @db.VarChar(100)
-  displayName  String    @map("display_name") @db.VarChar(255)
-  description  String?   @db.VarChar(500)
-  serviceId    String?   @map("service_id") @db.Uuid
-  isActive     Boolean   @default(true) @map("is_active")
-  requires2fa  Boolean   @default(false) @map("requires_2fa")
-  missingSince DateTime? @map("missing_since")
-  retiredAt    DateTime? @map("retired_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  archivedAt   DateTime? @map("archived_at")
+  id              String    @id @default(uuid(7)) @db.Uuid
+  name            String    @db.VarChar(100)
+  displayName     String    @map("display_name") @db.VarChar(255)
+  description     String?   @db.VarChar(500)
+  serviceId       String?   @map("service_id") @db.Uuid
+  isActive        Boolean   @default(true) @map("is_active")
+  requires2fa     Boolean   @default(false) @map("requires_2fa")
+  missingSince    DateTime? @map("missing_since")
+  retiredAt       DateTime? @map("retired_at")
+  // Declared in a provisioning document; read-only through the admin API.
+  provisioned     Boolean   @default(false)
+  unprovisionedAt DateTime? @map("unprovisioned_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  archivedAt      DateTime? @map("archived_at")
 
   rolePermissions             RolePermission[]
   userRoles                   UserRole[]
@@ -1289,7 +1292,11 @@ enum WebhookDeliveryStatus {
 
 model WebhookEndpoint {
   id                      String                @id @default(uuid(7)) @db.Uuid
-  organizationId          String                @map("organization_id") @db.Uuid
+  // Null for an endpoint owned by a service (ownerServiceId); one of the two is set.
+  organizationId          String?               @map("organization_id") @db.Uuid
+  ownerServiceId          String?               @map("owner_service_id") @db.Uuid
+  provisioned             Boolean               @default(false)
+  provisioningKey         String?               @unique @map("provisioning_key") @db.VarChar(300)
   url                     String                @db.VarChar(2048)
   description             String?
   // Sealed under the KEK (utils/webhookSecrets.ts); a plaintext value from
@@ -1312,9 +1319,11 @@ model WebhookEndpoint {
   deliveries    WebhookDelivery[]
   subscriptions WebhookEndpointEventType[]
   creator       User                       @relation("WebhookEndpointCreator", fields: [createdBy], references: [id], onDelete: Restrict)
-  organization  Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization  Organization?              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  ownerService  Service?                   @relation(fields: [ownerServiceId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, status])
+  @@index([ownerServiceId])
   @@index([archivedAt])
   @@map("webhook_endpoints")
   @@schema("webhooks")
@@ -1532,13 +1541,14 @@ model Service {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  client      OAuthClient?    @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  creator     User            @relation("ServiceCreator", fields: [createdBy], references: [id], onDelete: Restrict)
-  permissions Permission[]
-  roles       Role[]
-  buckets     Bucket[]
-  eventTypes  EventType[]
-  access      ServiceAccess[]
+  client           OAuthClient?      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  creator          User              @relation("ServiceCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  permissions      Permission[]
+  roles            Role[]
+  buckets          Bucket[]
+  eventTypes       EventType[]
+  access           ServiceAccess[]
+  webhookEndpoints WebhookEndpoint[]
 
   @@map("services")
   @@schema("core")
