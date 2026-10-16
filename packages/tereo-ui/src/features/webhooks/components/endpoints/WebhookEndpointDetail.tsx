@@ -1,12 +1,14 @@
 import ArchiveRestoreWebhookEndpointButton from "./buttons/ArchiveRestoreWebhookEndpointButton";
+import useUpdateWebhookEndpoint from "../../api/endpoints/useUpdateWebhookEndpoint";
 import useWebhookEndpointStats from "../../api/endpoints/useWebhookEndpointStats";
 import DeleteWebhookEndpointButton from "./buttons/DeleteWebhookEndpointButton";
 import RevokePreviousSecretButton from "./buttons/RevokePreviousSecretButton";
 import TestWebhookEndpointButton from "./buttons/TestWebhookEndpointButton";
 import EditWebhookEndpointButton from "./buttons/EditWebhookEndpointButton";
 import useWebhookEndpoint from "../../api/endpoints/useWebhookEndpoint";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import RotateSecretButton from "./buttons/RotateSecretButton";
-import { useParams, useSearchParams } from "react-router-dom";
 import { DeliveryList } from "../deliveries/DeliveryList";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import type { WebhookEndpoint } from "../../api/types";
@@ -19,6 +21,7 @@ import "../styles.css";
 import {
   Alert,
   Badge,
+  Button,
   Card,
   Centered,
   Col,
@@ -41,6 +44,7 @@ export const WebhookEndpointDetail = () => {
   const { endpointId } = useParams<{ endpointId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: endpoint, isLoading } = useWebhookEndpoint(endpointId ?? "");
+  const updateMutation = useUpdateWebhookEndpoint();
 
   const tabFromUrl = searchParams.get("tab");
   const activeTab: Tab = isValidTab(tabFromUrl) ? tabFromUrl : "details";
@@ -80,27 +84,66 @@ export const WebhookEndpointDetail = () => {
       <PageHeader
         title={endpoint.description || "Webhook Endpoint"}
         subtitle={endpoint.url}
-        badges={<EndpointStatusBadges endpoint={endpoint} />}
+        badges={
+          <>
+            <EndpointStatusBadges endpoint={endpoint} />
+            {endpoint.provisioned && <ProvisionedBadge />}
+          </>
+        }
         actions={[
           <TestWebhookEndpointButton
             key="test"
             endpoint={endpoint}
             onSent={() => setActiveTab("deliveries")}
           />,
-          <RotateSecretButton key="rotate" endpoint={endpoint} />,
-          <RevokePreviousSecretButton
-            key="revoke-previous"
-            endpoint={endpoint}
-          />,
-          <EditWebhookEndpointButton key="edit" endpoint={endpoint} />,
-          <ArchiveRestoreWebhookEndpointButton
-            key="archive"
-            endpoint={endpoint}
-            navigateOnArchive
-          />,
-          <DeleteWebhookEndpointButton key="delete" endpoint={endpoint} />,
+          ...(endpoint.provisioned
+            ? endpoint.status === "DISABLED" &&
+              !endpoint.archivedAt &&
+              hasPermission("webhooks.write")
+              ? [
+                  <Button
+                    key="re-enable"
+                    variant="secondary"
+                    size="sm"
+                    isLoading={updateMutation.isPending}
+                    onClick={() =>
+                      updateMutation.mutate({
+                        id: endpoint.id,
+                        updateData: { status: "ACTIVE" },
+                      })
+                    }
+                  >
+                    Re-enable
+                  </Button>,
+                ]
+              : []
+            : [
+                <RotateSecretButton key="rotate" endpoint={endpoint} />,
+                <RevokePreviousSecretButton
+                  key="revoke-previous"
+                  endpoint={endpoint}
+                />,
+                <EditWebhookEndpointButton key="edit" endpoint={endpoint} />,
+                <ArchiveRestoreWebhookEndpointButton
+                  key="archive"
+                  endpoint={endpoint}
+                  navigateOnArchive
+                />,
+                <DeleteWebhookEndpointButton
+                  key="delete"
+                  endpoint={endpoint}
+                />,
+              ]),
         ]}
       />
+
+      {endpoint.provisioned && (
+        <Alert variant="primary">
+          This endpoint comes from the provisioning file. Change or remove it
+          there and restart core. Deliveries, retries and test sends still work
+          here.
+        </Alert>
+      )}
 
       {endpoint.archivedAt && (
         <Alert variant="warning">
@@ -188,6 +231,24 @@ const EndpointDetails = ({ endpoint }: { endpoint: WebhookEndpoint }) => {
                 label: "URL",
                 value: <span className="t-webhook-url">{endpoint.url}</span>,
               },
+              ...(endpoint.ownerService
+                ? [
+                    {
+                      label: "Owning Service",
+                      value: (
+                        <Link
+                          className="v-link"
+                          to={`/services/${endpoint.ownerService.id}`}
+                        >
+                          {endpoint.ownerService.name}
+                        </Link>
+                      ),
+                    },
+                  ]
+                : []),
+              ...(endpoint.organizationId === null
+                ? [{ label: "Organization", value: "All organizations" }]
+                : []),
               {
                 label: "Description",
                 value: endpoint.description || (

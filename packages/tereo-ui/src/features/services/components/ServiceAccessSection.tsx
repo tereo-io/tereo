@@ -31,8 +31,6 @@ export const ServiceAccessSection = ({
   const revoke = useDecideServiceAccess("revoke");
   const busy = approve.isPending || revoke.isPending;
 
-  const pending = service.access.filter((a) => a.status === "pending");
-
   const decide = (mutation: typeof approve, ids: string[]) =>
     mutation.mutate({ serviceId: service.id, ids });
 
@@ -55,11 +53,6 @@ export const ServiceAccessSection = ({
       cellElement: (a) => <AccessStatusBadge status={a.status} />,
     },
     {
-      title: "Requested",
-      dataKey: "requestedAt",
-      cellElement: (a) => new Date(a.requestedAt).toLocaleString(),
-    },
-    {
       title: "Decided",
       dataKey: "decidedAt",
       cellElement: (a) => <AccessDecision access={a} />,
@@ -71,24 +64,23 @@ export const ServiceAccessSection = ({
       hidden: !canDecide,
       cellElement: (a) => (
         <RowActions align="end">
-          {a.status !== "approved" && (
+          {a.status === "revoked" ? (
             <Button
               size="sm"
               variant="success"
               disabled={busy}
               onClick={() => decide(approve, [a.id])}
             >
-              Approve
+              Re-approve
             </Button>
-          )}
-          {a.status !== "revoked" && (
+          ) : (
             <Button
               size="sm"
               variant="danger"
               disabled={busy}
               onClick={() => decide(revoke, [a.id])}
             >
-              {a.status === "pending" && !a.decidedAt ? "Deny" : "Revoke"}
+              Revoke
             </Button>
           )}
         </RowActions>
@@ -97,41 +89,20 @@ export const ServiceAccessSection = ({
   ];
 
   return (
-    <BorderedSection
-      title={`Requested Access${pending.length ? ` (${pending.length} pending)` : ""}`}
-      actions={
-        canDecide && pending.length > 1 ? (
-          <Button
-            size="sm"
-            variant="success"
-            isLoading={approve.isPending}
-            disabled={busy}
-            onClick={() =>
-              decide(
-                approve,
-                pending.map((a) => a.id)
-              )
-            }
-          >
-            Approve All Pending
-          </Button>
-        ) : undefined
-      }
-    >
+    <BorderedSection title="Access">
       <Col>
         <p className="v-help-text">
-          Roles and audiences the service asks for when it registers. Until
-          approved, calls that need them get 403. Approving a role assigns it to
-          the service account; approving an audience lets that service
-          introspect this one&apos;s tokens. Revoking takes it away and revokes
-          the service&apos;s current tokens, so its next call gets a token
-          without it. A revoked item stays revoked when requested again.
+          Roles and audiences the provisioning file grants the service, approved
+          while the file lists them. Revoking takes one away and revokes the
+          service&apos;s current tokens, so its next call gets a token without
+          it. A revoked item stays revoked while the file lists it, until
+          re-approved here.
         </p>
         <Table<ServiceAccess>
           columns={columns}
           rows={service.access}
           rowKey={(a) => a.id}
-          emptyMessage="This service has requested no access."
+          emptyMessage="This service has been granted no access."
         />
       </Col>
     </BorderedSection>

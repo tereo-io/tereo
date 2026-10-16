@@ -27,16 +27,6 @@ export const servicesRoute: RouteObject = {
       ),
     },
     {
-      path: "access",
-      handle: { title: "Access Requests" },
-      element: canRead(
-        namedLazy(
-          () => import("@/features/services/components/AccessRequestList"),
-          "AccessRequestList"
-        )
-      ),
-    },
-    {
       path: ":serviceId",
       element: canRead(
         namedLazy(

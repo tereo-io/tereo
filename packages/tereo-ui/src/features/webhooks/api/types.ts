@@ -10,7 +10,8 @@ export type WebhookDeliveryStatus = "PENDING" | "SUCCESS" | "FAILED";
 
 export interface WebhookEndpoint {
   id: string;
-  organizationId: string;
+  /** Null for an owned endpoint that serves every organization. */
+  organizationId: string | null;
   url: string;
   description: string | null;
   /** Masked (`first8...`) on every read; full only on create and rotate. */
@@ -23,6 +24,10 @@ export interface WebhookEndpoint {
   previousSecretExpiresAt: string | null;
   /** Core 409s a hard delete while delivery history references the endpoint. */
   hasDeliveries: boolean;
+  /** Declared in the provisioning file: only a DISABLED one's status can change here. */
+  provisioned: boolean;
+  /** The service whose provisioning document declares it; null for a hand-made endpoint. */
+  ownerService: { id: string; slug: string; name: string } | null;
   createdAt: string;
   updatedAt: string;
   createdBy: string;

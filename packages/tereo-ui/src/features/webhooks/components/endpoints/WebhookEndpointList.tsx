@@ -1,6 +1,7 @@
 import useInfiniteWebhookEndpoints from "../../api/endpoints/useInfiniteWebhookEndpoints";
 import CreateWebhookEndpointModal from "./modals/CreateWebhookEndpointModal";
 import useWebhooksOrganization from "../../hooks/useWebhooksOrganization";
+import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import type { WebhookEndpoint } from "../../api/types";
 import { EndpointStatusBadges } from "../badges";
 import { useNavigate } from "react-router-dom";
@@ -33,7 +34,11 @@ export const WebhookEndpointList = () => {
         title: "URL",
         dataKey: "url",
         minWidth: "16rem",
-        cellElement: (ep) => <span className="t-webhook-url">{ep.url}</span>,
+        cellElement: (ep) => (
+          <span className="t-webhook-url">
+            {ep.url} {ep.provisioned && <ProvisionedBadge />}
+          </span>
+        ),
       },
       {
         title: "Description",

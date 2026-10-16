@@ -28,6 +28,8 @@ export interface Role {
   /** Set when a system role's service stopped declaring it; grants nothing. */
   retiredAt: string | null;
   requires2fa: boolean;
+  /** Declared in the provisioning file: read-only here, but still assignable to users. */
+  provisioned: boolean;
   createdAt: string;
   updatedAt: string;
   permissions?: RolePermission[];

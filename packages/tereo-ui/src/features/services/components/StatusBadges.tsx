@@ -42,7 +42,6 @@ export const RetirementBadge = ({ item }: { item: Retirable }) => {
 };
 
 const ACCESS_VARIANT = {
-  pending: "warning",
   approved: "success",
   revoked: "danger",
 } as const;

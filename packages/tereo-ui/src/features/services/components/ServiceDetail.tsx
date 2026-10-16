@@ -113,8 +113,9 @@ export const ServiceDetail = () => {
         {service.provisioned && (
           <Alert variant="primary">
             This service comes from the provisioning file. Change its name or
-            secret there and restart core. Its access requests are still decided
-            here, and a rotated secret&apos;s overlap can still be ended early.
+            secret there and restart core. Its access is still approved and
+            revoked here, and a rotated secret&apos;s overlap can still be ended
+            early.
           </Alert>
         )}
         {!service.isActive && (
@@ -178,7 +179,7 @@ export const ServiceDetail = () => {
                   value: service.declarationVersion ?? muted("—"),
                 },
                 {
-                  label: "Last Registered",
+                  label: "Last Applied",
                   value: service.declaredAt
                     ? new Date(service.declaredAt).toLocaleString()
                     : muted("Never"),

@@ -24,8 +24,8 @@ const service: ServiceDetailData = {
   audience: [],
   previousSecretExpiresAt: null,
   declarationHash: null,
-  declarationVersion: null,
-  declaredAt: null,
+  declarationVersion: "1.2.0",
+  declaredAt: "2026-10-02T00:00:00Z",
   createdBy: null,
   creator: null,
   createdAt: "2026-10-01T00:00:00Z",
@@ -37,14 +37,26 @@ const service: ServiceDetailData = {
       serviceId: "s1",
       kind: "role",
       target: "file_user",
-      status: "pending",
+      status: "approved",
       requestedAt: "2026-10-01T00:00:00Z",
-      decidedAt: null,
+      decidedAt: "2026-10-01T00:00:00Z",
       decidedBy: null,
       decidedByEmail: null,
       decidedByName: null,
       approvedPermissions: null,
-      pendingPermissions: null,
+    },
+    {
+      id: "a2",
+      serviceId: "s1",
+      kind: "audience",
+      target: "files",
+      status: "revoked",
+      requestedAt: "2026-10-01T00:00:00Z",
+      decidedAt: "2026-10-02T00:00:00Z",
+      decidedBy: null,
+      decidedByEmail: null,
+      decidedByName: null,
+      approvedPermissions: null,
     },
   ],
   settings: { secretOverlapHours: 24, retirementGraceHours: 24 },
@@ -95,7 +107,27 @@ describe("ServiceDetail", () => {
     expect(
       screen.queryByRole("button", { name: "Deactivate" })
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /approve/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Re-approve" })).toBeEnabled();
+  });
+
+  it("has no pending inbox and offers Re-approve only on a revoked row", async () => {
+    renderDetail(service);
+
+    await screen.findByText("Service Details");
+    expect(screen.queryByText(/pending/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Approve" })
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Re-approve" })).toHaveLength(
+      1
+    );
+    expect(screen.getAllByRole("button", { name: "Revoke" })).toHaveLength(1);
+  });
+
+  it("shows the declared version", async () => {
+    renderDetail(service);
+
+    expect(await screen.findByText("1.2.0")).toBeVisible();
   });
 
   it("lets an admin end a provisioned service's secret overlap", async () => {
