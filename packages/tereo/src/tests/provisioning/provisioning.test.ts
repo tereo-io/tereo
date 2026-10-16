@@ -7,6 +7,7 @@ import { prisma } from "../../utils/db/prisma.js";
 import { logger } from "../../utils/logger.js";
 import { CORE_URL } from "../utils/coreUrl.js";
 import { fetchJson } from "../utils/http.js";
+import db from "../../utils/db/index.js";
 import { randomBytes } from "crypto";
 import env from "../../env.js";
 import {
@@ -225,6 +226,14 @@ const accessRow = async (
   prisma.serviceAccess.findUniqueOrThrow({
     where: { serviceId_kind_target: { serviceId, kind, target } },
   });
+
+/** The token's row, by the jti in its payload. */
+const tokenRow = (token: string) => {
+  const { jti } = JSON.parse(
+    Buffer.from(token.split(".")[1], "base64url").toString()
+  ) as { jti: string };
+  return prisma.accessToken.findUniqueOrThrow({ where: { jti } });
+};
 
 const holdsRole = async (slug: string, roleName: string) => {
   const userId = (await serviceRow(slug)).client!.serviceAccountUser!.id;
@@ -627,6 +636,17 @@ describe("applyProvisioning", () => {
       expect(row.unprovisionedAt).toBeNull();
       expect(row.client?.serviceAccountUser?.isActive).toBe(true);
       expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(200);
+      const reactivated = await prisma.auditLogEntry.findFirst({
+        where: {
+          entityId: row.id,
+          changes: { path: ["isActive", "new"], equals: true },
+        },
+      });
+      expect(reactivated?.userId).toBe(SYSTEM_USER_ID);
+      expect(reactivated?.metadata).toMatchObject({
+        file: d.file,
+        version: d.version,
+      });
     });
   });
 
@@ -939,17 +959,14 @@ describe("access", () => {
     const row = await accessRow(c.id, "role", roleTarget(owner));
     expect(row.status).toBe("approved");
     expect(row.approvedPermissionIds).toHaveLength(2);
-    const held = await prisma.rolePermission.count({
-      where: {
-        permission: { name: `${owner.service.namespace}.items.write` },
-        role: {
-          userRoles: {
-            some: { userId: c.client!.serviceAccountUser!.id },
-          },
-        },
-      },
-    });
-    expect(held).toBe(1);
+    expect(
+      await db.roles.getUserPermissions(c.client!.serviceAccountUser!.id)
+    ).toEqual(
+      expect.arrayContaining([
+        `${owner.service.namespace}.items.read`,
+        `${owner.service.namespace}.items.write`,
+      ])
+    );
     expect(
       await prisma.auditLogEntry.count({
         where: {
@@ -958,6 +975,54 @@ describe("access", () => {
         },
       })
     ).toBe(0);
+  });
+
+  it("follows a role that shrinks, auditing it", async () => {
+    const owner = serviceDoc();
+    Object.assign(
+      owner.service,
+      ownerDeclaration(owner.service.namespace, ["read", "write"])
+    );
+    const consumer = serviceDoc({
+      access: { roles: [roleTarget(owner)], audiences: [] },
+    });
+    await apply(owner, consumer);
+
+    const shrunk = withService(
+      owner,
+      ownerDeclaration(owner.service.namespace, ["read"]),
+      { version: "1.1.0" }
+    );
+    const result = await apply(shrunk, consumer);
+    expect(result.access).toEqual([
+      `service:${consumer.service.slug} narrowed role:${roleTarget(owner)}`,
+    ]);
+
+    const c = await serviceRow(consumer.service.slug);
+    expect(
+      (await accessRow(c.id, "role", roleTarget(owner))).approvedPermissionIds
+    ).toHaveLength(1);
+    const entries = await prisma.auditLogEntry.findMany({
+      where: {
+        entityId: c.id,
+        metadata: { path: ["action"], equals: "access_approved" },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(entries).toHaveLength(2);
+    expect(entries[1].userId).toBe(SYSTEM_USER_ID);
+    expect(entries[1].metadata).toMatchObject({
+      file: consumer.file,
+      version: consumer.version,
+      access: [
+        {
+          kind: "role",
+          target: roleTarget(owner),
+          permissions: [],
+          removedPermissions: [`${owner.service.namespace}.items.write`],
+        },
+      ],
+    });
   });
 
   it("revokes access removed from the set", async () => {
@@ -970,6 +1035,8 @@ describe("access", () => {
       },
     });
     await apply(owner, consumer);
+    const token = await serviceToken(consumer);
+    expect((await tokenRow(token)).revokedAt).toBeNull();
 
     const result = await apply(
       owner,
@@ -992,6 +1059,36 @@ describe("access", () => {
       )
     ).toBe(false);
     expect(c.client?.audience).toEqual([]);
+    expect((await tokenRow(token)).revokedAt).not.toBeNull();
+  });
+
+  it("grants again access the set lists again after removing it", async () => {
+    const owner = serviceDoc();
+    Object.assign(owner.service, ownerDeclaration(owner.service.namespace));
+    const consumer = serviceDoc({
+      access: { roles: [roleTarget(owner)], audiences: [] },
+    });
+    await apply(owner, consumer);
+    await apply(
+      owner,
+      withService(consumer, { access: { roles: [], audiences: [] } })
+    );
+
+    const result = await apply(owner, consumer);
+    expect(result.access).toEqual([
+      `service:${consumer.service.slug} granted role:${roleTarget(owner)}`,
+    ]);
+    const c = await serviceRow(consumer.service.slug);
+    const row = await accessRow(c.id, "role", roleTarget(owner));
+    expect(row.status).toBe("approved");
+    expect(row.decidedBy).toBe(SYSTEM_USER_ID);
+    expect(row.approvedPermissionIds).toHaveLength(1);
+    expect(
+      await holdsRole(
+        consumer.service.slug,
+        `${owner.service.namespace}_item_reader`
+      )
+    ).toBe(true);
   });
 
   it("keeps an admin's revocation while the set lists it", async () => {

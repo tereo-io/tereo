@@ -340,7 +340,8 @@ const applyService = async (
         accountUserId,
       },
       { isActive: true },
-      SYSTEM_ACTOR
+      SYSTEM_ACTOR,
+      { action: "provisioned", ...meta }
     );
     result.updated.push(entry);
   }

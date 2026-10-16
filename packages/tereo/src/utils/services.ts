@@ -110,7 +110,8 @@ export const updateServiceTx = async (
   tx: Prisma.TransactionClient,
   existing: ServiceToUpdate,
   body: { name?: string; isActive?: boolean },
-  actor: { userId: string; email: string | null }
+  actor: { userId: string; email: string | null },
+  auditMetadata?: Record<string, unknown>
 ) => {
   await tx.service.update({
     where: { id: existing.id },
@@ -143,6 +144,7 @@ export const updateServiceTx = async (
         isActive: { old: existing.isActive, new: after.isActive },
       }),
     },
+    ...(auditMetadata && { metadata: auditMetadata }),
   });
   await emitTx(tx, {
     organizationId: getDefaultOrganizationId(),

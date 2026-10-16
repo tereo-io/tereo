@@ -171,6 +171,8 @@ interface Decided {
   kind: string;
   target: string;
   permissions?: string[];
+  /** Permissions the role no longer grants, when it shrank. */
+  removedPermissions?: string[];
 }
 
 export const decideAccessTx = async (
@@ -190,6 +192,7 @@ export const decideAccessTx = async (
     kind: r.kind,
     target: r.target,
     ...(r.permissions && { permissions: r.permissions }),
+    ...(r.removedPermissions && { removedPermissions: r.removedPermissions }),
   }));
   await logAuditTx(tx, {
     auth: actor,
@@ -372,10 +375,12 @@ const accessKey = (row: { kind: string; target: string }) =>
 
 /**
  * Make the service's access what its provisioning document lists, deciding
- * as core. Listed access missing or pending is approved; approved access to
- * another service's role follows the role, recording what it grants now;
- * approved access no longer listed is revoked. A row an admin revoked stays
- * revoked. Every target must already exist: call after the declarations.
+ * as core. Listed access missing or pending is approved, and so is listed
+ * access core revoked because an earlier document stopped listing it; access
+ * an admin revoked stays revoked. Approved access to another service's role
+ * follows the role, recording what it grants now. Approved access no longer
+ * listed is revoked. Every target must already exist: call after the
+ * declarations.
  * The caller revokes the service's tokens when anything was revoked.
  */
 export const syncProvisionedAccessTx = async (
@@ -384,7 +389,12 @@ export const syncProvisionedAccessTx = async (
   wanted: { roles: string[]; audiences: string[] },
   now: Date,
   meta: Record<string, unknown> = {}
-): Promise<{ granted: string[]; extended: string[]; revoked: string[] }> => {
+): Promise<{
+  granted: string[];
+  extended: string[];
+  narrowed: string[];
+  revoked: string[];
+}> => {
   const want = [
     ...wanted.roles.map((target) => ({ kind: "role" as const, target })),
     ...wanted.audiences.map((target) => ({
@@ -412,7 +422,11 @@ export const syncProvisionedAccessTx = async (
   });
   const listed = rows.filter((r) => wantedKeys.has(accessKey(r)));
 
-  const pending = listed.filter((r) => r.status === "pending");
+  const pending = listed.filter(
+    (r) =>
+      r.status === "pending" ||
+      (r.status === "revoked" && r.decidedBy === SYSTEM_USER_ID)
+  );
   const approved =
     pending.length === 0
       ? []
@@ -425,6 +439,7 @@ export const syncProvisionedAccessTx = async (
         );
 
   const extended: Decided[] = [];
+  const narrowed: Decided[] = [];
   for (const row of listed) {
     if (row.status !== "approved" || !isServiceRole(row)) continue;
     const role = await resolveRoleTarget(row.target, tx);
@@ -436,18 +451,41 @@ export const syncProvisionedAccessTx = async (
     const before = new Set(row.approvedPermissionIds);
     const ids = granted.map((rp) => rp.permissionId);
     const added = granted.filter((rp) => !before.has(rp.permissionId));
-    if (ids.length === before.size && added.length === 0) continue;
+    const current = new Set(ids);
+    const removedIds = row.approvedPermissionIds.filter(
+      (id) => !current.has(id)
+    );
+    if (added.length === 0 && removedIds.length === 0) continue;
     await tx.serviceAccess.update({
       where: { id: row.id },
       data: { approvedPermissionIds: ids },
     });
-    if (added.length > 0)
-      extended.push({
-        ...row,
-        permissions: added.map((rp) => rp.permission.name).sort(),
-      });
+    const removedPermissions =
+      removedIds.length === 0
+        ? undefined
+        : (
+            await tx.permission.findMany({
+              where: { id: { in: removedIds } },
+              select: { name: true },
+            })
+          )
+            .map((p) => p.name)
+            .sort();
+    const decided = {
+      ...row,
+      permissions: added.map((rp) => rp.permission.name).sort(),
+      ...(removedPermissions && { removedPermissions }),
+    };
+    (added.length > 0 ? extended : narrowed).push(decided);
   }
-  await decideAccessTx(tx, SYSTEM_ACTOR, service, extended, "approved", meta);
+  await decideAccessTx(
+    tx,
+    SYSTEM_ACTOR,
+    service,
+    [...extended, ...narrowed],
+    "approved",
+    meta
+  );
 
   const revoked = await revokeAccessTx(
     tx,
@@ -462,6 +500,7 @@ export const syncProvisionedAccessTx = async (
   return {
     granted: approved.map(accessKey),
     extended: extended.map(accessKey),
+    narrowed: narrowed.map(accessKey),
     revoked: revoked.map(accessKey),
   };
 };
