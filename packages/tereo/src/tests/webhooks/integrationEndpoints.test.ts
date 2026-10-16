@@ -166,12 +166,11 @@ describe("creating", () => {
   });
 
   it("needs no webhooks.* permission", async () => {
-    const claims = JSON.parse(
-      Buffer.from(aToken.split(".")[1], "base64url").toString()
-    ) as { permissions?: string[] };
-    expect(
-      (claims.permissions ?? []).filter((p) => p.startsWith("webhooks."))
-    ).toEqual([]);
+    const permissions = await db.roles.getUserPermissions(
+      a.accountId,
+      a.organizationId ?? undefined
+    );
+    expect(permissions.filter((p) => p.startsWith("webhooks."))).toEqual([]);
   });
 
   it("refuses an event type the integration may not read", async () => {

@@ -3,4 +3,5 @@ export const MIN_CODE_CHALLENGE_LENGTH = 43;
 export const MAX_CODE_VERIFIER_LENGTH = 128;
 export const MAX_REDIRECT_URI_LENGTH = 2048;
 export const MAX_SCOPE_LENGTH = 1000;
-export const MAX_TOKEN_LENGTH = 2048;
+// Well above any token core issues, so introspect and revoke never refuse one.
+export const MAX_TOKEN_LENGTH = 8192;

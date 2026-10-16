@@ -14,7 +14,6 @@ export interface AccessTokenPayload {
   scope: string;
   client_id: string;
   sid?: string;
-  permissions?: string[];
   org_id?: string;
   // RFC 9068: when the user signed in, for routes that need a recent login.
   auth_time?: number;
@@ -27,7 +26,6 @@ export interface TokenGenerationOptions {
   audience?: string[];
   expiresIn?: number;
   sessionId?: string;
-  permissions?: string[];
   organizationId?: string;
   authTime?: Date;
 }
@@ -97,10 +95,6 @@ export const generateAccessToken = (
   if (options.audience && options.audience.length > 0) {
     payload.aud =
       options.audience.length === 1 ? options.audience[0] : options.audience;
-  }
-
-  if (options.permissions && options.permissions.length > 0) {
-    payload.permissions = options.permissions;
   }
 
   if (options.organizationId) {

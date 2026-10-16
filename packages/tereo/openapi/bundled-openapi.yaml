@@ -20985,8 +20985,9 @@ components:
           description: |
             The user's permissions now, scoped to the token's organization, as
             `requireAuth` computes them: a role revoked since the token was issued
-            is gone here though the token's own `permissions` claim still lists
-            it. Always present for an active token (possibly empty).
+            is already gone. Access tokens carry no permissions, so this (or
+            `/oauth/check-permission`) is where a service reads them. Always
+            present for an active token (possibly empty).
           items:
             type: string
         org_id:

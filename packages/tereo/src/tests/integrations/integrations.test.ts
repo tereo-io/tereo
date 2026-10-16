@@ -96,9 +96,25 @@ const claimsOf = (token: string) =>
   JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()) as {
     jti: string;
     org_id?: string;
-    permissions?: string[];
     aud?: string | string[];
   };
+
+/** The live permissions of the integration's token, as introspection reports them. */
+const permissionsOf = async ({ credentials }: Created) => {
+  const { clientId, clientSecret } = credentials;
+  const res = await fetch(`${CORE_URL}/oauth/introspect`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      token: await tokenOf({ credentials } as Created),
+    }).toString(),
+  });
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { permissions?: string[] }).permissions ?? [];
+};
 
 const isRevoked = async (token: string) =>
   (
@@ -268,8 +284,7 @@ describe("roles", () => {
     expect(res.body.roles.map((r: { id: string }) => r.id)).toEqual([roleId]);
     expect(await isRevoked(before)).toBe(true);
 
-    const claims = claimsOf(await tokenOf(created));
-    expect(claims.permissions).toContain("webhooks.read");
+    expect(await permissionsOf(created)).toContain("webhooks.read");
 
     const row = await prisma.service.findUniqueOrThrow({
       where: { id: created.id },
@@ -314,9 +329,7 @@ describe("roles", () => {
       granter
     );
     expect(res.status).toBe(200);
-    expect(claimsOf(await tokenOf(created)).permissions).toContain(
-      "users.read"
-    );
+    expect(await permissionsOf(created)).toContain("users.read");
     const got = await api("GET", `/v1/admin/integrations/${created.id}`);
     expect(got.body.roles).toEqual([
       expect.objectContaining({
