@@ -17,6 +17,18 @@ describe("stalePathWarnings", () => {
     ).toEqual([expect.stringMatching(/^UI_BASE_URL/)]);
   });
 
+  it("warns about PROVISIONING_FILE without PROVISIONING_PATH", () => {
+    expect(
+      stalePathWarnings({ PROVISIONING_FILE: "/etc/tereo/provisioning.yaml" })
+    ).toEqual([expect.stringMatching(/^PROVISIONING_FILE.*PROVISIONING_PATH/)]);
+    expect(
+      stalePathWarnings({
+        PROVISIONING_FILE: "/etc/tereo/provisioning.yaml",
+        PROVISIONING_PATH: "/etc/tereo/provisioning",
+      })
+    ).toEqual([]);
+  });
+
   it("accepts the current paths and the defaults", () => {
     expect(
       stalePathWarnings({

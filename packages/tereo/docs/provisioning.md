@@ -456,7 +456,8 @@ kubectl patch secret tereo-secrets --type merge \
 
 From `PROVISIONING_FILE` (YAML, 0.2.0):
 
-1. Rename the variable to `PROVISIONING_PATH`; point it at a folder (or one file) of JSON.
+1. Rename the variable to `PROVISIONING_PATH`; point it at a folder (or one file) of JSON. Core
+   warns at start when `PROVISIONING_FILE` is still set without it.
 2. Convert each `services[]` entry to a document `{ "version": "…", "service": { … } }` and the
    `clients[]` entries to `clients`. The fields are unchanged. Quote nothing as a number: write
    versions as strings.
