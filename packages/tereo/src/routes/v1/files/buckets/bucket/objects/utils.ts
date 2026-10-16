@@ -254,9 +254,9 @@ export const contentDisposition = (
  * header injection and emitted as an ASCII `filename=` and an RFC 5987
  * `filename*=` (`contentDisposition`).
  *
- * Every download path calls this, so it also sets the CSP (`downloadCsp`):
- * user content a browser renders on core's origin anyway loads nothing, and
- * all but an inline PDF is sandboxed, so it runs no script.
+ * Every download path calls this, so it also sets the sandboxing CSP: should
+ * a browser render user content on core's origin anyway, it runs no script
+ * and loads nothing.
  */
 export const setContentDisposition = (
   res: Response,
@@ -275,19 +275,10 @@ export const setContentDisposition = (
     "Content-Disposition",
     contentDisposition(inline ? "inline" : "attachment", filename)
   );
-  res.setHeader(
-    "Content-Security-Policy",
-    downloadCsp(opts.contentType, inline)
-  );
+  res.setHeader("Content-Security-Policy", DOWNLOAD_CSP);
 };
 
-// Browsers' built-in PDF viewers don't run inside a sandboxed frame, so an
-// inline PDF keeps only `default-src 'none'`; the rest stays sandboxed.
-export const downloadCsp = (contentType: string, inline: boolean): string =>
-  inline &&
-  normalizeContentType(contentType)?.split(";")[0] === "application/pdf"
-    ? "default-src 'none'"
-    : "sandbox; default-src 'none'";
+const DOWNLOAD_CSP = "sandbox; default-src 'none'";
 
 export const handleMetadata = (req: Request) => {
   const metadataHeader = req.headers["x-metadata"] as string | undefined;
