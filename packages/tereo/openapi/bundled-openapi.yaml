@@ -7868,8 +7868,11 @@ paths:
         (`400 not_org_assignable`); system roles are refused (`403`).
         **Platform**: global roles, custom or system. Either way the caller must
         hold every permission a newly granted role carries (`403`). Unknown,
-        archived or retired roles are `400 unknown_role`. Its tokens are revoked
-        when the roles change, so its next token carries the new permissions.
+        archived or retired roles are `400 unknown_role`. A role carrying the
+        root `admin` permission is never allowed (`403
+        role_not_allowed_for_integration`), whoever grants it. Its tokens are
+        revoked when the roles change, so its next token carries the new
+        permissions.
 
         An audit log entry is created and a `core.integration.updated` webhook
         event is emitted when the roles change.
@@ -7905,7 +7908,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing integrations.write permission, a permission the caller does not hold, or a system role for an org-bound integration
+          description: Forbidden - missing integrations.write permission, a permission the caller does not hold, a system role for an org-bound integration, or a role carrying `admin` (`role_not_allowed_for_integration`)
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: No integration with this id
