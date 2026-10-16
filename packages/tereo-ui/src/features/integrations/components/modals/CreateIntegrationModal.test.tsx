@@ -54,4 +54,38 @@ describe("CreateIntegrationModal", () => {
       expect(document.body.textContent).not.toContain("s3cret-value")
     );
   });
+
+  it("still shows the secret when the dialog is closed while the request is in flight", async () => {
+    let resolve: (v: unknown) => void = () => {};
+    authMock.axios.post.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      })
+    );
+    const onClose = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <CreateIntegrationModal show onClose={onClose} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await userEvent.type(screen.getByLabelText(/^Name/), "Acme");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add Integration" })
+    );
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).not.toHaveBeenCalled();
+    resolve({
+      data: {
+        id: "i1",
+        name: "Acme",
+        credentials: { clientId: "cid-1", clientSecret: "s3cret-value" },
+      },
+    });
+
+    expect(await screen.findByText("Copy the secret now")).toBeVisible();
+  });
 });

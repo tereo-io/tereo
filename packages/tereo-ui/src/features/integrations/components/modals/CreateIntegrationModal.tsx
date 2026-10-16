@@ -42,7 +42,10 @@ const CreateIntegrationModal = ({
     createMutation.reset();
   };
 
+  // Closing mid-request would reset the mutation and drop its result: the
+  // secret, shown only once.
   const handleClose = () => {
+    if (createMutation.isPending) return;
     reset();
     onClose();
   };
@@ -76,7 +79,12 @@ const CreateIntegrationModal = ({
         onClose={handleClose}
         title="Add Integration"
         footerButtons={[
-          <Button key="cancel" variant="secondary" onClick={handleClose}>
+          <Button
+            key="cancel"
+            variant="secondary"
+            onClick={handleClose}
+            disabled={createMutation.isPending}
+          >
             Cancel
           </Button>,
           <Button
