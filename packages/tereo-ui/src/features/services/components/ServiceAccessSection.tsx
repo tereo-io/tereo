@@ -92,11 +92,11 @@ export const ServiceAccessSection = ({
     <BorderedSection title="Access">
       <Col>
         <p className="v-help-text">
-          Roles and audiences the provisioning file grants the service, approved
-          while the file lists them. Revoking takes one away and revokes the
-          service&apos;s current tokens, so its next call gets a token without
-          it. A revoked item stays revoked while the file lists it, until
-          re-approved here.
+          Roles and audiences the provisioning document grants the service,
+          approved while the document lists them. Revoking takes one away and
+          revokes the service&apos;s current tokens, so its next call gets a
+          token without it. A revoked item stays revoked while the document
+          lists it, until re-approved here.
         </p>
         <Table<ServiceAccess>
           columns={columns}

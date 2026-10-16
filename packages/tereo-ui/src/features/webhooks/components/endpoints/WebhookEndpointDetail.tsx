@@ -139,9 +139,9 @@ export const WebhookEndpointDetail = () => {
 
       {endpoint.provisioned && (
         <Alert variant="primary">
-          This endpoint comes from the provisioning file. Change or remove it
-          there and restart core. Deliveries, retries and test sends still work
-          here.
+          This endpoint comes from a provisioning document. Change or remove it
+          there; it applies on the next deploy or <code>provision</code> run.
+          Deliveries, retries and test sends still work here.
         </Alert>
       )}
 

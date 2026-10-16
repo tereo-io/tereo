@@ -1,7 +1,7 @@
 # Auth area
 
 The auth area of tereo, mounted at the root of the service (`http://localhost:4001`):
-OAuth 2.0 Authorization Server and OpenID Connect Provider — authorization code + client credentials + refresh token grants, PKCE S256, token introspection/revocation, TOTP 2FA, RBAC, organizations, and real-time WebSocket events. First-boot setup (`/v1/setup`), service registration (`/v1/registry`) and `/v1/admin/services` are root-mounted beside it ([registry.md](registry.md)).
+OAuth 2.0 Authorization Server and OpenID Connect Provider — authorization code + client credentials + refresh token grants, PKCE S256, token introspection/revocation, TOTP 2FA, RBAC, organizations, and real-time WebSocket events. First-boot setup (`/v1/setup`) and `/v1/admin/services` are root-mounted beside it; services are declared in provisioning documents ([provisioning.md](provisioning.md), [registry.md](registry.md)).
 
 ## Structure
 
@@ -24,7 +24,7 @@ src/
 
 ## Who may call core's API
 
-Core's own resource routes — `/v1/account`, `/v1/admin`, `/v1/files`, `/audit`, `/webhooks`, `/v1/registry` and
+Core's own resource routes — `/v1/account`, `/v1/admin`, `/v1/files`, `/audit`, `/webhooks` and
 the `/ws` socket — admit a bearer token by the client it was issued to (`utils/coreAccess.ts`,
 applied in `requireAuth` from what `checkAccessToken` resolves, so the socket and every router
 agree):
@@ -51,7 +51,7 @@ discovery) are per area, each with a read-only variant:
 | `core:audit` / `core:audit.read`       | `/v1/audit`          | `audit-logs.admin` / `audit-logs.read`                                                                   |
 | `core:webhooks` / `core:webhooks.read` | `/v1/webhooks`       | `webhooks.admin` / `webhooks.read`, `webhooks.event-types.read`                                          |
 
-No scope opens `/v1/registry`: only services declare. A ceiling caps, it never grants: the token holds
+A ceiling caps, it never grants: the token holds
 a permission only if the user holds it _and_ a ceiling covers it. A user's organization member role
 (owner/admin/member), which authorizes organization routes without a permission, is capped the same
 way (`requireOrgRole` checks the ceiling). An admin opts a client in by adding core scopes to its
@@ -814,7 +814,7 @@ All in Redis; limiters in `utils/rateLimit.ts`, instances in `middleware/rateLim
 
 "Per IP" means per `getIpIdentifier` (`ipRateLimitKey`): an IPv4 address as is, an IPv4-mapped IPv6 address as its IPv4 address, and any other IPv6 address as its /64, since one host is often given a whole /64 to rotate through. The share unlock window (`utils/shareUnlockLimiter.ts`) still keys by the full address.
 
-- **Before authentication** — `rateLimitPreAuth`, per client IP, mounted ahead of `requireAuth` on `/v1/admin`, `/v1/account`, `/v1/files`, `/audit`, `/webhooks` and `/v1/registry`, so floods of missing or bad tokens are bounded without verifying them.
+- **Before authentication** — `rateLimitPreAuth`, per client IP, mounted ahead of `requireAuth` on `/v1/admin`, `/v1/account`, `/v1/files`, `/audit` and `/webhooks`, so floods of missing or bad tokens are bounded without verifying them.
 - **General** — `rateLimitGeneral`, after authentication: per user, per IP when anonymous, per OAuth client for internal service accounts.
 - **Credentials** — counted before the credential is checked, atomically, and cleared by a success: login passwords per client and IP (`authFailure`, keyed by the body's `client_id` once that client is found — never by a header the login does not authenticate with, which a caller could vary per request; the key spans every account tried from that address, so a success only gives back its own attempt — clearing the count would let a login to one's own account wipe the failures against everyone else's) and per account (`loginAccountBackoff`: keyed on a hash of the normalised email, so unknown emails behave the same; five attempts, then a delay doubling from 1 s to 15 min — a backoff, not a lockout); provider callbacks per IP once their round trip is consumed (see _Errors_ under _Sign in with an identity provider_); confidential-client secrets at `/oauth/token`, `/oauth/revoke` and `/oauth/introspect` per client and IP (`clientSecretFailure`: 10 wrong secrets per 5 min, keyed with the IP so one address cannot lock a client out for its other callers. Unlike the others it counts only failures — read before the secret is hashed, spent after a wrong one — so any number of concurrent correct secrets from one address, such as pods behind one NAT, pass. Once the count is full every attempt is refused before hashing, the right secret included, until the window expires: a correct secret cannot clear a full count, so a stale-secret pod sharing an address can hold the client off for up to 5 min. Concurrent wrong secrets can overshoot the limit by the burst, acceptable for high-entropy secrets); login 2FA per user; `/v1/account/password` and `/v1/account/totp/*` per user; setup per IP; share unlock per token and IP.
 - **Known device** — so that someone holding an account in backoff does not lock its owner out, a completed login (after 2FA when required) sets `tereo_known_device` (`utils/knownDevice.ts`; httpOnly, `SameSite=Lax`, path `/oauth`, 90 days): `<userId>.<issuedAt>.<HMAC>`, keyed with `KNOWN_DEVICE_KEY` and covering the user's password hash, so a password change or admin reset (a freshly salted hash) voids every earlier cookie with no extra column. At the login submit, while the account is delayed (`loginAccountBackoff.isDelayed`), a cookie valid for that same user skips the delay: `authFailure` and the password check still apply, the attempt still counts toward the account (`spendUnblocked`, which lengthens the delay without being refused by it), and `knownDeviceFailure` caps it at 5 wrong passwords per 15 min per cookie, so a stolen cookie is not an unlimited guess. Outside a delay a known device is treated like any browser. The cookie is checked only against the user the email names, so it reveals nothing about other emails; sign-out leaves it, since it is not a session.

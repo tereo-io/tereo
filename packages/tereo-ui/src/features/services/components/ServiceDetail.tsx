@@ -112,10 +112,10 @@ export const ServiceDetail = () => {
         )}
         {service.provisioned && (
           <Alert variant="primary">
-            This service comes from the provisioning file. Change its name or
-            secret there and restart core. Its access is still approved and
-            revoked here, and a rotated secret&apos;s overlap can still be ended
-            early.
+            This service comes from a provisioning document. Change its name or
+            secret there; it applies on the next deploy or{" "}
+            <code>provision</code> run. Its access is still approved and revoked
+            here, and a rotated secret&apos;s overlap can still be ended early.
           </Alert>
         )}
         {!service.isActive && (
