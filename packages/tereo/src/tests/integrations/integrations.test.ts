@@ -406,6 +406,34 @@ describe("other admin routes", () => {
   });
 });
 
+describe("introspection", () => {
+  it("never lets an integration introspect another client's token, even named in its aud", async () => {
+    const introspector = await createIntegration();
+    const other = await createIntegration();
+    const otherRow = await prisma.service.findUniqueOrThrow({
+      where: { id: other.id },
+    });
+    await prisma.oAuthClient.update({
+      where: { id: otherRow.clientId! },
+      data: { audience: [introspector.slug] },
+    });
+    const token = await tokenOf(other);
+    expect([claimsOf(token).aud].flat()).toContain(introspector.slug);
+
+    const { clientId, clientSecret } = introspector.credentials;
+    const res = await fetch(`${CORE_URL}/oauth/introspect`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ token }).toString(),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ active: false });
+  });
+});
+
 describe("audiences", () => {
   it("puts the services named in its tokens' aud, and refuses anything else", async () => {
     const serviceSlug = `int-svc-${rand()}`;

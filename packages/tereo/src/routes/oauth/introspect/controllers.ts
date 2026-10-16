@@ -87,8 +87,8 @@ export const introspectHandler = async (req: Request, res: Response) => {
  *
  * Authorization rules (RFC 7662 Section 2.2):
  * 1. Client can always introspect its own tokens (client_id match)
- * 2. Otherwise the requesting client must belong to a service whose slug is
- *    in the token's audience — an audience an admin approved for the
+ * 2. Otherwise the requesting client must belong to a service (never an
+ *    integration) whose slug is in the token's audience — an audience an admin approved for the
  *    token's service (/admin/services)
  *
  * This enables the resource server pattern: a reporting service validates tokens issued to
@@ -102,7 +102,7 @@ const isAuthorizedToIntrospect = async (
   if (tokenClientId === requestingClient.clientId) return true;
   if (!tokenAudience) return false;
   const service = await db.services.getByClientId(requestingClient.id);
-  if (!service) return false;
+  if (service?.kind !== "service") return false;
   const audiences = Array.isArray(tokenAudience)
     ? tokenAudience
     : [tokenAudience];
