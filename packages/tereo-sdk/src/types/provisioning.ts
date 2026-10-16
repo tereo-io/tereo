@@ -119,7 +119,33 @@ export interface CustomRole {
   permissions: string[];
 }
 
-/** One file; it needs at least one of `service`, `clients`, `roles`, not empty. */
+/**
+ * A machine client for an external party (a 3PL, a customer's system). Its
+ * client id is its slug. It declares nothing.
+ */
+export interface IntegrationProvisioning {
+  slug: string;
+  name: string;
+  /**
+   * Org-bound when set: its tokens carry this `org_id`, and it holds only
+   * org-assignable custom roles there. Fixed once created.
+   */
+  organizationId?: string;
+  /** Name of the environment variable, in core's environment, that holds the client secret. */
+  secretFrom: string;
+  /**
+   * Role names. Org-bound: org-assignable custom roles of the set. Otherwise
+   * also core's roles and `<slug>/<name>` services' system roles. Default [].
+   */
+  roles?: string[];
+  /** Slugs of services in the set that may introspect its tokens. Default []. */
+  audiences?: string[];
+}
+
+/**
+ * One file; it needs at least one of `service`, `clients`, `roles`,
+ * `integrations`, not empty.
+ */
 export interface ProvisioningDocument {
   $schema?: string;
   /** Semver of the release: `MAJOR.MINOR.PATCH[-prerelease]`. */
@@ -127,4 +153,5 @@ export interface ProvisioningDocument {
   service?: ServiceProvisioning;
   clients?: LoginClientProvisioning[];
   roles?: CustomRole[];
+  integrations?: IntegrationProvisioning[];
 }

@@ -38,6 +38,13 @@ type Tx = Prisma.TransactionClient;
 
 const retirement = { missingSince: true, retiredAt: true } as const;
 
+/** A service; integrations are managed under /admin/integrations. */
+const getServiceRow = async (id: string, tx?: Tx) => {
+  const service = await db.services.get(id, tx);
+  if (service.kind !== "service") throw new NotFoundError("Service not found");
+  return service;
+};
+
 /** An app service — core's own row is managed by code, not admins. */
 const getAppService = async (req: Request, tx?: Tx) => {
   const { id } = validateParams(ServiceIdParamSchema, req);
@@ -46,7 +53,7 @@ const getAppService = async (req: Request, tx?: Tx) => {
       "Core is managed by its code, not through this API"
     );
   }
-  const service = await db.services.get(id, tx);
+  const service = await getServiceRow(id, tx);
   if (!service.client?.serviceAccountUser) {
     throw new Error(`Service ${service.slug} has no client or service account`);
   }
@@ -70,7 +77,7 @@ const getEditableAppService = async (req: Request) => {
  */
 export const getService = async (req: Request, res: Response) => {
   const { id } = validateParams(ServiceIdParamSchema, req);
-  const service = await db.services.get(id);
+  const service = await getServiceRow(id);
   const [permissions, systemRoles, buckets, eventTypes, access] =
     await Promise.all([
       prisma.permission.findMany({

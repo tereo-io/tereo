@@ -274,6 +274,28 @@ const serviceEvents: EventTypeDefinition[] = [
   },
 ];
 
+const integrationEvents: EventTypeDefinition[] = [
+  { eventType: "core.integration.created", description: "Integration added" },
+  {
+    eventType: "core.integration.updated",
+    description:
+      "Integration renamed or reactivated, or its roles or audiences changed",
+  },
+  {
+    eventType: "core.integration.deactivated",
+    description: "Integration deactivated; its tokens were revoked",
+  },
+  {
+    eventType: "core.integration.secret-regenerated",
+    description: "Integration client secret regenerated",
+  },
+  {
+    eventType: "core.integration.previous-secret-revoked",
+    description:
+      "Integration's previous client secret revoked before its overlap ended",
+  },
+];
+
 const keyEvents: EventTypeDefinition[] = [
   {
     eventType: "core.signing-key.rotated",
@@ -322,6 +344,7 @@ const READ_PERMISSIONS: [prefix: string, permission: string][] = [
   ["file-service.share.", "file-service.shares.read"],
   ["file-service.", "file-service.objects.read"],
   ["core.service.", "services.read"],
+  ["core.integration.", "integrations.read"],
   ["core.signing-key.", "settings.read"],
   ["notification.connection.", "notifications.admin"],
   ["notification.", "notifications.read"],
@@ -343,6 +366,7 @@ export const EVENT_TYPES: EventTypeDefinition[] = [
   ...fileEvents,
   ...webhookEvents,
   ...serviceEvents,
+  ...integrationEvents,
   ...keyEvents,
   ...notificationEvents,
 ].map(withReadPermission);

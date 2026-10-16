@@ -16,6 +16,7 @@ import {
 import type {
   LoadedDocument,
   ProvisioningSet,
+  ResolvedIntegration,
   ResolvedService,
 } from "./load.js";
 
@@ -91,9 +92,15 @@ const checkSetUniqueness = (
   services: ServiceInSet[],
   problems: string[]
 ) => {
+  // Services and integrations share one table, and so their slugs.
   checkUnique(
     "service slug",
-    services.map(({ file, service }) => ({ value: service.slug, file })),
+    [
+      ...services.map(({ file, service }) => ({ value: service.slug, file })),
+      ...set.documents.flatMap((d) =>
+        (d.integrations ?? []).map((i) => ({ value: i.slug, file: d.file }))
+      ),
+    ],
     problems
   );
   checkUnique(
@@ -113,6 +120,10 @@ const checkSetUniqueness = (
     set.documents.flatMap((d) => [
       ...(d.service ? [{ value: d.service.clientId, file: d.file }] : []),
       ...d.clients.map((c) => ({ value: c.clientId, file: d.file })),
+      ...(d.integrations ?? []).map((i) => ({
+        value: i.clientId,
+        file: d.file,
+      })),
     ]),
     problems
   );
@@ -349,6 +360,58 @@ const checkCustomRoles = (
 };
 
 /**
+ * An integration's roles and audiences, against the set and core. Org-bound,
+ * it holds only org-assignable custom roles; a platform one also core's roles
+ * and services' system roles (`<slug>/<name>`).
+ */
+const checkIntegration = (
+  set: ProvisioningSet,
+  file: string,
+  integration: ResolvedIntegration,
+  services: ServiceInSet[],
+  problems: string[]
+) => {
+  const label = `${file}: integrations[${integration.slug}]`;
+  if (integration.slug === CORE_SERVICE.slug)
+    problems.push(`${label}: slug "${integration.slug}" is core's`);
+
+  const customRoles = new Map(
+    set.documents.flatMap((d) => d.roles.map((r) => [r.name, r] as const))
+  );
+  const isSystemRole = (target: string) => {
+    const { slug, name } = splitRoleTarget(target);
+    return slug === null
+      ? CORE_ROLE_NAMES.has(name)
+      : !!services
+          .find((s) => s.service.slug === slug)
+          ?.service.systemRoles.some((r) => r.name === name);
+  };
+  for (const role of integration.roles) {
+    const where = `${label}: roles "${role}"`;
+    const custom = customRoles.get(role);
+    if (integration.organizationId) {
+      if (custom?.orgAssignable) continue;
+      problems.push(
+        custom
+          ? `${where} is not org-assignable; an org-bound integration holds only org-assignable custom roles`
+          : isSystemRole(role)
+            ? `${where} is a system role; an org-bound integration holds only org-assignable custom roles`
+            : `${where} is not a custom role in the provisioning set`
+      );
+    } else if (!custom && !isSystemRole(role)) {
+      problems.push(
+        `${where} is not a custom role in the provisioning set, a core role, nor a service's system role`
+      );
+    }
+  }
+  for (const audience of integration.audiences)
+    if (!services.some((s) => s.service.slug === audience))
+      problems.push(
+        `${label}: audiences "${audience}" is not a service in the provisioning set`
+      );
+};
+
+/**
  * Every problem with the set as a whole, each prefixed with the file(s)
  * concerned. Needs no database: references resolve within the set or against
  * core's declaration. Empty when the set may be applied.
@@ -372,6 +435,8 @@ export const validateSet = (set: ProvisioningSet): string[] => {
     }
     checkClients(doc, services, problems);
     checkCustomRoles(doc, services, problems);
+    for (const integration of doc.integrations ?? [])
+      checkIntegration(set, doc.file, integration, services, problems);
   }
   return problems;
 };

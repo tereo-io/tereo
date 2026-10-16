@@ -30,13 +30,13 @@ export const get = async (
   return service;
 };
 
-/** The ones of these slugs that name a service. */
+/** The ones of these slugs that name a service (not an integration). */
 export const findSlugs = async (
   slugs: string[],
   tx: Prisma.TransactionClient = prisma
 ): Promise<Set<string>> => {
   const found = await tx.service.findMany({
-    where: { slug: { in: slugs } },
+    where: { slug: { in: slugs }, kind: "service" },
     select: { slug: true },
   });
   return new Set(found.map((s) => s.slug));
@@ -76,3 +76,63 @@ export const getAccessPaginated = async (options: PageOptions) => {
 };
 
 export type ServiceWithClient = Awaited<ReturnType<typeof get>>;
+
+const integrationInclude = {
+  client: {
+    select: {
+      id: true,
+      clientId: true,
+      audience: true,
+      previousSecretExpiresAt: true,
+      serviceAccountUser: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          isActive: true,
+          userRoles: {
+            select: {
+              organizationId: true,
+              role: {
+                select: {
+                  id: true,
+                  name: true,
+                  displayName: true,
+                  serviceId: true,
+                },
+              },
+            },
+            orderBy: { role: { name: "asc" } },
+          },
+        },
+      },
+    },
+  },
+  organization: { select: { id: true, name: true, slug: true } },
+  creator: userRefSelect,
+} satisfies Prisma.ServiceInclude;
+
+export const getIntegration = async (
+  id: string,
+  tx: Prisma.TransactionClient = prisma
+) => {
+  const integration = await tx.service.findUnique({
+    where: { id, kind: "integration" },
+    include: integrationInclude,
+  });
+  if (!integration) throw new NotFoundError("Integration not found");
+  return integration;
+};
+
+export const getIntegrationsPaginated = async (options: PageOptions) => {
+  const rows = await prisma.service.findMany({
+    take: options.take + 1,
+    orderBy: options.orderBy,
+    where: { ...options.where, kind: "integration" },
+    include: integrationInclude,
+  });
+  const hasMore = rows.length > options.take;
+  return { data: hasMore ? rows.slice(0, options.take) : rows, hasMore };
+};
+
+export type IntegrationRow = Awaited<ReturnType<typeof getIntegration>>;

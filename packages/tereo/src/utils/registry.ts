@@ -114,6 +114,15 @@ export const namespacesOverlap = (a: string, b: string) =>
 export const lockNamespaces = (tx: Tx) =>
   tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('registry:namespaces', 0))`;
 
+// Integrations have none.
+const serviceNamespaces = async (tx: Tx): Promise<string[]> =>
+  (
+    await tx.service.findMany({
+      where: { namespace: { not: null } },
+      select: { namespace: true },
+    })
+  ).flatMap((s) => (s.namespace ? [s.namespace] : []));
+
 /**
  * Throws unless `namespace` is well-formed and clear of every other service's
  * namespace, of core's reserved prefixes, and of buckets admins created under
@@ -131,12 +140,7 @@ export const assertNamespaceAvailable = async (
     );
   }
   if (tx !== prisma) await lockNamespaces(tx);
-  const taken = [
-    ...CORE_RESERVED_NAMESPACES,
-    ...(await tx.service.findMany({ select: { namespace: true } })).map(
-      (s) => s.namespace
-    ),
-  ];
+  const taken = [...CORE_RESERVED_NAMESPACES, ...(await serviceNamespaces(tx))];
   const clash = taken.find((other) => namespacesOverlap(namespace, other));
   if (clash) {
     throw new ConflictError(
@@ -184,10 +188,9 @@ export const assertBucketNameUnreserved = async (
   tx: Tx = prisma
 ): Promise<void> => {
   if (tx !== prisma) await lockNamespaces(tx);
-  const services = await tx.service.findMany({ select: { namespace: true } });
   const owner = [
     ...CORE_RESERVED_NAMESPACES,
-    ...services.map((s) => s.namespace),
+    ...(await serviceNamespaces(tx)),
   ].find((ns) => bucketInNamespace(name, [ns]));
   if (owner) {
     throw new ConflictError(

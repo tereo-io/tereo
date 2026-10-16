@@ -53,7 +53,8 @@ const permissionsInClientOrg = async (
 ): Promise<string[]> => {
   const clientOrg = client.organizationId;
   if (!clientOrg) {
-    if (!(await db.services.getByClientId(client.id))) {
+    // Not an integration's: an external party learns no user's global permissions.
+    if ((await db.services.getByClientId(client.id))?.kind !== "service") {
       throw new ForbiddenError(
         "Only a service's client or an organization's client may check permissions"
       );

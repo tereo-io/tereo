@@ -1,9 +1,9 @@
+import { CORE_SERVICE_ID, SYSTEM_USER_ID } from "../../definitions/index.js";
 import { deleteLoginClientTx, rotatedSecretFields } from "../clients.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
 import { formatClient, formatRole } from "../transformers.js";
 import { syncProvisionedAccessTx } from "../serviceAccess.js";
-import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { openSigningSecret } from "../webhookSecrets.js";
 import { prisma, type Prisma } from "../db/prisma.js";
 import type { CustomRoleEntry } from "./schema.js";
@@ -18,6 +18,13 @@ import {
   notifyRolePermissionsChanged,
   notifyRoleStatusChanged,
 } from "../../websocket/emitters/index.js";
+import {
+  createIntegrationTx,
+  integrationRef,
+  setIntegrationAudiencesTx,
+  setIntegrationRolesTx,
+  updateIntegrationTx,
+} from "../integrations.js";
 import {
   createServiceTx,
   revokeServiceTokens,
@@ -34,6 +41,7 @@ import {
   ProvisioningError,
   type ProvisioningSet,
   type ResolvedClient,
+  type ResolvedIntegration,
   type ResolvedService,
   type ResolvedWebhook,
 } from "./load.js";
@@ -43,7 +51,10 @@ type Tx = Prisma.TransactionClient;
 const PROVISIONING_LOCK = "provisioning";
 
 export interface ProvisioningResult {
-  /** Services, clients and webhooks (`webhook:<provisioning key>`). */
+  /**
+   * Services, clients, integrations and webhooks (`webhook:<provisioning
+   * key>`).
+   */
   created: string[];
   updated: string[];
   rotated: string[];
@@ -51,7 +62,7 @@ export interface ProvisioningResult {
   unprovisioned: string[];
   /** Services whose declaration was applied. */
   declared: string[];
-  /** Access granted, extended or revoked. */
+  /** Access granted, extended or revoked; integrations' roles or audiences set. */
   access: string[];
   /** Custom roles created or changed. */
   roles: string[];
@@ -71,6 +82,9 @@ interface ClientInSet extends FromDocument {
 interface RoleInSet extends FromDocument {
   role: CustomRoleEntry;
 }
+interface IntegrationInSet extends FromDocument {
+  integration: ResolvedIntegration;
+}
 
 const entriesOf = (set: ProvisioningSet) => ({
   services: set.documents.flatMap(({ file, version, service }) =>
@@ -81,6 +95,13 @@ const entriesOf = (set: ProvisioningSet) => ({
   ),
   roles: set.documents.flatMap(({ file, version, roles }) =>
     roles.map((role) => ({ file, version, role }))
+  ),
+  integrations: set.documents.flatMap(({ file, version, integrations }) =>
+    (integrations ?? []).map((integration) => ({
+      file,
+      version,
+      integration,
+    }))
   ),
 });
 
@@ -98,20 +119,28 @@ const clientLabel = ({ file, client }: ClientInSet) =>
   `${file}: clients[${client.clientId}]`;
 
 const roleLabel = ({ file, role }: RoleInSet) => `${file}: roles[${role.name}]`;
+const integrationLabel = ({ file, integration }: IntegrationInSet) =>
+  `${file}: integrations[${integration.slug}]`;
 
 const sortedUnique = (values: string[]) => [...new Set(values)].sort();
 
 const loadState = async (tx: Tx, p: Entries) => {
   const services = p.services.map((e) => e.service);
   const clients = p.clients.map((e) => e.client);
-  const slugs = services.map((s) => s.slug);
+  const integrations = p.integrations.map((e) => e.integration);
+  const slugs = [
+    ...services.map((s) => s.slug),
+    ...integrations.map((i) => i.slug),
+  ];
   const clientIds = [
     ...services.map((s) => s.clientId),
     ...clients.map((c) => c.clientId),
+    ...integrations.map((i) => i.clientId),
   ];
   const hashes = [
     ...services.map((s) => s.secretHash),
     ...clients.flatMap((c) => (c.secretHash ? [c.secretHash] : [])),
+    ...integrations.map((i) => i.secretHash),
   ];
   // One query at a time: a transaction runs on one connection.
   const serviceRows = await tx.service.findMany({
@@ -140,6 +169,7 @@ const loadState = async (tx: Tx, p: Entries) => {
     select: { id: true, clientSecret: true, previousSecretHash: true },
   });
   return {
+    // Integrations too: they share the table, and so the slugs.
     services: new Map(serviceRows.map((s) => [s.slug, s])),
     clients: new Map(clientRows.map((c) => [c.clientId, c])),
     roles: new Map(roleRows.map((r) => [r.name, r])),
@@ -187,6 +217,10 @@ const findProblems = async (
     const spec = entry.service;
     const label = serviceLabel(entry);
     const existing = state.services.get(spec.slug);
+    if (existing?.kind === "integration") {
+      problems.push(`${label}: slug "${spec.slug}" is an integration's`);
+      continue;
+    }
     if (existing && !existing.provisioned) {
       problems.push(
         `${label}: a service with slug "${spec.slug}" already exists and was not created from the provisioning file`
@@ -276,6 +310,67 @@ const findProblems = async (
       problems.push(
         `${serviceLabel(entry)}: webhooks[${key}]: no organization with id ${id}`
       );
+
+  const integrationOrgs = sortedUnique(
+    p.integrations.flatMap((e) =>
+      e.integration.organizationId ? [e.integration.organizationId] : []
+    )
+  );
+  const liveOrgs = new Set(
+    (
+      await tx.organization.findMany({
+        where: { id: { in: integrationOrgs }, archivedAt: null },
+        select: { id: true },
+      })
+    ).map((o) => o.id)
+  );
+  for (const entry of p.integrations) {
+    const spec = entry.integration;
+    const label = integrationLabel(entry);
+    const existing = state.services.get(spec.slug);
+    if (existing && existing.kind !== "integration") {
+      problems.push(`${label}: slug "${spec.slug}" is a service's`);
+      continue;
+    }
+    if (existing && !existing.provisioned) {
+      problems.push(
+        `${label}: an integration with slug "${spec.slug}" already exists and was not created from the provisioning file`
+      );
+      continue;
+    }
+    if (existing) {
+      if (existing.client?.clientId !== spec.clientId)
+        problems.push(
+          `${label}: clientId cannot change from "${existing.client?.clientId}"`
+        );
+      if (existing.organizationId !== spec.organizationId)
+        problems.push(
+          `${label}: organizationId cannot change from ${existing.organizationId ?? "none"}`
+        );
+      if (existing.client) ownClientRow.set(label, existing.client.id);
+    } else {
+      if (spec.organizationId && !liveOrgs.has(spec.organizationId))
+        problems.push(
+          `${label}: no organization with id ${spec.organizationId}`
+        );
+      const email = serviceAccountEmail(spec.slug);
+      if (await tx.user.findUnique({ where: { email } }))
+        problems.push(`${label}: a user with email "${email}" already exists`);
+    }
+
+    const client = state.clients.get(spec.clientId);
+    if (client && client.id !== existing?.client?.id)
+      problems.push(
+        `${label}: a client with clientId "${spec.clientId}" already exists`
+      );
+
+    checkSecret(
+      label,
+      spec.secretEnv,
+      spec.secretHash,
+      ownClientRow.get(label)
+    );
+  }
 
   for (const entry of p.roles)
     if (state.roles.get(entry.role.name)?.provisioned === false)
@@ -431,6 +526,179 @@ const applyService = async (
     });
     result.rotated.push(entry);
   }
+};
+
+const applyIntegration = async (
+  tx: Tx,
+  from: IntegrationInSet,
+  state: State,
+  now: Date,
+  result: ProvisioningResult
+) => {
+  const spec = from.integration;
+  const meta = documentMeta(from);
+  const entry = `integration:${spec.slug}`;
+  const existing = state.services.get(spec.slug);
+  if (!existing) {
+    await createIntegrationTx(
+      tx,
+      {
+        slug: spec.slug,
+        name: spec.name,
+        organizationId: spec.organizationId,
+        clientId: spec.clientId,
+        clientSecretHash: spec.secretHash,
+        provisioned: true,
+        auditMetadata: meta,
+      },
+      SYSTEM_ACTOR
+    );
+    result.created.push(entry);
+    return;
+  }
+
+  const ref = integrationRef(await db.services.getIntegration(existing.id, tx));
+  if (existing.unprovisionedAt) {
+    await tx.service.update({
+      where: { id: existing.id },
+      data: { unprovisionedAt: null },
+    });
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      action: "UPDATE",
+      entityType: "Integration",
+      entityId: existing.id,
+      entityName: existing.slug,
+      changes: {
+        unprovisionedAt: { old: existing.unprovisionedAt, new: null },
+      },
+      metadata: { action: "provisioned", ...meta },
+    });
+  }
+  if (existing.name !== spec.name || !existing.isActive) {
+    await updateIntegrationTx(
+      tx,
+      ref,
+      {
+        ...(existing.name !== spec.name && { name: spec.name }),
+        ...(!existing.isActive && { isActive: true }),
+      },
+      SYSTEM_ACTOR,
+      { action: "provisioned", ...meta }
+    );
+  }
+  if (
+    existing.unprovisionedAt ||
+    existing.name !== spec.name ||
+    !existing.isActive
+  )
+    result.updated.push(entry);
+
+  const client = existing.client!;
+  if (client.clientSecret !== spec.secretHash) {
+    const previousSecretExpiresAt = await rotateSecret(
+      tx,
+      client,
+      spec.secretHash,
+      now
+    );
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      action: "UPDATE",
+      entityType: "Integration",
+      entityId: existing.id,
+      entityName: existing.slug,
+      metadata: { action: "secret_rotated", previousSecretExpiresAt, ...meta },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "core.integration.secret-regenerated",
+      entityType: "Integration",
+      entityId: existing.id,
+      data: { id: existing.id, slug: existing.slug, previousSecretExpiresAt },
+    });
+    result.rotated.push(entry);
+  }
+};
+
+/**
+ * The role a provisioned integration names: a custom role, core's, or
+ * `<slug>/<name>` a service's system role. Validation checked the names
+ * against the set; the database is checked here.
+ */
+const resolveIntegrationRole = async (tx: Tx, target: string) => {
+  const slash = target.indexOf("/");
+  const live = { archivedAt: null, retiredAt: null };
+  if (slash !== -1) {
+    return tx.role.findFirst({
+      where: {
+        name: target.slice(slash + 1),
+        service: { slug: target.slice(0, slash), kind: "service" },
+        ...live,
+      },
+      select: { id: true },
+    });
+  }
+  return (
+    (await tx.role.findFirst({
+      where: { name: target, serviceId: null, ...live },
+      select: { id: true },
+    })) ??
+    (await tx.role.findFirst({
+      where: { name: target, serviceId: CORE_SERVICE_ID, ...live },
+      select: { id: true },
+    }))
+  );
+};
+
+/** Roles and audiences, once the roles and services they name exist. */
+const applyIntegrationsAccess = async (
+  tx: Tx,
+  p: Entries,
+  result: ProvisioningResult
+): Promise<string[]> => {
+  const problems: string[] = [];
+  for (const from of p.integrations) {
+    const spec = from.integration;
+    const label = integrationLabel(from);
+    const meta = { action: "provisioned", ...documentMeta(from) };
+    const row = await tx.service.findUniqueOrThrow({
+      where: { slug: spec.slug },
+      select: { id: true },
+    });
+    const ref = integrationRef(await db.services.getIntegration(row.id, tx));
+
+    const roleIds: string[] = [];
+    const missing: string[] = [];
+    for (const name of sortedUnique(spec.roles)) {
+      const role = await resolveIntegrationRole(tx, name);
+      if (role) roleIds.push(role.id);
+      else missing.push(name);
+    }
+    if (missing.length > 0) {
+      for (const name of missing)
+        problems.push(
+          `${label}: roles "${name}" does not exist in the database, or is archived or retired`
+        );
+      continue;
+    }
+
+    await asProblem(label, problems, async () => {
+      if (await setIntegrationRolesTx(tx, ref, roleIds, SYSTEM_ACTOR, meta))
+        result.access.push(`integration:${spec.slug} roles`);
+      if (
+        await setIntegrationAudiencesTx(
+          tx,
+          ref,
+          spec.audiences,
+          SYSTEM_ACTOR,
+          meta
+        )
+      )
+        result.access.push(`integration:${spec.slug} audiences`);
+    });
+  }
+  return problems;
 };
 
 /** What a login client's row holds for its entry, the secret aside. */
@@ -938,6 +1206,7 @@ const markMissing = async (
 ) => {
   const services = await tx.service.findMany({
     where: {
+      kind: "service",
       provisioned: true,
       unprovisionedAt: null,
       slug: { notIn: p.services.map((e) => e.service.slug) },
@@ -970,6 +1239,31 @@ const markMissing = async (
       },
     });
     result.unprovisioned.push(`service:${service.slug}`);
+  }
+
+  const integrations = await tx.service.findMany({
+    where: {
+      kind: "integration",
+      provisioned: true,
+      unprovisionedAt: null,
+      slug: { notIn: p.integrations.map((e) => e.integration.slug) },
+    },
+  });
+  for (const integration of integrations) {
+    await tx.service.update({
+      where: { id: integration.id },
+      data: { unprovisionedAt: now },
+    });
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      action: "UPDATE",
+      entityType: "Integration",
+      entityId: integration.id,
+      entityName: integration.slug,
+      changes: { unprovisionedAt: { old: null, new: now } },
+      metadata: { action: "unprovisioned" },
+    });
+    result.unprovisioned.push(`integration:${integration.slug}`);
   }
 
   const clients = await tx.oAuthClient.findMany({
@@ -1077,7 +1371,8 @@ const applyServicesContent = async (
     await asProblem(serviceLabel(entry), problems, async () => {
       const { changed } = await applyDeclarationTx(
         tx,
-        row,
+        // Its namespace is the entry's: findProblems refuses a change.
+        { ...row, namespace: entry.service.namespace },
         declarationOf(entry.version, entry.service),
         SYSTEM_ACTOR,
         now,
@@ -1150,7 +1445,9 @@ export const applyProvisioning = async (
         // rows.
         await lockRegistries(
           tx,
-          [...state.services.values()].map((s) => s.id)
+          [...state.services.values()]
+            .filter((s) => s.kind === "service")
+            .map((s) => s.id)
         );
         const problems = await findProblems(tx, p, state);
         if (problems.length > 0) throw new ProvisioningError(problems);
@@ -1170,6 +1467,15 @@ export const applyProvisioning = async (
         if (content.problems.length > 0)
           throw new ProvisioningError(content.problems);
         const roleChanges = await applyRoles(tx, p, result);
+        for (const entry of p.integrations)
+          await applyIntegration(tx, entry, state, now, result);
+        const integrationProblems = await applyIntegrationsAccess(
+          tx,
+          p,
+          result
+        );
+        if (integrationProblems.length > 0)
+          throw new ProvisioningError(integrationProblems);
         await applyWebhooks(tx, p, now, result);
         for (const entry of p.clients)
           await applyClient(tx, entry, state, now, result);
@@ -1224,80 +1530,106 @@ const revokeHolderClientTokens = async (roleId: string) => {
 // `now` is a parameter for tests.
 export const deprovisionMissing = async (
   now: Date = new Date()
-): Promise<{ services: number; clients: number; roles: number }> => {
+): Promise<{
+  services: number;
+  integrations: number;
+  clients: number;
+  roles: number;
+}> => {
   const cutoff = new Date(
     now.getTime() - env.REGISTRY_RETIREMENT_GRACE_HOURS * 60 * 60 * 1000
   );
-  const { serviceClientIds, jtis, services, clients, archivedRoles } =
-    await prisma.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
-        const stale = { provisioned: true, unprovisionedAt: { lte: cutoff } };
-        const dueServices = await tx.service.findMany({
-          where: { ...stale, isActive: true },
-          include: { client: { include: { serviceAccountUser: true } } },
-        });
-        const serviceClientIds: string[] = [];
-        for (const service of dueServices) {
-          const { client, accountUserId } = serviceRows(service);
-          await updateServiceTx(
-            tx,
-            {
-              id: service.id,
-              name: service.name,
-              isActive: true,
-              client,
-              accountUserId,
-            },
-            { isActive: false },
-            SYSTEM_ACTOR
-          );
-          serviceClientIds.push(client.id);
-        }
+  const {
+    serviceClientIds,
+    jtis,
+    services,
+    integrations,
+    clients,
+    archivedRoles,
+  } = await prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
+      const stale = { provisioned: true, unprovisionedAt: { lte: cutoff } };
+      const dueServices = await tx.service.findMany({
+        where: { ...stale, kind: "service", isActive: true },
+        include: { client: { include: { serviceAccountUser: true } } },
+      });
+      const serviceClientIds: string[] = [];
+      for (const service of dueServices) {
+        const { client, accountUserId } = serviceRows(service);
+        await updateServiceTx(
+          tx,
+          {
+            id: service.id,
+            name: service.name,
+            isActive: true,
+            client,
+            accountUserId,
+          },
+          { isActive: false },
+          SYSTEM_ACTOR
+        );
+        serviceClientIds.push(client.id);
+      }
 
-        const dueClients = await tx.oAuthClient.findMany({
-          where: { ...stale, service: { is: null } },
-        });
-        const jtis: string[] = [];
-        for (const client of dueClients)
-          jtis.push(...(await deleteLoginClientTx(tx, client, SYSTEM_ACTOR)));
+      // Their tokens are revoked with the deactivation.
+      const dueIntegrations = await tx.service.findMany({
+        where: { ...stale, kind: "integration", isActive: true },
+        select: { id: true },
+      });
+      for (const { id } of dueIntegrations)
+        await updateIntegrationTx(
+          tx,
+          integrationRef(await db.services.getIntegration(id, tx)),
+          { isActive: false },
+          SYSTEM_ACTOR,
+          { action: "unprovisioned" }
+        );
 
-        const dueRoles = await tx.role.findMany({
-          where: { ...stale, serviceId: null, archivedAt: null },
+      const dueClients = await tx.oAuthClient.findMany({
+        where: { ...stale, service: { is: null } },
+      });
+      const jtis: string[] = [];
+      for (const client of dueClients)
+        jtis.push(...(await deleteLoginClientTx(tx, client, SYSTEM_ACTOR)));
+
+      const dueRoles = await tx.role.findMany({
+        where: { ...stale, serviceId: null, archivedAt: null },
+      });
+      const archivedRoles: { id: string; name: string }[] = [];
+      for (const role of dueRoles) {
+        await tx.role.update({
+          where: { id: role.id },
+          data: { isActive: false, archivedAt: now },
         });
-        const archivedRoles: { id: string; name: string }[] = [];
-        for (const role of dueRoles) {
-          await tx.role.update({
-            where: { id: role.id },
-            data: { isActive: false, archivedAt: now },
-          });
-          await logAuditTx(tx, {
-            auth: SYSTEM_ACTOR,
-            action: "ARCHIVE",
-            entityType: "Role",
-            entityId: role.id,
-            entityName: role.name,
-            metadata: { action: "unprovisioned" },
-          });
-          await emitTx(tx, {
-            organizationId: getDefaultOrganizationId(),
-            eventType: "auth.role.archived",
-            entityType: "Role",
-            entityId: role.id,
-            data: { id: role.id, name: role.name },
-          });
-          archivedRoles.push({ id: role.id, name: role.name });
-        }
-        return {
-          serviceClientIds,
-          jtis,
-          services: dueServices.length,
-          clients: dueClients.length,
-          archivedRoles,
-        };
-      },
-      { timeout: 30_000 }
-    );
+        await logAuditTx(tx, {
+          auth: SYSTEM_ACTOR,
+          action: "ARCHIVE",
+          entityType: "Role",
+          entityId: role.id,
+          entityName: role.name,
+          metadata: { action: "unprovisioned" },
+        });
+        await emitTx(tx, {
+          organizationId: getDefaultOrganizationId(),
+          eventType: "auth.role.archived",
+          entityType: "Role",
+          entityId: role.id,
+          data: { id: role.id, name: role.name },
+        });
+        archivedRoles.push({ id: role.id, name: role.name });
+      }
+      return {
+        serviceClientIds,
+        jtis,
+        services: dueServices.length,
+        integrations: dueIntegrations.length,
+        clients: dueClients.length,
+        archivedRoles,
+      };
+    },
+    { timeout: 30_000 }
+  );
   for (const id of serviceClientIds) await revokeServiceTokens(id);
   disconnectTokenSockets(jtis);
   for (const { id } of archivedRoles) {
@@ -1307,10 +1639,10 @@ export const deprovisionMissing = async (
     );
   }
   const roles = archivedRoles.length;
-  if (services > 0 || clients > 0 || roles > 0)
+  if (services > 0 || integrations > 0 || clients > 0 || roles > 0)
     logger.info(
-      { services, clients, roles },
+      { services, integrations, clients, roles },
       "Retired entries removed from the provisioning file"
     );
-  return { services, clients, roles };
+  return { services, integrations, clients, roles };
 };

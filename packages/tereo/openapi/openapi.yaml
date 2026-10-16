@@ -829,6 +829,8 @@ tags:
     description: Admin endpoints for system settings
   - name: Admin - Services
     description: Admin endpoints for app services — credentials, activation and access approval
+  - name: Admin - Integrations
+    description: Admin endpoints for integrations — machine clients for external parties, org-bound or platform, with their roles and audiences
   - name: Setup
     description: First-boot setup — create the first admin (public; authorized by the setup token)
   - name: Health
@@ -931,6 +933,7 @@ x-tagGroups:
       - Admin - Identity Provider Domains
       - Admin - Settings
       - Admin - Services
+      - Admin - Integrations
 
   - name: Files
     tags:
@@ -1111,6 +1114,18 @@ paths:
     $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers~1{id}~1domains'
   /v1/admin/identity-providers/{id}/domains/{domainId}:
     $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers~1{id}~1domains~1{domainId}'
+  /v1/admin/integrations:
+    $ref: './paths/auth/admin/integrations.yaml#/~1admin~1integrations'
+  /v1/admin/integrations/{id}:
+    $ref: './paths/auth/admin/integrations.yaml#/~1admin~1integrations~1{id}'
+  /v1/admin/integrations/{id}/regenerate-secret:
+    $ref: './paths/auth/admin/integrations.yaml#/~1admin~1integrations~1{id}~1regenerate-secret'
+  /v1/admin/integrations/{id}/revoke-previous-secret:
+    $ref: './paths/auth/admin/integrations.yaml#/~1admin~1integrations~1{id}~1revoke-previous-secret'
+  /v1/admin/integrations/{id}/roles:
+    $ref: './paths/auth/admin/integrations.yaml#/~1admin~1integrations~1{id}~1roles'
+  /v1/admin/integrations/{id}/audiences:
+    $ref: './paths/auth/admin/integrations.yaml#/~1admin~1integrations~1{id}~1audiences'
   /v1/admin/services:
     $ref: './paths/auth/admin/services.yaml#/~1admin~1services'
   /v1/admin/services/access:
@@ -1973,6 +1988,16 @@ webhooks:
     $ref: './paths/auth/admin/services.yaml#/core.service.access-approved'
   core.service.access-revoked:
     $ref: './paths/auth/admin/services.yaml#/core.service.access-revoked'
+  core.integration.created:
+    $ref: './paths/auth/admin/integrations.yaml#/core.integration.created'
+  core.integration.updated:
+    $ref: './paths/auth/admin/integrations.yaml#/core.integration.updated'
+  core.integration.deactivated:
+    $ref: './paths/auth/admin/integrations.yaml#/core.integration.deactivated'
+  core.integration.secret-regenerated:
+    $ref: './paths/auth/admin/integrations.yaml#/core.integration.secret-regenerated'
+  core.integration.previous-secret-revoked:
+    $ref: './paths/auth/admin/integrations.yaml#/core.integration.previous-secret-revoked'
   file-service.bucket.created:
     $ref: './paths/files/webhook-events.yaml#/file-service.bucket.created'
   file-service.bucket.updated:

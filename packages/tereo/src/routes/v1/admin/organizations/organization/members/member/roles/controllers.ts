@@ -1,6 +1,7 @@
 import { getDefaultOrganizationId } from "../../../../../../../../utils/defaultOrganization.js";
 import { assertOrgAssignableRoles } from "../../../../../../../../utils/orgRoleAssignment.js";
 import { notifyOrgRolesChanged } from "../../../../../../../../websocket/emitters/index.js";
+import { assertNotIntegrationAccount } from "../../../../../../../../utils/integrations.js";
 import { emitTx, logAuditTx } from "../../../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../../../utils/auth.js";
 import db from "../../../../../../../../utils/db/index.js";
@@ -56,6 +57,7 @@ export const setMemberOrgRoles = async (req: Request, res: Response) => {
   const roleIds = [...new Set(body.roleIds)];
 
   await db.organizations.get(orgId);
+  await assertNotIntegrationAccount(userId);
 
   const userRoles = await db.$transaction(async (tx) => {
     // Under the lock removeMember and tier changes take, so the membership

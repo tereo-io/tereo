@@ -26,6 +26,7 @@ export const CORE_RESERVED_NAMESPACES = [
   "settings",
   "organizations",
   "services",
+  "integrations",
   "auth",
   "auth-service",
   "file-service",

@@ -2374,7 +2374,7 @@ CompleteSetupResponse:
 # Admin - Service Schemas
 Service:
   type: object
-  description: An app service — its OAuth client, the service-account user it acts as, and its declaration state.
+  description: An app service — its OAuth client, the service-account user it acts as, and its declaration state. Integrations are under `/v1/admin/integrations`.
   required:
     - id
     - slug
@@ -2796,6 +2796,197 @@ PaginatedServicesResponse:
       type: array
       items:
         $ref: '#/Service'
+    hasMore:
+      type: boolean
+      description: Whether more pages exist beyond this one.
+    limit:
+      type: integer
+      description: The page size used for this request.
+    nextCursor:
+      type: [string, 'null']
+      description: Opaque cursor to pass as `cursor` on the next request to continue paginating. `null` when `hasMore` is `false`.
+
+Integration:
+  type: object
+  description: |
+    A machine client for an external party: its OAuth client, the
+    service-account user it acts as, and the roles and audience it holds.
+    Org-bound when `organizationId` is set (its tokens carry that `org_id`),
+    a platform integration otherwise.
+  required:
+    - id
+    - slug
+    - name
+    - organizationId
+    - organization
+    - isActive
+    - provisioned
+    - clientId
+    - serviceAccountUserId
+    - serviceAccountUser
+    - roles
+    - audience
+    - previousSecretExpiresAt
+    - createdBy
+    - creator
+    - createdAt
+    - updatedAt
+  properties:
+    id:
+      type: string
+      format: uuid
+    slug:
+      type: string
+    name:
+      type: string
+    organizationId:
+      type: [string, 'null']
+      format: uuid
+      description: The organization its tokens are bound to; `null` for a platform integration. Fixed at creation.
+    organization:
+      description: The organization `organizationId` names; null when it is null.
+      oneOf:
+        - $ref: '../schemas.yaml#/OrgRef'
+        - type: 'null'
+    isActive:
+      type: boolean
+    provisioned:
+      type: boolean
+      description: |
+        True for an integration from the provisioning documents. Only the end
+        of a secret overlap is decided here; every other write is
+        `409 managed_by_provisioning`.
+    clientId:
+      type: [string, 'null']
+      description: OAuth `client_id` of its confidential client
+    serviceAccountUserId:
+      type: [string, 'null']
+      format: uuid
+    serviceAccountUser:
+      oneOf:
+        - $ref: '../schemas.yaml#/UserRef'
+        - type: 'null'
+    roles:
+      type: array
+      description: Its roles in its organization when org-bound, its global roles otherwise.
+      items:
+        $ref: '#/IntegrationRole'
+    audience:
+      type: array
+      items:
+        type: string
+      description: Slugs of the services that may introspect its tokens
+    previousSecretExpiresAt:
+      type: [string, 'null']
+      format: date-time
+      description: When the replaced client secret stops working; `null` when there is no overlap.
+    createdBy:
+      type: string
+      format: uuid
+    creator:
+      $ref: '../schemas.yaml#/UserRef'
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
+IntegrationRole:
+  type: object
+  required: [id, name, displayName, system]
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    displayName:
+      type: string
+    system:
+      type: boolean
+      description: A system role (core's or a service's), not a custom role.
+
+IntegrationWithCredentials:
+  allOf:
+    - $ref: '#/Integration'
+    - type: object
+      required:
+        - credentials
+      properties:
+        credentials:
+          $ref: '#/ServiceCredentials'
+
+CreateIntegrationRequest:
+  type: object
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+    slug:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+      description: Defaults to the name, lowercased and hyphenated. Shared with services.
+    organizationId:
+      type: string
+      format: uuid
+      description: Makes it org-bound. Fixed once set.
+
+UpdateIntegrationRequest:
+  type: object
+  minProperties: 1
+  description: At least one field is required.
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+    isActive:
+      type: boolean
+      description: '`false` deactivates the integration and its service account and revokes its tokens.'
+
+SetIntegrationRolesRequest:
+  type: object
+  required:
+    - roleIds
+  properties:
+    roleIds:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        format: uuid
+      description: Its roles from now on; `[]` removes them all.
+
+SetIntegrationAudiencesRequest:
+  type: object
+  required:
+    - slugs
+  properties:
+    slugs:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+      description: Service slugs; `[]` clears the audience.
+
+PaginatedIntegrationsResponse:
+  type: object
+  required:
+    - data
+    - hasMore
+    - limit
+    - nextCursor
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/Integration'
     hasMore:
       type: boolean
       description: Whether more pages exist beyond this one.

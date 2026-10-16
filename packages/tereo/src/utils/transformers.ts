@@ -1,7 +1,7 @@
 import { ClientType, UserType } from "../../prisma/generated/client/index.js";
 import { toOrgRef, toServiceRef, toUserRef, type OrgRef } from "./refs.js";
+import type { IntegrationRow, ServiceWithClient } from "./db/services.js";
 import { previousSecretExpiry } from "./webhookSigning.js";
-import type { ServiceWithClient } from "./db/services.js";
 import { maskCustomHeaders } from "./webhookHeaders.js";
 import db from "./db/index.js";
 
@@ -204,6 +204,42 @@ export const formatService = (service: ServiceWithClient) => ({
   createdAt: service.createdAt,
   updatedAt: service.updatedAt,
 });
+
+/**
+ * An integration. `roles` are those that count for it: in its organization
+ * when it is bound to one, global otherwise.
+ */
+export const formatIntegration = (integration: IntegrationRow) => {
+  const account = integration.client?.serviceAccountUser;
+  return {
+    id: integration.id,
+    slug: integration.slug,
+    name: integration.name,
+    organizationId: integration.organizationId,
+    organization: toOrgRef(integration.organization),
+    isActive: integration.isActive,
+    provisioned: integration.provisioned,
+    clientId: integration.client?.clientId ?? null,
+    serviceAccountUserId: account?.id ?? null,
+    serviceAccountUser: toUserRef(account),
+    roles: (account?.userRoles ?? [])
+      .filter((ur) => ur.organizationId === integration.organizationId)
+      .map(({ role }) => ({
+        id: role.id,
+        name: role.name,
+        displayName: role.displayName,
+        system: role.serviceId !== null,
+      })),
+    audience: integration.client?.audience ?? [],
+    previousSecretExpiresAt: unexpired(
+      integration.client?.previousSecretExpiresAt
+    ),
+    createdBy: integration.createdBy,
+    creator: toUserRef(integration.creator),
+    createdAt: integration.createdAt,
+    updatedAt: integration.updatedAt,
+  };
+};
 
 type WebhookEndpointRow = Awaited<
   ReturnType<typeof db.webhookEndpoints.getById>

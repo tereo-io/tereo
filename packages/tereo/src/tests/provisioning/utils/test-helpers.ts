@@ -13,10 +13,11 @@ import {
   systemRoleItem,
 } from "../../../utils/registry.js";
 
-// Production never deletes a service; tests do, with everything that would
-// otherwise hold it: its buckets with their objects, its webhook endpoints and
-// event types, its declared roles and permissions, its access rows, and its
-// service-account user with that user's roles and audit entries.
+// Production never deletes a service or an integration; tests do, with
+// everything that would otherwise hold it: its buckets with their objects, its
+// webhook endpoints and event types, its declared roles and permissions, its
+// access rows, and its service-account user with that user's roles,
+// memberships and audit entries.
 export async function removeServices(slugs: string[]) {
   const services = await prisma.service.findMany({
     where: { slug: { in: slugs } },
@@ -55,6 +56,10 @@ export async function removeServices(slugs: string[]) {
   await prisma.role.deleteMany({ where: { serviceId: { in: ids } } });
   await prisma.permission.deleteMany({ where: { serviceId: { in: ids } } });
   await prisma.userRole.deleteMany({ where: { userId: { in: userIds } } });
+  // An org-bound integration's account is a member of its organization.
+  await prisma.organizationMember.deleteMany({
+    where: { userId: { in: userIds } },
+  });
   await prisma.auditLogEntry.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.service.deleteMany({ where: { id: { in: ids } } });
   // Its tokens and login-flow rows go with it (ON DELETE CASCADE).
@@ -88,6 +93,7 @@ export async function cleanupAllTestEntities() {
         { slug: { startsWith: "prov-" } },
         { slug: { startsWith: "hand-" } },
         { slug: { startsWith: "reg-" } },
+        { slug: { startsWith: "int-" } },
       ],
     },
     select: { slug: true },

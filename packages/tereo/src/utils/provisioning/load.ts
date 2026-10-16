@@ -151,12 +151,26 @@ export interface ResolvedClient {
   trustedCoreScopes: string[];
 }
 
+export interface ResolvedIntegration {
+  slug: string;
+  name: string;
+  organizationId: string | null;
+  /** The slug. */
+  clientId: string;
+  secretEnv: string;
+  secretHash: string;
+  roles: string[];
+  audiences: string[];
+}
+
 export interface LoadedDocument {
   file: string;
   version: string;
   service: ResolvedService | null;
   clients: ResolvedClient[];
   roles: CustomRoleEntry[];
+  /** Absent is none. */
+  integrations?: ResolvedIntegration[];
 }
 
 export interface ProvisioningSet {
@@ -353,6 +367,12 @@ export const parseDocuments = (
       if (c.clientType === "confidential" && c.secretFrom)
         uses.push({ label, envName: c.secretFrom, owner: null });
     }
+    for (const i of data.integrations ?? [])
+      uses.push({
+        label: `${file}: integrations[${i.slug}]`,
+        envName: i.secretFrom,
+        owner: null,
+      });
   }
 
   const values = resolveSecrets(uses, env, problems);
@@ -409,6 +429,16 @@ export const parseDocuments = (
         trustedCoreScopes: c.trustedCoreScopes,
       })),
       roles: data.roles ?? [],
+      integrations: (data.integrations ?? []).map((i) => ({
+        slug: i.slug,
+        name: i.name,
+        organizationId: i.organizationId ?? null,
+        clientId: i.slug,
+        secretEnv: i.secretFrom,
+        secretHash: hashOf(i.secretFrom),
+        roles: i.roles,
+        audiences: i.audiences,
+      })),
     })),
   };
 };

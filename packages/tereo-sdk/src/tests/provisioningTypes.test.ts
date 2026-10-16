@@ -81,6 +81,16 @@ const full: ProvisioningDocument = {
       permissions: ["billing.invoices.read"],
     },
   ],
+  integrations: [
+    {
+      slug: "acme-3pl",
+      name: "Acme 3PL",
+      organizationId: "6f1c1d62-3a4b-4c58-9d0e-1f2a3b4c5d6e",
+      secretFrom: "ACME_3PL_SECRET",
+      roles: ["auditor"],
+      audiences: ["billing"],
+    },
+  ],
 };
 
 describe("ProvisioningDocument", () => {
@@ -110,8 +120,15 @@ describe("ProvisioningDocument", () => {
         // @ts-expect-error unknown key on a client
         clients: [{ clientId: "a", name: "A", extra: 1 }],
       },
+      {
+        version: "1.0.0",
+        integrations: [
+          // @ts-expect-error unknown key on an integration
+          { slug: "a", name: "A", secretFrom: "A_SECRET", extra: 1 },
+        ],
+      },
     ];
-    expect(docs).toHaveLength(3);
+    expect(docs).toHaveLength(4);
   });
 });
 
@@ -138,6 +155,12 @@ describe("provisioning schema", () => {
       validate({
         version: "1.0.0",
         service: { slug: "a", name: "A", secretFrom: "A", extra: 1 },
+      })
+    ).toBe(false);
+    expect(
+      validate({
+        version: "1.0.0",
+        integrations: [{ slug: "a", name: "A", secretFrom: "A", extra: 1 }],
       })
     ).toBe(false);
   });

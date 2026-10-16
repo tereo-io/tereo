@@ -81,6 +81,21 @@ const ServiceEntry = z
   })
   .strict();
 
+const IntegrationEntry = z
+  .object({
+    slug: Slug,
+    name: Name,
+    // Org-bound when set: its tokens carry this org_id. Fixed once created.
+    organizationId: z.uuid().optional(),
+    secretFrom: EnvName,
+    // Role names: org-assignable custom roles of the set when org-bound;
+    // otherwise also core's roles and `<slug>/<name>` services' system roles.
+    roles: z.array(Text).default([]),
+    // Slugs of services in the set that may introspect its tokens.
+    audiences: z.array(Text).default([]),
+  })
+  .strict();
+
 const CustomRoleEntry = z
   .object({
     name: z
@@ -109,11 +124,17 @@ export const ProvisioningDocumentSchema = z
     service: ServiceEntry.optional(),
     clients: z.array(ClientEntry).optional(),
     roles: z.array(CustomRoleEntry).optional(),
+    integrations: z.array(IntegrationEntry).optional(),
   })
   .strict()
-  .refine((d) => d.service || d.clients?.length || d.roles?.length, {
-    message: "needs one of service, clients, roles, not empty",
-  });
+  .refine(
+    (d) =>
+      d.service ||
+      d.clients?.length ||
+      d.roles?.length ||
+      d.integrations?.length,
+    { message: "needs one of service, clients, roles, integrations, not empty" }
+  );
 
 export type ProvisioningDocument = z.input<typeof ProvisioningDocumentSchema>;
 export type CustomRoleEntry = z.output<typeof CustomRoleEntry>;

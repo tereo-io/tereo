@@ -58,6 +58,14 @@ ServiceIdParam:
     type: string
     format: uuid
 
+IntegrationIdParam:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid
+
 IdentityProviderIdParam:
   name: id
   in: path
