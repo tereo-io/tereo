@@ -264,6 +264,47 @@ describe("parseDocuments", () => {
     expect(text).toContain("needs at least one redirect URI");
   });
 
+  it("refuses a webhook URL that could never be delivered to", () => {
+    const urls = [
+      "ftp://x",
+      "https://user:pw@x",
+      "http://localhost/x",
+      "http://10.0.0.1/x",
+    ];
+    const problems = problemsOf({
+      "a.json": doc({
+        service: service({
+          webhooks: urls.map((url, i) => webhook({ key: `hook-${i}`, url })),
+        }),
+      }),
+    });
+    expect(problems).toHaveLength(urls.length);
+    urls.forEach((_, i) =>
+      expect(problems[i]).toMatch(
+        new RegExp(
+          `^a\\.json: services\\[vanquished-inventory\\]: webhooks\\[hook-${i}\\]: url `
+        )
+      )
+    );
+  });
+
+  it("accepts an in-cluster webhook URL", () => {
+    const set = parse({
+      "a.json": doc({
+        service: service({
+          webhooks: [
+            webhook({
+              url: "http://product.vanquished.svc.cluster.local/webhooks",
+            }),
+          ],
+        }),
+      }),
+    });
+    expect(set.documents[0].service?.webhooks[0].url).toBe(
+      "http://product.vanquished.svc.cluster.local/webhooks"
+    );
+  });
+
   it("never includes a secret in problems", () => {
     const env = { ...baseEnv(), INVENTORY_SECRET: "short" };
     const problems = problemsOf({ "a.json": doc({ service: service() }) }, env);

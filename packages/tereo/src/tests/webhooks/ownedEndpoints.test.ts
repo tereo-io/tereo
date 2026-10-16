@@ -17,6 +17,7 @@ import type {
   ResolvedService,
 } from "../../utils/provisioning/load.js";
 import {
+  ensureTestMembership,
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../utils/principals.js";
@@ -121,7 +122,7 @@ beforeAll(async () => {
         name: `${ns}.items.read`,
         displayName: "Read items",
         description: "",
-        orgAssignable: false,
+        orgAssignable: true,
       },
     ],
     systemRoles: [
@@ -199,18 +200,26 @@ const emit = async (organizationId: string) => {
 };
 
 /** A delivery to the endpoint written directly, in `status`. */
-const storedDelivery = (status: "PENDING" | "FAILED" = "PENDING") =>
+const storedDelivery = (
+  status: "PENDING" | "FAILED" = "PENDING",
+  organizationId?: string
+) =>
   db.webhookDeliveries
     .create({
       webhookEndpointId: endpointId,
       eventType,
-      payload: { id: randomUUID(), eventType, data: { n: 1 } },
+      payload: { id: randomUUID(), organizationId, eventType, data: { n: 1 } },
     })
     .then(async (delivery) => {
       if (status !== "PENDING")
         await prisma.webhookDelivery.updateMany({
           where: { id: delivery.id },
-          data: { status, attempts: 1, completedAt: new Date() },
+          data: {
+            status,
+            attempts: 1,
+            completedAt: new Date(),
+            responseBody: "echo",
+          },
         });
       return delivery;
     });
@@ -311,6 +320,54 @@ describe("API", () => {
     expect(tested.status, JSON.stringify(tested.data)).toBe(
       HTTP_STATUS.ACCEPTED
     );
+  });
+
+  it("redacts another organization's payloads by what the viewer may read there", async () => {
+    // webhooks.admin everywhere; the event's read permission only in org A.
+    const userId = randomUUID();
+    await ensureTestMembership(userId, orgA);
+    const readItems = await prisma.permission.findUniqueOrThrow({
+      where: { name: `${publisher.service.namespace}.items.read` },
+    });
+    const role = await prisma.role.create({
+      data: {
+        name: `owned-viewer-${userId}`,
+        displayName: "Org-scoped item reader",
+        rolePermissions: { create: [{ permissionId: readItems.id }] },
+      },
+    });
+    await prisma.userRole.create({
+      data: { userId, roleId: role.id, organizationId: orgA },
+    });
+    const token = await getTestPrincipalToken({
+      userId,
+      organizationId: orgA,
+      permissions: ["webhooks.admin"],
+    });
+
+    try {
+      const view = async (organizationId: string) => {
+        const delivery = await storedDelivery("FAILED", organizationId);
+        const res = await api.get(`${url()}/deliveries/${delivery.id}`, {
+          headers: auth(token),
+        });
+        expect(res.status, JSON.stringify(res.data)).toBe(HTTP_STATUS.OK);
+        return res.data;
+      };
+      const own = await view(orgA);
+      expect(own.payloadRedacted).toBe(false);
+      expect(own.payload).not.toBeNull();
+      expect(own.responseBody).toBe("echo");
+
+      const other = await view(orgB);
+      expect(other.payloadRedacted).toBe(true);
+      expect(other.payload).toBeNull();
+      expect(other.responseBody).toBeNull();
+    } finally {
+      await prisma.userRole.deleteMany({ where: { roleId: role.id } });
+      await prisma.rolePermission.deleteMany({ where: { roleId: role.id } });
+      await prisma.role.delete({ where: { id: role.id } });
+    }
   });
 
   it("hides it from a caller without webhooks.admin", async () => {

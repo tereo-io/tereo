@@ -1520,7 +1520,13 @@ describe("webhooks", () => {
 
     const dropped = await apply(withService(d, { webhooks: [] }));
     expect(dropped.unprovisioned).toEqual([`webhook:${key}`]);
-    expect((await endpointRow(key)).archivedAt).not.toBeNull();
+    const archived = await endpointRow(key);
+    expect(archived.archivedAt).not.toBeNull();
+    const audit = await prisma.auditLogEntry.findFirstOrThrow({
+      where: { entityId: archived.id, action: "ARCHIVE" },
+    });
+    expect(audit.userId).toBe(SYSTEM_USER_ID);
+    expect(audit.metadata).toMatchObject({ file: d.file, version: d.version });
 
     const back = await apply(d);
     expect(back.updated).toEqual([`webhook:${key}`]);

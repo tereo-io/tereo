@@ -1,8 +1,10 @@
 import { CLIENT_SECRET_PREFIX, secretStrengthProblem } from "../secretRules.js";
 import { ProvisioningDocumentSchema, type CustomRoleEntry } from "./schema.js";
+import { assertSafeWebhookUrlForRegistration } from "../ssrfGuard.js";
 import { isSafeRedirectUri } from "../redirectUris.js";
 import { readFile, readdir, stat } from "fs/promises";
 import { hashFlowToken } from "../crypto.js";
+import { AppError } from "../errors.js";
 import { basename, join } from "path";
 import type { z } from "zod";
 
@@ -291,12 +293,24 @@ export const parseDocuments = (
     if (service) {
       const label = `${file}: services[${service.slug}]`;
       uses.push({ label, envName: service.secretFrom, owner: null });
-      for (const w of service.webhooks)
+      for (const w of service.webhooks) {
+        const where = `${label}: webhooks[${w.key}]`;
+        // The API's rule, without DNS: in-cluster names pass, and are
+        // checked again at delivery.
+        try {
+          assertSafeWebhookUrlForRegistration(w.url);
+        } catch (err) {
+          if (!(err instanceof AppError)) throw err;
+          problems.push(
+            `${where}: url ${err.message.replace(/^Webhook URL /, "")}`
+          );
+        }
         uses.push({
-          label: `${label}: webhooks[${w.key}]`,
+          label: where,
           envName: w.secretFrom,
           owner: `${file}:${service.slug}`,
         });
+      }
     }
     for (const c of data.clients ?? []) {
       const label = `${file}: clients[${c.clientId}]`;

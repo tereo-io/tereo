@@ -877,9 +877,19 @@ const applyWebhooks = async (
       archivedAt: null,
       provisioningKey: { notIn: wanted },
     },
-    select: { id: true, organizationId: true, provisioningKey: true },
+    select: {
+      id: true,
+      organizationId: true,
+      provisioningKey: true,
+      ownerService: { select: { slug: true } },
+    },
   });
+  // A service still in the set dropped the entry from its document.
+  const documentOf = new Map(
+    p.services.map((from) => [from.service.slug, documentMeta(from)])
+  );
   for (const endpoint of dropped) {
+    const owner = endpoint.ownerService?.slug;
     await db.webhookEndpoints.archive(endpoint.id, tx);
     await logAuditTx(tx, {
       auth: SYSTEM_ACTOR,
@@ -890,6 +900,7 @@ const applyWebhooks = async (
       metadata: {
         action: "unprovisioned",
         provisioningKey: endpoint.provisioningKey,
+        ...(owner && documentOf.get(owner)),
       },
     });
     result.unprovisioned.push(`webhook:${endpoint.provisioningKey}`);

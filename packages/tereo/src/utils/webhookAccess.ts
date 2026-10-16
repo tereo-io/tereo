@@ -183,6 +183,8 @@ interface StoredDelivery {
  * `deliveries` as `viewer` may see them: the payload, and the receiver's
  * response that may echo it, only when the viewer could read the event
  * (`viewer.permissions` are those of their request, in `organizationId`).
+ * An all-organization endpoint carries other organizations' events: each is
+ * judged by what the viewer may read in the event's own organization.
  */
 export const redactUnreadable = async <T extends StoredDelivery>(
   viewer: { userId: string; permissions: string[] },
@@ -192,16 +194,35 @@ export const redactUnreadable = async <T extends StoredDelivery>(
   const readPermissions = await db.eventTypes.readPermissions(
     deliveries.map((d) => d.eventType)
   );
+  const permissionsIn = new Map<string, Promise<string[]>>([
+    [organizationId, Promise.resolve(viewer.permissions)],
+  ]);
+  const permissionsOf = (org: string) => {
+    let permissions = permissionsIn.get(org);
+    if (!permissions) {
+      permissions = actingPermissions(viewer.userId, org).then((p) => p ?? []);
+      permissionsIn.set(org, permissions);
+    }
+    return permissions;
+  };
   return Promise.all(
     deliveries.map(async (delivery) => {
-      const payload = delivery.payload as { data?: unknown } | null;
+      const payload = delivery.payload as {
+        data?: unknown;
+        organizationId?: unknown;
+      } | null;
       const data =
         payload?.data && typeof payload.data === "object"
           ? (payload.data as Record<string, unknown>)
           : {};
+      // A test send names no organization; it is the request's.
+      const eventOrg =
+        typeof payload?.organizationId === "string"
+          ? payload.organizationId
+          : organizationId;
       const readable = await mayReadEvent(
-        viewer,
-        { organizationId, eventType: delivery.eventType, data },
+        { userId: viewer.userId, permissions: await permissionsOf(eventOrg) },
+        { organizationId: eventOrg, eventType: delivery.eventType, data },
         readPermissions.get(delivery.eventType) ?? null
       );
       return readable
