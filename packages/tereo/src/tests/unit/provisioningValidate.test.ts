@@ -54,6 +54,7 @@ const clientOf = (
   grantTypes: ["authorization_code", "refresh_token"],
   audience: [],
   consentRequired: true,
+  trustedCoreScopes: [],
   ...c,
 });
 

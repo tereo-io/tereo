@@ -17,6 +17,7 @@ export const formatClient = (
     grantTypes: string[];
     audience: string[];
     consentRequired: boolean;
+    trustedCoreScopes: string[];
     provisioned: boolean;
     ownerId: string;
     organizationId: string | null;
@@ -51,6 +52,7 @@ export const formatClient = (
     grantTypes: client.grantTypes,
     audience: client.audience,
     consentRequired: client.consentRequired,
+    trustedCoreScopes: client.trustedCoreScopes,
     provisioned: client.provisioned,
     ownerId: client.ownerId,
     organizationId: client.organizationId,

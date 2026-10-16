@@ -62,14 +62,21 @@ export const isFirstPartyClient = (clientId: string): boolean =>
 
 /**
  * Whether the user is spared the consent screen for this request: always for
- * core's own client; for one an admin marked `consentRequired: false`, only
- * when it asks for no core API scope, since those act in core as the user.
- * Only the screen is skipped; what the client's tokens may do in core's API
- * is decided by `isFirstPartyClient` and the scopes.
+ * core's own client; for one marked `consentRequired: false`, only when every
+ * core API scope it asks for is one its provisioning trusts, since those act
+ * in core as the user. Only the screen is skipped; what the client's tokens
+ * may do in core's API is decided by `isFirstPartyClient` and the scopes.
  */
 export const skipsConsent = (
-  client: { clientId: string; consentRequired: boolean },
+  client: {
+    clientId: string;
+    consentRequired: boolean;
+    trustedCoreScopes: string[];
+  },
   scopes: string[]
 ): boolean =>
   isFirstPartyClient(client.clientId) ||
-  (!client.consentRequired && coreScopesOf(scopes).length === 0);
+  (!client.consentRequired &&
+    coreScopesOf(scopes).every((s) =>
+      client.trustedCoreScopes.includes(s.name)
+    ));

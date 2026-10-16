@@ -276,6 +276,66 @@ describe("parseDocuments", () => {
     expect(text).toContain("needs at least one redirect URI");
   });
 
+  it("accepts trustedCoreScopes the client also asks for", () => {
+    const {
+      documents: [d],
+    } = parse({
+      "a.json": doc({
+        clients: [
+          {
+            clientId: "c1",
+            name: "C1",
+            redirectUris: ["https://app.example.com/callback"],
+            scopes: ["openid", "core:files.read", "core:account"],
+            trustedCoreScopes: ["core:files.read"],
+          },
+        ],
+      }),
+    });
+    expect(d.clients[0].trustedCoreScopes).toEqual(["core:files.read"]);
+  });
+
+  it("defaults trustedCoreScopes to none", () => {
+    const {
+      documents: [d],
+    } = parse({
+      "a.json": doc({
+        clients: [
+          {
+            clientId: "c1",
+            name: "C1",
+            redirectUris: ["https://app.example.com/callback"],
+          },
+        ],
+      }),
+    });
+    expect(d.clients[0].trustedCoreScopes).toEqual([]);
+  });
+
+  it.each([
+    ["core:admin", "core:admin cannot be trusted"],
+    ["core:admin.read", "core:admin.read cannot be trusted"],
+    ["core:nope", "core:nope is not a core scope"],
+    ["core:files", "core:files is not in scopes"],
+  ])("refuses trustedCoreScopes %j", (scope, message) => {
+    const problems = problemsOf({
+      "a.json": doc({
+        clients: [
+          {
+            clientId: "c1",
+            name: "C1",
+            redirectUris: ["https://app.example.com/callback"],
+            scopes: ["openid", "core:admin", "core:admin.read", "core:nope"],
+            trustedCoreScopes: [scope],
+          },
+        ],
+      }),
+    });
+    expect(problems).toEqual([
+      `a.json: clients[c1]: trustedCoreScopes: ${message}`,
+    ]);
+  });
+
   it("refuses a webhook URL that could never be delivered to", () => {
     const urls = [
       "ftp://x",

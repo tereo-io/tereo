@@ -443,6 +443,7 @@ const clientFields = (spec: ResolvedClient) => ({
   grantTypes: spec.grantTypes,
   audience: sortedUnique(spec.audience),
   consentRequired: spec.consentRequired,
+  trustedCoreScopes: spec.trustedCoreScopes,
 });
 
 const applyClient = async (

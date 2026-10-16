@@ -98,6 +98,11 @@ export interface LoginClientProvisioning {
   audience?: string[];
   /** Default true. */
   consentRequired?: boolean;
+  /**
+   * Core scopes (from `scopes`) the user is not asked to approve when
+   * `consentRequired` is false. Never `core:admin` or `core:admin.read`.
+   */
+  trustedCoreScopes?: string[];
   description?: string;
 }
 

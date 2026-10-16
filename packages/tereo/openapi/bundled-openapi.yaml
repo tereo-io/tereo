@@ -20913,6 +20913,7 @@ components:
         - grantTypes
         - audience
         - consentRequired
+        - trustedCoreScopes
         - provisioned
         - ownerId
         - organizationId
@@ -20972,9 +20973,16 @@ components:
           type: boolean
           description: |
             Whether users approve the app on a consent screen after signing in.
-            A request for any `core:*` scope shows the consent screen even when
-            `false`. Core's own login client never asks, and refuses a change
-            (`409`).
+            A request for a `core:*` scope not in `trustedCoreScopes` shows the
+            consent screen even when `false`. Core's own login client never
+            asks, and refuses a change (`409`).
+        trustedCoreScopes:
+          type: array
+          items:
+            type: string
+          description: |
+            Core scopes users are not asked to approve when `consentRequired` is
+            `false`. Set only by provisioning; empty on clients made here.
         provisioned:
           type: boolean
           description: |
@@ -21137,8 +21145,9 @@ components:
           description: |
             Whether users approve the app on a consent screen after signing in.
             A request for any `core:*` scope shows the consent screen even when
-            `false`. Core's own login client never asks, and refuses a change
-            (`409`).
+            `false` (provisioned clients may trust some; see
+            `trustedCoreScopes`). Core's own login client never asks, and
+            refuses a change (`409`).
     UpdateClientRequest:
       type: object
       properties:
@@ -21201,8 +21210,9 @@ components:
           description: |
             Whether users approve the app on a consent screen after signing in.
             A request for any `core:*` scope shows the consent screen even when
-            `false`. Core's own login client never asks, and refuses a change
-            (`409`).
+            `false` (provisioned clients may trust some; see
+            `trustedCoreScopes`). Core's own login client never asks, and
+            refuses a change (`409`).
         ownerId:
           type: string
           format: uuid

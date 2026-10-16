@@ -38,6 +38,8 @@ const ClientEntry = z
       .default(["authorization_code", "refresh_token"]),
     audience: z.array(Text).default([]),
     consentRequired: z.boolean().default(true),
+    // Checked by load: core scopes in `scopes`, never the admin ones.
+    trustedCoreScopes: z.array(Text).default([]),
     description: Description.optional(),
   })
   .strict();

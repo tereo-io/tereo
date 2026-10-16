@@ -171,6 +171,9 @@ model OAuthClient {
   // false: the user is not asked to approve this client after signing in.
   // Says nothing about what its tokens may do in core's API.
   consentRequired         Boolean    @default(true) @map("consent_required")
+  // Core API scopes the user is not asked to approve when consentRequired is
+  // false. Set only by provisioning; never core:admin or core:admin.read.
+  trustedCoreScopes       String[]   @default([]) @map("trusted_core_scopes")
   // After a regenerate, the replaced secret keeps working until it expires,
   // so running copies of a service survive the rollout.
   previousSecretHash      String?    @map("previous_secret_hash") @db.VarChar(255)

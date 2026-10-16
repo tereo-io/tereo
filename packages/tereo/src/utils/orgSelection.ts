@@ -20,7 +20,12 @@ export const handlePostAuthOrgSelection = async (
   req: Request,
   res: Response,
   userId: string,
-  client: { id: string; clientId: string; consentRequired: boolean },
+  client: {
+    id: string;
+    clientId: string;
+    consentRequired: boolean;
+    trustedCoreScopes: string[];
+  },
   redirectUri: string,
   scopes: string[],
   state: string | null,

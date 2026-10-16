@@ -43,6 +43,7 @@ export interface FirstFactorContinuation {
     clientId: string;
     scopes: string[];
     consentRequired: boolean;
+    trustedCoreScopes: string[];
   };
   request: AuthorizeRequestParams;
   /** The `amr` so far: `["pwd"]`, `["fed"]` or `["fed", "mfa"]`. */

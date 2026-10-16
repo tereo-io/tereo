@@ -14,6 +14,7 @@ interface CreateClientData extends CreateClientInput {
   clientSecret: string | null;
   ownerId: string;
   provisioned?: boolean;
+  trustedCoreScopes?: string[];
 }
 
 interface UpdateClientData extends UpdateClientInput {
@@ -38,6 +39,7 @@ export interface ClientRecord {
   grantTypes: string[];
   audience: string[];
   consentRequired: boolean;
+  trustedCoreScopes: string[];
   provisioned: boolean;
   unprovisionedAt: Date | null;
   ownerId: string;
@@ -181,6 +183,7 @@ export const create = async (
       audience: data.audience,
       ownerId: data.ownerId,
       provisioned: data.provisioned,
+      trustedCoreScopes: data.trustedCoreScopes,
     },
     include: { serviceAccountUser: true },
   });

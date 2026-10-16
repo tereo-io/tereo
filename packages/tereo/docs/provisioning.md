@@ -194,7 +194,8 @@ Login clients, as made in the admin UI.
 | `redirectUris`, `postLogoutRedirectUris` | Safe URLs: `https`, or loopback `http` |
 | `scopes`, `grantTypes` | Default grant types `authorization_code` and `refresh_token`. Scopes and audience take effect as for clients made in the admin UI ([auth](auth.md)) |
 | `audience` | Services of the set its tokens may name. Unlike a hand-made client's audience, no `services.approve` is involved: the documents are the deploy's decision |
-| `consentRequired` | Default `true`. `false` skips consent after a login, unless the request asks for a `core:*` scope: those always show the consent screen. It grants no core API access |
+| `consentRequired` | Default `true`. `false` skips consent after a login (silent `prompt=none` included), unless the request asks for a `core:*` scope not in `trustedCoreScopes`. It grants no core API access beyond the scopes |
+| `trustedCoreScopes` | Default `[]`. Core scopes a first-party app gets without the consent screen when `consentRequired` is `false`. Each must be a core scope listed in `scopes`; `core:admin` and `core:admin.read` are refused. Settable only here: hand-made clients have none |
 | `description` | Optional, max 500 |
 
 ### `roles`

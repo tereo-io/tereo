@@ -1,5 +1,6 @@
 import { CLIENT_SECRET_PREFIX, secretStrengthProblem } from "../secretRules.js";
 import { ProvisioningDocumentSchema, type CustomRoleEntry } from "./schema.js";
+import { CORE_SCOPES } from "../../definitions/index.js";
 import { isSafeRedirectUri } from "../redirectUris.js";
 import { readFile, readdir, stat } from "fs/promises";
 import { hashFlowToken } from "../crypto.js";
@@ -55,7 +56,13 @@ interface ClientRules {
   grantTypes: string[];
   redirectUris: string[];
   postLogoutRedirectUris: string[];
+  scopes: string[];
+  trustedCoreScopes: string[];
 }
+
+const CORE_SCOPE_NAMES = new Set(CORE_SCOPES.map((s) => s.name));
+// Administering core as the user always needs the user's say.
+const UNTRUSTABLE_SCOPES = new Set(["core:admin", "core:admin.read"]);
 
 // The rules one login client must meet on its own.
 const checkClient = (c: ClientRules, problems: string[]) => {
@@ -84,6 +91,16 @@ const checkClient = (c: ClientRules, problems: string[]) => {
         `${c.label}: postLogoutRedirectUris[${i}] is not a safe URL`
       );
   });
+
+  for (const scope of c.trustedCoreScopes) {
+    const where = `${c.label}: trustedCoreScopes`;
+    if (UNTRUSTABLE_SCOPES.has(scope))
+      problems.push(`${where}: ${scope} cannot be trusted`);
+    else if (!CORE_SCOPE_NAMES.has(scope))
+      problems.push(`${where}: ${scope} is not a core scope`);
+    else if (!c.scopes.includes(scope))
+      problems.push(`${where}: ${scope} is not in scopes`);
+  }
 };
 
 export interface ResolvedWebhook {
@@ -131,6 +148,7 @@ export interface ResolvedClient {
   grantTypes: ("authorization_code" | "refresh_token")[];
   audience: string[];
   consentRequired: boolean;
+  trustedCoreScopes: string[];
 }
 
 export interface LoadedDocument {
@@ -388,6 +406,7 @@ export const parseDocuments = (
         grantTypes: c.grantTypes,
         audience: c.audience,
         consentRequired: c.consentRequired,
+        trustedCoreScopes: c.trustedCoreScopes,
       })),
       roles: data.roles ?? [],
     })),
