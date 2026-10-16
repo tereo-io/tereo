@@ -1,18 +1,21 @@
+import { ensureTestUser, getTestPrincipalToken } from "../utils/principals.js";
 import { provisioningJsonSchema } from "../../cli/provision/index.js";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { removeRoles, removeServices } from "./utils/test-helpers.js";
 import { generateClientSecret } from "../../utils/crypto.js";
-import { removeServices } from "./utils/test-helpers.js";
 import { describe, it, expect, afterAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
+import { randomBytes, randomUUID } from "crypto";
+import { CORE_URL } from "../utils/coreUrl.js";
 import { loadTestEnv } from "../testEnv.js";
 import { spawnSync } from "child_process";
-import { randomBytes } from "crypto";
 import { tmpdir } from "os";
 import path from "path";
 
 const packageDir = path.resolve(import.meta.dirname, "../../..");
 const dirs: string[] = [];
 const slugs: string[] = [];
+const roleNames: string[] = [];
 
 const cli = (args: string[], env: Record<string, string> = {}) =>
   spawnSync("npx", ["tsx", "src/cli/index.ts", ...args], {
@@ -44,6 +47,7 @@ const serviceExists = async (slug: string) =>
   (await prisma.service.findUnique({ where: { slug } })) !== null;
 
 afterAll(async () => {
+  await removeRoles(roleNames);
   await removeServices(slugs);
   for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
 });
@@ -89,5 +93,54 @@ describe("provisioning CLI", () => {
       "utf-8"
     );
     expect(JSON.parse(committed)).toEqual(provisioningJsonSchema());
+  });
+
+  it("applies a role change with a holder, and pushes it over Redis to a connected socket", async () => {
+    const dir = tempDir();
+    const name = `cli-role-${randomBytes(4).toString("hex")}`;
+    roleNames.push(name);
+    const writeRole = (version: string, permissions: string[]) =>
+      writeFileSync(
+        path.join(dir, "roles.json"),
+        JSON.stringify({
+          version,
+          roles: [{ name, displayName: name, permissions }],
+        })
+      );
+    writeRole("1.0.0", ["roles.read"]);
+    expect(cli(["provision", "--path", dir]).status).toBe(0);
+
+    const role = await prisma.role.findFirstOrThrow({
+      where: { name, serviceId: null },
+    });
+    const userId = await ensureTestUser(randomUUID());
+    await prisma.userRole.create({ data: { userId, roleId: role.id } });
+    const token = await getTestPrincipalToken({ userId, permissions: [] });
+    const ws = new WebSocket(
+      `${CORE_URL.replace(/^http/, "ws")}/ws/?EIO=4&transport=websocket`
+    );
+    const events: string[] = [];
+    const connected = new Promise<void>((resolve, reject) => {
+      ws.addEventListener("message", ({ data }) => {
+        const packet = String(data);
+        if (packet.startsWith("0")) ws.send(`40${JSON.stringify({ token })}`);
+        else if (packet === "2") ws.send("3");
+        else if (packet.startsWith("40")) resolve();
+        else if (packet.startsWith("44")) reject(new Error(packet));
+        else if (packet.startsWith("42")) events.push(packet);
+      });
+    });
+    try {
+      await connected;
+      writeRole("1.0.1", ["roles.read", "roles.write"]);
+      const res = cli(["provision", "--path", dir]);
+      expect(res.status, res.stderr).toBe(0);
+      expect(JSON.parse(res.stdout).roles).toContain(`role:${name}`);
+      for (let i = 0; i < 50 && events.length === 0; i++)
+        await new Promise((r) => setTimeout(r, 100));
+      expect(events.join()).toContain("auth:permissions:changed");
+    } finally {
+      ws.close();
+    }
   });
 });

@@ -1154,13 +1154,29 @@ export const applyProvisioning = async (
     throw err;
   }
   const { result, revokedClients, roleChanges } = applied;
-  // Their next token lacks what was revoked.
-  for (const id of revokedClients) await revokeServiceTokens(id);
-  for (const id of roleChanges.permissionsChanged) {
-    await notifyRolePermissionsChanged(id);
-    await revokeHolderClientTokens(id);
-  }
-  for (const id of roleChanges.statusChanged) await notifyRoleStatusChanged(id);
+  // Tokens first: a failed push must not leave a revoked role's holders with
+  // working tokens. The apply is committed, so a failure here is logged.
+  const after = async (what: string, step: () => Promise<unknown>) => {
+    try {
+      await step();
+    } catch (err) {
+      logger.error({ err }, `Provisioning: ${what} failed after commit`);
+    }
+  };
+  for (const id of revokedClients)
+    await after("revoking service tokens", () => revokeServiceTokens(id));
+  for (const id of roleChanges.permissionsChanged)
+    await after("revoking role holders' client tokens", () =>
+      revokeHolderClientTokens(id)
+    );
+  for (const id of roleChanges.permissionsChanged)
+    await after("notifying a role's permission change", () =>
+      notifyRolePermissionsChanged(id)
+    );
+  for (const id of roleChanges.statusChanged)
+    await after("notifying a role's status change", () =>
+      notifyRoleStatusChanged(id)
+    );
   return result;
 };
 

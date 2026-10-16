@@ -1,4 +1,5 @@
 import "../preload.js";
+import { closeRedisEmitter } from "../websocket/emitters/redisEmitter.js";
 import { runGenerateSecretCli } from "./generateSecret/index.js";
 import { runOutboxReplayCli } from "./outboxReplay/index.js";
 import { disconnectDatabase } from "../utils/db/prisma.js";
@@ -56,5 +57,6 @@ main()
     process.exit(1);
   })
   .finally(async () => {
+    await closeRedisEmitter();
     await disconnectDatabase();
   });
