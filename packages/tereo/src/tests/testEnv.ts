@@ -1,11 +1,13 @@
 import { readFileSync, existsSync } from "fs";
+import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { parse } from "dotenv";
 import path from "path";
 
 /**
  * The test environment: `.env`, pointed at a separate database and Redis db
- * so tests never touch dev data. `globalSetup` migrates and seeds that
+ * so tests never touch dev data, and at blob storage of that database's own
+ * (`testStoragePath`). `globalSetup` migrates and seeds that
  * database, then starts one server on 4001 that every test file talks to.
  *
  * `TEST_DATABASE_URL` / `TEST_REDIS_URL`, from the shell or `.env`, override
@@ -41,12 +43,16 @@ export function loadTestEnv(): Record<string, string> {
   const redis = new URL(env.REDIS_URL);
   redis.pathname = "/1";
   const port = process.env.TEST_PORT ?? env.TEST_PORT ?? "4001";
+  const databaseUrl =
+    process.env.TEST_DATABASE_URL ?? env.TEST_DATABASE_URL ?? db.toString();
+  const storage = testStoragePath(here, databaseUrl);
   return {
     ...env,
     PORT: port,
     PUBLIC_URL: `http://localhost:${port}`,
-    DATABASE_URL:
-      process.env.TEST_DATABASE_URL ?? env.TEST_DATABASE_URL ?? db.toString(),
+    DATABASE_URL: databaseUrl,
+    FILE_SERVICE_STORAGE_PATH: storage,
+    FILE_SERVICE_TEMP_PATH: path.join(storage, "temp"),
     REDIS_URL:
       process.env.TEST_REDIS_URL ?? env.TEST_REDIS_URL ?? redis.toString(),
     NODE_ENV: "test",
@@ -57,4 +63,28 @@ export function loadTestEnv(): Record<string, string> {
     // The fake SMTP server speaks plaintext.
     ALLOW_PLAINTEXT_SMTP: "true",
   };
+}
+
+/**
+ * Blob storage for one test database. A content blob's row holds the key its
+ * file is encrypted under, and an upload of content that already has a row
+ * shares it without writing a file. So the files must be the ones written for
+ * that database's rows: one directory per database, never the dev server's
+ * `./storage`, and the same one in every worktree that tests against it.
+ */
+function testStoragePath(here: string, databaseUrl: string): string {
+  let root = path.resolve(here, "../..");
+  try {
+    const common = execFileSync(
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd: here, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }
+    ).trim();
+    root = path.join(path.dirname(common), "packages/tereo");
+  } catch {
+    // Not a git checkout: this package's own directory.
+  }
+  const url = new URL(databaseUrl);
+  const name = `${url.hostname}-${url.port || "5432"}-${url.pathname.slice(1)}`;
+  return path.join(root, "storage/test", name.replace(/[^\w.-]/g, "_"));
 }

@@ -1,6 +1,7 @@
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
 import type { ResolvedService } from "../../../utils/provisioning/load.js";
 import { applyProvisioning } from "../../../utils/provisioning/index.js";
+import { removeBuckets } from "../../files/utils/test-helpers.js";
 import { generateClientSecret } from "../../../utils/crypto.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { randomBytes } from "crypto";
@@ -13,9 +14,9 @@ import {
 } from "../../../utils/registry.js";
 
 // Production never deletes a service; tests do, with everything that would
-// otherwise hold it: its webhook endpoints and event types, its declared roles
-// and permissions, its access rows, and its service-account user with that
-// user's roles and audit entries.
+// otherwise hold it: its buckets with their objects, its webhook endpoints and
+// event types, its declared roles and permissions, its access rows, and its
+// service-account user with that user's roles and audit entries.
 export async function removeServices(slugs: string[]) {
   const services = await prisma.service.findMany({
     where: { slug: { in: slugs } },
@@ -26,6 +27,11 @@ export async function removeServices(slugs: string[]) {
   const userIds = services.flatMap((s) =>
     s.client?.serviceAccountUser ? [s.client.serviceAccountUser.id] : []
   );
+  const buckets = await prisma.bucket.findMany({
+    where: { serviceId: { in: ids } },
+    select: { id: true },
+  });
+  await removeBuckets(buckets.map((b) => b.id));
   const endpoints = {
     OR: [{ ownerServiceId: { in: ids } }, { createdBy: { in: userIds } }],
   };
@@ -73,13 +79,15 @@ export async function removeLoginClients(clientIds: string[]) {
   });
 }
 
-// Rows a failed run left behind, by the prefixes provisioning.test.ts uses.
+// Rows a run left behind, by the prefixes the provisioning and registry tests
+// use.
 export async function cleanupAllTestEntities() {
   const services = await prisma.service.findMany({
     where: {
       OR: [
         { slug: { startsWith: "prov-" } },
         { slug: { startsWith: "hand-" } },
+        { slug: { startsWith: "reg-" } },
       ],
     },
     select: { slug: true },
