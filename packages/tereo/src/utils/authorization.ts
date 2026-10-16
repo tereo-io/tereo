@@ -1,4 +1,5 @@
 import { generateAuthorizationCode, generateRandomString } from "./crypto.js";
+import { maySelectOrganization } from "./supportAccess.js";
 import { LOGIN_CLIENT } from "../definitions/index.js";
 import type { Request, Response } from "express";
 import { emitTx, logAuditTx } from "./outbox.js";
@@ -238,14 +239,14 @@ export const issueAuthorizationCode = async (
     );
 
     // Callers let a non-member select the organization only through
-    // support access, which its admins see as an entry and an event.
+    // support access, which its admins see as an entry and an event: once
+    // per selection, so not for a silent re-issue in the organization the
+    // continued session already holds, nor for one who no longer holds it.
     const support =
       !!grant.organizationId &&
-      !(await db.organizations.getMembership(
-        grant.organizationId,
-        grant.userId,
-        tx
-      ));
+      continued?.organizationId !== grant.organizationId &&
+      (await maySelectOrganization(grant.userId, grant.organizationId, tx))
+        .support;
     const user =
       freshLogin || support ? await db.users.get(grant.userId, tx) : null;
 

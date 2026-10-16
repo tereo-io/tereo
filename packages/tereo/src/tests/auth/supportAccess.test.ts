@@ -1,9 +1,11 @@
 import { BASE_URL, HTTP_STATUS, createTestUser } from "./utils/test-helpers.js";
 import { generateRandomString, hashFlowToken } from "../../utils/crypto.js";
+import { issueAuthorizationCode } from "../../utils/authorization.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { handleRefreshToken } from "../../utils/auth.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
+import type { Request, Response } from "express";
 import db from "../../utils/db/index.js";
 import { randomBytes } from "crypto";
 import {
@@ -216,6 +218,64 @@ describe("support access at authorize", () => {
     const { location } = await switchTo(jar, orgId);
     expect(location.searchParams.get("code")).toBeTruthy();
     expect(await supportEntries(user.id, orgId)).toHaveLength(0);
+  });
+});
+
+describe("support access at code issue", () => {
+  it("writes no support entry when the holder lost the permission before the code", async () => {
+    const orgId = await newOrg();
+    const user = await createTestUser();
+    const pkce = newPkce();
+    const req = { cookies: {} } as unknown as Request;
+    const res = {
+      cookie: () => res,
+      clearCookie: () => res,
+    } as unknown as Response;
+
+    const redirect = await issueAuthorizationCode(req, res, loginClientRecord, {
+      userId: user.id,
+      organizationId: orgId,
+      redirectUri: loginRedirectUri,
+      scopes: ["openid"],
+      state: pkce.state,
+      codeChallenge: pkce.challenge,
+      codeChallengeMethod: "S256",
+      nonce: null,
+      authTime: new Date(),
+      maxAge: null,
+      acrValues: null,
+      authMethods: ["pwd"],
+      userSessionId: null,
+    });
+    expect(new URL(redirect).searchParams.get("code")).toBeTruthy();
+    expect(await supportEntries(user.id, orgId)).toHaveLength(0);
+  });
+
+  it("writes no second entry for a silent re-issue in the session's organization", async () => {
+    const orgId = await newOrg();
+    const { user, jar } = await signIn();
+    await grantSupportAccess(user.id);
+    await switchTo(jar, orgId);
+    expect(await supportEntries(user.id, orgId)).toHaveLength(1);
+
+    const pkce = newPkce();
+    const silent = await fetch(
+      `${BASE_URL}/oauth/authorize?${new URLSearchParams({
+        response_type: "code",
+        client_id: LOGIN_CLIENT.clientId,
+        redirect_uri: loginRedirectUri,
+        state: pkce.state,
+        scope: "openid",
+        code_challenge: pkce.challenge,
+        code_challenge_method: "S256",
+        prompt: "none",
+      })}`,
+      { redirect: "manual", headers: { Cookie: cookieHeader(jar) } }
+    );
+    expect(silent.status).toBe(302);
+    const location = new URL(silent.headers.get("location") ?? "");
+    expect(location.searchParams.get("code")).toBeTruthy();
+    expect(await supportEntries(user.id, orgId)).toHaveLength(1);
   });
 });
 

@@ -101,8 +101,10 @@ Each time a code is issued for a non-member organization core writes an audit en
 `Organization`, under that organization: action `LOGIN`, `metadata.action` `support_access`,
 `client_id`, `sid`) and emits the event `auth.organization.support-access`
 (`{ userId, organizationId, clientId }`, read with `organizations.read`) in the same transaction, so
-the organization's webhooks and audit log show who came in. A refresh writes nothing more. Members
-switching into their own organization write neither.
+the organization's webhooks and audit log show who came in. A refresh writes nothing more, nor
+does a silent re-issue (`prompt=none`) in the organization the SSO session already holds. Members
+switching into their own organization write neither; nor does someone whose permission was removed
+before the code was issued.
 
 Outside core's resource routes:
 
