@@ -1,3 +1,23 @@
+## 0.3.0 (2026-10-16)
+
+### 🚀 Features
+
+- `recipients` on `EmitEventParams` addresses an event to named services or integrations (`core.webhooks.emit`, `core.outbox.emit`), and the provisioning types gain `internalHost`, `trustedCoreScopes` and an `integrations` section (`IntegrationProvisioning`). Test tokens can name a client (`|client=<id>`), and `createCoreClient({ testServiceUserId })` makes the `service` test user a real UUID. Needs the `core` release with addressed events. ([#14](https://github.com/tereo-io/tereo/pull/14))
+
+### ⚠️  Breaking Changes
+
+- The SDK no longer registers services with core. `register()`, `isRegistered()`, `whenRegistered()` and `getRegistration()` are removed, along with registration's retry logic and its part in readiness. The SDK now exports the types of a provisioning document (`ProvisioningDocument`, `ServiceProvisioning`, and the rest) and its JSON Schema, so a service's build writes its own document with `JSON.stringify` from a typed object and the deploy hands it to core. ([#12](https://github.com/tereo-io/tereo/pull/12))
+
+  Migration checklist:
+
+  1. Move the declaration passed to `register()` into the service's provisioning document (`service.permissions`, `systemRoles`, `buckets`, `eventTypes`), and `requestedAccess` into `service.access`.
+  2. Delete the `register()`, `isRegistered()`, `whenRegistered()` and `getRegistration()` calls. Calls to core are accepted as soon as the document is applied, and the outbox no longer waits for registration.
+  3. Needs core with provisioning (the `core` release that removes `POST /v1/registry/declaration`).
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.2.0 (2026-10-15)
 
 ### 🩹 Fixes
