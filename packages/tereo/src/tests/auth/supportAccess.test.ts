@@ -104,8 +104,18 @@ const exchange = async (code: string, verifier: string) => {
 const claims = (token: string) =>
   JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()) as {
     org_id?: string;
-    permissions?: string[];
   };
+
+/** The token's live permissions, as introspection reports them. */
+const introspectedPermissions = async (token: string) => {
+  const res = await fetch(`${BASE_URL}/oauth/introspect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: LOGIN_CLIENT.clientId, token }),
+  });
+  expect(res.status).toBe(HTTP_STATUS.OK);
+  return ((await res.json()) as { permissions: string[] }).permissions;
+};
 
 const supportEntries = (userId: string, orgId: string) =>
   prisma.auditLogEntry.findMany({
@@ -138,7 +148,7 @@ describe("support access at authorize", () => {
     const { access_token } = (await res.json()) as { access_token: string };
     const token = claims(access_token);
     expect(token.org_id).toBe(orgId);
-    expect([...(token.permissions ?? [])].sort()).toEqual(
+    expect([...(await introspectedPermissions(access_token))].sort()).toEqual(
       [...(await db.roles.getUserPermissions(user.id, null))].sort()
     );
 

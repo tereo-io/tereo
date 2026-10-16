@@ -82,14 +82,14 @@ describe("ending sessions while tokens are being issued", () => {
     const other = await getAccessTokenForUser(user, client);
     const clientRecord = await db.clients.getByClientId(client.clientId);
 
-    // The refresh reads the user's permissions while it runs; the sign-out
+    // The refresh reads its login's context while it runs; the sign-out
     // lands there, between the refresh's start and its new tokens.
-    const roles = db.roles;
-    (db as { roles: typeof roles }).roles = {
-      ...roles,
-      getUserPermissions: async (...args) => {
+    const codes = db.authorizationCode;
+    (db as { authorizationCode: typeof codes }).authorizationCode = {
+      ...codes,
+      getLoginContextById: async (...args) => {
         await signOutOthers(other);
-        return roles.getUserPermissions(...args);
+        return codes.getLoginContextById(...args);
       },
     };
     try {
@@ -101,7 +101,7 @@ describe("ending sessions while tokens are being issued", () => {
         })
       ).rejects.toThrow("invalid_grant");
     } finally {
-      (db as { roles: typeof roles }).roles = roles;
+      (db as { authorizationCode: typeof codes }).authorizationCode = codes;
     }
 
     expect(
