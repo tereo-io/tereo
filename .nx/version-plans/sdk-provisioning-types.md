@@ -1,5 +1,5 @@
 ---
-sdk: major
+"@tereo-io/sdk": major
 ---
 
 The SDK no longer registers services with core. `register()`, `isRegistered()`, `whenRegistered()` and `getRegistration()` are removed, along with registration's retry logic and its part in readiness. The SDK now exports the types of a provisioning document (`ProvisioningDocument`, `ServiceProvisioning`, and the rest) and its JSON Schema, so a service's build writes its own document with `JSON.stringify` from a typed object and the deploy hands it to core.
