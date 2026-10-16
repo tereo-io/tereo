@@ -325,15 +325,23 @@ describe("applyProvisioning", () => {
     );
     expect(result.updated).toEqual([`client:${spec.clientId}`]);
     expect((await clientRow(spec.clientId)).trustedCoreScopes).toEqual([
-      "core:files.read",
       "core:account",
+      "core:files.read",
     ]);
+
+    const reordered = await apply(
+      clientsDoc({
+        ...spec,
+        trustedCoreScopes: ["core:account", "core:files.read", "core:account"],
+      })
+    );
+    expect(reordered.updated).toEqual([]);
 
     const read = await api("GET", `/v1/admin/clients/${row.id}`);
     expect(read.status).toBe(200);
     expect(read.body.trustedCoreScopes).toEqual([
-      "core:files.read",
       "core:account",
+      "core:files.read",
     ]);
   });
 
