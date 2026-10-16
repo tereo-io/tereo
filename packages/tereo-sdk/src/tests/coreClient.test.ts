@@ -225,6 +225,23 @@ describe("testMode", () => {
     await testing.stop();
   });
 
+  it("validates testServiceUserId and uses it for the service token", async () => {
+    process.env.NODE_ENV = "test";
+    expect(() =>
+      createCoreClient({ ...options, testMode: true, testServiceUserId: "x" })
+    ).toThrow(/testServiceUserId/);
+    const id = "123e4567-e89b-42d3-a456-426614174000";
+    const core = createCoreClient({
+      ...options,
+      testMode: true,
+      testServiceUserId: id,
+    });
+    expect(await core.auth.introspectToken("test-token-service")).toMatchObject(
+      { user_id: id }
+    );
+    await core.stop();
+  });
+
   it("is refused in production", () => {
     process.env.NODE_ENV = "production";
     expect(() => createCoreClient({ ...options, testMode: true })).toThrow(
