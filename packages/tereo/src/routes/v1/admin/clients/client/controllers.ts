@@ -35,11 +35,17 @@ import {
   verifyScopes,
 } from "../utils.js";
 
-/** A service's client is managed with its service, under /admin/services. */
+/**
+ * A service's or an integration's client is managed with it, under
+ * /admin/services or /admin/integrations.
+ */
 const refuseServiceClient = async (id: string) => {
-  if (await db.services.getByClientId(id)) {
+  const owner = await db.services.getByClientId(id);
+  if (owner) {
     throw new ConflictError(
-      "This client belongs to a service; manage it under /admin/services"
+      owner.kind === "integration"
+        ? "This client belongs to an integration; manage it under /admin/integrations"
+        : "This client belongs to a service; manage it under /admin/services"
     );
   }
 };

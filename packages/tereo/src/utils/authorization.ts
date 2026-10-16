@@ -1,8 +1,9 @@
 import { generateAuthorizationCode, generateRandomString } from "./crypto.js";
+import { maySelectOrganization } from "./supportAccess.js";
 import { LOGIN_CLIENT } from "../definitions/index.js";
 import type { Request, Response } from "express";
+import { emitTx, logAuditTx } from "./outbox.js";
 import { OAuth2Error } from "./errors.js";
-import { logAuditTx } from "./outbox.js";
 import db from "./db/index.js";
 import env from "../env.js";
 import {
@@ -237,8 +238,45 @@ export const issueAuthorizationCode = async (
       tx
     );
 
-    if (freshLogin) {
-      const user = await db.users.get(grant.userId, tx);
+    // Callers let a non-member select the organization only through
+    // support access, which its admins see as an entry and an event: once
+    // per selection, so not for a silent re-issue in the organization the
+    // continued session already holds, nor for one who no longer holds it.
+    const support =
+      !!grant.organizationId &&
+      continued?.organizationId !== grant.organizationId &&
+      (await maySelectOrganization(grant.userId, grant.organizationId, tx))
+        .support;
+    const user =
+      freshLogin || support ? await db.users.get(grant.userId, tx) : null;
+
+    if (support && user && grant.organizationId) {
+      await logAuditTx(tx, {
+        auth: { userId: user.id, email: user.email },
+        organizationId: grant.organizationId,
+        action: "LOGIN",
+        entityType: "Organization",
+        entityId: grant.organizationId,
+        metadata: {
+          action: "support_access",
+          client_id: client.clientId,
+          sid: session.id,
+        },
+      });
+      await emitTx(tx, {
+        organizationId: grant.organizationId,
+        eventType: "auth.organization.support-access",
+        entityType: "Organization",
+        entityId: grant.organizationId,
+        data: {
+          userId: user.id,
+          organizationId: grant.organizationId,
+          clientId: client.clientId,
+        },
+      });
+    }
+
+    if (freshLogin && user) {
       await logAuditTx(tx, {
         auth: { userId: user.id, email: user.email },
         organizationId: grant.organizationId,

@@ -38,6 +38,11 @@
       otherwise) naming an existing organization — an archived one counts —
       or the request fails with `400 unknown_organization`.
 
+      **Addressed events:** with `recipients`, the event is sent only to
+      endpoints the named services or integrations own, each still subject
+      to its owner's read permission (`400 unknown_recipient` for an unknown
+      slug). Without it, to every subscriber.
+
       **Idempotency:** Requests may include an optional `idempotencyKey`. When
       provided, submissions by the same caller with the same key,
       `organizationId` and `eventType` are deduplicated for 24 hours (Redis
@@ -81,8 +86,9 @@
       '400':
         description: |
           A malformed request (`invalid_request`), an event type that is reserved,
-          unregistered or retired, or an `organizationId` that names no organization
-          (`unknown_organization`)
+          unregistered or retired, an `organizationId` that names no organization
+          (`unknown_organization`), or a `recipients` slug that names no service
+          or integration (`unknown_recipient`)
         headers:
           X-RateLimit-Limit:
             $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
@@ -103,6 +109,7 @@
                     - invalid_event_type
                     - event_type_retired
                     - unknown_organization
+                    - unknown_recipient
                 error_description:
                   type: string
                   examples:
@@ -162,8 +169,9 @@
         sent only by `POST /v1/webhooks/webhooks/{id}/test`),
         `invalid_event_type` / `event_type_retired` (every event type must be
         declared by a service and not retired), or
-        `duplicate_idempotency_key`, or `unknown_organization` (any event's
-        `organizationId` names no organization);
+        `duplicate_idempotency_key`, `unknown_organization` (any event's
+        `organizationId` names no organization), or `unknown_recipient` (any
+        event's `recipients` names no service or integration);
       - `403` — any event names an organization or event type the caller may
         not emit for (see `POST /v1/webhooks/events`);
       - `409 idempotency_request_in_progress` / `422 idempotency_key_conflict` — see
@@ -214,8 +222,9 @@
         description: |
           A malformed request (`invalid_request`), an event type that is reserved,
           unregistered or retired, two events sharing an idempotency key
-          (`duplicate_idempotency_key`), or an `organizationId` that names no organization
-          (`unknown_organization`)
+          (`duplicate_idempotency_key`), an `organizationId` that names no organization
+          (`unknown_organization`), or a `recipients` slug that names no service or
+          integration (`unknown_recipient`)
         headers:
           X-RateLimit-Limit:
             $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
@@ -237,6 +246,7 @@
                     - event_type_retired
                     - duplicate_idempotency_key
                     - unknown_organization
+                    - unknown_recipient
                 error_description:
                   type: string
                   examples:

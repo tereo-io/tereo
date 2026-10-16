@@ -7,6 +7,7 @@ import { createPinnedDispatcher } from "../../utils/ssrfGuard.js";
 import { BASE_URL, HTTP_STATUS } from "./utils/test-helpers.js";
 import { generateClientSecret } from "../../utils/crypto.js";
 import { createHmac, randomBytes, randomUUID } from "crypto";
+import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { CORE_URL } from "../utils/coreUrl.js";
 import db from "../../utils/db/index.js";
@@ -49,6 +50,7 @@ const serviceDoc = (extra: Partial<ResolvedService>): ServiceDoc => {
       name: `Service ${slug}`,
       namespace: slug,
       clientId: slug,
+      internalHost: null,
       secretEnv: "SERVICE_SECRET",
       secretHash: hashedSecret,
       access: { roles: [], audiences: [] },
@@ -252,6 +254,137 @@ describe("delivery", () => {
       .update(`${timestamp}.${body}`)
       .digest("hex");
     expect(headers["x-webhook-signature"]).toBe(`sha256=${expected}`);
+  });
+});
+
+describe("internalHost", () => {
+  const internalHost = "hooks.internal.test";
+  let owner: ServiceDoc;
+  let ownedId: string;
+
+  /** Delivers one stored delivery of `id`, recording what connectTarget got. */
+  const deliverTo = async (id: string) => {
+    const delivery = await db.webhookDeliveries.create({
+      webhookEndpointId: id,
+      eventType,
+      payload: { id: randomUUID(), eventType, data: {} },
+    });
+    const given: (string | undefined)[] = [];
+    received.length = 0;
+    await processWebhookDelivery(
+      { data: { deliveryId: delivery.id } },
+      {
+        connectTarget: async (_url, opts) => {
+          given.push(opts?.allowPrivateHost);
+          return createPinnedDispatcher([{ address: "127.0.0.1", family: 4 }]);
+        },
+      }
+    );
+    return given;
+  };
+
+  beforeAll(async () => {
+    owner = serviceDoc({
+      internalHost,
+      access: subscriber.service.access,
+      webhooks: [
+        {
+          key: "internal",
+          url: `http://${internalHost}:${receiverPort}/hook`,
+          events: [eventType],
+          organizations: "all",
+          description: null,
+          secretEnv: "INTERNAL_WEBHOOK_SECRET",
+          secretPlain: randomBytes(32).toString("hex"),
+        },
+      ],
+    });
+    await applyProvisioning({ documents: [publisher, subscriber, owner] });
+    ownedId = (
+      await prisma.webhookEndpoint.findUniqueOrThrow({
+        where: { provisioningKey: `${owner.service.slug}:internal` },
+      })
+    ).id;
+  });
+
+  it("is stored on the service by apply, and updated by it", async () => {
+    const row = () =>
+      prisma.service.findUniqueOrThrow({
+        where: { slug: owner.service.slug },
+      });
+    expect((await row()).internalHost).toBe(internalHost);
+    const moved = {
+      ...owner,
+      service: { ...owner.service, internalHost: "10.35.2.2" },
+    };
+    await applyProvisioning({ documents: [publisher, subscriber, moved] });
+    expect((await row()).internalHost).toBe("10.35.2.2");
+    await applyProvisioning({ documents: [publisher, subscriber, owner] });
+    expect((await row()).internalHost).toBe(internalHost);
+  });
+
+  it("is passed to the guard for the owner's endpoint", async () => {
+    expect(await deliverTo(ownedId)).toEqual([internalHost]);
+    expect(received).toHaveLength(1);
+  });
+
+  it("is not passed for another service's endpoint", async () => {
+    expect(await deliverTo(endpointId)).toEqual([undefined]);
+  });
+
+  it("is not passed for the owner's endpoint unless provisioned", async () => {
+    const { endpoint: made } = await db.webhookEndpoints.create({
+      organizationId: null,
+      ownerServiceId: (
+        await prisma.service.findUniqueOrThrow({
+          where: { slug: owner.service.slug },
+        })
+      ).id,
+      createdBy: SYSTEM_USER_ID,
+      url: `http://${internalHost}:${receiverPort}/hook`,
+      eventTypes: [eventType],
+    });
+    expect(await deliverTo(made.id)).toEqual([undefined]);
+  });
+
+  it("is not passed for an integration's endpoint", async () => {
+    const slug = `int-${rand()}`;
+    slugs.push(slug);
+    const integration = await prisma.service.create({
+      data: {
+        slug,
+        name: slug,
+        kind: "integration",
+        internalHost,
+        createdBy: SYSTEM_USER_ID,
+      },
+    });
+    const { endpoint: made } = await db.webhookEndpoints.create({
+      organizationId: null,
+      ownerServiceId: integration.id,
+      createdBy: SYSTEM_USER_ID,
+      provisioned: true,
+      url: `http://${internalHost}:${receiverPort}/hook`,
+      eventTypes: [eventType],
+    });
+    expect(await deliverTo(made.id)).toEqual([undefined]);
+  });
+
+  it("is not passed for an API-made endpoint to the same URL", async () => {
+    const { endpoint: made } = await db.webhookEndpoints.create({
+      organizationId: orgA,
+      createdBy: SYSTEM_USER_ID,
+      url: `http://${internalHost}:${receiverPort}/hook`,
+      eventTypes: [eventType],
+    });
+    try {
+      expect(await deliverTo(made.id)).toEqual([undefined]);
+    } finally {
+      await prisma.webhookEndpoint.update({
+        where: { id: made.id },
+        data: { archivedAt: new Date() },
+      });
+    }
   });
 });
 

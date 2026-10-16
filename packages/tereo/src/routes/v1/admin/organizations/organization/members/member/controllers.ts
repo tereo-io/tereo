@@ -1,6 +1,7 @@
 import { notifyOrgMembershipChanged } from "../../../../../../../websocket/emitters/index.js";
 import { getDefaultOrganizationId } from "../../../../../../../utils/defaultOrganization.js";
 import { OrgMemberRole } from "../../../../../../../../prisma/generated/client/index.js";
+import { assertNotIntegrationAccount } from "../../../../../../../utils/integrations.js";
 import { formatOrganizationMember } from "../../../../../../../utils/transformers.js";
 import { endOrganizationSessions } from "../../../../../../../utils/sessions.js";
 import { MemberUserIdParamSchema, UpdateMemberRoleSchema } from "./schemas.js";
@@ -51,6 +52,7 @@ export const removeMember = async (req: Request, res: Response) => {
   const callerRole = await requireOrgRole("admin", req, orgId);
 
   await db.organizations.get(orgId);
+  await assertNotIntegrationAccount(userId);
   await db.$transaction(async (tx) => {
     await lockOrgOwners(tx, orgId);
     const removed = await db.organizations.removeMember(orgId, userId, tx);
@@ -102,6 +104,7 @@ export const updateMemberRole = async (req: Request, res: Response) => {
   const { userId } = validateParams(MemberUserIdParamSchema, req);
   const callerRole = await requireOrgRole("admin", req, orgId);
   const body = validateBody(UpdateMemberRoleSchema, req);
+  await assertNotIntegrationAccount(userId);
 
   // Admins cannot change an owner's role or make anyone (themselves
   // included) an owner — only owners or platform admins can.

@@ -1,8 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import dns from "dns/promises";
 import {
+  BlockedAddressError,
   assertExternalTargetSafe,
   assertSafeWebhookUrlForRegistration,
   isPrivateOrReservedIp,
+  parseInternalHost,
 } from "../../utils/ssrfGuard.js";
 
 describe("isPrivateOrReservedIp", () => {
@@ -128,5 +131,159 @@ describe("assertExternalTargetSafe", () => {
       "https://[2606:4700:4700::1111]/"
     );
     await agent.close();
+  });
+});
+
+describe("parseInternalHost", () => {
+  it.each([
+    [
+      "order-routing.vanquished.svc.cluster.local",
+      "hostname",
+      "order-routing.vanquished.svc.cluster.local",
+    ],
+    [
+      "Order-Routing.Vanquished.svc.cluster.local.",
+      "hostname",
+      "order-routing.vanquished.svc.cluster.local",
+    ],
+    ["10.35.2.2", "ip", "10.35.2.2"],
+    ["fd00::5", "ip", "fd00::5"],
+    ["FD00:0:0::5", "ip", "fd00::5"],
+  ])("accepts %s", (value, kind, host) => {
+    expect(parseInternalHost(value)).toEqual({ kind, host });
+  });
+
+  it.each([
+    "10.35.2.2/24",
+    "http://x",
+    "x:8080",
+    "x/path",
+    "user@x",
+    "127.0.0.1",
+    "LOCALHOST",
+    "localhost.",
+    "api.localhost",
+    "[::1]",
+    "::1",
+    "::ffff:127.0.0.1",
+    "127.1",
+    "0x7f000001",
+    "2130706433",
+    "169.254.169.254",
+    "fe80::1",
+    "0.0.0.0",
+    "::",
+    "224.0.0.1",
+    "ff02::1",
+    "",
+    " ",
+    "bad host",
+  ])("refuses %j", (value) => {
+    expect(() => parseInternalHost(value)).toThrow(
+      expect.objectContaining({ code: "invalid_internal_host" })
+    );
+  });
+});
+
+describe("allowPrivateHost", () => {
+  it("lets the named host reach a private address at delivery", async () => {
+    const agent = await assertExternalTargetSafe("http://10.35.2.2/x", {
+      allowPrivateHost: "10.35.2.2",
+    });
+    await agent.close();
+  });
+
+  it("keeps the full guard without it, or for another host", async () => {
+    await expect(
+      assertExternalTargetSafe("http://10.35.2.2/x")
+    ).rejects.toBeInstanceOf(BlockedAddressError);
+    await expect(
+      assertExternalTargetSafe("http://10.35.2.2/x", {
+        allowPrivateHost: "10.35.2.3",
+      })
+    ).rejects.toBeInstanceOf(BlockedAddressError);
+  });
+
+  it("matches a normalized IPv6 literal", async () => {
+    const agent = await assertExternalTargetSafe("http://[fd00:0::5]:8080/x", {
+      allowPrivateHost: "fd00::5",
+    });
+    await agent.close();
+  });
+
+  it("still refuses loopback, link-local, unspecified and multicast", async () => {
+    for (const host of ["127.0.0.1", "169.254.169.254", "0.0.0.0", "224.0.0.1"])
+      await expect(
+        assertExternalTargetSafe(`http://${host}/x`, { allowPrivateHost: host })
+      ).rejects.toBeInstanceOf(BlockedAddressError);
+    await expect(
+      assertExternalTargetSafe("http://[::1]/x", { allowPrivateHost: "::1" })
+    ).rejects.toBeInstanceOf(BlockedAddressError);
+  });
+
+  it("still refuses a name that resolves to loopback", async () => {
+    await expect(
+      assertExternalTargetSafe("http://localhost/x", {
+        allowPrivateHost: "localhost",
+      })
+    ).rejects.toBeInstanceOf(BlockedAddressError);
+  });
+
+  describe("a named host's DNS answers", () => {
+    const resolveTo = (...addresses: string[]) =>
+      vi.spyOn(dns, "lookup").mockResolvedValue(
+        addresses.map((address) => ({
+          address,
+          family: address.includes(":") ? 6 : 4,
+        })) as never
+      );
+    const deliver = () =>
+      assertExternalTargetSafe("http://svc.internal:8080/x", {
+        allowPrivateHost: "svc.internal",
+      });
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it.each(["127.0.0.1", "169.254.169.254", "::ffff:127.0.0.1"])(
+      "refuses one resolving to %s",
+      async (address) => {
+        resolveTo(address);
+        await expect(deliver()).rejects.toBeInstanceOf(BlockedAddressError);
+      }
+    );
+
+    it("refuses mixed records with one loopback address", async () => {
+      resolveTo("10.35.2.2", "127.0.0.1");
+      await expect(deliver()).rejects.toBeInstanceOf(BlockedAddressError);
+    });
+
+    it("accepts a private address", async () => {
+      resolveTo("10.35.2.2");
+      const agent = await deliver();
+      await agent.close();
+    });
+  });
+
+  it("lets the named host pass registration as a private literal, nothing else", () => {
+    expect(() =>
+      assertSafeWebhookUrlForRegistration("http://10.35.2.2:8080/hook", {
+        allowPrivateHost: "10.35.2.2",
+      })
+    ).not.toThrow();
+    expect(() =>
+      assertSafeWebhookUrlForRegistration("http://10.35.2.3:8080/hook", {
+        allowPrivateHost: "10.35.2.2",
+      })
+    ).toThrow(expect.objectContaining({ code: "private_url_not_allowed" }));
+    expect(() =>
+      assertSafeWebhookUrlForRegistration("http://127.0.0.1/hook", {
+        allowPrivateHost: "127.0.0.1",
+      })
+    ).toThrow(expect.objectContaining({ code: "private_url_not_allowed" }));
+    expect(() =>
+      assertSafeWebhookUrlForRegistration("http://localhost/hook", {
+        allowPrivateHost: "localhost",
+      })
+    ).toThrow(expect.objectContaining({ code: "private_url_not_allowed" }));
   });
 });

@@ -52,6 +52,7 @@ model Organization {
   webhookEndpoints        WebhookEndpoint[]
   auditLogEntries         AuditLogEntry[]
   identityProviderDomains IdentityProviderDomain[]
+  integrations            Service[]
 
   notifications Notification[]
 
@@ -171,6 +172,9 @@ model OAuthClient {
   // false: the user is not asked to approve this client after signing in.
   // Says nothing about what its tokens may do in core's API.
   consentRequired         Boolean    @default(true) @map("consent_required")
+  // Core API scopes the user is not asked to approve when consentRequired is
+  // false. Set only by provisioning; never core:admin or core:admin.read.
+  trustedCoreScopes       String[]   @default([]) @map("trusted_core_scopes")
   // After a regenerate, the replaced secret keeps working until it expires,
   // so running copies of a service survive the rollout.
   previousSecretHash      String?    @map("previous_secret_hash") @db.VarChar(255)
@@ -1517,29 +1521,49 @@ model SetupToken {
   @@schema("core")
 }
 
+enum ServiceKind {
+  service
+  integration
+
+  @@map("service_kind")
+  @@schema("core")
+}
+
 // An app service, or core itself (fixed id, no client). Provisioned, with a
 // declaration of what it owns, all named under its namespace; or added by an
 // admin, who gets its client credentials once. Never deleted.
+//
+// An integration is a machine client for an external party: no namespace, it
+// never declares anything. With an organization (fixed at creation) its
+// tokens carry that org_id and its account holds org roles there; without
+// one it holds global roles. CHECKs keep namespace and organization_id to
+// their kind.
 model Service {
-  id                 String    @id @default(uuid(7)) @db.Uuid
-  slug               String    @unique @db.VarChar(64)
-  name               String    @db.VarChar(100)
-  namespace          String    @unique @db.VarChar(64)
-  clientId           String?   @unique @map("client_id") @db.Uuid
-  isActive           Boolean   @default(true) @map("is_active")
-  declarationHash    String?   @map("declaration_hash") @db.Char(64)
+  id                 String      @id @default(uuid(7)) @db.Uuid
+  slug               String      @unique @db.VarChar(64)
+  name               String      @db.VarChar(100)
+  kind               ServiceKind @default(service)
+  namespace          String?     @unique @db.VarChar(64)
+  organizationId     String?     @map("organization_id") @db.Uuid
+  clientId           String?     @unique @map("client_id") @db.Uuid
+  isActive           Boolean     @default(true) @map("is_active")
+  // Set by provisioning: the host its own webhook endpoints may reach at a
+  // private address (utils/ssrfGuard.ts).
+  internalHost       String?     @map("internal_host") @db.VarChar(253)
+  declarationHash    String?     @map("declaration_hash") @db.Char(64)
   // The semver of the declaration last applied; an older one is ignored.
-  declarationVersion String?   @map("declaration_version") @db.VarChar(64)
-  declaredAt         DateTime? @map("declared_at")
+  declarationVersion String?     @map("declaration_version") @db.VarChar(64)
+  declaredAt         DateTime?   @map("declared_at")
   // Created from the provisioning file.
-  provisioned        Boolean   @default(false)
+  provisioned        Boolean     @default(false)
   // When a provisioned service was first missing from the file.
-  unprovisionedAt    DateTime? @map("unprovisioned_at")
-  createdBy          String    @map("created_by") @db.Uuid
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  unprovisionedAt    DateTime?   @map("unprovisioned_at")
+  createdBy          String      @map("created_by") @db.Uuid
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
 
   client           OAuthClient?      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  organization     Organization?     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   creator          User              @relation("ServiceCreator", fields: [createdBy], references: [id], onDelete: Restrict)
   permissions      Permission[]
   roles            Role[]
@@ -1548,6 +1572,7 @@ model Service {
   access           ServiceAccess[]
   webhookEndpoints WebhookEndpoint[]
 
+  @@index([organizationId])
   @@map("services")
   @@schema("core")
 }

@@ -74,7 +74,8 @@ export class AuthServiceClient {
    */
   constructor(
     config: AuthServiceClientConfig = {},
-    private readonly testMode = false
+    private readonly testMode = false,
+    private readonly testServiceUserId?: string
   ) {
     this.defaultTestPermissions = config.defaultTestPermissions ?? [];
     this.publicRoutes = config.publicRoutes ?? [];
@@ -87,7 +88,9 @@ export class AuthServiceClient {
    */
   async introspectToken(token: string): Promise<IntrospectionResponse> {
     if (this.testMode) {
-      const testResult = parseTestToken(token, this.defaultTestPermissions);
+      const testResult = parseTestToken(token, this.defaultTestPermissions, {
+        serviceUserId: this.testServiceUserId,
+      });
       if (testResult) return testResult;
     }
 

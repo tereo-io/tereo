@@ -276,6 +276,66 @@ describe("parseDocuments", () => {
     expect(text).toContain("needs at least one redirect URI");
   });
 
+  it("accepts trustedCoreScopes the client also asks for", () => {
+    const {
+      documents: [d],
+    } = parse({
+      "a.json": doc({
+        clients: [
+          {
+            clientId: "c1",
+            name: "C1",
+            redirectUris: ["https://app.example.com/callback"],
+            scopes: ["openid", "core:files.read", "core:account"],
+            trustedCoreScopes: ["core:files.read"],
+          },
+        ],
+      }),
+    });
+    expect(d.clients[0].trustedCoreScopes).toEqual(["core:files.read"]);
+  });
+
+  it("defaults trustedCoreScopes to none", () => {
+    const {
+      documents: [d],
+    } = parse({
+      "a.json": doc({
+        clients: [
+          {
+            clientId: "c1",
+            name: "C1",
+            redirectUris: ["https://app.example.com/callback"],
+          },
+        ],
+      }),
+    });
+    expect(d.clients[0].trustedCoreScopes).toEqual([]);
+  });
+
+  it.each([
+    ["core:admin", "core:admin cannot be trusted"],
+    ["core:admin.read", "core:admin.read cannot be trusted"],
+    ["core:nope", "core:nope is not a core scope"],
+    ["core:files", "core:files is not in scopes"],
+  ])("refuses trustedCoreScopes %j", (scope, message) => {
+    const problems = problemsOf({
+      "a.json": doc({
+        clients: [
+          {
+            clientId: "c1",
+            name: "C1",
+            redirectUris: ["https://app.example.com/callback"],
+            scopes: ["openid", "core:admin", "core:admin.read", "core:nope"],
+            trustedCoreScopes: [scope],
+          },
+        ],
+      }),
+    });
+    expect(problems).toEqual([
+      `a.json: clients[c1]: trustedCoreScopes: ${message}`,
+    ]);
+  });
+
   it("refuses a webhook URL that could never be delivered to", () => {
     const urls = [
       "ftp://x",
@@ -314,6 +374,78 @@ describe("parseDocuments", () => {
     });
     expect(set.documents[0].service?.webhooks[0].url).toBe(
       "http://product.vanquished.svc.cluster.local/webhooks"
+    );
+  });
+
+  it("lets a webhook reach its service's internalHost, and only that", () => {
+    const url = "http://10.35.2.2:8080/hook";
+    const set = parse({
+      "a.json": doc({
+        service: service({
+          internalHost: "10.35.2.2",
+          webhooks: [webhook({ url })],
+        }),
+      }),
+    });
+    expect(set.documents[0].service?.internalHost).toBe("10.35.2.2");
+    expect(set.documents[0].service?.webhooks[0].url).toBe(url);
+
+    const without = problemsOf({
+      "a.json": doc({ service: service({ webhooks: [webhook({ url })] }) }),
+    });
+    expect(without).toHaveLength(1);
+    expect(without[0]).toMatch(/webhooks\[stock\]: url /);
+
+    const other = problemsOf({
+      "a.json": doc({
+        service: service({
+          internalHost: "10.35.2.3",
+          webhooks: [webhook({ url })],
+        }),
+      }),
+    });
+    expect(other).toHaveLength(1);
+    expect(other[0]).toMatch(/webhooks\[stock\]: url /);
+  });
+
+  it("normalizes internalHost and matches the URL's host case-insensitively", () => {
+    const set = parse({
+      "a.json": doc({
+        service: service({
+          internalHost: "Order-Routing.Vanquished.svc.cluster.local.",
+          webhooks: [
+            webhook({
+              url: "http://ORDER-ROUTING.vanquished.svc.cluster.local:8080/hook",
+            }),
+          ],
+        }),
+      }),
+    });
+    expect(set.documents[0].service?.internalHost).toBe(
+      "order-routing.vanquished.svc.cluster.local"
+    );
+    const bare = parse({ "b.json": doc({ service: service() }) });
+    expect(bare.documents[0].service?.internalHost).toBeNull();
+  });
+
+  it.each([
+    "10.35.2.2/24",
+    "http://x",
+    "x:8080",
+    "127.0.0.1",
+    "localhost",
+    "169.254.169.254",
+    "0.0.0.0",
+    "ff02::1",
+    "127.1",
+    "",
+  ])("refuses internalHost %j", (internalHost) => {
+    const problems = problemsOf({
+      "a.json": doc({ service: service({ internalHost }) }),
+    });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(
+      /^a\.json: services\[vanquished-inventory\]: internalHost /
     );
   });
 

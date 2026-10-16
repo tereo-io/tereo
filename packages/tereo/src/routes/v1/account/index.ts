@@ -1,5 +1,6 @@
 import { createRequireAuth } from "../../../middleware/auth.js";
 import { getProfile, changePassword } from "./controllers.js";
+import organizationsRouter from "./organizations/index.js";
 import identitiesRouter from "./identities/index.js";
 import sessionsRouter from "./sessions/index.js";
 import photoRouter from "./photo/index.js";
@@ -13,6 +14,8 @@ import {
 const accountRouter = Router();
 
 accountRouter.use(rateLimitPreAuth);
+// Before the router-wide auth: it admits core:organizations as well.
+accountRouter.use("/organizations", organizationsRouter);
 accountRouter.use(createRequireAuth({ area: "account" }));
 accountRouter.use(rateLimitGeneral);
 

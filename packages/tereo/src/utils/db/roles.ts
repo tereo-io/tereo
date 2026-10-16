@@ -112,8 +112,11 @@ const grantedPermission = {
 } as const;
 
 /** Assignable roles among `ids`: not archived, not retired. */
-export const getByIds = async (ids: string[]) => {
-  return await prisma.role.findMany({
+export const getByIds = async (
+  ids: string[],
+  tx: Prisma.TransactionClient = prisma
+) => {
+  return await tx.role.findMany({
     where: { id: { in: ids }, archivedAt: null, retiredAt: null },
     include: {
       rolePermissions: { include: { permission: grantedPermission } },

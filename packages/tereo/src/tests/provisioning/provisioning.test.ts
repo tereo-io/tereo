@@ -96,6 +96,7 @@ const serviceDoc = (
       name: `Service ${slug}`,
       namespace: slug,
       clientId: slug,
+      internalHost: null,
       secretEnv: "SERVICE_SECRET",
       secretHash: secret.hash,
       access: { roles: [], audiences: [] },
@@ -133,6 +134,7 @@ const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
     grantTypes: ["authorization_code", "refresh_token"],
     audience: [],
     consentRequired: true,
+    trustedCoreScopes: [],
     ...extra,
   };
   createdClientIds.push(spec.clientId);
@@ -303,6 +305,44 @@ describe("applyProvisioning", () => {
     expect(row.consentRequired).toBe(false);
     expect(row.redirectUris).toEqual(spec.redirectUris);
     expect(row.scopes).toEqual(spec.scopes);
+  });
+
+  it("stores trustedCoreScopes, updates them and shows them read-only", async () => {
+    const spec = clientSpec({
+      scopes: ["openid", "core:files.read", "core:account"],
+      consentRequired: false,
+      trustedCoreScopes: ["core:files.read"],
+    });
+    await apply(clientsDoc(spec));
+    const row = await clientRow(spec.clientId);
+    expect(row.trustedCoreScopes).toEqual(["core:files.read"]);
+
+    const result = await apply(
+      clientsDoc({
+        ...spec,
+        trustedCoreScopes: ["core:files.read", "core:account"],
+      })
+    );
+    expect(result.updated).toEqual([`client:${spec.clientId}`]);
+    expect((await clientRow(spec.clientId)).trustedCoreScopes).toEqual([
+      "core:account",
+      "core:files.read",
+    ]);
+
+    const reordered = await apply(
+      clientsDoc({
+        ...spec,
+        trustedCoreScopes: ["core:account", "core:files.read", "core:account"],
+      })
+    );
+    expect(reordered.updated).toEqual([]);
+
+    const read = await api("GET", `/v1/admin/clients/${row.id}`);
+    expect(read.status).toBe(200);
+    expect(read.body.trustedCoreScopes).toEqual([
+      "core:account",
+      "core:files.read",
+    ]);
   });
 
   it("refuses a login client audience naming no service", async () => {
@@ -1039,6 +1079,30 @@ describe("access", () => {
         },
       ],
     });
+  });
+
+  it("revokes tokens when a role swaps one permission for another", async () => {
+    const owner = serviceDoc();
+    Object.assign(
+      owner.service,
+      ownerDeclaration(owner.service.namespace, ["read"])
+    );
+    const consumer = serviceDoc({
+      access: { roles: [roleTarget(owner)], audiences: [] },
+    });
+    await apply(owner, consumer);
+    const token = await serviceToken(consumer);
+
+    const swapped = withService(
+      owner,
+      ownerDeclaration(owner.service.namespace, ["write"]),
+      { version: "1.1.0" }
+    );
+    const result = await apply(swapped, consumer);
+    expect(result.access).toEqual([
+      `service:${consumer.service.slug} extended role:${roleTarget(owner)}`,
+    ]);
+    expect((await tokenRow(token)).revokedAt).not.toBeNull();
   });
 
   it("revokes access removed from the set", async () => {

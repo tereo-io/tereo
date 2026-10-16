@@ -90,6 +90,28 @@ describe("outbox writers", () => {
     });
   });
 
+  it("keep an event's recipients", async () => {
+    const tx = fakeDb();
+    const event: EmitEventParams = {
+      ...(row().payload as EmitEventParams),
+      recipients: ["acme-3pl"],
+    };
+    await make(fakeDb().db).emit(tx.db, event);
+    expect(JSON.parse(tx.calls[0].values[2] as string)).toMatchObject({
+      recipients: ["acme-3pl"],
+    });
+
+    const app = fakeDb();
+    const emitAsync = vi
+      .spyOn(webhooks, "emitAsync")
+      .mockResolvedValue({ deliveriesCreated: 1 });
+    app.claim([row({ payload: event })]);
+    await make(app.db).processBatch();
+    expect(emitAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ recipients: ["acme-3pl"] })
+    );
+  });
+
   it("refuse an undeclared event type before writing", async () => {
     const tx = fakeDb();
     await expect(

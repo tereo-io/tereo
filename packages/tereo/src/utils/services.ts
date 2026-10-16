@@ -13,9 +13,21 @@ export interface CreateServiceInput {
   clientId: string;
   clientSecretHash: string;
   provisioned?: boolean;
+  internalHost?: string | null;
   /** Added to the audit entry's metadata. */
   auditMetadata?: Record<string, unknown>;
 }
+
+/** A slug from a display name: lowercase words joined by hyphens. */
+export const slugify = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/^[^a-z]+/, "")
+    // slug and namespace are VarChar(64).
+    .slice(0, 64)
+    .replace(/-+$/, "");
 
 export const serviceAccountEmail = (slug: string) =>
   `${slug}@services.tereo.internal`;
@@ -66,6 +78,7 @@ export const createServiceTx = async (
       clientId: client.id,
       createdBy: actor.userId,
       provisioned: input.provisioned,
+      internalHost: input.internalHost ?? null,
     },
   });
 

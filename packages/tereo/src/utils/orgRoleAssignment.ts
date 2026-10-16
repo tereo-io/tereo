@@ -2,6 +2,7 @@ import { BadRequestError, ForbiddenError } from "./errors.js";
 import type { AuthContext } from "../middleware/auth.js";
 import { capToCeiling } from "./coreAccess.js";
 import { assertCanGrant } from "./grants.js";
+import type { Prisma } from "./db/prisma.js";
 import db from "./db/index.js";
 
 /**
@@ -16,12 +17,13 @@ export const assertOrgAssignableRoles = async (
   >,
   organizationId: string,
   roleIds: string[],
-  alreadyHeld: Set<string>
+  alreadyHeld: Set<string>,
+  tx?: Prisma.TransactionClient
 ) => {
   const ids = [...new Set(roleIds)];
   if (ids.length === 0) return [];
 
-  const roles = await db.roles.getByIds(ids);
+  const roles = await db.roles.getByIds(ids, tx);
   if (roles.length !== ids.length) {
     const foundIds = new Set(roles.map((r) => r.id));
     const missingIds = ids.filter((id) => !foundIds.has(id));

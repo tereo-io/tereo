@@ -28,7 +28,7 @@ AccountForbiddenResponse:
             type: string
       example:
         error: "insufficient_scope"
-        error_description: "This token's scopes do not reach /v1/account; it needs one of: core:account"
+        error_description: "This token's scopes do not reach /v1/account/me; it needs one of: core:account"
 
 LoginTotpSetupForbiddenResponse:
   description: |

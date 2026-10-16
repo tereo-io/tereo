@@ -28,6 +28,7 @@ export const provision = async (
         service: d.service?.slug ?? null,
         clients: d.clients.length,
         roles: d.roles.length,
+        integrations: d.integrations?.length ?? 0,
       })),
       ...(changed && { ...result }),
     },

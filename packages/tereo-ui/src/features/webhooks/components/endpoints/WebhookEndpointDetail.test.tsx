@@ -63,7 +63,23 @@ const renderDetail = (data: WebhookEndpoint) => {
 
 beforeEach(() => authMock.axios.get.mockReset());
 
+const integrationOwned: WebhookEndpoint = {
+  ...owned,
+  ownerService: { id: "i1", slug: "acme", name: "Acme", kind: "integration" },
+};
+
 describe("WebhookEndpointDetail", () => {
+  it("labels an integration-owned endpoint's owner and links to the integration", async () => {
+    renderDetail(integrationOwned);
+
+    expect(await screen.findByText("Owning Integration")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Acme" })).toHaveAttribute(
+      "href",
+      "/integrations/i1"
+    );
+    expect(screen.queryByText("Owning Service")).not.toBeInTheDocument();
+  });
+
   it("offers every control on a hand-made endpoint", async () => {
     renderDetail(endpoint);
 

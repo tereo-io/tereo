@@ -337,7 +337,8 @@ const accessKey = (row: { kind: string; target: string }) =>
  * follows the role, recording what it grants now. Approved access no longer
  * listed is revoked. Every target must already exist: call after the
  * declarations.
- * The caller revokes the service's tokens when anything was revoked.
+ * The caller revokes the service's tokens when anything was revoked or
+ * `lostPermissions` is set (an extended role may also have lost some).
  */
 export const syncProvisionedAccessTx = async (
   tx: Tx,
@@ -350,6 +351,7 @@ export const syncProvisionedAccessTx = async (
   extended: string[];
   narrowed: string[];
   revoked: string[];
+  lostPermissions: boolean;
 }> => {
   const want = [
     ...wanted.roles.map((target) => ({ kind: "role" as const, target })),
@@ -459,5 +461,8 @@ export const syncProvisionedAccessTx = async (
     extended: extended.map(accessKey),
     narrowed: narrowed.map(accessKey),
     revoked: revoked.map(accessKey),
+    lostPermissions: [...extended, ...narrowed].some(
+      (d) => d.removedPermissions && d.removedPermissions.length > 0
+    ),
   };
 };

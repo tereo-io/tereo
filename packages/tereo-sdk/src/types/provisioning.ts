@@ -60,6 +60,12 @@ export interface ServiceProvisioning {
   /** Defaults to the slug without a trailing `-service`. */
   namespace?: string;
   clientId?: string;
+  /**
+   * The service's own private hostname or IP address (no scheme, port, path
+   * or CIDR). Its webhooks may target it even when it resolves to a private
+   * address; loopback, link-local, unspecified and multicast are never allowed.
+   */
+  internalHost?: string;
   /** Name of the environment variable, in core's environment, that holds the client secret. */
   secretFrom: string;
   /** Access the service asks for; approved by the document itself. */
@@ -92,6 +98,11 @@ export interface LoginClientProvisioning {
   audience?: string[];
   /** Default true. */
   consentRequired?: boolean;
+  /**
+   * Core scopes (from `scopes`) the user is not asked to approve when
+   * `consentRequired` is false. Never `core:admin` or `core:admin.read`.
+   */
+  trustedCoreScopes?: string[];
   description?: string;
 }
 
@@ -108,7 +119,33 @@ export interface CustomRole {
   permissions: string[];
 }
 
-/** One file; it needs at least one of `service`, `clients`, `roles`, not empty. */
+/**
+ * A machine client for an external party (a 3PL, a customer's system). Its
+ * client id is its slug. It declares nothing.
+ */
+export interface IntegrationProvisioning {
+  slug: string;
+  name: string;
+  /**
+   * Org-bound when set: its tokens carry this `org_id`, and it holds only
+   * org-assignable custom roles there. Fixed once created.
+   */
+  organizationId?: string;
+  /** Name of the environment variable, in core's environment, that holds the client secret. */
+  secretFrom: string;
+  /**
+   * Role names. Org-bound: org-assignable custom roles of the set. Otherwise
+   * also core's roles and `<slug>/<name>` services' system roles. Default [].
+   */
+  roles?: string[];
+  /** Slugs of services in the set that may introspect its tokens. Default []. */
+  audiences?: string[];
+}
+
+/**
+ * One file; it needs at least one of `service`, `clients`, `roles`,
+ * `integrations`, not empty.
+ */
 export interface ProvisioningDocument {
   $schema?: string;
   /** Semver of the release: `MAJOR.MINOR.PATCH[-prerelease]`. */
@@ -116,4 +153,5 @@ export interface ProvisioningDocument {
   service?: ServiceProvisioning;
   clients?: LoginClientProvisioning[];
   roles?: CustomRole[];
+  integrations?: IntegrationProvisioning[];
 }

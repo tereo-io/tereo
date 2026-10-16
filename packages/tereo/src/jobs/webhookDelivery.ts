@@ -12,6 +12,7 @@ import {
   BlockedAddressError,
   UnresolvableHostError,
   assertExternalTargetSafe,
+  type PrivateHostOption,
 } from "../utils/ssrfGuard.js";
 import {
   isLastDeliveryAttempt,
@@ -31,8 +32,14 @@ export const AUTO_DISABLE_THRESHOLD = 5;
 /** The attempt's error when the endpoint's signing secret cannot be opened. */
 export const SECRET_UNAVAILABLE = "Signing secret cannot be opened";
 
-/** Resolves and checks a URL's host; returns a dispatcher pinned to it. */
-export type ConnectTarget = (url: string) => Promise<Agent>;
+/**
+ * Resolves and checks a URL's host; returns a dispatcher pinned to it.
+ * `allowPrivateHost` is the owning service's internalHost (ssrfGuard).
+ */
+export type ConnectTarget = (
+  url: string,
+  opts?: PrivateHostOption
+) => Promise<Agent>;
 
 type AttemptOutcome =
   | { ok: true; httpStatus: number; responseBody: string | null }
@@ -98,7 +105,8 @@ async function attemptDelivery(
   url: string,
   headers: Record<string, string>,
   body: string,
-  connectTarget: ConnectTarget
+  connectTarget: ConnectTarget,
+  targetOpts: PrivateHostOption
 ): Promise<AttemptOutcome> {
   // Bare fetch is intentional here. request-handler is built for known,
   // pre-registered upstreams with rate limits and OAuth/Basic auth. Customer
@@ -112,7 +120,7 @@ async function attemptDelivery(
   let dispatcher: Agent | undefined;
   try {
     const signal = AbortSignal.timeout(DELIVERY_TIMEOUT_MS);
-    dispatcher = await connectTarget(url);
+    dispatcher = await connectTarget(url, targetOpts);
     const response = await fetch(url, {
       method: "POST",
       headers,
@@ -262,7 +270,16 @@ export async function processWebhookDelivery(
           ),
         },
         payloadJson,
-        connectTarget
+        connectTarget,
+        // Only an endpoint a service's provisioning document declares may
+        // reach that service's own internalHost; every other endpoint keeps
+        // the full guard.
+        {
+          allowPrivateHost:
+            endpoint.provisioned && endpoint.ownerService?.kind === "service"
+              ? (endpoint.ownerService.internalHost ?? undefined)
+              : undefined,
+        }
       )
     : {
         ok: false,

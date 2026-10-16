@@ -1,7 +1,11 @@
+import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { generateTotpSecret, encryptTotpSecret } from "../../utils/totp.js";
+import { removeLoginClients } from "../provisioning/utils/test-helpers.js";
+import { applyProvisioning } from "../../utils/provisioning/index.js";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
-import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
+import { randomBytes } from "crypto";
 import {
   absorbCookies,
   browserLogin,
@@ -262,6 +266,113 @@ describe("prompt=none consent", () => {
     expect(
       await prisma.consentSession.count({ where: { userId: user.id } })
     ).toBe(before);
+  });
+});
+
+describe("trusted core scopes", () => {
+  const TRUSTING_REDIRECT = "http://localhost:3100/trusts-core/callback";
+  const trustingClientId = `prov-client-${randomBytes(5).toString("hex")}`;
+
+  beforeAll(async () => {
+    // Events are written in this process, outside the server.
+    await ensureDefaultOrganization();
+    await applyProvisioning({
+      documents: [
+        {
+          file: "trusting.json",
+          version: "1.0.0",
+          service: null,
+          roles: [],
+          clients: [
+            {
+              clientId: trustingClientId,
+              name: "Trusts core scopes",
+              description: null,
+              clientType: "public",
+              secretEnv: null,
+              secretHash: null,
+              redirectUris: [TRUSTING_REDIRECT],
+              postLogoutRedirectUris: [],
+              scopes: ["openid", "core:files.read", "core:account"],
+              grantTypes: ["authorization_code", "refresh_token"],
+              audience: [],
+              consentRequired: false,
+              trustedCoreScopes: ["core:files.read"],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  afterAll(() => removeLoginClients([trustingClientId]));
+
+  it("answers prompt=none with a code for a trusted core scope, and the token keeps its ceiling", async () => {
+    const { user, jar } = await signIn(trustingClientId, TRUSTING_REDIRECT);
+    await getTestPrincipalToken({ userId: user.id, permissions: ["admin"] });
+
+    const { pkce, response } = authorize(
+      jar,
+      trustingClientId,
+      TRUSTING_REDIRECT,
+      { prompt: "none", scope: "openid core:files.read" }
+    );
+    const res = await response;
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get("location") ?? "");
+    expect(location.searchParams.get("error")).toBeNull();
+    const code = location.searchParams.get("code");
+    expect(code).toBeTruthy();
+
+    const tokens = await exchange(
+      trustingClientId,
+      TRUSTING_REDIRECT,
+      code!,
+      pkce.verifier
+    );
+    expect(tokens.status).toBe(200);
+    const { access_token } = (await tokens.json()) as { access_token: string };
+    const call = (init: RequestInit = {}) =>
+      fetch(`${BASE_URL}/v1/files/buckets`, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "Content-Type": "application/json",
+        },
+      });
+    expect((await call()).status).toBe(200);
+    const create = await call({
+      method: "POST",
+      body: JSON.stringify({ name: `trusted-${Date.now()}` }),
+    });
+    expect(create.status).toBe(403);
+  });
+
+  it("issues the code at once after password login for a trusted core scope", async () => {
+    const user = await createTestUser();
+    const { url } = await loginOnly(
+      trustingClientId,
+      TRUSTING_REDIRECT,
+      user.email,
+      user.plainPassword,
+      { scope: "openid core:files.read" }
+    );
+    expect(`${url.origin}${url.pathname}`).toBe(TRUSTING_REDIRECT);
+    expect(url.searchParams.get("code")).toBeTruthy();
+    expect(
+      await prisma.consentSession.count({ where: { userId: user.id } })
+    ).toBe(0);
+  });
+
+  it("answers consent_required for a core scope the client does not trust", async () => {
+    const { jar } = await signIn(trustingClientId, TRUSTING_REDIRECT);
+    const { response } = authorize(jar, trustingClientId, TRUSTING_REDIRECT, {
+      prompt: "none",
+      scope: "openid core:files.read core:account",
+    });
+    const location = new URL((await response).headers.get("location") ?? "");
+    expect(location.searchParams.get("error")).toBe("consent_required");
+    expect(location.searchParams.get("code")).toBeNull();
   });
 });
 

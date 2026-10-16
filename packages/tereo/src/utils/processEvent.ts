@@ -80,13 +80,39 @@ type PlannedEvent = {
   endpointIds: string[];
 };
 
+/**
+ * The ids of the services and integrations `slugs` name. 400
+ * `unknown_recipient` if any is unknown; an outbox row naming one is
+ * dead-lettered.
+ */
+async function resolveRecipients(slugs: string[]): Promise<string[]> {
+  const distinct = [...new Set(slugs)];
+  const rows = await prisma.service.findMany({
+    where: { slug: { in: distinct } },
+    select: { id: true, slug: true },
+  });
+  const known = new Set(rows.map((r) => r.slug));
+  const unknown = distinct.filter((slug) => !known.has(slug));
+  if (unknown.length > 0) {
+    throw new BadRequestError(
+      "unknown_recipient",
+      `No service or integration with slug: ${unknown.join(", ")}`
+    );
+  }
+  return rows.map((r) => r.id);
+}
+
 async function planEvent(
   event: EmitEventInput,
   readPermission: string | null
 ): Promise<PlannedEvent> {
+  const recipientServiceIds = event.recipients
+    ? await resolveRecipients(event.recipients)
+    : undefined;
   const endpoints = await db.webhookEndpoints.findActiveByOrgAndEvent(
     event.organizationId,
-    event.eventType
+    event.eventType,
+    { recipientServiceIds }
   );
   const mayReceive = createRecipientCheck(event, readPermission);
   const endpointIds: string[] = [];
@@ -136,6 +162,7 @@ async function writeEventTx(
       entityId: event.entityId,
       occurredAt: occurredAt.toISOString(),
       data: event.data,
+      ...(event.recipients && { recipients: event.recipients }),
     };
     const delivery = await db.webhookDeliveries.create(
       { webhookEndpointId, eventType: event.eventType, payload },

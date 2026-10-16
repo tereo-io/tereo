@@ -20,6 +20,7 @@ import {
  * - core's own (`auth.*`, `file-service.*`, `core.service.*`): nobody — core
  *   emits them in-process, so one arriving here is forged;
  * - a registered service: only the event types it declares;
+ * - an integration: none, as it declares nothing;
  * - any other caller: only with `webhooks.admin`, which may emit any
  *   service's event types.
  * Unregistered event types pass here and are refused with a 400 later.
@@ -42,6 +43,9 @@ const assertMayEmit = async (auth: AuthContext, eventTypes: string[]) => {
   const service = auth.oauthClientId
     ? await db.services.getByClientId(auth.oauthClientId)
     : null;
+  if (service?.kind === "integration") {
+    throw new ForbiddenError(`Integration ${service.slug} can't emit events`);
+  }
   if (service) {
     const foreign = owners.filter((e) => e.serviceId !== service.id);
     if (foreign.length > 0) {

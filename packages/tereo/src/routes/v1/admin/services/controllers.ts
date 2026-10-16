@@ -1,7 +1,7 @@
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
+import { createServiceTx, slugify } from "../../../../utils/services.js";
 import { withDeciders } from "../../../../utils/serviceAccess.js";
 import { formatService } from "../../../../utils/transformers.js";
-import { createServiceTx } from "../../../../utils/services.js";
 import { BadRequestError } from "../../../../utils/errors.js";
 import { validateUser } from "../../../../utils/auth.js";
 import type { Request, Response } from "express";
@@ -19,16 +19,6 @@ import {
   ListServiceAccessQuerySchema,
   ListServicesQuerySchema,
 } from "./schemas.js";
-
-const slugify = (name: string) =>
-  name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/^[^a-z]+/, "")
-    // slug and namespace are VarChar(64).
-    .slice(0, 64)
-    .replace(/-+$/, "");
 
 /**
  * Add a service: its confidential client (client_credentials only), the
@@ -76,7 +66,7 @@ export const listServices = async (req: Request, res: Response) => {
   const result = await db.services.getPaginated({
     take: query.limit,
     orderBy: query.orderBy,
-    where: applyCursorToWhere(query),
+    where: { ...applyCursorToWhere(query), kind: "service" },
   });
   const page = buildCursorPageResponse(result, query);
   res.json({

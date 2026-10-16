@@ -27,6 +27,7 @@ const stored: OAuthClient = {
   scopes: ["openid"],
   grantTypes: ["authorization_code", "refresh_token"],
   audience: [],
+  trustedCoreScopes: [],
   consentRequired: true,
   provisioned: false,
   ownerId: "u1",

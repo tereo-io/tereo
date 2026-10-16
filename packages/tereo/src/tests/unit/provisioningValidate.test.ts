@@ -18,6 +18,7 @@ const serviceOf = (s: ServiceInput): ResolvedService => {
     name: s.slug,
     namespace,
     clientId: s.clientId ?? s.slug,
+    internalHost: null,
     secretEnv: `${namespace.toUpperCase()}_SECRET`,
     secretHash: "hash",
     access: { roles: [], audiences: [] },
@@ -53,6 +54,7 @@ const clientOf = (
   grantTypes: ["authorization_code", "refresh_token"],
   audience: [],
   consentRequired: true,
+  trustedCoreScopes: [],
   ...c,
 });
 
@@ -292,6 +294,20 @@ describe("validateSet", () => {
           doc("b.json", { clients: [{ clientId: "alpha-service" }] })
         ),
         "alpha-service"
+      );
+    });
+
+    it("internalHost", () => {
+      expectBoth(
+        validate(
+          doc("a.json", {
+            service: { slug: "alpha-service", internalHost: "10.35.2.2" },
+          }),
+          doc("b.json", {
+            service: { slug: "beta-service", internalHost: "10.35.2.2" },
+          })
+        ),
+        '"10.35.2.2"'
       );
     });
 

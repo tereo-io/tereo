@@ -54,7 +54,12 @@ WebhooksConflictResponse:
     first, `idempotency_request_in_progress`
     when an event with the same idempotency key is still being processed,
     `managed_by_provisioning` when the endpoint is declared in a service's
-    provisioning document and the change must be made there.
+    provisioning document and the change must be made there,
+    `managed_by_integration` when an integration owns the endpoint and the
+    caller is not that integration: a `webhooks.admin` holder may only pause
+    it (a `status`-only PATCH), archive, restore or delete it, and any other
+    PATCH field, rotate-secret, revoke-previous-secret, test send or retry
+    is refused.
   headers:
     X-RateLimit-Limit:
       $ref: '../headers.yaml#/X-RateLimit-Limit'
@@ -76,6 +81,7 @@ WebhooksConflictResponse:
               - resource_archived
               - idempotency_request_in_progress
               - managed_by_provisioning
+              - managed_by_integration
           error_description:
             description: A human-readable explanation of the error
             type: string

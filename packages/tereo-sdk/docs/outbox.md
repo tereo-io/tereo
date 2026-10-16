@@ -39,7 +39,7 @@ roles, approved by an admin, for the reaper's sends to succeed.
 | Method | Takes | |
 |--------|-------|---|
 | `audit(tx, entry)` | `AuditLogEntryInput` — see [audit](audit.md#entries) | Row with `destination = "audit"` |
-| `emit(tx, event)` | `EmitEventParams` — see [webhooks](webhooks.md#emitting) | Row with `destination = "webhook"`. Calls `webhooks.assertEventType` first, so an undeclared event type throws now, not at dispatch |
+| `emit(tx, event)` | `EmitEventParams` — see [webhooks](webhooks.md#emitting); `recipients` (up to 50 service or integration slugs) addresses the event and is stored with the row | Row with `destination = "webhook"`. Calls `webhooks.assertEventType` first, so an undeclared event type throws now, not at dispatch |
 | `notify(tx, input)` | `NotificationInput` — the body of core's `POST /v1/notifications` ([core's notifications.md](../../tereo/docs/notifications.md#sending)) | Row with `destination = "notification"`. Throws now for an unknown channel, a recipient count outside 1 to 50, or an email with no `to` recipient (one without `as` counts as `to`); core checks the rest at dispatch |
 
 Leave `idempotencyKey` out: the reaper sets it to the row id. Nothing is filled from a request
@@ -105,7 +105,8 @@ Started by `core.start()`, stopped by `core.stop()`. Any number of replicas can 
 4. On failure:
    - **Rejected by core** — any 4xx except 401, 403, 408, 409 (the same key still in flight) and 429 —
      the row is dead-lettered at once. Core answers 400 for an audit entry whose `userId` or
-     `organizationId` it does not know, for an unregistered or retired event type, and for a
+     `organizationId` it does not know, for an unregistered or retired event type or an unknown
+     `recipients` slug, and for a
      notification it refuses (an unknown connection, an invalid recipient, an attachment it can't
      find).
    - **Refused by the SDK** before sending — an audit entry it finds invalid

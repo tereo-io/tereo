@@ -1,10 +1,10 @@
 import { assertSafeWebhookUrlForRegistration } from "../../../../../utils/ssrfGuard.js";
-import { validateOrganizationId } from "../../../../../middleware/organizationId.js";
 import { rethrowRestrictedAsConflict } from "../../../../../utils/prismaErrors.js";
 import { assertNoReservedEventTypes } from "../../../../../utils/processEvent.js";
 import { enqueueCommittedDelivery } from "../../../../../jobs/webhookQueues.js";
 import { formatWebhookEndpoint } from "../../../../../utils/transformers.js";
 import { logAuditTx, computeChanges } from "../../../../../utils/outbox.js";
+import { webhookScope } from "../../../../../utils/webhookOwnership.js";
 import { TEST_EVENT_TYPE } from "../../../../../definitions/index.js";
 import { validateUser } from "../../../../../middleware/auth.js";
 import db from "../../../../../utils/db/index.js";
@@ -16,6 +16,7 @@ import {
 } from "../../../../../utils/webhookHeaders.js";
 import {
   assertMaySubscribe,
+  assertNotManagedByIntegration,
   assertNotProvisioned,
   getVisibleEndpoint,
 } from "../../../../../utils/webhookAccess.js";
@@ -60,28 +61,35 @@ const withoutSecrets = ({
 
 export const getWebhookEndpoint = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
 
-  const endpoint = await getVisibleEndpoint(id, auth, organizationId);
+  const endpoint = await getVisibleEndpoint(id, auth, scope);
 
   res.json(await withDeliveryFlag(endpoint));
 };
 
 export const updateWebhookEndpoint = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
+  const { organizationId } = scope;
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
   const body = validateBody(updateWebhookEndpointSchema, req);
 
-  const existing = await getVisibleEndpoint(id, auth, organizationId);
+  const existing = await getVisibleEndpoint(id, auth, scope);
   // Archived-endpoint rejection is enforced by guardArchived on the PATCH route.
   // A provisioned endpoint takes only a status change: re-enabling one that
   // was disabled, which the file cannot do.
   const statusOnly = Object.entries(body).every(
     ([key, value]) => key === "status" || value === undefined
   );
-  if (!statusOnly) assertNotProvisioned(existing);
+  if (!statusOnly) {
+    assertNotProvisioned(existing);
+    assertNotManagedByIntegration(existing, scope);
+  }
+  // An admin pausing an integration's endpoint changes nothing it is sent.
+  const adminPause =
+    statusOnly && !scope.owner && existing.ownerService?.kind === "integration";
 
   // SSRF guard on URL changes (same rationale as create).
   if (body.url) {
@@ -102,7 +110,7 @@ export const updateWebhookEndpoint = async (req: Request, res: Response) => {
   }
   // The endpoint is sent what its creator may read; whoever changes where it
   // goes or what it carries must be able to read all of it too.
-  if (!existing.provisioned) {
+  if (!existing.provisioned && !adminPause) {
     assertMaySubscribe(
       auth.permissions,
       await db.eventTypes.findMany(body.eventTypes ?? existing.eventTypes)
@@ -151,10 +159,11 @@ export const updateWebhookEndpoint = async (req: Request, res: Response) => {
 
 export const archiveWebhookEndpoint = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
+  const { organizationId } = scope;
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
 
-  const existing = await getVisibleEndpoint(id, auth, organizationId);
+  const existing = await getVisibleEndpoint(id, auth, scope);
   assertNotProvisioned(existing);
   if (existing.archivedAt) {
     throw new AlreadyArchivedError("Webhook endpoint is already archived");
@@ -178,10 +187,11 @@ export const archiveWebhookEndpoint = async (req: Request, res: Response) => {
 
 export const restoreWebhookEndpoint = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
+  const { organizationId } = scope;
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
 
-  const existing = await getVisibleEndpoint(id, auth, organizationId);
+  const existing = await getVisibleEndpoint(id, auth, scope);
   assertNotProvisioned(existing);
   if (!existing.archivedAt) {
     throw new NotArchivedError("Webhook endpoint is not archived");
@@ -205,10 +215,11 @@ export const restoreWebhookEndpoint = async (req: Request, res: Response) => {
 
 export const deleteWebhookEndpoint = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
+  const { organizationId } = scope;
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
 
-  const existing = await getVisibleEndpoint(id, auth, organizationId);
+  const existing = await getVisibleEndpoint(id, auth, scope);
   assertNotProvisioned(existing);
 
   await db.$transaction(async (tx) => {
@@ -238,11 +249,13 @@ export const deleteWebhookEndpoint = async (req: Request, res: Response) => {
 
 export const rotateSecret = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
+  const { organizationId } = scope;
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
 
-  const existing = await getVisibleEndpoint(id, auth, organizationId);
+  const existing = await getVisibleEndpoint(id, auth, scope);
   assertNotProvisioned(existing);
+  assertNotManagedByIntegration(existing, scope);
   // Archived-endpoint rejection is enforced by guardArchived on the rotate route.
 
   const overlapMs = env.WEBHOOK_SECRET_OVERLAP_HOURS * 60 * 60 * 1000;
@@ -275,11 +288,13 @@ export const rotateSecret = async (req: Request, res: Response) => {
 
 export const revokePreviousSecret = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
+  const { organizationId } = scope;
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
 
-  const existing = await getVisibleEndpoint(id, auth, organizationId);
+  const existing = await getVisibleEndpoint(id, auth, scope);
   assertNotProvisioned(existing);
+  assertNotManagedByIntegration(existing, scope);
 
   const updated = await db.$transaction(async (tx) => {
     const result = await db.webhookEndpoints.revokePreviousSecret(id, tx);
@@ -299,10 +314,12 @@ export const revokePreviousSecret = async (req: Request, res: Response) => {
 
 export const testWebhookEndpoint = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
+  const { organizationId } = scope;
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
 
-  const endpoint = await getVisibleEndpoint(id, auth, organizationId);
+  const endpoint = await getVisibleEndpoint(id, auth, scope);
+  assertNotManagedByIntegration(endpoint, scope);
   // Archived-endpoint rejection is enforced by guardArchived on the test route.
 
   if (endpoint.status !== "ACTIVE") {
@@ -351,10 +368,10 @@ export const testWebhookEndpoint = async (req: Request, res: Response) => {
 
 export const getEndpointStats = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
 
-  await getVisibleEndpoint(id, auth, organizationId);
+  await getVisibleEndpoint(id, auth, scope);
 
   const stats = await db.webhookDeliveries.getStats(id);
   res.json(stats);

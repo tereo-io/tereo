@@ -206,6 +206,14 @@ export const ClientDetail = () => {
             emptyText="No scopes configured"
             color="secondary"
           />
+          {client.trustedCoreScopes.length > 0 && (
+            <TagCard
+              title="Trusted core scopes"
+              tags={client.trustedCoreScopes}
+              emptyText="None"
+              color="secondary"
+            />
+          )}
           {client.audience.length > 0 && (
             <Card>
               <h3>Audience</h3>

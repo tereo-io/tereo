@@ -53,4 +53,23 @@ describe("parseTestToken", () => {
   it("returns null when the user id segment is empty", () => {
     expect(parseTestToken("test-token-", [])).toBeNull();
   });
+
+  it("names a client with |client=", () => {
+    expect(parseTestToken("test-token-u1|client=billing", [])?.client_id).toBe(
+      "billing"
+    );
+    expect(parseTestToken("test-token-u1", [])?.client_id).toBe("test-client");
+  });
+
+  it("resolves the service user to the given UUID", () => {
+    const id = "123e4567-e89b-42d3-a456-426614174000";
+    const result = parseTestToken("test-token-service", [], {
+      serviceUserId: id,
+    });
+    expect(result).toMatchObject({ sub: id, user_id: id });
+    expect(parseTestToken("test-token-service", [])?.user_id).toBe("service");
+    expect(
+      parseTestToken("test-token-u1", [], { serviceUserId: id })?.user_id
+    ).toBe("u1");
+  });
 });

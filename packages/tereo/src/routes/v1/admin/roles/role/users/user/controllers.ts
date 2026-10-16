@@ -40,13 +40,16 @@ export const removeRoleUser = async (req: Request, res: Response) => {
     : null;
   const role = await db.roles.get(roleId);
   const user = await db.users.get(userId);
-  // A service's roles are what an admin approved for it (/admin/services).
-  if (
-    user.oauthClientId &&
-    (await db.services.getByClientId(user.oauthClientId))
-  ) {
+  // A service's roles are what an admin approved for it (/admin/services);
+  // an integration's are set under /admin/integrations.
+  const owner = user.oauthClientId
+    ? await db.services.getByClientId(user.oauthClientId)
+    : null;
+  if (owner) {
     throw new ForbiddenError(
-      "This user is a service account; revoke its access under /admin/services"
+      owner.kind === "integration"
+        ? "This user is an integration's account; set its roles under /admin/integrations"
+        : "This user is a service account; revoke its access under /admin/services"
     );
   }
   if (!organizationId) {

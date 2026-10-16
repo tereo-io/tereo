@@ -39,7 +39,15 @@ const include = {
     orderBy: { eventType: "asc" },
   },
   creator: userRefSelect,
-  ownerService: { select: { id: true, slug: true, name: true } },
+  ownerService: {
+    select: {
+      id: true,
+      slug: true,
+      name: true,
+      kind: true,
+      internalHost: true,
+    },
+  },
 } satisfies Prisma.WebhookEndpointInclude;
 
 type EndpointRow = Prisma.WebhookEndpointGetPayload<{
@@ -312,10 +320,14 @@ export const incrementConsecutiveFailures = async (
   });
 };
 
-/** The organization's endpoints, and owned ones sent every organization's events. */
+/**
+ * The organization's endpoints, and owned ones sent every organization's
+ * events; with `recipientServiceIds`, only those these services own.
+ */
 export const findActiveByOrgAndEvent = async (
   organizationId: string,
-  eventType: string
+  eventType: string,
+  { recipientServiceIds }: { recipientServiceIds?: string[] } = {}
 ) => {
   const rows = await prisma.webhookEndpoint.findMany({
     where: {
@@ -323,6 +335,9 @@ export const findActiveByOrgAndEvent = async (
         { organizationId },
         { organizationId: null, ownerServiceId: { not: null } },
       ],
+      ...(recipientServiceIds && {
+        ownerServiceId: { in: recipientServiceIds },
+      }),
       status: "ACTIVE",
       archivedAt: null,
       subscriptions: { some: { eventType } },

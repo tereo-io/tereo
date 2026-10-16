@@ -1,12 +1,16 @@
 import { CLIENT_SECRET_PREFIX, secretStrengthProblem } from "../secretRules.js";
 import { ProvisioningDocumentSchema, type CustomRoleEntry } from "./schema.js";
-import { assertSafeWebhookUrlForRegistration } from "../ssrfGuard.js";
+import { CORE_SCOPES } from "../../definitions/index.js";
 import { isSafeRedirectUri } from "../redirectUris.js";
 import { readFile, readdir, stat } from "fs/promises";
 import { hashFlowToken } from "../crypto.js";
 import { AppError } from "../errors.js";
 import { basename, join } from "path";
 import type { z } from "zod";
+import {
+  assertSafeWebhookUrlForRegistration,
+  parseInternalHost,
+} from "../ssrfGuard.js";
 
 export class ProvisioningError extends Error {
   constructor(public problems: string[]) {
@@ -52,7 +56,13 @@ interface ClientRules {
   grantTypes: string[];
   redirectUris: string[];
   postLogoutRedirectUris: string[];
+  scopes: string[];
+  trustedCoreScopes: string[];
 }
+
+const CORE_SCOPE_NAMES = new Set(CORE_SCOPES.map((s) => s.name));
+// Administering core as the user always needs the user's say.
+const UNTRUSTABLE_SCOPES = new Set(["core:admin", "core:admin.read"]);
 
 // The rules one login client must meet on its own.
 const checkClient = (c: ClientRules, problems: string[]) => {
@@ -81,6 +91,16 @@ const checkClient = (c: ClientRules, problems: string[]) => {
         `${c.label}: postLogoutRedirectUris[${i}] is not a safe URL`
       );
   });
+
+  for (const scope of c.trustedCoreScopes) {
+    const where = `${c.label}: trustedCoreScopes`;
+    if (UNTRUSTABLE_SCOPES.has(scope))
+      problems.push(`${where}: ${scope} cannot be trusted`);
+    else if (!CORE_SCOPE_NAMES.has(scope))
+      problems.push(`${where}: ${scope} is not a core scope`);
+    else if (!c.scopes.includes(scope))
+      problems.push(`${where}: ${scope} is not in scopes`);
+  }
 };
 
 export interface ResolvedWebhook {
@@ -103,6 +123,8 @@ export interface ResolvedService {
   name: string;
   namespace: string;
   clientId: string;
+  /** Normalized; its own webhooks may reach it at a private address. */
+  internalHost: string | null;
   secretEnv: string;
   secretHash: string;
   access: ServiceOutput["access"];
@@ -126,6 +148,19 @@ export interface ResolvedClient {
   grantTypes: ("authorization_code" | "refresh_token")[];
   audience: string[];
   consentRequired: boolean;
+  trustedCoreScopes: string[];
+}
+
+export interface ResolvedIntegration {
+  slug: string;
+  name: string;
+  organizationId: string | null;
+  /** The slug. */
+  clientId: string;
+  secretEnv: string;
+  secretHash: string;
+  roles: string[];
+  audiences: string[];
 }
 
 export interface LoadedDocument {
@@ -134,6 +169,8 @@ export interface LoadedDocument {
   service: ResolvedService | null;
   clients: ResolvedClient[];
   roles: CustomRoleEntry[];
+  /** Absent is none. */
+  integrations?: ResolvedIntegration[];
 }
 
 export interface ProvisioningSet {
@@ -288,17 +325,29 @@ export const parseDocuments = (
   }
 
   const uses: SecretUse[] = [];
+  const internalHosts = new Map<string, string>();
   for (const { file, data } of parsedDocs) {
     const { service } = data;
     if (service) {
       const label = `${file}: services[${service.slug}]`;
       uses.push({ label, envName: service.secretFrom, owner: null });
+      if (service.internalHost !== undefined) {
+        try {
+          internalHosts.set(file, parseInternalHost(service.internalHost).host);
+        } catch (err) {
+          if (!(err instanceof AppError)) throw err;
+          problems.push(`${label}: internalHost ${err.message}`);
+        }
+      }
       for (const w of service.webhooks) {
         const where = `${label}: webhooks[${w.key}]`;
         // The API's rule, without DNS: in-cluster names pass, and are
-        // checked again at delivery.
+        // checked again at delivery. Only the service's own internalHost
+        // may be a private address.
         try {
-          assertSafeWebhookUrlForRegistration(w.url);
+          assertSafeWebhookUrlForRegistration(w.url, {
+            allowPrivateHost: internalHosts.get(file),
+          });
         } catch (err) {
           if (!(err instanceof AppError)) throw err;
           problems.push(
@@ -318,6 +367,12 @@ export const parseDocuments = (
       if (c.clientType === "confidential" && c.secretFrom)
         uses.push({ label, envName: c.secretFrom, owner: null });
     }
+    for (const i of data.integrations ?? [])
+      uses.push({
+        label: `${file}: integrations[${i.slug}]`,
+        envName: i.secretFrom,
+        owner: null,
+      });
   }
 
   const values = resolveSecrets(uses, env, problems);
@@ -336,6 +391,7 @@ export const parseDocuments = (
             namespace:
               data.service.namespace ?? withoutServiceSuffix(data.service.slug),
             clientId: data.service.clientId ?? data.service.slug,
+            internalHost: internalHosts.get(file) ?? null,
             secretEnv: data.service.secretFrom,
             secretHash: hashOf(data.service.secretFrom),
             access: data.service.access,
@@ -370,8 +426,19 @@ export const parseDocuments = (
         grantTypes: c.grantTypes,
         audience: c.audience,
         consentRequired: c.consentRequired,
+        trustedCoreScopes: c.trustedCoreScopes,
       })),
       roles: data.roles ?? [],
+      integrations: (data.integrations ?? []).map((i) => ({
+        slug: i.slug,
+        name: i.name,
+        organizationId: i.organizationId ?? null,
+        clientId: i.slug,
+        secretEnv: i.secretFrom,
+        secretHash: hashOf(i.secretFrom),
+        roles: i.roles,
+        audiences: i.audiences,
+      })),
     })),
   };
 };

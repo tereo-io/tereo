@@ -785,6 +785,8 @@ tags:
     description: Discovery and metadata endpoints
   - name: Account - Profile
     description: User profile, password, and photo management
+  - name: Account - Organizations
+    description: The organizations the caller belongs to, and, for support staff, any active one
   - name: Account - Sessions
     description: Session management and revocation
   - name: Account - TOTP
@@ -825,6 +827,8 @@ tags:
     description: Admin endpoints for system settings
   - name: Admin - Services
     description: Admin endpoints for app services — credentials, activation and access approval
+  - name: Admin - Integrations
+    description: Admin endpoints for integrations — machine clients for external parties, org-bound or platform, with their roles and audiences
   - name: Setup
     description: First-boot setup — create the first admin (public; authorized by the setup token)
   - name: Health
@@ -1099,8 +1103,10 @@ paths:
           `urn:auth-service:mfa` over a session whose login had no second factor
           gets `error=interaction_required` instead.
         - `org_id` (without `prompt=login`) with a live user session for an
-          active user who is a member of that active organization, a login no
-          older than `max_age` and valid scopes: to `{UI}/consent?session=…` for
+          active user who is a member of that active organization (or, for any
+          active organization, holds `organizations.support-access` through a
+          global role — support access), a login no older than `max_age` and
+          valid scopes: to `{UI}/consent?session=…` for
           that organization, skipping login — or, for core's own login client,
           straight to `redirect_uri` with `code` and `state`, as with
           `prompt=none`. This is the one continuation without a password that
@@ -1256,7 +1262,7 @@ paths:
             maxLength: 128
         - name: org_id
           in: query
-          description: Organization hint. With a live user session that is a member of this active organization, login is skipped and consent is requested for it.
+          description: Organization hint. With a live user session that is a member of this active organization, or that holds `organizations.support-access` globally, login is skipped and consent is requested for it. A support-access selection acts with the user's global roles only, writes an audit entry (`metadata.action` `support_access`) and emits `auth.organization.support-access` under the organization.
           schema:
             type: string
             format: uuid
@@ -1928,7 +1934,9 @@ paths:
       description: |
         Submits the user's organization selection during the OAuth2 authorization code flow.
         Validates the org-selection session (including the HTTP-only session cookie), verifies
-        the user is an active member of the chosen organization, then creates a consent session
+        the user is a member of the chosen active organization (or holds
+        `organizations.support-access` through a global role, which audits and emits
+        `auth.organization.support-access` when the code is issued), then creates a consent session
         scoped to that organization and returns a redirect URL pointing at `/consent` in the UI,
         which invokes `GET /oauth/consent` next.
 
@@ -1938,7 +1946,7 @@ paths:
 
         400 `invalid_session` for an unknown session or a missing or mismatched
         cookie, `session_expired` for an expired one, `user_not_in_organization` when the
-        user is not a member of the organization, `organization_not_active` when
+        user is neither a member of the organization nor a support-access holder, `organization_not_active` when
         it is inactive or archived. The session is single-use: of concurrent submits of one session, one
         goes through and the others are 400 `invalid_session`.
       operationId: postOrgSelectSubmit
@@ -3007,6 +3015,79 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/AccountForbiddenResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/account/organizations:
+    get:
+      tags:
+        - Account - Organizations
+      summary: List the caller's organizations
+      description: |
+        The caller's active organizations, for an organization picker. Admits a
+        token with `core:account` or `core:organizations` (the latter reaches
+        nothing else). Archived and inactive organizations are never listed.
+
+        Without `search`, only the caller's memberships. With `search` (2 to 100
+        characters, matched case-insensitively against name and slug), the
+        matching memberships; and, when the token holds
+        `organizations.support-access`, every matching active organization, with
+        `member: false` and `memberRole: null` for those the caller does not
+        belong to. The permission comes from the caller's roles cut down to the
+        token's ceiling: `core:organizations` carries it, `core:account` does
+        not. A non-holder's search returns memberships only.
+      operationId: getAccountOrganizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+        - name: sort
+          in: query
+          description: Sort field. Defaults to `name`.
+          schema:
+            type: string
+            enum:
+              - name
+              - slug
+            default: name
+        - name: sortDir
+          in: query
+          description: Sort direction. Defaults to `asc` here.
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: asc
+        - name: search
+          in: query
+          description: Case-insensitive match on name or slug, 2 to 100 characters (`400` otherwise).
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 100
+      responses:
+        '200':
+          description: A page of organizations
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountOrganizationsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
@@ -7470,6 +7551,433 @@ paths:
           $ref: '#/components/responses/RateLimitResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/integrations:
+    get:
+      tags:
+        - Admin - Integrations
+      summary: List integrations
+      description: |
+        Returns a paginated list of integrations: machine clients for external
+        parties (a 3PL, a customer's system, another app). Services are listed
+        under `/v1/admin/services`.
+
+        **Filter fields and operators:**
+        - `slug`: `contains`, `equals`
+        - `name`: `contains`, `equals`
+        - `organizationId`: `equals`
+        - `isActive`: `equals`
+
+        **Sort fields:** `id` (default), `slug`, `name`, `createdAt`
+      operationId: listAdminIntegrations
+      security:
+        - BearerAuth:
+            - integrations.read
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+        - $ref: '#/components/parameters/SortParam'
+        - $ref: '#/components/parameters/SortDirParam'
+        - $ref: '#/components/parameters/FilterValueParam'
+        - $ref: '#/components/parameters/FilterOperatorParam'
+      responses:
+        '200':
+          description: Paginated list of integrations
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedIntegrationsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing integrations.read permission
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+    post:
+      tags:
+        - Admin - Integrations
+      summary: Add an integration
+      description: |
+        Adds an integration: a confidential OAuth client (`client_credentials`
+        only), the service-account user it acts as, and its row. The client
+        secret is returned in this response and nowhere else — only its hash is
+        stored. An integration declares nothing.
+
+        With `organizationId` it is **org-bound**: its tokens carry that `org_id`,
+        its account is a member of the organization, and it holds org roles
+        there. Without one it is a **platform** integration: no `org_id`, global
+        roles. The organization is fixed at creation.
+
+        `slug` defaults to the name, lowercased and hyphenated. Returns `409` when
+        the slug is taken by a service or another integration, and
+        `400 unknown_organization` when the organization does not exist.
+
+        An audit log entry is created for this action.
+        A `core.integration.created` webhook event is emitted.
+      operationId: createAdminIntegration
+      security:
+        - BearerAuth:
+            - integrations.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIntegrationRequest'
+      responses:
+        '201':
+          description: Integration added; `credentials` holds the only copy of the client secret
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrationWithCredentials'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing integrations.write permission
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: The slug is taken
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/integrations/{id}:
+    get:
+      tags:
+        - Admin - Integrations
+      summary: Get an integration
+      description: |
+        The integration with its organization, roles (org roles in its
+        organization when org-bound, global roles otherwise) and audience.
+      operationId: getAdminIntegration
+      security:
+        - BearerAuth:
+            - integrations.read
+      parameters:
+        - $ref: '#/components/parameters/IntegrationIdParam'
+      responses:
+        '200':
+          description: The integration
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Integration'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing integrations.read permission
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: No integration with this id
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+    patch:
+      tags:
+        - Admin - Integrations
+      summary: Update an integration
+      description: |
+        Renames, deactivates or reactivates. Deactivating deactivates its
+        service-account user and revokes its tokens; no new token is issued
+        until it is reactivated. A provisioned integration is `409
+        managed_by_provisioning`.
+
+        An audit log entry is created for this action. A
+        `core.integration.deactivated` webhook event is emitted on deactivation,
+        `core.integration.updated` otherwise.
+      operationId: updateAdminIntegration
+      security:
+        - BearerAuth:
+            - integrations.write
+      parameters:
+        - $ref: '#/components/parameters/IntegrationIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIntegrationRequest'
+      responses:
+        '200':
+          description: The integration, updated
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Integration'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing integrations.write permission
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: No integration with this id
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: The integration is provisioned (`managed_by_provisioning`)
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/integrations/{id}/regenerate-secret:
+    post:
+      tags:
+        - Admin - Integrations
+      summary: Regenerate an integration's secret
+      description: |
+        A new client secret, shown once. The replaced one keeps working for
+        `SERVICE_SECRET_OVERLAP_HOURS`, as for services. A provisioned
+        integration is `409 managed_by_provisioning`: its secret comes from the
+        provisioning documents.
+
+        An audit log entry is created for this action.
+        A `core.integration.secret-regenerated` webhook event is emitted.
+      operationId: regenerateAdminIntegrationSecret
+      security:
+        - BearerAuth:
+            - integrations.write
+      parameters:
+        - $ref: '#/components/parameters/IntegrationIdParam'
+      responses:
+        '200':
+          description: The new secret
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegenerateServiceSecretResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing integrations.write permission
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: No integration with this id
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: The integration is provisioned (`managed_by_provisioning`)
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/integrations/{id}/revoke-previous-secret:
+    post:
+      tags:
+        - Admin - Integrations
+      summary: Revoke an integration's previous secret
+      description: |
+        Ends the secret overlap now: only the current secret works from here on.
+        Allowed on a provisioned integration too: the provisioning documents
+        cannot end an overlap, and a leaked old secret must not wait it out.
+
+        An audit log entry is created for this action.
+        A `core.integration.previous-secret-revoked` webhook event is emitted.
+      operationId: revokeAdminIntegrationPreviousSecret
+      security:
+        - BearerAuth:
+            - integrations.write
+      parameters:
+        - $ref: '#/components/parameters/IntegrationIdParam'
+      responses:
+        '200':
+          description: Previous secret revoked
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Integration'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing integrations.write permission
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: No integration with this id
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/integrations/{id}/roles:
+    put:
+      tags:
+        - Admin - Integrations
+      summary: Set an integration's roles
+      description: |
+        Replaces the integration's roles. **Org-bound**: org roles in its
+        organization — custom roles carrying only org-assignable permissions
+        (`400 not_org_assignable`); system roles are refused (`403`).
+        **Platform**: global roles, custom or system. Either way the caller must
+        hold every permission a newly granted role carries (`403`). Unknown,
+        archived or retired roles are `400 unknown_role`. A role carrying the
+        root `admin` permission is never allowed (`403
+        role_not_allowed_for_integration`), whoever grants it. Its tokens are
+        revoked when the roles change, so its next token carries the new
+        permissions.
+
+        An audit log entry is created and a `core.integration.updated` webhook
+        event is emitted when the roles change.
+      operationId: setAdminIntegrationRoles
+      security:
+        - BearerAuth:
+            - integrations.write
+      parameters:
+        - $ref: '#/components/parameters/IntegrationIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetIntegrationRolesRequest'
+      responses:
+        '200':
+          description: The integration with its roles
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Integration'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing integrations.write permission, a permission the caller does not hold, a system role for an org-bound integration, or a role carrying `admin` (`role_not_allowed_for_integration`)
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: No integration with this id
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: The integration is provisioned (`managed_by_provisioning`)
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/integrations/{id}/audiences:
+    put:
+      tags:
+        - Admin - Integrations
+      summary: Set an integration's audiences
+      description: |
+        Replaces the slugs of the services that may introspect the
+        integration's tokens: each appears in its tokens' `aud`. Each must be a
+        service other than core (`422 invalid_audience`); an integration cannot
+        be an audience. Its tokens are revoked when the audience changes.
+
+        An audit log entry is created and a `core.integration.updated` webhook
+        event is emitted when the audience changes.
+      operationId: setAdminIntegrationAudiences
+      security:
+        - BearerAuth:
+            - integrations.write
+      parameters:
+        - $ref: '#/components/parameters/IntegrationIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetIntegrationAudiencesRequest'
+      responses:
+        '200':
+          description: The integration with its audience
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Integration'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing integrations.write permission
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: No integration with this id
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: The integration is provisioned (`managed_by_provisioning`)
+        '422':
+          $ref: '#/components/responses/UnprocessableEntityResponse'
+          description: A slug that names core, an integration or no service (`invalid_audience`)
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/admin/services:
     get:
       tags:
@@ -11637,6 +12145,14 @@ paths:
         Returns a paginated list of the organization's webhook endpoints.
         Signing secrets and custom header values are masked in the response.
 
+        **Integrations:** an integration's token needs no `webhooks.*`
+        permission on these routes and acts only on the endpoints it owns:
+        this list shows only those, every other id is a 404, and its token's
+        organization and `X-Organization-ID` play no part. An endpoint it
+        creates is owned by it, in its organization (or, for a platform
+        integration, of all organizations, `organizationId: null`); each event
+        type needs its own read permission (`403` otherwise).
+
         The organization is the token's `org_id`, or the `X-Organization-ID`
         header for a `webhooks.admin` caller (400 when malformed, 404 when no
         such organization; 403 when neither is present).
@@ -11823,6 +12339,12 @@ paths:
         Archived endpoints are rejected (`409 resource_archived`). A provisioned
         endpoint refuses every change except a body carrying only `status` (to
         re-enable it): `409 managed_by_provisioning`.
+
+        An endpoint an integration owns is visible to anyone but that
+        integration only with `webhooks.admin` (others: absent from lists, 404).
+        Such an admin may PATCH `{status}` only; any other field is
+        `409 managed_by_integration`, as are rotate-secret,
+        revoke-previous-secret, test sends and retries.
 
         **Required permissions:**
         - `webhooks.write`
@@ -12609,6 +13131,11 @@ paths:
         otherwise) naming an existing organization — an archived one counts —
         or the request fails with `400 unknown_organization`.
 
+        **Addressed events:** with `recipients`, the event is sent only to
+        endpoints the named services or integrations own, each still subject
+        to its owner's read permission (`400 unknown_recipient` for an unknown
+        slug). Without it, to every subscriber.
+
         **Idempotency:** Requests may include an optional `idempotencyKey`. When
         provided, submissions by the same caller with the same key,
         `organizationId` and `eventType` are deduplicated for 24 hours (Redis
@@ -12652,8 +13179,9 @@ paths:
         '400':
           description: |
             A malformed request (`invalid_request`), an event type that is reserved,
-            unregistered or retired, or an `organizationId` that names no organization
-            (`unknown_organization`)
+            unregistered or retired, an `organizationId` that names no organization
+            (`unknown_organization`), or a `recipients` slug that names no service
+            or integration (`unknown_recipient`)
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
@@ -12674,6 +13202,7 @@ paths:
                       - invalid_event_type
                       - event_type_retired
                       - unknown_organization
+                      - unknown_recipient
                   error_description:
                     type: string
                     examples:
@@ -12732,8 +13261,9 @@ paths:
           sent only by `POST /v1/webhooks/webhooks/{id}/test`),
           `invalid_event_type` / `event_type_retired` (every event type must be
           declared by a service and not retired), or
-          `duplicate_idempotency_key`, or `unknown_organization` (any event's
-          `organizationId` names no organization);
+          `duplicate_idempotency_key`, `unknown_organization` (any event's
+          `organizationId` names no organization), or `unknown_recipient` (any
+          event's `recipients` names no service or integration);
         - `403` — any event names an organization or event type the caller may
           not emit for (see `POST /v1/webhooks/events`);
         - `409 idempotency_request_in_progress` / `422 idempotency_key_conflict` — see
@@ -12784,8 +13314,9 @@ paths:
           description: |
             A malformed request (`invalid_request`), an event type that is reserved,
             unregistered or retired, two events sharing an idempotency key
-            (`duplicate_idempotency_key`), or an `organizationId` that names no organization
-            (`unknown_organization`)
+            (`duplicate_idempotency_key`), an `organizationId` that names no organization
+            (`unknown_organization`), or a `recipients` slug that names no service or
+            integration (`unknown_recipient`)
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
@@ -12807,6 +13338,7 @@ paths:
                       - event_type_retired
                       - duplicate_idempotency_key
                       - unknown_organization
+                      - unknown_recipient
                   error_description:
                     type: string
                     examples:
@@ -15066,6 +15598,51 @@ webhooks:
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.organization.support-access:
+    post:
+      tags:
+        - Admin - Organizations
+      summary: Organization entered through support access
+      description: Fired when a holder of `organizations.support-access` who is not a member selects the organization at login (`org_id` switch, org picker or post-login hint) and an authorization code is issued for it. Not fired on refresh. An audit entry with `metadata.action` `support_access` is written with it.
+      operationId: webhookOrganizationSupportAccess
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.organization.support-access
+                    entityType:
+                      const: Organization
+                    data:
+                      type: object
+                      required:
+                        - userId
+                        - organizationId
+                        - clientId
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        organizationId:
+                          type: string
+                          format: uuid
+                        clientId:
+                          type: string
+                          description: The OAuth client the code was issued to
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
   auth.user.created:
     post:
       tags:
@@ -15952,6 +16529,252 @@ webhooks:
                                   - audience
                               target:
                                 type: string
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  core.integration.created:
+    post:
+      tags:
+        - Admin - Integrations
+      summary: Integration added
+      description: Fired when an integration is added, by an admin or from the provisioning documents.
+      operationId: webhookIntegrationCreated
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: core.integration.created
+                    entityType:
+                      const: Integration
+                    data:
+                      type: object
+                      required:
+                        - id
+                        - slug
+                        - organizationId
+                        - name
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        slug:
+                          type: string
+                        organizationId:
+                          type:
+                            - string
+                            - 'null'
+                          format: uuid
+                        name:
+                          type: string
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  core.integration.updated:
+    post:
+      tags:
+        - Admin - Integrations
+      summary: Integration updated
+      description: Fired when an integration is renamed or reactivated, or its roles or audience change. `data` carries what changed.
+      operationId: webhookIntegrationUpdated
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: core.integration.updated
+                    entityType:
+                      const: Integration
+                    data:
+                      type: object
+                      required:
+                        - id
+                        - slug
+                        - organizationId
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        slug:
+                          type: string
+                        organizationId:
+                          type:
+                            - string
+                            - 'null'
+                          format: uuid
+                        name:
+                          type: string
+                        isActive:
+                          type: boolean
+                        roleIds:
+                          type: array
+                          items:
+                            type: string
+                            format: uuid
+                        audience:
+                          type: array
+                          items:
+                            type: string
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  core.integration.deactivated:
+    post:
+      tags:
+        - Admin - Integrations
+      summary: Integration deactivated
+      description: Fired when an integration is deactivated; its tokens were revoked.
+      operationId: webhookIntegrationDeactivated
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: core.integration.deactivated
+                    entityType:
+                      const: Integration
+                    data:
+                      type: object
+                      required:
+                        - id
+                        - slug
+                        - organizationId
+                        - name
+                        - isActive
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        slug:
+                          type: string
+                        organizationId:
+                          type:
+                            - string
+                            - 'null'
+                          format: uuid
+                        name:
+                          type: string
+                        isActive:
+                          type: boolean
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  core.integration.secret-regenerated:
+    post:
+      tags:
+        - Admin - Integrations
+      summary: Integration secret regenerated
+      description: Fired when an integration's client secret is regenerated, by an admin or a changed provisioning secret.
+      operationId: webhookIntegrationSecretRegenerated
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: core.integration.secret-regenerated
+                    entityType:
+                      const: Integration
+                    data:
+                      type: object
+                      required:
+                        - id
+                        - slug
+                        - previousSecretExpiresAt
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        slug:
+                          type: string
+                        previousSecretExpiresAt:
+                          type:
+                            - string
+                            - 'null'
+                          format: date-time
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  core.integration.previous-secret-revoked:
+    post:
+      tags:
+        - Admin - Integrations
+      summary: Integration previous secret revoked
+      description: Fired when an integration's previous client secret is revoked before its overlap ended.
+      operationId: webhookIntegrationPreviousSecretRevoked
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: core.integration.previous-secret-revoked
+                    entityType:
+                      const: Integration
+                    data:
+                      type: object
+                      required:
+                        - id
+                        - slug
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        slug:
+                          type: string
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -17639,7 +18462,9 @@ components:
         - any other client, only if it was granted core API scopes — its token's
           `aud` then includes `core`. It reaches only the areas its scopes name,
           and its permissions are the user's live ones cut down to the scopes'
-          ceilings: `core:account` (`/v1/account`, `/ws`), `core:admin` /
+          ceilings: `core:account` (`/v1/account`, `/ws`), `core:events` (`/ws` only),
+          `core:organizations` (`GET /v1/account/organizations` only; ceiling
+          `organizations.support-access`), `core:admin` /
           `core:admin.read` (`/v1/admin`: `users`, `roles`, `permissions`, `clients`,
           `settings`, `organizations`, `services` — `.admin` / `.read`),
           `core:files` / `core:files.read` (`file-service.admin` / the
@@ -18297,6 +19122,13 @@ components:
       schema:
         type: string
         format: uuid
+    IntegrationIdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     SignedVersionParam:
       name: version
       in: query
@@ -18837,7 +19669,12 @@ components:
         first, `idempotency_request_in_progress`
         when an event with the same idempotency key is still being processed,
         `managed_by_provisioning` when the endpoint is declared in a service's
-        provisioning document and the change must be made there.
+        provisioning document and the change must be made there,
+        `managed_by_integration` when an integration owns the endpoint and the
+        caller is not that integration: a `webhooks.admin` holder may only pause
+        it (a `status`-only PATCH), archive, restore or delete it, and any other
+        PATCH field, rotate-secret, revoke-previous-secret, test send or retry
+        is refused.
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -18859,6 +19696,7 @@ components:
                   - resource_archived
                   - idempotency_request_in_progress
                   - managed_by_provisioning
+                  - managed_by_integration
               error_description:
                 description: A human-readable explanation of the error
                 type: string
@@ -19326,7 +20164,7 @@ components:
                 type: string
           example:
             error: insufficient_scope
-            error_description: 'This token''s scopes do not reach /v1/account; it needs one of: core:account'
+            error_description: 'This token''s scopes do not reach /v1/account/me; it needs one of: core:account'
     LinkForbiddenResponse:
       description: |
         Forbidden. `forbidden`: the token was not issued to core's own UI (a
@@ -20913,6 +21751,7 @@ components:
         - grantTypes
         - audience
         - consentRequired
+        - trustedCoreScopes
         - provisioned
         - ownerId
         - organizationId
@@ -20972,9 +21811,16 @@ components:
           type: boolean
           description: |
             Whether users approve the app on a consent screen after signing in.
-            A request for any `core:*` scope shows the consent screen even when
-            `false`. Core's own login client never asks, and refuses a change
-            (`409`).
+            A request for a `core:*` scope not in `trustedCoreScopes` shows the
+            consent screen even when `false`. Core's own login client never
+            asks, and refuses a change (`409`).
+        trustedCoreScopes:
+          type: array
+          items:
+            type: string
+          description: |
+            Core scopes users are not asked to approve when `consentRequired` is
+            `false`. Set only by provisioning; empty on clients made here.
         provisioned:
           type: boolean
           description: |
@@ -21137,8 +21983,9 @@ components:
           description: |
             Whether users approve the app on a consent screen after signing in.
             A request for any `core:*` scope shows the consent screen even when
-            `false`. Core's own login client never asks, and refuses a change
-            (`409`).
+            `false` (provisioned clients may trust some; see
+            `trustedCoreScopes`). Core's own login client never asks, and
+            refuses a change (`409`).
     UpdateClientRequest:
       type: object
       properties:
@@ -21201,8 +22048,9 @@ components:
           description: |
             Whether users approve the app on a consent screen after signing in.
             A request for any `core:*` scope shows the consent screen even when
-            `false`. Core's own login client never asks, and refuses a change
-            (`409`).
+            `false` (provisioned clients may trust some; see
+            `trustedCoreScopes`). Core's own login client never asks, and
+            refuses a change (`409`).
         ownerId:
           type: string
           format: uuid
@@ -21915,7 +22763,7 @@ components:
               type: string
     Service:
       type: object
-      description: An app service — its OAuth client, the service-account user it acts as, and its declaration state.
+      description: An app service — its OAuth client, the service-account user it acts as, and its declaration state. Integrations are under `/v1/admin/integrations`.
       required:
         - id
         - slug
@@ -24588,6 +25436,7 @@ components:
                 - id
                 - slug
                 - name
+                - kind
               properties:
                 id:
                   type: string
@@ -24596,6 +25445,14 @@ components:
                   type: string
                 name:
                   type: string
+                kind:
+                  type: string
+                  enum:
+                    - service
+                    - integration
+                  description: |
+                    `integration` for an endpoint an integration manages itself
+                    through this API.
             - type: 'null'
         provisioningKey:
           type:
@@ -25219,6 +26076,22 @@ components:
             (`400 duplicate_idempotency_key`).
           examples:
             - order-12345-created-v1
+        recipients:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          description: |
+            Addresses the event: slugs of services or integrations. It is then
+            sent only to ACTIVE endpoints these recipients own (in the event's
+            organization, or of all organizations), each still subject to its
+            owner's read permission, and to no other subscriber. An unknown slug
+            is `400 unknown_recipient`. The delivered payload carries it.
+          examples:
+            - - acme-3pl
       required:
         - organizationId
         - eventType
@@ -26396,6 +27269,48 @@ components:
           type: string
           format: uri
           description: Where the user signs in to the client again
+    AccountOrganizationsResponse:
+      type: object
+      required:
+        - data
+        - hasMore
+        - limit
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - slug
+              - memberRole
+              - member
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              slug:
+                type: string
+              memberRole:
+                type:
+                  - string
+                  - 'null'
+                description: The caller's tier in the organization (`owner`, `admin` or `member`); `null` for an organization reached through support access.
+              member:
+                type: boolean
+                description: Whether the caller is a member. `false` only for a support-access search result.
+        hasMore:
+          type: boolean
+        limit:
+          type: integer
+        nextCursor:
+          type:
+            - string
+            - 'null'
     UserIdentity:
       type: object
       description: A user's account at an identity provider
@@ -26760,6 +27675,203 @@ components:
           items:
             type: string
             format: uuid
+    IntegrationRole:
+      type: object
+      required:
+        - id
+        - name
+        - displayName
+        - system
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        displayName:
+          type: string
+        system:
+          type: boolean
+          description: A system role (core's or a service's), not a custom role.
+    Integration:
+      type: object
+      description: |
+        A machine client for an external party: its OAuth client, the
+        service-account user it acts as, and the roles and audience it holds.
+        Org-bound when `organizationId` is set (its tokens carry that `org_id`),
+        a platform integration otherwise.
+      required:
+        - id
+        - slug
+        - name
+        - organizationId
+        - organization
+        - isActive
+        - provisioned
+        - clientId
+        - serviceAccountUserId
+        - serviceAccountUser
+        - roles
+        - audience
+        - previousSecretExpiresAt
+        - createdBy
+        - creator
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        organizationId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The organization its tokens are bound to; `null` for a platform integration. Fixed at creation.
+        organization:
+          description: The organization `organizationId` names; null when it is null.
+          oneOf:
+            - $ref: '#/components/schemas/OrgRef'
+            - type: 'null'
+        isActive:
+          type: boolean
+        provisioned:
+          type: boolean
+          description: |
+            True for an integration from the provisioning documents. Only the end
+            of a secret overlap is decided here; every other write is
+            `409 managed_by_provisioning`.
+        clientId:
+          type:
+            - string
+            - 'null'
+          description: OAuth `client_id` of its confidential client
+        serviceAccountUserId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        serviceAccountUser:
+          oneOf:
+            - $ref: '#/components/schemas/UserRef'
+            - type: 'null'
+        roles:
+          type: array
+          description: Its roles in its organization when org-bound, its global roles otherwise.
+          items:
+            $ref: '#/components/schemas/IntegrationRole'
+        audience:
+          type: array
+          items:
+            type: string
+          description: Slugs of the services that may introspect its tokens
+        previousSecretExpiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the replaced client secret stops working; `null` when there is no overlap.
+        createdBy:
+          type: string
+          format: uuid
+        creator:
+          $ref: '#/components/schemas/UserRef'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PaginatedIntegrationsResponse:
+      type: object
+      required:
+        - data
+        - hasMore
+        - limit
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Integration'
+        hasMore:
+          type: boolean
+          description: Whether more pages exist beyond this one.
+        limit:
+          type: integer
+          description: The page size used for this request.
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: Opaque cursor to pass as `cursor` on the next request to continue paginating. `null` when `hasMore` is `false`.
+    CreateIntegrationRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: ^[a-z][a-z0-9]*(-[a-z0-9]+)*$
+          description: Defaults to the name, lowercased and hyphenated. Shared with services.
+        organizationId:
+          type: string
+          format: uuid
+          description: Makes it org-bound. Fixed once set.
+    IntegrationWithCredentials:
+      allOf:
+        - $ref: '#/components/schemas/Integration'
+        - type: object
+          required:
+            - credentials
+          properties:
+            credentials:
+              $ref: '#/components/schemas/ServiceCredentials'
+    UpdateIntegrationRequest:
+      type: object
+      minProperties: 1
+      description: At least one field is required.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        isActive:
+          type: boolean
+          description: '`false` deactivates the integration and its service account and revokes its tokens.'
+    SetIntegrationRolesRequest:
+      type: object
+      required:
+        - roleIds
+      properties:
+        roleIds:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+          description: Its roles from now on; `[]` removes them all.
+    SetIntegrationAudiencesRequest:
+      type: object
+      required:
+        - slugs
+      properties:
+        slugs:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+          description: Service slugs; `[]` clears the audience.
     SigningKey:
       type: object
       required:
@@ -27213,6 +28325,7 @@ x-tagGroups:
       - OAuth2/OIDC - Session
       - OAuth2/OIDC - Permissions
       - Account - Profile
+      - Account - Organizations
       - Account - Sessions
       - Account - TOTP
       - Account - Sign-in Methods
@@ -27233,6 +28346,7 @@ x-tagGroups:
       - Admin - Identity Provider Domains
       - Admin - Settings
       - Admin - Services
+      - Admin - Integrations
   - name: Files
     tags:
       - Files - Buckets

@@ -400,6 +400,7 @@ const continueProviderLogin = async (
       clientId: string;
       scopes: string[];
       consentRequired: boolean;
+      trustedCoreScopes: string[];
     };
     request: AuthorizeRequestParams;
   }

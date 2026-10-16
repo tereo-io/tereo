@@ -86,6 +86,24 @@ export class ManagedByProvisioningError extends AppError {
   }
 }
 
+/** A webhook endpoint an integration manages: only it changes it, beyond a pause or removal. */
+export class ManagedByIntegrationError extends AppError {
+  constructor(
+    message = "Managed by the integration that owns it; an admin may only pause, archive or delete it"
+  ) {
+    super(409, "managed_by_integration", message);
+    this.name = "ManagedByIntegrationError";
+  }
+}
+
+/** Integrations never hold a role carrying the root `admin` permission. */
+export class RoleNotAllowedForIntegrationError extends AppError {
+  constructor(message: string) {
+    super(403, "role_not_allowed_for_integration", message);
+    this.name = "RoleNotAllowedForIntegrationError";
+  }
+}
+
 /**
  * A request with the same idempotency key is still running: one code for
  * uploads, emits and audit writes. Retry shortly.

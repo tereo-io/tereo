@@ -10,9 +10,15 @@ verifies core's signature on a delivery an app receives. Types in `src/types/web
 in the transaction that makes the change. The methods here send directly; the outbox reaper is their
 main caller.
 
-`EmitEventParams`: `{ organizationId, eventType, entityType, entityId, data, idempotencyKey? }`.
+`EmitEventParams`: `{ organizationId, eventType, entityType, entityId, data, idempotencyKey?, recipients? }`.
 `idempotencyKey` is held by core for 24 hours per caller (the service's account), organization and
 event type; the outbox sets it to the row id. When omitted, one is generated per event and call, so the request handler's retries emit it once.
+
+`recipients` addresses the event: up to 50 slugs of services or integrations. Core then sends it
+only to webhook endpoints those recipients own (in the event's organization, or of all
+organizations), each still subject to its owner's read permission, and to no other subscriber. An
+unknown slug is a 400, so an outbox row naming one is dead-lettered. Without it, every subscriber
+gets the event.
 
 | Method | Returns | |
 |--------|---------|---|

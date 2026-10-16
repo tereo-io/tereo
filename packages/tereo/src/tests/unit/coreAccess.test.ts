@@ -54,6 +54,32 @@ describe("resolveCoreAccess", () => {
   });
 });
 
+describe("core:events and core:organizations", () => {
+  it("open only their own areas", () => {
+    const events = delegated("core:events");
+    expect(allowsArea(events, "events")).toBe(true);
+    expect(allowsArea(events, "account")).toBe(false);
+    const orgs = delegated("core:organizations");
+    expect(allowsArea(orgs, "organizations")).toBe(true);
+    expect(allowsArea(orgs, "account")).toBe(false);
+    expect(allowsArea(orgs, "admin")).toBe(false);
+  });
+
+  it("carry no permissions but support access", () => {
+    expect(effectivePermissions(["admin"], delegated("core:events"))).toEqual(
+      []
+    );
+    const orgs = delegated("core:organizations");
+    expect(can(["admin"], orgs, "organizations.support-access")).toBe(true);
+    expect(can(["organizations.admin"], orgs, "organizations.read")).toBe(
+      false
+    );
+    expect(can(["users.read"], orgs, "organizations.support-access")).toBe(
+      false
+    );
+  });
+});
+
 describe("effectivePermissions", () => {
   it("is the live permissions for full access, and none without access", () => {
     expect(effectivePermissions(["admin"], { kind: "full" })).toEqual([

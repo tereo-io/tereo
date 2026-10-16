@@ -251,6 +251,58 @@ export const getUserOrganizations = async (userId: string) => {
   }));
 };
 
+/**
+ * Active, unarchived organizations, a page at a time: those `userId` belongs
+ * to when `membersOnly`, otherwise all of them; with `search`, only those
+ * whose name or slug contains it (case-insensitive). Each row carries the
+ * user's member role there, or null.
+ */
+export const searchActive = async (options: {
+  userId: string;
+  membersOnly: boolean;
+  search?: string;
+  take: number;
+  orderBy: Record<string, "asc" | "desc">[];
+  /** The page's cursor clause. */
+  where?: Record<string, unknown>;
+}) => {
+  const { userId, membersOnly, search, take, orderBy, where } = options;
+  const rows = await prisma.organization.findMany({
+    take: take + 1,
+    orderBy,
+    where: {
+      AND: [
+        (where ?? {}) as Prisma.OrganizationWhereInput,
+        { isActive: true, archivedAt: null },
+        membersOnly ? { members: { some: { userId } } } : {},
+        search
+          ? {
+              OR: [
+                { name: { contains: search, mode: "insensitive" } },
+                { slug: { contains: search, mode: "insensitive" } },
+              ],
+            }
+          : {},
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      members: { where: { userId }, select: { memberRole: true } },
+    },
+  });
+
+  const hasMore = rows.length > take;
+  const data = (hasMore ? rows.slice(0, take) : rows).map(
+    ({ members, ...org }) => ({
+      ...org,
+      memberRole: members[0]?.memberRole ?? null,
+    })
+  );
+  return { data, hasMore };
+};
+
 export const addMember = async (
   orgId: string,
   userId: string,

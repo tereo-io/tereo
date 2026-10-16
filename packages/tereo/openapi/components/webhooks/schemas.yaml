@@ -57,7 +57,7 @@ WebhookEndpoint:
       description: The service `ownerServiceId` names; `null` for endpoints made through the API.
       oneOf:
         - type: object
-          required: [id, slug, name]
+          required: [id, slug, name, kind]
           properties:
             id:
               type: string
@@ -66,6 +66,12 @@ WebhookEndpoint:
               type: string
             name:
               type: string
+            kind:
+              type: string
+              enum: [service, integration]
+              description: |
+                `integration` for an endpoint an integration manages itself
+                through this API.
         - type: 'null'
     provisioningKey:
       type: [string, 'null']
@@ -663,6 +669,22 @@ EmitEventRequest:
         (`400 duplicate_idempotency_key`).
       examples:
         - "order-12345-created-v1"
+    recipients:
+      type: array
+      minItems: 1
+      maxItems: 50
+      items:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: |
+        Addresses the event: slugs of services or integrations. It is then
+        sent only to ACTIVE endpoints these recipients own (in the event's
+        organization, or of all organizations), each still subject to its
+        owner's read permission, and to no other subscriber. An unknown slug
+        is `400 unknown_recipient`. The delivered payload carries it.
+      examples:
+        - ["acme-3pl"]
   required:
     - organizationId
     - eventType

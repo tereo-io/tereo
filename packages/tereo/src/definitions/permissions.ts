@@ -9,8 +9,8 @@ import type { PermissionDefinition } from "./types.js";
 // and shares; webhooks' endpoints, deliveries and emitting; reading and
 // writing audit entries. A role assigned within an organization grants only
 // these. Everything that reaches past one organization stays global-only:
-// `admin`; users, roles, permissions, clients, settings and services, which
-// are platform-wide; `organizations.*`, whose holders bypass organization
+// `admin`; users, roles, permissions, clients, settings, services and
+// integrations, which are platform-wide; `organizations.*`, whose holders bypass organization
 // membership (`requireOrgRole`); and the per-area administrators
 // `file-service.admin`, `webhooks.admin` and `audit-logs.admin`, which act on
 // any organization. `audit-logs.delete` has no route yet, so it stays out
@@ -79,6 +79,25 @@ const SERVICE_PERMISSIONS: PermissionDefinition[] = [
   },
 ];
 
+// Integrations are platform-wide, whatever organization one is bound to.
+const INTEGRATION_PERMISSIONS: PermissionDefinition[] = [
+  adminPermission(
+    "integrations.read",
+    "Read Integrations",
+    "View integrations, their roles and audiences"
+  ),
+  adminPermission(
+    "integrations.write",
+    "Write Integrations",
+    "Add, rename, deactivate integrations, set their roles and audiences and regenerate their secrets"
+  ),
+  adminPermission(
+    "integrations.admin",
+    "Administer Integrations",
+    "Full access to integrations"
+  ),
+];
+
 // Explicit set (not domainPermissions()) to preserve the exact names + action subsets the service enforces — settings is read/write only, no per-domain .admin wildcards.
 const AUTH_SERVICE_PERMISSIONS: PermissionDefinition[] = [
   adminPermission("users.read", "Read Users", "View user accounts and details"),
@@ -137,6 +156,11 @@ const AUTH_SERVICE_PERMISSIONS: PermissionDefinition[] = [
     "organizations.archive",
     "Archive Organizations",
     "Archive and restore organizations"
+  ),
+  adminPermission(
+    "organizations.support-access",
+    "Support Organizations",
+    "Find and enter any active organization as support, without membership"
   ),
   adminPermission(
     "identity-providers.read",
@@ -253,6 +277,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   ADMIN_PERMISSION,
   ...AUTH_SERVICE_PERMISSIONS,
   ...SERVICE_PERMISSIONS,
+  ...INTEGRATION_PERMISSIONS,
   ...FILE_SERVICE_PERMISSIONS,
   ...WEBHOOK_PERMISSIONS,
   ...AUDIT_LOG_PERMISSIONS,
@@ -318,6 +343,16 @@ export const PERMISSIONS = {
     SEND: "notifications.send",
     READ: "notifications.read",
     ADMIN: "notifications.admin",
+  },
+
+  ORGANIZATIONS: {
+    SUPPORT_ACCESS: "organizations.support-access",
+  },
+
+  INTEGRATIONS: {
+    READ: "integrations.read",
+    WRITE: "integrations.write",
+    ADMIN: "integrations.admin",
   },
 
   AUDIT_LOGS: {

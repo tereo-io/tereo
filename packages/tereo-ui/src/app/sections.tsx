@@ -1,6 +1,7 @@
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import { AUTH_ADMIN_PERMISSIONS } from "./routes/auth-admin-pages";
 import { notificationsRoute } from "./routes/notifications";
+import { integrationsRoute } from "./routes/integrations";
 import { fileStorageRoute } from "./routes/file-storage";
 import type { PermissionRequirement } from "@/lib/auth";
 import { authAdminRoute } from "./routes/auth-admin";
@@ -12,6 +13,7 @@ import {
   faBell,
   faClipboardList,
   faCubes,
+  faHandshake,
   faHdd,
   faPlug,
   faUserShield,
@@ -91,6 +93,15 @@ export const SECTIONS: SectionDef[] = [
       label: "Services",
       icon: faCubes,
       permission: "services.read",
+    },
+  },
+  {
+    route: integrationsRoute,
+    nav: {
+      to: "/integrations",
+      label: "Integrations",
+      icon: faHandshake,
+      permission: "integrations.read",
     },
   },
 ];

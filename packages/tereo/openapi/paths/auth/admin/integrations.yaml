@@ -1,0 +1,650 @@
+/admin/integrations:
+  get:
+    tags:
+      - Admin - Integrations
+    summary: List integrations
+    description: |
+      Returns a paginated list of integrations: machine clients for external
+      parties (a 3PL, a customer's system, another app). Services are listed
+      under `/v1/admin/services`.
+
+      **Filter fields and operators:**
+      - `slug`: `contains`, `equals`
+      - `name`: `contains`, `equals`
+      - `organizationId`: `equals`
+      - `isActive`: `equals`
+
+      **Sort fields:** `id` (default), `slug`, `name`, `createdAt`
+    operationId: listAdminIntegrations
+    security:
+      - BearerAuth: [integrations.read]
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../../components/parameters.yaml#/SortParam'
+      - $ref: '../../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../../components/parameters.yaml#/FilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of integrations
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/PaginatedIntegrationsResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing integrations.read permission
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Admin - Integrations
+    summary: Add an integration
+    description: |
+      Adds an integration: a confidential OAuth client (`client_credentials`
+      only), the service-account user it acts as, and its row. The client
+      secret is returned in this response and nowhere else — only its hash is
+      stored. An integration declares nothing.
+
+      With `organizationId` it is **org-bound**: its tokens carry that `org_id`,
+      its account is a member of the organization, and it holds org roles
+      there. Without one it is a **platform** integration: no `org_id`, global
+      roles. The organization is fixed at creation.
+
+      `slug` defaults to the name, lowercased and hyphenated. Returns `409` when
+      the slug is taken by a service or another integration, and
+      `400 unknown_organization` when the organization does not exist.
+
+      An audit log entry is created for this action.
+      A `core.integration.created` webhook event is emitted.
+    operationId: createAdminIntegration
+    security:
+      - BearerAuth: [integrations.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/CreateIntegrationRequest'
+    responses:
+      '201':
+        description: Integration added; `credentials` holds the only copy of the client secret
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/IntegrationWithCredentials'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing integrations.write permission
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The slug is taken
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/integrations/{id}:
+  get:
+    tags:
+      - Admin - Integrations
+    summary: Get an integration
+    description: |
+      The integration with its organization, roles (org roles in its
+      organization when org-bound, global roles otherwise) and audience.
+    operationId: getAdminIntegration
+    security:
+      - BearerAuth: [integrations.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/IntegrationIdParam'
+    responses:
+      '200':
+        description: The integration
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Integration'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing integrations.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: No integration with this id
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Admin - Integrations
+    summary: Update an integration
+    description: |
+      Renames, deactivates or reactivates. Deactivating deactivates its
+      service-account user and revokes its tokens; no new token is issued
+      until it is reactivated. A provisioned integration is `409
+      managed_by_provisioning`.
+
+      An audit log entry is created for this action. A
+      `core.integration.deactivated` webhook event is emitted on deactivation,
+      `core.integration.updated` otherwise.
+    operationId: updateAdminIntegration
+    security:
+      - BearerAuth: [integrations.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/IntegrationIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/UpdateIntegrationRequest'
+    responses:
+      '200':
+        description: The integration, updated
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Integration'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing integrations.write permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: No integration with this id
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The integration is provisioned (`managed_by_provisioning`)
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/integrations/{id}/regenerate-secret:
+  post:
+    tags:
+      - Admin - Integrations
+    summary: Regenerate an integration's secret
+    description: |
+      A new client secret, shown once. The replaced one keeps working for
+      `SERVICE_SECRET_OVERLAP_HOURS`, as for services. A provisioned
+      integration is `409 managed_by_provisioning`: its secret comes from the
+      provisioning documents.
+
+      An audit log entry is created for this action.
+      A `core.integration.secret-regenerated` webhook event is emitted.
+    operationId: regenerateAdminIntegrationSecret
+    security:
+      - BearerAuth: [integrations.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/IntegrationIdParam'
+    responses:
+      '200':
+        description: The new secret
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/RegenerateServiceSecretResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing integrations.write permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: No integration with this id
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The integration is provisioned (`managed_by_provisioning`)
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/integrations/{id}/revoke-previous-secret:
+  post:
+    tags:
+      - Admin - Integrations
+    summary: Revoke an integration's previous secret
+    description: |
+      Ends the secret overlap now: only the current secret works from here on.
+      Allowed on a provisioned integration too: the provisioning documents
+      cannot end an overlap, and a leaked old secret must not wait it out.
+
+      An audit log entry is created for this action.
+      A `core.integration.previous-secret-revoked` webhook event is emitted.
+    operationId: revokeAdminIntegrationPreviousSecret
+    security:
+      - BearerAuth: [integrations.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/IntegrationIdParam'
+    responses:
+      '200':
+        description: Previous secret revoked
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Integration'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing integrations.write permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: No integration with this id
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/integrations/{id}/roles:
+  put:
+    tags:
+      - Admin - Integrations
+    summary: Set an integration's roles
+    description: |
+      Replaces the integration's roles. **Org-bound**: org roles in its
+      organization — custom roles carrying only org-assignable permissions
+      (`400 not_org_assignable`); system roles are refused (`403`).
+      **Platform**: global roles, custom or system. Either way the caller must
+      hold every permission a newly granted role carries (`403`). Unknown,
+      archived or retired roles are `400 unknown_role`. A role carrying the
+      root `admin` permission is never allowed (`403
+      role_not_allowed_for_integration`), whoever grants it. Its tokens are
+      revoked when the roles change, so its next token carries the new
+      permissions.
+
+      An audit log entry is created and a `core.integration.updated` webhook
+      event is emitted when the roles change.
+    operationId: setAdminIntegrationRoles
+    security:
+      - BearerAuth: [integrations.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/IntegrationIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/SetIntegrationRolesRequest'
+    responses:
+      '200':
+        description: The integration with its roles
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Integration'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing integrations.write permission, a permission the caller does not hold, a system role for an org-bound integration, or a role carrying `admin` (`role_not_allowed_for_integration`)
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: No integration with this id
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The integration is provisioned (`managed_by_provisioning`)
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/integrations/{id}/audiences:
+  put:
+    tags:
+      - Admin - Integrations
+    summary: Set an integration's audiences
+    description: |
+      Replaces the slugs of the services that may introspect the
+      integration's tokens: each appears in its tokens' `aud`. Each must be a
+      service other than core (`422 invalid_audience`); an integration cannot
+      be an audience. Its tokens are revoked when the audience changes.
+
+      An audit log entry is created and a `core.integration.updated` webhook
+      event is emitted when the audience changes.
+    operationId: setAdminIntegrationAudiences
+    security:
+      - BearerAuth: [integrations.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/IntegrationIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/SetIntegrationAudiencesRequest'
+    responses:
+      '200':
+        description: The integration with its audience
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Integration'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing integrations.write permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: No integration with this id
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: The integration is provisioned (`managed_by_provisioning`)
+      '422':
+        $ref: '../../../components/auth/responses.yaml#/UnprocessableEntityResponse'
+        description: A slug that names core, an integration or no service (`invalid_audience`)
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+core.integration.created:
+  post:
+    tags:
+      - Admin - Integrations
+    summary: Integration added
+    description: Fired when an integration is added, by an admin or from the provisioning documents.
+    operationId: webhookIntegrationCreated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.integration.created
+                  entityType:
+                    const: Integration
+                  data:
+                    type: object
+                    required: [id, slug, organizationId, name]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      slug:
+                        type: string
+                      organizationId:
+                        type: [string, 'null']
+                        format: uuid
+                      name:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+core.integration.updated:
+  post:
+    tags:
+      - Admin - Integrations
+    summary: Integration updated
+    description: Fired when an integration is renamed or reactivated, or its roles or audience change. `data` carries what changed.
+    operationId: webhookIntegrationUpdated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.integration.updated
+                  entityType:
+                    const: Integration
+                  data:
+                    type: object
+                    required: [id, slug, organizationId]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      slug:
+                        type: string
+                      organizationId:
+                        type: [string, 'null']
+                        format: uuid
+                      name:
+                        type: string
+                      isActive:
+                        type: boolean
+                      roleIds:
+                        type: array
+                        items:
+                          type: string
+                          format: uuid
+                      audience:
+                        type: array
+                        items:
+                          type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+core.integration.deactivated:
+  post:
+    tags:
+      - Admin - Integrations
+    summary: Integration deactivated
+    description: Fired when an integration is deactivated; its tokens were revoked.
+    operationId: webhookIntegrationDeactivated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.integration.deactivated
+                  entityType:
+                    const: Integration
+                  data:
+                    type: object
+                    required: [id, slug, organizationId, name, isActive]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      slug:
+                        type: string
+                      organizationId:
+                        type: [string, 'null']
+                        format: uuid
+                      name:
+                        type: string
+                      isActive:
+                        type: boolean
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+core.integration.secret-regenerated:
+  post:
+    tags:
+      - Admin - Integrations
+    summary: Integration secret regenerated
+    description: Fired when an integration's client secret is regenerated, by an admin or a changed provisioning secret.
+    operationId: webhookIntegrationSecretRegenerated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.integration.secret-regenerated
+                  entityType:
+                    const: Integration
+                  data:
+                    type: object
+                    required: [id, slug, previousSecretExpiresAt]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      slug:
+                        type: string
+                      previousSecretExpiresAt:
+                        type: [string, 'null']
+                        format: date-time
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+core.integration.previous-secret-revoked:
+  post:
+    tags:
+      - Admin - Integrations
+    summary: Integration previous secret revoked
+    description: Fired when an integration's previous client secret is revoked before its overlap ended.
+    operationId: webhookIntegrationPreviousSecretRevoked
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: core.integration.previous-secret-revoked
+                  entityType:
+                    const: Integration
+                  data:
+                    type: object
+                    required: [id, slug]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      slug:
+                        type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

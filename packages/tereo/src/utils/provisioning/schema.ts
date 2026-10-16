@@ -38,6 +38,8 @@ const ClientEntry = z
       .default(["authorization_code", "refresh_token"]),
     audience: z.array(Text).default([]),
     consentRequired: z.boolean().default(true),
+    // Checked by load: core scopes in `scopes`, never the admin ones.
+    trustedCoreScopes: z.array(Text).default([]),
     description: Description.optional(),
   })
   .strict();
@@ -61,6 +63,8 @@ const ServiceEntry = z
     name: Name,
     namespace: Slug.optional(),
     clientId: ClientId.optional(),
+    // Checked and normalized by load (parseInternalHost).
+    internalHost: z.string().max(253).optional(),
     secretFrom: EnvName,
     access: z
       .object({
@@ -74,6 +78,21 @@ const ServiceEntry = z
     buckets: z.array(bucketItem.strict()).max(100).default([]),
     eventTypes: z.array(eventTypeItem.strict()).max(1000).default([]),
     webhooks: z.array(WebhookEntry).default([]),
+  })
+  .strict();
+
+const IntegrationEntry = z
+  .object({
+    slug: Slug,
+    name: Name,
+    // Org-bound when set: its tokens carry this org_id. Fixed once created.
+    organizationId: z.uuid().optional(),
+    secretFrom: EnvName,
+    // Role names: org-assignable custom roles of the set when org-bound;
+    // otherwise also core's roles and `<slug>/<name>` services' system roles.
+    roles: z.array(Text).default([]),
+    // Slugs of services in the set that may introspect its tokens.
+    audiences: z.array(Text).default([]),
   })
   .strict();
 
@@ -105,11 +124,17 @@ export const ProvisioningDocumentSchema = z
     service: ServiceEntry.optional(),
     clients: z.array(ClientEntry).optional(),
     roles: z.array(CustomRoleEntry).optional(),
+    integrations: z.array(IntegrationEntry).optional(),
   })
   .strict()
-  .refine((d) => d.service || d.clients?.length || d.roles?.length, {
-    message: "needs one of service, clients, roles, not empty",
-  });
+  .refine(
+    (d) =>
+      d.service ||
+      d.clients?.length ||
+      d.roles?.length ||
+      d.integrations?.length,
+    { message: "needs one of service, clients, roles, integrations, not empty" }
+  );
 
 export type ProvisioningDocument = z.input<typeof ProvisioningDocumentSchema>;
 export type CustomRoleEntry = z.output<typeof CustomRoleEntry>;

@@ -5,6 +5,7 @@ import { TokenResponse } from "../routes/oauth/token/controllers.js";
 import { generateAccessToken, generateIdToken } from "./tokens.js";
 import { TokenRequest } from "../routes/oauth/token/schemas.js";
 import { stepUpRequired, usedMfa } from "./authorization.js";
+import { maySelectOrganization } from "./supportAccess.js";
 import { presignUserPhotoUrl } from "./userPhotos.js";
 import type { Request, Response } from "express";
 import { tokenAudience } from "./coreAccess.js";
@@ -246,7 +247,7 @@ export const handleAuthorizationCode = async (
 
   // Removing a member or deactivating an organization revokes its tokens but
   // not a code already issued for it.
-  if (code.organizationId && !(await isActiveMember(code))) {
+  if (code.organizationId && !(await maySelectGrantOrganization(code))) {
     throw new Error("invalid_grant");
   }
 
@@ -291,18 +292,17 @@ export const handleAuthorizationCode = async (
   };
 };
 
-/** Whether the user still belongs to the organization, and it is active. */
-const isActiveMember = async (grant: {
+/**
+ * Whether the user may still select the grant's organization: a member of it
+ * or a support-access holder, and it is active.
+ */
+const maySelectGrantOrganization = async (grant: {
   userId: string;
   organizationId: string | null;
 }): Promise<boolean> => {
   if (!grant.organizationId) return false;
-  const membership = await db.organizations.getMembership(
-    grant.organizationId,
-    grant.userId
-  );
-  if (!membership) return false;
-  return isActiveOrganization(grant.organizationId);
+  return (await maySelectOrganization(grant.userId, grant.organizationId))
+    .allowed;
 };
 
 /** False for an inactive, archived or missing organization. */
@@ -411,7 +411,7 @@ export const handleRefreshToken = async (
   const old = await getRefreshToken(client, body, refreshTokenFromCookie, ip);
   // A member removed or an organization deactivated while this refresh was
   // in flight: the session end's revocation may not have caught it.
-  if (old.organizationId && !(await isActiveMember(old))) {
+  if (old.organizationId && !(await maySelectGrantOrganization(old))) {
     await revokeLostOrganizationGrant(old);
     throw new Error("invalid_grant");
   }

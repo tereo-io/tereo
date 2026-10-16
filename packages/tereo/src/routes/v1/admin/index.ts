@@ -2,6 +2,7 @@ import identityProvidersRouter from "./identity-providers/index.js";
 import { createRequireAuth } from "../../../middleware/auth.js";
 import notificationsRouter from "./notifications/index.js";
 import organizationsRouter from "./organizations/index.js";
+import integrationsRouter from "./integrations/index.js";
 import signingKeysRouter from "./signing-keys/index.js";
 import permissionsRouter from "./permissions/index.js";
 import settingsRouter from "./settings/index.js";
@@ -23,6 +24,7 @@ adminRouter.use(rateLimitGeneral);
 
 adminRouter.use("/clients", clientsRouter);
 adminRouter.use("/identity-providers", identityProvidersRouter);
+adminRouter.use("/integrations", integrationsRouter);
 adminRouter.use("/notifications", notificationsRouter);
 adminRouter.use("/organizations", organizationsRouter);
 adminRouter.use("/permissions", permissionsRouter);

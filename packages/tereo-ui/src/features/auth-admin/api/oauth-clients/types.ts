@@ -18,6 +18,8 @@ export interface OAuthClient {
   grantTypes: (GrantType | "client_credentials")[];
   /** Service slugs this client's tokens may name; a service's own client is managed under /admin/services. */
   audience: string[];
+  /** Core scopes this client's tokens may carry; set through provisioning only. */
+  trustedCoreScopes: string[];
   /** Whether users approve the app after signing in; core's own login client never asks. */
   consentRequired: boolean;
   provisioned: boolean;

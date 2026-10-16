@@ -161,6 +161,8 @@ export interface EmitTxInput {
   entityType: string;
   entityId: string;
   data: Record<string, unknown>;
+  /** Slugs of services or integrations: sent only to endpoints they own. */
+  recipients?: string[];
 }
 
 const KNOWN_EVENT_TYPES = new Set(EVENT_TYPES.map((e) => e.eventType));

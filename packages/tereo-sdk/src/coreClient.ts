@@ -14,6 +14,9 @@ import {
   startFileServiceCache,
 } from "./utils/fileCache.js";
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface CoreClientOptions {
   /** This service's slug, as core knows it. Recorded as the source of its audit entries. */
   service: string;
@@ -41,6 +44,11 @@ export interface CoreClientOptions {
    * `production: true`.
    */
   testMode?: boolean;
+  /**
+   * With `testMode`: the UUID that the test token user `service` resolves to,
+   * so tests can match a service user's id. Throws if not a UUID.
+   */
+  testServiceUserId?: string;
   /**
    * Event types `webhooks.emit` accepts, to reject typos before the request.
    * Without it, any type is accepted and core decides.
@@ -105,6 +113,12 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
       "@tereo-io/sdk: testMode accepts forged tokens and is refused in production (NODE_ENV=production or `production: true`)"
     );
   }
+  if (
+    options.testServiceUserId !== undefined &&
+    !UUID_RE.test(options.testServiceUserId)
+  ) {
+    throw new Error("@tereo-io/sdk: testServiceUserId must be a UUID");
+  }
   const url = option(options.url, "CORE_URL", "url");
   const clientId = option(options.clientId, "CORE_CLIENT_ID", "clientId");
   const handler = createHandler({
@@ -137,7 +151,11 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
     : null;
 
   return {
-    auth: new AuthServiceClient(options.auth, testMode),
+    auth: new AuthServiceClient(
+      options.auth,
+      testMode,
+      options.testServiceUserId
+    ),
     files: new FileServiceClient(undefined, testMode),
     webhooks,
     audit,

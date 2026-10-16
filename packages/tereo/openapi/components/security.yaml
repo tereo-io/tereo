@@ -18,7 +18,9 @@ BearerAuth:
     - any other client, only if it was granted core API scopes — its token's
       `aud` then includes `core`. It reaches only the areas its scopes name,
       and its permissions are the user's live ones cut down to the scopes'
-      ceilings: `core:account` (`/v1/account`, `/ws`), `core:admin` /
+      ceilings: `core:account` (`/v1/account`, `/ws`), `core:events` (`/ws` only),
+      `core:organizations` (`GET /v1/account/organizations` only; ceiling
+      `organizations.support-access`), `core:admin` /
       `core:admin.read` (`/v1/admin`: `users`, `roles`, `permissions`, `clients`,
       `settings`, `organizations`, `services` — `.admin` / `.read`),
       `core:files` / `core:files.read` (`file-service.admin` / the
