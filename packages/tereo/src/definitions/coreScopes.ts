@@ -8,11 +8,20 @@ import { CORE_SERVICE } from "./coreService.js";
 export const CORE_AUDIENCE = CORE_SERVICE.slug;
 
 /**
- * The parts of core's API a token may be admitted to, one per router.
+ * The parts of core's API a token may be admitted to, mostly one per router.
  * `notifications` has no scope: only core's UI and services reach it.
+ * `events` is the socket on /ws; `organizations` is
+ * `GET /v1/account/organizations`, which `account` opens too.
  */
 export type CoreArea =
-  "account" | "admin" | "audit" | "files" | "webhooks" | "notifications";
+  | "account"
+  | "admin"
+  | "audit"
+  | "files"
+  | "webhooks"
+  | "notifications"
+  | "events"
+  | "organizations";
 
 export interface CoreScope {
   name: string;
@@ -40,7 +49,8 @@ const ADMIN_DOMAINS = [
 /**
  * Scopes a client other than core's own UI or a service needs to call core's
  * API for its user. Two per area — everything the user may do there, or only
- * reading — and one for the user's own account.
+ * reading — and one each for the user's own account, their events socket and
+ * their organizations list.
  */
 export const CORE_SCOPES: readonly CoreScope[] = [
   {
@@ -49,6 +59,19 @@ export const CORE_SCOPES: readonly CoreScope[] = [
       "Manage your account: profile, password, sessions and two-factor authentication",
     area: "account",
     ceiling: [],
+  },
+  {
+    name: "core:events",
+    description: "Receive your account's events as they happen",
+    area: "events",
+    ceiling: [],
+  },
+  {
+    name: "core:organizations",
+    description:
+      "List your organizations, or search every organization if you support them",
+    area: "organizations",
+    ceiling: ["organizations.support-access"],
   },
   {
     name: "core:admin",

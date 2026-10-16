@@ -77,12 +77,12 @@ const within = <T>(promise: Promise<T>, ms: number, what: string) =>
   ]);
 
 /** A browser login through to tokens: a session with a refresh token. */
-const signIn = async () => {
+const signIn = async (scope = "openid core:account") => {
   const user = await createTestUser();
   const login = await browserLogin({
     clientId: client.clientId,
     redirectUri: REDIRECT_URI,
-    scope: "openid core:account",
+    scope,
     email: user.email,
     password: user.plainPassword,
   });
@@ -581,6 +581,62 @@ describe("Organization change events", () => {
     } finally {
       there.close();
       elsewhere.close();
+    }
+  });
+});
+
+describe("Socket scopes", () => {
+  it("admits a core:events-only token, which receives its user's events and nothing else", async () => {
+    const { user, accessToken } = await signIn("openid core:events");
+    const socket = connect(accessToken);
+    try {
+      expect(await socket.connected).toBeNull();
+
+      const res = await fetch(`${BASE_URL}/v1/admin/users/${user.id}/roles`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${await getTestPrincipalToken({
+            permissions: ["users.write"],
+          })}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ roleIds: [] }),
+      });
+      expect(res.status).toBe(200);
+
+      await within(
+        (async () => {
+          while (
+            !socket.events.some((e) => e.name === "auth:permissions:changed")
+          ) {
+            await new Promise((r) => setTimeout(r, 20));
+          }
+        })(),
+        5000,
+        "auth:permissions:changed received"
+      );
+    } finally {
+      socket.close();
+    }
+
+    const me = await fetch(`${BASE_URL}/v1/account/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(me.status).toBe(403);
+    expect(((await me.json()) as { error: string }).error).toBe(
+      "insufficient_scope"
+    );
+  });
+
+  it("refuses a token whose core scopes open neither account nor events", async () => {
+    const { accessToken } = await signIn("openid core:organizations");
+    const socket = connect(accessToken);
+    try {
+      expect(await socket.connected).toBe(
+        "This token is not issued for core's API"
+      );
+    } finally {
+      socket.close();
     }
   });
 });

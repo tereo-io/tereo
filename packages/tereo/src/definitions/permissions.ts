@@ -139,6 +139,11 @@ const AUTH_SERVICE_PERMISSIONS: PermissionDefinition[] = [
     "Archive and restore organizations"
   ),
   adminPermission(
+    "organizations.support-access",
+    "Support Organizations",
+    "Find and enter any active organization as support, without membership"
+  ),
+  adminPermission(
     "identity-providers.read",
     "Read Identity Providers",
     "View identity providers and their domains"
@@ -318,6 +323,10 @@ export const PERMISSIONS = {
     SEND: "notifications.send",
     READ: "notifications.read",
     ADMIN: "notifications.admin",
+  },
+
+  ORGANIZATIONS: {
+    SUPPORT_ACCESS: "organizations.support-access",
   },
 
   AUDIT_LOGS: {

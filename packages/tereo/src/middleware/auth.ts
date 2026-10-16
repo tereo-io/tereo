@@ -61,8 +61,8 @@ export interface PublicRoute {
 
 export interface RequireAuthOptions {
   /** The part of core's API the router serves, which a delegated token's
-   * scopes must name (utils/coreAccess.ts). */
-  area: CoreArea;
+   * scopes must name (utils/coreAccess.ts) — any one, when several. */
+  area: CoreArea | CoreArea[];
   /** Routes admitted without a token. Admission only — each controller still
    * decides whether to serve an anonymous caller. */
   publicRoutes?: PublicRoute[];
@@ -103,7 +103,7 @@ export const createRequireAuth =
 
 const authenticate = async (
   token: string,
-  area: CoreArea,
+  area: CoreArea | CoreArea[],
   req: Request,
   res: Response
 ) => {
@@ -141,8 +141,8 @@ const authenticate = async (
       403,
       "insufficient_scope",
       scopes
-        ? `This token's scopes do not reach /${area}; it needs one of: ${scopes}`
-        : `Only core's UI and services may call /${area}`
+        ? `This token's scopes do not reach ${req.originalUrl.split("?")[0]}; it needs one of: ${scopes}`
+        : `Only core's UI and services may call ${req.originalUrl.split("?")[0]}`
     );
   }
 

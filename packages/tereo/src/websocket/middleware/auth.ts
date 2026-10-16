@@ -36,8 +36,8 @@ export const authenticateSocket = async (
     if (check.isClientToken) {
       return next(new Error("Invalid token subject"));
     }
-    // The socket carries the user's own account events, as /account does.
-    if (!allowsArea(check.access, "account")) {
+    // The socket carries the user's own account events.
+    if (!allowsArea(check.access, ["account", "events"])) {
       return next(new Error("This token is not issued for core's API"));
     }
     const { user, token: stored } = check;

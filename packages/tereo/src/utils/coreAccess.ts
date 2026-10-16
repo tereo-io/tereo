@@ -38,10 +38,18 @@ export const resolveCoreAccess = (token: {
   return scopes.length > 0 ? { kind: "delegated", scopes } : { kind: "none" };
 };
 
-/** Whether the token may reach the router for `area` at all. */
-export const allowsArea = (access: CoreAccess, area: CoreArea): boolean =>
-  access.kind === "full" ||
-  (access.kind === "delegated" && access.scopes.some((s) => s.area === area));
+/** Whether the token may reach the router for `area` (any of them) at all. */
+export const allowsArea = (
+  access: CoreAccess,
+  area: CoreArea | CoreArea[]
+): boolean => {
+  const areas = [area].flat();
+  return (
+    access.kind === "full" ||
+    (access.kind === "delegated" &&
+      access.scopes.some((s) => areas.includes(s.area)))
+  );
+};
 
 /**
  * The permissions that hold for the token: `live` itself for full access,
@@ -94,6 +102,8 @@ export const tokenAudience = (
     ? [...clientAudience, CORE_AUDIENCE]
     : clientAudience;
 
-/** The scopes that would admit a token to `area`, for a challenge. */
-export const scopesForArea = (area: CoreArea): string[] =>
-  CORE_SCOPES.filter((s) => s.area === area).map((s) => s.name);
+/** The scopes that would admit a token to `area` (any of them), for a challenge. */
+export const scopesForArea = (area: CoreArea | CoreArea[]): string[] => {
+  const areas = [area].flat();
+  return CORE_SCOPES.filter((s) => areas.includes(s.area)).map((s) => s.name);
+};
