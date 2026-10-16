@@ -2,6 +2,7 @@ import { ensureTestUser, getTestPrincipalToken } from "../utils/principals.js";
 import { provisioningJsonSchema } from "../../cli/provision/index.js";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { removeRoles, removeServices } from "./utils/test-helpers.js";
+import { CORE_SERVICE_ID } from "../../definitions/index.js";
 import { generateClientSecret } from "../../utils/crypto.js";
 import { describe, it, expect, afterAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
@@ -81,6 +82,56 @@ describe("provisioning CLI", () => {
     expect(res.stderr).toContain("bad-two.json");
   });
 
+  it("registers core's declaration before applying, as start does", async () => {
+    // A database core's current declaration has not reached yet: a release's
+    // Job can run before any of its pods has started.
+    const core = await prisma.service.findUniqueOrThrow({
+      where: { id: CORE_SERVICE_ID },
+    });
+    const permission = await prisma.permission.findUniqueOrThrow({
+      where: { name: "roles.read" },
+    });
+    await prisma.service.update({
+      where: { id: CORE_SERVICE_ID },
+      data: { declarationHash: "0".repeat(64) },
+    });
+    await prisma.permission.update({
+      where: { id: permission.id },
+      data: { retiredAt: new Date() },
+    });
+    try {
+      const dir = tempDir();
+      const name = `cli-role-${randomBytes(4).toString("hex")}`;
+      roleNames.push(name);
+      writeFileSync(
+        path.join(dir, "roles.json"),
+        JSON.stringify({
+          version: "1.0.0",
+          roles: [{ name, displayName: name, permissions: ["roles.read"] }],
+        })
+      );
+      const res = cli(["provision", "--path", dir]);
+      expect(res.status, res.stderr).toBe(0);
+      expect(JSON.parse(res.stdout).roles).toContain(`role:${name}`);
+      expect(
+        (
+          await prisma.service.findUniqueOrThrow({
+            where: { id: CORE_SERVICE_ID },
+          })
+        ).declarationHash
+      ).toBe(core.declarationHash);
+    } finally {
+      await prisma.service.update({
+        where: { id: CORE_SERVICE_ID },
+        data: { declarationHash: core.declarationHash },
+      });
+      await prisma.permission.update({
+        where: { id: permission.id },
+        data: { retiredAt: permission.retiredAt },
+      });
+    }
+  });
+
   it("prints the JSON Schema", () => {
     const res = cli(["provisioning-schema"]);
     expect(res.status, res.stderr).toBe(0);
@@ -108,7 +159,8 @@ describe("provisioning CLI", () => {
         })
       );
     writeRole("1.0.0", ["roles.read"]);
-    expect(cli(["provision", "--path", dir]).status).toBe(0);
+    const first = cli(["provision", "--path", dir]);
+    expect(first.status, first.stderr).toBe(0);
 
     const role = await prisma.role.findFirstOrThrow({
       where: { name, serviceId: null },

@@ -1000,6 +1000,7 @@ describe("access", () => {
       access: { roles: [roleTarget(owner)], audiences: [] },
     });
     await apply(owner, consumer);
+    const token = await serviceToken(consumer);
 
     const shrunk = withService(
       owner,
@@ -1010,6 +1011,8 @@ describe("access", () => {
     expect(result.access).toEqual([
       `service:${consumer.service.slug} narrowed role:${roleTarget(owner)}`,
     ]);
+    // It embeds the permission the role no longer grants.
+    expect((await tokenRow(token)).revokedAt).not.toBeNull();
 
     const c = await serviceRow(consumer.service.slug);
     expect(
@@ -1251,6 +1254,29 @@ describe("custom roles", () => {
     const again = await apply(owner, rolesDoc(grown));
     expect(again.roles).toEqual([]);
     expect(await updates()).toBe(1);
+  });
+
+  it("refuses a permission missing from the database as a problem", async () => {
+    // Validation knows it from core's code; the database lacks it until
+    // core's declaration is registered.
+    const permission = await prisma.permission.findUniqueOrThrow({
+      where: { name: "roles.read" },
+    });
+    await prisma.permission.update({
+      where: { id: permission.id },
+      data: { retiredAt: new Date() },
+    });
+    try {
+      const role = roleSpec(["roles.read"]);
+      expect(await problemsOf(rolesDoc(role))).toEqual([
+        `roles.json: roles[${role.name}]: permission "roles.read" does not exist in the database`,
+      ]);
+    } finally {
+      await prisma.permission.update({
+        where: { id: permission.id },
+        data: { retiredAt: permission.retiredAt },
+      });
+    }
   });
 
   it("refuses a custom role whose name a hand-made role holds", async () => {
@@ -1549,6 +1575,6 @@ describe("webhooks", () => {
 
 describe("provision", () => {
   it("does nothing without PROVISIONING_PATH", async () => {
-    await expect(provision()).resolves.toBeUndefined();
+    await expect(provision()).resolves.toBeNull();
   });
 });

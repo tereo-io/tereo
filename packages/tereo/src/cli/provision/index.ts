@@ -1,5 +1,7 @@
 import { ProvisioningDocumentSchema } from "../../utils/provisioning/schema.js";
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
+import { registerCore } from "../../utils/coreRegistration.js";
+import { assertSystemUser } from "../../utils/users.js";
 import { loadKeys } from "../../utils/keys.js";
 import z from "zod";
 import {
@@ -29,6 +31,10 @@ export async function runProvisionCli(args: string[]): Promise<void> {
   await loadKeys();
   // Events are written in this process.
   await ensureDefaultOrganization();
+  // As at start: documents may use what this release's core declares, and
+  // the Job can run before any pod of the release has started.
+  await assertSystemUser();
+  await registerCore();
   try {
     const result = await provision({ path, dryRun });
     console.log(

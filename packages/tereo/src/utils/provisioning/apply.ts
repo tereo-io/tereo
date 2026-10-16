@@ -608,6 +608,17 @@ const applyRoles = async (
     const spec = from.role;
     const meta = documentMeta(from);
     const entry = `role:${spec.name}`;
+    // Validation checked the names against the set and the code; the
+    // database can still lack one (core's declaration not yet registered).
+    const missing = spec.permissions.filter((n) => !idOf.has(n));
+    if (missing.length > 0) {
+      throw new ProvisioningError(
+        missing.map(
+          (n) =>
+            `${roleLabel(from)}: permission "${n}" does not exist in the database`
+        )
+      );
+    }
     const wanted = sortedUnique(spec.permissions.map((n) => idOf.get(n)!));
     const fields = roleFields(spec);
     const existing = await tx.role.findFirst({
@@ -1083,23 +1094,25 @@ const applyServicesContent = async (
       for (const [verb, keys] of Object.entries(changes))
         for (const key of keys)
           result.access.push(`service:${row.slug} ${verb} ${key}`);
-      if (changes.revoked.length > 0) revokedClients.push(client.id);
+      // Tokens carry the permissions: a narrowed role's are stale too.
+      if (changes.revoked.length > 0 || changes.narrowed.length > 0)
+        revokedClients.push(client.id);
     });
   }
   return { problems, revokedClients };
 };
 
-/**
- * Bring the database in line with the provisioning set, all or nothing:
- * every problem is reported before anything is written. Serialized, so
- * replicas starting together apply it once.
- */
 class DryRunRollback extends Error {
   constructor(public result: ProvisioningResult) {
     super("dry run");
   }
 }
 
+/**
+ * Bring the database in line with the provisioning set, all or nothing:
+ * every problem is reported before anything is written. Serialized, so
+ * replicas starting together apply it once.
+ */
 export const applyProvisioning = async (
   set: ProvisioningSet,
   now: Date = new Date(),
