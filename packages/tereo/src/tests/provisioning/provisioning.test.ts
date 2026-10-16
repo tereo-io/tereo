@@ -1,9 +1,10 @@
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { removeLoginClients, removeServices } from "./utils/test-helpers.js";
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { getTestPrincipalToken } from "../utils/principals.js";
 import { generateClientSecret } from "../../utils/crypto.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { logger } from "../../utils/logger.js";
 import { CORE_URL } from "../utils/coreUrl.js";
 import { fetchJson } from "../utils/http.js";
 import { randomBytes } from "crypto";
@@ -20,9 +21,10 @@ import {
 } from "../../utils/provisioning/index.js";
 import {
   ProvisioningError,
-  type ProvisionedClientSpec,
-  type ProvisionedServiceSpec,
-  type Provisioning,
+  type LoadedDocument,
+  type ProvisioningSet,
+  type ResolvedClient,
+  type ResolvedService,
 } from "../../utils/provisioning/load.js";
 import {
   DEFAULT_ORGANIZATION_ID,
@@ -61,31 +63,54 @@ const newSecret = () => {
   return { plain: plainSecret, hash: hashedSecret };
 };
 
-const serviceSpec = (
-  extra: Partial<ProvisionedServiceSpec> = {}
-): ProvisionedServiceSpec & { plainSecret: string } => {
+interface ServiceDoc extends LoadedDocument {
+  service: ResolvedService;
+  plainSecret: string;
+}
+
+const serviceDoc = (
+  extra: Partial<ResolvedService> = {},
+  doc: { file?: string; version?: string } = {}
+): ServiceDoc => {
   const slug = extra.slug ?? `prov-${rand()}`;
   createdSlugs.push(slug);
   const secret = newSecret();
   return {
-    slug,
-    name: `Service ${slug}`,
-    namespace: slug,
-    clientId: slug,
-    secretEnv: "SERVICE_SECRET",
-    secretHash: secret.hash,
+    file: doc.file ?? `${slug}.json`,
+    version: doc.version ?? "1.0.0",
+    service: {
+      slug,
+      name: `Service ${slug}`,
+      namespace: slug,
+      clientId: slug,
+      secretEnv: "SERVICE_SECRET",
+      secretHash: secret.hash,
+      access: { roles: [], audiences: [] },
+      permissions: [],
+      systemRoles: [],
+      buckets: [],
+      eventTypes: [],
+      webhooks: [],
+      ...extra,
+    },
+    clients: [],
+    roles: [],
     plainSecret: secret.plain,
-    access: { roles: [], audiences: [] },
-    ...extra,
   };
 };
 
-const clientSpec = (
-  extra: Partial<ProvisionedClientSpec> = {}
-): ProvisionedClientSpec => {
-  const spec: ProvisionedClientSpec = {
+/** The document again, its service changed. */
+const withService = (
+  d: ServiceDoc,
+  extra: Partial<ResolvedService>,
+  doc: { file?: string; version?: string } = {}
+): ServiceDoc => ({ ...d, ...doc, service: { ...d.service, ...extra } });
+
+const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
+  const spec: ResolvedClient = {
     clientId: `prov-client-${rand()}`,
     name: "Provisioned app",
+    description: null,
     clientType: "public",
     secretEnv: null,
     secretHash: null,
@@ -101,26 +126,56 @@ const clientSpec = (
   return spec;
 };
 
-const file = (
-  services: ProvisionedServiceSpec[] = [],
-  clients: ProvisionedClientSpec[] = []
-): Provisioning => ({
-  services: services.map(({ ...s }) => {
-    delete (s as { plainSecret?: string }).plainSecret;
-    return s;
-  }),
+const clientsDoc = (...clients: ResolvedClient[]): LoadedDocument => ({
+  file: "clients.json",
+  version: "1.0.0",
+  service: null,
   clients,
+  roles: [],
 });
 
-const problemsOf = async (p: Provisioning): Promise<string[]> => {
+const setOf = (...docs: LoadedDocument[]): ProvisioningSet => ({
+  documents: docs.map(({ file, version, service, clients, roles }) => ({
+    file,
+    version,
+    service,
+    clients,
+    roles,
+  })),
+});
+
+const apply = (...docs: LoadedDocument[]) => applyProvisioning(setOf(...docs));
+
+const problemsOf = async (...docs: LoadedDocument[]): Promise<string[]> => {
   try {
-    await applyProvisioning(p);
+    await apply(...docs);
   } catch (err) {
     if (err instanceof ProvisioningError) return err.problems;
     throw err;
   }
   throw new Error("expected a ProvisioningError");
 };
+
+/** A declaration with one role, `<ns>_item_reader`, granting `grants`. */
+const ownerDeclaration = (ns: string, grants: string[] = ["read"]) => ({
+  permissions: ["read", "write"].map((verb) => ({
+    name: `${ns}.items.${verb}`,
+    displayName: `${verb} items`,
+    description: "",
+    orgAssignable: false,
+  })),
+  systemRoles: [
+    {
+      name: `${ns}_item_reader`,
+      displayName: "Item reader",
+      description: "",
+      permissions: grants.map((verb) => `${ns}.items.${verb}`),
+    },
+  ],
+});
+
+const roleTarget = (owner: ServiceDoc) =>
+  `${owner.service.slug}/${owner.service.namespace}_item_reader`;
 
 const fetchToken = async (clientId: string, clientSecret: string) => {
   const response = await fetch(`${CORE_URL}/oauth/token`, {
@@ -149,14 +204,11 @@ const clientRow = (clientId: string) =>
 const auditCount = (entityIds: string[]) =>
   prisma.auditLogEntry.count({ where: { entityId: { in: entityIds } } });
 
-const serviceToken = async (spec: {
-  clientId: string;
-  plainSecret: string;
-}) => {
+const serviceToken = async (d: ServiceDoc) => {
   const response = await fetch(`${CORE_URL}/oauth/token`, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${Buffer.from(`${spec.clientId}:${spec.plainSecret}`).toString("base64")}`,
+      Authorization: `Basic ${Buffer.from(`${d.service.clientId}:${d.plainSecret}`).toString("base64")}`,
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: "grant_type=client_credentials",
@@ -164,37 +216,6 @@ const serviceToken = async (spec: {
   expect(response.status).toBe(200);
   return ((await response.json()) as { access_token: string }).access_token;
 };
-
-/** Register a declaration as the service, requesting the given access. */
-const register = async (
-  spec: { clientId: string; plainSecret: string; namespace: string },
-  requestedAccess: { roles?: string[]; audiences?: string[] },
-  extra: Record<string, unknown> = {}
-) => {
-  const response = await fetch(`${CORE_URL}/v1/registry/declaration`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${await serviceToken(spec)}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      version: "1.0.0",
-      requestedAccess,
-      ...extra,
-    }),
-  });
-  const body = (await response.json()) as {
-    access: { id: string; kind: string; target: string; status: string }[];
-  };
-  expect(response.status, JSON.stringify(body)).toBe(200);
-  return body;
-};
-
-const statusOf = (
-  body: { access: { kind: string; target: string; status: string }[] },
-  kind: string,
-  target: string
-) => body.access.find((a) => a.kind === kind && a.target === target)?.status;
 
 const accessRow = async (
   serviceId: string,
@@ -216,48 +237,38 @@ const holdsRole = async (slug: string, roleName: string) => {
 
 describe("applyProvisioning", () => {
   it("creates a service with its client, service-account user and given secret", async () => {
-    const spec = serviceSpec({
-      access: { roles: ["file_user"], audiences: [] },
-    });
-    const result = await applyProvisioning(file([spec]));
-    expect(result.created).toContain(`service:${spec.slug}`);
+    const d = serviceDoc();
+    const result = await apply(d);
+    expect(result.created).toContain(`service:${d.service.slug}`);
 
-    const row = await serviceRow(spec.slug);
+    const row = await serviceRow(d.service.slug);
     expect(row.provisioned).toBe(true);
     expect(row.unprovisionedAt).toBeNull();
-    expect(row.namespace).toBe(spec.namespace);
-    expect(row.provisionedAccess).toEqual({
-      roles: ["file_user"],
-      audiences: [],
-    });
+    expect(row.namespace).toBe(d.service.namespace);
     expect(row.createdBy).toBe(SYSTEM_USER_ID);
-    expect(row.client?.clientId).toBe(spec.clientId);
+    expect(row.client?.clientId).toBe(d.service.clientId);
     expect(row.client?.provisioned).toBe(true);
     expect(row.client?.grantTypes).toEqual(["client_credentials"]);
-    expect(row.client?.clientSecret).toBe(spec.secretHash);
+    expect(row.client?.clientSecret).toBe(d.service.secretHash);
     expect(row.client?.serviceAccountUser?.userType).toBe("service_account");
-    // Access is approved only once the service requests it.
-    expect(
-      await prisma.serviceAccess.count({ where: { serviceId: row.id } })
-    ).toBe(0);
 
-    expect(await fetchToken(spec.clientId, spec.plainSecret)).toBe(200);
+    expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(200);
   });
 
   it("creates a login client with audience and consentRequired", async () => {
-    const target = serviceSpec();
+    const target = serviceDoc();
     const secret = newSecret();
     const spec = clientSpec({
       clientType: "confidential",
       secretEnv: "APP_SECRET",
       secretHash: secret.hash,
-      audience: [target.slug],
+      audience: [target.service.slug],
       consentRequired: false,
     });
-    const result = await applyProvisioning(file([target], [spec]));
+    const result = await apply(target, clientsDoc(spec));
     expect(result.created).toEqual(
       expect.arrayContaining([
-        `service:${target.slug}`,
+        `service:${target.service.slug}`,
         `client:${spec.clientId}`,
       ])
     );
@@ -267,7 +278,7 @@ describe("applyProvisioning", () => {
     expect(row.ownerId).toBe(SYSTEM_USER_ID);
     expect(row.clientType).toBe("confidential");
     expect(row.clientSecret).toBe(secret.hash);
-    expect(row.audience).toEqual([target.slug]);
+    expect(row.audience).toEqual([target.service.slug]);
     expect(row.consentRequired).toBe(false);
     expect(row.redirectUris).toEqual(spec.redirectUris);
     expect(row.scopes).toEqual(spec.scopes);
@@ -275,7 +286,7 @@ describe("applyProvisioning", () => {
 
   it("refuses a login client audience naming no service", async () => {
     const spec = clientSpec({ audience: ["no-such-service"] });
-    const problems = await problemsOf(file([], [spec]));
+    const problems = await problemsOf(clientsDoc(spec));
     expect(problems.join("\n")).toContain("no-such-service");
     expect(
       await prisma.oAuthClient.findUnique({
@@ -284,110 +295,134 @@ describe("applyProvisioning", () => {
     ).toBeNull();
   });
 
+  it("refuses the whole set when one document is invalid", async () => {
+    const good = serviceDoc();
+    const bad = serviceDoc({
+      access: { roles: ["no-such-core-role"], audiences: [] },
+    });
+    const problems = await problemsOf(good, bad);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(`${bad.file}: services[${bad.service.slug}]`);
+    expect(
+      await prisma.service.findUnique({ where: { slug: good.service.slug } })
+    ).toBeNull();
+  });
+
   it("is idempotent: a second apply changes nothing and writes no audit entry", async () => {
-    const service = serviceSpec();
-    const client = clientSpec({ audience: [service.slug] });
-    const p = file([service], [client]);
-    await applyProvisioning(p);
+    const d = serviceDoc();
+    Object.assign(d.service, ownerDeclaration(d.service.namespace));
+    const client = clientSpec({ audience: [d.service.slug] });
+    const set = setOf(d, clientsDoc(client));
+    await applyProvisioning(set);
     const ids = [
-      (await serviceRow(service.slug)).id,
+      (await serviceRow(d.service.slug)).id,
       (await clientRow(client.clientId)).id,
     ];
     const before = await auditCount(ids);
     const updatedAt = (await clientRow(client.clientId)).updatedAt;
 
-    const again = await applyProvisioning(p);
+    const again = await applyProvisioning(set);
     expect(again).toEqual({
       created: [],
       updated: [],
       rotated: [],
       unprovisioned: [],
+      declared: [],
+      access: [],
     });
     expect(await auditCount(ids)).toBe(before);
     expect((await clientRow(client.clientId)).updatedAt).toEqual(updatedAt);
   });
 
   it("updates a changed name, redirect URIs, audience or consent setting", async () => {
-    const service = serviceSpec();
-    const other = serviceSpec();
+    const d = serviceDoc();
+    const other = serviceDoc();
     const client = clientSpec();
-    await applyProvisioning(file([service, other], [client]));
+    await apply(d, other, clientsDoc(client));
 
-    const result = await applyProvisioning(
-      file(
-        [{ ...service, name: "Renamed service" }, other],
-        [
-          {
-            ...client,
-            name: "Renamed app",
-            redirectUris: ["https://app.example.com/other-callback"],
-            audience: [other.slug],
-            consentRequired: false,
-          },
-        ]
-      )
+    const result = await apply(
+      withService(d, { name: "Renamed service" }),
+      other,
+      clientsDoc({
+        ...client,
+        name: "Renamed app",
+        redirectUris: ["https://app.example.com/other-callback"],
+        audience: [other.service.slug],
+        consentRequired: false,
+      })
     );
     expect(result.updated.sort()).toEqual(
-      [`client:${client.clientId}`, `service:${service.slug}`].sort()
+      [`client:${client.clientId}`, `service:${d.service.slug}`].sort()
     );
 
-    const s = await serviceRow(service.slug);
+    const s = await serviceRow(d.service.slug);
     expect(s.name).toBe("Renamed service");
     expect(s.client?.name).toBe("Renamed service");
     const c = await clientRow(client.clientId);
     expect(c.name).toBe("Renamed app");
     expect(c.redirectUris).toEqual(["https://app.example.com/other-callback"]);
-    expect(c.audience).toEqual([other.slug]);
+    expect(c.audience).toEqual([other.service.slug]);
     expect(c.consentRequired).toBe(false);
   });
 
+  it("treats a renamed file as the same service", async () => {
+    const d = serviceDoc({}, { file: "x.json" });
+    await apply(d);
+    const result = await apply({ ...d, file: "y.json" });
+    expect(result.created).toEqual([]);
+  });
+
   it("rotates a changed secret, keeping the old one for the overlap", async () => {
-    const service = serviceSpec();
-    await applyProvisioning(file([service]));
+    const d = serviceDoc();
+    await apply(d);
     const next = newSecret();
 
     const now = new Date();
     const result = await applyProvisioning(
-      file([{ ...service, secretHash: next.hash }]),
+      setOf(withService(d, { secretHash: next.hash })),
       now
     );
-    expect(result.rotated).toEqual([`service:${service.slug}`]);
+    expect(result.rotated).toEqual([`service:${d.service.slug}`]);
 
-    const row = await serviceRow(service.slug);
+    const row = await serviceRow(d.service.slug);
     expect(row.client?.clientSecret).toBe(next.hash);
-    expect(row.client?.previousSecretHash).toBe(service.secretHash);
+    expect(row.client?.previousSecretHash).toBe(d.service.secretHash);
     expect(row.client?.previousSecretExpiresAt?.getTime()).toBe(
       now.getTime() + env.SERVICE_SECRET_OVERLAP_HOURS * 60 * 60 * 1000
     );
-    expect(await fetchToken(service.clientId, service.plainSecret)).toBe(200);
-    expect(await fetchToken(service.clientId, next.plain)).toBe(200);
+    expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(200);
+    expect(await fetchToken(d.service.clientId, next.plain)).toBe(200);
   });
 
   it("refuses a secret already used by another client, current or previous", async () => {
-    const holder = serviceSpec();
-    await applyProvisioning(file([holder]));
+    const holder = serviceDoc();
+    await apply(holder);
     const rotated = newSecret();
-    await applyProvisioning(file([{ ...holder, secretHash: rotated.hash }]));
+    const holderRotated = withService(holder, { secretHash: rotated.hash });
+    await apply(holderRotated);
 
-    const takesCurrent = serviceSpec({ secretHash: rotated.hash });
+    const takesCurrent = serviceDoc({ secretHash: rotated.hash });
     const takesPrevious = clientSpec({
       clientType: "confidential",
       secretEnv: "APP_SECRET",
-      secretHash: holder.secretHash,
+      secretHash: holder.service.secretHash,
     });
     const problems = await problemsOf(
-      file(
-        [{ ...holder, secretHash: rotated.hash }, takesCurrent],
-        [takesPrevious]
-      )
+      holderRotated,
+      takesCurrent,
+      clientsDoc(takesPrevious)
     );
     expect(problems).toHaveLength(2);
-    expect(problems.join("\n")).toContain(`services[${takesCurrent.slug}]`);
+    expect(problems.join("\n")).toContain(
+      `services[${takesCurrent.service.slug}]`
+    );
     expect(problems.join("\n")).toContain(`clients[${takesPrevious.clientId}]`);
     expect(problems.join("\n")).not.toContain(rotated.hash);
-    expect(problems.join("\n")).not.toContain(holder.secretHash);
+    expect(problems.join("\n")).not.toContain(holder.service.secretHash);
     expect(
-      await prisma.service.findUnique({ where: { slug: takesCurrent.slug } })
+      await prisma.service.findUnique({
+        where: { slug: takesCurrent.service.slug },
+      })
     ).toBeNull();
     expect(
       await prisma.oAuthClient.findUnique({
@@ -397,18 +432,18 @@ describe("applyProvisioning", () => {
   });
 
   it("explains how to recover from reusing the previous secret", async () => {
-    const service = serviceSpec();
-    await applyProvisioning(file([service]));
+    const d = serviceDoc();
+    await apply(d);
     const next = newSecret();
-    await applyProvisioning(file([{ ...service, secretHash: next.hash }]));
+    await apply(withService(d, { secretHash: next.hash }));
 
     // A rollback that restores the old value.
-    const problems = await problemsOf(file([service]));
+    const problems = await problemsOf(d);
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toContain(`services[${service.slug}]`);
+    expect(problems[0]).toContain(`${d.file}: services[${d.service.slug}]`);
     expect(problems[0]).toContain("previous secret");
     expect(problems[0]).toContain("generate-secret");
-    expect((await serviceRow(service.slug)).client?.clientSecret).toBe(
+    expect((await serviceRow(d.service.slug)).client?.clientSecret).toBe(
       next.hash
     );
   });
@@ -429,18 +464,14 @@ describe("applyProvisioning", () => {
     expect(handClient.status, JSON.stringify(handClient.body)).toBe(201);
     createdClientIds.push(handClient.body.clientId);
 
-    const fresh = serviceSpec();
+    const fresh = serviceDoc();
     const problems = await problemsOf(
-      file(
-        [
-          serviceSpec({
-            slug: created.body.slug,
-            namespace: created.body.namespace,
-          }),
-          fresh,
-        ],
-        [clientSpec({ clientId: handClient.body.clientId })]
-      )
+      serviceDoc({
+        slug: created.body.slug,
+        namespace: created.body.namespace,
+      }),
+      fresh,
+      clientsDoc(clientSpec({ clientId: handClient.body.clientId }))
     );
     expect(problems).toHaveLength(2);
     expect(problems[0]).toContain(created.body.slug);
@@ -449,29 +480,29 @@ describe("applyProvisioning", () => {
     expect(problems[1]).toContain("not created from the provisioning file");
     // No partial writes: the valid entry was not created either.
     expect(
-      await prisma.service.findUnique({ where: { slug: fresh.slug } })
+      await prisma.service.findUnique({ where: { slug: fresh.service.slug } })
     ).toBeNull();
     expect((await serviceRow(created.body.slug)).provisioned).toBe(false);
   });
 
-  it("marks an entry missing from the file as unprovisioned, and clears it when it returns", async () => {
+  it("marks an entry missing from the set as unprovisioned, and clears it when it returns", async () => {
     const endpoint = await createTestWebhookEndpoint(
       await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
       { eventTypes: ["core.service.updated", "auth.client.updated"] }
     );
-    const service = serviceSpec();
+    const d = serviceDoc();
     const client = clientSpec();
-    await applyProvisioning(file([service], [client]));
+    await apply(d, clientsDoc(client));
 
     const now = new Date();
-    const result = await applyProvisioning(file(), now);
+    const result = await applyProvisioning(setOf(), now);
     expect(result.unprovisioned).toEqual(
       expect.arrayContaining([
-        `service:${service.slug}`,
+        `service:${d.service.slug}`,
         `client:${client.clientId}`,
       ])
     );
-    const s = await serviceRow(service.slug);
+    const s = await serviceRow(d.service.slug);
     const c = await clientRow(client.clientId);
     expect(s.unprovisionedAt).toEqual(now);
     expect(c.unprovisionedAt).toEqual(now);
@@ -493,14 +524,14 @@ describe("applyProvisioning", () => {
     }
 
     // A later start without it keeps the first time it went missing.
-    await applyProvisioning(file(), new Date(now.getTime() + 60_000));
-    expect((await serviceRow(service.slug)).unprovisionedAt).toEqual(now);
+    await applyProvisioning(setOf(), new Date(now.getTime() + 60_000));
+    expect((await serviceRow(d.service.slug)).unprovisionedAt).toEqual(now);
 
-    const back = await applyProvisioning(file([service], [client]));
+    const back = await apply(d, clientsDoc(client));
     expect(back.updated.sort()).toEqual(
-      [`client:${client.clientId}`, `service:${service.slug}`].sort()
+      [`client:${client.clientId}`, `service:${d.service.slug}`].sort()
     );
-    expect((await serviceRow(service.slug)).unprovisionedAt).toBeNull();
+    expect((await serviceRow(d.service.slug)).unprovisionedAt).toBeNull();
     expect((await clientRow(client.clientId)).unprovisionedAt).toBeNull();
   });
 
@@ -514,20 +545,20 @@ describe("applyProvisioning", () => {
       });
 
     it("deactivates a service unprovisioned longer than the grace and revokes its tokens", async () => {
-      const service = serviceSpec();
-      await applyProvisioning(file([service]));
-      await serviceToken(service);
-      const before = await serviceRow(service.slug);
+      const d = serviceDoc();
+      await apply(d);
+      await serviceToken(d);
+      const before = await serviceRow(d.service.slug);
       expect(await liveTokens(before.client!.id)).toBeGreaterThan(0);
 
       const now = new Date();
-      await applyProvisioning(file(), now);
+      await applyProvisioning(setOf(), now);
       const result = await deprovisionMissing(
         new Date(now.getTime() + grace + HOUR)
       );
       expect(result.services).toBeGreaterThanOrEqual(1);
 
-      const row = await serviceRow(service.slug);
+      const row = await serviceRow(d.service.slug);
       expect(row.isActive).toBe(false);
       expect(row.client?.serviceAccountUser?.isActive).toBe(false);
       expect(await liveTokens(row.client!.id)).toBe(0);
@@ -540,11 +571,11 @@ describe("applyProvisioning", () => {
 
     it("deletes a login client unprovisioned longer than the grace", async () => {
       const client = clientSpec();
-      await applyProvisioning(file([], [client]));
+      await apply(clientsDoc(client));
       const id = (await clientRow(client.clientId)).id;
 
       const now = new Date();
-      await applyProvisioning(file(), now);
+      await applyProvisioning(setOf(), now);
       const result = await deprovisionMissing(
         new Date(now.getTime() + grace + HOUR)
       );
@@ -561,72 +592,94 @@ describe("applyProvisioning", () => {
       expect(audit?.userId).toBe(SYSTEM_USER_ID);
 
       // Nothing of it is left to conflict with the entry returning.
-      const back = await applyProvisioning(file([], [client]));
+      const back = await apply(clientsDoc(client));
       expect(back.created).toContain(`client:${client.clientId}`);
     });
 
     it("leaves entries inside the grace untouched", async () => {
-      const service = serviceSpec();
+      const d = serviceDoc();
       const client = clientSpec();
-      await applyProvisioning(file([service], [client]));
-      await serviceToken(service);
+      await apply(d, clientsDoc(client));
+      await serviceToken(d);
 
       const now = new Date();
-      await applyProvisioning(file(), now);
+      await applyProvisioning(setOf(), now);
       await deprovisionMissing(new Date(now.getTime() + grace - HOUR));
 
-      const row = await serviceRow(service.slug);
+      const row = await serviceRow(d.service.slug);
       expect(row.isActive).toBe(true);
       expect(await liveTokens(row.client!.id)).toBeGreaterThan(0);
       await clientRow(client.clientId);
     });
 
-    it("reactivates a deactivated service when it returns to the file", async () => {
-      const service = serviceSpec();
-      await applyProvisioning(file([service]));
+    it("reactivates a deactivated service when it returns to the set", async () => {
+      const d = serviceDoc();
+      await apply(d);
       const now = new Date();
-      await applyProvisioning(file(), now);
+      await applyProvisioning(setOf(), now);
       await deprovisionMissing(new Date(now.getTime() + grace + HOUR));
-      expect((await serviceRow(service.slug)).isActive).toBe(false);
+      expect((await serviceRow(d.service.slug)).isActive).toBe(false);
 
-      const back = await applyProvisioning(file([service]));
-      expect(back.updated).toContain(`service:${service.slug}`);
-      const row = await serviceRow(service.slug);
+      const back = await apply(d);
+      expect(back.updated).toContain(`service:${d.service.slug}`);
+      const row = await serviceRow(d.service.slug);
       expect(row.isActive).toBe(true);
       expect(row.unprovisionedAt).toBeNull();
       expect(row.client?.serviceAccountUser?.isActive).toBe(true);
-      expect(await fetchToken(service.clientId, service.plainSecret)).toBe(200);
+      expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(200);
     });
   });
 
-  it("applies once when two starts race", async () => {
-    const service = serviceSpec();
+  it("applies once when two applies race", async () => {
+    const owner = serviceDoc();
+    Object.assign(owner.service, ownerDeclaration(owner.service.namespace));
+    const consumer = serviceDoc({
+      access: { roles: [roleTarget(owner)], audiences: [owner.service.slug] },
+    });
     const client = clientSpec();
-    const p = file([service], [client]);
+    const set = setOf(owner, consumer, clientsDoc(client));
     const [a, b] = await Promise.all([
-      applyProvisioning(p),
-      applyProvisioning(p),
+      applyProvisioning(set),
+      applyProvisioning(set),
     ]);
     expect([...a.created, ...b.created].sort()).toEqual(
-      [`client:${client.clientId}`, `service:${service.slug}`].sort()
+      [
+        `client:${client.clientId}`,
+        `service:${owner.service.slug}`,
+        `service:${consumer.service.slug}`,
+      ].sort()
     );
-    const row = await serviceRow(service.slug);
+    expect([...a.declared, ...b.declared].sort()).toEqual(
+      [
+        `service:${owner.service.slug}`,
+        `service:${consumer.service.slug}`,
+      ].sort()
+    );
+    const row = await serviceRow(owner.service.slug);
     const entries = await prisma.auditLogEntry.count({
       where: { entityId: row.id, action: "CREATE" },
     });
     expect(entries).toBe(1);
+    const c = await serviceRow(consumer.service.slug);
+    const approvals = await prisma.auditLogEntry.count({
+      where: {
+        entityId: c.id,
+        metadata: { path: ["action"], equals: "access_approved" },
+      },
+    });
+    expect(approvals).toBe(1);
   });
 
   it("refuses admin edits to a provisioned client or service with 409 managed_by_provisioning", async () => {
-    const service = serviceSpec();
+    const d = serviceDoc();
     const secret = newSecret();
     const client = clientSpec({
       clientType: "confidential",
       secretEnv: "APP_SECRET",
       secretHash: secret.hash,
     });
-    await applyProvisioning(file([service], [client]));
-    const s = await serviceRow(service.slug);
+    await apply(d, clientsDoc(client));
+    const s = await serviceRow(d.service.slug);
     const c = await clientRow(client.clientId);
 
     const attempts = [
@@ -641,7 +694,7 @@ describe("applyProvisioning", () => {
       expect(res.body.error).toBe("managed_by_provisioning");
     }
     expect((await clientRow(client.clientId)).name).toBe(client.name);
-    expect((await serviceRow(service.slug)).name).toBe(service.name);
+    expect((await serviceRow(d.service.slug)).name).toBe(d.service.name);
 
     const shown = await api("GET", `/v1/admin/clients/${c.id}`);
     expect(shown.body.provisioned).toBe(true);
@@ -650,12 +703,12 @@ describe("applyProvisioning", () => {
   });
 
   it("lets an admin end a provisioned service's secret overlap at once", async () => {
-    const service = serviceSpec();
-    await applyProvisioning(file([service]));
+    const d = serviceDoc();
+    await apply(d);
     const next = newSecret();
-    await applyProvisioning(file([{ ...service, secretHash: next.hash }]));
-    expect(await fetchToken(service.clientId, service.plainSecret)).toBe(200);
-    const s = await serviceRow(service.slug);
+    await apply(withService(d, { secretHash: next.hash }));
+    expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(200);
+    const s = await serviceRow(d.service.slug);
 
     const res = await api(
       "POST",
@@ -663,180 +716,290 @@ describe("applyProvisioning", () => {
     );
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.provisioned).toBe(true);
-    expect((await serviceRow(service.slug)).client?.previousSecretHash).toBe(
+    expect((await serviceRow(d.service.slug)).client?.previousSecretHash).toBe(
       null
     );
-    expect(await fetchToken(service.clientId, service.plainSecret)).toBe(401);
-    expect(await fetchToken(service.clientId, next.plain)).toBe(200);
+    expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(401);
+    expect(await fetchToken(d.service.clientId, next.plain)).toBe(200);
   });
 
-  it("still lets an admin approve or revoke a provisioned service's access", async () => {
-    const service = serviceSpec();
-    const other = serviceSpec();
-    await applyProvisioning(file([service, other]));
-    const s = await serviceRow(service.slug);
-    const request = await prisma.serviceAccess.create({
-      data: { serviceId: s.id, kind: "audience", target: other.slug },
-    });
-
-    const approved = await api(
-      "POST",
-      `/v1/admin/services/${s.id}/access/approve`,
-      {
-        ids: [request.id],
-      }
-    );
-    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
-    expect((await serviceRow(service.slug)).client?.audience).toEqual([
-      other.slug,
-    ]);
-
-    const revoked = await api(
-      "POST",
-      `/v1/admin/services/${s.id}/access/revoke`,
-      {
-        ids: [request.id],
-      }
-    );
-    expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
-    expect((await serviceRow(service.slug)).client?.audience).toEqual([]);
-  });
-
-  it("records audit entries as the system user", async () => {
-    const service = serviceSpec();
+  it("records audit entries as the system user, with the document's file and version", async () => {
+    const d = serviceDoc({}, { version: "2.3.4" });
     const client = clientSpec();
-    await applyProvisioning(file([service], [client]));
+    await apply(d, clientsDoc(client));
     const ids = [
-      (await serviceRow(service.slug)).id,
+      (await serviceRow(d.service.slug)).id,
       (await clientRow(client.clientId)).id,
     ];
-    const entries = await prisma.auditLogEntry.findMany({
+    const all = await prisma.auditLogEntry.findMany({
       where: { entityId: { in: ids } },
     });
+    for (const entry of all) {
+      expect(entry.userId).toBe(SYSTEM_USER_ID);
+      expect(entry.writerUserId).toBe(SYSTEM_USER_ID);
+    }
+    for (const entry of all.filter((e) => e.entityType === "Service"))
+      expect(entry.metadata).toMatchObject({ file: d.file, version: "2.3.4" });
+    // The service's (empty) declaration is applied too.
+    expect(all.filter((e) => e.action === "UPDATE")).toHaveLength(1);
+    const entries = all.filter((e) => e.action === "CREATE");
     expect(entries.map((e) => e.entityType).sort()).toEqual([
       "OAuthClient",
       "Service",
     ]);
-    for (const entry of entries) {
-      expect(entry.action).toBe("CREATE");
-      expect(entry.userId).toBe(SYSTEM_USER_ID);
-      expect(entry.writerUserId).toBe(SYSTEM_USER_ID);
-    }
+    const service = entries.find((e) => e.entityType === "Service")!;
+    expect(service.metadata).toMatchObject({ file: d.file, version: "2.3.4" });
+    const login = entries.find((e) => e.entityType === "OAuthClient")!;
+    expect(login.metadata).toMatchObject({
+      file: "clients.json",
+      version: "1.0.0",
+    });
   });
 });
 
-describe("pre-approved access", () => {
-  it("does not auto-approve a service the file no longer lists", async () => {
-    const spec = serviceSpec({
-      access: { roles: ["file_user"], audiences: [] },
-    });
-    await applyProvisioning(file([spec]));
-    await applyProvisioning(file([]));
-    expect((await serviceRow(spec.slug)).unprovisionedAt).not.toBeNull();
-
-    const body = await register(spec, { roles: ["file_user"] });
-    expect(statusOf(body, "role", "file_user")).toBe("pending");
-    expect(await holdsRole(spec.slug, "file_user")).toBe(false);
-  });
-
-  it("leaves a pre-approved request for a retired role pending", async () => {
-    const owner = serviceSpec();
-    const role = `${owner.namespace}_item_reader`;
-    const target = `${owner.slug}/${role}`;
-    const consumer = serviceSpec();
-    await applyProvisioning(file([owner, consumer]));
-    await register(
-      owner,
-      {},
-      {
-        permissions: [
-          { name: `${owner.namespace}.items.read`, displayName: "Read" },
-        ],
-        systemRoles: [
-          {
-            name: role,
-            displayName: "Item reader",
-            permissions: [`${owner.namespace}.items.read`],
-          },
-        ],
-      }
-    );
-    await register(consumer, { roles: [target] });
-    const o = await serviceRow(owner.slug);
-    await prisma.role.update({
-      where: { serviceId_name: { serviceId: o.id, name: role } },
-      data: { retiredAt: new Date() },
-    });
-
-    await applyProvisioning(
-      file([owner, { ...consumer, access: { roles: [target], audiences: [] } }])
-    );
-    // register() asserts the registry answers 200.
-    const body = await register(consumer, {}, { version: "1.0.1" });
-    expect(statusOf(body, "role", target)).toBe("pending");
-    const c = await serviceRow(consumer.slug);
-    expect((await accessRow(c.id, "role", target)).decidedAt).toBeNull();
-  });
-
-  it("approves a registered request the file pre-approves", async () => {
-    const spec = serviceSpec({
-      access: { roles: ["file_user"], audiences: [] },
-    });
-    await applyProvisioning(file([spec]));
-
-    const body = await register(spec, { roles: ["file_user"] });
-    expect(statusOf(body, "role", "file_user")).toBe("approved");
-    const s = await serviceRow(spec.slug);
-    const row = await accessRow(s.id, "role", "file_user");
-    expect(row.decidedBy).toBe(SYSTEM_USER_ID);
-    expect(row.decidedAt).not.toBeNull();
-    expect(await holdsRole(spec.slug, "file_user")).toBe(true);
-    const audit = await prisma.auditLogEntry.findFirst({
+describe("declarations", () => {
+  const declaredEntries = (serviceId: string) =>
+    prisma.auditLogEntry.findMany({
       where: {
-        entityId: s.id,
-        metadata: { path: ["action"], equals: "access_approved" },
+        entityId: serviceId,
+        metadata: { path: ["via"], equals: "declaration" },
       },
     });
-    expect(audit?.userId).toBe(SYSTEM_USER_ID);
+
+  it("applies a service's declaration with the document's version", async () => {
+    const d = serviceDoc({}, { version: "1.4.0" });
+    Object.assign(d.service, ownerDeclaration(d.service.namespace));
+    const result = await apply(d);
+    expect(result.declared).toEqual([`service:${d.service.slug}`]);
+
+    const row = await serviceRow(d.service.slug);
+    expect(row.declarationVersion).toBe("1.4.0");
+    expect(row.declarationHash).not.toBeNull();
+    const permission = await prisma.permission.findUniqueOrThrow({
+      where: { name: `${d.service.namespace}.items.read` },
+    });
+    expect(permission.serviceId).toBe(row.id);
+    const role = await prisma.role.findUniqueOrThrow({
+      where: {
+        serviceId_name: {
+          serviceId: row.id,
+          name: `${d.service.namespace}_item_reader`,
+        },
+      },
+      include: { rolePermissions: true },
+    });
+    expect(role.rolePermissions.map((rp) => rp.permissionId)).toEqual([
+      permission.id,
+    ]);
+
+    const [entry] = await declaredEntries(row.id);
+    expect(entry.userId).toBe(SYSTEM_USER_ID);
+    expect(entry.metadata).toMatchObject({ file: d.file, version: "1.4.0" });
   });
 
-  it("leaves a request the file does not list pending", async () => {
-    const spec = serviceSpec({
-      access: { roles: ["file_user"], audiences: [] },
-    });
-    await applyProvisioning(file([spec]));
+  it("skips an unchanged declaration", async () => {
+    const d = serviceDoc();
+    Object.assign(d.service, ownerDeclaration(d.service.namespace));
+    await apply(d);
+    const id = (await serviceRow(d.service.slug)).id;
+    const before = await auditCount([id]);
 
-    const body = await register(spec, {
-      roles: ["file_user", "webhook_publisher"],
-    });
-    expect(statusOf(body, "role", "file_user")).toBe("approved");
-    expect(statusOf(body, "role", "webhook_publisher")).toBe("pending");
-    expect(await holdsRole(spec.slug, "webhook_publisher")).toBe(false);
+    const again = await apply(d);
+    expect(again.declared).toEqual([]);
+    expect(await auditCount([id])).toBe(before);
+    expect(await declaredEntries(id)).toHaveLength(1);
   });
 
-  it("approves pending requests already on file when the file starts listing them", async () => {
-    const spec = serviceSpec();
-    await applyProvisioning(file([spec]));
-    const body = await register(spec, { roles: ["file_user"] });
-    expect(statusOf(body, "role", "file_user")).toBe("pending");
+  it("applies a lower version, with a warning", async () => {
+    const d = serviceDoc({}, { version: "1.1.0" });
+    Object.assign(d.service, ownerDeclaration(d.service.namespace));
+    await apply(d);
 
-    await applyProvisioning(
-      file([{ ...spec, access: { roles: ["file_user"], audiences: [] } }])
+    const warn = vi.spyOn(logger, "warn");
+    try {
+      const rollback = withService(
+        d,
+        ownerDeclaration(d.service.namespace, ["read", "write"]),
+        { version: "1.0.0" }
+      );
+      const result = await apply(rollback);
+      expect(result.declared).toEqual([`service:${d.service.slug}`]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          storedVersion: "1.1.0",
+          appliedVersion: "1.0.0",
+        }),
+        "Applied a declaration older than the one applied before"
+      );
+    } finally {
+      warn.mockRestore();
+    }
+    expect((await serviceRow(d.service.slug)).declarationVersion).toBe("1.0.0");
+  });
+
+  it("refuses a declaration naming a permission another service owns", async () => {
+    const first = serviceDoc();
+    await apply(first);
+    const second = serviceDoc();
+    const name = `${second.service.namespace}.items.read`;
+    // Set validation cannot see a row outside the set.
+    await prisma.permission.create({
+      data: {
+        name,
+        displayName: "Read",
+        serviceId: (await serviceRow(first.service.slug)).id,
+      },
+    });
+    second.service.permissions = [
+      { name, displayName: "Read", description: "", orgAssignable: false },
+    ];
+
+    const problems = await problemsOf(first, second);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(
+      `${second.file}: services[${second.service.slug}]`
     );
-    const s = await serviceRow(spec.slug);
-    const row = await accessRow(s.id, "role", "file_user");
-    expect(row.status).toBe("approved");
-    expect(row.decidedBy).toBe(SYSTEM_USER_ID);
-    expect(await holdsRole(spec.slug, "file_user")).toBe(true);
+    expect(problems[0]).toContain(name);
+    expect(
+      await prisma.service.findUnique({ where: { slug: second.service.slug } })
+    ).toBeNull();
+  });
+});
+
+describe("access", () => {
+  it("grants a core role and an audience", async () => {
+    const target = serviceDoc();
+    const d = serviceDoc({
+      access: { roles: ["file_user"], audiences: [target.service.slug] },
+    });
+    const result = await apply(target, d);
+    expect(result.access.length).toBe(2);
+
+    const s = await serviceRow(d.service.slug);
+    expect(await holdsRole(d.service.slug, "file_user")).toBe(true);
+    expect(s.client?.audience).toEqual([target.service.slug]);
+    for (const [kind, name] of [
+      ["role", "file_user"],
+      ["audience", target.service.slug],
+    ] as const) {
+      const row = await accessRow(s.id, kind, name);
+      expect(row.status).toBe("approved");
+      expect(row.decidedBy).toBe(SYSTEM_USER_ID);
+    }
   });
 
-  it("does not re-approve a request an admin revoked", async () => {
-    const spec = serviceSpec({
+  it("grants a mutual pair each other's roles in one apply", async () => {
+    const a = serviceDoc();
+    const b = serviceDoc();
+    Object.assign(a.service, ownerDeclaration(a.service.namespace), {
+      access: { roles: [roleTarget(b)], audiences: [] },
+    });
+    Object.assign(b.service, ownerDeclaration(b.service.namespace), {
+      access: { roles: [roleTarget(a)], audiences: [] },
+    });
+    await apply(a, b);
+
+    for (const [consumer, owner] of [
+      [a, b],
+      [b, a],
+    ]) {
+      expect(
+        await holdsRole(
+          consumer.service.slug,
+          `${owner.service.namespace}_item_reader`
+        )
+      ).toBe(true);
+      const s = await serviceRow(consumer.service.slug);
+      const row = await accessRow(s.id, "role", roleTarget(owner));
+      expect(row.status).toBe("approved");
+      expect(row.decidedBy).toBe(SYSTEM_USER_ID);
+      expect(row.approvedPermissionIds).toHaveLength(1);
+    }
+  });
+
+  it("extends approved access when the role grows", async () => {
+    const owner = serviceDoc();
+    Object.assign(owner.service, ownerDeclaration(owner.service.namespace));
+    const consumer = serviceDoc({
+      access: { roles: [roleTarget(owner)], audiences: [] },
+    });
+    await apply(owner, consumer);
+
+    const grown = withService(
+      owner,
+      ownerDeclaration(owner.service.namespace, ["read", "write"]),
+      { version: "1.1.0" }
+    );
+    const result = await apply(grown, consumer);
+    expect(result.access).toEqual([
+      `service:${consumer.service.slug} extended role:${roleTarget(owner)}`,
+    ]);
+
+    const c = await serviceRow(consumer.service.slug);
+    const row = await accessRow(c.id, "role", roleTarget(owner));
+    expect(row.status).toBe("approved");
+    expect(row.approvedPermissionIds).toHaveLength(2);
+    const held = await prisma.rolePermission.count({
+      where: {
+        permission: { name: `${owner.service.namespace}.items.write` },
+        role: {
+          userRoles: {
+            some: { userId: c.client!.serviceAccountUser!.id },
+          },
+        },
+      },
+    });
+    expect(held).toBe(1);
+    expect(
+      await prisma.auditLogEntry.count({
+        where: {
+          entityId: c.id,
+          metadata: { path: ["action"], equals: "access_requested" },
+        },
+      })
+    ).toBe(0);
+  });
+
+  it("revokes access removed from the set", async () => {
+    const owner = serviceDoc();
+    Object.assign(owner.service, ownerDeclaration(owner.service.namespace));
+    const consumer = serviceDoc({
+      access: {
+        roles: [roleTarget(owner)],
+        audiences: [owner.service.slug],
+      },
+    });
+    await apply(owner, consumer);
+
+    const result = await apply(
+      owner,
+      withService(consumer, { access: { roles: [], audiences: [] } })
+    );
+    expect(result.access.sort()).toEqual(
+      [
+        `service:${consumer.service.slug} revoked audience:${owner.service.slug}`,
+        `service:${consumer.service.slug} revoked role:${roleTarget(owner)}`,
+      ].sort()
+    );
+    const c = await serviceRow(consumer.service.slug);
+    expect((await accessRow(c.id, "role", roleTarget(owner))).status).toBe(
+      "revoked"
+    );
+    expect(
+      await holdsRole(
+        consumer.service.slug,
+        `${owner.service.namespace}_item_reader`
+      )
+    ).toBe(false);
+    expect(c.client?.audience).toEqual([]);
+  });
+
+  it("keeps an admin's revocation while the set lists it", async () => {
+    const d = serviceDoc({
       access: { roles: ["file_user"], audiences: [] },
     });
-    await applyProvisioning(file([spec]));
-    await register(spec, { roles: ["file_user"] });
-    const s = await serviceRow(spec.slug);
+    await apply(d);
+    const s = await serviceRow(d.service.slug);
     const row = await accessRow(s.id, "role", "file_user");
 
     const revoked = await api(
@@ -846,73 +1009,38 @@ describe("pre-approved access", () => {
     );
     expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
 
-    await applyProvisioning(file([spec]));
-    const body = await register(
-      spec,
-      { roles: ["file_user"] },
-      { version: "1.0.1" }
-    );
-    expect(statusOf(body, "role", "file_user")).toBe("revoked");
-    expect(await holdsRole(spec.slug, "file_user")).toBe(false);
+    const again = await apply(d);
+    expect(again.access).toEqual([]);
+    expect((await accessRow(s.id, "role", "file_user")).status).toBe("revoked");
+    expect(await holdsRole(d.service.slug, "file_user")).toBe(false);
   });
 
-  it("does not auto-approve a request reopened because the role gained permissions", async () => {
-    const owner = serviceSpec();
-    const ns = owner.namespace;
-    const role = `${ns}_item_reader`;
-    const target = `${owner.slug}/${role}`;
-    const consumer = serviceSpec({
-      access: { roles: [target], audiences: [] },
+  it("still lets an admin approve or revoke a provisioned service's access", async () => {
+    const d = serviceDoc();
+    const other = serviceDoc();
+    await apply(d, other);
+    const s = await serviceRow(d.service.slug);
+    const request = await prisma.serviceAccess.create({
+      data: { serviceId: s.id, kind: "audience", target: other.service.slug },
     });
-    await applyProvisioning(file([owner, consumer]));
 
-    const ownerDeclaration = (version: string, grants: string[]) => ({
-      version,
-      permissions: [
-        { name: `${ns}.items.read`, displayName: "Read items" },
-        { name: `${ns}.items.write`, displayName: "Write items" },
-      ],
-      systemRoles: [
-        { name: role, displayName: "Item reader", permissions: grants },
-      ],
-    });
-    await register(owner, {}, ownerDeclaration("1.0.0", [`${ns}.items.read`]));
-
-    const body = await register(consumer, { roles: [target] });
-    expect(statusOf(body, "role", target)).toBe("approved");
-
-    await register(
-      owner,
-      {},
-      ownerDeclaration("1.0.1", [`${ns}.items.read`, `${ns}.items.write`])
+    const approved = await api(
+      "POST",
+      `/v1/admin/services/${s.id}/access/approve`,
+      { ids: [request.id] }
     );
-    const c = await serviceRow(consumer.slug);
-    expect((await accessRow(c.id, "role", target)).status).toBe("pending");
-
-    await applyProvisioning(file([owner, consumer]));
-    const again = await register(
-      consumer,
-      { roles: [target] },
-      { version: "1.0.1" }
-    );
-    expect(statusOf(again, "role", target)).toBe("pending");
-    const row = await accessRow(c.id, "role", target);
-    expect(row.status).toBe("pending");
-    expect(row.approvedPermissionIds).toHaveLength(1);
-  });
-
-  it("approves a pre-approved audience, adding it to the service's client audience", async () => {
-    const target = serviceSpec();
-    const spec = serviceSpec({
-      access: { roles: [], audiences: [target.slug] },
-    });
-    await applyProvisioning(file([target, spec]));
-
-    const body = await register(spec, { audiences: [target.slug] });
-    expect(statusOf(body, "audience", target.slug)).toBe("approved");
-    expect((await serviceRow(spec.slug)).client?.audience).toEqual([
-      target.slug,
+    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+    expect((await serviceRow(d.service.slug)).client?.audience).toEqual([
+      other.service.slug,
     ]);
+
+    const revoked = await api(
+      "POST",
+      `/v1/admin/services/${s.id}/access/revoke`,
+      { ids: [request.id] }
+    );
+    expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
+    expect((await serviceRow(d.service.slug)).client?.audience).toEqual([]);
   });
 });
 

@@ -4,7 +4,6 @@ import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { rotatedSecretFields } from "../../../../../utils/clients.js";
 import { CORE_SERVICE_ID } from "../../../../../definitions/index.js";
 import { formatService } from "../../../../../utils/transformers.js";
-import { resolveRoleTarget } from "../../../../../utils/registry.js";
 import { emitTx, logAuditTx } from "../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
@@ -13,8 +12,7 @@ import env from "../../../../../env.js";
 import {
   accessRows,
   approveAccessTx,
-  decideAccessTx,
-  lockedAudience,
+  revokeAccessTx,
   withDeciders,
 } from "../../../../../utils/serviceAccess.js";
 import {
@@ -270,43 +268,9 @@ export const revokeAccess = async (req: Request, res: Response) => {
   const { ids } = validateBody(AccessDecisionSchema, req);
   const service = await getAppService(req);
 
-  const revoked = await db.$transaction(async (tx) => {
-    const rows = (await accessRows(tx, service.id, ids)).filter(
-      (r) => r.status !== "revoked"
-    );
-    const audience = await lockedAudience(tx, service.client.id);
-    for (const row of rows) {
-      if (row.kind === "role") {
-        // A retired role keeps its assignment, which would grant again
-        // should its owner declare the role once more.
-        const role = await resolveRoleTarget(row.target, tx, {
-          includeRetired: true,
-        });
-        if (role) {
-          await tx.userRole.deleteMany({
-            where: {
-              userId: service.accountUserId,
-              roleId: role.id,
-              organizationId: null,
-            },
-          });
-        }
-        // Approving it again approves the role's permissions afresh.
-        await tx.serviceAccess.update({
-          where: { id: row.id },
-          data: { approvedPermissionIds: [] },
-        });
-      } else {
-        audience.delete(row.target);
-      }
-    }
-    await tx.oAuthClient.update({
-      where: { id: service.client.id },
-      data: { audience: [...audience].sort() },
-    });
-    await decideAccessTx(tx, auth, service, rows, "revoked");
-    return rows;
-  });
+  const revoked = await db.$transaction(async (tx) =>
+    revokeAccessTx(tx, auth, service, await accessRows(tx, service.id, ids))
+  );
 
   if (revoked.length > 0) await revokeServiceTokens(service.client.id);
   res.json({

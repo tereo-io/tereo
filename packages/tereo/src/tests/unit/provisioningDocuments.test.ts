@@ -231,6 +231,9 @@ describe("parseDocuments", () => {
       baseEnv()
     );
     expect(across.join("\n")).toContain("used by more than one entry");
+    expect(across.join("\n")).toContain(
+      "a.json: services[vanquished-inventory] and b.json: services[vanquished-orders]"
+    );
 
     const within = problemsOf({
       "a.json": doc({
@@ -240,6 +243,9 @@ describe("parseDocuments", () => {
       }),
     });
     expect(within.join("\n")).toContain("used by more than one entry");
+    expect(within.join("\n")).toContain(
+      "a.json: services[vanquished-inventory] and a.json: services[vanquished-inventory]: webhooks[stock]"
+    );
   });
 
   it("applies the per-client rules", () => {

@@ -522,43 +522,19 @@ export const registerDeclaration = async (
       }
 
       const now = new Date();
-      const summary = {
-        permissions: await applyPermissions(tx, service, declaration, now),
-        systemRoles: await applyRoles(tx, service, declaration, now),
-        buckets: await applyBuckets(tx, service, declaration, now),
-        eventTypes: await applyEventTypes(tx, service, declaration, now),
-      };
       const requested = await applyRequestedAccess(tx, service, declaration);
+      const { summary } = await applyDeclarationTx(
+        tx,
+        service,
+        declaration,
+        actor,
+        now,
+        { requested }
+      );
       await reopenGrownAccess(tx, service, actor, now);
-
-      await tx.service.update({
-        where: { id: service.id },
-        data: {
-          declarationHash: hash,
-          declarationVersion: version,
-          declaredAt: now,
-        },
-      });
-
-      const organizationId = getDefaultOrganizationId();
-      await logAuditTx(tx, {
-        auth: actor,
-        action: "UPDATE",
-        entityType: "Service",
-        entityId: service.id,
-        entityName: service.slug,
-        metadata: { via: "declaration", version, hash, ...summary, requested },
-      });
-      await emitTx(tx, {
-        organizationId,
-        eventType: "core.service.declared",
-        entityType: "Service",
-        entityId: service.id,
-        data: { slug: service.slug, version, hash, ...summary },
-      });
       if (requested.length > 0) {
         await emitTx(tx, {
-          organizationId,
+          organizationId: getDefaultOrganizationId(),
           eventType: "core.service.access-requested",
           entityType: "Service",
           entityId: service.id,
@@ -584,6 +560,96 @@ interface ApplySummary {
   declared: number;
   missing: number;
 }
+
+export interface ApplySummaryByKind {
+  permissions: ApplySummary;
+  systemRoles: ApplySummary;
+  buckets: ApplySummary;
+  eventTypes: ApplySummary;
+}
+
+/**
+ * Write a declaration's permissions, system roles, buckets and event types,
+ * record its hash and version, audit it and emit `core.service.declared`.
+ * Skipped when the stored hash and version are already these. An older
+ * version is applied too, with a warning: callers that must refuse one check
+ * first. Call with the service's registry locked.
+ */
+export const applyDeclarationTx = async (
+  tx: Tx,
+  service: RegistryService,
+  declaration: ParsedDeclaration,
+  actor: { userId: string; email: string | null },
+  now: Date,
+  meta: Record<string, unknown> = {}
+): Promise<{ changed: boolean; summary: ApplySummaryByKind }> => {
+  const { version } = declaration;
+  const hash = declarationHash(declaration);
+  const stored = await tx.service.findUniqueOrThrow({
+    where: { id: service.id },
+    select: { declarationHash: true, declarationVersion: true },
+  });
+  if (
+    stored.declarationHash === hash &&
+    stored.declarationVersion === version
+  ) {
+    const none = { declared: 0, missing: 0 };
+    return {
+      changed: false,
+      summary: {
+        permissions: none,
+        systemRoles: none,
+        buckets: none,
+        eventTypes: none,
+      },
+    };
+  }
+  if (
+    stored.declarationVersion !== null &&
+    compareSemver(version, stored.declarationVersion) < 0
+  ) {
+    logger.warn(
+      {
+        service: service.slug,
+        storedVersion: stored.declarationVersion,
+        appliedVersion: version,
+      },
+      "Applied a declaration older than the one applied before"
+    );
+  }
+
+  const summary = {
+    permissions: await applyPermissions(tx, service, declaration, now),
+    systemRoles: await applyRoles(tx, service, declaration, now),
+    buckets: await applyBuckets(tx, service, declaration, now),
+    eventTypes: await applyEventTypes(tx, service, declaration, now),
+  };
+
+  await tx.service.update({
+    where: { id: service.id },
+    data: {
+      declarationHash: hash,
+      declarationVersion: version,
+      declaredAt: now,
+    },
+  });
+  await logAuditTx(tx, {
+    auth: actor,
+    action: "UPDATE",
+    entityType: "Service",
+    entityId: service.id,
+    entityName: service.slug,
+    metadata: { via: "declaration", ...meta, version, hash, ...summary },
+  });
+  await emitTx(tx, {
+    organizationId: getDefaultOrganizationId(),
+    eventType: "core.service.declared",
+    entityType: "Service",
+    entityId: service.id,
+    data: { slug: service.slug, version, hash, ...summary },
+  });
+  return { changed: true, summary };
+};
 
 /** Declared items clear `missing_since`/`retired_at`; the rest start missing. */
 const present = { missingSince: null, retiredAt: null };

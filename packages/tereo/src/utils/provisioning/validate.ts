@@ -263,10 +263,14 @@ const checkWebhooks = (
         );
         continue;
       }
-      if (type.readPermission && !hasPermission(held, type.readPermission))
+      if (type.readPermission && !hasPermission(held, type.readPermission)) {
+        const own = service.eventTypes.some((e) => e.eventType === event);
         problems.push(
-          `${where}: ${service.slug} could not read ${event} (needs ${type.readPermission}); add a role granting it to access.roles`
+          own
+            ? `${where}: ${service.slug} could not read ${event} (needs ${type.readPermission}); a service's account does not hold its own permissions, so add to access.roles a role of another service or a requestable core role granting it`
+            : `${where}: ${service.slug} could not read ${event} (needs ${type.readPermission}); add a role granting it to access.roles`
         );
+      }
     }
   }
 };

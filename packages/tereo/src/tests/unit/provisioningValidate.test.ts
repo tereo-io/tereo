@@ -463,6 +463,20 @@ describe("validateSet", () => {
     expect(withAccess(["beta-service/beta_reader"])).toEqual([]);
   });
 
+  it("explains that a service cannot read its own event through its own roles", () => {
+    expect(
+      validate(
+        doc("a.json", {
+          service: alpha({
+            webhooks: [{ key: "k", events: ["alpha.item.created"] }],
+          }),
+        })
+      )
+    ).toEqual([
+      "a.json: services[alpha-service]: webhooks[k]: alpha-service could not read alpha.item.created (needs alpha.items.read); a service's account does not hold its own permissions, so add to access.roles a role of another service or a requestable core role granting it",
+    ]);
+  });
+
   it("reads a core event through a requestable core role", () => {
     const withAccess = (roles: string[]) =>
       validate(

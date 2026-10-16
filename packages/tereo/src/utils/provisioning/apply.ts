@@ -1,12 +1,12 @@
-import { assertNamespaceAvailable, namespacesOverlap } from "../registry.js";
 import { disconnectTokenSockets } from "../../websocket/emitters/index.js";
 import { deleteLoginClientTx, rotatedSecretFields } from "../clients.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
-import { approveProvisionedAccess } from "../serviceAccess.js";
+import { syncProvisionedAccessTx } from "../serviceAccess.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma, type Prisma } from "../db/prisma.js";
 import { formatClient } from "../transformers.js";
+import { validateSet } from "./validate.js";
 import { AppError } from "../errors.js";
 import { logger } from "../logger.js";
 import db from "../db/index.js";
@@ -18,10 +18,16 @@ import {
   updateServiceTx,
 } from "../services.js";
 import {
+  applyDeclarationTx,
+  assertNamespaceAvailable,
+  lockRegistries,
+  type ParsedDeclaration,
+} from "../registry.js";
+import {
   ProvisioningError,
-  type ProvisionedClientSpec,
-  type ProvisionedServiceSpec,
-  type Provisioning,
+  type ProvisioningSet,
+  type ResolvedClient,
+  type ResolvedService,
 } from "./load.js";
 
 type Tx = Prisma.TransactionClient;
@@ -33,44 +39,71 @@ export interface ProvisioningResult {
   updated: string[];
   rotated: string[];
   unprovisioned: string[];
+  /** Services whose declaration was applied. */
+  declared: string[];
+  /** Access granted, extended or revoked. */
+  access: string[];
 }
+
+/** An entry with the document it came from. */
+interface FromDocument {
+  file: string;
+  version: string;
+}
+interface ServiceInSet extends FromDocument {
+  service: ResolvedService;
+}
+interface ClientInSet extends FromDocument {
+  client: ResolvedClient;
+}
+
+const entriesOf = (set: ProvisioningSet) => ({
+  services: set.documents.flatMap(({ file, version, service }) =>
+    service ? [{ file, version, service }] : []
+  ),
+  clients: set.documents.flatMap(({ file, version, clients }) =>
+    clients.map((client) => ({ file, version, client }))
+  ),
+});
+
+type Entries = ReturnType<typeof entriesOf>;
+
+const documentMeta = ({ file, version }: FromDocument) => ({ file, version });
 
 const SYSTEM_ACTOR = { userId: SYSTEM_USER_ID, email: null };
 
 const GENERATE_SECRET = "npm run cli -- generate-secret";
 
-const serviceLabel = (s: { slug: string }) => `services[${s.slug}]`;
-const clientLabel = (c: { clientId: string }) => `clients[${c.clientId}]`;
+const serviceLabel = ({ file, service }: ServiceInSet) =>
+  `${file}: services[${service.slug}]`;
+const clientLabel = ({ file, client }: ClientInSet) =>
+  `${file}: clients[${client.clientId}]`;
 
 const sortedUnique = (values: string[]) => [...new Set(values)].sort();
 
-const accessOf = (spec: ProvisionedServiceSpec) => ({
-  roles: sortedUnique(spec.access.roles),
-  audiences: sortedUnique(spec.access.audiences),
-});
-
-const loadState = async (tx: Tx, p: Provisioning) => {
-  const slugs = p.services.map((s) => s.slug);
+const loadState = async (tx: Tx, p: Entries) => {
+  const services = p.services.map((e) => e.service);
+  const clients = p.clients.map((e) => e.client);
+  const slugs = services.map((s) => s.slug);
   const clientIds = [
-    ...p.services.map((s) => s.clientId),
-    ...p.clients.map((c) => c.clientId),
+    ...services.map((s) => s.clientId),
+    ...clients.map((c) => c.clientId),
   ];
   const hashes = [
-    ...p.services.map((s) => s.secretHash),
-    ...p.clients.flatMap((c) => (c.secretHash ? [c.secretHash] : [])),
+    ...services.map((s) => s.secretHash),
+    ...clients.flatMap((c) => (c.secretHash ? [c.secretHash] : [])),
   ];
   // One query at a time: a transaction runs on one connection.
-  const services = await tx.service.findMany({
+  const serviceRows = await tx.service.findMany({
     where: { slug: { in: slugs } },
     include: { client: { include: { serviceAccountUser: true } } },
   });
-  const clients = await tx.oAuthClient.findMany({
+  const clientRows = await tx.oAuthClient.findMany({
     where: { clientId: { in: clientIds } },
     include: { service: { select: { slug: true } } },
   });
-  const allServices = await tx.service.findMany({ select: { slug: true } });
   const scopes = await tx.scope.findMany({
-    where: { name: { in: p.clients.flatMap((c) => c.scopes) } },
+    where: { name: { in: clients.flatMap((c) => c.scopes) } },
     select: { name: true },
   });
   const secretHolders = await tx.oAuthClient.findMany({
@@ -83,9 +116,8 @@ const loadState = async (tx: Tx, p: Provisioning) => {
     select: { id: true, clientSecret: true, previousSecretHash: true },
   });
   return {
-    services: new Map(services.map((s) => [s.slug, s])),
-    clients: new Map(clients.map((c) => [c.clientId, c])),
-    serviceSlugs: new Set(allServices.map((s) => s.slug)),
+    services: new Map(serviceRows.map((s) => [s.slug, s])),
+    clients: new Map(clientRows.map((c) => [c.clientId, c])),
     scopes: new Set(scopes.map((s) => s.name)),
     secretHolders,
   };
@@ -95,7 +127,7 @@ type State = Awaited<ReturnType<typeof loadState>>;
 
 const findProblems = async (
   tx: Tx,
-  p: Provisioning,
+  p: Entries,
   state: State
 ): Promise<string[]> => {
   const problems: string[] = [];
@@ -126,9 +158,9 @@ const findProblems = async (
     }
   };
 
-  const newNamespaces: { label: string; namespace: string }[] = [];
-  for (const spec of p.services) {
-    const label = serviceLabel(spec);
+  for (const entry of p.services) {
+    const spec = entry.service;
+    const label = serviceLabel(entry);
     const existing = state.services.get(spec.slug);
     if (existing && !existing.provisioned) {
       problems.push(
@@ -153,12 +185,6 @@ const findProblems = async (
         if (!(err instanceof AppError)) throw err;
         problems.push(`${label}: ${err.message}`);
       }
-      for (const other of newNamespaces)
-        if (namespacesOverlap(spec.namespace, other.namespace))
-          problems.push(
-            `${label}: namespace "${spec.namespace}" overlaps "${other.namespace}" of ${other.label}`
-          );
-      newNamespaces.push({ label, namespace: spec.namespace });
       const email = serviceAccountEmail(spec.slug);
       if (await tx.user.findUnique({ where: { email } }))
         problems.push(`${label}: a user with email "${email}" already exists`);
@@ -180,9 +206,9 @@ const findProblems = async (
     );
   }
 
-  const fileSlugs = new Set(p.services.map((s) => s.slug));
-  for (const spec of p.clients) {
-    const label = clientLabel(spec);
+  for (const entry of p.clients) {
+    const spec = entry.client;
+    const label = clientLabel(entry);
     const existing = state.clients.get(spec.clientId);
     if (existing && !existing.provisioned) {
       problems.push(
@@ -200,11 +226,6 @@ const findProblems = async (
     for (const scope of sortedUnique(spec.scopes))
       if (!state.scopes.has(scope))
         problems.push(`${label}: scope "${scope}" is not registered`);
-
-    // Services this file creates may be named before they exist.
-    for (const slug of sortedUnique(spec.audience))
-      if (!state.serviceSlugs.has(slug) && !fileSlugs.has(slug))
-        problems.push(`${label}: audience "${slug}" is not a service`);
 
     if (spec.secretEnv && spec.secretHash)
       checkSecret(label, spec.secretEnv, spec.secretHash, existing?.id);
@@ -241,13 +262,14 @@ const serviceRows = <
 
 const applyService = async (
   tx: Tx,
-  spec: ProvisionedServiceSpec,
+  from: ServiceInSet,
   state: State,
   now: Date,
   result: ProvisioningResult
 ) => {
+  const spec = from.service;
+  const meta = documentMeta(from);
   const entry = `service:${spec.slug}`;
-  const access = accessOf(spec);
   const existing = state.services.get(spec.slug);
   if (!existing) {
     await createServiceTx(
@@ -259,7 +281,7 @@ const applyService = async (
         clientId: spec.clientId,
         clientSecretHash: spec.secretHash,
         provisioned: true,
-        provisionedAccess: access,
+        auditMetadata: meta,
       },
       SYSTEM_ACTOR
     );
@@ -268,21 +290,13 @@ const applyService = async (
   }
 
   const changes = computeChanges(
-    {
-      name: existing.name,
-      provisionedAccess: existing.provisionedAccess,
-      unprovisionedAt: existing.unprovisionedAt,
-    },
-    { name: spec.name, provisionedAccess: access, unprovisionedAt: null }
+    { name: existing.name, unprovisionedAt: existing.unprovisionedAt },
+    { name: spec.name, unprovisionedAt: null }
   );
   if (changes) {
     await tx.service.update({
       where: { id: existing.id },
-      data: {
-        name: spec.name,
-        provisionedAccess: access,
-        unprovisionedAt: null,
-      },
+      data: { name: spec.name, unprovisionedAt: null },
     });
     if (existing.client && existing.client.name !== spec.name)
       await tx.oAuthClient.update({
@@ -296,7 +310,7 @@ const applyService = async (
       entityId: existing.id,
       entityName: existing.slug,
       changes,
-      metadata: { action: "provisioned" },
+      metadata: { action: "provisioned", ...meta },
     });
     await emitTx(tx, {
       organizationId: getDefaultOrganizationId(),
@@ -344,7 +358,7 @@ const applyService = async (
       entityType: "Service",
       entityId: existing.id,
       entityName: existing.slug,
-      metadata: { action: "secret_rotated", previousSecretExpiresAt },
+      metadata: { action: "secret_rotated", previousSecretExpiresAt, ...meta },
     });
     await emitTx(tx, {
       organizationId: getDefaultOrganizationId(),
@@ -358,7 +372,7 @@ const applyService = async (
 };
 
 /** What a login client's row holds for its entry, the secret aside. */
-const clientFields = (spec: ProvisionedClientSpec) => ({
+const clientFields = (spec: ResolvedClient) => ({
   name: spec.name,
   clientType: spec.clientType,
   redirectUris: spec.redirectUris,
@@ -371,11 +385,13 @@ const clientFields = (spec: ProvisionedClientSpec) => ({
 
 const applyClient = async (
   tx: Tx,
-  spec: ProvisionedClientSpec,
+  from: ClientInSet,
   state: State,
   now: Date,
   result: ProvisioningResult
 ) => {
+  const spec = from.client;
+  const meta = documentMeta(from);
   const entry = `client:${spec.clientId}`;
   const fields = clientFields(spec);
   const existing = state.clients.get(spec.clientId);
@@ -403,6 +419,7 @@ const applyClient = async (
         scopes: client.scopes,
         audience: client.audience,
         provisioned: true,
+        ...meta,
       },
     });
     await emitTx(tx, {
@@ -463,6 +480,7 @@ const applyClient = async (
       metadata: {
         action: "provisioned",
         ...(secretChange && { secret: secretChange }),
+        ...meta,
       },
     });
     await emitTx(tx, {
@@ -492,6 +510,7 @@ const applyClient = async (
         clientId: existing.clientId,
         action: "secret_rotated",
         previousSecretExpiresAt,
+        ...meta,
       },
     });
     await emitTx(tx, {
@@ -507,7 +526,7 @@ const applyClient = async (
 
 const markMissing = async (
   tx: Tx,
-  p: Provisioning,
+  p: Entries,
   now: Date,
   result: ProvisioningResult
 ) => {
@@ -515,7 +534,7 @@ const markMissing = async (
     where: {
       provisioned: true,
       unprovisionedAt: null,
-      slug: { notIn: p.services.map((s) => s.slug) },
+      slug: { notIn: p.services.map((e) => e.service.slug) },
     },
   });
   for (const service of services) {
@@ -552,7 +571,7 @@ const markMissing = async (
       provisioned: true,
       unprovisionedAt: null,
       service: { is: null },
-      clientId: { notIn: p.clients.map((c) => c.clientId) },
+      clientId: { notIn: p.clients.map((e) => e.client.clientId) },
     },
   });
   for (const client of clients) {
@@ -580,19 +599,112 @@ const markMissing = async (
   }
 };
 
+const declarationOf = (
+  version: string,
+  service: ResolvedService
+): ParsedDeclaration => ({
+  version,
+  permissions: service.permissions,
+  systemRoles: service.systemRoles,
+  buckets: service.buckets,
+  eventTypes: service.eventTypes,
+  requestedAccess: { roles: [], audiences: [] },
+});
+
+/** Runs `write`, turning a refusal it throws into a problem of `label`. */
+const asProblem = async (
+  label: string,
+  problems: string[],
+  write: () => Promise<void>
+) => {
+  try {
+    await write();
+  } catch (err) {
+    if (!(err instanceof AppError)) throw err;
+    problems.push(`${label}: ${err.message}`);
+  }
+};
+
+/** Declarations, then access, which may name roles the declarations add. */
+const applyServicesContent = async (
+  tx: Tx,
+  p: Entries,
+  now: Date,
+  result: ProvisioningResult
+): Promise<{ problems: string[]; revokedClients: string[] }> => {
+  const rows = new Map(
+    (
+      await tx.service.findMany({
+        where: { slug: { in: p.services.map((e) => e.service.slug) } },
+        include: { client: { include: { serviceAccountUser: true } } },
+      })
+    ).map((row) => [row.slug, row])
+  );
+  const problems: string[] = [];
+
+  for (const entry of p.services) {
+    const row = rows.get(entry.service.slug)!;
+    await asProblem(serviceLabel(entry), problems, async () => {
+      const { changed } = await applyDeclarationTx(
+        tx,
+        row,
+        declarationOf(entry.version, entry.service),
+        SYSTEM_ACTOR,
+        now,
+        documentMeta(entry)
+      );
+      if (changed) result.declared.push(`service:${row.slug}`);
+    });
+  }
+  const revokedClients: string[] = [];
+  if (problems.length > 0) return { problems, revokedClients };
+
+  for (const entry of p.services) {
+    const row = rows.get(entry.service.slug)!;
+    const { client, accountUserId } = serviceRows(row);
+    await asProblem(serviceLabel(entry), problems, async () => {
+      const changes = await syncProvisionedAccessTx(
+        tx,
+        { id: row.id, slug: row.slug, accountUserId, client },
+        {
+          roles: sortedUnique(entry.service.access.roles),
+          audiences: sortedUnique(entry.service.access.audiences),
+        },
+        now,
+        documentMeta(entry)
+      );
+      for (const [verb, keys] of Object.entries(changes))
+        for (const key of keys)
+          result.access.push(`service:${row.slug} ${verb} ${key}`);
+      if (changes.revoked.length > 0) revokedClients.push(client.id);
+    });
+  }
+  return { problems, revokedClients };
+};
+
 /**
- * Bring the database in line with the provisioning file, all or nothing:
+ * Bring the database in line with the provisioning set, all or nothing:
  * every problem is reported before anything is written. Serialized, so
  * replicas starting together apply it once.
  */
 export const applyProvisioning = async (
-  p: Provisioning,
+  set: ProvisioningSet,
   now: Date = new Date()
 ): Promise<ProvisioningResult> => {
-  const result = await prisma.$transaction(
+  const invalid = validateSet(set);
+  if (invalid.length > 0) throw new ProvisioningError(invalid);
+  const p = entriesOf(set);
+
+  const { result, revokedClients } = await prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
       const state = await loadState(tx, p);
+      // Before any row is written: the registry route and admin decisions
+      // take these first, then rows.
+      await lockRegistries(
+        tx,
+        [...state.services.values()].map((s) => s.id)
+      );
       const problems = await findProblems(tx, p, state);
       if (problems.length > 0) throw new ProvisioningError(problems);
 
@@ -601,22 +713,23 @@ export const applyProvisioning = async (
         updated: [],
         rotated: [],
         unprovisioned: [],
+        declared: [],
+        access: [],
       };
-      for (const spec of p.services)
-        await applyService(tx, spec, state, now, result);
-      for (const spec of p.clients)
-        await applyClient(tx, spec, state, now, result);
+      for (const entry of p.services)
+        await applyService(tx, entry, state, now, result);
+      const content = await applyServicesContent(tx, p, now, result);
+      if (content.problems.length > 0)
+        throw new ProvisioningError(content.problems);
+      for (const entry of p.clients)
+        await applyClient(tx, entry, state, now, result);
       await markMissing(tx, p, now, result);
-      return result;
+      return { result, revokedClients: content.revokedClients };
     },
-    { timeout: 30_000 }
+    { timeout: 120_000 }
   );
-  // Requests registered before the file listed them.
-  const services = await prisma.service.findMany({
-    where: { slug: { in: p.services.map((s) => s.slug) } },
-    select: { id: true },
-  });
-  for (const service of services) await approveProvisionedAccess(service.id);
+  // Their next token lacks what was revoked.
+  for (const id of revokedClients) await revokeServiceTokens(id);
   return result;
 };
 

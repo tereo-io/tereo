@@ -81,7 +81,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
       await provision().catch((err) => {
         if (err instanceof ProvisioningError)
           for (const problem of err.problems)
-            logger.error({ problem }, "Provisioning file refused");
+            logger.error({ problem }, "Provisioning refused");
         throw err;
       });
       // Moves secrets in table columns off a previous KEK, as loadKeys() did

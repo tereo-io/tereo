@@ -22,22 +22,7 @@ const Text = z.string().min(1, "must not be empty");
 const Name = Text.max(100);
 const ClientId = Text.max(64);
 
-const ServiceEntry = z
-  .object({
-    slug: Slug,
-    name: Name,
-    namespace: Slug.optional(),
-    clientId: ClientId.optional(),
-    secretFrom: EnvName,
-    access: z
-      .object({
-        roles: z.array(Text).default([]),
-        audiences: z.array(Text).default([]),
-      })
-      .strict()
-      .default({ roles: [], audiences: [] }),
-  })
-  .strict();
+const Description = z.string().max(500);
 
 const ClientEntry = z
   .object({
@@ -53,17 +38,9 @@ const ClientEntry = z
       .default(["authorization_code", "refresh_token"]),
     audience: z.array(Text).default([]),
     consentRequired: z.boolean().default(true),
+    description: Description.optional(),
   })
   .strict();
-
-export const ProvisioningFileSchema = z
-  .object({
-    services: z.array(ServiceEntry).default([]),
-    clients: z.array(ClientEntry).default([]),
-  })
-  .strict();
-
-const Description = z.string().max(500);
 
 const WebhookEntry = z
   .object({
@@ -78,7 +55,7 @@ const WebhookEntry = z
   })
   .strict();
 
-const DocumentServiceEntry = z
+const ServiceEntry = z
   .object({
     slug: Slug,
     name: Name,
@@ -99,10 +76,6 @@ const DocumentServiceEntry = z
     webhooks: z.array(WebhookEntry).default([]),
   })
   .strict();
-
-const DocumentClientEntry = ClientEntry.extend({
-  description: Description.optional(),
-}).strict();
 
 const CustomRoleEntry = z
   .object({
@@ -128,8 +101,8 @@ export const ProvisioningDocumentSchema = z
         SEMVER_PATTERN,
         "a semver version: MAJOR.MINOR.PATCH[-prerelease]"
       ),
-    service: DocumentServiceEntry.optional(),
-    clients: z.array(DocumentClientEntry).optional(),
+    service: ServiceEntry.optional(),
+    clients: z.array(ClientEntry).optional(),
     roles: z.array(CustomRoleEntry).optional(),
   })
   .strict()

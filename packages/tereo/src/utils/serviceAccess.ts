@@ -178,7 +178,8 @@ export const decideAccessTx = async (
   actor: AccessActor,
   service: { id: string; slug: string },
   rows: Decided[],
-  status: "approved" | "revoked"
+  status: "approved" | "revoked",
+  meta: Record<string, unknown> = {}
 ) => {
   if (rows.length === 0) return;
   await tx.serviceAccess.updateMany({
@@ -196,7 +197,7 @@ export const decideAccessTx = async (
     entityType: "Service",
     entityId: service.id,
     entityName: service.slug,
-    metadata: { action: `access_${status}`, access: decided },
+    metadata: { action: `access_${status}`, access: decided, ...meta },
   });
   await emitTx(tx, {
     organizationId: getDefaultOrganizationId(),
@@ -222,7 +223,10 @@ export const approveAccessTx = async (
   actor: AccessActor,
   service: AppService,
   ids: string[],
-  { checkGrantable = true }: { checkGrantable?: boolean } = {}
+  {
+    checkGrantable = true,
+    meta,
+  }: { checkGrantable?: boolean; meta?: Record<string, unknown> } = {}
 ): Promise<ServiceAccess[]> => {
   await lockRoleOwners(tx, service.id, ids);
   const rows = (await accessRows(tx, service.id, ids)).filter(
@@ -308,8 +312,158 @@ export const approveAccessTx = async (
     where: { id: service.client.id },
     data: { audience: [...audience].sort() },
   });
-  await decideAccessTx(tx, actor, service, decided, "approved");
+  await decideAccessTx(tx, actor, service, decided, "approved", meta);
   return rows;
+};
+
+/**
+ * Take access away: the role off the service's account, or the audience off
+ * its client. The caller revokes the service's tokens once this commits, so
+ * its next token lacks what was revoked. Rows already revoked are skipped;
+ * returns the rows it revoked.
+ */
+export const revokeAccessTx = async (
+  tx: Tx,
+  actor: AccessActor,
+  service: AppService,
+  rows: ServiceAccess[],
+  meta: Record<string, unknown> = {}
+): Promise<ServiceAccess[]> => {
+  const revoking = rows.filter((r) => r.status !== "revoked");
+  if (revoking.length === 0) return [];
+  const audience = await lockedAudience(tx, service.client.id);
+  for (const row of revoking) {
+    if (row.kind === "role") {
+      // A retired role keeps its assignment, which would grant again
+      // should its owner declare the role once more.
+      const role = await resolveRoleTarget(row.target, tx, {
+        includeRetired: true,
+      });
+      if (role) {
+        await tx.userRole.deleteMany({
+          where: {
+            userId: service.accountUserId,
+            roleId: role.id,
+            organizationId: null,
+          },
+        });
+      }
+      // Approving it again approves the role's permissions afresh.
+      await tx.serviceAccess.update({
+        where: { id: row.id },
+        data: { approvedPermissionIds: [] },
+      });
+    } else {
+      audience.delete(row.target);
+    }
+  }
+  await tx.oAuthClient.update({
+    where: { id: service.client.id },
+    data: { audience: [...audience].sort() },
+  });
+  await decideAccessTx(tx, actor, service, revoking, "revoked", meta);
+  return revoking;
+};
+
+const SYSTEM_ACTOR: AccessActor = { userId: SYSTEM_USER_ID, email: null };
+
+const accessKey = (row: { kind: string; target: string }) =>
+  `${row.kind}:${row.target}`;
+
+/**
+ * Make the service's access what its provisioning document lists, deciding
+ * as core. Listed access missing or pending is approved; approved access to
+ * another service's role follows the role, recording what it grants now;
+ * approved access no longer listed is revoked. A row an admin revoked stays
+ * revoked. Every target must already exist: call after the declarations.
+ * The caller revokes the service's tokens when anything was revoked.
+ */
+export const syncProvisionedAccessTx = async (
+  tx: Tx,
+  service: AppService,
+  wanted: { roles: string[]; audiences: string[] },
+  now: Date,
+  meta: Record<string, unknown> = {}
+): Promise<{ granted: string[]; extended: string[]; revoked: string[] }> => {
+  const want = [
+    ...wanted.roles.map((target) => ({ kind: "role" as const, target })),
+    ...wanted.audiences.map((target) => ({
+      kind: "audience" as const,
+      target,
+    })),
+  ];
+  const wantedKeys = new Set(want.map(accessKey));
+  // An admin's decision locks the client row before the access rows; so
+  // does this, before writing any.
+  await lockedAudience(tx, service.client.id);
+  const existing = await tx.serviceAccess.findMany({
+    where: { serviceId: service.id },
+  });
+  const known = new Set(existing.map(accessKey));
+  await tx.serviceAccess.createMany({
+    data: want
+      .filter((w) => !known.has(accessKey(w)))
+      .map((w) => ({ serviceId: service.id, ...w, requestedAt: now })),
+    skipDuplicates: true,
+  });
+  const rows = await tx.serviceAccess.findMany({
+    where: { serviceId: service.id },
+    orderBy: [{ kind: "asc" }, { target: "asc" }],
+  });
+  const listed = rows.filter((r) => wantedKeys.has(accessKey(r)));
+
+  const pending = listed.filter((r) => r.status === "pending");
+  const approved =
+    pending.length === 0
+      ? []
+      : await approveAccessTx(
+          tx,
+          SYSTEM_ACTOR,
+          service,
+          pending.map((r) => r.id),
+          { checkGrantable: false, meta }
+        );
+
+  const extended: Decided[] = [];
+  for (const row of listed) {
+    if (row.status !== "approved" || !isServiceRole(row)) continue;
+    const role = await resolveRoleTarget(row.target, tx);
+    if (!role) continue;
+    const granted = await tx.rolePermission.findMany({
+      where: { roleId: role.id, permission: { retiredAt: null } },
+      select: { permissionId: true, permission: { select: { name: true } } },
+    });
+    const before = new Set(row.approvedPermissionIds);
+    const ids = granted.map((rp) => rp.permissionId);
+    const added = granted.filter((rp) => !before.has(rp.permissionId));
+    if (ids.length === before.size && added.length === 0) continue;
+    await tx.serviceAccess.update({
+      where: { id: row.id },
+      data: { approvedPermissionIds: ids },
+    });
+    if (added.length > 0)
+      extended.push({
+        ...row,
+        permissions: added.map((rp) => rp.permission.name).sort(),
+      });
+  }
+  await decideAccessTx(tx, SYSTEM_ACTOR, service, extended, "approved", meta);
+
+  const revoked = await revokeAccessTx(
+    tx,
+    SYSTEM_ACTOR,
+    service,
+    rows.filter(
+      (r) => r.status === "approved" && !wantedKeys.has(accessKey(r))
+    ),
+    meta
+  );
+
+  return {
+    granted: approved.map(accessKey),
+    extended: extended.map(accessKey),
+    revoked: revoked.map(accessKey),
+  };
 };
 
 const ProvisionedAccessSchema = z.object({
