@@ -2,6 +2,7 @@ import RemoveUserFromRoleButton from "./buttons/RemoveUserFromRoleButton";
 import ArchiveRestoreRoleButton from "./buttons/ArchiveRestoreRoleButton";
 import ManagePermissionsButton from "./buttons/ManagePermissionsButton";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import DuplicateRoleButton from "./buttons/DuplicateRoleButton";
 import { faLock } from "@fortawesome/free-solid-svg-icons";
 import DeleteRoleButton from "./buttons/DeleteRoleButton";
@@ -143,30 +144,37 @@ export const RoleDetail = () => {
                 <FontAwesomeIcon icon={faLock} /> System
               </Badge>
             )}
+            {role.provisioned && <ProvisionedBadge />}
             {role.retiredAt && <Badge variant="danger">Retired</Badge>}
             {role.archivedAt && <Badge variant="warning">Archived</Badge>}
           </>
         }
-        actions={[
-          // A system role is code-owned: only its 2FA policy is editable
-          // (EditRoleButton limits the form), its permissions are not, and it
-          // can't be archived or deleted (those buttons hide themselves).
-          ...(!canWrite || role.archivedAt || role.retiredAt
-            ? []
-            : [<EditRoleButton key="edit" role={role} />]),
-          ...(!canWrite || role.archivedAt || role.isSystem
-            ? []
-            : [<ManagePermissionsButton key="permissions" role={role} />]),
-          ...(role.archivedAt
-            ? []
-            : [<DuplicateRoleButton key="duplicate" role={role} />]),
-          <ArchiveRestoreRoleButton key="archive" role={role} />,
-          <DeleteRoleButton
-            key="delete"
-            role={role}
-            userCount={usersData?.users.length ?? 0}
-          />,
-        ]}
+        actions={
+          role.provisioned
+            ? [<DuplicateRoleButton key="duplicate" role={role} />]
+            : [
+                // A system role is code-owned: only its 2FA policy is editable
+                // (EditRoleButton limits the form), its permissions are not, and it
+                // can't be archived or deleted (those buttons hide themselves).
+                ...(!canWrite || role.archivedAt || role.retiredAt
+                  ? []
+                  : [<EditRoleButton key="edit" role={role} />]),
+                ...(!canWrite || role.archivedAt || role.isSystem
+                  ? []
+                  : [
+                      <ManagePermissionsButton key="permissions" role={role} />,
+                    ]),
+                ...(role.archivedAt
+                  ? []
+                  : [<DuplicateRoleButton key="duplicate" role={role} />]),
+                <ArchiveRestoreRoleButton key="archive" role={role} />,
+                <DeleteRoleButton
+                  key="delete"
+                  role={role}
+                  userCount={usersData?.users.length ?? 0}
+                />,
+              ]
+        }
       />
       <Row>
         <Col>

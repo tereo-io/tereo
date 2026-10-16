@@ -50,7 +50,7 @@ All of these live in `packages/tereo/src/definitions/` and are registered on eve
       *Permissions* section of `packages/tereo/docs/{area}.md`
 - [ ] Event type: a webhook definition in the OpenAPI spec (`openapi/paths/{area}/` + the root `webhooks:`), and
       `packages/tereo/docs/webhooks.md` if delivery changes
-- [ ] Registration rules (namespaces, approval, retirement): `packages/tereo/docs/registry.md`
+- [ ] Declaration rules (namespaces, access, retirement) and the provisioning documents (`provisioning.md`): `packages/tereo/docs/registry.md`
 
 ### Webhook / Audit Changes
 
@@ -67,7 +67,7 @@ All of these live in `packages/tereo/src/definitions/` and are registered on eve
 
 ### SDK Changes (`@tereo-io/sdk`)
 
-- [ ] `packages/tereo-sdk/README.md` — usage, registration, outbox, the layout table
+- [ ] `packages/tereo-sdk/README.md` — usage, provisioning types, outbox, the layout table
 - [ ] Per-area notes: `packages/tereo-sdk/docs/{auth,files,webhooks,audit}.md`
 - [ ] Root `CLAUDE.md` *Where this is heading* if the SDK's shape changes
 

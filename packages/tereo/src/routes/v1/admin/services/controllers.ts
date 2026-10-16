@@ -81,14 +81,11 @@ export const listServices = async (req: Request, res: Response) => {
   const page = buildCursorPageResponse(result, query);
   res.json({
     ...page,
-    data: page.data.map(({ _count, ...service }) => ({
-      ...formatService(service),
-      pendingAccessCount: _count.access,
-    })),
+    data: page.data.map(formatService),
   });
 };
 
-/** Access requests across every service — the approval inbox. */
+/** Access rows across every service. */
 export const listServiceAccess = async (req: Request, res: Response) => {
   const query = validateQuery(ListServiceAccessQuerySchema, req);
   const result = await db.services.getAccessPaginated({

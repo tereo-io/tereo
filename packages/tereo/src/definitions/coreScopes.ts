@@ -12,13 +12,7 @@ export const CORE_AUDIENCE = CORE_SERVICE.slug;
  * `notifications` has no scope: only core's UI and services reach it.
  */
 export type CoreArea =
-  | "account"
-  | "admin"
-  | "audit"
-  | "files"
-  | "registry"
-  | "webhooks"
-  | "notifications";
+  "account" | "admin" | "audit" | "files" | "webhooks" | "notifications";
 
 export interface CoreScope {
   name: string;
@@ -46,8 +40,7 @@ const ADMIN_DOMAINS = [
 /**
  * Scopes a client other than core's own UI or a service needs to call core's
  * API for its user. Two per area — everything the user may do there, or only
- * reading — and one for the user's own account. `/registry` has none: only
- * services declare.
+ * reading — and one for the user's own account.
  */
 export const CORE_SCOPES: readonly CoreScope[] = [
   {

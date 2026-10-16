@@ -4,7 +4,7 @@
 are SDK-level in `src/types/files.ts` and re-exported from the transport types in
 `src/requests/files/*/types.ts`; all are exported from the package root.
 
-Buckets a service owns are declared in its [registration](registry.md) (`<namespace>-…`); the
+Buckets a service owns are declared in its [provisioning document](provisioning.md) (`<namespace>-…`); the
 service needs the `file_user` role, and whatever bucket permissions an admin grants it.
 
 ## Addressing

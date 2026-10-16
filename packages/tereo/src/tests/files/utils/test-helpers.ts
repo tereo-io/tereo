@@ -246,13 +246,34 @@ export function getTestUserId(): string {
  * other test suites running in parallel.
  */
 export async function cleanupTestEntities() {
-  if (testBucketIds.length === 0) return; // Nothing to clean up
+  await removeBuckets(testBucketIds);
+  testBucketIds.length = 0;
+}
 
+/**
+ * Global cleanup for all test entities
+ * Should only be called in global teardown after all tests complete
+ * Cleans up any leftover test buckets (e.g., from failed tests)
+ */
+export async function cleanupAllTestEntities() {
+  const allTestBuckets = await prisma.bucket.findMany({
+    where: { name: { startsWith: "test-bucket-" } },
+    select: { id: true },
+  });
+  await removeBuckets(allTestBuckets.map((b) => b.id));
+}
+
+/**
+ * Deletes the buckets with their objects, and each content blob no longer
+ * referenced, row and file. A blob row left behind outlives the run: the next
+ * upload of the same content shares it, so its file must stay readable.
+ */
+export async function removeBuckets(bucketIds: number[]) {
+  if (bucketIds.length === 0) return;
   const fs = await import("fs/promises");
 
-  // Collect blob hashes referenced by any version under the tracked buckets.
   const versions = await prisma.objectVersion.findMany({
-    where: { object: { bucketId: { in: testBucketIds } } },
+    where: { object: { bucketId: { in: bucketIds } } },
     select: { contentBlobHash: true },
   });
   const hashes = new Set(
@@ -263,67 +284,10 @@ export async function cleanupTestEntities() {
 
   // Cascade wipe: buckets → objects → versions + access logs + multipart rows.
   await prisma.bucketPermission
-    .deleteMany({ where: { bucketId: { in: testBucketIds } } })
+    .deleteMany({ where: { bucketId: { in: bucketIds } } })
     .catch(() => {});
   await prisma.bucket
-    .deleteMany({ where: { id: { in: testBucketIds } } })
-    .catch(() => {});
-
-  // Drop any ContentBlob rows that are no longer referenced, along with their files.
-  for (const hash of hashes) {
-    try {
-      const stillReferenced = await prisma.objectVersion.count({
-        where: { contentBlobHash: hash },
-      });
-      if (stillReferenced === 0) {
-        const blob = await prisma.contentBlob.findUnique({ where: { hash } });
-        if (blob) {
-          await fs.unlink(blob.fsPath).catch(() => {});
-          await prisma.contentBlob.delete({ where: { hash } }).catch(() => {});
-        }
-      }
-    } catch {
-      // Ignore cleanup errors
-    }
-  }
-
-  // Reset tracking
-  testBucketIds.length = 0;
-}
-
-/**
- * Global cleanup for all test entities
- * Should only be called in global teardown after all tests complete
- * Cleans up any leftover test buckets (e.g., from failed tests)
- */
-export async function cleanupAllTestEntities() {
-  const fs = await import("fs/promises");
-
-  // Find ALL test buckets by naming pattern
-  const allTestBuckets = await prisma.bucket.findMany({
-    where: { name: { startsWith: "test-bucket-" } },
-    select: { id: true },
-  });
-
-  const allBucketIds = allTestBuckets.map((b) => b.id);
-
-  if (allBucketIds.length === 0) return; // Nothing to clean up
-
-  const versions = await prisma.objectVersion.findMany({
-    where: { object: { bucketId: { in: allBucketIds } } },
-    select: { contentBlobHash: true },
-  });
-  const hashes = new Set(
-    versions
-      .map((v) => v.contentBlobHash)
-      .filter((h): h is string => h !== null)
-  );
-
-  await prisma.bucketPermission
-    .deleteMany({ where: { bucketId: { in: allBucketIds } } })
-    .catch(() => {});
-  await prisma.bucket
-    .deleteMany({ where: { id: { in: allBucketIds } } })
+    .deleteMany({ where: { id: { in: bucketIds } } })
     .catch(() => {});
 
   for (const hash of hashes) {

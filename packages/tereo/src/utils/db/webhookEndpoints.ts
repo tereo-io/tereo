@@ -7,8 +7,12 @@ import { prisma } from "./prisma.js";
 import { v7 as uuidv7 } from "uuid";
 
 export interface CreateWebhookEndpointInput {
-  organizationId: string;
+  /** Null, with an owner, for an endpoint sent every organization's events. */
+  organizationId: string | null;
   createdBy: string;
+  ownerServiceId?: string | null;
+  provisioned?: boolean;
+  provisioningKey?: string | null;
   url: string;
   description?: string | null;
   eventTypes: string[];
@@ -35,6 +39,7 @@ const include = {
     orderBy: { eventType: "asc" },
   },
   creator: userRefSelect,
+  ownerService: { select: { id: true, slug: true, name: true } },
 } satisfies Prisma.WebhookEndpointInclude;
 
 type EndpointRow = Prisma.WebhookEndpointGetPayload<{
@@ -118,6 +123,9 @@ export const create = async (
       id,
       organizationId: data.organizationId,
       createdBy: data.createdBy,
+      ownerServiceId: data.ownerServiceId ?? null,
+      provisioned: data.provisioned ?? false,
+      provisioningKey: data.provisioningKey ?? null,
       url: data.url,
       description: data.description ?? null,
       signingSecret: secret.sealed,
@@ -237,17 +245,19 @@ export const remove = async (id: string, tx?: Prisma.TransactionClient) => {
 // A null `previousSecretExpiresAt` drops the replaced secret at once. The
 // replaced secret moves as it is stored: both columns share one sealing name.
 // Returns the plaintext new secret, for the one response that shows it.
+// `plaintext` is the new secret when given, otherwise a fresh one.
 export const rotateSecret = async (
   id: string,
   previousSecretExpiresAt: Date | null,
-  tx: Prisma.TransactionClient
+  tx: Prisma.TransactionClient,
+  plaintext?: string
 ) => {
   const [current] = await tx.$queryRaw<{ signing_secret: string }[]>`
     SELECT "signing_secret" FROM "webhooks"."webhook_endpoints"
     WHERE "id" = ${id}::uuid FOR UPDATE`;
   if (!current) throw new NotFoundError("Webhook endpoint not found");
 
-  const secret = await newEndpointSecret(id);
+  const secret = await newEndpointSecret(id, plaintext);
   const endpoint = withEventTypes(
     await tx.webhookEndpoint.update({
       where: { id },
@@ -302,13 +312,17 @@ export const incrementConsecutiveFailures = async (
   });
 };
 
+/** The organization's endpoints, and owned ones sent every organization's events. */
 export const findActiveByOrgAndEvent = async (
   organizationId: string,
   eventType: string
 ) => {
   const rows = await prisma.webhookEndpoint.findMany({
     where: {
-      organizationId,
+      OR: [
+        { organizationId },
+        { organizationId: null, ownerServiceId: { not: null } },
+      ],
       status: "ACTIVE",
       archivedAt: null,
       subscriptions: { some: { eventType } },

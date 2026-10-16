@@ -12,7 +12,7 @@ import {
 } from "@kosmeo-ui/react";
 
 /**
- * Read-only: event types are declared by their services at boot and retire a
+ * Read-only: event types are declared in their services' provisioning documents and retire a
  * day after a service stops declaring them (docs/registry.md).
  */
 export const EventTypeList = () => {

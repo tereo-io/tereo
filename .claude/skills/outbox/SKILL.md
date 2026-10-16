@@ -27,7 +27,7 @@ entry or event exists exactly when the business write commits, and not at all wh
 | Table | `core.outbox` (Prisma model `Outbox`) | the app's own, default `core_outbox`, created by the app's migration |
 | Reaper | `createOutboxReaper` in `worker.ts` (`ROLE=worker` or `all`) | `OutboxClient`, started by `core.start()` |
 | Dispatch | in-process: `emitWithIdempotency` (`utils/processEvent.ts`) | HTTP to core: `audit.logAsync` / `webhooks.emitAsync` |
-| Event types | `definitions/eventTypes.ts` | the service's declaration, sent by `core.register()` |
+| Event types | `definitions/eventTypes.ts` | the service's provisioning document (`service.eventTypes`) |
 
 There is no separate outbox package here, no `outboxClient.ts`, and no
 `initializeOutbox`.
@@ -236,7 +236,7 @@ own** database. The authority is `packages/tereo-sdk/README.md` (section *Outbox
 
    The reaper's SQL is hard-coded to these column names — do not rename them.
 
-2. **Pass `outbox` to `createCoreClient`** and register at boot:
+2. **Pass `outbox` to `createCoreClient`** and start it at boot:
 
 ```typescript
 import { createCoreClient } from "@tereo-io/sdk";
@@ -250,10 +250,16 @@ export const core = createCoreClient({
 });
 
 await core.start();
-await core.register({
-  eventTypes: [{ eventType: "product.item.created", description: "Item created" }],
-  requestedAccess: { roles: ["webhook_publisher", "audit_writer"] },
-});
+```
+
+The event types and the roles (`webhook_publisher`, `audit_writer`) come from the service's
+provisioning document, not from a call at boot:
+
+```json
+{ "version": "1.0.0", "service": { "slug": "product-service", "name": "Product",
+  "secretFrom": "PRODUCT_CLIENT_SECRET",
+  "access": { "roles": ["webhook_publisher", "audit_writer"] },
+  "eventTypes": [{ "eventType": "product.item.created", "description": "Item created" }] } }
 ```
 
 `OutboxOptions`: `db` (required — anything with `$executeRawUnsafe`/`$queryRawUnsafe`: a Prisma
@@ -302,8 +308,6 @@ await prisma.$transaction(async (tx) => {
 
 Same claim query, backoff, dead-lettering and replay as core's, with these differences:
 
-- **Waits for registration.** Nothing is dispatched while a `register()` is still retrying
-  (`canDispatch: () => !registry.isPending()`), so events never reach core before their event types.
 - **Sequential within a batch**, oldest `next_attempt_at` first. A full batch schedules the next pass
   immediately.
 - Two dispatchers, fixed: `audit` → `audit.logAsync`, `webhook` → `webhooks.emitAsync`, each with

@@ -257,11 +257,7 @@ const serviceEvents: EventTypeDefinition[] = [
   },
   {
     eventType: "core.service.declared",
-    description: "Service registered a changed declaration",
-  },
-  {
-    eventType: "core.service.access-requested",
-    description: "Service requested a role or audience awaiting approval",
+    description: "A changed service declaration was applied",
   },
   {
     eventType: "core.service.access-approved",

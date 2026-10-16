@@ -38,7 +38,7 @@ export const ListServiceAccessQuerySchema = createCursorQuerySchema({
   filters: {
     status: {
       operators: ["equals", "in"],
-      schema: z.enum(["pending", "approved", "revoked"]),
+      schema: z.enum(["approved", "revoked"]),
     },
     kind: {
       operators: ["equals", "in"],

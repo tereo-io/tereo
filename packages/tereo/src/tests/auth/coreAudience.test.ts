@@ -306,14 +306,9 @@ describe("a third-party token with core scopes", () => {
     const user = await createTestUser();
     const token = await loginToken(thirdParty, user, "openid core:account");
     expect((await call(token, "/v1/account/me")).status).toBe(HTTP_STATUS.OK);
-    expect(
-      await errorOf(
-        await call(token, "/v1/registry/declaration", {
-          method: "POST",
-          body: "{}",
-        })
-      )
-    ).toBe("insufficient_scope");
+    expect(await errorOf(await call(token, "/v1/admin/users"))).toBe(
+      "insufficient_scope"
+    );
   });
 
   it("is introspected by its own client with the user's live permissions", async () => {

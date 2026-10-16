@@ -1,3 +1,4 @@
+import { getRedisEmitter } from "./redisEmitter.js";
 import { logger } from "../../utils/logger.js";
 import db from "../../utils/db/index.js";
 import type { Server } from "socket.io";
@@ -15,10 +16,12 @@ export const setIO = (ioInstance: IOServer) => {
   io = ioInstance;
 };
 
-export const getIO = (): IOServer => {
-  if (!io) throw new Error("Socket.io not initialized");
-  return io;
-};
+/**
+ * The server, or in a process that never started one (the CLI) an emitter
+ * with the same `to`/`in`/`emit`/`disconnectSockets` over Redis.
+ */
+export const getIO = (): IOServer =>
+  io ?? (getRedisEmitter() as unknown as IOServer);
 
 export const emitPermissionChangeToUser = (
   userId: string,

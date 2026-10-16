@@ -85,7 +85,7 @@ notes as a range; a value outside its range stops core at startup with the varia
 | `TRUST_PROXY` | `loopback` outside production | Required in production. Express `trust proxy`: `loopback`, `linklocal`, `uniquelocal`, a hop count, a comma-separated IP/CIDR list, or `true`/`false`; `true` is refused in production |
 | `CORS_ALLOWED_ORIGINS` | `UI_BASE_URL`'s origin outside production | Comma-separated. Required in production |
 | `SETUP_TOKEN` | generated and logged | 24 characters or more. Core accepts it as the first-boot setup token until setup completes, so setup can run unattended; it is never logged. It replaces any other setup token, so changing or unsetting it before setup completes retires the old one. Compared case-insensitively, ignoring whitespace and hyphens |
-| `PROVISIONING_FILE` | unset | Path of a YAML file declaring the app services and login clients core reconciles at every start, as `provisioned` rows. A file that cannot be applied stops core from starting. Secrets are read from environment variables the file names, never from the file. See [provisioning](provisioning.md) |
+| `PROVISIONING_PATH` | unset | Path of a JSON file, or a directory of `*.json` files, declaring the app services (with what they own and their access and webhooks), login clients and custom roles core applies at every start, as `provisioned` rows. Documents that cannot be applied stop core from starting. Secrets are read from environment variables the documents name, never from the documents. See [provisioning](provisioning.md) |
 | `INTERNAL_NETWORK_CIDRS` | RFC 1918, loopback, `fc00::/7`, `fe80::/10` | Comma-separated CIDRs whose service-account callers, connecting directly (no proxy header), get the general rate limit's internal tier, keyed per client, instead of the external one. Read straight from the environment by `utils/rateLimit.ts`, outside the schema, so a bad entry is logged and skipped rather than refused |
 
 ### Keys
@@ -195,7 +195,7 @@ env (no overlap).
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `REGISTRY_RETIREMENT_GRACE_HOURS` | `24` | 0–8760. How long an item may be missing from a declaration before it retires, and how long a service or login client dropped from the [provisioning file](provisioning.md) lasts before it is deactivated or deleted |
+| `REGISTRY_RETIREMENT_GRACE_HOURS` | `24` | 0–8760. How long an item may be missing from a declaration before it retires, and how long a service, login client or custom role dropped from the [provisioning documents](provisioning.md) lasts before it is deactivated, deleted or archived |
 | `SERVICE_SECRET_OVERLAP_HOURS` | `24` | 0–8760. How long a replaced service secret keeps working |
 
 ### Files

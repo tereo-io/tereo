@@ -3,13 +3,17 @@ import { getTestPrincipalToken } from "../utils/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { CORE_VERSION } from "../../utils/version.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { randomBytes, randomUUID } from "crypto";
 import { CORE_URL } from "../utils/coreUrl.js";
 import { fetchJson } from "../utils/http.js";
-import db from "../../utils/db/index.js";
+import { randomBytes } from "crypto";
 import FormData from "form-data";
 import env from "../../env.js";
 import axios from "axios";
+import {
+  provisionService,
+  provisionServices,
+  type ProvisionSpec,
+} from "../provisioning/utils/test-helpers.js";
 import {
   CORE_DECLARATION,
   CORE_SERVICE_ID,
@@ -91,18 +95,21 @@ const fetchToken = async ({ clientId, clientSecret }: Credentials) => {
   return { status: response.status, token: body.access_token ?? null };
 };
 
-const tokenFor = async (service: AddedService) => {
+const tokenFor = async (service: { credentials: Credentials }) => {
   const { status, token } = await fetchToken(service.credentials);
   expect(status).toBe(200);
   return token!;
 };
 
-const declare = (token: string, declaration: unknown) =>
-  api("POST", "/v1/registry/declaration", token, declaration);
+const newSlug = () => `reg-${rand()}`;
 
-/** A small valid declaration under the service's namespace. */
-const declarationFor = (ns: string, extra: Record<string, unknown> = {}) => ({
-  version: "1.0.0",
+type Declaration = NonNullable<ProvisionSpec["declaration"]>;
+
+/** A small valid declaration under the namespace. */
+const declarationFor = (
+  ns: string,
+  extra: Partial<Declaration> = {}
+): Declaration => ({
   permissions: [
     { name: `${ns}.items.read`, displayName: "Read items" },
     { name: `${ns}.items.write`, displayName: "Write items" },
@@ -120,6 +127,35 @@ const declarationFor = (ns: string, extra: Record<string, unknown> = {}) => ({
   ],
   ...extra,
 });
+
+/** A service provisioned with `declarationFor` its namespace, its slug. */
+const provisionDeclared = (
+  extra: Partial<Declaration> = {},
+  spec: Omit<ProvisionSpec, "declaration"> = {}
+) => {
+  const slug = spec.slug ?? newSlug();
+  return provisionService({
+    ...spec,
+    slug,
+    declaration: declarationFor(spec.namespace ?? slug, extra),
+  });
+};
+
+const accessOf = async (serviceId: string) =>
+  prisma.serviceAccess.findMany({
+    where: { serviceId },
+    orderBy: [{ kind: "asc" }, { target: "asc" }],
+  });
+
+const decide = (
+  serviceId: string,
+  verb: "approve" | "revoke",
+  ids: string[],
+  token = adminToken
+) =>
+  api("POST", `/v1/admin/services/${serviceId}/access/${verb}`, token, {
+    ids,
+  });
 
 const emit = (token: string, eventType: string) =>
   api("POST", "/v1/webhooks/events", token, {
@@ -226,14 +262,10 @@ describe("adding a service", () => {
     expect(deleted.status).toBe(204);
 
     try {
-      const service = await addService({ namespace });
-      const res = await declare(
-        await tokenFor(service),
-        declarationFor(namespace, {
-          buckets: [{ bucketName, policy: "private" }],
-        })
+      const service = await provisionDeclared(
+        { buckets: [{ bucketName, policy: "private" }] },
+        { namespace }
       );
-      expect(res.status, JSON.stringify(res.body)).toBe(200);
 
       const rows = await prisma.bucket.findMany({
         where: { name: bucketName },
@@ -278,16 +310,9 @@ describe("adding a service", () => {
   });
 });
 
-describe("registering a declaration", () => {
-  it("applies it, and an unchanged one is a no-op", async () => {
-    const service = await addService();
-    const token = await tokenFor(service);
-    const declaration = declarationFor(service.namespace);
-
-    const first = await declare(token, declaration);
-    expect(first.status).toBe(200);
-    expect(first.body.changed).toBe(true);
-
+describe("a provisioned service's declaration", () => {
+  it("is applied under the service", async () => {
+    const service = await provisionDeclared();
     const permission = await prisma.permission.findUniqueOrThrow({
       where: { name: `${service.namespace}.items.read` },
     });
@@ -304,59 +329,13 @@ describe("registering a declaration", () => {
       where: { eventType: `${service.namespace}.item.created` },
     });
     expect(eventType.source).toBe(service.slug);
-
-    // Same content, different order: still unchanged.
-    const reordered = {
-      ...declaration,
-      permissions: [...declaration.permissions].reverse(),
-    };
-    const second = await declare(token, reordered);
-    expect(second.status).toBe(200);
-    expect(second.body.changed).toBe(false);
-  });
-
-  it("refuses names outside the namespace, applying nothing", async () => {
-    const service = await addService();
-    const token = await tokenFor(service);
-    const res = await declare(token, {
-      ...declarationFor(service.namespace),
-      permissions: [
-        { name: `${service.namespace}.items.read`, displayName: "Read" },
-        { name: "users.read", displayName: "Hijack" },
-      ],
-      buckets: [{ bucketName: "someone-elses-bucket", policy: "private" }],
-    });
-    expect(res.status).toBe(422);
-    expect(
-      res.body.error_description ?? res.body.message ?? JSON.stringify(res.body)
-    ).toContain("users.read");
-    expect(
-      await prisma.permission.count({ where: { serviceId: service.id } })
-    ).toBe(0);
-  });
-
-  it("refuses a system role granting another service's permission", async () => {
-    const service = await addService();
-    const token = await tokenFor(service);
-    const res = await declare(token, {
-      ...declarationFor(service.namespace),
-      systemRoles: [
-        {
-          name: `${service.namespace}_sneaky`,
-          displayName: "Sneaky",
-          permissions: ["admin"],
-        },
-      ],
-    });
-    expect(res.status).toBe(422);
   });
 
   it("stores an event type's read permission, its own or core's", async () => {
-    const service = await addService();
-    const ns = service.namespace;
-    const res = await declare(
-      await tokenFor(service),
-      declarationFor(ns, {
+    const slug = newSlug();
+    const ns = slug;
+    const service = await provisionDeclared(
+      {
         eventTypes: [
           {
             eventType: `${ns}.item.created`,
@@ -365,9 +344,9 @@ describe("registering a declaration", () => {
           { eventType: `${ns}.user.linked`, readPermission: "users.read" },
           { eventType: `${ns}.item.pinged` },
         ],
-      })
+      },
+      { slug }
     );
-    expect(res.status, JSON.stringify(res.body)).toBe(200);
     const rows = await prisma.eventType.findMany({
       where: { serviceId: service.id },
       orderBy: { eventType: "asc" },
@@ -378,200 +357,47 @@ describe("registering a declaration", () => {
       [`${ns}.user.linked`, "users.read"],
     ]);
   });
-
-  it("refuses an event type read with a permission nobody declares", async () => {
-    const service = await addService();
-    const ns = service.namespace;
-    const res = await declare(
-      await tokenFor(service),
-      declarationFor(ns, {
-        eventTypes: [
-          { eventType: `${ns}.item.created`, readPermission: "nobody.read" },
-        ],
-      })
-    );
-    expect(res.status).toBe(422);
-    expect(JSON.stringify(res.body)).toContain("nobody.read");
-  });
-
-  it("refuses a system role not named under the service's namespace", async () => {
-    const service = await addService();
-    const token = await tokenFor(service);
-    const ns = service.namespace;
-    for (const name of ["admin", "item_reader", `${ns}_`, `${ns}-x_reader`]) {
-      const res = await declare(token, {
-        ...declarationFor(ns),
-        systemRoles: [{ name, displayName: "Unprefixed", permissions: [] }],
-      });
-      expect(res.status, name).toBe(400);
-      expect(res.body.error, name).toBe("invalid_role_name");
-      expect(res.body.error_description, name).toContain(`"${ns}_"`);
-    }
-    expect(
-      await prisma.permission.count({ where: { serviceId: service.id } })
-    ).toBe(0);
-    expect(
-      await prisma.service.findUniqueOrThrow({ where: { id: service.id } })
-    ).toMatchObject({ declarationHash: null });
-  });
-
-  it("ignores a declaration older than the one applied", async () => {
-    const service = await addService();
-    const token = await tokenFor(service);
-    const ns = service.namespace;
-    const withRead = declarationFor(ns, { version: "1.2.0" });
-    const first = await declare(token, withRead);
-    expect(first.body).toMatchObject({ applied: true, changed: true });
-
-    // An older release's replica, restarting after the rollout.
-    const older = await declare(token, {
-      ...withRead,
-      version: "1.2.0-rc.1",
-      permissions: withRead.permissions.slice(0, 1),
-    });
-    expect(older.status).toBe(200);
-    expect(older.body).toMatchObject({ applied: false, changed: false });
-    const write = await prisma.permission.findUniqueOrThrow({
-      where: { name: `${ns}.items.write` },
-    });
-    expect(write.missingSince).toBeNull();
-
-    // The same version applies as before: hash-gated.
-    const same = await declare(token, withRead);
-    expect(same.body).toMatchObject({ applied: true, changed: false });
-
-    // A newer one applies, even with what an older one had dropped.
-    const newer = await declare(token, {
-      ...withRead,
-      version: "1.10.0",
-      permissions: withRead.permissions.slice(0, 1),
-    });
-    expect(newer.body).toMatchObject({ applied: true, changed: true });
-    expect(
-      (
-        await prisma.permission.findUniqueOrThrow({
-          where: { name: `${ns}.items.write` },
-        })
-      ).missingSince
-    ).not.toBeNull();
-    expect(
-      await prisma.service.findUniqueOrThrow({ where: { id: service.id } })
-    ).toMatchObject({ declarationVersion: "1.10.0" });
-
-    // Unchanged content under a newer version moves the version on.
-    const bumped = await declare(token, {
-      ...withRead,
-      version: "2.0.0",
-      permissions: withRead.permissions.slice(0, 1),
-    });
-    expect(bumped.body).toMatchObject({ applied: true, changed: false });
-    expect(
-      (await declare(token, { ...withRead, version: "1.10.0" })).body
-    ).toMatchObject({ applied: false });
-  });
-
-  it("requires a semver version", async () => {
-    const service = await addService();
-    const token = await tokenFor(service);
-    const { version: _, ...unversioned } = declarationFor(service.namespace);
-    expect((await declare(token, unversioned)).status).toBe(400);
-    for (const version of ["1.0", "v1.0.0", "1.0.0+build", "latest"]) {
-      expect(
-        (await declare(token, declarationFor(service.namespace, { version })))
-          .status,
-        version
-      ).toBe(400);
-    }
-  });
-
-  it("is refused to a caller that is not a service", async () => {
-    const res = await declare(adminToken, declarationFor("anything"));
-    expect(res.status).toBe(403);
-  });
-
-  it("applies concurrent identical declarations once", async () => {
-    const service = await addService();
-    const token = await tokenFor(service);
-    const declaration = declarationFor(service.namespace);
-    const results = await Promise.all(
-      Array.from({ length: 4 }, () => declare(token, declaration))
-    );
-    expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200]);
-    expect(results.filter((r) => r.body.changed)).toHaveLength(1);
-  });
 });
 
-describe("requested access", () => {
-  it("stays pending until approved, then works; revoking takes it away", async () => {
-    const service = await addService();
+describe("provisioned access", () => {
+  it("works once applied; revoking takes it away, approving gives it back", async () => {
+    const service = await provisionDeclared(
+      {},
+      { access: { roles: ["webhook_publisher"] } }
+    );
     let token = await tokenFor(service);
     const eventType = `${service.namespace}.item.created`;
 
-    const registered = await declare(
-      token,
-      declarationFor(service.namespace, {
-        requestedAccess: { roles: ["webhook_publisher"] },
-      })
-    );
-    expect(registered.status).toBe(200);
-    expect(registered.body.access).toEqual([
+    const access = await accessOf(service.id);
+    expect(access).toEqual([
       expect.objectContaining({
         kind: "role",
         target: "webhook_publisher",
-        status: "pending",
+        status: "approved",
+        decidedBy: SYSTEM_USER_ID,
       }),
     ]);
-
-    expect((await emit(token, eventType)).status).toBe(403);
-
-    const accessId = registered.body.access[0].id;
-    const approved = await api(
-      "POST",
-      `/v1/admin/services/${service.id}/access/approve`,
-      adminToken,
-      { ids: [accessId] }
-    );
-    expect(approved.status).toBe(200);
-    // Permissions resolve per request: the same token now succeeds.
     expect((await emit(token, eventType)).status).toBe(202);
 
-    // A later declaration that no longer asks keeps the approval.
-    await declare(token, declarationFor(service.namespace));
-    expect((await emit(token, eventType)).status).toBe(202);
-
-    const revoked = await api(
-      "POST",
-      `/v1/admin/services/${service.id}/access/revoke`,
-      adminToken,
-      { ids: [accessId] }
-    );
+    const revoked = await decide(service.id, "revoke", [access[0].id]);
     expect(revoked.status).toBe(200);
     expect((await emit(token, eventType)).status).toBe(401);
     token = await tokenFor(service);
     expect((await emit(token, eventType)).status).toBe(403);
+
+    const approved = await decide(service.id, "approve", [access[0].id]);
+    expect(approved.status).toBe(200);
+    // Permissions resolve per request: the same token now succeeds.
+    expect((await emit(token, eventType)).status).toBe(202);
   });
 
   it("only lets a service emit its own event types", async () => {
-    const owner = await addService();
-    const other = await addService();
-    const ownerToken = await tokenFor(owner);
-    await declare(ownerToken, declarationFor(owner.namespace));
-
+    const owner = await provisionDeclared();
+    const other = await provisionDeclared(
+      {},
+      { access: { roles: ["webhook_publisher"] } }
+    );
     const otherToken = await tokenFor(other);
-    const registered = await declare(
-      otherToken,
-      declarationFor(other.namespace, {
-        requestedAccess: { roles: ["webhook_publisher"] },
-      })
-    );
-    await api(
-      "POST",
-      `/v1/admin/services/${other.id}/access/approve`,
-      adminToken,
-      {
-        ids: registered.body.access.map((a: { id: string }) => a.id),
-      }
-    );
 
     expect(
       (await emit(otherToken, `${other.namespace}.item.created`)).status
@@ -581,78 +407,20 @@ describe("requested access", () => {
     ).toBe(403);
   });
 
-  it("refuses a request for a role that does not exist", async () => {
-    const service = await addService();
-    const token = await tokenFor(service);
-    const res = await declare(
-      token,
-      declarationFor(service.namespace, {
-        requestedAccess: { roles: ["no_such_role", "nobody/role"] },
-      })
-    );
-    expect(res.status).toBe(422);
-  });
-
-  it("refuses a request for a core role that is not requestable", async () => {
-    const service = await addService();
-    const res = await declare(
-      await tokenFor(service),
-      declarationFor(service.namespace, {
-        requestedAccess: { roles: ["admin"] },
-      })
-    );
-    expect(res.status).toBe(422);
-    expect(res.body.error).toBe("invalid_requested_access");
-    expect(res.body.error_description).toContain(
-      'role "admin" cannot be requested by a service'
-    );
-  });
-
-  it.each(["core/admin", "core/platform_admin"])(
-    "refuses %s, a core admin role behind the core/ prefix",
-    async (target) => {
-      const service = await addService();
-      const res = await declare(
-        await tokenFor(service),
-        declarationFor(service.namespace, {
-          requestedAccess: { roles: [target] },
-        })
-      );
-      expect(res.status).toBe(422);
-      expect(res.body.error).toBe("invalid_requested_access");
-      expect(
-        await prisma.serviceAccess.count({ where: { serviceId: service.id } })
-      ).toBe(0);
-    }
-  );
-
-  it("refuses a requestable core role behind the core/ prefix", async () => {
-    const service = await addService();
-    const res = await declare(
-      await tokenFor(service),
-      declarationFor(service.namespace, {
-        requestedAccess: { roles: ["core/file_user"] },
-      })
-    );
-    expect(res.status).toBe(422);
-    expect(res.body.error).toBe("invalid_requested_access");
-    expect(res.body.error_description).toContain("named bare");
-  });
-
   it.each(["admin", "core/admin"])(
     "refuses to approve a %s row that slipped onto file",
     async (target) => {
       const service = await addService();
       await tokenFor(service);
       const row = await prisma.serviceAccess.create({
-        data: { serviceId: service.id, kind: "role", target },
+        data: {
+          serviceId: service.id,
+          kind: "role",
+          target,
+          status: "revoked",
+        },
       });
-      const res = await api(
-        "POST",
-        `/v1/admin/services/${service.id}/access/approve`,
-        adminToken,
-        { ids: [row.id] }
-      );
+      const res = await decide(service.id, "approve", [row.id]);
       expect(res.status).toBe(422);
       expect(
         (
@@ -660,34 +428,16 @@ describe("requested access", () => {
             where: { id: row.id },
           })
         ).status
-      ).toBe("pending");
+      ).toBe("revoked");
     }
   );
 
-  it("still accepts a requestable core role", async () => {
-    const service = await addService();
-    const res = await declare(
-      await tokenFor(service),
-      declarationFor(service.namespace, {
-        requestedAccess: { roles: ["file_user"] },
-      })
-    );
-    expect(res.status).toBe(200);
-    expect(res.body.access).toEqual([
-      expect.objectContaining({ target: "file_user", status: "pending" }),
-    ]);
-  });
-
   it("lets an approved audience introspect the service's tokens", async () => {
-    const issuer = await addService();
-    const resource = await addService();
-    const issuerToken = await tokenFor(issuer);
-    const registered = await declare(
-      issuerToken,
-      declarationFor(issuer.namespace, {
-        requestedAccess: { audiences: [resource.slug] },
-      })
-    );
+    const resourceSlug = newSlug();
+    const [resource, issuer] = await provisionServices([
+      { slug: resourceSlug },
+      { access: { audiences: [resourceSlug] } },
+    ]);
 
     const introspect = async (token: string) => {
       const { clientId, clientSecret } = resource.credentials;
@@ -702,32 +452,21 @@ describe("requested access", () => {
       return ((await response.json()) as { active: boolean }).active;
     };
 
-    expect(await introspect(issuerToken)).toBe(false);
-    await api(
-      "POST",
-      `/v1/admin/services/${issuer.id}/access/approve`,
-      adminToken,
-      {
-        ids: [registered.body.access[0].id],
-      }
-    );
-    // The audience is stamped when the token is issued.
     expect(await introspect(await tokenFor(issuer))).toBe(true);
+    const [row] = await accessOf(issuer.id);
+    await decide(issuer.id, "revoke", [row.id]);
+    // The audience is stamped when the token is issued.
+    expect(await introspect(await tokenFor(issuer))).toBe(false);
   });
 });
 
-describe("approving requested access", () => {
-  const request = async (roles: string[]) => {
-    const service = await addService();
-    const registered = await declare(
-      await tokenFor(service),
-      declarationFor(service.namespace, { requestedAccess: { roles } })
-    );
-    expect(registered.status).toBe(200);
-    return {
-      service,
-      ids: (registered.body.access as { id: string }[]).map((a) => a.id),
-    };
+describe("approving revoked access again", () => {
+  /** A provisioned service whose access to `roles` an admin revoked. */
+  const revokedAccess = async (roles: string[]) => {
+    const service = await provisionService({ access: { roles } });
+    const ids = (await accessOf(service.id)).map((a) => a.id);
+    expect((await decide(service.id, "revoke", ids)).status).toBe(200);
+    return { service, ids };
   };
 
   const accountRoles = async (serviceId: string) => {
@@ -749,21 +488,14 @@ describe("approving requested access", () => {
     const approver = await getTestPrincipalToken({
       permissions: ["services.approve"],
     });
-    const { service, ids } = await request(["webhook_publisher"]);
+    const { service, ids } = await revokedAccess(["webhook_publisher"]);
 
-    const res = await api(
-      "POST",
-      `/v1/admin/services/${service.id}/access/approve`,
-      approver,
-      { ids }
-    );
+    const res = await decide(service.id, "approve", ids, approver);
     expect(res.status).toBe(403);
     expect(res.body.error_description).toContain("webhooks.emit");
 
-    const access = await prisma.serviceAccess.findMany({
-      where: { serviceId: service.id },
-    });
-    expect(access.map((a) => a.status)).toEqual(["pending"]);
+    const access = await accessOf(service.id);
+    expect(access.map((a) => a.status)).toEqual(["revoked"]);
     expect((await accountRoles(service.id)).roles).toEqual([]);
   });
 
@@ -771,14 +503,9 @@ describe("approving requested access", () => {
     const approver = await getTestPrincipalToken({
       permissions: ["services.approve", "webhooks.emit"],
     });
-    const { service, ids } = await request(["webhook_publisher"]);
+    const { service, ids } = await revokedAccess(["webhook_publisher"]);
 
-    const res = await api(
-      "POST",
-      `/v1/admin/services/${service.id}/access/approve`,
-      approver,
-      { ids }
-    );
+    const res = await decide(service.id, "approve", ids, approver);
     expect(res.status).toBe(200);
     expect((await accountRoles(service.id)).roles).toEqual([
       { role: { name: "webhook_publisher" } },
@@ -789,193 +516,36 @@ describe("approving requested access", () => {
     const approver = await getTestPrincipalToken({
       permissions: ["services.approve"],
     });
-    const { service, ids } = await request(["webhook_publisher"]);
+    const { service, ids } = await revokedAccess(["webhook_publisher"]);
     const { userId } = await accountRoles(service.id);
     const role = await prisma.role.findFirstOrThrow({
       where: { name: "webhook_publisher", serviceId: CORE_SERVICE_ID },
     });
     await prisma.userRole.create({ data: { userId, roleId: role.id } });
 
-    const res = await api(
-      "POST",
-      `/v1/admin/services/${service.id}/access/approve`,
-      approver,
-      { ids }
-    );
+    const res = await decide(service.id, "approve", ids, approver);
     expect(res.status).toBe(200);
-  });
-});
-
-describe("access to another service's role", () => {
-  /**
-   * An owner declaring `<ns>_editor` over `grants`, and a consumer whose
-   * request for it an admin approved.
-   */
-  const approvedConsumer = async () => {
-    const owner = await addService();
-    const ownerToken = await tokenFor(owner);
-    const ns = owner.namespace;
-    const roleName = `${ns}_editor`;
-    const declareOwner = (grants: string[]) =>
-      declare(
-        ownerToken,
-        declarationFor(ns, {
-          systemRoles: [
-            {
-              name: roleName,
-              displayName: "Editor",
-              permissions: grants.map((g) => `${ns}.items.${g}`),
-            },
-          ],
-        })
-      );
-    expect((await declareOwner(["read"])).status).toBe(200);
-
-    const consumer = await addService();
-    const target = `${owner.slug}/${roleName}`;
-    const registered = await declare(
-      await tokenFor(consumer),
-      declarationFor(consumer.namespace, {
-        requestedAccess: { roles: [target] },
-      })
-    );
-    expect(registered.status).toBe(200);
-    const accessId = registered.body.access[0].id as string;
-    const approved = await api(
-      "POST",
-      `/v1/admin/services/${consumer.id}/access/approve`,
-      superApprover,
-      { ids: [accessId] }
-    );
-    expect(approved.status).toBe(200);
-
-    const account = await prisma.service.findUniqueOrThrow({
-      where: { id: consumer.id },
-      select: { client: { select: { serviceAccountUser: true } } },
-    });
-    const accountId = account.client!.serviceAccountUser!.id;
-    return {
-      ns,
-      consumer,
-      accessId,
-      declareOwner,
-      permissions: () => db.roles.getUserPermissions(accountId),
-      accessRow: async () =>
-        (
-          await api("GET", `/v1/admin/services/${consumer.id}`, adminToken)
-        ).body.access.find((a: { id: string }) => a.id === accessId),
-    };
-  };
-
-  let superApprover: string;
-  beforeAll(async () => {
-    superApprover = await getTestPrincipalToken({
-      permissions: ["services.approve", "admin"],
-    });
-  });
-
-  it("holds back what the role gains after approval, as a pending request", async () => {
-    const { ns, consumer, accessId, declareOwner, permissions, accessRow } =
-      await approvedConsumer();
-    expect(await permissions()).toEqual([`${ns}.items.read`]);
-
-    expect((await declareOwner(["read", "write"])).status).toBe(200);
-    expect(await permissions()).toEqual([`${ns}.items.read`]);
-    expect(await accessRow()).toMatchObject({
-      status: "pending",
-      approvedPermissions: [`${ns}.items.read`],
-      pendingPermissions: [`${ns}.items.write`],
-    });
-
-    const inbox = await api(
-      "GET",
-      `/v1/admin/services/access?filter[status]=pending&filter[serviceId]=${consumer.id}`,
-      adminToken
-    );
-    expect(inbox.body.data.map((a: { id: string }) => a.id)).toEqual([
-      accessId,
-    ]);
-  });
-
-  it("grants the gain once approved, by an approver who holds it", async () => {
-    const { ns, consumer, accessId, declareOwner, permissions, accessRow } =
-      await approvedConsumer();
-    await declareOwner(["read", "write"]);
-
-    // Holds what was approved before, not what the role gained.
-    const approverId = randomUUID();
-    const partial = await getTestPrincipalToken({
-      userId: approverId,
-      permissions: ["services.approve"],
-    });
-    const read = await prisma.permission.findUniqueOrThrow({
-      where: { name: `${ns}.items.read` },
-    });
-    const holdsRead = await prisma.role.create({
-      data: {
-        name: `holds-read-${rand()}`,
-        displayName: "Holds read",
-        rolePermissions: { create: [{ permissionId: read.id }] },
-      },
-    });
-    await prisma.userRole.create({
-      data: { userId: approverId, roleId: holdsRead.id },
-    });
-    const refused = await api(
-      "POST",
-      `/v1/admin/services/${consumer.id}/access/approve`,
-      partial,
-      { ids: [accessId] }
-    );
-    expect(refused.status).toBe(403);
-    expect(refused.body.error_description).toContain(`${ns}.items.write`);
-    expect(refused.body.error_description).not.toContain(`${ns}.items.read`);
-
-    const approved = await api(
-      "POST",
-      `/v1/admin/services/${consumer.id}/access/approve`,
-      superApprover,
-      { ids: [accessId] }
-    );
-    expect(approved.status).toBe(200);
-    expect(await permissions()).toEqual([
-      `${ns}.items.read`,
-      `${ns}.items.write`,
-    ]);
-    expect(await accessRow()).toMatchObject({
-      status: "approved",
-      approvedPermissions: [`${ns}.items.read`, `${ns}.items.write`],
-      pendingPermissions: [],
-    });
-  });
-
-  it("shrinks with the role, and is approved again once a gain is dropped", async () => {
-    const { ns, declareOwner, permissions, accessRow } =
-      await approvedConsumer();
-    await declareOwner(["read", "write"]);
-    expect((await accessRow()).status).toBe("pending");
-
-    await declareOwner([]);
-    expect(await permissions()).toEqual([]);
-    expect((await accessRow()).status).toBe("approved");
-
-    await declareOwner(["read"]);
-    expect(await permissions()).toEqual([`${ns}.items.read`]);
   });
 });
 
 describe("org-assignable permissions", () => {
   it("stores the flag a declaration gives, false when it gives none", async () => {
-    const service = await addService();
-    const token = await tokenFor(service);
-    const ns = service.namespace;
-    const declaration = declarationFor(ns, {
-      permissions: [
-        { name: `${ns}.items.read`, displayName: "Read", orgAssignable: true },
-        { name: `${ns}.items.write`, displayName: "Write" },
-      ],
-    });
-    expect((await declare(token, declaration)).status).toBe(200);
+    const slug = newSlug();
+    const ns = slug;
+    await provisionDeclared(
+      {
+        permissions: [
+          {
+            name: `${ns}.items.read`,
+            displayName: "Read",
+            orgAssignable: true,
+          },
+          { name: `${ns}.items.write`, displayName: "Write" },
+        ],
+      },
+      { slug }
+    );
+    const service = await prisma.service.findUniqueOrThrow({ where: { slug } });
 
     const flags = await prisma.permission.findMany({
       where: { serviceId: service.id },
@@ -988,16 +558,15 @@ describe("org-assignable permissions", () => {
     ]);
 
     // Changing only the flag is a change.
-    const flipped = await declare(
-      token,
-      declarationFor(ns, {
+    await provisionDeclared(
+      {
         permissions: [
           { name: `${ns}.items.read`, displayName: "Read" },
           { name: `${ns}.items.write`, displayName: "Write" },
         ],
-      })
+      },
+      { slug }
     );
-    expect(flipped.body.changed).toBe(true);
     expect(
       (
         await prisma.permission.findUniqueOrThrow({
@@ -1036,64 +605,50 @@ describe("org-assignable permissions", () => {
 });
 
 describe("services admin API", () => {
-  /** A service with two pending requests: a role and an audience. */
-  const withPendingRequests = async () => {
-    const service = await addService();
-    const audience = await addService();
-    const registered = await declare(
-      await tokenFor(service),
-      declarationFor(service.namespace, {
-        requestedAccess: {
-          roles: ["webhook_publisher"],
-          audiences: [audience.slug],
-        },
-      })
-    );
-    expect(registered.status).toBe(200);
-    return { service, access: registered.body.access as { id: string }[] };
+  /** A provisioned service with two approved access rows: a role and an audience. */
+  const withAccess = async () => {
+    const audienceSlug = newSlug();
+    const [, service] = await provisionServices([
+      { slug: audienceSlug },
+      {
+        access: { roles: ["webhook_publisher"], audiences: [audienceSlug] },
+      },
+    ]);
+    const access = await accessOf(service.id);
+    expect(access).toHaveLength(2);
+    return { service, access };
   };
 
-  it("counts each service's pending requests in the list", async () => {
-    const { service, access } = await withPendingRequests();
-    const findCount = async () => {
-      const res = await api(
-        "GET",
-        `/v1/admin/services?filter[slug]=${service.slug}&filter[slug_op]=equals`,
-        adminToken
-      );
-      expect(res.status).toBe(200);
-      expect(res.body.data).toHaveLength(1);
-      return res.body.data[0].pendingAccessCount;
-    };
-    expect(await findCount()).toBe(2);
-
-    await api(
-      "POST",
-      `/v1/admin/services/${service.id}/access/approve`,
-      adminToken,
-      { ids: [access[0].id] }
-    );
-    expect(await findCount()).toBe(1);
-  });
-
-  it("lists access requests across services, filtered and paginated", async () => {
-    const first = await withPendingRequests();
-    const second = await withPendingRequests();
-
-    const pending = await api(
+  it("lists services without a count of requests", async () => {
+    const service = await provisionService();
+    const res = await api(
       "GET",
-      "/v1/admin/services/access?filter[status]=pending&limit=200",
+      `/v1/admin/services?filter[slug]=${service.slug}&filter[slug_op]=equals`,
       adminToken
     );
-    expect(pending.status).toBe(200);
-    const ids = pending.body.data.map((a: { id: string }) => a.id);
-    for (const a of [...first.access, ...second.access]) {
-      expect(ids).toContain(a.id);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0]).not.toHaveProperty("pendingAccessCount");
+  });
+
+  it("lists access by service and status, a page at a time", async () => {
+    const first = await withAccess();
+    const second = await withAccess();
+
+    const approvedOf = (serviceId: string) =>
+      api(
+        "GET",
+        `/v1/admin/services/access?filter[status]=approved&filter[serviceId]=${serviceId}`,
+        adminToken
+      );
+    for (const { service, access } of [first, second]) {
+      const approved = await approvedOf(service.id);
+      expect(approved.status).toBe(200);
+      expect(
+        approved.body.data.map((a: { id: string }) => a.id).sort()
+      ).toEqual(access.map((a) => a.id).sort());
     }
-    expect(
-      pending.body.data.every((a: { status: string }) => a.status === "pending")
-    ).toBe(true);
-    const row = pending.body.data.find(
+    const row = (await approvedOf(first.service.id)).body.data.find(
       (a: { id: string }) => a.id === first.access[0].id
     );
     expect(row.service).toEqual({
@@ -1101,9 +656,9 @@ describe("services admin API", () => {
       slug: first.service.slug,
       name: expect.any(String),
     });
-    expect(row.decidedByEmail).toBeNull();
+    expect(row).not.toHaveProperty("pendingPermissions");
 
-    // One service's requests, a page at a time.
+    // One service's access, a page at a time.
     const seen: string[] = [];
     let cursor: string | null = null;
     do {
@@ -1121,18 +676,13 @@ describe("services admin API", () => {
     } while (cursor);
     expect(seen.sort()).toEqual(first.access.map((a) => a.id).sort());
 
-    await api(
-      "POST",
-      `/v1/admin/services/${first.service.id}/access/approve`,
-      adminToken,
-      { ids: [first.access[0].id] }
-    );
-    const approved = await api(
+    await decide(first.service.id, "revoke", [first.access[0].id]);
+    const revoked = await api(
       "GET",
-      `/v1/admin/services/access?filter[status]=approved&filter[serviceId]=${first.service.id}`,
+      `/v1/admin/services/access?filter[status]=revoked&filter[serviceId]=${first.service.id}`,
       adminToken
     );
-    expect(approved.body.data.map((a: { id: string }) => a.id)).toEqual([
+    expect(revoked.body.data.map((a: { id: string }) => a.id)).toEqual([
       first.access[0].id,
     ]);
   });
@@ -1147,30 +697,29 @@ describe("services admin API", () => {
     expect((await api("GET", "/v1/admin/services/access", null)).status).toBe(
       401
     );
-    expect(
-      (
-        await api(
-          "GET",
-          "/v1/admin/services/access?filter[status]=maybe",
-          adminToken
-        )
-      ).status
-    ).toBe(400);
+    for (const status of ["maybe", "pending"]) {
+      expect(
+        (
+          await api(
+            "GET",
+            `/v1/admin/services/access?filter[status]=${status}`,
+            adminToken
+          )
+        ).status,
+        status
+      ).toBe(400);
+    }
   });
 
   it("names who decided each access row", async () => {
-    const { service, access } = await withPendingRequests();
-    await api(
-      "POST",
-      `/v1/admin/services/${service.id}/access/approve`,
-      adminToken,
-      { ids: [access[0].id] }
-    );
+    const { service, access } = await withAccess();
+    await decide(service.id, "revoke", [access[0].id]);
     const row = await prisma.serviceAccess.findUniqueOrThrow({
       where: { id: access[0].id },
       include: { decider: true },
     });
     expect(row.decider).not.toBeNull();
+    expect(row.decidedBy).not.toBe(SYSTEM_USER_ID);
 
     const detail = await api(
       "GET",
@@ -1186,14 +735,11 @@ describe("services admin API", () => {
       decidedByEmail: row.decider!.email,
       decidedByName: row.decider!.name,
     });
-    const undecided = detail.body.access.find(
+    // Approved by provisioning, as core.
+    const provisioned = detail.body.access.find(
       (a: { id: string }) => a.id === access[1].id
     );
-    expect(undecided).toMatchObject({
-      decidedBy: null,
-      decidedByEmail: null,
-      decidedByName: null,
-    });
+    expect(provisioned).toMatchObject({ decidedBy: SYSTEM_USER_ID });
 
     const listedRow = (
       await api(
@@ -1221,16 +767,18 @@ describe("services admin API", () => {
 });
 
 describe("retirement", () => {
-  it("retires what a declaration drops after the grace period, and restores it on re-declaring", async () => {
-    const service = await addService();
-    const token = await tokenFor(service);
-    const full = declarationFor(service.namespace);
-    await declare(token, full);
+  it("retires what a declaration drops after the grace period, and restores it on declaring it again", async () => {
+    const slug = newSlug();
+    const full = declarationFor(slug);
+    await provisionService({ slug, declaration: full });
 
-    const dropped = `${service.namespace}.items.write`;
-    await declare(token, {
-      ...full,
-      permissions: full.permissions.filter((p) => p.name !== dropped),
+    const dropped = `${slug}.items.write`;
+    await provisionService({
+      slug,
+      declaration: {
+        ...full,
+        permissions: full.permissions!.filter((p) => p.name !== dropped),
+      },
     });
     const missing = await prisma.permission.findUniqueOrThrow({
       where: { name: dropped },
@@ -1250,7 +798,7 @@ describe("retirement", () => {
         .retiredAt
     ).not.toBeNull();
 
-    await declare(token, full);
+    await provisionService({ slug, declaration: full });
     const back = await prisma.permission.findUniqueOrThrow({
       where: { name: dropped },
     });
@@ -1259,23 +807,14 @@ describe("retirement", () => {
   });
 
   it("makes a retired bucket read-only", async () => {
-    const service = await addService();
-    const token = await tokenFor(service);
-    const bucketName = `${service.namespace}-docs`;
-    const withBucket = declarationFor(service.namespace, {
-      buckets: [{ bucketName, policy: "private" }],
-      requestedAccess: { roles: ["file_user"] },
-    });
-    const registered = await declare(token, withBucket);
-    expect(registered.status).toBe(200);
-    await api(
-      "POST",
-      `/v1/admin/services/${service.id}/access/approve`,
-      adminToken,
-      {
-        ids: registered.body.access.map((a: { id: string }) => a.id),
-      }
+    const slug = newSlug();
+    const bucketName = `${slug}-docs`;
+    const access = { roles: ["file_user"] };
+    const service = await provisionDeclared(
+      { buckets: [{ bucketName, policy: "private" }] },
+      { slug, access }
     );
+    const token = await tokenFor(service);
 
     const file = {
       buffer: Buffer.from("hello"),
@@ -1284,7 +823,7 @@ describe("retirement", () => {
     };
     await uploadTestObject(token, bucketName, "a.txt", file);
 
-    await declare(token, { ...withBucket, buckets: [] });
+    await provisionDeclared({ buckets: [] }, { slug, access });
     await retireMissing(new Date(Date.now() + 25 * 60 * 60 * 1000));
 
     const form = new FormData();
@@ -1320,30 +859,16 @@ describe("retirement", () => {
 
 describe("file_user", () => {
   it("reads its own bucket's settings, not another service's", async () => {
-    const declareBucketOwner = async () => {
-      const service = await addService();
-      const token = await tokenFor(service);
-      const registered = await declare(
-        token,
-        declarationFor(service.namespace, {
-          buckets: [
-            { bucketName: `${service.namespace}-docs`, policy: "private" },
-          ],
-          requestedAccess: { roles: ["file_user"] },
-        })
+    const bucketOwner = async () => {
+      const slug = newSlug();
+      const service = await provisionDeclared(
+        { buckets: [{ bucketName: `${slug}-docs`, policy: "private" }] },
+        { slug, access: { roles: ["file_user"] } }
       );
-      await api(
-        "POST",
-        `/v1/admin/services/${service.id}/access/approve`,
-        adminToken,
-        {
-          ids: registered.body.access.map((a: { id: string }) => a.id),
-        }
-      );
-      return { service, token, bucket: `${service.namespace}-docs` };
+      return { token: await tokenFor(service), bucket: `${slug}-docs` };
     };
-    const mine = await declareBucketOwner();
-    const theirs = await declareBucketOwner();
+    const mine = await bucketOwner();
+    const theirs = await bucketOwner();
 
     const own = await api(
       "GET",
@@ -1444,9 +969,7 @@ describe("secrets", () => {
       }
     );
     expect(res.status).toBe(200);
-    expect(
-      (await declare(token, declarationFor(service.namespace))).status
-    ).toBe(401);
+    expect((await api("GET", "/v1/files/buckets", token)).status).toBe(401);
   });
 
   it("keeps a service's client out of /admin/clients", async () => {
@@ -1544,27 +1067,18 @@ describe("concurrent access decisions", () => {
     // Each round races two approvals; without a lock on the client row one
     // would rewrite the audience the other just added.
     for (let round = 0; round < 5; round++) {
-      const issuer = await addService();
-      const [first, second] = [await addService(), await addService()];
-      const registered = await declare(
-        await tokenFor(issuer),
-        declarationFor(issuer.namespace, {
-          requestedAccess: { audiences: [first.slug, second.slug] },
-        })
-      );
-      expect(registered.status).toBe(200);
-      const ids = (registered.body.access as { id: string }[]).map((a) => a.id);
+      const [first, second] = [newSlug(), newSlug()];
+      const [issuer] = await provisionServices([
+        { access: { audiences: [first, second] } },
+        { slug: first },
+        { slug: second },
+      ]);
+      const ids = (await accessOf(issuer.id)).map((a) => a.id);
       expect(ids).toHaveLength(2);
+      expect((await decide(issuer.id, "revoke", ids)).status).toBe(200);
 
       const results = await Promise.all(
-        ids.map((id) =>
-          api(
-            "POST",
-            `/v1/admin/services/${issuer.id}/access/approve`,
-            adminToken,
-            { ids: [id] }
-          )
-        )
+        ids.map((id) => decide(issuer.id, "approve", [id]))
       );
       expect(results.map((r) => r.status)).toEqual([200, 200]);
 
@@ -1572,9 +1086,7 @@ describe("concurrent access decisions", () => {
         where: { clientId: issuer.credentials.clientId },
         select: { audience: true },
       });
-      expect(client.audience).toEqual(
-        expect.arrayContaining([first.slug, second.slug])
-      );
+      expect(client.audience).toEqual(expect.arrayContaining([first, second]));
     }
   });
 });

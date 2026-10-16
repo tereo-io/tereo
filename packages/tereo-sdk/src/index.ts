@@ -15,20 +15,19 @@ export { OutboxClient } from "./clients/outbox.js";
 export { outboxTableSql } from "./utils/outboxSchema.js";
 export type { OutboxOptions, OutboxRow, SqlClient } from "./types/outbox.js";
 
-// --- Registration ---------------------------------------------------------
+// --- Provisioning ----------------------------------------------------------
 
-export { RegistryClient } from "./clients/registry.js";
-export type { RegistryClientOptions } from "./clients/registry.js";
 export type {
-  BucketDeclaration,
-  Declaration,
-  EventTypeDeclaration,
-  PermissionDeclaration,
-  RegistrationResult,
-  RequestedAccess,
-  ServiceAccess,
-  SystemRoleDeclaration,
-} from "./types/registry.js";
+  BucketProvisioning,
+  CustomRole,
+  EventTypeProvisioning,
+  LoginClientProvisioning,
+  PermissionProvisioning,
+  ProvisioningDocument,
+  ServiceProvisioning,
+  SystemRoleProvisioning,
+  WebhookSubscription,
+} from "./types/provisioning.js";
 
 // --- Auth --------------------------------------------------------------------
 

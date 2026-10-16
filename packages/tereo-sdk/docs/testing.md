@@ -22,7 +22,7 @@ In test mode:
 | `core.auth.getOrganization` | A mock organization for any id, with a `code` from the id's last block |
 | `core.files.*` | Every method returns a stub or does nothing — e.g. `downloadObject` returns `Buffer.from("test-file-contents:{bucket}/{key}")` |
 
-`core.audit`, `core.webhooks`, `core.outbox` and `register()` are **not** stubbed: they call core (or,
+`core.audit`, `core.webhooks` and `core.outbox` are **not** stubbed: they call core (or,
 for the outbox, the app's database) as usual. Use the no-op clients below, or drain the outbox
 yourself.
 
@@ -51,8 +51,7 @@ should run without core's audit or webhooks.
 
 The reaper runs on a timer after `core.start()`. For deterministic tests, pass
 `outbox: { db, dispatch: false }` so no timer runs, and call `core.outbox.processBatch()` to drain:
-it claims one batch, dispatches it and returns how many rows it handled. It sends nothing while a
-`register()` is still retrying.
+it claims one batch, dispatches it and returns how many rows it handled.
 
 ## The SDK's own tests
 

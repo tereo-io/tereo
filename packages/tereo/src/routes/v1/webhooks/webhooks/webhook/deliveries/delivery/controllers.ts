@@ -1,6 +1,5 @@
 import { validateOrganizationId } from "../../../../../../../middleware/organizationId.js";
 import { enqueueCommittedDelivery } from "../../../../../../../jobs/webhookQueues.js";
-import { redactUnreadable } from "../../../../../../../utils/webhookAccess.js";
 import { validateParams } from "../../../../../../../utils/validateReq.js";
 import { validateUser } from "../../../../../../../middleware/auth.js";
 import { logAuditTx } from "../../../../../../../utils/outbox.js";
@@ -9,7 +8,10 @@ import { webhookDeliveryIdParamSchema } from "./schemas.js";
 import db from "../../../../../../../utils/db/index.js";
 import { Request, Response } from "express";
 import {
-  NotFoundError,
+  getVisibleEndpoint,
+  redactUnreadable,
+} from "../../../../../../../utils/webhookAccess.js";
+import {
   BadRequestError,
   ArchivedError,
 } from "../../../../../../../utils/errors.js";
@@ -19,10 +21,7 @@ export const getDelivery = async (req: Request, res: Response) => {
   const organizationId = validateOrganizationId(req);
   const { id, deliveryId } = validateParams(webhookDeliveryIdParamSchema, req);
 
-  const endpoint = await db.webhookEndpoints.getById(id);
-  if (endpoint.organizationId !== organizationId) {
-    throw new NotFoundError("Webhook endpoint not found");
-  }
+  await getVisibleEndpoint(id, auth, organizationId);
 
   // Scope the delivery to this endpoint so a caller can't read another
   // endpoint's (or org's) delivery by pairing their own endpoint id with an
@@ -38,10 +37,7 @@ export const retryDelivery = async (req: Request, res: Response) => {
   const organizationId = validateOrganizationId(req);
   const { id, deliveryId } = validateParams(webhookDeliveryIdParamSchema, req);
 
-  const endpoint = await db.webhookEndpoints.getById(id);
-  if (endpoint.organizationId !== organizationId) {
-    throw new NotFoundError("Webhook endpoint not found");
-  }
+  const endpoint = await getVisibleEndpoint(id, auth, organizationId);
   if (endpoint.archivedAt) {
     throw new ArchivedError(
       "Webhook endpoint is archived; restore it before retrying deliveries"

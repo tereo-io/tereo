@@ -147,7 +147,7 @@
 
       **Notes:**
       - On a declared bucket, the declaring service's own grant cannot be revoked
-        (`409 bucket_declared`): its declaration re-applies it on registration
+        (`409 bucket_declared`): its declaration re-applies it when it changes
       - Revoked permissions are soft-deleted (marked with revokedAt timestamp)
 
       An audit log entry is created and, for a bucket in an organization, a

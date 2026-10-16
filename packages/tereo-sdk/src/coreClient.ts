@@ -1,11 +1,9 @@
-import type { Declaration, RegistrationResult } from "./types/registry.js";
 import { NotificationsClient } from "./clients/notifications.js";
 import type { AuthServiceClientConfig } from "./types/auth.js";
 import { WebhookServiceClient } from "./clients/webhooks.js";
 import { createHandler, resetHandler } from "./handler.js";
 import { AuditLogServiceClient } from "./clients/audit.js";
 import { FileServiceClient } from "./clients/files.js";
-import { RegistryClient } from "./clients/registry.js";
 import type { OutboxOptions } from "./types/outbox.js";
 import { AuthServiceClient } from "./clients/auth.js";
 import { OutboxClient } from "./clients/outbox.js";
@@ -45,7 +43,7 @@ export interface CoreClientOptions {
   testMode?: boolean;
   /**
    * Event types `webhooks.emit` accepts, to reject typos before the request.
-   * Taken from the declaration when `register` is called.
+   * Without it, any type is accepted and core decides.
    */
   eventTypes?: string[];
   /**
@@ -67,19 +65,9 @@ export interface CoreClient {
    * core after it commits. Requires the `outbox` option.
    */
   outbox: OutboxClient;
-  /**
-   * Register what this service owns and the access it needs, retrying until
-   * core accepts. Call at every boot, after `start()`; report not-ready until
-   * `isRegistered()`. Rejects only on a declaration core will never accept.
-   */
-  register(declaration: Declaration): Promise<RegistrationResult>;
-  /** True once core has accepted the declaration — the readiness signal. */
-  isRegistered(): boolean;
-  /** Resolves once registered. */
-  whenRegistered(): Promise<RegistrationResult>;
   /** Start the request handler and the file cache. Call once at boot. */
   start(): Promise<void>;
-  /** Stop them, and any registration still retrying; the process may then create another client. */
+  /** Stop them, the reaper and the caches; the process may then create another client. */
   stop(): Promise<void>;
 }
 
@@ -140,13 +128,11 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
   const audit = new AuditLogServiceClient({ source: options.service });
   const webhooks = new WebhookServiceClient({ eventTypes: options.eventTypes });
   const notifications = new NotificationsClient();
-  const registry = new RegistryClient();
   const outbox = options.outbox
     ? new OutboxClient(options.outbox, {
         audit,
         webhooks,
         notifications,
-        canDispatch: () => !registry.isPending(),
       })
     : null;
 
@@ -164,14 +150,6 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
       }
       return outbox;
     },
-    register: (declaration) => {
-      if (!options.eventTypes && declaration.eventTypes) {
-        webhooks.useEventTypes(declaration.eventTypes.map((e) => e.eventType));
-      }
-      return registry.register(declaration);
-    },
-    isRegistered: () => registry.isRegistered(),
-    whenRegistered: () => registry.whenRegistered(),
     start: async () => {
       await handler.start();
       await startFileServiceCache();
@@ -179,7 +157,6 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
       outbox?.start();
     },
     stop: async () => {
-      registry.close();
       await outbox?.stop();
       await audit.close();
       await closeFileServiceCache();

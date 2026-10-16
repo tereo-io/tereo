@@ -9,10 +9,8 @@ compare, is in the [outbox skill](../../../.claude/skills/outbox/SKILL.md).
 ```ts
 const core = createCoreClient({ service: "product-service", redis, outbox: { db: prisma } });
 await core.start();       // starts the reaper
-await core.register({
-  eventTypes: [...],
-  requestedAccess: { roles: ["webhook_publisher", "audit_writer", "notification_sender"] },
-});
+// the service's provisioning document lists its event types and asks for the roles
+// webhook_publisher, audit_writer and notification_sender (see provisioning.md)
 
 await prisma.$transaction(async (tx) => {
   const item = await tx.item.create({ data });
@@ -97,8 +95,7 @@ rows (`WHERE "dead_lettered_at" IS NULL`) for a SQL migration.
 
 Started by `core.start()`, stopped by `core.stop()`. Any number of replicas can run one.
 
-1. Nothing is sent while a `register()` is still retrying.
-2. Claims due rows — oldest `next_attempt_at` first, not dead-lettered, unclaimed or with a stale
+1. Claims due rows — oldest `next_attempt_at` first, not dead-lettered, unclaimed or with a stale
    claim — with `FOR UPDATE SKIP LOCKED`.
 3. Sends them one at a time: `audit` rows via `audit.logAsync`, `webhook` rows via
    `webhooks.emitAsync`, `notification` rows via `notifications.sendAsync`, each with

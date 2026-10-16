@@ -6,7 +6,7 @@ discovery and `/health` stay at the root.
 
 | Area | Mounted at | Covers |
 |------|-----------|--------|
-| Auth | `/oauth`, `/.well-known`, `/v1` | OAuth2 / OpenID Connect, `/.well-known`, `/v1/account`, `/v1/admin` (users, clients, roles, permissions, organizations, settings, services), first-boot `/v1/setup`, `/v1/registry/declaration`, `GET /health` |
+| Auth | `/oauth`, `/.well-known`, `/v1` | OAuth2 / OpenID Connect, `/.well-known`, `/v1/account`, `/v1/admin` (users, clients, roles, permissions, organizations, settings, services), first-boot `/v1/setup`, `GET /health` |
 | Files | `/v1/files` | Buckets, objects, multipart, archives, lifecycle, bucket permissions, shares, signed URLs |
 | Webhooks | `/v1/webhooks` | Webhook endpoints and deliveries, event types, event emission |
 | Audit | `/v1/audit` | Audit log entries |
@@ -52,7 +52,7 @@ openapi/
 │   └── notifications/      # parameters, responses, schemas
 └── paths/
     ├── auth/               # health, well-known, oauth, oauth-upstream, oauth-org-select, account,
-    │   │                   #   account-identities, setup, registry, and admin:
+    │   │                   #   account-identities, setup, and admin:
     │   └── admin/          #   clients, identity-providers, organizations, permissions, roles, services,
     │                       #   settings, signing-keys, users, user-identities
     ├── files/              # buckets, lifecycle, objects, multipart, archives, permissions, shares,

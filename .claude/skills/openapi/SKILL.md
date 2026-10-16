@@ -40,9 +40,9 @@ packages/tereo/
     │   ├── webhooks/             # parameters, responses, schemas
     │   └── audit/                # parameters, responses, schemas
     └── paths/
-        ├── auth/                 # /oauth, /.well-known, /health at the root; /v1/account, /v1/admin, /v1/setup, /v1/registry
+        ├── auth/                 # /oauth, /.well-known, /health at the root; /v1/account, /v1/admin, /v1/setup
         │   ├── health.yaml, well-known.yaml, oauth.yaml, oauth-org-select.yaml, account.yaml
-        │   ├── setup.yaml, registry.yaml
+        │   ├── setup.yaml
         │   └── admin/            # clients, organizations, permissions, roles, services, settings, users
         ├── files/                # /v1/files — buckets, objects, multipart, archives, lifecycle, permissions,
         │                         #   shares, signed, webhook-events
@@ -83,8 +83,8 @@ URL on core, so there is one server, `http://localhost:4001`:
 Descriptions that mention another route use the full path too (`POST /v1/files/buckets/{name}/archives`,
 `GET /v1/audit/entries`). Health is only `GET /health` at the root.
 
-Routes that aren't strictly auth — `/v1/setup`, `/v1/registry/declaration`,
-`/v1/admin/services` — live with auth (`paths/auth/setup.yaml`, `paths/auth/registry.yaml`,
+Routes that aren't strictly auth — `/v1/setup`,
+`/v1/admin/services` — live with auth (`paths/auth/setup.yaml`,
 `paths/auth/admin/services.yaml`); `/v1/files/signed` and `/v1/files/shared` are in
 `paths/files/signed.yaml` and `shares.yaml`.
 

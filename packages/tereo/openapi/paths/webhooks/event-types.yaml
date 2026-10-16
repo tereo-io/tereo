@@ -6,8 +6,8 @@
     description: |
       Returns a paginated list of registered event types, including retired
       ones (`retiredAt` set). Event types are read-only here: each service
-      declares its own at boot (`POST /v1/registry/declaration`), and one dropped
-      from a declaration is retired.
+      declares its own (core in code, app services in provisioning
+      documents), and one dropped from a declaration is retired.
 
       **Required permissions:**
       - `webhooks.event-types.read`

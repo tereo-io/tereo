@@ -1,16 +1,23 @@
-import { assertNamespaceAvailable, namespacesOverlap } from "../registry.js";
-import { disconnectTokenSockets } from "../../websocket/emitters/index.js";
 import { deleteLoginClientTx, rotatedSecretFields } from "../clients.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
-import { approveProvisionedAccess } from "../serviceAccess.js";
+import { formatClient, formatRole } from "../transformers.js";
+import { syncProvisionedAccessTx } from "../serviceAccess.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import { openSigningSecret } from "../webhookSecrets.js";
 import { prisma, type Prisma } from "../db/prisma.js";
-import { formatClient } from "../transformers.js";
+import type { CustomRoleEntry } from "./schema.js";
+import { validateSet } from "./validate.js";
 import { AppError } from "../errors.js";
 import { logger } from "../logger.js";
 import db from "../db/index.js";
 import env from "../../env.js";
+import {
+  disconnectTokenSockets,
+  notifyRoleDeleted,
+  notifyRolePermissionsChanged,
+  notifyRoleStatusChanged,
+} from "../../websocket/emitters/index.js";
 import {
   createServiceTx,
   revokeServiceTokens,
@@ -18,10 +25,17 @@ import {
   updateServiceTx,
 } from "../services.js";
 import {
+  applyDeclarationTx,
+  assertNamespaceAvailable,
+  lockRegistries,
+  type ParsedDeclaration,
+} from "../registry.js";
+import {
   ProvisioningError,
-  type ProvisionedClientSpec,
-  type ProvisionedServiceSpec,
-  type Provisioning,
+  type ProvisioningSet,
+  type ResolvedClient,
+  type ResolvedService,
+  type ResolvedWebhook,
 } from "./load.js";
 
 type Tx = Prisma.TransactionClient;
@@ -29,48 +43,91 @@ type Tx = Prisma.TransactionClient;
 const PROVISIONING_LOCK = "provisioning";
 
 export interface ProvisioningResult {
+  /** Services, clients and webhooks (`webhook:<provisioning key>`). */
   created: string[];
   updated: string[];
   rotated: string[];
+  /** Webhooks here were archived; the rest retire after the grace. */
   unprovisioned: string[];
+  /** Services whose declaration was applied. */
+  declared: string[];
+  /** Access granted, extended or revoked. */
+  access: string[];
+  /** Custom roles created or changed. */
+  roles: string[];
 }
+
+/** An entry with the document it came from. */
+interface FromDocument {
+  file: string;
+  version: string;
+}
+interface ServiceInSet extends FromDocument {
+  service: ResolvedService;
+}
+interface ClientInSet extends FromDocument {
+  client: ResolvedClient;
+}
+interface RoleInSet extends FromDocument {
+  role: CustomRoleEntry;
+}
+
+const entriesOf = (set: ProvisioningSet) => ({
+  services: set.documents.flatMap(({ file, version, service }) =>
+    service ? [{ file, version, service }] : []
+  ),
+  clients: set.documents.flatMap(({ file, version, clients }) =>
+    clients.map((client) => ({ file, version, client }))
+  ),
+  roles: set.documents.flatMap(({ file, version, roles }) =>
+    roles.map((role) => ({ file, version, role }))
+  ),
+});
+
+type Entries = ReturnType<typeof entriesOf>;
+
+const documentMeta = ({ file, version }: FromDocument) => ({ file, version });
 
 const SYSTEM_ACTOR = { userId: SYSTEM_USER_ID, email: null };
 
 const GENERATE_SECRET = "npm run cli -- generate-secret";
 
-const serviceLabel = (s: { slug: string }) => `services[${s.slug}]`;
-const clientLabel = (c: { clientId: string }) => `clients[${c.clientId}]`;
+const serviceLabel = ({ file, service }: ServiceInSet) =>
+  `${file}: services[${service.slug}]`;
+const clientLabel = ({ file, client }: ClientInSet) =>
+  `${file}: clients[${client.clientId}]`;
+
+const roleLabel = ({ file, role }: RoleInSet) => `${file}: roles[${role.name}]`;
 
 const sortedUnique = (values: string[]) => [...new Set(values)].sort();
 
-const accessOf = (spec: ProvisionedServiceSpec) => ({
-  roles: sortedUnique(spec.access.roles),
-  audiences: sortedUnique(spec.access.audiences),
-});
-
-const loadState = async (tx: Tx, p: Provisioning) => {
-  const slugs = p.services.map((s) => s.slug);
+const loadState = async (tx: Tx, p: Entries) => {
+  const services = p.services.map((e) => e.service);
+  const clients = p.clients.map((e) => e.client);
+  const slugs = services.map((s) => s.slug);
   const clientIds = [
-    ...p.services.map((s) => s.clientId),
-    ...p.clients.map((c) => c.clientId),
+    ...services.map((s) => s.clientId),
+    ...clients.map((c) => c.clientId),
   ];
   const hashes = [
-    ...p.services.map((s) => s.secretHash),
-    ...p.clients.flatMap((c) => (c.secretHash ? [c.secretHash] : [])),
+    ...services.map((s) => s.secretHash),
+    ...clients.flatMap((c) => (c.secretHash ? [c.secretHash] : [])),
   ];
   // One query at a time: a transaction runs on one connection.
-  const services = await tx.service.findMany({
+  const serviceRows = await tx.service.findMany({
     where: { slug: { in: slugs } },
     include: { client: { include: { serviceAccountUser: true } } },
   });
-  const clients = await tx.oAuthClient.findMany({
+  const clientRows = await tx.oAuthClient.findMany({
     where: { clientId: { in: clientIds } },
     include: { service: { select: { slug: true } } },
   });
-  const allServices = await tx.service.findMany({ select: { slug: true } });
+  const roleRows = await tx.role.findMany({
+    where: { serviceId: null, name: { in: p.roles.map((e) => e.role.name) } },
+    select: { name: true, provisioned: true },
+  });
   const scopes = await tx.scope.findMany({
-    where: { name: { in: p.clients.flatMap((c) => c.scopes) } },
+    where: { name: { in: clients.flatMap((c) => c.scopes) } },
     select: { name: true },
   });
   const secretHolders = await tx.oAuthClient.findMany({
@@ -83,9 +140,9 @@ const loadState = async (tx: Tx, p: Provisioning) => {
     select: { id: true, clientSecret: true, previousSecretHash: true },
   });
   return {
-    services: new Map(services.map((s) => [s.slug, s])),
-    clients: new Map(clients.map((c) => [c.clientId, c])),
-    serviceSlugs: new Set(allServices.map((s) => s.slug)),
+    services: new Map(serviceRows.map((s) => [s.slug, s])),
+    clients: new Map(clientRows.map((c) => [c.clientId, c])),
+    roles: new Map(roleRows.map((r) => [r.name, r])),
     scopes: new Set(scopes.map((s) => s.name)),
     secretHolders,
   };
@@ -95,7 +152,7 @@ type State = Awaited<ReturnType<typeof loadState>>;
 
 const findProblems = async (
   tx: Tx,
-  p: Provisioning,
+  p: Entries,
   state: State
 ): Promise<string[]> => {
   const problems: string[] = [];
@@ -126,9 +183,9 @@ const findProblems = async (
     }
   };
 
-  const newNamespaces: { label: string; namespace: string }[] = [];
-  for (const spec of p.services) {
-    const label = serviceLabel(spec);
+  for (const entry of p.services) {
+    const spec = entry.service;
+    const label = serviceLabel(entry);
     const existing = state.services.get(spec.slug);
     if (existing && !existing.provisioned) {
       problems.push(
@@ -153,12 +210,6 @@ const findProblems = async (
         if (!(err instanceof AppError)) throw err;
         problems.push(`${label}: ${err.message}`);
       }
-      for (const other of newNamespaces)
-        if (namespacesOverlap(spec.namespace, other.namespace))
-          problems.push(
-            `${label}: namespace "${spec.namespace}" overlaps "${other.namespace}" of ${other.label}`
-          );
-      newNamespaces.push({ label, namespace: spec.namespace });
       const email = serviceAccountEmail(spec.slug);
       if (await tx.user.findUnique({ where: { email } }))
         problems.push(`${label}: a user with email "${email}" already exists`);
@@ -180,9 +231,9 @@ const findProblems = async (
     );
   }
 
-  const fileSlugs = new Set(p.services.map((s) => s.slug));
-  for (const spec of p.clients) {
-    const label = clientLabel(spec);
+  for (const entry of p.clients) {
+    const spec = entry.client;
+    const label = clientLabel(entry);
     const existing = state.clients.get(spec.clientId);
     if (existing && !existing.provisioned) {
       problems.push(
@@ -201,14 +252,36 @@ const findProblems = async (
       if (!state.scopes.has(scope))
         problems.push(`${label}: scope "${scope}" is not registered`);
 
-    // Services this file creates may be named before they exist.
-    for (const slug of sortedUnique(spec.audience))
-      if (!state.serviceSlugs.has(slug) && !fileSlugs.has(slug))
-        problems.push(`${label}: audience "${slug}" is not a service`);
-
     if (spec.secretEnv && spec.secretHash)
       checkSecret(label, spec.secretEnv, spec.secretHash, existing?.id);
   }
+
+  const listed = p.services.flatMap((entry) =>
+    entry.service.webhooks.flatMap((w) =>
+      w.organizations === "all"
+        ? []
+        : w.organizations.map((id) => ({ entry, key: w.key, id }))
+    )
+  );
+  const known = new Set(
+    (
+      await tx.organization.findMany({
+        where: { id: { in: sortedUnique(listed.map((l) => l.id)) } },
+        select: { id: true },
+      })
+    ).map((o) => o.id)
+  );
+  for (const { entry, key, id } of listed)
+    if (!known.has(id))
+      problems.push(
+        `${serviceLabel(entry)}: webhooks[${key}]: no organization with id ${id}`
+      );
+
+  for (const entry of p.roles)
+    if (state.roles.get(entry.role.name)?.provisioned === false)
+      problems.push(
+        `${roleLabel(entry)}: a role named "${entry.role.name}" already exists and was not created from the provisioning file`
+      );
 
   return problems;
 };
@@ -241,13 +314,14 @@ const serviceRows = <
 
 const applyService = async (
   tx: Tx,
-  spec: ProvisionedServiceSpec,
+  from: ServiceInSet,
   state: State,
   now: Date,
   result: ProvisioningResult
 ) => {
+  const spec = from.service;
+  const meta = documentMeta(from);
   const entry = `service:${spec.slug}`;
-  const access = accessOf(spec);
   const existing = state.services.get(spec.slug);
   if (!existing) {
     await createServiceTx(
@@ -259,7 +333,7 @@ const applyService = async (
         clientId: spec.clientId,
         clientSecretHash: spec.secretHash,
         provisioned: true,
-        provisionedAccess: access,
+        auditMetadata: meta,
       },
       SYSTEM_ACTOR
     );
@@ -268,21 +342,13 @@ const applyService = async (
   }
 
   const changes = computeChanges(
-    {
-      name: existing.name,
-      provisionedAccess: existing.provisionedAccess,
-      unprovisionedAt: existing.unprovisionedAt,
-    },
-    { name: spec.name, provisionedAccess: access, unprovisionedAt: null }
+    { name: existing.name, unprovisionedAt: existing.unprovisionedAt },
+    { name: spec.name, unprovisionedAt: null }
   );
   if (changes) {
     await tx.service.update({
       where: { id: existing.id },
-      data: {
-        name: spec.name,
-        provisionedAccess: access,
-        unprovisionedAt: null,
-      },
+      data: { name: spec.name, unprovisionedAt: null },
     });
     if (existing.client && existing.client.name !== spec.name)
       await tx.oAuthClient.update({
@@ -296,7 +362,7 @@ const applyService = async (
       entityId: existing.id,
       entityName: existing.slug,
       changes,
-      metadata: { action: "provisioned" },
+      metadata: { action: "provisioned", ...meta },
     });
     await emitTx(tx, {
       organizationId: getDefaultOrganizationId(),
@@ -326,7 +392,8 @@ const applyService = async (
         accountUserId,
       },
       { isActive: true },
-      SYSTEM_ACTOR
+      SYSTEM_ACTOR,
+      { action: "provisioned", ...meta }
     );
     result.updated.push(entry);
   }
@@ -344,7 +411,7 @@ const applyService = async (
       entityType: "Service",
       entityId: existing.id,
       entityName: existing.slug,
-      metadata: { action: "secret_rotated", previousSecretExpiresAt },
+      metadata: { action: "secret_rotated", previousSecretExpiresAt, ...meta },
     });
     await emitTx(tx, {
       organizationId: getDefaultOrganizationId(),
@@ -358,7 +425,7 @@ const applyService = async (
 };
 
 /** What a login client's row holds for its entry, the secret aside. */
-const clientFields = (spec: ProvisionedClientSpec) => ({
+const clientFields = (spec: ResolvedClient) => ({
   name: spec.name,
   clientType: spec.clientType,
   redirectUris: spec.redirectUris,
@@ -371,11 +438,13 @@ const clientFields = (spec: ProvisionedClientSpec) => ({
 
 const applyClient = async (
   tx: Tx,
-  spec: ProvisionedClientSpec,
+  from: ClientInSet,
   state: State,
   now: Date,
   result: ProvisioningResult
 ) => {
+  const spec = from.client;
+  const meta = documentMeta(from);
   const entry = `client:${spec.clientId}`;
   const fields = clientFields(spec);
   const existing = state.clients.get(spec.clientId);
@@ -403,6 +472,7 @@ const applyClient = async (
         scopes: client.scopes,
         audience: client.audience,
         provisioned: true,
+        ...meta,
       },
     });
     await emitTx(tx, {
@@ -463,6 +533,7 @@ const applyClient = async (
       metadata: {
         action: "provisioned",
         ...(secretChange && { secret: secretChange }),
+        ...meta,
       },
     });
     await emitTx(tx, {
@@ -492,6 +563,7 @@ const applyClient = async (
         clientId: existing.clientId,
         action: "secret_rotated",
         previousSecretExpiresAt,
+        ...meta,
       },
     });
     await emitTx(tx, {
@@ -505,9 +577,352 @@ const applyClient = async (
   }
 };
 
+/** What a custom role's row holds for its entry. */
+const roleFields = (spec: CustomRoleEntry) => ({
+  displayName: spec.displayName,
+  description: spec.description ?? null,
+  requires2fa: spec.requires2fa,
+});
+
+/**
+ * Creates or updates each custom role, its permission set replaced. Returns
+ * the ids of roles whose permissions or activity changed, for the holders'
+ * tokens and sessions once the transaction commits.
+ */
+const applyRoles = async (
+  tx: Tx,
+  p: Entries,
+  result: ProvisioningResult
+): Promise<{ permissionsChanged: string[]; statusChanged: string[] }> => {
+  const permissionsChanged: string[] = [];
+  const statusChanged: string[] = [];
+  const permissions = await tx.permission.findMany({
+    where: {
+      name: { in: p.roles.flatMap((e) => e.role.permissions) },
+      retiredAt: null,
+    },
+    select: { id: true, name: true },
+  });
+  const idOf = new Map(permissions.map((perm) => [perm.name, perm.id]));
+
+  for (const from of p.roles) {
+    const spec = from.role;
+    const meta = documentMeta(from);
+    const entry = `role:${spec.name}`;
+    // Validation checked the names against the set and the code; the
+    // database can still lack one (core's declaration not yet registered).
+    const missing = spec.permissions.filter((n) => !idOf.has(n));
+    if (missing.length > 0) {
+      throw new ProvisioningError(
+        missing.map(
+          (n) =>
+            `${roleLabel(from)}: permission "${n}" does not exist in the database`
+        )
+      );
+    }
+    const wanted = sortedUnique(spec.permissions.map((n) => idOf.get(n)!));
+    const fields = roleFields(spec);
+    const existing = await tx.role.findFirst({
+      where: { name: spec.name, serviceId: null },
+      include: { rolePermissions: true },
+    });
+
+    if (!existing) {
+      const created = await db.roles.create(
+        {
+          name: spec.name,
+          displayName: spec.displayName,
+          description: spec.description,
+          requires2fa: spec.requires2fa,
+          provisioned: true,
+        },
+        tx
+      );
+      const role = await db.roles.setPermissions(created.id, wanted, tx);
+      await logAuditTx(tx, {
+        auth: SYSTEM_ACTOR,
+        action: "CREATE",
+        entityType: "Role",
+        entityId: role.id,
+        entityName: role.name,
+        metadata: {
+          displayName: role.displayName,
+          provisioned: true,
+          permissionIds: wanted,
+          ...meta,
+        },
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.role.created",
+        entityType: "Role",
+        entityId: role.id,
+        data: formatRole(role) as Record<string, unknown>,
+      });
+      result.roles.push(entry);
+      continue;
+    }
+
+    const held = sortedUnique(
+      existing.rolePermissions.map((rp) => rp.permissionId)
+    );
+    const permissionsDiffer =
+      held.length !== wanted.length || held.some((id, i) => id !== wanted[i]);
+    const restored = existing.archivedAt !== null;
+    const reactivated = restored || !existing.isActive;
+    const changes = computeChanges(
+      {
+        ...Object.fromEntries(
+          Object.keys(fields).map((k) => [
+            k,
+            existing[k as keyof typeof fields],
+          ])
+        ),
+        isActive: existing.isActive,
+        archivedAt: existing.archivedAt,
+        unprovisionedAt: existing.unprovisionedAt,
+      },
+      {
+        ...fields,
+        isActive: true,
+        archivedAt: null,
+        unprovisionedAt: null,
+      }
+    );
+    if (!changes && !permissionsDiffer) continue;
+
+    await tx.role.update({
+      where: { id: existing.id },
+      data: {
+        ...fields,
+        archivedAt: null,
+        unprovisionedAt: null,
+        isActive: true,
+      },
+    });
+    if (permissionsDiffer)
+      await db.roles.setPermissions(existing.id, wanted, tx);
+    const role = await db.roles.get(existing.id, tx);
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      action: "UPDATE",
+      entityType: "Role",
+      entityId: role.id,
+      entityName: role.name,
+      changes,
+      metadata: {
+        action: "provisioned",
+        ...(permissionsDiffer && { permissionIds: wanted }),
+        ...meta,
+      },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: restored ? "auth.role.restored" : "auth.role.updated",
+      entityType: "Role",
+      entityId: role.id,
+      data: formatRole(role) as Record<string, unknown>,
+    });
+    if (permissionsDiffer) {
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.role.permissions-changed",
+        entityType: "Role",
+        entityId: role.id,
+        data: { id: role.id, name: role.name, permissionIds: wanted },
+      });
+      permissionsChanged.push(role.id);
+    }
+    if (reactivated) statusChanged.push(role.id);
+    result.roles.push(entry);
+  }
+  return { permissionsChanged, statusChanged };
+};
+
+/** Where a webhook entry goes: one endpoint for all organizations, or one per listed one. */
+const webhookTargets = (slug: string, w: ResolvedWebhook) =>
+  w.organizations === "all"
+    ? [{ provisioningKey: `${slug}:${w.key}`, organizationId: null }]
+    : sortedUnique(w.organizations).map((organizationId) => ({
+        provisioningKey: `${slug}:${w.key}:${organizationId}`,
+        organizationId,
+      }));
+
+/**
+ * Creates or updates each service's webhook endpoints, keyed by
+ * `provisioningKey`, and archives at once those no longer in the set. Status
+ * is left alone: an endpoint auto-disabled stays so until an admin re-enables
+ * it.
+ */
+const applyWebhooks = async (
+  tx: Tx,
+  p: Entries,
+  now: Date,
+  result: ProvisioningResult
+) => {
+  const wanted: string[] = [];
+  const overlapMs = env.WEBHOOK_SECRET_OVERLAP_HOURS * 60 * 60 * 1000;
+
+  for (const from of p.services) {
+    const meta = documentMeta(from);
+    const row = await tx.service.findUniqueOrThrow({
+      where: { slug: from.service.slug },
+      include: { client: { include: { serviceAccountUser: true } } },
+    });
+    const { accountUserId } = serviceRows(row);
+
+    for (const w of from.service.webhooks) {
+      const events = sortedUnique(w.events);
+      for (const { provisioningKey, organizationId } of webhookTargets(
+        row.slug,
+        w
+      )) {
+        wanted.push(provisioningKey);
+        const entry = `webhook:${provisioningKey}`;
+        const existing = await tx.webhookEndpoint.findUnique({
+          where: { provisioningKey },
+          include: { subscriptions: { select: { eventType: true } } },
+        });
+
+        if (!existing) {
+          const { endpoint } = await db.webhookEndpoints.create(
+            {
+              organizationId,
+              createdBy: accountUserId,
+              ownerServiceId: row.id,
+              provisioned: true,
+              provisioningKey,
+              url: w.url,
+              description: w.description,
+              eventTypes: events,
+              signingSecret: w.secretPlain,
+            },
+            tx
+          );
+          await logAuditTx(tx, {
+            auth: SYSTEM_ACTOR,
+            organizationId,
+            action: "CREATE",
+            entityType: "WebhookEndpoint",
+            entityId: endpoint.id,
+            metadata: {
+              url: w.url,
+              eventTypes: events,
+              provisioningKey,
+              ...meta,
+            },
+          });
+          result.created.push(entry);
+          continue;
+        }
+
+        // Opened before the row is written, and compared in the clear: the
+        // stored value is sealed.
+        const rotates = (await openSigningSecret(existing)) !== w.secretPlain;
+
+        const held = sortedUnique(
+          existing.subscriptions.map((s) => s.eventType)
+        );
+        const changes = computeChanges(
+          {
+            url: existing.url,
+            description: existing.description,
+            eventTypes: held,
+          },
+          { url: w.url, description: w.description, eventTypes: events }
+        );
+        const restored = existing.archivedAt !== null;
+        if (changes || restored) {
+          await db.webhookEndpoints.update(
+            existing.id,
+            {
+              url: w.url,
+              description: w.description,
+              ...(changes?.eventTypes && { eventTypes: events }),
+            },
+            tx
+          );
+          if (restored) await db.webhookEndpoints.restore(existing.id, tx);
+          await logAuditTx(tx, {
+            auth: SYSTEM_ACTOR,
+            organizationId,
+            action: restored ? "RESTORE" : "UPDATE",
+            entityType: "WebhookEndpoint",
+            entityId: existing.id,
+            changes,
+            metadata: { action: "provisioned", provisioningKey, ...meta },
+          });
+          result.updated.push(entry);
+        }
+
+        if (rotates) {
+          const previousSecretExpiresAt =
+            overlapMs > 0 ? new Date(now.getTime() + overlapMs) : null;
+          await db.webhookEndpoints.rotateSecret(
+            existing.id,
+            previousSecretExpiresAt,
+            tx,
+            w.secretPlain
+          );
+          await logAuditTx(tx, {
+            auth: SYSTEM_ACTOR,
+            organizationId,
+            action: "UPDATE",
+            entityType: "WebhookEndpoint",
+            entityId: existing.id,
+            metadata: {
+              action: "secret_rotated",
+              previousSecretExpiresAt,
+              provisioningKey,
+              ...meta,
+            },
+          });
+          result.rotated.push(entry);
+        }
+      }
+    }
+  }
+
+  // No deliveries to a URL the deploy removed, so no grace.
+  const dropped = await tx.webhookEndpoint.findMany({
+    where: {
+      provisioned: true,
+      archivedAt: null,
+      provisioningKey: { notIn: wanted },
+    },
+    select: {
+      id: true,
+      organizationId: true,
+      provisioningKey: true,
+      ownerService: { select: { slug: true } },
+    },
+  });
+  // A service still in the set dropped the entry from its document.
+  const documentOf = new Map(
+    p.services.map((from) => [from.service.slug, documentMeta(from)])
+  );
+  for (const endpoint of dropped) {
+    const owner = endpoint.ownerService?.slug;
+    await db.webhookEndpoints.archive(endpoint.id, tx);
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      organizationId: endpoint.organizationId,
+      action: "ARCHIVE",
+      entityType: "WebhookEndpoint",
+      entityId: endpoint.id,
+      metadata: {
+        action: "unprovisioned",
+        provisioningKey: endpoint.provisioningKey,
+        ...(owner && documentOf.get(owner)),
+      },
+    });
+    result.unprovisioned.push(`webhook:${endpoint.provisioningKey}`);
+  }
+};
+
 const markMissing = async (
   tx: Tx,
-  p: Provisioning,
+  p: Entries,
   now: Date,
   result: ProvisioningResult
 ) => {
@@ -515,7 +930,7 @@ const markMissing = async (
     where: {
       provisioned: true,
       unprovisionedAt: null,
-      slug: { notIn: p.services.map((s) => s.slug) },
+      slug: { notIn: p.services.map((e) => e.service.slug) },
     },
   });
   for (const service of services) {
@@ -552,7 +967,7 @@ const markMissing = async (
       provisioned: true,
       unprovisionedAt: null,
       service: { is: null },
-      clientId: { notIn: p.clients.map((c) => c.clientId) },
+      clientId: { notIn: p.clients.map((e) => e.client.clientId) },
     },
   });
   for (const client of clients) {
@@ -578,56 +993,226 @@ const markMissing = async (
     });
     result.unprovisioned.push(`client:${client.clientId}`);
   }
+
+  const roles = await tx.role.findMany({
+    where: {
+      provisioned: true,
+      unprovisionedAt: null,
+      serviceId: null,
+      name: { notIn: p.roles.map((e) => e.role.name) },
+    },
+  });
+  for (const role of roles) {
+    await tx.role.update({
+      where: { id: role.id },
+      data: { unprovisionedAt: now },
+    });
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      action: "UPDATE",
+      entityType: "Role",
+      entityId: role.id,
+      entityName: role.name,
+      changes: { unprovisionedAt: { old: null, new: now } },
+      metadata: { action: "unprovisioned" },
+    });
+    result.unprovisioned.push(`role:${role.name}`);
+  }
 };
 
+const declarationOf = (
+  version: string,
+  service: ResolvedService
+): ParsedDeclaration => ({
+  version,
+  permissions: service.permissions,
+  systemRoles: service.systemRoles,
+  buckets: service.buckets,
+  eventTypes: service.eventTypes,
+});
+
+/** Runs `write`, turning a refusal it throws into a problem of `label`. */
+const asProblem = async (
+  label: string,
+  problems: string[],
+  write: () => Promise<void>
+) => {
+  try {
+    await write();
+  } catch (err) {
+    if (!(err instanceof AppError)) throw err;
+    problems.push(`${label}: ${err.message}`);
+  }
+};
+
+/** Declarations, then access, which may name roles the declarations add. */
+const applyServicesContent = async (
+  tx: Tx,
+  p: Entries,
+  now: Date,
+  result: ProvisioningResult
+): Promise<{ problems: string[]; revokedClients: string[] }> => {
+  const rows = new Map(
+    (
+      await tx.service.findMany({
+        where: { slug: { in: p.services.map((e) => e.service.slug) } },
+        include: { client: { include: { serviceAccountUser: true } } },
+      })
+    ).map((row) => [row.slug, row])
+  );
+  const problems: string[] = [];
+
+  for (const entry of p.services) {
+    const row = rows.get(entry.service.slug)!;
+    await asProblem(serviceLabel(entry), problems, async () => {
+      const { changed } = await applyDeclarationTx(
+        tx,
+        row,
+        declarationOf(entry.version, entry.service),
+        SYSTEM_ACTOR,
+        now,
+        documentMeta(entry)
+      );
+      if (changed) result.declared.push(`service:${row.slug}`);
+    });
+  }
+  const revokedClients: string[] = [];
+  if (problems.length > 0) return { problems, revokedClients };
+
+  for (const entry of p.services) {
+    const row = rows.get(entry.service.slug)!;
+    const { client, accountUserId } = serviceRows(row);
+    await asProblem(serviceLabel(entry), problems, async () => {
+      const changes = await syncProvisionedAccessTx(
+        tx,
+        { id: row.id, slug: row.slug, accountUserId, client },
+        {
+          roles: sortedUnique(entry.service.access.roles),
+          audiences: sortedUnique(entry.service.access.audiences),
+        },
+        now,
+        documentMeta(entry)
+      );
+      for (const [verb, keys] of Object.entries(changes))
+        for (const key of keys)
+          result.access.push(`service:${row.slug} ${verb} ${key}`);
+      // Tokens carry the permissions: a narrowed role's are stale too.
+      if (changes.revoked.length > 0 || changes.narrowed.length > 0)
+        revokedClients.push(client.id);
+    });
+  }
+  return { problems, revokedClients };
+};
+
+class DryRunRollback extends Error {
+  constructor(public result: ProvisioningResult) {
+    super("dry run");
+  }
+}
+
 /**
- * Bring the database in line with the provisioning file, all or nothing:
+ * Bring the database in line with the provisioning set, all or nothing:
  * every problem is reported before anything is written. Serialized, so
  * replicas starting together apply it once.
  */
 export const applyProvisioning = async (
-  p: Provisioning,
-  now: Date = new Date()
+  set: ProvisioningSet,
+  now: Date = new Date(),
+  options: { dryRun?: boolean } = {}
 ): Promise<ProvisioningResult> => {
-  const result = await prisma.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
-      const state = await loadState(tx, p);
-      const problems = await findProblems(tx, p, state);
-      if (problems.length > 0) throw new ProvisioningError(problems);
+  const invalid = validateSet(set);
+  if (invalid.length > 0) throw new ProvisioningError(invalid);
+  const p = entriesOf(set);
 
-      const result: ProvisioningResult = {
-        created: [],
-        updated: [],
-        rotated: [],
-        unprovisioned: [],
-      };
-      for (const spec of p.services)
-        await applyService(tx, spec, state, now, result);
-      for (const spec of p.clients)
-        await applyClient(tx, spec, state, now, result);
-      await markMissing(tx, p, now, result);
-      return result;
-    },
-    { timeout: 30_000 }
-  );
-  // Requests registered before the file listed them.
-  const services = await prisma.service.findMany({
-    where: { slug: { in: p.services.map((s) => s.slug) } },
-    select: { id: true },
-  });
-  for (const service of services) await approveProvisionedAccess(service.id);
+  let applied;
+  try {
+    applied = await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
+        const state = await loadState(tx, p);
+        // Before any row is written: admin decisions take these first, then
+        // rows.
+        await lockRegistries(
+          tx,
+          [...state.services.values()].map((s) => s.id)
+        );
+        const problems = await findProblems(tx, p, state);
+        if (problems.length > 0) throw new ProvisioningError(problems);
+
+        const result: ProvisioningResult = {
+          created: [],
+          updated: [],
+          rotated: [],
+          unprovisioned: [],
+          declared: [],
+          access: [],
+          roles: [],
+        };
+        for (const entry of p.services)
+          await applyService(tx, entry, state, now, result);
+        const content = await applyServicesContent(tx, p, now, result);
+        if (content.problems.length > 0)
+          throw new ProvisioningError(content.problems);
+        const roleChanges = await applyRoles(tx, p, result);
+        await applyWebhooks(tx, p, now, result);
+        for (const entry of p.clients)
+          await applyClient(tx, entry, state, now, result);
+        await markMissing(tx, p, now, result);
+        // A dry run computed the result against the real rows; roll it back.
+        if (options.dryRun) throw new DryRunRollback(result);
+        return { result, revokedClients: content.revokedClients, roleChanges };
+      },
+      { timeout: 120_000 }
+    );
+  } catch (err) {
+    if (err instanceof DryRunRollback) return err.result;
+    throw err;
+  }
+  const { result, revokedClients, roleChanges } = applied;
+  // Tokens first: a failed push must not leave a revoked role's holders with
+  // working tokens. The apply is committed, so a failure here is logged.
+  const after = async (what: string, step: () => Promise<unknown>) => {
+    try {
+      await step();
+    } catch (err) {
+      logger.error({ err }, `Provisioning: ${what} failed after commit`);
+    }
+  };
+  for (const id of revokedClients)
+    await after("revoking service tokens", () => revokeServiceTokens(id));
+  for (const id of roleChanges.permissionsChanged)
+    await after("revoking role holders' client tokens", () =>
+      revokeHolderClientTokens(id)
+    );
+  for (const id of roleChanges.permissionsChanged)
+    await after("notifying a role's permission change", () =>
+      notifyRolePermissionsChanged(id)
+    );
+  for (const id of roleChanges.statusChanged)
+    await after("notifying a role's status change", () =>
+      notifyRoleStatusChanged(id)
+    );
   return result;
+};
+
+/** A service client holding the role gets its next token with what it grants now. */
+const revokeHolderClientTokens = async (roleId: string) => {
+  const holders = await db.roles.getUserIdsByRoleId(roleId);
+  const clientIds = new Set(
+    holders.flatMap((h) => (h.user.oauthClientId ? [h.user.oauthClientId] : []))
+  );
+  for (const clientId of clientIds)
+    await db.accessTokens.revokeByClientId(clientId);
 };
 
 // `now` is a parameter for tests.
 export const deprovisionMissing = async (
   now: Date = new Date()
-): Promise<{ services: number; clients: number }> => {
+): Promise<{ services: number; clients: number; roles: number }> => {
   const cutoff = new Date(
     now.getTime() - env.REGISTRY_RETIREMENT_GRACE_HOURS * 60 * 60 * 1000
   );
-  const { serviceClientIds, jtis, services, clients } =
+  const { serviceClientIds, jtis, services, clients, archivedRoles } =
     await prisma.$transaction(
       async (tx) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
@@ -660,21 +1245,56 @@ export const deprovisionMissing = async (
         const jtis: string[] = [];
         for (const client of dueClients)
           jtis.push(...(await deleteLoginClientTx(tx, client, SYSTEM_ACTOR)));
+
+        const dueRoles = await tx.role.findMany({
+          where: { ...stale, serviceId: null, archivedAt: null },
+        });
+        const archivedRoles: { id: string; name: string }[] = [];
+        for (const role of dueRoles) {
+          await tx.role.update({
+            where: { id: role.id },
+            data: { isActive: false, archivedAt: now },
+          });
+          await logAuditTx(tx, {
+            auth: SYSTEM_ACTOR,
+            action: "ARCHIVE",
+            entityType: "Role",
+            entityId: role.id,
+            entityName: role.name,
+            metadata: { action: "unprovisioned" },
+          });
+          await emitTx(tx, {
+            organizationId: getDefaultOrganizationId(),
+            eventType: "auth.role.archived",
+            entityType: "Role",
+            entityId: role.id,
+            data: { id: role.id, name: role.name },
+          });
+          archivedRoles.push({ id: role.id, name: role.name });
+        }
         return {
           serviceClientIds,
           jtis,
           services: dueServices.length,
           clients: dueClients.length,
+          archivedRoles,
         };
       },
       { timeout: 30_000 }
     );
   for (const id of serviceClientIds) await revokeServiceTokens(id);
   disconnectTokenSockets(jtis);
-  if (services > 0 || clients > 0)
+  for (const { id } of archivedRoles) {
+    await revokeHolderClientTokens(id);
+    notifyRoleDeleted(
+      (await db.roles.getUserIdsByRoleId(id)).map((h) => h.userId)
+    );
+  }
+  const roles = archivedRoles.length;
+  if (services > 0 || clients > 0 || roles > 0)
     logger.info(
-      { services, clients },
+      { services, clients, roles },
       "Retired entries removed from the provisioning file"
     );
-  return { services, clients };
+  return { services, clients, roles };
 };

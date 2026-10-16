@@ -1,17 +1,19 @@
 import { validateOrganizationId } from "../../../../../../middleware/organizationId.js";
 import { enqueueCommittedDelivery } from "../../../../../../jobs/webhookQueues.js";
-import { redactUnreadable } from "../../../../../../utils/webhookAccess.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { logAuditTx } from "../../../../../../utils/outbox.js";
 import db from "../../../../../../utils/db/index.js";
 import { Request, Response } from "express";
+import {
+  getVisibleEndpoint,
+  redactUnreadable,
+} from "../../../../../../utils/webhookAccess.js";
 import {
   validateBody,
   validateParams,
   validateQuery,
 } from "../../../../../../utils/validateReq.js";
 import {
-  NotFoundError,
   ArchivedError,
   BadRequestError,
 } from "../../../../../../utils/errors.js";
@@ -31,10 +33,7 @@ export const listDeliveries = async (req: Request, res: Response) => {
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
   const query = validateQuery(getWebhookDeliveriesQuerySchema, req);
 
-  const endpoint = await db.webhookEndpoints.getById(id);
-  if (endpoint.organizationId !== organizationId) {
-    throw new NotFoundError("Webhook endpoint not found");
-  }
+  await getVisibleEndpoint(id, auth, organizationId);
 
   const where = applyCursorToWhere(query, { webhookEndpointId: id });
 
@@ -67,10 +66,7 @@ export const bulkRetryDeliveries = async (req: Request, res: Response) => {
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
   const body = validateBody(bulkRetrySchema, req);
 
-  const endpoint = await db.webhookEndpoints.getById(id);
-  if (endpoint.organizationId !== organizationId) {
-    throw new NotFoundError("Webhook endpoint not found");
-  }
+  const endpoint = await getVisibleEndpoint(id, auth, organizationId);
   if (endpoint.archivedAt) {
     throw new ArchivedError(
       "Webhook endpoint is archived; restore it before retrying deliveries"

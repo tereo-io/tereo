@@ -22,6 +22,7 @@
     "test:logs": "../../docker/test/run.sh logs -f runner",
     "test:clean": "../../docker/test/run.sh down -v",
     "cli": "tsx src/cli/index.ts",
+    "provisioning:schema": "tsx scripts/provisioning-schema.ts",
     "openapi:lint": "redocly lint",
     "openapi:build": "redocly lint && redocly bundle"
   },
@@ -38,6 +39,7 @@
     "@prisma/client": "^7.10.0",
     "@prisma/instrumentation": "^7.10.0",
     "@socket.io/redis-adapter": "^8.3.0",
+    "@socket.io/redis-emitter": "^5.1.0",
     "archiver": "^8.0.0",
     "axios": "^1.20.0",
     "bullmq": "^6.3.15",
@@ -62,7 +64,6 @@
     "socket.io": "^4.8.4",
     "undici": "^6.29.0",
     "uuid": "^14.0.3",
-    "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

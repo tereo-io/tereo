@@ -5,6 +5,8 @@ import { assertNoReservedEventTypes } from "../../../../utils/processEvent.js";
 import { resolveMaskedHeaders } from "../../../../utils/webhookHeaders.js";
 import { formatWebhookEndpoint } from "../../../../utils/transformers.js";
 import { assertMaySubscribe } from "../../../../utils/webhookAccess.js";
+import { PERMISSIONS } from "../../../../definitions/permissions.js";
+import { hasPermission } from "../../../../utils/permissions.js";
 import { validateUser } from "../../../../middleware/auth.js";
 import { BadRequestError } from "../../../../utils/errors.js";
 import { logAuditTx } from "../../../../utils/outbox.js";
@@ -21,6 +23,7 @@ import {
 } from "./schemas.js";
 
 export const listWebhookEndpoints = async (req: Request, res: Response) => {
+  const auth = validateUser(req);
   const organizationId = validateOrganizationId(req);
 
   const query = validateQuery(getWebhookEndpointsQuerySchema, req);
@@ -30,8 +33,13 @@ export const listWebhookEndpoints = async (req: Request, res: Response) => {
   );
 
   const archivedFiltered = !!req.query["filter[archived]"];
+  // Owned endpoints sent every organization's events are listed only for
+  // webhooks.admin, as getVisibleEndpoint shows them.
+  const visible = hasPermission(auth.permissions, PERMISSIONS.WEBHOOKS.ADMIN)
+    ? { OR: [{ organizationId }, { organizationId: null }] }
+    : { organizationId };
   const where = applyCursorToWhere(query, {
-    organizationId,
+    ...visible,
     ...(includeArchived || archivedFiltered ? {} : { archivedAt: null }),
   });
 

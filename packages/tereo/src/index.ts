@@ -3,6 +3,7 @@ import { ensureBlobDirectory, ensureTempDirectory } from "./utils/storage.js";
 import { closeHttpServer, tuneServerKeepAlive } from "./utils/httpServer.js";
 import { ProvisioningError, provision } from "./utils/provisioning/index.js";
 import { ensureDefaultOrganization } from "./utils/defaultOrganization.js";
+import { closeRedisEmitter } from "./websocket/emitters/redisEmitter.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
 import { loadKeys, startSigningKeyRefresh } from "./utils/keys.js";
 import { ensureCurrentPartitions } from "./utils/partitions.js";
@@ -54,7 +55,11 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
     start: async () => {
       if (running) throw new Error("Server is already running");
       running = true;
-      for (const warning of stalePathWarnings(env)) logger.warn(warning);
+      const stale = stalePathWarnings({
+        ...env,
+        PROVISIONING_FILE: process.env.PROVISIONING_FILE,
+      });
+      for (const warning of stale) logger.warn(warning);
 
       // Before anything signs, verifies or decrypts.
       await loadKeys();
@@ -81,7 +86,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
       await provision().catch((err) => {
         if (err instanceof ProvisioningError)
           for (const problem of err.problems)
-            logger.error({ problem }, "Provisioning file refused");
+            logger.error({ problem }, "Provisioning refused");
         throw err;
       });
       // Moves secrets in table columns off a previous KEK, as loadKeys() did
@@ -182,6 +187,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
         }
         if (runsWorker) await step("worker", stopWorker);
         await step("cacheBroadcast", closeCacheBroadcast);
+        await step("redisEmitter", closeRedisEmitter);
         await step("redis", closeRedisConnection);
         await step("database", disconnectDatabase);
         running = false;

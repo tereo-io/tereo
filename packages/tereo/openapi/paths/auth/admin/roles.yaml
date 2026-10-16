@@ -208,7 +208,7 @@
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
-        description: A custom role with the new name already exists, or the deactivation would leave no active administrator (`conflict`), or the role is archived (`resource_archived`)
+        description: A custom role with the new name already exists, or the deactivation would leave no active administrator (`conflict`), or the role is archived (`resource_archived`), or the role is declared in the provisioning documents (`managed_by_provisioning`; change it there)
         headers:
           X-RateLimit-Limit:
             $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
@@ -274,7 +274,7 @@
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The deletion would leave no active administrator
+        description: The deletion would leave no active administrator (`conflict`), or the role is declared in the provisioning documents (`managed_by_provisioning`; change it there)
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -399,7 +399,7 @@
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: Role not found
       '409':
-        description: The role is still active (`conflict`; deactivate it first), or already archived (`already_archived`)
+        description: The role is still active (`conflict`; deactivate it first), or already archived (`already_archived`), or the role is declared in the provisioning documents (`managed_by_provisioning`; change it there)
         headers:
           X-RateLimit-Limit:
             $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
@@ -465,6 +465,7 @@
         description: Role not found
       '409':
         $ref: '../../../components/responses.yaml#/NotArchivedResponse'
+        description: The role is not archived (`not_archived`), or it is declared in the provisioning documents (`managed_by_provisioning`; change it there)
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -535,7 +536,7 @@
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
-        description: The change would leave no active administrator (`conflict`), the role is archived (`resource_archived`; restore it first), or it is assigned within an organization and a permission added is not org-assignable (`role_assigned_in_org`)
+        description: The change would leave no active administrator (`conflict`), the role is archived (`resource_archived`; restore it first), or it is assigned within an organization and a permission added is not org-assignable (`role_assigned_in_org`), or the role is declared in the provisioning documents (`managed_by_provisioning`; change it there)
         headers:
           X-RateLimit-Limit:
             $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'

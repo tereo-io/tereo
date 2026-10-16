@@ -55,19 +55,17 @@ const audit = { logAsync } as unknown as AuditLogServiceClient;
 const sendAsync = vi.fn();
 const notifications = { sendAsync } as unknown as NotificationsClient;
 let webhooks: WebhookServiceClient;
-let canDispatch = true;
 
 const make = (db: SqlClient, maxAttempts = 3) =>
   new OutboxClient(
     { db, table: "billing.core_outbox", maxAttempts },
-    { audit, webhooks, notifications, canDispatch: () => canDispatch }
+    { audit, webhooks, notifications }
   );
 
 beforeEach(() => {
   logAsync.mockReset();
   sendAsync.mockReset();
   webhooks = new WebhookServiceClient({ eventTypes: ["product.item.created"] });
-  canDispatch = true;
 });
 
 describe("outbox writers", () => {
@@ -333,13 +331,6 @@ describe("outbox reaper", () => {
 
     expect(emitAsync).not.toHaveBeenCalled();
     expect(app.calls.some((c) => c.query.includes("DELETE"))).toBe(false);
-  });
-
-  it("claims nothing while registration is pending", async () => {
-    const app = fakeDb();
-    canDispatch = false;
-    expect(await make(app.db).processBatch()).toBe(0);
-    expect(app.calls).toHaveLength(0);
   });
 });
 

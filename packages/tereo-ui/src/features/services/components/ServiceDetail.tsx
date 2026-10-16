@@ -106,14 +106,15 @@ export const ServiceDetail = () => {
       <Col size="lg">
         {isCore && (
           <Alert variant="primary">
-            Core&apos;s own declaration is registered from its code on every
-            start. It is shown here for reference and cannot be changed.
+            Core&apos;s own declaration is applied from its code on every start.
+            It is shown here for reference and cannot be changed.
           </Alert>
         )}
         {service.provisioned && (
           <Alert variant="primary">
-            This service comes from the provisioning file. Change its name or
-            secret there and restart core. Its access requests are still decided
+            This service comes from a provisioning document. Change its name or
+            secret there; it applies on the next deploy or{" "}
+            <code>provision</code> run. Its access is still approved and revoked
             here, and a rotated secret&apos;s overlap can still be ended early.
           </Alert>
         )}
@@ -178,7 +179,7 @@ export const ServiceDetail = () => {
                   value: service.declarationVersion ?? muted("—"),
                 },
                 {
-                  label: "Last Registered",
+                  label: "Last Applied",
                   value: service.declaredAt
                     ? new Date(service.declaredAt).toLocaleString()
                     : muted("Never"),

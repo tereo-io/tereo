@@ -96,6 +96,32 @@ the same check to the caller: a delivery whose event they could not read comes b
 `payload` and `responseBody` set to `null` and `payloadRedacted: true`. For the same reason the
 audit entry written for an event no endpoint was sent records its type and entity but not its data.
 
+## Service-owned endpoints
+
+A service's [provisioning document](provisioning.md#webhooks) can declare endpoints that deliver core
+events to the service. They are ordinary endpoints with an owner:
+
+- `ownerService` (`{ id, slug, name }`), `ownerServiceId`, `provisioningKey` (`<service slug>:<key>`,
+  plus `:<organization id>` when the document lists organizations) and `provisioned: true` are on
+  the response; `organizationId` is `null` for an endpoint of **all organizations**, which exists
+  only with an owner and receives the events of every organization. A list of organizations in the
+  document makes one endpoint per organization.
+- The signing secret comes from the environment variable the document names. Changing its value
+  rotates it, with `WEBHOOK_SECRET_OVERLAP_HOURS` of overlap.
+- The delivery check (`src/utils/webhookAccess.ts`) does not ask for `webhooks.read`. It asks for
+  the event's `readPermission` (and bucket access for `file-service.*` events) of the owning
+  service's account. A service's account does not hold its own permissions, so a webhook on the
+  service's own events needs a role in the document's `access.roles` granting it.
+- Fan-out for an event of organization X selects the endpoints of X and the owned endpoints of all
+  organizations.
+- Delivery history of an all-organization endpoint is shown per event's organization: a delivery's
+  payload and response are redacted unless the viewer can read the event in that organization.
+- Document URLs are checked at load: `http` or `https`, no credentials, and not `localhost` or a
+  private or reserved IP literal. In-cluster hostnames pass.
+- Provisioned endpoints answer `409 managed_by_provisioning` to `PATCH` (except one carrying only
+  `status`, to re-enable), `DELETE`, archive, restore, rotate-secret and revoke-previous-secret.
+  Delivery views, retries and test sends work. An endpoint a document drops is archived at once.
+
 ## List Filters
 
 `filter[field]=value` with `filter[field_op]=operator` (default `equals`); `contains` is

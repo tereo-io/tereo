@@ -190,7 +190,7 @@
       - storageQuotaBytes (max 1 TB), corsConfig, rateLimitConfig (null clears)
 
       **Declared buckets** (`serviceId` set): the declaring service owns the name, existence and
-      description, which its declaration re-applies on registration. A changed `description` is
+      description, which its declaration re-applies when it changes. A changed `description` is
       refused with `409 bucket_declared`; every other field may be tuned by an admin and is kept.
 
       Turning `versioningEnabled` off while historical versions exist returns

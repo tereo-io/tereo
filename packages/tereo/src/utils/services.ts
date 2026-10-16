@@ -13,7 +13,8 @@ export interface CreateServiceInput {
   clientId: string;
   clientSecretHash: string;
   provisioned?: boolean;
-  provisionedAccess?: { roles: string[]; audiences: string[] };
+  /** Added to the audit entry's metadata. */
+  auditMetadata?: Record<string, unknown>;
 }
 
 export const serviceAccountEmail = (slug: string) =>
@@ -65,7 +66,6 @@ export const createServiceTx = async (
       clientId: client.id,
       createdBy: actor.userId,
       provisioned: input.provisioned,
-      provisionedAccess: input.provisionedAccess,
     },
   });
 
@@ -80,6 +80,7 @@ export const createServiceTx = async (
       namespace,
       clientId: input.clientId,
       ...(input.provisioned && { provisioned: true }),
+      ...input.auditMetadata,
     },
   });
   await emitTx(tx, {
@@ -109,7 +110,8 @@ export const updateServiceTx = async (
   tx: Prisma.TransactionClient,
   existing: ServiceToUpdate,
   body: { name?: string; isActive?: boolean },
-  actor: { userId: string; email: string | null }
+  actor: { userId: string; email: string | null },
+  auditMetadata?: Record<string, unknown>
 ) => {
   await tx.service.update({
     where: { id: existing.id },
@@ -142,6 +144,7 @@ export const updateServiceTx = async (
         isActive: { old: existing.isActive, new: after.isActive },
       }),
     },
+    ...(auditMetadata && { metadata: auditMetadata }),
   });
   await emitTx(tx, {
     organizationId: getDefaultOrganizationId(),

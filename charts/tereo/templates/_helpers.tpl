@@ -142,3 +142,13 @@ files: blobs live on the volume, so every core pod must share it.
 {{ toYaml . }}
 {{- end }}
 {{- end }}
+
+{{/* Non-empty when core has provisioning documents to read. */}}
+{{- define "tereo.provisioning" -}}
+{{- if or .Values.provisioning.documents .Values.provisioning.existingConfigMap -}}true{{- end -}}
+{{- end }}
+
+{{/* The ConfigMap holding the documents: the existing one, or the chart's own. */}}
+{{- define "tereo.provisioningConfigMap" -}}
+{{- default (printf "%s-provisioning" (include "tereo.fullname" .)) .Values.provisioning.existingConfigMap -}}
+{{- end }}

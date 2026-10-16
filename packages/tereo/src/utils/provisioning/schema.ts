@@ -1,5 +1,12 @@
-import { NAMESPACE_PATTERN } from "../registry.js";
+import { SEMVER_PATTERN } from "../semver.js";
 import { z } from "zod";
+import {
+  NAMESPACE_PATTERN,
+  bucketItem,
+  eventTypeItem,
+  permissionItem,
+  systemRoleItem,
+} from "../registry.js";
 
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -15,22 +22,7 @@ const Text = z.string().min(1, "must not be empty");
 const Name = Text.max(100);
 const ClientId = Text.max(64);
 
-const ServiceEntry = z
-  .object({
-    slug: Slug,
-    name: Name,
-    namespace: Slug.optional(),
-    clientId: ClientId.optional(),
-    secretFrom: EnvName,
-    access: z
-      .object({
-        roles: z.array(Text).default([]),
-        audiences: z.array(Text).default([]),
-      })
-      .strict()
-      .default({ roles: [], audiences: [] }),
-  })
-  .strict();
+const Description = z.string().max(500);
 
 const ClientEntry = z
   .object({
@@ -46,12 +38,78 @@ const ClientEntry = z
       .default(["authorization_code", "refresh_token"]),
     audience: z.array(Text).default([]),
     consentRequired: z.boolean().default(true),
+    description: Description.optional(),
   })
   .strict();
 
-export const ProvisioningFileSchema = z
+const WebhookEntry = z
   .object({
-    services: z.array(ServiceEntry).default([]),
-    clients: z.array(ClientEntry).default([]),
+    key: Slug,
+    url: z.string().max(2048),
+    events: z.array(Text).min(1),
+    secretFrom: EnvName,
+    organizations: z
+      .union([z.literal("all"), z.array(z.uuid()).min(1)])
+      .default("all"),
+    description: Description.optional(),
   })
   .strict();
+
+const ServiceEntry = z
+  .object({
+    slug: Slug,
+    name: Name,
+    namespace: Slug.optional(),
+    clientId: ClientId.optional(),
+    secretFrom: EnvName,
+    access: z
+      .object({
+        roles: z.array(Text).default([]),
+        audiences: z.array(Text).default([]),
+      })
+      .strict()
+      .default({ roles: [], audiences: [] }),
+    permissions: z.array(permissionItem.strict()).max(1000).default([]),
+    systemRoles: z.array(systemRoleItem.strict()).max(200).default([]),
+    buckets: z.array(bucketItem.strict()).max(100).default([]),
+    eventTypes: z.array(eventTypeItem.strict()).max(1000).default([]),
+    webhooks: z.array(WebhookEntry).default([]),
+  })
+  .strict();
+
+const CustomRoleEntry = z
+  .object({
+    name: z
+      .string()
+      .min(1)
+      .max(100)
+      .regex(/^[a-z][a-z0-9_-]*$/, "lowercase letters, digits, _ -"),
+    displayName: z.string().min(1).max(255),
+    description: Description.optional(),
+    orgAssignable: z.boolean().default(false),
+    requires2fa: z.boolean().default(false),
+    permissions: z.array(z.string().min(1).max(200)),
+  })
+  .strict();
+
+export const ProvisioningDocumentSchema = z
+  .object({
+    $schema: z.string().optional(),
+    version: z
+      .string()
+      .max(64)
+      .regex(
+        SEMVER_PATTERN,
+        "a semver version: MAJOR.MINOR.PATCH[-prerelease]"
+      ),
+    service: ServiceEntry.optional(),
+    clients: z.array(ClientEntry).optional(),
+    roles: z.array(CustomRoleEntry).optional(),
+  })
+  .strict()
+  .refine((d) => d.service || d.clients?.length || d.roles?.length, {
+    message: "needs one of service, clients, roles, not empty",
+  });
+
+export type ProvisioningDocument = z.input<typeof ProvisioningDocumentSchema>;
+export type CustomRoleEntry = z.output<typeof CustomRoleEntry>;

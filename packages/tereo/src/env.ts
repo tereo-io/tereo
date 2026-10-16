@@ -149,12 +149,15 @@ export const checkUiBaseUrl = (
 
 /**
  * Settings that still point at the paths core served before its API moved
- * under `/v1` and the admin UI to `/`. Neither old path has an alias, so they
- * break quietly: file links 404 and UI redirects land on the app shell.
+ * under `/v1` and the admin UI to `/`, or use a variable since renamed.
+ * None has an alias, so they break quietly: file links 404, UI redirects land
+ * on the app shell, and a provisioning file is never read.
  */
 export const stalePathWarnings = (source: {
   FILE_SERVICE_PUBLIC_BASE_URL?: string;
   UI_BASE_URL?: string;
+  PROVISIONING_FILE?: string;
+  PROVISIONING_PATH?: string;
 }): string[] => {
   const pathOf = (url: string | undefined) => {
     if (!url) return undefined;
@@ -174,6 +177,11 @@ export const stalePathWarnings = (source: {
   if (pathOf(source.UI_BASE_URL)?.endsWith("/ui")) {
     warnings.push(
       "UI_BASE_URL ends in /ui; core serves the admin UI at / (the default is PUBLIC_URL in production)"
+    );
+  }
+  if (source.PROVISIONING_FILE && !source.PROVISIONING_PATH) {
+    warnings.push(
+      "PROVISIONING_FILE is no longer read; set PROVISIONING_PATH to a JSON provisioning document or a folder of them"
     );
   }
   return warnings;
@@ -289,8 +297,9 @@ const EnvFields = z
     // Token for first-boot setup, so it can run unattended. Unset, core
     // generates one and logs it.
     SETUP_TOKEN: z.string().min(24).optional(),
-    // YAML declaring the services and login clients core reconciles at start.
-    PROVISIONING_FILE: z.string().optional(),
+    // A JSON provisioning document, or a folder of them, declaring the
+    // services, login clients and custom roles core applies at start.
+    PROVISIONING_PATH: z.string().optional(),
     // The admin UI's build, served at the root when present (the Docker image has
     // it). Missing, core serves the API alone.
     UI_DIST_PATH: z.string().default(DEFAULT_UI_DIST_PATH),

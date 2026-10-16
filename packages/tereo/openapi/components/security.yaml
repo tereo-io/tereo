@@ -8,7 +8,7 @@ BearerAuth:
     permissions are read from the database on each request.
 
     Which tokens core's own API (`/v1/account`, `/v1/admin`, `/v1/files`, `/v1/audit`,
-    `/v1/webhooks`, `/v1/notifications`, `/v1/registry`, the `/ws` socket) admits depends on the client
+    `/v1/webhooks`, `/v1/notifications`, the `/ws` socket) admits depends on the client
     the token was issued to:
 
     - core's UI (`tereo-ui`) or a service (a client registered under
@@ -25,8 +25,7 @@ BearerAuth:
       `file-service.*.read` permissions), `core:audit` / `core:audit.read`
       (`audit-logs.admin` / `audit-logs.read`), `core:webhooks` /
       `core:webhooks.read` (`webhooks.admin` / `webhooks.read`,
-      `webhooks.event-types.read`). No scope opens `/v1/registry` or
-      `/v1/notifications`. An
+      `webhooks.event-types.read`). No scope opens `/v1/notifications`. An
       organization member role is capped the same way.
     - any other client without core API scopes: 401 `invalid_token`.
 

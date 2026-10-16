@@ -52,7 +52,9 @@ WebhooksConflictResponse:
     delete), `already_archived` when archiving an archived endpoint,
     `resource_archived` when the endpoint is archived and must be restored
     first, `idempotency_request_in_progress`
-    when an event with the same idempotency key is still being processed.
+    when an event with the same idempotency key is still being processed,
+    `managed_by_provisioning` when the endpoint is declared in a service's
+    provisioning document and the change must be made there.
   headers:
     X-RateLimit-Limit:
       $ref: '../headers.yaml#/X-RateLimit-Limit'
@@ -73,6 +75,7 @@ WebhooksConflictResponse:
               - already_archived
               - resource_archived
               - idempotency_request_in_progress
+              - managed_by_provisioning
           error_description:
             description: A human-readable explanation of the error
             type: string

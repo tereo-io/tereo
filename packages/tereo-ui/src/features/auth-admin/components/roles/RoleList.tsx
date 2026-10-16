@@ -1,5 +1,6 @@
 import ArchiveRestoreRoleListButton from "./buttons/ArchiveRestoreRoleListButton";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import useInfiniteRoles from "../../api/roles/useInfiniteRoles";
 import { faLock } from "@fortawesome/free-solid-svg-icons";
 import CreateRoleModal from "./modals/CreateRoleModal";
@@ -41,6 +42,7 @@ export const RoleList = () => {
                 title="System role"
               />
             )}
+            {role.provisioned && <ProvisionedBadge />}
             {role.retiredAt !== null && (
               <Badge size="sm" variant="danger">
                 Retired
@@ -86,7 +88,10 @@ export const RoleList = () => {
         disableRowClick: true,
         width: "7rem",
         align: "center",
-        cellElement: (role) => <ArchiveRestoreRoleListButton role={role} />,
+        cellElement: (role) =>
+          role.provisioned ? null : (
+            <ArchiveRestoreRoleListButton role={role} />
+          ),
       },
     ],
     []

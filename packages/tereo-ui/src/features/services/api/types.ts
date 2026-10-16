@@ -20,9 +20,9 @@ export interface Service extends ServiceSummary {
   /** Set while a regenerated secret's predecessor still works. */
   previousSecretExpiresAt: string | null;
   declarationHash: string | null;
-  /** The version of the declaration last applied; null if it never registered. */
+  /** The version of the provisioning document last applied; null if none was. */
   declarationVersion: string | null;
-  /** When the service last registered a declaration; null if it never has. */
+  /** When a provisioning document was last applied; null if never. */
   declaredAt: string | null;
   createdBy: string | null;
   creator: UserRef | null;
@@ -31,10 +31,7 @@ export interface Service extends ServiceSummary {
 }
 
 /** A row of `GET /admin/services`. */
-export interface ServiceListItem extends Service {
-  /** How many of its access requests await a decision. */
-  pendingAccessCount: number;
-}
+export type ServiceListItem = Service;
 
 /** Set on an item its service's latest declaration no longer lists. */
 export interface Retirable {
@@ -68,7 +65,7 @@ export interface DeclaredEventType extends Retirable {
 }
 
 export type ServiceAccessKind = "role" | "audience";
-export type ServiceAccessStatus = "pending" | "approved" | "revoked";
+export type ServiceAccessStatus = "approved" | "revoked";
 
 export interface ServiceAccess {
   id: string;
@@ -84,13 +81,6 @@ export interface ServiceAccess {
   decidedByName: string | null;
   /** Another service's role: the permissions its approval recorded; null otherwise. */
   approvedPermissions: string[] | null;
-  /** Another service's role while pending: what approving would add; null otherwise. */
-  pendingPermissions: string[] | null;
-}
-
-/** A row of `GET /admin/services/access`, the cross-service inbox. */
-export interface ServiceAccessListItem extends ServiceAccess {
-  service: { id: string; slug: string; name: string };
 }
 
 /** Core's configuration for services, as this deployment has it set. */

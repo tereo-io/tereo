@@ -15,7 +15,7 @@ import {
 } from "@kosmeo-ui/react";
 
 // Read-only: permissions are declared in code by the service that owns them
-// and registered at boot. Admins compose custom roles from them.
+// and applied from their provisioning documents. Admins compose custom roles from them.
 export const PermissionList = () => {
   const { hasPermission } = useAuth();
   const { data, hasMore, isLoading, onQueryChange, reload } =

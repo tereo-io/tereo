@@ -1,5 +1,6 @@
 import { getTestAccessToken as getWebhooksToken } from "./webhooks/utils/test-helpers.js";
 import { getTestAccessToken as getAuditToken } from "./audit/utils/test-helpers.js";
+import { provisionService } from "./provisioning/utils/test-helpers.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CORE_URL } from "./utils/coreUrl.js";
 import axios from "axios";
@@ -60,6 +61,31 @@ describe("URL layout", () => {
         })
       ).status
     ).toBe(200);
+  });
+
+  it("has no registration route: services are provisioned", async () => {
+    const { credentials } = await provisionService();
+    const tokenResponse = await fetch(`${ROOT}/oauth/token`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${credentials.clientId}:${credentials.clientSecret}`).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "grant_type=client_credentials",
+    });
+    expect(tokenResponse.status).toBe(200);
+    const { access_token } = (await tokenResponse.json()) as {
+      access_token: string;
+    };
+    const response = await axios.post(
+      `${ROOT}/v1/registry/declaration`,
+      { version: "1.0.0" },
+      {
+        headers: { Authorization: `Bearer ${access_token}` },
+        validateStatus: () => true,
+      }
+    );
+    expect(response.status).toBe(404);
   });
 
   it("keeps the protocol and infrastructure paths at the root", async () => {

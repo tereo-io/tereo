@@ -64,7 +64,7 @@ const SERVICE_PERMISSIONS: PermissionDefinition[] = [
   {
     name: "services.read",
     displayName: "Read Services",
-    description: "View services, their declarations and requested access",
+    description: "View services, their declarations and access",
   },
   {
     name: "services.write",
@@ -75,7 +75,7 @@ const SERVICE_PERMISSIONS: PermissionDefinition[] = [
   {
     name: "services.approve",
     displayName: "Approve Service Access",
-    description: "Approve or revoke the access services request",
+    description: "Approve or revoke services' access",
   },
 ];
 

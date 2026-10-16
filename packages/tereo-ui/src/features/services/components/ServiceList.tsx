@@ -58,27 +58,13 @@ export const ServiceList = () => {
         cellElement: (s) => <span className="v-mono">{s.namespace}</span>,
       },
       {
-        title: "Last Registered",
+        title: "Last Applied",
         dataKey: "declaredAt",
         cellElement: (s) =>
           s.declaredAt ? (
             new Date(s.declaredAt).toLocaleString()
           ) : (
             <span className="v-muted-text">Never</span>
-          ),
-      },
-      {
-        title: "Pending Access",
-        dataKey: "pendingAccessCount",
-        width: "9rem",
-        align: "center",
-        cellElement: (s) =>
-          s.pendingAccessCount > 0 ? (
-            <Badge size="sm" variant="warning">
-              {s.pendingAccessCount} pending
-            </Badge>
-          ) : (
-            <span className="v-muted-text">—</span>
           ),
       },
       {

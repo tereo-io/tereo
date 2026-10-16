@@ -4,9 +4,7 @@
       - Admin - Services
     summary: List services
     description: |
-      Returns a paginated list of services, core's own row included. Each
-      carries `pendingAccessCount`, the number of its access requests that
-      await a decision.
+      Returns a paginated list of services, core's own row included.
 
       **Filter fields and operators:**
       - `slug`: `contains`, `equals`
@@ -56,8 +54,8 @@
       Adds an app service: a confidential OAuth client (`client_credentials`
       only), the service-account user it acts as, and the service row. The
       client secret is returned in this response and nowhere else — only its
-      hash is stored. The service then registers what it declares with
-      `POST /v1/registry/declaration`, using these credentials.
+      hash is stored. An admin-made service declares nothing: services that
+      own permissions, roles, buckets or event types are provisioned.
 
       `slug` defaults to the name, lowercased and hyphenated (cut to 64
       characters, without a trailing hyphen); `namespace`
@@ -111,22 +109,22 @@
   get:
     tags:
       - Admin - Services
-    summary: List access requests across services
+    summary: List service access across services
     description: |
-      Returns a paginated list of every service's access requests — the
-      approval inbox. Each row carries the service it belongs to and who
-      decided it. Approve or revoke through
-      `POST /v1/admin/services/{id}/access/approve` and `.../revoke`.
+      Returns a paginated list of every service's access rows, approved by
+      provisioning or decided by an admin. Each row carries the service it
+      belongs to and who decided it. Revoke, or approve a revoked row again,
+      through `POST /v1/admin/services/{id}/access/revoke` and `.../approve`.
 
       **Filter fields and operators:**
-      - `status`: `equals`, `in` (`pending`, `approved`, `revoked`)
+      - `status`: `equals`, `in` (`approved`, `revoked`)
       - `kind`: `equals`, `in` (`role`, `audience`)
       - `serviceId`: `equals`
       - `target`: `contains`, `equals`
 
       **Sort fields:** `requestedAt` (default, descending), `id`
 
-      Example: `GET /v1/admin/services/access?filter[status]=pending`
+      Example: `GET /v1/admin/services/access?filter[status]=revoked`
     operationId: listAdminServiceAccess
     security:
       - BearerAuth: [services.read]
@@ -139,7 +137,7 @@
       - $ref: '../../../components/parameters.yaml#/FilterOperatorParam'
     responses:
       '200':
-        description: Paginated list of access requests
+        description: Paginated list of access rows
         headers:
           X-RateLimit-Limit:
             $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
@@ -170,7 +168,7 @@
     summary: Get service
     description: |
       Returns the service, everything it declared (retired items included)
-      and its access requests. Works for core's own row too.
+      and its access. Works for core's own row too.
 
       Each access row names who decided it (`decidedBy`, plus
       `decidedByEmail` and `decidedByName`). `settings` states the secret
@@ -218,7 +216,7 @@
       Deactivating revokes all of the service's outstanding tokens. Core's
       own row cannot be changed (`403`). A provisioned service is refused
       with `409 managed_by_provisioning`: its name and secret come from the
-      provisioning file.
+      provisioning documents.
 
       An audit log entry is created for this action.
       A `core.service.updated` webhook event is emitted.
@@ -259,7 +257,7 @@
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
+        description: The service is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -311,7 +309,7 @@
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: The service is declared in the provisioning file (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
+        description: The service is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`); change it there. Its access can still be approved or revoked.
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -325,7 +323,7 @@
     description: |
       Ends the secret overlap now: only the current secret works from here
       on. Core's own row cannot be changed (`403`). Allowed on a provisioned
-      service too: the provisioning file cannot end an overlap, and a leaked
+      service too: the provisioning documents cannot end an overlap, and a leaked
       old secret must not wait it out.
 
       An audit log entry is created for this action.
@@ -369,27 +367,23 @@
       - Admin - Services
     summary: Approve service access
     description: |
-      Grants what the service asked for in its declaration: a requested
-      role is assigned (globally) to its service-account user, a requested
-      audience is added to its client's `audience`. Requests already approved
-      are skipped. All ids must belong to this service (`404` otherwise);
-      a requested role that no longer exists or is retired fails the whole
-      call with `422 role_unavailable`, and a core role services may not
-      request with `422 role_not_requestable`. Core's own row cannot be changed
-      (`403`).
+      Approves access rows again, typically ones an admin revoked: a role
+      is assigned (globally) to the service-account user, an audience is
+      added to its client's `audience`. Rows already approved are skipped.
+      All ids must belong to this service (`404` otherwise); a role that no
+      longer exists or is retired fails the whole call with
+      `422 role_unavailable`, and a core role services may not hold with
+      `422 role_not_requestable`. Core's own row cannot be changed (`403`).
 
-      Only grant what you hold: every permission of a requested role the
-      service account does not already hold must be one the approver holds
-      through a global role (`admin` holds all), otherwise the whole call is a `403` naming them
-      and nothing is approved.
+      Only grant what you hold: every permission of a role the service
+      account does not already hold must be one the approver holds through
+      a global role (`admin` holds all), otherwise the whole call is a `403`
+      naming them and nothing is approved.
 
       Approving another service's role (`<slug>/<name>`) records the
-      permissions it grants at that moment, and the service holds only
-      those. When the declaring service later adds permissions to the role,
-      the request returns to `pending` with them in `pendingPermissions`;
-      it keeps what was approved meanwhile. Approving it again records the
-      role's current permissions, and the approver must hold the added
-      ones. Core's own roles are not recorded: they change only with core.
+      permissions it grants at that moment. Provisioning brings approved
+      access up to what the role grants on each apply. Core's own roles are
+      not recorded: they change only with core.
 
       When anything changed, an audit log entry is created and a
       `core.service.access-approved` webhook event is emitted.
@@ -424,13 +418,13 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing services.approve permission, the service is core, or a requested role grants a permission the approver does not hold
+        description: Forbidden - missing services.approve permission, the service is core, or a role grants a permission the approver does not hold
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
-        description: Service not found, or an access request id is not this service's
+        description: Service not found, or an access id is not this service's
       '422':
         $ref: '../../../components/auth/responses.yaml#/UnprocessableEntityResponse'
-        description: A requested role no longer exists or is retired (`role_unavailable`), or is a core role services may not hold (`role_not_requestable`)
+        description: A role no longer exists or is retired (`role_unavailable`), or is a core role services may not hold (`role_not_requestable`)
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -443,7 +437,7 @@
     summary: Revoke service access
     description: |
       Takes access away: the role is removed from the service-account user,
-      or the audience from its client. Requests already revoked are skipped.
+      or the audience from its client. Rows already revoked are skipped.
       When anything was revoked, all of the service's outstanding tokens are
       revoked too, so its next call fetches a token without that access.
       All ids must belong to this service (`404` otherwise). Core's own row
@@ -485,7 +479,7 @@
         description: Forbidden - missing services.approve permission, or the service is core
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
-        description: Service not found, or an access request id is not this service's
+        description: Service not found, or an access id is not this service's
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -627,9 +621,9 @@ core.service.secret-regenerated:
 core.service.declared:
   post:
     tags:
-      - Registry
-    summary: Service declaration registered
-    description: Fired when a service registers a declaration that differs from the last one applied.
+      - Admin - Services
+    summary: Service declaration applied
+    description: Fired when a declaration that differs from the last one applied is applied — core's own on start, or an app service's from provisioning.
     operationId: webhookServiceDeclared
     security: []
     parameters:
@@ -706,69 +700,12 @@ core.service.declared:
       '2XX':
         description: Any 2xx response acknowledges the delivery; anything else is retried.
 
-core.service.access-requested:
-  post:
-    tags:
-      - Registry
-    summary: Service access requested
-    description: |
-      Fired when a declaration requests roles or audiences not requested
-      before, and for each service whose approved access to a role grew when
-      the role's own service declared more permissions for it (`entityId` is
-      then that service, and each item names the added `permissions`). Both
-      await an admin's approval.
-    operationId: webhookServiceAccessRequested
-    security: []
-    parameters:
-      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
-      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
-      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
-      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            allOf:
-              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
-              - type: object
-                properties:
-                  eventType:
-                    const: core.service.access-requested
-                  entityType:
-                    const: Service
-                  data:
-                    type: object
-                    required: [slug, requested]
-                    properties:
-                      slug:
-                        type: string
-                      requested:
-                        type: array
-                        items:
-                          type: object
-                          required: [kind, target]
-                          properties:
-                            kind:
-                              type: string
-                              enum: [role, audience]
-                            target:
-                              type: string
-                            permissions:
-                              type: array
-                              items:
-                                type: string
-                              description: 'A role that grew since its approval: the permissions it gained, awaiting approval'
-    responses:
-      '2XX':
-        description: Any 2xx response acknowledges the delivery; anything else is retried.
-
 core.service.access-approved:
   post:
     tags:
       - Admin - Services
     summary: Service access approved
-    description: Fired when an admin approves a service's access requests.
+    description: Fired when a service's access is approved, by an admin or by provisioning (as the system user).
     operationId: webhookServiceAccessApproved
     security: []
     parameters:
@@ -823,7 +760,7 @@ core.service.access-revoked:
     tags:
       - Admin - Services
     summary: Service access revoked
-    description: Fired when an admin revokes a service's access.
+    description: Fired when a service's access is revoked, by an admin or by provisioning when its document stops listing it.
     operationId: webhookServiceAccessRevoked
     security: []
     parameters:

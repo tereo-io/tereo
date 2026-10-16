@@ -13,8 +13,8 @@
       endpoints match, returns `202` with `deliveriesCreated: 0` and an audit log
       entry is created to preserve the event details.
 
-      The event type must be registered (declared by a service through
-      `POST /v1/registry/declaration`) and not retired, or the request fails with
+      The event type must be registered (declared by a service in its
+      provisioning document) and not retired, or the request fails with
       `400 invalid_event_type` / `400 event_type_retired`. `webhook.test` is
       reserved for `POST /v1/webhooks/webhooks/{id}/test` and cannot be
       emitted (`400 reserved_event_type`, checked first).
@@ -161,7 +161,7 @@
       - `400` — a malformed event, `reserved_event_type` (`webhook.test`,
         sent only by `POST /v1/webhooks/webhooks/{id}/test`),
         `invalid_event_type` / `event_type_retired` (every event type must be
-        registered through `POST /v1/registry/declaration` and not retired), or
+        declared by a service and not retired), or
         `duplicate_idempotency_key`, or `unknown_organization` (any event's
         `organizationId` names no organization);
       - `403` — any event names an organization or event type the caller may

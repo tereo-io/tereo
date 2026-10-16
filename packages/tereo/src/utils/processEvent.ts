@@ -62,7 +62,7 @@ async function assertEmittable(
     if (!row) {
       throw new BadRequestError(
         "invalid_event_type",
-        `Event type "${eventType}" is not registered. Declare it in the service's registration first.`
+        `Event type "${eventType}" is not registered. Declare it in the service's provisioning document first.`
       );
     }
     if (row.retiredAt) {
@@ -91,7 +91,7 @@ async function planEvent(
   const mayReceive = createRecipientCheck(event, readPermission);
   const endpointIds: string[] = [];
   for (const endpoint of endpoints) {
-    if (await mayReceive(endpoint.createdBy)) endpointIds.push(endpoint.id);
+    if (await mayReceive(endpoint)) endpointIds.push(endpoint.id);
   }
   return { event, endpointIds };
 }

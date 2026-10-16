@@ -1,3 +1,4 @@
+import { provisionServices } from "../provisioning/utils/test-helpers.js";
 import { getTestPrincipalToken } from "../utils/principals.js";
 import { CORE_SERVICE_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
@@ -53,15 +54,6 @@ const fetchToken = async ({ clientId, clientSecret }: Credentials) => {
   return { status: response.status, token: body.access_token ?? null };
 };
 
-const tokenFor = async (service: AddedService) => {
-  const { status, token } = await fetchToken(service.credentials);
-  expect(status).toBe(200);
-  return token!;
-};
-
-const declare = (token: string, declaration: unknown) =>
-  api("POST", "/v1/registry/declaration", token, declaration);
-
 const accountUserId = async (serviceId: string) => {
   const row = await prisma.service.findUniqueOrThrow({
     where: { id: serviceId },
@@ -83,37 +75,49 @@ const waitForLockWait = async (like: string, timeoutMs = 10_000) => {
   throw new Error(`No backend waited on a lock for ${like}`);
 };
 
-describe("approving access while the role's owner registers", () => {
-  it("leaves every permission the role grants approved or pending", async () => {
+describe("approving access while provisioning changes the role", () => {
+  it("records every permission the role grants once both commit", async () => {
     const admin = await superAdmin();
-    const owner = await addService(admin);
-    const ownerToken = await tokenFor(owner);
-    const ns = owner.namespace;
+    const ownerSlug = `reg-${rand()}`;
+    const consumerSlug = `reg-${rand()}`;
+    const ns = ownerSlug;
     const roleName = `${ns}_editor`;
-    const declareOwner = (grants: string[], version: string) =>
-      declare(ownerToken, {
-        version,
-        permissions: [
-          { name: `${ns}.items.read`, displayName: "Read" },
-          { name: `${ns}.items.write`, displayName: "Write" },
-        ],
-        systemRoles: [
-          {
-            name: roleName,
-            displayName: "Editor",
-            permissions: grants.map((g) => `${ns}.items.${g}`),
+    const provisionBoth = (grants: string[], version: string) =>
+      provisionServices([
+        {
+          slug: ownerSlug,
+          version,
+          declaration: {
+            permissions: [
+              { name: `${ns}.items.read`, displayName: "Read" },
+              { name: `${ns}.items.write`, displayName: "Write" },
+            ],
+            systemRoles: [
+              {
+                name: roleName,
+                displayName: "Editor",
+                permissions: grants.map((g) => `${ns}.items.${g}`),
+              },
+            ],
           },
-        ],
-      });
-    expect((await declareOwner(["read"], "1.0.0")).status).toBe(200);
-
-    const consumer = await addService(admin);
-    const registered = await declare(await tokenFor(consumer), {
-      version: "1.0.0",
-      requestedAccess: { roles: [`${owner.slug}/${roleName}`] },
+        },
+        {
+          slug: consumerSlug,
+          access: { roles: [`${ownerSlug}/${roleName}`] },
+        },
+      ]);
+    const [, consumer] = await provisionBoth(["read"], "1.0.0");
+    const [access] = await prisma.serviceAccess.findMany({
+      where: { serviceId: consumer.id },
     });
-    expect(registered.status).toBe(200);
-    const accessId = registered.body.access[0].id as string;
+    const accessId = access.id;
+    const revoked = await api(
+      "POST",
+      `/v1/admin/services/${consumer.id}/access/revoke`,
+      admin,
+      { ids: [accessId] }
+    );
+    expect(revoked.status).toBe(200);
 
     // Holding the access row stops the approval just before it records the
     // role's permissions.
@@ -139,9 +143,9 @@ describe("approving access while the role's owner registers", () => {
     );
     await waitForLockWait("%service_access%");
 
-    // The owner's release adds `write` to the role: it either finishes or
-    // waits for the approval to commit.
-    const ownerRelease = declareOwner(["read", "write"], "1.1.0");
+    // The owner's release adds `write` to the role: it waits for the
+    // approval to commit.
+    const ownerRelease = provisionBoth(["read", "write"], "1.1.0");
     await Promise.race([
       ownerRelease,
       waitForLockWait("%pg_advisory_xact_lock%"),
@@ -150,44 +154,40 @@ describe("approving access while the role's owner registers", () => {
     release();
     await holder;
     expect((await approval).status).toBe(200);
-    expect((await ownerRelease).status).toBe(200);
+    await ownerRelease;
 
     const row = await prisma.serviceAccess.findUniqueOrThrow({
       where: { id: accessId },
     });
+    expect(row.status).toBe("approved");
     const names = await prisma.permission.findMany({
       where: { id: { in: row.approvedPermissionIds } },
       select: { name: true },
+      orderBy: { name: "asc" },
     });
-    const detail = await api("GET", `/v1/admin/services/${consumer.id}`, admin);
-    const view = detail.body.access.find(
-      (a: { id: string }) => a.id === accessId
-    );
+    expect(names.map((p) => p.name)).toEqual([
+      `${ns}.items.read`,
+      `${ns}.items.write`,
+    ]);
     expect(
-      [...view.approvedPermissions, ...view.pendingPermissions].sort()
+      (
+        await db.roles.getUserPermissions(await accountUserId(consumer.id))
+      ).sort()
     ).toEqual([`${ns}.items.read`, `${ns}.items.write`]);
-    expect(names.map((p) => p.name)).toEqual([`${ns}.items.read`]);
-    expect(row.status).toBe("pending");
   });
 });
 
 describe("revoking access to a retired core role", () => {
   it("removes the role, so declaring it again does not hand it back", async () => {
     const admin = await superAdmin();
-    const service = await addService(admin);
-    const registered = await declare(await tokenFor(service), {
-      version: "1.0.0",
-      requestedAccess: { roles: ["notification_sender"] },
+    const [service] = await provisionServices([
+      { access: { roles: ["notification_sender"] } },
+    ]);
+    const [access] = await prisma.serviceAccess.findMany({
+      where: { serviceId: service.id },
     });
-    expect(registered.status).toBe(200);
-    const accessId = registered.body.access[0].id as string;
-    const approved = await api(
-      "POST",
-      `/v1/admin/services/${service.id}/access/approve`,
-      admin,
-      { ids: [accessId] }
-    );
-    expect(approved.status).toBe(200);
+    const accessId = access.id;
+    expect(access.status).toBe("approved");
     const userId = await accountUserId(service.id);
     expect(await db.roles.getUserPermissions(userId)).toContain(
       "notifications.send"

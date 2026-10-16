@@ -45,32 +45,32 @@ env: {}
 # Further env sources, e.g. a ConfigMap or Secret of your own.
 extraEnvFrom: []
 
-# Services and login clients core creates and keeps at every start, as the
-# provisioning file's contents (packages/tereo/docs/provisioning.md). Empty
-# renders no ConfigMap and sets no PROVISIONING_FILE. Secrets are never
-# written here: `secretFrom` names an environment variable, and that variable
-# must be a key of secrets.existingSecret (or the Secret built by
-# secrets.externalSecret), or come from extraEnvFrom. Each value must be a
-# tereo_sk_ secret (npm run cli -- generate-secret). Core refuses to start if a
-# name is unset or a value is weak. Editing this restarts the pods.
+# Provisioning documents (packages/tereo/docs/provisioning.md): each entry is
+# one document, rendered as <name>.json in a ConfigMap mounted at
+# /etc/tereo/provisioning, where PROVISIONING_PATH points. Core applies them at
+# start, and a post-install/post-upgrade Job runs `provision` so a changed
+# document takes effect without a restart. Empty renders neither. Secrets are
+# never written here: `secretFrom` names an environment variable, which must
+# be a key of secrets.existingSecret (or the Secret built by
+# secrets.externalSecret), or come from extraEnvFrom.
 #
 # provisioning:
-#   services:
-#     - slug: billing-service
-#       name: Billing
-#       secretFrom: BILLING_CLIENT_SECRET
-#       access:
-#         roles: [file_user, audit_writer]
-#         audiences: [orders-service]
-#   clients:
-#     - clientId: billing-web
-#       name: Billing web app
-#       clientType: public
-#       redirectUris: [https://billing.example.com/callback]
-#       scopes: [openid, profile, email]
-#       audience: [billing-service]
-#       consentRequired: false
-provisioning: {}
+#   documents:
+#     billing:
+#       version: 1.0.0
+#       service:
+#         slug: billing-service
+#         name: Billing
+#         secretFrom: BILLING_CLIENT_SECRET
+provisioning:
+  documents: {}
+  # Mount a ConfigMap you manage (one *.json key per document) instead; the
+  # chart then renders no ConfigMap of its own.
+  existingConfigMap: ""
+  job:
+    backoffLimit: 1
+    activeDeadlineSeconds: 300
+    resources: {}
 
 secrets:
   # A Secret you manage, holding DATABASE_URL, CORE_KEK (openssl rand -base64
