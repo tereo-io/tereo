@@ -28,7 +28,7 @@ export class UnknownEventTypeError extends Error {
 
 /**
  * Emits webhook events to core. Event types are declared in the service's
- * registration (`register`), not here; `eventTypes` only lets the client
+ * provisioning document, not here; `eventTypes` only lets the client
  * reject a typo before the request is made.
  */
 export class WebhookServiceClient {
@@ -38,7 +38,7 @@ export class WebhookServiceClient {
     this.validEventTypes = new Set(config.eventTypes ?? []);
   }
 
-  /** Replace the event types `emit` accepts — `register` passes the declared ones. */
+  /** Replace the event types `emit` accepts; with none, every type is accepted and core decides. */
   useEventTypes(eventTypes: string[]): void {
     this.validEventTypes = new Set(eventTypes);
   }
