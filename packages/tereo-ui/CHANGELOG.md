@@ -1,3 +1,21 @@
+## 0.4.0 (2026-10-16)
+
+### 🚀 Features
+
+- `PARTITION_DDL_LOCK_TIMEOUT_MS` (default `5000`, 100–60000) sets how long creating or dropping a partition of the audit, webhook-delivery or notification tables waits for its table's lock before giving up until the next run. It was fixed at 5 seconds, which stays the default. ([#17](https://github.com/tereo-io/tereo/pull/17))
+
+### ⚠️  Breaking Changes
+
+- Access tokens no longer carry a `permissions` claim. A token's size grew with every permission its holder's roles granted, so a broad role (57 permissions here) produced a token longer than `/oauth/introspect` and `/oauth/revoke` accepted, and the claim went stale the moment a role was revoked. Nothing in core, the SDK or the admin UI read it: core and introspection compute permissions live from the database on every request. `/oauth/introspect` and `/oauth/revoke` now accept tokens up to 8192 characters. ([#16](https://github.com/tereo-io/tereo/pull/16))
+
+  Breaking changes:
+
+  - A service that verifies core's access tokens itself (against the JWKS) and reads `permissions` from them gets none. Read them from `/oauth/introspect` (what the SDK's `requireAuth` already does) or ask `/oauth/check-permission`.
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.3.0 (2026-10-16)
 
 ### 🚀 Features
