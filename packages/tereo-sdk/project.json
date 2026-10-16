@@ -10,7 +10,7 @@
         "^build"
       ],
       "options": {
-        "command": "tsc",
+        "command": "cp ../tereo/provisioning.schema.json . && tsc",
         "cwd": "packages/tereo-sdk"
       },
       "outputs": [

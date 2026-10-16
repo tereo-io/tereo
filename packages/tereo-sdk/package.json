@@ -44,7 +44,6 @@
     "NOTICE"
   ],
   "scripts": {
-    "prebuild": "cp ../tereo/provisioning.schema.json .",
     "build": "tsc",
     "check": "tsc --noEmit",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",

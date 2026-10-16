@@ -120,10 +120,13 @@ describe("provisioning schema", () => {
       "utf8"
     )
   );
-  const validate = new Ajv2020({ strict: false }).compile(schema);
+  const validate = new Ajv2020({ validateFormats: false }).compile(schema);
 
   it("matches core's schema", () => {
     expect(validate(full), JSON.stringify(validate.errors)).toBe(true);
+    const withAll = structuredClone(full);
+    withAll.service!.webhooks![0]!.organizations = "all";
+    expect(validate(withAll), JSON.stringify(validate.errors)).toBe(true);
     expect(
       validate({ version: "1.0.0" }),
       JSON.stringify(validate.errors)
@@ -135,5 +138,17 @@ describe("provisioning schema", () => {
         service: { slug: "a", name: "A", secretFrom: "A", extra: 1 },
       })
     ).toBe(false);
+  });
+});
+
+describe("shipped schema copy", () => {
+  it("is byte-equal to core's schema", () => {
+    const sdk = readFileSync(
+      new URL("../../provisioning.schema.json", import.meta.url)
+    );
+    const core = readFileSync(
+      new URL("../../../tereo/provisioning.schema.json", import.meta.url)
+    );
+    expect(sdk.equals(core)).toBe(true);
   });
 });
