@@ -1280,6 +1280,7 @@ describe("custom roles", () => {
       }),
       await roleApi("POST", `/v1/admin/roles/${row.id}/archive`),
       await roleApi("DELETE", `/v1/admin/roles/${row.id}`),
+      await roleApi("POST", `/v1/admin/roles/${row.id}/restore`),
     ];
     for (const res of attempts) {
       expect(res.status, JSON.stringify(res.body)).toBe(409);
@@ -1320,6 +1321,18 @@ describe("custom roles", () => {
       await prisma.userRole.deleteMany({ where: { userId: user.id } });
       await prisma.user.delete({ where: { id: user.id } });
     }
+  });
+
+  it("reactivates a provisioned role left inactive when the set lists it", async () => {
+    const role = roleSpec(["roles.read"]);
+    await apply(rolesDoc(role));
+    await prisma.role.update({
+      where: { id: (await roleRow(role.name)).id },
+      data: { isActive: false },
+    });
+    const result = await apply(rolesDoc(role));
+    expect(result.roles).toEqual([`role:${role.name}`]);
+    expect((await roleRow(role.name)).isActive).toBe(true);
   });
 
   describe("retirement", () => {

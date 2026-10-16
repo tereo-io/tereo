@@ -237,6 +237,7 @@ export const archiveRole = async (req: Request, res: Response) => {
 export const restoreRole = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const params = validateParams(RoleIdParamSchema, req);
+  refuseProvisioned(await db.roles.getAny(params.id));
 
   const restored = await db.$transaction(async (tx) => {
     const result = await db.roles.restore(params.id, tx);

@@ -631,6 +631,7 @@ const applyRoles = async (
     const permissionsDiffer =
       held.length !== wanted.length || held.some((id, i) => id !== wanted[i]);
     const restored = existing.archivedAt !== null;
+    const reactivated = restored || !existing.isActive;
     const changes = computeChanges(
       {
         ...Object.fromEntries(
@@ -645,7 +646,7 @@ const applyRoles = async (
       },
       {
         ...fields,
-        isActive: restored ? true : existing.isActive,
+        isActive: true,
         archivedAt: null,
         unprovisionedAt: null,
       }
@@ -658,7 +659,7 @@ const applyRoles = async (
         ...fields,
         archivedAt: null,
         unprovisionedAt: null,
-        ...(restored && { isActive: true }),
+        isActive: true,
       },
     });
     if (permissionsDiffer)
@@ -694,7 +695,7 @@ const applyRoles = async (
       });
       permissionsChanged.push(role.id);
     }
-    if (restored) statusChanged.push(role.id);
+    if (reactivated) statusChanged.push(role.id);
     result.roles.push(entry);
   }
   return { permissionsChanged, statusChanged };
