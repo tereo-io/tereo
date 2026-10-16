@@ -1,11 +1,12 @@
-{{- if .Values.provisioning }}
+{{- if and .Values.provisioning.documents (not .Values.provisioning.existingConfigMap) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "tereo.fullname" . }}-provisioning
+  name: {{ include "tereo.provisioningConfigMap" . }}
   labels:
     {{- include "tereo.labels" . | nindent 4 }}
 data:
-  provisioning.yaml: |
-    {{- toYaml .Values.provisioning | nindent 4 }}
+  {{- range $name, $doc := .Values.provisioning.documents }}
+  {{ $name }}.json: {{ toJson $doc | quote }}
+  {{- end }}
 {{- end }}

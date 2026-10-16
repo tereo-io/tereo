@@ -1,0 +1,67 @@
+{{- if include "tereo.provisioning" . }}
+{{- /*
+Applies the provisioning documents after every install and upgrade, so a
+changed document takes effect without restarting core. Core also applies them
+at start. The Job needs core's full environment: documents name secrets by
+environment variable.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "tereo.fullname" . }}-provision
+  labels:
+    {{- include "tereo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: provision
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.provisioning.job.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.provisioning.job.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "tereo.selectorLabels" (dict "root" . "component" "provision") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: provision
+          image: {{ include "tereo.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node", "dist/cli/index.js", "provision"]
+          env:
+            # The OTel SDK isn't needed for this short-lived job.
+            - name: NODE_OPTIONS
+              value: ""
+            {{- include "tereo.env" . | nindent 12 }}
+            - name: PROVISIONING_PATH
+              value: /etc/tereo/provisioning
+          envFrom:
+            {{- include "tereo.envFrom" . | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: provisioning
+              mountPath: /etc/tereo/provisioning
+              readOnly: true
+      volumes:
+        - name: provisioning
+          configMap:
+            name: {{ include "tereo.provisioningConfigMap" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
