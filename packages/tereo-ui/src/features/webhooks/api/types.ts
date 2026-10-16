@@ -27,7 +27,13 @@ export interface WebhookEndpoint {
   /** Declared in the provisioning file: only a DISABLED one's status can change here. */
   provisioned: boolean;
   /** The service whose provisioning document declares it; null for a hand-made endpoint. */
-  ownerService: { id: string; slug: string; name: string } | null;
+  ownerService: {
+    id: string;
+    slug: string;
+    name: string;
+    /** Absent from older cores, which only knew services. */
+    kind?: "service" | "integration";
+  } | null;
   createdAt: string;
   updatedAt: string;
   createdBy: string;

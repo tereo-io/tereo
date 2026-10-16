@@ -234,11 +234,14 @@ const EndpointDetails = ({ endpoint }: { endpoint: WebhookEndpoint }) => {
               ...(endpoint.ownerService
                 ? [
                     {
-                      label: "Owning Service",
+                      label:
+                        endpoint.ownerService.kind === "integration"
+                          ? "Owning Integration"
+                          : "Owning Service",
                       value: (
                         <Link
                           className="v-link"
-                          to={`/services/${endpoint.ownerService.id}`}
+                          to={`/${endpoint.ownerService.kind === "integration" ? "integrations" : "services"}/${endpoint.ownerService.id}`}
                         >
                           {endpoint.ownerService.name}
                         </Link>

@@ -21,6 +21,7 @@ const client: OAuthClient = {
   scopes: [],
   grantTypes: ["authorization_code"],
   audience: ["billing"],
+  trustedCoreScopes: [],
   consentRequired: false,
   provisioned: false,
   ownerId: "u1",
@@ -51,6 +52,13 @@ describe("ClientDetail", () => {
     expect(await screen.findByText("billing")).toBeInTheDocument();
     expect(screen.getByText("User approval")).toBeInTheDocument();
     expect(screen.getByText("Not asked")).toBeInTheDocument();
+  });
+
+  it("shows the core scopes the client is trusted with", async () => {
+    renderDetail({ ...client, trustedCoreScopes: ["core:events"] });
+
+    expect(await screen.findByText("Trusted core scopes")).toBeVisible();
+    expect(screen.getByText("core:events")).toBeVisible();
   });
 
   it("shows that users are asked to approve", async () => {
