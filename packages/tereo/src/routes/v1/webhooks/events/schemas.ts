@@ -10,6 +10,11 @@ export const emitEventSchema = z.object({
   entityId: pgText().min(1),
   data: pgJson(z.record(z.string(), z.unknown())),
   idempotencyKey: pgText().min(1).max(255).optional(),
+  /**
+   * Slugs of services or integrations: the event goes only to endpoints they
+   * own. Absent, to every subscriber.
+   */
+  recipients: z.array(pgText().min(1).max(64)).min(1).max(50).optional(),
 });
 
 export const batchEmitEventSchema = z.object({

@@ -1,10 +1,10 @@
 import { assertSafeWebhookUrlForRegistration } from "../../../../utils/ssrfGuard.js";
-import { validateOrganizationId } from "../../../../middleware/organizationId.js";
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
 import { assertNoReservedEventTypes } from "../../../../utils/processEvent.js";
 import { resolveMaskedHeaders } from "../../../../utils/webhookHeaders.js";
 import { formatWebhookEndpoint } from "../../../../utils/transformers.js";
 import { assertMaySubscribe } from "../../../../utils/webhookAccess.js";
+import { webhookScope } from "../../../../utils/webhookOwnership.js";
 import { PERMISSIONS } from "../../../../definitions/permissions.js";
 import { hasPermission } from "../../../../utils/permissions.js";
 import { validateUser } from "../../../../middleware/auth.js";
@@ -24,7 +24,7 @@ import {
 
 export const listWebhookEndpoints = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const { organizationId, owner } = webhookScope(req);
 
   const query = validateQuery(getWebhookEndpointsQuerySchema, req);
   const { includeArchived } = validateQuery(
@@ -33,11 +33,14 @@ export const listWebhookEndpoints = async (req: Request, res: Response) => {
   );
 
   const archivedFiltered = !!req.query["filter[archived]"];
-  // Owned endpoints sent every organization's events are listed only for
-  // webhooks.admin, as getVisibleEndpoint shows them.
-  const visible = hasPermission(auth.permissions, PERMISSIONS.WEBHOOKS.ADMIN)
-    ? { OR: [{ organizationId }, { organizationId: null }] }
-    : { organizationId };
+  // As getVisibleEndpoint shows them: an integration's own; otherwise the
+  // organization's, and owned endpoints sent every organization's events
+  // only for webhooks.admin.
+  const visible = owner
+    ? { ownerServiceId: owner.id }
+    : hasPermission(auth.permissions, PERMISSIONS.WEBHOOKS.ADMIN)
+      ? { OR: [{ organizationId }, { organizationId: null }] }
+      : { organizationId };
   const where = applyCursorToWhere(query, {
     ...visible,
     ...(includeArchived || archivedFiltered ? {} : { archivedAt: null }),
@@ -61,7 +64,7 @@ export const listWebhookEndpoints = async (req: Request, res: Response) => {
 
 export const createWebhookEndpoint = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const { organizationId, owner } = webhookScope(req);
 
   const body = validateBody(createWebhookEndpointSchema, req);
 
@@ -90,6 +93,7 @@ export const createWebhookEndpoint = async (req: Request, res: Response) => {
       {
         organizationId,
         createdBy: auth.userId,
+        ownerServiceId: owner?.id ?? null,
         url: body.url,
         description: body.description,
         eventTypes: body.eventTypes,

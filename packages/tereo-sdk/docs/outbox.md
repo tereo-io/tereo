@@ -105,7 +105,8 @@ Started by `core.start()`, stopped by `core.stop()`. Any number of replicas can 
 4. On failure:
    - **Rejected by core** — any 4xx except 401, 403, 408, 409 (the same key still in flight) and 429 —
      the row is dead-lettered at once. Core answers 400 for an audit entry whose `userId` or
-     `organizationId` it does not know, for an unregistered or retired event type, and for a
+     `organizationId` it does not know, for an unregistered or retired event type or an unknown
+     `recipients` slug, and for a
      notification it refuses (an unknown connection, an invalid recipient, an attachment it can't
      find).
    - **Refused by the SDK** before sending — an audit entry it finds invalid

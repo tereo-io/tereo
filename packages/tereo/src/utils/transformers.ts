@@ -266,6 +266,7 @@ export const formatWebhookEndpoint = <T extends WebhookEndpointRow>(
       id: ownerService.id,
       slug: ownerService.slug,
       name: ownerService.name,
+      kind: ownerService.kind,
     },
     signingSecret: options.revealSecret ?? `${signingSecretHint ?? ""}...`,
     creator: toUserRef(endpoint.creator),

@@ -101,7 +101,7 @@ audit entry written for an event no endpoint was sent records its type and entit
 A service's [provisioning document](provisioning.md#webhooks) can declare endpoints that deliver core
 events to the service. They are ordinary endpoints with an owner:
 
-- `ownerService` (`{ id, slug, name }`), `ownerServiceId`, `provisioningKey` (`<service slug>:<key>`,
+- `ownerService` (`{ id, slug, name, kind }`, `kind` being `service` or `integration`), `ownerServiceId`, `provisioningKey` (`<service slug>:<key>`,
   plus `:<organization id>` when the document lists organizations) and `provisioned: true` are on
   the response; `organizationId` is `null` for an endpoint of **all organizations**, which exists
   only with an owner and receives the events of every organization. A list of organizations in the
@@ -176,6 +176,39 @@ changed (the admin UI does); the mask for a header with no stored value — a ne
 
 Endpoint responses also carry `hasDeliveries`: true while delivery history references the endpoint,
 which makes a hard DELETE 409 until retention purges it.
+
+## Integration-owned endpoints
+
+An integration (`core.services` with `kind = integration`) manages its own endpoints through the
+same `/v1/webhooks/webhooks` routes, with its own client-credentials token:
+
+- It needs no `webhooks.*` permission (`requireWebhookPermission`, `routes/v1/webhooks/webhooks/middleware.ts`),
+  and every route acts only on endpoints it owns: the list shows only those, and any other id is a
+  404 (`getVisibleEndpoint`, with the request's `WebhookScope` from `utils/webhookOwnership.ts`).
+  Its token's organization and `X-Organization-ID` play no part.
+- Create sets `ownerServiceId` to the integration and `createdBy` to its account. An org-bound
+  integration's endpoint is in its organization; a platform integration's has `organizationId: null`
+  and is sent every organization's events.
+- Create and PATCH take the full SSRF check (no private host, unlike a service with an
+  `internalHost`) and `assertMaySubscribe` with the integration's own permissions. Core generates
+  the signing secret and returns it once; rotate-secret, revoke-previous-secret, test sends,
+  deliveries, stats, archive, restore and delete all work on its own endpoints.
+- Delivery is checked as for a service-owned endpoint: the event's `readPermission` (and bucket
+  access) of the integration's account in the event's organization, without `webhooks.read`. A
+  deactivated integration's account is inactive, so it is sent nothing new. Its delivery views
+  redact by the same rule.
+- Other callers are unchanged: `webhooks.admin` sees, pauses and deletes a platform integration's
+  endpoints, and an org-bound one's are its organization's endpoints like any other.
+
+## Addressed events
+
+`POST /v1/webhooks/events` (and each event of a batch), `emitTx` and the SDK's `core.outbox.emit`
+take an optional `recipients`: up to 50 slugs of services or integrations. An addressed event is
+sent only to ACTIVE endpoints those recipients own, in the event's organization or of all
+organizations, each still subject to its owner's read permission; no other subscriber gets it. An
+unknown slug is `400 unknown_recipient` on emit, and dead-letters an outbox row. The delivery's
+payload carries `recipients`. Who may emit the event type is unchanged. An unaddressed event goes
+to every subscriber, as before.
 
 ## Event Emission Flow
 

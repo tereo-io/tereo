@@ -1,4 +1,5 @@
 import { PERMISSIONS } from "../definitions/permissions.js";
+import type { WebhookScope } from "./webhookOwnership.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { canReadBucket } from "./bucketAccess.js";
 import { hasPermission } from "./permissions.js";
@@ -148,18 +149,20 @@ export const createRecipientCheck = (
 };
 
 /**
- * The endpoint, if the caller may see it in `organizationId`: that
- * organization's own, or, with `webhooks.admin`, an owned endpoint sent every
- * organization's events. Any other is a 404, as if it did not exist.
+ * The endpoint, if the caller may see it in `scope`: for an integration, one
+ * it owns; otherwise the scope organization's own, or, with `webhooks.admin`,
+ * an owned endpoint sent every organization's events. Any other is a 404, as
+ * if it did not exist.
  */
 export const getVisibleEndpoint = async (
   id: string,
   viewer: { permissions: string[] },
-  organizationId: string
+  { organizationId, owner }: WebhookScope
 ) => {
   const endpoint = await db.webhookEndpoints.getById(id);
-  const visible =
-    endpoint.organizationId === null
+  const visible = owner
+    ? endpoint.ownerServiceId === owner.id
+    : endpoint.organizationId === null
       ? hasPermission(viewer.permissions, PERMISSIONS.WEBHOOKS.ADMIN)
       : endpoint.organizationId === organizationId;
   if (!visible) throw new NotFoundError("Webhook endpoint not found");
@@ -182,21 +185,24 @@ interface StoredDelivery {
 /**
  * `deliveries` as `viewer` may see them: the payload, and the receiver's
  * response that may echo it, only when the viewer could read the event
- * (`viewer.permissions` are those of their request, in `organizationId`).
- * An all-organization endpoint carries other organizations' events: each is
- * judged by what the viewer may read in the event's own organization.
+ * (`viewer.permissions` are those of their request, in the scope's
+ * organization). An all-organization endpoint carries other organizations'
+ * events: each is judged by what the viewer may read in the event's own
+ * organization. An integration reading its own needs no `webhooks.read`, as
+ * when they are sent.
  */
 export const redactUnreadable = async <T extends StoredDelivery>(
   viewer: { userId: string; permissions: string[] },
-  organizationId: string,
+  { organizationId, owner }: WebhookScope,
   deliveries: T[]
 ): Promise<(T & { payloadRedacted: boolean })[]> => {
   const readPermissions = await db.eventTypes.readPermissions(
     deliveries.map((d) => d.eventType)
   );
-  const permissionsIn = new Map<string, Promise<string[]>>([
-    [organizationId, Promise.resolve(viewer.permissions)],
-  ]);
+  const permissionsIn = new Map<string, Promise<string[]>>();
+  if (organizationId) {
+    permissionsIn.set(organizationId, Promise.resolve(viewer.permissions));
+  }
   const permissionsOf = (org: string) => {
     let permissions = permissionsIn.get(org);
     if (!permissions) {
@@ -215,16 +221,26 @@ export const redactUnreadable = async <T extends StoredDelivery>(
         payload?.data && typeof payload.data === "object"
           ? (payload.data as Record<string, unknown>)
           : {};
-      // A test send names no organization; it is the request's.
+      // A test send names no organization; it is the request's, and a
+      // platform integration's has none: core's own test payload, read with
+      // the integration's global permissions.
       const eventOrg =
         typeof payload?.organizationId === "string"
           ? payload.organizationId
           : organizationId;
-      const readable = await mayReadEvent(
-        { userId: viewer.userId, permissions: await permissionsOf(eventOrg) },
-        { organizationId: eventOrg, eventType: delivery.eventType, data },
-        readPermissions.get(delivery.eventType) ?? null
-      );
+      const readPermission = readPermissions.get(delivery.eventType) ?? null;
+      const readable =
+        eventOrg === null
+          ? !readPermission || hasPermission(viewer.permissions, readPermission)
+          : await mayReadEvent(
+              {
+                userId: viewer.userId,
+                permissions: await permissionsOf(eventOrg),
+              },
+              { organizationId: eventOrg, eventType: delivery.eventType, data },
+              readPermission,
+              { requireWebhooksRead: !owner }
+            );
       return readable
         ? { ...delivery, payloadRedacted: false }
         : {

@@ -9,6 +9,14 @@
       Returns a paginated list of the organization's webhook endpoints.
       Signing secrets and custom header values are masked in the response.
 
+      **Integrations:** an integration's token needs no `webhooks.*`
+      permission on these routes and acts only on the endpoints it owns:
+      this list shows only those, every other id is a 404, and its token's
+      organization and `X-Organization-ID` play no part. An endpoint it
+      creates is owned by it, in its organization (or, for a platform
+      integration, of all organizations, `organizationId: null`); each event
+      type needs its own read permission (`403` otherwise).
+
       The organization is the token's `org_id`, or the `X-Organization-ID`
       header for a `webhooks.admin` caller (400 when malformed, 404 when no
       such organization; 403 when neither is present).

@@ -1,5 +1,5 @@
-import { validateOrganizationId } from "../../../../../../../middleware/organizationId.js";
 import { enqueueCommittedDelivery } from "../../../../../../../jobs/webhookQueues.js";
+import { webhookScope } from "../../../../../../../utils/webhookOwnership.js";
 import { validateParams } from "../../../../../../../utils/validateReq.js";
 import { validateUser } from "../../../../../../../middleware/auth.js";
 import { logAuditTx } from "../../../../../../../utils/outbox.js";
@@ -18,26 +18,27 @@ import {
 
 export const getDelivery = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
   const { id, deliveryId } = validateParams(webhookDeliveryIdParamSchema, req);
 
-  await getVisibleEndpoint(id, auth, organizationId);
+  await getVisibleEndpoint(id, auth, scope);
 
   // Scope the delivery to this endpoint so a caller can't read another
   // endpoint's (or org's) delivery by pairing their own endpoint id with an
   // arbitrary deliveryId.
   const delivery = await db.webhookDeliveries.getForEndpoint(deliveryId, id);
 
-  const [shown] = await redactUnreadable(auth, organizationId, [delivery]);
+  const [shown] = await redactUnreadable(auth, scope, [delivery]);
   res.json(shown);
 };
 
 export const retryDelivery = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
+  const { organizationId } = scope;
   const { id, deliveryId } = validateParams(webhookDeliveryIdParamSchema, req);
 
-  const endpoint = await getVisibleEndpoint(id, auth, organizationId);
+  const endpoint = await getVisibleEndpoint(id, auth, scope);
   if (endpoint.archivedAt) {
     throw new ArchivedError(
       "Webhook endpoint is archived; restore it before retrying deliveries"
@@ -72,6 +73,6 @@ export const retryDelivery = async (req: Request, res: Response) => {
 
   await enqueueCommittedDelivery(ref);
 
-  const [shown] = await redactUnreadable(auth, organizationId, [updated]);
+  const [shown] = await redactUnreadable(auth, scope, [updated]);
   res.status(202).json(shown);
 };

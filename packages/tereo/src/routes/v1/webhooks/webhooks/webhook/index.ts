@@ -1,5 +1,5 @@
 import { PERMISSIONS } from "../../../../../definitions/permissions.js";
-import { requirePermission } from "../../../../../middleware/auth.js";
+import { requireWebhookPermission } from "../middleware.js";
 import { guardArchivedWebhook } from "./middleware.js";
 import deliveriesRouter from "./deliveries/index.js";
 import * as controllers from "./controllers.js";
@@ -11,52 +11,52 @@ webhookRouter.use("/deliveries", deliveriesRouter);
 
 webhookRouter.post(
   "/rotate-secret",
-  requirePermission(PERMISSIONS.WEBHOOKS.ADMIN),
+  requireWebhookPermission(PERMISSIONS.WEBHOOKS.ADMIN),
   guardArchivedWebhook,
   controllers.rotateSecret
 );
 webhookRouter.post(
   "/revoke-previous-secret",
-  requirePermission(PERMISSIONS.WEBHOOKS.ADMIN),
+  requireWebhookPermission(PERMISSIONS.WEBHOOKS.ADMIN),
   guardArchivedWebhook,
   controllers.revokePreviousSecret
 );
 webhookRouter.post(
   "/test",
-  requirePermission(PERMISSIONS.WEBHOOKS.WRITE),
+  requireWebhookPermission(PERMISSIONS.WEBHOOKS.WRITE),
   guardArchivedWebhook,
   controllers.testWebhookEndpoint
 );
 webhookRouter.get(
   "/stats",
-  requirePermission(PERMISSIONS.WEBHOOKS.READ),
+  requireWebhookPermission(PERMISSIONS.WEBHOOKS.READ),
   controllers.getEndpointStats
 );
 webhookRouter.post(
   "/archive",
-  requirePermission(PERMISSIONS.WEBHOOKS.ARCHIVE),
+  requireWebhookPermission(PERMISSIONS.WEBHOOKS.ARCHIVE),
   controllers.archiveWebhookEndpoint
 );
 webhookRouter.post(
   "/restore",
-  requirePermission(PERMISSIONS.WEBHOOKS.ARCHIVE),
+  requireWebhookPermission(PERMISSIONS.WEBHOOKS.ARCHIVE),
   controllers.restoreWebhookEndpoint
 );
 
 webhookRouter.get(
   "/",
-  requirePermission(PERMISSIONS.WEBHOOKS.READ),
+  requireWebhookPermission(PERMISSIONS.WEBHOOKS.READ),
   controllers.getWebhookEndpoint
 );
 webhookRouter.patch(
   "/",
-  requirePermission(PERMISSIONS.WEBHOOKS.WRITE),
+  requireWebhookPermission(PERMISSIONS.WEBHOOKS.WRITE),
   guardArchivedWebhook,
   controllers.updateWebhookEndpoint
 );
 webhookRouter.delete(
   "/",
-  requirePermission(PERMISSIONS.WEBHOOKS.DELETE),
+  requireWebhookPermission(PERMISSIONS.WEBHOOKS.DELETE),
   controllers.deleteWebhookEndpoint
 );
 

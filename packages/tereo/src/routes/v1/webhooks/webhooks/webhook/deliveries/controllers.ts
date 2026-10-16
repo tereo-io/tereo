@@ -1,5 +1,5 @@
-import { validateOrganizationId } from "../../../../../../middleware/organizationId.js";
 import { enqueueCommittedDelivery } from "../../../../../../jobs/webhookQueues.js";
+import { webhookScope } from "../../../../../../utils/webhookOwnership.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { logAuditTx } from "../../../../../../utils/outbox.js";
 import db from "../../../../../../utils/db/index.js";
@@ -29,11 +29,11 @@ import {
 
 export const listDeliveries = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
   const query = validateQuery(getWebhookDeliveriesQuerySchema, req);
 
-  await getVisibleEndpoint(id, auth, organizationId);
+  await getVisibleEndpoint(id, auth, scope);
 
   const where = applyCursorToWhere(query, { webhookEndpointId: id });
 
@@ -43,7 +43,7 @@ export const listDeliveries = async (req: Request, res: Response) => {
     where,
   });
 
-  const data = await redactUnreadable(auth, organizationId, result.data);
+  const data = await redactUnreadable(auth, scope, result.data);
   res.json(buildCursorPageResponse({ ...result, data }, query));
 };
 
@@ -62,11 +62,12 @@ export const assertRetryableEndpoint = (status: string): void => {
 
 export const bulkRetryDeliveries = async (req: Request, res: Response) => {
   const auth = validateUser(req);
-  const organizationId = validateOrganizationId(req);
+  const scope = webhookScope(req);
+  const { organizationId } = scope;
   const { id } = validateParams(webhookEndpointIdParamSchema, req);
   const body = validateBody(bulkRetrySchema, req);
 
-  const endpoint = await getVisibleEndpoint(id, auth, organizationId);
+  const endpoint = await getVisibleEndpoint(id, auth, scope);
   if (endpoint.archivedAt) {
     throw new ArchivedError(
       "Webhook endpoint is archived; restore it before retrying deliveries"
