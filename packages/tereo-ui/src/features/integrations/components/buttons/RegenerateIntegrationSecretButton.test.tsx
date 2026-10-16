@@ -54,4 +54,33 @@ describe("RegenerateIntegrationSecretButton", () => {
         )
     ).toBe(false);
   });
+
+  it("still shows the new secret when the dialog is closed while the request is in flight", async () => {
+    let resolve: (v: unknown) => void = () => {};
+    authMock.axios.post.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      })
+    );
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RegenerateIntegrationSecretButton integration={integration} />
+      </QueryClientProvider>
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Regenerate Secret" })
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+    await userEvent.keyboard("{Escape}");
+    resolve({
+      data: {
+        clientId: "cid-1",
+        clientSecret: "fresh-s3cret",
+        previousSecretExpiresAt: null,
+      },
+    });
+
+    expect(await screen.findByText("Copy the secret now")).toBeVisible();
+  });
 });

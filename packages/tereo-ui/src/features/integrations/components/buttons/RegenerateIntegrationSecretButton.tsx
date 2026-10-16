@@ -29,6 +29,8 @@ const RegenerateIntegrationSecretButton = ({
     });
 
   const handleCancel = () => {
+    // Closing mid-request would drop the observer and lose the new secret.
+    if (regenerateMutation.isPending) return;
     setConfirming(false);
     regenerateMutation.reset();
   };
