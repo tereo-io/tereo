@@ -917,7 +917,7 @@ describe("pre-approved access", () => {
 });
 
 describe("provision", () => {
-  it("does nothing without PROVISIONING_FILE", async () => {
+  it("does nothing without PROVISIONING_PATH", async () => {
     await expect(provision()).resolves.toBeUndefined();
   });
 });

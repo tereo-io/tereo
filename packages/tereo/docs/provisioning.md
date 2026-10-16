@@ -6,7 +6,7 @@ services, their secrets and their access already in place, with no one calling `
 /v1/admin/services` by hand. Use it when the environment is built from code (GitOps, the Helm chart,
 Compose); services and clients made in the admin UI keep working beside it.
 
-Set `PROVISIONING_FILE` to the file's path. Unset, nothing happens: core neither applies nor
+Set `PROVISIONING_PATH` to the file's path. Unset, nothing happens: core neither applies nor
 retires anything, so rows a file provisioned earlier stay `provisioned` — read-only in the admin API
 — and are never retired. To release them, deploy an empty file (`services: []`, `clients: []`)
 instead: its entries are then removed as below, after `REGISTRY_RETIREMENT_GRACE_HOURS`. With the

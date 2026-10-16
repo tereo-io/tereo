@@ -63,7 +63,7 @@ spec:
               value: {{ .role }}
             {{- include "tereo.env" $ | nindent 12 }}
             {{- if $.Values.provisioning }}
-            - name: PROVISIONING_FILE
+            - name: PROVISIONING_PATH
               value: /etc/tereo/provisioning.yaml
             {{- end }}
           envFrom:

@@ -42,65 +42,53 @@ const nameField = (max: number) =>
     .max(max)
     .regex(/^[a-z0-9][a-z0-9._-]*$/, "lowercase letters, digits, . _ -");
 
+export const permissionItem = z.object({
+  name: nameField(100),
+  displayName: z.string().min(1).max(255),
+  description: z.string().max(500).default(""),
+  orgAssignable: z.boolean().default(false),
+});
+
+export const systemRoleItem = z.object({
+  name: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^[a-z][a-z0-9_-]*$/, "lowercase letters, digits, _ -"),
+  displayName: z.string().min(1).max(255),
+  description: z.string().max(500).default(""),
+  permissions: z.array(z.string().min(1).max(200)).max(1000).default([]),
+});
+
+export const bucketItem = z.object({
+  bucketName: z
+    .string()
+    .min(3)
+    .max(63)
+    .regex(
+      /^[a-z0-9][a-z0-9-]*[a-z0-9]$/,
+      "lowercase alphanumeric with hyphens"
+    ),
+  description: z.string().max(500).optional(),
+  policy: z.enum(["public", "private"]).default("private"),
+  storageQuotaBytes: z.number().int().positive().optional(),
+});
+
+export const eventTypeItem = z.object({
+  eventType: nameField(100),
+  description: z.string().max(500).default(""),
+  readPermission: z.string().min(1).max(200).optional(),
+});
+
 export const declarationSchema = z.object({
   version: z
     .string()
     .max(64)
     .regex(SEMVER_PATTERN, "a semver version: MAJOR.MINOR.PATCH[-prerelease]"),
-  permissions: z
-    .array(
-      z.object({
-        name: nameField(100),
-        displayName: z.string().min(1).max(255),
-        description: z.string().max(500).default(""),
-        orgAssignable: z.boolean().default(false),
-      })
-    )
-    .max(1000)
-    .default([]),
-  systemRoles: z
-    .array(
-      z.object({
-        name: z
-          .string()
-          .min(1)
-          .max(100)
-          .regex(/^[a-z][a-z0-9_-]*$/, "lowercase letters, digits, _ -"),
-        displayName: z.string().min(1).max(255),
-        description: z.string().max(500).default(""),
-        permissions: z.array(z.string().min(1).max(200)).max(1000).default([]),
-      })
-    )
-    .max(200)
-    .default([]),
-  buckets: z
-    .array(
-      z.object({
-        bucketName: z
-          .string()
-          .min(3)
-          .max(63)
-          .regex(
-            /^[a-z0-9][a-z0-9-]*[a-z0-9]$/,
-            "lowercase alphanumeric with hyphens"
-          ),
-        description: z.string().max(500).optional(),
-        policy: z.enum(["public", "private"]).default("private"),
-        storageQuotaBytes: z.number().int().positive().optional(),
-      })
-    )
-    .max(100)
-    .default([]),
-  eventTypes: z
-    .array(
-      z.object({
-        eventType: nameField(100),
-        description: z.string().max(500).default(""),
-        readPermission: z.string().min(1).max(200).optional(),
-      })
-    )
-    .max(1000)
-    .default([]),
+  permissions: z.array(permissionItem).max(1000).default([]),
+  systemRoles: z.array(systemRoleItem).max(200).default([]),
+  buckets: z.array(bucketItem).max(100).default([]),
+  eventTypes: z.array(eventTypeItem).max(1000).default([]),
   requestedAccess: z
     .object({
       roles: z.array(z.string().min(1).max(200)).max(100).default([]),

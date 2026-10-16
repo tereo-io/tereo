@@ -11,7 +11,7 @@ export {
 export { ProvisioningError, loadProvisioning } from "./load.js";
 
 export const provision = async (): Promise<void> => {
-  const provisioning = await loadProvisioning(env.PROVISIONING_FILE);
+  const provisioning = await loadProvisioning(env.PROVISIONING_PATH);
   if (!provisioning) return;
   const result = await applyProvisioning(provisioning);
   const changed = Object.values(result).some((entries) => entries.length > 0);

@@ -409,7 +409,7 @@ describe("parseProvisioning", () => {
 });
 
 describe("loadProvisioning", () => {
-  it("returns null when PROVISIONING_FILE is unset", async () => {
+  it("returns null when PROVISIONING_PATH is unset", async () => {
     expect(await loadProvisioning(undefined)).toBeNull();
   });
 

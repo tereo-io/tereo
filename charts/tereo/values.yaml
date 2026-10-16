@@ -47,7 +47,7 @@ extraEnvFrom: []
 
 # Services and login clients core creates and keeps at every start, as the
 # provisioning file's contents (packages/tereo/docs/provisioning.md). Empty
-# renders no ConfigMap and sets no PROVISIONING_FILE. Secrets are never
+# renders no ConfigMap and sets no PROVISIONING_PATH. Secrets are never
 # written here: `secretFrom` names an environment variable, and that variable
 # must be a key of secrets.existingSecret (or the Secret built by
 # secrets.externalSecret), or come from extraEnvFrom. Each value must be a

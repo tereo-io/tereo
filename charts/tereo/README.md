@@ -105,7 +105,7 @@ in Redis, and each scheduled job runs once however many pods there are. Two thin
 Declare the services and login clients core should have under `provisioning`, as the provisioning
 file's contents ([reference](https://github.com/tereo-io/tereo/blob/master/packages/tereo/docs/provisioning.md)).
 The chart puts them in a ConfigMap, mounts it at `/etc/tereo/provisioning.yaml` and sets
-`PROVISIONING_FILE`; unset, none of that is rendered. A change rolls the pods
+`PROVISIONING_PATH`; unset, none of that is rendered. A change rolls the pods
 (`checksum/provisioning`). Never write a secret there: `secretFrom` names an environment variable,
 which must be a key of the Secret in `secrets.existingSecret` (or come from `extraEnvFrom`). See
 [`ci/provisioning-values.yaml`](https://github.com/tereo-io/tereo/blob/master/charts/tereo/ci/provisioning-values.yaml).

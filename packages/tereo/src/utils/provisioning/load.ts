@@ -2,11 +2,16 @@ import { CLIENT_SECRET_PREFIX, secretStrengthProblem } from "../secretRules.js";
 import { isRequestableCoreRole } from "../../definitions/roles.js";
 import { CORE_SERVICE } from "../../definitions/coreService.js";
 import { isSafeRedirectUri } from "../redirectUris.js";
-import { ProvisioningFileSchema } from "./schema.js";
+import { readFile, readdir, stat } from "fs/promises";
 import { hashFlowToken } from "../crypto.js";
-import { readFile } from "fs/promises";
+import { basename, join } from "path";
 import { parse } from "yaml";
 import type { z } from "zod";
+import {
+  ProvisioningDocumentSchema,
+  ProvisioningFileSchema,
+  type CustomRoleEntry,
+} from "./schema.js";
 
 export interface ProvisionedServiceSpec {
   slug: string;
@@ -49,7 +54,7 @@ export class ProvisioningError extends Error {
 // Zod's own messages describe the rule, not the received value, so a
 // misplaced secret never reaches the output. Unknown keys are named: they are
 // the file's keys, not its values.
-const describeIssue = (issue: z.core.$ZodIssue): string => {
+const describeIssue = (issue: z.core.$ZodIssue, root = "file"): string => {
   const path =
     issue.path
       .map((part, i) =>
@@ -59,10 +64,11 @@ const describeIssue = (issue: z.core.$ZodIssue): string => {
             ? `.${String(part)}`
             : String(part)
       )
-      .join("") || "file";
+      .join("") || root;
+  const where = path ? `${path}: ` : "";
   if (issue.code === "unrecognized_keys")
-    return `${path}: unknown key ${issue.keys.map((k) => `"${k}"`).join(", ")}`;
-  return `${path}: ${issue.message}`;
+    return `${where}unknown key ${issue.keys.map((k) => `"${k}"`).join(", ")}`;
+  return `${where}${issue.message}`;
 };
 
 const withoutServiceSuffix = (slug: string) =>
@@ -146,6 +152,44 @@ const checkDuplicates = (
   }
 };
 
+interface ClientRules {
+  label: string;
+  clientType: "public" | "confidential";
+  secretFrom?: string;
+  grantTypes: string[];
+  redirectUris: string[];
+  postLogoutRedirectUris: string[];
+}
+
+// The rules one login client must meet on its own.
+const checkClient = (c: ClientRules, problems: string[]) => {
+  if (c.clientType === "confidential" && !c.secretFrom)
+    problems.push(`${c.label}: a confidential client needs secretFrom`);
+  else if (c.clientType === "public" && c.secretFrom)
+    problems.push(
+      `${c.label}: a public client has no secret; remove secretFrom`
+    );
+
+  if (
+    c.grantTypes.includes("authorization_code") &&
+    c.redirectUris.length === 0
+  )
+    problems.push(
+      `${c.label}: a client with the authorization_code grant needs at least one redirect URI`
+    );
+
+  c.redirectUris.forEach((uri, i) => {
+    if (!isSafeRedirectUri(uri))
+      problems.push(`${c.label}: redirectUris[${i}] is not a safe URL`);
+  });
+  c.postLogoutRedirectUris.forEach((uri, i) => {
+    if (!isSafeRedirectUri(uri))
+      problems.push(
+        `${c.label}: postLogoutRedirectUris[${i}] is not a safe URL`
+      );
+  });
+};
+
 export const parseProvisioning = (
   text: string,
   env: NodeJS.ProcessEnv
@@ -161,7 +205,9 @@ export const parseProvisioning = (
 
   const parsed = ProvisioningFileSchema.safeParse(raw);
   if (!parsed.success)
-    throw new ProvisioningError(parsed.error.issues.map(describeIssue));
+    throw new ProvisioningError(
+      parsed.error.issues.map((i) => describeIssue(i))
+    );
 
   const problems: string[] = [];
 
@@ -210,32 +256,10 @@ export const parseProvisioning = (
     envName: s.secretFrom,
   }));
   for (const c of clients) {
-    if (c.clientType === "confidential" && !c.secretFrom)
-      problems.push(`${c.label}: a confidential client needs secretFrom`);
-    else if (c.clientType === "public" && c.secretFrom)
-      problems.push(
-        `${c.label}: a public client has no secret; remove secretFrom`
-      );
-    else if (c.secretFrom) uses.push({ label: c.label, envName: c.secretFrom });
+    checkClient(c, problems);
+    if (c.clientType === "confidential" && c.secretFrom)
+      uses.push({ label: c.label, envName: c.secretFrom });
 
-    if (
-      c.grantTypes.includes("authorization_code") &&
-      c.redirectUris.length === 0
-    )
-      problems.push(
-        `${c.label}: a client with the authorization_code grant needs at least one redirect URI`
-      );
-
-    c.redirectUris.forEach((uri, i) => {
-      if (!isSafeRedirectUri(uri))
-        problems.push(`${c.label}: redirectUris[${i}] is not a safe URL`);
-    });
-    c.postLogoutRedirectUris.forEach((uri, i) => {
-      if (!isSafeRedirectUri(uri))
-        problems.push(
-          `${c.label}: postLogoutRedirectUris[${i}] is not a safe URL`
-        );
-    });
     for (const audience of c.audience)
       if (audience === CORE_SERVICE.slug)
         problems.push(`${c.label}: audience must not name "${audience}"`);
@@ -283,8 +307,282 @@ export const loadProvisioning = async (
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code ?? "error";
     throw new ProvisioningError([
-      `cannot read PROVISIONING_FILE ${path}: ${code}`,
+      `cannot read PROVISIONING_PATH ${path}: ${code}`,
     ]);
   }
   return parseProvisioning(text, env);
+};
+
+export interface ResolvedWebhook {
+  key: string;
+  url: string;
+  events: string[];
+  organizations: "all" | string[];
+  description: string | null;
+  secretEnv: string;
+  // Webhook secrets are sealed, not hashed, so the plaintext stays in memory.
+  secretPlain: string;
+}
+
+type ServiceOutput = NonNullable<
+  z.output<typeof ProvisioningDocumentSchema>["service"]
+>;
+
+export interface ResolvedService extends Omit<
+  ProvisionedServiceSpec,
+  "access"
+> {
+  access: ServiceOutput["access"];
+  permissions: ServiceOutput["permissions"];
+  systemRoles: ServiceOutput["systemRoles"];
+  buckets: ServiceOutput["buckets"];
+  eventTypes: ServiceOutput["eventTypes"];
+  webhooks: ResolvedWebhook[];
+}
+
+export interface ResolvedClient extends ProvisionedClientSpec {
+  description: string | null;
+}
+
+export interface LoadedDocument {
+  file: string;
+  version: string;
+  service: ResolvedService | null;
+  clients: ResolvedClient[];
+  roles: CustomRoleEntry[];
+}
+
+export interface ProvisioningSet {
+  documents: LoadedDocument[];
+}
+
+export const readProvisioningPath = async (
+  path: string
+): Promise<{ file: string; text: string }[]> => {
+  const unreadable = (err: unknown): never => {
+    const code = (err as NodeJS.ErrnoException).code ?? "error";
+    throw new ProvisioningError([
+      `cannot read PROVISIONING_PATH ${path}: ${code}`,
+    ]);
+  };
+
+  let info;
+  try {
+    info = await stat(path);
+  } catch (err) {
+    return unreadable(err);
+  }
+
+  if (!info.isDirectory()) {
+    try {
+      return [{ file: basename(path), text: await readFile(path, "utf8") }];
+    } catch (err) {
+      return unreadable(err);
+    }
+  }
+
+  let names: string[];
+  try {
+    names = await readdir(path);
+  } catch (err) {
+    return unreadable(err);
+  }
+
+  const files: { file: string; text: string }[] = [];
+  for (const name of names.sort()) {
+    if (name.startsWith(".") || !name.endsWith(".json")) continue;
+    // stat follows links: a mounted ConfigMap's entries are symlinks.
+    try {
+      if (!(await stat(join(path, name))).isFile()) continue;
+      files.push({
+        file: name,
+        text: await readFile(join(path, name), "utf8"),
+      });
+    } catch (err) {
+      return unreadable(err);
+    }
+  }
+  if (files.length === 0)
+    throw new ProvisioningError([`no provisioning documents in ${path}`]);
+  return files;
+};
+
+interface DocumentSecretUse extends SecretUse {
+  // Entries with the same owner may share a value; webhooks of one service.
+  owner: string | null;
+}
+
+// Returns env var name -> plain value. Callers hash what is stored hashed.
+const resolveDocumentSecrets = (
+  uses: DocumentSecretUse[],
+  env: NodeJS.ProcessEnv,
+  problems: string[]
+): Map<string, string> => {
+  const values = new Map<string, string>();
+  const usesByValue = new Map<string, DocumentSecretUse[]>();
+
+  for (const use of uses) {
+    const { label, envName } = use;
+    if (looksLikeSecret(envName)) {
+      problems.push(
+        `${label}: secretFrom does not look like an environment variable name`
+      );
+      continue;
+    }
+    const value = env[envName];
+    if (!value) {
+      problems.push(`${label}: ${envName} is not set`);
+      continue;
+    }
+    const weak = secretStrengthProblem(value);
+    if (weak) {
+      problems.push(`${label}: ${envName} ${weak}`);
+      continue;
+    }
+    values.set(envName, value);
+    usesByValue.set(value, [...(usesByValue.get(value) ?? []), use]);
+  }
+
+  for (const group of usesByValue.values()) {
+    const owner = group[0].owner;
+    const shared = owner !== null && group.every((u) => u.owner === owner);
+    if (group.length > 1 && !shared)
+      problems.push(
+        `${group.map((u) => u.label).join(" and ")}: a secret is used by more than one entry; each needs its own`
+      );
+  }
+
+  const secretVars = new Set(uses.map((u) => u.envName));
+  for (const { label, envName } of uses) {
+    const value = env[envName];
+    if (!value || looksLikeSecret(envName)) continue;
+    for (const [other, otherValue] of Object.entries(env)) {
+      if (other !== envName && !secretVars.has(other) && otherValue === value)
+        problems.push(
+          `${label}: ${envName} has the same value as ${other}; use a separate secret`
+        );
+    }
+  }
+  return values;
+};
+
+const jsonSyntaxProblem = (err: unknown): string => {
+  // The message can quote the source text, which may hold a secret; only the
+  // position is kept.
+  const message = err instanceof Error ? err.message : "";
+  const at = /position (\d+)/.exec(message);
+  return at ? `not valid JSON (at position ${at[1]})` : "not valid JSON";
+};
+
+export const parseDocuments = (
+  files: { file: string; text: string }[],
+  env: NodeJS.ProcessEnv
+): ProvisioningSet => {
+  const problems: string[] = [];
+  const parsedDocs: {
+    file: string;
+    data: z.output<typeof ProvisioningDocumentSchema>;
+  }[] = [];
+
+  for (const { file, text } of files) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch (err) {
+      problems.push(`${file}: ${jsonSyntaxProblem(err)}`);
+      continue;
+    }
+    const parsed = ProvisioningDocumentSchema.safeParse(raw);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues)
+        problems.push(`${file}: ${describeIssue(issue, "document")}`);
+      continue;
+    }
+    parsedDocs.push({ file, data: parsed.data });
+  }
+
+  const uses: DocumentSecretUse[] = [];
+  for (const { file, data } of parsedDocs) {
+    const { service } = data;
+    if (service) {
+      const label = `${file}: service[${service.slug}]`;
+      uses.push({ label, envName: service.secretFrom, owner: null });
+      for (const w of service.webhooks)
+        uses.push({
+          label: `${label} webhook[${w.key}]`,
+          envName: w.secretFrom,
+          owner: `${file}:${service.slug}`,
+        });
+    }
+    for (const c of data.clients ?? []) {
+      const label = `${file}: clients[${c.clientId}]`;
+      checkClient({ ...c, label }, problems);
+      if (c.clientType === "confidential" && c.secretFrom)
+        uses.push({ label, envName: c.secretFrom, owner: null });
+    }
+  }
+
+  const values = resolveDocumentSecrets(uses, env, problems);
+  if (problems.length > 0) throw new ProvisioningError(problems);
+
+  const hashOf = (envName: string) => hashFlowToken(values.get(envName)!);
+
+  return {
+    documents: parsedDocs.map(({ file, data }) => ({
+      file,
+      version: data.version,
+      service: data.service
+        ? {
+            slug: data.service.slug,
+            name: data.service.name,
+            namespace:
+              data.service.namespace ?? withoutServiceSuffix(data.service.slug),
+            clientId: data.service.clientId ?? data.service.slug,
+            secretEnv: data.service.secretFrom,
+            secretHash: hashOf(data.service.secretFrom),
+            access: data.service.access,
+            permissions: data.service.permissions,
+            systemRoles: data.service.systemRoles,
+            buckets: data.service.buckets,
+            eventTypes: data.service.eventTypes,
+            webhooks: data.service.webhooks.map((w) => ({
+              key: w.key,
+              url: w.url,
+              events: w.events,
+              organizations: w.organizations,
+              description: w.description ?? null,
+              secretEnv: w.secretFrom,
+              secretPlain: values.get(w.secretFrom)!,
+            })),
+          }
+        : null,
+      clients: (data.clients ?? []).map((c) => ({
+        clientId: c.clientId,
+        name: c.name,
+        description: c.description ?? null,
+        clientType: c.clientType,
+        secretEnv: c.secretFrom ?? null,
+        secretHash:
+          c.clientType === "confidential" && c.secretFrom
+            ? hashOf(c.secretFrom)
+            : null,
+        redirectUris: c.redirectUris,
+        postLogoutRedirectUris: c.postLogoutRedirectUris,
+        scopes: c.scopes,
+        grantTypes: c.grantTypes,
+        audience: c.audience,
+        consentRequired: c.consentRequired,
+      })),
+      roles: data.roles ?? [],
+    })),
+  };
+};
+
+export const loadProvisioningSet = async (
+  path: string | undefined,
+  // Not env.ts: the documents name the variables their secrets come from.
+  env: NodeJS.ProcessEnv = process.env
+): Promise<ProvisioningSet | null> => {
+  if (!path) return null;
+  return parseDocuments(await readProvisioningPath(path), env);
 };
