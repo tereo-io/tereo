@@ -211,28 +211,27 @@ const duplicates = (names: string[]) =>
  * says whose it is. Core's are exempt: their names predate the rule and are
  * the ones services request by bare name.
  */
-const assertRolesPrefixed = (
+export const rolePrefixProblems = (
   service: RegistryService,
   d: ParsedDeclaration
-) => {
-  if (service.id === CORE_SERVICE_ID) return;
+): string[] => {
+  if (service.id === CORE_SERVICE_ID) return [];
   const prefix = `${service.namespace}_`;
   const unprefixed = d.systemRoles
     .map((r) => r.name)
     .filter((n) => !n.startsWith(prefix) || n.length === prefix.length);
-  if (unprefixed.length > 0) {
-    throw new BadRequestError(
-      "invalid_role_name",
-      `System role names must start with "${prefix}" followed by a name: ${unprefixed.join(", ")}`
-    );
-  }
+  return unprefixed.length > 0
+    ? [
+        `System role names must start with "${prefix}" followed by a name: ${unprefixed.join(", ")}`,
+      ]
+    : [];
 };
 
 const CORE_ROLE_NAMES = new Set(ROLES.map((r) => r.name));
 const CORE_PERMISSION_NAMES = new Set(PERMISSION_CATALOG.map((p) => p.name));
 
 /** Everything wrong with a declaration that needs no database to see. */
-const declarationProblems = (
+export const declarationProblems = (
   service: RegistryService,
   d: ParsedDeclaration
 ): string[] => {
@@ -451,7 +450,10 @@ export const registerDeclaration = async (
   const declaration = declarationSchema.parse(input);
   const hash = declarationHash(declaration);
 
-  assertRolesPrefixed(service, declaration);
+  const unprefixed = rolePrefixProblems(service, declaration);
+  if (unprefixed.length > 0) {
+    throw new BadRequestError("invalid_role_name", unprefixed.join("; "));
+  }
   const problems = declarationProblems(service, declaration);
   if (problems.length > 0) {
     throw new UnprocessableEntityError(
