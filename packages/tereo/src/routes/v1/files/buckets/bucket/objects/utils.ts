@@ -254,9 +254,9 @@ export const contentDisposition = (
  * header injection and emitted as an ASCII `filename=` and an RFC 5987
  * `filename*=` (`contentDisposition`).
  *
- * Every download path calls this, so it also sets the sandboxing CSP: should
- * a browser render user content on core's origin anyway, it runs no script
- * and loads nothing.
+ * Every download path calls this, so it also sets the CSP (`downloadCsp`):
+ * user content a browser renders on core's origin anyway loads nothing, and
+ * all but an inline PDF is sandboxed, so it runs no script.
  */
 export const setContentDisposition = (
   res: Response,

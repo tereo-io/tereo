@@ -156,6 +156,7 @@ describe("object content types", () => {
       NO_SANDBOX
     );
     expect(downloadCsp("application/pdf", false)).toBe(SANDBOX);
+    expect(downloadCsp("application/pdf, text/html", true)).toBe(SANDBOX);
     expect(downloadCsp("image/png", true)).toBe(SANDBOX);
     expect(downloadCsp("text/plain", true)).toBe(SANDBOX);
     expect(downloadCsp("application/zip", false)).toBe(SANDBOX);
