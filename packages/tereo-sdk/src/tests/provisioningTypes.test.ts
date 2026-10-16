@@ -76,6 +76,7 @@ const full: ProvisioningDocument = {
       displayName: "Auditor",
       description: "Reads everything",
       orgAssignable: false,
+      requires2fa: true,
       permissions: ["billing.invoices.read"],
     },
   ],

@@ -581,6 +581,7 @@ const applyClient = async (
 const roleFields = (spec: CustomRoleEntry) => ({
   displayName: spec.displayName,
   description: spec.description ?? null,
+  requires2fa: spec.requires2fa,
 });
 
 /**
@@ -632,6 +633,7 @@ const applyRoles = async (
           name: spec.name,
           displayName: spec.displayName,
           description: spec.description,
+          requires2fa: spec.requires2fa,
           provisioned: true,
         },
         tx

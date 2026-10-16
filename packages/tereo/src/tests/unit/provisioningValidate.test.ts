@@ -129,6 +129,7 @@ const customRole = (
   name: "support",
   displayName: "Support",
   orgAssignable: false,
+  requires2fa: false,
   permissions: [],
   ...extra,
 });

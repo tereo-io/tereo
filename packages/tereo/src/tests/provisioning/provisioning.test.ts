@@ -1168,6 +1168,7 @@ describe("custom roles", () => {
       name,
       displayName: `Role ${name}`,
       orgAssignable: false,
+      requires2fa: false,
       permissions,
       ...extra,
     };
@@ -1254,6 +1255,16 @@ describe("custom roles", () => {
     const again = await apply(owner, rolesDoc(grown));
     expect(again.roles).toEqual([]);
     expect(await updates()).toBe(1);
+  });
+
+  it("applies requires2fa on create and on update", async () => {
+    const role = roleSpec(["roles.read"], { requires2fa: true });
+    await apply(rolesDoc(role));
+    expect((await roleRow(role.name)).requires2fa).toBe(true);
+
+    const result = await apply(rolesDoc({ ...role, requires2fa: false }));
+    expect(result.roles).toEqual([`role:${role.name}`]);
+    expect((await roleRow(role.name)).requires2fa).toBe(false);
   });
 
   it("refuses a permission missing from the database as a problem", async () => {

@@ -386,6 +386,10 @@
             "default": false,
             "type": "boolean"
           },
+          "requires2fa": {
+            "default": false,
+            "type": "boolean"
+          },
           "permissions": {
             "type": "array",
             "items": {

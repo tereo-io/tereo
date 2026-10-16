@@ -39,7 +39,7 @@ Every document has this shape; unknown keys are refused at every level, so a typ
 }
 ```
 
-A document needs at least one of `service`, `clients`, `roles`. Core prints the JSON Schema with
+A document needs at least one of `service`, `clients`, `roles`, and an empty list does not count. Core prints the JSON Schema with
 `npm run cli -- provisioning-schema`; it is also published as `packages/tereo/provisioning.schema.json`
 and exported by `@tereo-io/sdk`. An editor given it as `$schema` completes and checks documents.
 
@@ -207,6 +207,7 @@ admins as usual):
 | `name` | Lowercase letters, digits, `_` and `-`; unique across the set; may not equal a system role of core or of a service. Not namespaced |
 | `displayName`, `description`, `permissions` | A permission may be core's or any service's in the set |
 | `orgAssignable` | Default `false`. `true` needs every permission to be org-assignable |
+| `requires2fa` | Default `false`. `true`: holders must sign in with 2FA, as for a hand-made role |
 
 ## Validation
 

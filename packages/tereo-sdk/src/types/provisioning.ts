@@ -57,7 +57,7 @@ export interface WebhookSubscription {
 export interface ServiceProvisioning {
   slug: string;
   name: string;
-  /** Defaults to the slug. */
+  /** Defaults to the slug without a trailing `-service`. */
   namespace?: string;
   clientId?: string;
   /** Name of the environment variable, in core's environment, that holds the client secret. */
@@ -103,10 +103,12 @@ export interface CustomRole {
   description?: string;
   /** Default false. */
   orgAssignable?: boolean;
+  /** Holders must have 2FA enrolled. Default false. */
+  requires2fa?: boolean;
   permissions: string[];
 }
 
-/** One file; it needs at least one of `service`, `clients`, `roles`. */
+/** One file; it needs at least one of `service`, `clients`, `roles`, not empty. */
 export interface ProvisioningDocument {
   $schema?: string;
   /** Semver of the release: `MAJOR.MINOR.PATCH[-prerelease]`. */

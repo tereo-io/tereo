@@ -138,9 +138,21 @@ describe("parseDocuments", () => {
     expect(problems[0]).toContain("needs one of service, clients, roles");
   });
 
+  it("refuses a document whose sections are all empty", () => {
+    const problems = problemsOf({
+      "a.json": JSON.stringify({ version: "1.0.0", clients: [], roles: [] }),
+    });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/^a\.json: /);
+    expect(problems[0]).toContain("needs one of service, clients, roles");
+  });
+
   it("refuses a non-semver version", () => {
     const problems = problemsOf({
-      "a.json": JSON.stringify({ version: "1.10", roles: [] }),
+      "a.json": JSON.stringify({
+        version: "1.10",
+        roles: [{ name: "r", displayName: "R", permissions: [] }],
+      }),
     });
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("version");
