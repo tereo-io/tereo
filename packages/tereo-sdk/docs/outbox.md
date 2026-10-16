@@ -39,7 +39,7 @@ roles, approved by an admin, for the reaper's sends to succeed.
 | Method | Takes | |
 |--------|-------|---|
 | `audit(tx, entry)` | `AuditLogEntryInput` — see [audit](audit.md#entries) | Row with `destination = "audit"` |
-| `emit(tx, event)` | `EmitEventParams` — see [webhooks](webhooks.md#emitting) | Row with `destination = "webhook"`. Calls `webhooks.assertEventType` first, so an undeclared event type throws now, not at dispatch |
+| `emit(tx, event)` | `EmitEventParams` — see [webhooks](webhooks.md#emitting); `recipients` (up to 50 service or integration slugs) addresses the event and is stored with the row | Row with `destination = "webhook"`. Calls `webhooks.assertEventType` first, so an undeclared event type throws now, not at dispatch |
 | `notify(tx, input)` | `NotificationInput` — the body of core's `POST /v1/notifications` ([core's notifications.md](../../tereo/docs/notifications.md#sending)) | Row with `destination = "notification"`. Throws now for an unknown channel, a recipient count outside 1 to 50, or an email with no `to` recipient (one without `as` counts as `to`); core checks the rest at dispatch |
 
 Leave `idempotencyKey` out: the reaper sets it to the row id. Nothing is filled from a request

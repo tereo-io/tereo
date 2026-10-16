@@ -2,7 +2,7 @@
 
 A deploy declares everything its app services own in a folder of JSON **provisioning documents**:
 each service with its permissions, system roles, buckets, event types, access and webhook
-subscriptions, plus login clients and custom roles. Core reads them at every start, checks the whole
+subscriptions, plus login clients, custom roles and integrations. Core reads them at every start, checks the whole
 set, and applies it in one transaction, so a fresh environment comes up with its services, secrets,
 roles and access already in place. There is no registration: services do not call core to say what
 they own, and no HTTP route applies provisioning. Services and clients made in the admin UI keep
@@ -35,11 +35,12 @@ Every document has this shape; unknown keys are refused at every level, so a typ
   "version": "1.4.0",                              // required semver
   "service": { … },                                // at most one
   "clients": [ … ],                                // login clients
-  "roles": [ … ]                                   // custom roles
+  "roles": [ … ],                                  // custom roles
+  "integrations": [ … ]                            // machine clients for external parties
 }
 ```
 
-A document needs at least one of `service`, `clients`, `roles`, and an empty list does not count. Core prints the JSON Schema with
+A document needs at least one of `service`, `clients`, `roles`, `integrations`, and an empty list does not count. Core prints the JSON Schema with
 `npm run cli -- provisioning-schema`; it is also published as `packages/tereo/provisioning.schema.json`
 and exported by `@tereo-io/sdk`. An editor given it as `$schema` completes and checks documents.
 
@@ -174,11 +175,51 @@ A service's own document usually holds only `version` and `service`.
 | `slug`, `namespace` | Lowercase words joined by hyphens, max 64. `namespace` defaults to the slug without a trailing `-service`. It prefixes everything the service declares ([registry](registry.md)) |
 | `name` | Required, max 100 |
 | `clientId` | The service's OAuth client ID; defaults to the slug. Unique across services and login clients |
+| `internalHost` | Optional, max 253: the one host its own webhooks may reach at a private address ([below](#internal-webhook-targets)) |
 | `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)) |
 | `access.roles` | Requestable core roles, bare (`file_user`, `webhook_publisher`, `audit_writer`, `notification_sender`, `tenant_resolver`, `user_resolver`), or `<slug>/<name>`, a system role another service of the set declares |
 | `access.audiences` | Services of the set whose APIs this one may call (it can be introspected by them). Not core, not itself |
 | `permissions`, `systemRoles`, `buckets`, `eventTypes` | The service's declaration, with the namespacing, validation and update rules of [registry](registry.md#what-a-declaration-holds) |
 | `webhooks` | Service-owned endpoints: [Webhooks](#webhooks) |
+
+#### Internal webhook targets
+
+Webhook URLs may not name a private or reserved address, so a service that listens on one (a
+private IP, or a name that resolves to one) declares it:
+
+```json
+{
+  "version": "1.4.0",
+  "service": {
+    "slug": "product-service",
+    "name": "Product",
+    "secretFrom": "PRODUCT_CLIENT_SECRET",
+    "internalHost": "10.20.0.15",
+    "access": { "roles": ["file_user"] },
+    "webhooks": [
+      {
+        "key": "files",
+        "url": "http://10.20.0.15:8080/hooks/core",
+        "events": ["file-service.object.created"],
+        "secretFrom": "PRODUCT_WEBHOOK_SECRET"
+      }
+    ]
+  }
+}
+```
+
+- `internalHost` is a DNS hostname or a single IP literal, never a CIDR; it is normalized (an IPv6
+  address is stored compressed, case and a trailing dot dropped). Non-canonical IP spellings
+  (`127.1`, `2130706433`), a value with a scheme, port, path or zone id, and `localhost` names are
+  refused.
+- Loopback, link-local (including the cloud metadata address), unspecified and multicast addresses,
+  and ranges that embed an IPv4 core cannot check, are refused **even when named**.
+- The exception covers only the service's **own provisioned** endpoints, and only a URL whose host
+  equals `internalHost`; it applies at load and again at every delivery, which also checks the
+  addresses a name resolves to and does not follow redirects. Endpoints made through the API or by
+  another service or an integration never get it.
+- It is unique across the set. A change is audited and emits `core.service.updated`. It is not shown
+  or settable through `/v1/admin/services`.
 
 The document's `version` is stored as the service's declared version.
 
@@ -198,6 +239,50 @@ Login clients, as made in the admin UI.
 | `trustedCoreScopes` | Default `[]`. Core scopes a first-party app gets without the consent screen when `consentRequired` is `false`. Each must be a core scope listed in `scopes`; `core:admin` and `core:admin.read` are refused. Settable only here: hand-made clients have none |
 | `description` | Optional, max 500 |
 
+### `integrations`
+
+Machine clients for **external parties** (a carrier, a partner's system): see
+[integrations](integrations.md) for what they are and hold. An integration signs in with
+`client_credentials`, declares nothing and has no namespace.
+
+```json
+{
+  "version": "1.0.0",
+  "roles": [
+    {
+      "name": "carrier_reader",
+      "displayName": "Carrier reader",
+      "orgAssignable": true,
+      "permissions": ["customer.customers.read"]
+    }
+  ],
+  "integrations": [
+    {
+      "slug": "acme-3pl",
+      "name": "Acme 3PL",
+      "organizationId": "7b1c4d9e-3a52-4f0b-9c61-2d8e5a7f0b13",
+      "secretFrom": "ACME_3PL_CLIENT_SECRET",
+      "roles": ["carrier_reader"],
+      "audiences": ["customer-service"]
+    }
+  ]
+}
+```
+
+| Field | Rule |
+|-------|------|
+| `slug` | Required, as a service slug; shares the slug space of services (never core's). It is also the integration's client ID |
+| `name` | Required, max 100 |
+| `organizationId` | Optional UUID. Set: **org-bound**, its tokens carry this organization. Absent: **platform**. Fixed once created; the organization must exist and not be archived |
+| `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)); rotates as a service's does |
+| `roles` | Role names it holds. Org-bound: `orgAssignable` custom roles of the set. Platform: also core's roles and `<slug>/<name>` system roles of services in the set |
+| `audiences` | Services of the set whose APIs it may call (introspectable by them); not core, not an integration |
+
+The roles and audiences are set as the system user at apply, replaced to match the document; a
+change revokes the integration's tokens. An integration removed from the documents is marked, then
+deactivated after `REGISTRY_RETIREMENT_GRACE_HOURS`, like a service. A provisioned integration
+answers `409 managed_by_provisioning` to every admin write except `revoke-previous-secret`.
+
 ### `roles`
 
 Custom roles composed across services, for people (assigned to users and organization members by
@@ -216,16 +301,18 @@ Core loads every document, then checks the set as one. Every problem is reported
 its file name, and any problem means **nothing is written**. At start, core then does not start; from
 the CLI the exit code is non-zero.
 
-- **Per document**: JSON syntax, the schema, a semver `version`, at least one of the three sections.
-- **Uniqueness across the set**: service slug and namespace (and no overlap, as a namespace may
-  not equal or hyphen-extend another's, nor one core reserves), client ID across services and login
-  clients, custom role name, webhook `key` within its service, permission, event-type and bucket
+- **Per document**: JSON syntax, the schema, a semver `version`, at least one of the four sections.
+- **Uniqueness across the set**: service and integration slug (one space), service namespace (and no overlap, as a namespace may
+  not equal or hyphen-extend another's, nor one core reserves), client ID across services, integrations and login
+  clients, `internalHost`, custom role name, webhook `key` within its service, permission, event-type and bucket
   names.
 - **References resolve within the set or core's declaration**, so boot order does not exist and a typo
   fails the deploy:
   - `access.roles`: a requestable core role, or `<slug>/<name>` for a system role of another service
     in the set (never the service's own);
-  - `access.audiences` and a login client's `audience`: a service in the set;
+  - `access.audiences`, an integration's `audiences` and a login client's `audience`: a service in
+    the set;
+  - an integration's `roles`, as in [`integrations`](#integrations);
   - a custom role's permissions; a system role's (its own service's only); an event type's
     `readPermission` (its own service's or core's).
 - **Webhooks**:
@@ -236,8 +323,8 @@ the CLI the exit code is non-zero.
     Otherwise the endpoint would never be sent anything, which is an error rather than a silent
     drop;
   - the URL is `http` or `https` with no credentials, and its host is not `localhost` or a
-    private or reserved IP literal (private in-cluster targets get their own feature). In-cluster
-    DNS names are fine.
+    private or reserved IP literal, unless it is the service's own
+    [`internalHost`](#internal-webhook-targets). In-cluster DNS names are fine.
 - **Secrets**: format, strength and the other rules of [Secrets](#secrets), across service, client
   and webhook secrets; every `secretFrom` variable must be set.
 - **Existing rows**: a service or client of the same slug or ID that exists but is not
@@ -267,7 +354,8 @@ apply it once. A set that has not changed writes nothing and audits nothing.
      An admin can approve it again ([admin API](#managed-rows)).
 5. **Webhooks**: service-owned endpoints are created or updated ([Webhooks](#webhooks)).
 6. **Login clients**.
-7. **Removals** ([below](#removing-an-entry)).
+7. **Integrations**: created or updated, then their roles and audiences set.
+8. **Removals** ([below](#removing-an-entry)).
 
 Every write is audited as the system user, with the document's `file` and `version` in the entry's
 metadata. `core.service.declared` is emitted for each changed service. A service made in the admin
@@ -375,6 +463,7 @@ Provisioned rows change only in the documents. The admin API answers `409` with 
 | Row | Refused | Still allowed |
 |-----|---------|---------------|
 | Service | `PATCH /v1/admin/services/:id` (rename, deactivate), `regenerate-secret` | `access/approve` and `access/revoke`; `revoke-previous-secret`, to end a rotation's overlap at once |
+| Integration | `PATCH`, roles, audiences and `regenerate-secret` on `/v1/admin/integrations/:id` | Reading it; `revoke-previous-secret` |
 | Login client | `PATCH`, `DELETE`, `regenerate-secret` on `/v1/admin/clients/:id` | Reading it |
 | Custom role | Edit, delete, archive, restore, and changing its permissions | Assigning it to users and organization members, and duplicating it |
 | Webhook endpoint | `PATCH` (except a status-only re-enable), `DELETE`, archive, restore, `rotate-secret`, `revoke-previous-secret` | Delivery views, retries, test sends, a status-only `PATCH` to re-enable |
@@ -393,7 +482,8 @@ npm run cli -- provisioning-schema
   release of core declares before any of its pods has started. It then loads, validates and applies
   `--path` or `PROVISIONING_PATH`, and prints
   what changed as JSON (`created`, `updated`, `rotated`, `unprovisioned`, `declared`, `access`,
-  `roles`). It needs core's environment: the database, `CORE_KEK` (or stored keys), the
+  `roles`). Integrations appear in `created`, `updated` and `rotated`, and their roles and audiences
+  under `access`. It needs core's environment: the database, `CORE_KEK` (or stored keys), the
   `secretFrom` variables and `REDIS_URL`, through which it delivers live permission pushes to
   signed-in users. On any problem it prints every one and exits non-zero. With no path set it says
   so and exits 0.

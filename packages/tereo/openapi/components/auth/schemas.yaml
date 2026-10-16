@@ -2975,6 +2975,36 @@ SetIntegrationAudiencesRequest:
         type: string
       description: Service slugs; `[]` clears the audience.
 
+AccountOrganizationsResponse:
+  type: object
+  required: [data, hasMore, limit, nextCursor]
+  properties:
+    data:
+      type: array
+      items:
+        type: object
+        required: [id, name, slug, memberRole, member]
+        properties:
+          id:
+            type: string
+            format: uuid
+          name:
+            type: string
+          slug:
+            type: string
+          memberRole:
+            type: [string, 'null']
+            description: The caller's tier in the organization (`owner`, `admin` or `member`); `null` for an organization reached through support access.
+          member:
+            type: boolean
+            description: Whether the caller is a member. `false` only for a support-access search result.
+    hasMore:
+      type: boolean
+    limit:
+      type: integer
+    nextCursor:
+      type: [string, 'null']
+
 PaginatedIntegrationsResponse:
   type: object
   required:

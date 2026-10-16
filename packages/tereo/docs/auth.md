@@ -50,6 +50,8 @@ discovery) are per area, each with a read-only variant:
 | `core:files` / `core:files.read`       | `/v1/files`          | `file-service.admin` / the four `file-service.*.read`                                                    |
 | `core:audit` / `core:audit.read`       | `/v1/audit`          | `audit-logs.admin` / `audit-logs.read`                                                                   |
 | `core:webhooks` / `core:webhooks.read` | `/v1/webhooks`       | `webhooks.admin` / `webhooks.read`, `webhooks.event-types.read`                                          |
+| `core:events`                          | `/ws`                | — (the socket only: permission-change pushes, nothing else)                                              |
+| `core:organizations`                   | `GET /v1/account/organizations` | `organizations.support-access` ([Support access](#support-access))                            |
 
 A ceiling caps, it never grants: the token holds
 a permission only if the user holds it _and_ a ceiling covers it. A user's organization member role
@@ -58,6 +60,49 @@ way (`requireOrgRole` checks the ceiling). An admin opts a client in by adding c
 `scopes` (`PATCH /v1/admin/clients/:id`); the user then approves them on the consent screen. Nothing
 else changes: the UI and services need no scope, and `openid`/`profile`/`email`/`offline_access`
 keep their OIDC meaning.
+
+`core:account` admits `/v1/account` and `/ws`; `core:events` admits the socket alone, and
+`core:organizations` the organizations list alone, so an app can offer an organization picker, or
+live permission updates, without being given the user's account. The 403's message names the request
+path (`This token's scopes do not reach /v1/account/me; it needs one of: core:account`), and the
+`WWW-Authenticate` challenge lists the scopes of every area that would admit it.
+
+### Trusted core scopes
+
+A login client normally sends the user through the consent screen for every `core:*` scope it
+requests. A **provisioned** client with `consentRequired: false` and `trustedCoreScopes` skips it for
+those scopes, `prompt=none` included; a request for any `core:*` scope outside the list still
+asks. Each trusted scope must be a core scope in the client's `scopes`, never `core:admin` or
+`core:admin.read`, and the field is settable only through
+[provisioning](provisioning.md#clients). Trusting a scope skips the screen, not the ceiling: the
+token still holds only what the user holds and the scope's ceiling covers.
+
+### Account organizations
+
+`GET /v1/account/organizations` (`core:account` or `core:organizations`) lists the caller's active
+organizations, 50 per page by default, sorted by `name` or `slug` (default `name`, ascending), as
+`{ id, name, slug, memberRole, member }`. `search` (2 to 100 characters, case-insensitive on name
+and slug) filters them. Archived and inactive organizations never appear. For a holder of
+`organizations.support-access`, a search also returns non-member organizations (`member: false`,
+`memberRole: null`); without `search`, the list is memberships only.
+
+### Support access
+
+`organizations.support-access` is a global-only permission (not org-assignable) that lets a
+person sign in **into any active, unarchived organization they are not a member of**, to help its
+users. Holders are whoever has a role carrying it, and `organizations.admin` and `admin` include it
+through the hierarchy, so platform admins have it too. It works at every point that picks an
+organization (`org_id` on `/oauth/authorize`, the org picker, a login's organization hint) and when
+a code or refresh token is exchanged, so removing the permission ends the grant at the next refresh
+(`invalid_grant`, revoked as for a lost membership). The resulting token names the organization,
+but its permissions are the person's **global** ones: the visit grants no organization role.
+
+Each time a code is issued for a non-member organization core writes an audit entry (entity
+`Organization`, under that organization: action `LOGIN`, `metadata.action` `support_access`,
+`client_id`, `sid`) and emits the event `auth.organization.support-access`
+(`{ userId, organizationId, clientId }`, read with `organizations.read`) in the same transaction, so
+the organization's webhooks and audit log show who came in. A refresh writes nothing more. Members
+switching into their own organization write neither.
 
 Outside core's resource routes:
 
@@ -77,8 +122,10 @@ Outside core's resource routes:
   API is the app's decision, which `scope` and `aud` in the response inform.
 - `/oauth/check-permission` authenticates a confidential client, not a token. A client of an
   organization may only ask about that organization's members, and is answered in it;
-  `organization_id`, if given, must be the client's; a non-member and an unknown user get the same 403. A client of no organization must be a service's: it is answered from the user's global roles
-  only and may not name an organization. Any other client — a login client created under
+  `organization_id`, if given, must be the client's; a non-member and an unknown user get the same 403. An organization-bound
+  [integration](integrations.md) is such a client, answered for its organization's members. A
+  client of no organization must be a service's (a platform integration is refused): it is
+  answered from the user's global roles only and may not name an organization. Any other client — a login client created under
   `/v1/admin/clients` — is refused, so it cannot read any user's global permissions. Every refusal is
   403, decided before the user is looked up.
 

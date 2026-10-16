@@ -117,7 +117,12 @@ events to the service. They are ordinary endpoints with an owner:
 - Delivery history of an all-organization endpoint is shown per event's organization: a delivery's
   payload and response are redacted unless the viewer can read the event in that organization.
 - Document URLs are checked at load: `http` or `https`, no credentials, and not `localhost` or a
-  private or reserved IP literal. In-cluster hostnames pass.
+  private or reserved IP literal. In-cluster hostnames pass. A service that must be reached at a
+  private address declares [`internalHost`](provisioning.md#internal-webhook-targets): its own
+  provisioned endpoints may then name exactly that host, at load and at every delivery.
+  Loopback, link-local, unspecified and multicast addresses stay refused even when named, and
+  endpoints made through the API, or owned by another service or an integration, never get the
+  exception.
 - Provisioned endpoints answer `409 managed_by_provisioning` to `PATCH` (except one carrying only
   `status`, to re-enable), `DELETE`, archive, restore, rotate-secret and revoke-previous-secret.
   Delivery views, retries and test sends work. An endpoint a document drops is archived at once.

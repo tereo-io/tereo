@@ -1111,3 +1111,72 @@ auth.user.recovery-codes-regenerated:
     responses:
       '2XX':
         description: Any 2xx response acknowledges the delivery; anything else is retried.
+/account/organizations:
+  get:
+    tags:
+      - Account - Organizations
+    summary: List the caller's organizations
+    description: |
+      The caller's active organizations, for an organization picker. Admits a
+      token with `core:account` or `core:organizations` (the latter reaches
+      nothing else). Archived and inactive organizations are never listed.
+
+      Without `search`, only the caller's memberships. With `search` (2 to 100
+      characters, matched case-insensitively against name and slug), the
+      matching memberships; and, when the token holds
+      `organizations.support-access`, every matching active organization, with
+      `member: false` and `memberRole: null` for those the caller does not
+      belong to. The permission comes from the caller's roles cut down to the
+      token's ceiling: `core:organizations` carries it, `core:account` does
+      not. A non-holder's search returns memberships only.
+    operationId: getAccountOrganizations
+    security:
+      - BearerAuth: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+      - name: sort
+        in: query
+        description: Sort field. Defaults to `name`.
+        schema:
+          type: string
+          enum: [name, slug]
+          default: name
+      - name: sortDir
+        in: query
+        description: Sort direction. Defaults to `asc` here.
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: asc
+      - name: search
+        in: query
+        description: Case-insensitive match on name or slug, 2 to 100 characters (`400` otherwise).
+        schema:
+          type: string
+          minLength: 2
+          maxLength: 100
+    responses:
+      '200':
+        description: A page of organizations
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/AccountOrganizationsResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/AccountForbiddenResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'

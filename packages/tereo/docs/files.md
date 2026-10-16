@@ -93,7 +93,11 @@ An object's content type is stored as a single `type/subtype`, lowercased, with 
 parameter (`normalizeContentType` in `utils/contentType.ts`) — on upload, presigned upload, PATCH and
 multipart initiate alike; anything else is `400`. A browser reads `image/png, text/html` as HTML, so
 inline-safety is decided on the parsed type, and every download (authenticated, public, signed,
-version, archive) carries `Content-Security-Policy: sandbox; default-src 'none'`.
+version, archive) carries `Content-Security-Policy: sandbox; default-src 'none'`. The one exception
+is an **inline** PDF (`application/pdf` served with `Content-Disposition: inline`): browsers' built-in
+PDF viewers do not run inside a sandboxed frame, so it carries `default-src 'none'` alone
+(`downloadCsp` in `objects/utils.ts`). A PDF forced to download (`attachment`) and every other type
+stay sandboxed.
 
 Every `Content-Disposition` — downloads, archives, the share probe — comes from
 `contentDisposition` in `objects/utils.ts`: control characters, `"` and `\` become `_`; `filename=`

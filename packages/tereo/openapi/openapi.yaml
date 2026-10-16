@@ -789,6 +789,8 @@ tags:
     description: Discovery and metadata endpoints
   - name: Account - Profile
     description: User profile, password, and photo management
+  - name: Account - Organizations
+    description: The organizations the caller belongs to, and, for support staff, any active one
   - name: Account - Sessions
     description: Session management and revocation
   - name: Account - TOTP
@@ -913,6 +915,7 @@ x-tagGroups:
       - OAuth2/OIDC - Session
       - OAuth2/OIDC - Permissions
       - Account - Profile
+      - Account - Organizations
       - Account - Sessions
       - Account - TOTP
       - Account - Sign-in Methods
@@ -1016,6 +1019,8 @@ paths:
     $ref: './paths/auth/oauth.yaml#/~1oauth~1totp~1setup~1verify'
   /v1/account/me:
     $ref: './paths/auth/account.yaml#/~1account~1me'
+  /v1/account/organizations:
+    $ref: './paths/auth/account.yaml#/~1account~1organizations'
   /v1/account/sessions:
     $ref: './paths/auth/account.yaml#/~1account~1sessions'
   /v1/account/sessions/{sessionId}:

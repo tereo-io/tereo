@@ -785,6 +785,8 @@ tags:
     description: Discovery and metadata endpoints
   - name: Account - Profile
     description: User profile, password, and photo management
+  - name: Account - Organizations
+    description: The organizations the caller belongs to, and, for support staff, any active one
   - name: Account - Sessions
     description: Session management and revocation
   - name: Account - TOTP
@@ -3013,6 +3015,79 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/AccountForbiddenResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/account/organizations:
+    get:
+      tags:
+        - Account - Organizations
+      summary: List the caller's organizations
+      description: |
+        The caller's active organizations, for an organization picker. Admits a
+        token with `core:account` or `core:organizations` (the latter reaches
+        nothing else). Archived and inactive organizations are never listed.
+
+        Without `search`, only the caller's memberships. With `search` (2 to 100
+        characters, matched case-insensitively against name and slug), the
+        matching memberships; and, when the token holds
+        `organizations.support-access`, every matching active organization, with
+        `member: false` and `memberRole: null` for those the caller does not
+        belong to. The permission comes from the caller's roles cut down to the
+        token's ceiling: `core:organizations` carries it, `core:account` does
+        not. A non-holder's search returns memberships only.
+      operationId: getAccountOrganizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+        - name: sort
+          in: query
+          description: Sort field. Defaults to `name`.
+          schema:
+            type: string
+            enum:
+              - name
+              - slug
+            default: name
+        - name: sortDir
+          in: query
+          description: Sort direction. Defaults to `asc` here.
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: asc
+        - name: search
+          in: query
+          description: Case-insensitive match on name or slug, 2 to 100 characters (`400` otherwise).
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 100
+      responses:
+        '200':
+          description: A page of organizations
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountOrganizationsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
@@ -18378,7 +18453,9 @@ components:
         - any other client, only if it was granted core API scopes — its token's
           `aud` then includes `core`. It reaches only the areas its scopes name,
           and its permissions are the user's live ones cut down to the scopes'
-          ceilings: `core:account` (`/v1/account`, `/ws`), `core:admin` /
+          ceilings: `core:account` (`/v1/account`, `/ws`), `core:events` (`/ws` only),
+          `core:organizations` (`GET /v1/account/organizations` only; ceiling
+          `organizations.support-access`), `core:admin` /
           `core:admin.read` (`/v1/admin`: `users`, `roles`, `permissions`, `clients`,
           `settings`, `organizations`, `services` — `.admin` / `.read`),
           `core:files` / `core:files.read` (`file-service.admin` / the
@@ -20072,7 +20149,7 @@ components:
                 type: string
           example:
             error: insufficient_scope
-            error_description: 'This token''s scopes do not reach /v1/account; it needs one of: core:account'
+            error_description: 'This token''s scopes do not reach /v1/account/me; it needs one of: core:account'
     LinkForbiddenResponse:
       description: |
         Forbidden. `forbidden`: the token was not issued to core's own UI (a
@@ -27177,6 +27254,48 @@ components:
           type: string
           format: uri
           description: Where the user signs in to the client again
+    AccountOrganizationsResponse:
+      type: object
+      required:
+        - data
+        - hasMore
+        - limit
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - slug
+              - memberRole
+              - member
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              slug:
+                type: string
+              memberRole:
+                type:
+                  - string
+                  - 'null'
+                description: The caller's tier in the organization (`owner`, `admin` or `member`); `null` for an organization reached through support access.
+              member:
+                type: boolean
+                description: Whether the caller is a member. `false` only for a support-access search result.
+        hasMore:
+          type: boolean
+        limit:
+          type: integer
+        nextCursor:
+          type:
+            - string
+            - 'null'
     UserIdentity:
       type: object
       description: A user's account at an identity provider
@@ -28191,6 +28310,7 @@ x-tagGroups:
       - OAuth2/OIDC - Session
       - OAuth2/OIDC - Permissions
       - Account - Profile
+      - Account - Organizations
       - Account - Sessions
       - Account - TOTP
       - Account - Sign-in Methods

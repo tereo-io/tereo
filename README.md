@@ -244,7 +244,14 @@ A deploy declares its services, login clients and custom roles in a folder of JS
 applies at every start and with `npm run cli -- provision`, with secrets from the environment and
 access granted by the documents, and
 `SETUP_TOKEN` lets first-boot setup run unattended. Login clients carry an admin-set `audience` and a
-`consentRequired` flag, and app service secrets share one `tereo_sk_` format.
+`consentRequired` flag (a provisioned client can also trust named core scopes to skip consent), and
+app service secrets share one `tereo_sk_` format. Machine clients for external parties are
+[integrations](packages/tereo/docs/integrations.md), org-bound or platform, declared in provisioning
+or made in the admin UI; they manage their own webhook endpoints and receive events addressed to
+them (`recipients`). A service can reach its own webhooks at a private address with
+`internalHost`. Permitted staff can sign in into any active organization
+([support access](packages/tereo/docs/auth.md#support-access)), and an app can offer an
+organization picker with the `core:organizations` scope.
 CI checks formatting, import order, lint and types, runs the suite in Docker with real users and
 tokens, and starts the release image against a fresh database.
 
