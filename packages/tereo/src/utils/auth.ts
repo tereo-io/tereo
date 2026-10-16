@@ -210,16 +210,10 @@ export const handleClientCredentials = async (
     };
   }
 
-  const permissions = await db.roles.getUserPermissions(
-    client.serviceAccountUser.id,
-    client.organizationId ?? undefined
-  );
-
   const { token } = await handleCreateTokens(
     client,
     requestedScopes,
     "client_credentials",
-    permissions,
     undefined,
     undefined,
     undefined,
@@ -251,11 +245,6 @@ export const handleAuthorizationCode = async (
     throw new Error("invalid_grant");
   }
 
-  const permissions = await db.roles.getUserPermissions(
-    code.userId,
-    code.organizationId ?? undefined
-  );
-
   const idTokenContext: IdTokenContext = {
     ...(await loginIdTokenContext(code.user, code, code.scopes)),
     nonce: code.nonce ?? undefined,
@@ -271,7 +260,6 @@ export const handleAuthorizationCode = async (
       client,
       code.scopes,
       "authorization_code",
-      permissions,
       code.userId,
       code.id,
       idTokenContext,
@@ -432,10 +420,6 @@ export const handleRefreshToken = async (
   if (await stepUpRequired(old.userId, login?.authMethods || ["pwd"])) {
     throw new Error("invalid_grant");
   }
-  const permissions = await db.roles.getUserPermissions(
-    old.userId,
-    old.organizationId ?? undefined
-  );
   // Carry the authorization-code id forward as the token-family identifier so
   // every rotation stays linked. Without this, the family lineage is lost after
   // the first rotation and reuse detection (revokeByAuthCodeId) can only ever
@@ -456,7 +440,6 @@ export const handleRefreshToken = async (
       client,
       scopes,
       "refresh_token",
-      permissions,
       old.userId,
       old.authCodeId ?? undefined,
       idTokenContext,
@@ -585,7 +568,6 @@ const handleCreateTokens = async (
   client: ClientRecord,
   scopes: string[],
   grantType: string,
-  permissions: string[],
   userId?: string,
   authCodeId?: string,
   idTokenContext?: IdTokenContext,
@@ -610,7 +592,6 @@ const handleCreateTokens = async (
     scopes,
     audience: tokenAudience(client.audience, scopes),
     sessionId: refreshTokenId,
-    permissions,
     organizationId,
     authTime: idTokenContext?.authTime,
   });

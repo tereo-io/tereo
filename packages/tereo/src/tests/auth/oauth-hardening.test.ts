@@ -760,7 +760,7 @@ describe("Token types", () => {
 });
 
 describe("Introspection permissions", () => {
-  it("reports the user's live permissions, not the ones the token carries", async () => {
+  it("reports the user's live permissions", async () => {
     const holder = await createTestUser();
     const role = await createTestRole();
     const permission = await createTestPermission();
@@ -802,9 +802,16 @@ describe("Introspection permissions", () => {
     const after = await introspect();
     expect(after.active).toBe(true);
     expect(after.permissions).not.toContain(permission.name);
-    expect(
-      (jwt.decode(access_token) as { permissions: string[] }).permissions
-    ).toContain(permission.name);
+    expect(jwt.decode(access_token)).not.toHaveProperty("permissions");
+  });
+
+  it("answers inactive for a token longer than 2048 characters, rather than refusing it", async () => {
+    const res = await postForm("/oauth/introspect", {
+      client_id: publicClient.clientId,
+      token: `eyJ.${"a".repeat(3000)}.sig`,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ active: false });
   });
 });
 

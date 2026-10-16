@@ -132,7 +132,7 @@ const problemsOf = async (...docs: LoadedDocument[]): Promise<string[]> => {
   throw new Error("expected a ProvisioningError");
 };
 
-const tokenClaims = async (clientId: string, secret: string) => {
+const issueToken = async (clientId: string, secret: string) => {
   const response = await fetch(`${CORE_URL}/oauth/token`, {
     method: "POST",
     headers: {
@@ -142,10 +142,30 @@ const tokenClaims = async (clientId: string, secret: string) => {
     body: "grant_type=client_credentials",
   });
   expect(response.status).toBe(200);
-  const { access_token } = (await response.json()) as { access_token: string };
+  return ((await response.json()) as { access_token: string }).access_token;
+};
+
+const tokenClaims = async (clientId: string, secret: string) => {
+  const token = await issueToken(clientId, secret);
   return JSON.parse(
-    Buffer.from(access_token.split(".")[1], "base64url").toString()
-  ) as { org_id?: string; permissions?: string[]; aud?: string | string[] };
+    Buffer.from(token.split(".")[1], "base64url").toString()
+  ) as { org_id?: string; aud?: string | string[] };
+};
+
+/** The live permissions of a fresh token, as introspection reports them. */
+const tokenPermissions = async (clientId: string, secret: string) => {
+  const res = await fetch(`${CORE_URL}/oauth/introspect`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${clientId}:${secret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      token: await issueToken(clientId, secret),
+    }).toString(),
+  });
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { permissions?: string[] }).permissions ?? [];
 };
 
 describe("provisioned integrations", () => {
@@ -178,7 +198,9 @@ describe("provisioned integrations", () => {
 
     const claims = await tokenClaims(spec.clientId, plainSecret);
     expect(claims.org_id).toBe(orgId);
-    expect(claims.permissions).toContain("webhooks.read");
+    expect(await tokenPermissions(spec.clientId, plainSecret)).toContain(
+      "webhooks.read"
+    );
     expect([claims.aud].flat()).toContain(service.slug);
 
     const got = await api("GET", `/v1/admin/integrations/${row.id}`);
@@ -229,7 +251,9 @@ describe("provisioned integrations", () => {
     });
     const claims = await tokenClaims(integration.clientId, plainSecret);
     expect(claims.org_id).toBeUndefined();
-    expect(claims.permissions).toContain("users.read");
+    expect(await tokenPermissions(integration.clientId, plainSecret)).toContain(
+      "users.read"
+    );
   });
 
   it("resolves a core role's name to core's role, never an admin-made custom role", async () => {
@@ -250,9 +274,12 @@ describe("provisioned integrations", () => {
       await applyProvisioning({
         documents: [doc({ integrations: [integration] })],
       });
-      const claims = await tokenClaims(integration.clientId, plainSecret);
-      expect(claims.permissions).toContain("users.read");
-      expect(claims.permissions).not.toContain("webhooks.read");
+      const permissions = await tokenPermissions(
+        integration.clientId,
+        plainSecret
+      );
+      expect(permissions).toContain("users.read");
+      expect(permissions).not.toContain("webhooks.read");
     } finally {
       await removeRoles(["user_resolver"]);
     }
@@ -269,8 +296,9 @@ describe("provisioned integrations", () => {
       documents: [doc({ integrations: [{ ...integration, roles: [] }] })],
     });
     expect(changed.access).toContain(`integration:${integration.slug} roles`);
-    const claims = await tokenClaims(integration.clientId, plainSecret);
-    expect(claims.permissions ?? []).not.toContain("users.read");
+    expect(
+      await tokenPermissions(integration.clientId, plainSecret)
+    ).not.toContain("users.read");
 
     const now = new Date();
     const dropped = await applyProvisioning(

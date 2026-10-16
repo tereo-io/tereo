@@ -40,6 +40,10 @@ A delegated token that reaches an area its scopes do not name gets **403 `insuff
 with a `WWW-Authenticate: Bearer error="insufficient_scope", scope="…"` challenge naming the scopes
 that would. Inside an area, permissions are checked as always, against the cut-down set.
 
+Rights are always read live, never from the token: access tokens carry no `permissions` claim,
+which would grow with every role and go stale the moment one is revoked. A service outside core
+reads them from `/oauth/introspect` (the SDK's `requireAuth`) or asks `/oauth/check-permission`.
+
 Core's API scopes (`definitions/coreScopes.ts`; seeded into `auth.scopes`, advertised in
 discovery) are per area, each with a read-only variant:
 
