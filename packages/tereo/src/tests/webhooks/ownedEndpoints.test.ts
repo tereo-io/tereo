@@ -332,6 +332,44 @@ describe("internalHost", () => {
     expect(await deliverTo(endpointId)).toEqual([undefined]);
   });
 
+  it("is not passed for the owner's endpoint unless provisioned", async () => {
+    const { endpoint: made } = await db.webhookEndpoints.create({
+      organizationId: null,
+      ownerServiceId: (
+        await prisma.service.findUniqueOrThrow({
+          where: { slug: owner.service.slug },
+        })
+      ).id,
+      createdBy: SYSTEM_USER_ID,
+      url: `http://${internalHost}:${receiverPort}/hook`,
+      eventTypes: [eventType],
+    });
+    expect(await deliverTo(made.id)).toEqual([undefined]);
+  });
+
+  it("is not passed for an integration's endpoint", async () => {
+    const slug = `int-${rand()}`;
+    slugs.push(slug);
+    const integration = await prisma.service.create({
+      data: {
+        slug,
+        name: slug,
+        kind: "integration",
+        internalHost,
+        createdBy: SYSTEM_USER_ID,
+      },
+    });
+    const { endpoint: made } = await db.webhookEndpoints.create({
+      organizationId: null,
+      ownerServiceId: integration.id,
+      createdBy: SYSTEM_USER_ID,
+      provisioned: true,
+      url: `http://${internalHost}:${receiverPort}/hook`,
+      eventTypes: [eventType],
+    });
+    expect(await deliverTo(made.id)).toEqual([undefined]);
+  });
+
   it("is not passed for an API-made endpoint to the same URL", async () => {
     const { endpoint: made } = await db.webhookEndpoints.create({
       organizationId: orgA,

@@ -271,9 +271,15 @@ export async function processWebhookDelivery(
         },
         payloadJson,
         connectTarget,
-        // Only an endpoint a service owns may reach that service's own
-        // internalHost; API-made endpoints keep the full guard.
-        { allowPrivateHost: endpoint.ownerService?.internalHost ?? undefined }
+        // Only an endpoint a service's provisioning document declares may
+        // reach that service's own internalHost; every other endpoint keeps
+        // the full guard.
+        {
+          allowPrivateHost:
+            endpoint.provisioned && endpoint.ownerService?.kind === "service"
+              ? (endpoint.ownerService.internalHost ?? undefined)
+              : undefined,
+        }
       )
     : {
         ok: false,
