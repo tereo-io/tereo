@@ -12,7 +12,7 @@ info:
 
     | Area | Mounted at | Covers |
     |---|---|---|
-    | Auth | `/oauth`, `/.well-known`, `/v1` | Its OAuth2 / OpenID Connect authorization server (`/oauth`, `/.well-known`), account and admin APIs (`/v1/account`, `/v1/admin`), first-boot setup (`/v1/setup`), the registry app services declare themselves to at boot (`/v1/registry`), service administration (`/v1/admin/services`) and `GET /health` |
+    | Auth | `/oauth`, `/.well-known`, `/v1` | Its OAuth2 / OpenID Connect authorization server (`/oauth`, `/.well-known`), account and admin APIs (`/v1/account`, `/v1/admin`), first-boot setup (`/v1/setup`), service administration (`/v1/admin/services`) and `GET /health` |
     | Files | `/v1/files` | S3-like object storage with fine-grained access control and audit logging |
     | Webhooks | `/v1/webhooks` | Webhook endpoints, the event type registry, and asynchronous event delivery with retry logic and delivery tracking |
     | Audit | `/v1/audit` | Centralized audit log: receives entries from the app's services and queries change history across all of them |
@@ -329,8 +329,8 @@ info:
     | Event Types | `webhooks.event-types.read` | List and view event types |
     | Event Emission | `webhooks.emit` | Emit events to webhook endpoints. Outside the read/write ladder: no other `webhooks.*` permission but `webhooks.admin` includes it |
 
-    There is no API for writing event types: each service declares its own when it registers at
-    boot (`POST /v1/registry/declaration`), and one dropped from a declaration is retired a day later.
+    There is no API for writing event types: core declares its own in code, and each app service
+    its own in its provisioning document; one dropped from a declaration is retired a day later.
 
     ### Audit
 
@@ -360,7 +360,7 @@ info:
     - A batch write (e.g. `POST /v1/audit/entries/batch`) counts as one request
 
     #### Per-Address Limit Before Authentication
-    On `/v1/admin`, `/v1/account`, `/v1/files`, `/v1/audit`, `/v1/webhooks` and `/v1/registry`, a cheaper limit
+    On `/v1/admin`, `/v1/account`, `/v1/files`, `/v1/audit` and `/v1/webhooks`, a cheaper limit
     runs before the token is checked, so floods of missing or invalid tokens are bounded too:
     300 requests/second per client IP (1000 for a direct connection from an internal network
     address). Passing it adds no headers; past it, the same `429 too_many_requests` as the
@@ -593,8 +593,7 @@ info:
       operation-specific, e.g. `invalid_cursor`). A request body that isn't valid JSON (or
       urlencoded form) is `400 invalid_request` on every route
     - `payload_too_large` - A JSON or form body over the body parser's limit (`413`, every route):
-      10 MB under `/v1/files`, `/v1/webhooks` and `/v1/audit`, 1 MB for `/v1/registry`, 10 KB for the auth
-      routes
+      10 MB under `/v1/files`, `/v1/webhooks` and `/v1/audit`, 10 KB for the auth routes
     - `invalid_token` / `unauthorized` - Missing, invalid, expired or revoked access token, a
       token whose session was revoked, rotated or superseded or whose client was deleted, or an
       inactive user (`401`)
@@ -832,8 +831,6 @@ tags:
     description: Admin endpoints for app services — credentials, activation and access approval
   - name: Setup
     description: First-boot setup — create the first admin (public; authorized by the setup token)
-  - name: Registry
-    description: Declarations app services register at boot
   - name: Health
     description: System health check
 
@@ -934,7 +931,6 @@ x-tagGroups:
       - Admin - Identity Provider Domains
       - Admin - Settings
       - Admin - Services
-      - Registry
 
   - name: Files
     tags:
@@ -971,8 +967,6 @@ paths:
     $ref: './paths/auth/setup.yaml#/~1setup~1status'
   /v1/setup:
     $ref: './paths/auth/setup.yaml#/~1setup'
-  /v1/registry/declaration:
-    $ref: './paths/auth/registry.yaml#/~1registry~1declaration'
   /.well-known/oauth-authorization-server:
     $ref: './paths/auth/well-known.yaml#/~1.well-known~1oauth-authorization-server'
   /.well-known/openid-configuration:
@@ -1637,12 +1631,6 @@ components:
       $ref: './components/auth/schemas.yaml#/CompleteSetupRequest'
     CompleteSetupResponse:
       $ref: './components/auth/schemas.yaml#/CompleteSetupResponse'
-    Declaration:
-      $ref: './components/auth/schemas.yaml#/Declaration'
-    ServiceAccessSummary:
-      $ref: './components/auth/schemas.yaml#/ServiceAccessSummary'
-    RegisterDeclarationResponse:
-      $ref: './components/auth/schemas.yaml#/RegisterDeclarationResponse'
     Service:
       $ref: './components/auth/schemas.yaml#/Service'
     ServiceCredentials:
@@ -1653,8 +1641,6 @@ components:
       $ref: './components/auth/schemas.yaml#/ServiceAccess'
     ServiceAccessListItem:
       $ref: './components/auth/schemas.yaml#/ServiceAccessListItem'
-    ServiceListItem:
-      $ref: './components/auth/schemas.yaml#/ServiceListItem'
     ServiceSettings:
       $ref: './components/auth/schemas.yaml#/ServiceSettings'
     ServiceDetail:
@@ -1981,8 +1967,6 @@ webhooks:
     $ref: './paths/auth/admin/signing-keys.yaml#/core.signing-key.rotated'
   core.service.declared:
     $ref: './paths/auth/admin/services.yaml#/core.service.declared'
-  core.service.access-requested:
-    $ref: './paths/auth/admin/services.yaml#/core.service.access-requested'
   core.service.access-approved:
     $ref: './paths/auth/admin/services.yaml#/core.service.access-approved'
   core.service.access-revoked:

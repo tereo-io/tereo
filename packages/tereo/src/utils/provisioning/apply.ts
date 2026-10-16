@@ -810,7 +810,6 @@ const declarationOf = (
   systemRoles: service.systemRoles,
   buckets: service.buckets,
   eventTypes: service.eventTypes,
-  requestedAccess: { roles: [], audiences: [] },
 });
 
 /** Runs `write`, turning a refusal it throws into a problem of `label`. */
@@ -901,8 +900,8 @@ export const applyProvisioning = async (
     async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
       const state = await loadState(tx, p);
-      // Before any row is written: the registry route and admin decisions
-      // take these first, then rows.
+      // Before any row is written: admin decisions take these first, then
+      // rows.
       await lockRegistries(
         tx,
         [...state.services.values()].map((s) => s.id)

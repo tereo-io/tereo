@@ -1,7 +1,6 @@
 import { smallBodyParsers } from "../../middleware/bodyParsers.js";
 import notificationsRouter from "./notifications/index.js";
 import webhooksRouter from "./webhooks/index.js";
-import registryRouter from "./registry/index.js";
 import accountRouter from "./account/index.js";
 import filesRouter from "./files/index.js";
 import auditRouter from "./audit/index.js";
@@ -36,10 +35,6 @@ v1Router.use(
   express.json({ limit: "10mb" }),
   notificationsRouter
 );
-
-// Registry — /v1/registry. Declarations list every permission, role, bucket
-// and event type a service owns, so they outgrow the auth routes' limit.
-v1Router.use("/registry", express.json({ limit: "1mb" }), registryRouter);
 
 // Account, admin and setup — /v1/account, /v1/admin, /v1/setup.
 v1Router.use("/account", ...smallBodyParsers, accountRouter);

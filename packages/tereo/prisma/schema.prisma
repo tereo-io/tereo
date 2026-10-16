@@ -1517,9 +1517,9 @@ model SetupToken {
   @@schema("core")
 }
 
-// An app service, or core itself (fixed id, no client). Added by an admin,
-// who gets its client credentials once; on every start the service registers
-// a declaration of what it owns, all named under its namespace. Never deleted.
+// An app service, or core itself (fixed id, no client). Provisioned, with a
+// declaration of what it owns, all named under its namespace; or added by an
+// admin, who gets its client credentials once. Never deleted.
 model Service {
   id                 String    @id @default(uuid(7)) @db.Uuid
   slug               String    @unique @db.VarChar(64)
@@ -1535,8 +1535,6 @@ model Service {
   provisioned        Boolean   @default(false)
   // When a provisioned service was first missing from the file.
   unprovisionedAt    DateTime? @map("unprovisioned_at")
-  // The file's `access`: requests matching it are approved without an admin.
-  provisionedAccess  Json      @default("{\"roles\":[],\"audiences\":[]}") @map("provisioned_access")
   createdBy          String    @map("created_by") @db.Uuid
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
@@ -1585,8 +1583,8 @@ model ServiceAccess {
   requestedAt           DateTime            @default(now()) @map("requested_at")
   decidedAt             DateTime?           @map("decided_at")
   decidedBy             String?             @map("decided_by") @db.Uuid
-  // A role request's approved permissions, recorded at approval. Permissions
-  // the role gains later grant nothing until approved too.
+  // A role's approved permissions, recorded at approval and brought up to
+  // what the role grants on each provisioning apply.
   approvedPermissionIds String[]            @default([]) @map("approved_permission_ids") @db.Uuid
 
   service    Service   @relation(fields: [serviceId], references: [id], onDelete: Restrict)

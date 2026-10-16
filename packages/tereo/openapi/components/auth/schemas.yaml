@@ -2353,215 +2353,10 @@ CompleteSetupResponse:
         code:
           type: string
 
-# Registry Schemas
-Declaration:
-  type: object
-  description: |
-    Everything an app service declares, sent on every start. Every list
-    defaults to empty; an item missing from a later declaration is marked
-    missing and retired after the grace period.
-  required:
-    - version
-  properties:
-    version:
-      type: string
-      maxLength: 64
-      pattern: '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?$'
-      description: |
-        Semver of the release declaring it, `MAJOR.MINOR.PATCH` with an
-        optional `-prerelease` (no build metadata). A declaration older than
-        the one applied last is ignored (`applied: false`), so a replica of
-        an earlier release restarting after a rollout cannot undo it. An
-        equal or newer one is applied when its content changed.
-      example: 1.4.0
-    permissions:
-      type: array
-      maxItems: 1000
-      items:
-        type: object
-        required:
-          - name
-          - displayName
-        properties:
-          name:
-            type: string
-            minLength: 1
-            maxLength: 100
-            pattern: '^[a-z0-9][a-z0-9._-]*$'
-            description: Must be prefixed with the service's namespace.
-          displayName:
-            type: string
-            minLength: 1
-            maxLength: 255
-          description:
-            type: string
-            maxLength: 500
-            default: ''
-          orgAssignable:
-            type: boolean
-            default: false
-            description: |
-              A role assigned within an organization may grant this
-              permission. Set it only where every use of the permission stays
-              inside the caller's organization.
-    systemRoles:
-      type: array
-      maxItems: 200
-      items:
-        type: object
-        required:
-          - name
-          - displayName
-        properties:
-          name:
-            type: string
-            minLength: 1
-            maxLength: 100
-            pattern: '^[a-z][a-z0-9_-]*$'
-            description: |
-              `<namespace>_<name>`, under the service's namespace (a service
-              with namespace `billing` declares `billing_editor`); anything
-              else is a `400 invalid_role_name`. Nor may it equal one of
-              core's role names.
-          displayName:
-            type: string
-            minLength: 1
-            maxLength: 255
-          description:
-            type: string
-            maxLength: 500
-            default: ''
-          permissions:
-            type: array
-            maxItems: 1000
-            items:
-              type: string
-              minLength: 1
-              maxLength: 200
-            default: []
-            description: Names of permissions the role grants.
-    buckets:
-      type: array
-      maxItems: 100
-      items:
-        type: object
-        required:
-          - bucketName
-        properties:
-          bucketName:
-            type: string
-            minLength: 3
-            maxLength: 63
-            pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
-          description:
-            type: string
-            maxLength: 500
-          policy:
-            type: string
-            enum: [public, private]
-            default: private
-          storageQuotaBytes:
-            type: integer
-            minimum: 1
-    eventTypes:
-      type: array
-      maxItems: 1000
-      items:
-        type: object
-        required:
-          - eventType
-        properties:
-          eventType:
-            type: string
-            minLength: 1
-            maxLength: 100
-            pattern: '^[a-z0-9][a-z0-9._-]*$'
-          description:
-            type: string
-            maxLength: 500
-            default: ''
-          readPermission:
-            type: string
-            minLength: 1
-            maxLength: 200
-            description: |
-              A permission this declaration lists, or one of core's, that a
-              webhook endpoint's creator must hold to subscribe to the event
-              type and be sent its events. Without one, `webhooks.read` is
-              enough.
-    requestedAccess:
-      type: object
-      description: Access the service asks for; each new item waits for an admin to approve it.
-      properties:
-        roles:
-          type: array
-          maxItems: 100
-          items:
-            type: string
-            minLength: 1
-            maxLength: 200
-          default: []
-          description: A requestable core system role by its bare `name` (never `core/<name>`), or another service's as `<slug>/<name>`.
-        audiences:
-          type: array
-          maxItems: 100
-          items:
-            type: string
-            minLength: 1
-            maxLength: 64
-          default: []
-          description: Slugs of other services whose APIs this service calls.
-
-ServiceAccessSummary:
-  type: object
-  required:
-    - id
-    - kind
-    - target
-    - status
-  properties:
-    id:
-      type: string
-      format: uuid
-    kind:
-      type: string
-      enum: [role, audience]
-    target:
-      type: string
-      description: The role (`name` or `<slug>/<name>`) or audience (service slug) requested.
-    status:
-      type: string
-      enum: [pending, approved, revoked]
-
-RegisterDeclarationResponse:
-  type: object
-  required:
-    - service
-    - applied
-    - changed
-    - access
-  properties:
-    service:
-      type: string
-      description: Slug of the calling service
-    applied:
-      type: boolean
-      description: |
-        `false` when the declaration's `version` is older than the one
-        applied last: nothing was written, and core logged a warning.
-    changed:
-      type: boolean
-      description: '`false` when nothing was applied: the declaration was ignored, or its hash matched the last one applied (a no-op).'
-    access:
-      type: array
-      description: Every access request on file for the service, with its status.
-      items:
-        $ref: '#/ServiceAccessSummary'
-
 # Admin - Service Schemas
 Service:
   type: object
-  description: An app service — its OAuth client, the service-account user it acts as, and its registration state.
+  description: An app service — its OAuth client, the service-account user it acts as, and its declaration state.
   required:
     - id
     - slug
@@ -2622,10 +2417,10 @@ Service:
       description: When the replaced client secret stops working; `null` when there is no overlap, including once that time has passed.
     declarationHash:
       type: [string, 'null']
-      description: SHA-256 of the last declaration applied; `null` until the service first registers.
+      description: SHA-256 of the last declaration applied; `null` until one is first applied, and always for an admin-made service.
     declarationVersion:
       type: [string, 'null']
-      description: The `version` of the last declaration applied; an older one is ignored. `null` until the service first registers.
+      description: The `version` of the last declaration applied; `null` until one is first applied, and always for an admin-made service.
     declaredAt:
       type: [string, 'null']
       format: date-time
@@ -2679,7 +2474,6 @@ ServiceAccess:
     - decidedByName
     - decider
     - approvedPermissions
-    - pendingPermissions
   properties:
     id:
       type: string
@@ -2694,7 +2488,7 @@ ServiceAccess:
       type: string
     status:
       type: string
-      enum: [pending, approved, revoked]
+      enum: [approved, revoked]
     requestedAt:
       type: string
       format: date-time
@@ -2705,9 +2499,8 @@ ServiceAccess:
       type: [string, 'null']
       format: uuid
       description: |
-        The user who last approved or revoked it; `null` until first
-        decided. A role that grew since its approval is `pending` again and
-        keeps the earlier decision here.
+        The user who last approved or revoked it: the system user when
+        provisioning decided it.
     decidedByEmail:
       type: [string, 'null']
       format: email
@@ -2728,14 +2521,6 @@ ServiceAccess:
         For another service's role (`<slug>/<name>`): the permissions its
         approval recorded, the only ones the service holds through it. `null`
         for core's roles and for audiences.
-    pendingPermissions:
-      type: [array, 'null']
-      items:
-        type: string
-      description: |
-        For another service's role while `pending`: what the role grants
-        beyond `approvedPermissions`, which approving would grant. Empty
-        otherwise; `null` for core's roles and for audiences.
 
 ServiceAccessListItem:
   allOf:
@@ -2745,20 +2530,8 @@ ServiceAccessListItem:
         - service
       properties:
         service:
-          description: The service that asked for this access.
+          description: The service this access belongs to.
           $ref: '../schemas.yaml#/ServiceRef'
-
-ServiceListItem:
-  allOf:
-    - $ref: '#/Service'
-    - type: object
-      required:
-        - pendingAccessCount
-      properties:
-        pendingAccessCount:
-          type: integer
-          minimum: 0
-          description: How many of the service's access requests await a decision.
 
 ServiceSettings:
   type: object
@@ -3004,7 +2777,7 @@ PaginatedServicesResponse:
     data:
       type: array
       items:
-        $ref: '#/ServiceListItem'
+        $ref: '#/Service'
     hasMore:
       type: boolean
       description: Whether more pages exist beyond this one.

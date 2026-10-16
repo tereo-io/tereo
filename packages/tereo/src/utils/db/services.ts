@@ -57,10 +57,7 @@ export const getPaginated = async (options: PageOptions) => {
     take: options.take + 1,
     orderBy: options.orderBy,
     where: options.where,
-    include: {
-      ...withClient,
-      _count: { select: { access: { where: { status: "pending" } } } },
-    },
+    include: withClient,
   });
   const hasMore = rows.length > options.take;
   return { data: hasMore ? rows.slice(0, options.take) : rows, hasMore };

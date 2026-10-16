@@ -236,7 +236,7 @@ export const assertBucketDeletable = (bucket: {
 };
 
 /**
- * Refuses edits a re-registration would silently undo: the declaration
+ * Refuses edits the next declaration would silently undo: the declaration
  * re-applies a bucket's description, and its service's grant on it.
  */
 export const assertDeclaredFieldsUnchanged = (

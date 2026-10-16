@@ -468,8 +468,8 @@ ListWebhookDeliveriesResponse:
 EventType:
   type: object
   description: |
-    An event type, declared by the service that emits it and registered when
-    that service starts (`POST /v1/registry/declaration`). One dropped from its
+    An event type, declared by the service that emits it (core in code, app
+    services in provisioning documents). One dropped from its
     service's declaration is marked `missingSince`, then retired (`retiredAt`)
     a day later; retired types cannot be emitted.
   properties:

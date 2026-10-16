@@ -62,7 +62,7 @@ async function assertEmittable(
     if (!row) {
       throw new BadRequestError(
         "invalid_event_type",
-        `Event type "${eventType}" is not registered. Declare it in the service's registration first.`
+        `Event type "${eventType}" is not registered. Declare it in the service's provisioning document first.`
       );
     }
     if (row.retiredAt) {

@@ -1,9 +1,9 @@
-import { ROLES, isRequestableCoreRole } from "../definitions/roles.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { PERMISSION_CATALOG } from "../definitions/permissions.js";
 import { compareSemver, SEMVER_PATTERN } from "./semver.js";
 import type { Declaration } from "../definitions/index.js";
 import { emitTx, logAuditTx } from "./outbox.js";
+import { ROLES } from "../definitions/roles.js";
 import type { Prisma } from "./db/prisma.js";
 import { prisma } from "./db/prisma.js";
 import { logger } from "./logger.js";
@@ -12,7 +12,6 @@ import env from "../env.js";
 import { z } from "zod";
 import {
   CORE_RESERVED_NAMESPACES,
-  CORE_SERVICE,
   CORE_SERVICE_ID,
   SYSTEM_USER_ID,
 } from "../definitions/index.js";
@@ -25,9 +24,9 @@ import {
 /**
  * The registry: each service (core included) declares the permissions,
  * system roles, buckets and event types it owns, all named under its
- * namespace, and requests access to roles and audiences an admin must
- * approve. A declaration is applied whole; whatever it stops listing is
- * marked missing and retired after `REGISTRY_RETIREMENT_GRACE_HOURS`.
+ * namespace — core in code, app services in their provisioning documents.
+ * A declaration is applied whole; whatever it stops listing is marked
+ * missing and retired after `REGISTRY_RETIREMENT_GRACE_HOURS`.
  */
 
 type Tx = Prisma.TransactionClient;
@@ -89,12 +88,6 @@ export const declarationSchema = z.object({
   systemRoles: z.array(systemRoleItem).max(200).default([]),
   buckets: z.array(bucketItem).max(100).default([]),
   eventTypes: z.array(eventTypeItem).max(1000).default([]),
-  requestedAccess: z
-    .object({
-      roles: z.array(z.string().min(1).max(200)).max(100).default([]),
-      audiences: z.array(z.string().min(1).max(64)).max(100).default([]),
-    })
-    .default({ roles: [], audiences: [] }),
 });
 
 export type ParsedDeclaration = z.infer<typeof declarationSchema>;
@@ -341,10 +334,6 @@ export const declarationHash = (d: ParsedDeclaration): string => {
       .sort(byKey((r) => r.name)),
     buckets: [...d.buckets].sort(byKey((b) => b.bucketName)),
     eventTypes: [...d.eventTypes].sort(byKey((e) => e.eventType)),
-    requestedAccess: {
-      roles: [...new Set(d.requestedAccess.roles)].sort(),
-      audiences: [...new Set(d.requestedAccess.audiences)].sort(),
-    },
   };
   return createHash("sha256").update(canonicalJson(normalized)).digest("hex");
 };
@@ -353,37 +342,14 @@ export const declarationHash = (d: ParsedDeclaration): string => {
 // Register
 // ---------------------------------------------------------------------------
 
-export interface AccessView {
-  id: string;
-  kind: "role" | "audience";
-  target: string;
-  status: "pending" | "approved" | "revoked";
-}
-
 export interface RegisterResult {
   /** False when the declaration's version is older than the one applied. */
   applied: boolean;
   changed: boolean;
-  access: AccessView[];
 }
 
-const accessView = (row: AccessView): AccessView => ({
-  id: row.id,
-  kind: row.kind,
-  target: row.target,
-  status: row.status,
-});
-
-export const listAccess = async (serviceId: string, tx: Tx = prisma) =>
-  (
-    await tx.serviceAccess.findMany({
-      where: { serviceId },
-      orderBy: [{ kind: "asc" }, { target: "asc" }],
-    })
-  ).map(accessView);
-
 /**
- * A requested role, resolved: `name` is one of core's system roles,
+ * An access role target, resolved: `name` is one of core's system roles,
  * `<slug>/<name>` another service's.
  */
 export const resolveRoleTarget = async (
@@ -435,12 +401,12 @@ export const lockRegistries = async (tx: Tx, serviceIds: Iterable<string>) => {
 };
 
 /**
- * Apply a declaration for `service`. One whose version is older than the
- * applied one is ignored, so a replica of an earlier release that restarts
- * after a rollout cannot undo it. Unchanged (same hash) is a no-op beyond
- * recording a newer version. A declaration that breaks a rule is refused
- * whole, with every problem listed. Serialized per service, so copies
- * starting together apply it once.
+ * Apply core's own declaration, in-process. One whose version is older than
+ * the applied one is ignored, so a replica of an earlier release that
+ * restarts after a rollout cannot undo it. Unchanged (same hash) is a no-op
+ * beyond recording a newer version. A declaration that breaks a rule is
+ * refused whole, with every problem listed. Serialized, so copies starting
+ * together apply it once. App services' declarations come from provisioning.
  */
 export const registerDeclaration = async (
   service: RegistryService,
@@ -463,7 +429,7 @@ export const registerDeclaration = async (
   }
 
   const { version } = declaration;
-  const ignored = async (stored: string, tx: Tx = prisma) => {
+  const ignored = (stored: string): RegisterResult => {
     logger.warn(
       {
         service: service.slug,
@@ -472,11 +438,7 @@ export const registerDeclaration = async (
       },
       "Ignored a declaration older than the one applied"
     );
-    return {
-      applied: false,
-      changed: false,
-      access: await listAccess(service.id, tx),
-    };
+    return { applied: false, changed: false };
   };
   const isOlder = (stored: string | null): stored is string =>
     stored !== null && compareSemver(version, stored) < 0;
@@ -491,11 +453,7 @@ export const registerDeclaration = async (
     current.declarationHash === hash &&
     current.declarationVersion === version
   ) {
-    return {
-      applied: true,
-      changed: false,
-      access: await listAccess(service.id),
-    };
+    return { applied: true, changed: false };
   }
 
   return prisma.$transaction(
@@ -505,7 +463,7 @@ export const registerDeclaration = async (
         where: { id: service.id },
       });
       if (isOlder(locked.declarationVersion)) {
-        return ignored(locked.declarationVersion, tx);
+        return ignored(locked.declarationVersion);
       }
       if (locked.declarationHash === hash) {
         if (locked.declarationVersion !== version) {
@@ -514,43 +472,21 @@ export const registerDeclaration = async (
             data: { declarationVersion: version },
           });
         }
-        return {
-          applied: true,
-          changed: false,
-          access: await listAccess(service.id, tx),
-        };
+        return { applied: true, changed: false };
       }
 
-      const now = new Date();
-      const requested = await applyRequestedAccess(tx, service, declaration);
       const { summary } = await applyDeclarationTx(
         tx,
         service,
         declaration,
         actor,
-        now,
-        { requested }
+        new Date()
       );
-      await reopenGrownAccess(tx, service, actor, now);
-      if (requested.length > 0) {
-        await emitTx(tx, {
-          organizationId: getDefaultOrganizationId(),
-          eventType: "core.service.access-requested",
-          entityType: "Service",
-          entityId: service.id,
-          data: { slug: service.slug, requested },
-        });
-      }
-
       logger.info(
-        { service: service.slug, version, hash, ...summary, requested },
+        { service: service.slug, version, hash, ...summary },
         "Registered declaration"
       );
-      return {
-        applied: true,
-        changed: true,
-        access: await listAccess(service.id, tx),
-      };
+      return { applied: true, changed: true };
     },
     { timeout: 30_000 }
   );
@@ -869,164 +805,6 @@ const applyEventTypes = async (
     data: { missingSince: now },
   });
   return { declared: names.length, missing: count };
-};
-
-/**
- * Record requested access as pending. Additive: a request already on file
- * keeps its status, and one no longer requested keeps its approval, so a
- * rolling deploy cannot make an approval flap. Returns the new requests.
- */
-const applyRequestedAccess = async (
-  tx: Tx,
-  service: RegistryService,
-  d: ParsedDeclaration
-): Promise<{ kind: "role" | "audience"; target: string }[]> => {
-  const roles = [...new Set(d.requestedAccess.roles)];
-  const audiences = [...new Set(d.requestedAccess.audiences)];
-  if (service.id === CORE_SERVICE_ID && roles.length + audiences.length > 0) {
-    throw new UnprocessableEntityError(
-      "invalid_declaration",
-      "Core requests no access; it runs in-process"
-    );
-  }
-
-  const problems: string[] = [];
-  for (const target of roles) {
-    if (target.startsWith(`${CORE_SERVICE.slug}/`)) {
-      problems.push(
-        `role "${target}": core roles are named bare, without "${CORE_SERVICE.slug}/"`
-      );
-      continue;
-    }
-    const role = await resolveRoleTarget(target, tx);
-    if (!role) {
-      problems.push(`role "${target}" does not exist or is retired`);
-    } else if (
-      role.serviceId === CORE_SERVICE_ID &&
-      !isRequestableCoreRole(role.name)
-    ) {
-      problems.push(`role "${target}" cannot be requested by a service`);
-    }
-  }
-  for (const slug of audiences) {
-    const target = await tx.service.findUnique({ where: { slug } });
-    if (!target || target.id === CORE_SERVICE_ID || target.id === service.id) {
-      problems.push(`audience "${slug}" is not another service`);
-    }
-  }
-  if (problems.length > 0) {
-    throw new UnprocessableEntityError(
-      "invalid_requested_access",
-      problems.join("; ")
-    );
-  }
-
-  const wanted = [
-    ...roles.map((target) => ({ kind: "role" as const, target })),
-    ...audiences.map((target) => ({ kind: "audience" as const, target })),
-  ];
-  const onFile = await tx.serviceAccess.findMany({
-    where: { serviceId: service.id },
-    select: { kind: true, target: true },
-  });
-  const known = new Set(onFile.map((a) => `${a.kind}:${a.target}`));
-  const fresh = wanted.filter((w) => !known.has(`${w.kind}:${w.target}`));
-  await tx.serviceAccess.createMany({
-    data: fresh.map((w) => ({ serviceId: service.id, ...w })),
-    skipDuplicates: true,
-  });
-  return fresh;
-};
-
-/**
- * Other services' approved access to this service's roles, checked against
- * what the roles now grant. A role that gained permissions puts the access
- * back to pending, naming them: the service keeps what was approved, and the
- * rest grants nothing until an admin approves it. One whose gains are gone
- * again returns to approved. The service's account holds the role while the
- * access is in effect, so revoked and never-approved rows are left alone.
- */
-const reopenGrownAccess = async (
-  tx: Tx,
-  service: RegistryService,
-  actor: { userId: string; email: string | null },
-  now: Date
-) => {
-  if (service.id === CORE_SERVICE_ID) return;
-  const roles = await tx.role.findMany({
-    where: { serviceId: service.id },
-    select: {
-      name: true,
-      rolePermissions: {
-        where: { permission: { retiredAt: null } },
-        select: { permissionId: true, permission: { select: { name: true } } },
-      },
-    },
-  });
-  const byTarget = new Map(roles.map((r) => [`${service.slug}/${r.name}`, r]));
-  const rows = await tx.serviceAccess.findMany({
-    where: {
-      kind: "role",
-      target: { in: [...byTarget.keys()] },
-      assignment: { isNot: null },
-    },
-    include: { service: { select: { id: true, slug: true } } },
-  });
-
-  const reopened = new Map<
-    string,
-    {
-      consumer: { id: string; slug: string };
-      requested: { kind: "role"; target: string; permissions: string[] }[];
-    }
-  >();
-  for (const row of rows) {
-    const approved = new Set(row.approvedPermissionIds);
-    const added = byTarget
-      .get(row.target)!
-      .rolePermissions.filter((rp) => !approved.has(rp.permissionId))
-      .map((rp) => rp.permission.name)
-      .sort();
-    if (added.length > 0 && row.status === "approved") {
-      await tx.serviceAccess.update({
-        where: { id: row.id },
-        data: { status: "pending", requestedAt: now },
-      });
-      const entry = reopened.get(row.serviceId) ?? {
-        consumer: row.service,
-        requested: [],
-      };
-      entry.requested.push({
-        kind: "role",
-        target: row.target,
-        permissions: added,
-      });
-      reopened.set(row.serviceId, entry);
-    } else if (added.length === 0 && row.status === "pending") {
-      await tx.serviceAccess.update({
-        where: { id: row.id },
-        data: { status: "approved" },
-      });
-    }
-  }
-
-  for (const { consumer, requested } of reopened.values()) {
-    await logAuditTx(tx, {
-      auth: actor,
-      action: "UPDATE",
-      entityType: "Service",
-      entityId: consumer.id,
-      entityName: consumer.slug,
-      metadata: { action: "access_requested", via: service.slug, requested },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "core.service.access-requested",
-      entityType: "Service",
-      entityId: consumer.id,
-      data: { slug: consumer.slug, requested },
-    });
-  }
 };
 
 // ---------------------------------------------------------------------------

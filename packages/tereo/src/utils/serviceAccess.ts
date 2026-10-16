@@ -8,8 +8,6 @@ import { isRequestableCoreRole } from "../definitions/roles.js";
 import { prisma, type Prisma } from "./db/prisma.js";
 import { emitTx, logAuditTx } from "./outbox.js";
 import { withUserRefs } from "./users.js";
-import { logger } from "./logger.js";
-import { z } from "zod";
 
 type Tx = Prisma.TransactionClient;
 
@@ -17,42 +15,11 @@ const isServiceRole = (row: Pick<ServiceAccess, "kind" | "target">) =>
   row.kind === "role" && row.target.includes("/");
 
 /**
- * For each request for another service's role, the permission names it was
- * approved for and those the role grants beyond them while it is pending;
- * both null for core's roles and audiences.
+ * For each row for another service's role, the permission names it was
+ * approved for; null for core's roles and audiences.
  */
 const withPermissions = async <T extends ServiceAccess>(rows: T[]) => {
-  const targets = new Set(rows.filter(isServiceRole).map((r) => r.target));
-  const slugs = [...targets].map((t) => t.slice(0, t.indexOf("/")));
-  const roles =
-    targets.size === 0
-      ? []
-      : await prisma.role.findMany({
-          where: {
-            serviceId: { not: CORE_SERVICE_ID },
-            service: { slug: { in: [...new Set(slugs)] } },
-          },
-          select: {
-            name: true,
-            service: { select: { slug: true } },
-            rolePermissions: {
-              where: { permission: { retiredAt: null } },
-              select: { permissionId: true },
-            },
-          },
-        });
-  const current = new Map(
-    roles.map((r) => [
-      `${r.service!.slug}/${r.name}`,
-      r.rolePermissions.map((rp) => rp.permissionId),
-    ])
-  );
-  const ids = [
-    ...new Set([
-      ...rows.flatMap((r) => r.approvedPermissionIds),
-      ...[...current.values()].flat(),
-    ]),
-  ];
+  const ids = [...new Set(rows.flatMap((r) => r.approvedPermissionIds))];
   const names = new Map(
     ids.length === 0
       ? []
@@ -66,28 +33,19 @@ const withPermissions = async <T extends ServiceAccess>(rows: T[]) => {
   const named = (list: string[]) =>
     list.flatMap((id) => names.get(id) ?? []).sort();
 
-  return rows.map(({ approvedPermissionIds, ...row }) => {
-    if (!isServiceRole(row)) {
-      return { ...row, approvedPermissions: null, pendingPermissions: null };
-    }
-    const approved = new Set(approvedPermissionIds);
-    const grants = current.get(row.target) ?? [];
-    return {
-      ...row,
-      approvedPermissions: named(approvedPermissionIds),
-      pendingPermissions:
-        row.status === "pending"
-          ? named(grants.filter((id) => !approved.has(id)))
-          : [],
-    };
-  });
+  return rows.map(({ approvedPermissionIds, ...row }) => ({
+    ...row,
+    approvedPermissions: isServiceRole(row)
+      ? named(approvedPermissionIds)
+      : null,
+  }));
 };
 
 /**
  * Add who decided each access row, from one lookup: `decider`, and its email
  * and name flat. The `decidedBy` id stays; all three are null until the row
- * is first decided, and name the last decision after. Requests for another
- * service's role also carry `approvedPermissions` and `pendingPermissions`.
+ * is first decided, and name the last decision after. Rows for another
+ * service's role also carry `approvedPermissions`.
  */
 export const withDeciders = async <T extends ServiceAccess>(rows: T[]) =>
   (
@@ -141,10 +99,9 @@ export const lockedAudience = async (tx: Tx, clientId: string) => {
 };
 
 /**
- * Holds the registration of every service whose role these rows request, so
+ * Holds the registry lock of every service whose role these rows name, so
  * the permissions an approval records are still what the role grants when it
- * commits: a registration adding one meanwhile would see no assignment yet
- * and reopen nothing.
+ * commits: provisioning takes these locks before changing a role.
  */
 const lockRoleOwners = async (tx: Tx, serviceId: string, ids: string[]) => {
   const rows = await tx.serviceAccess.findMany({
@@ -215,11 +172,10 @@ export const decideAccessTx = async (
 };
 
 /**
- * Give the service what it asked for: a role on its account, or an audience.
- * Approving another service's role records the permissions it grants now;
- * what the role gains later comes back as pending and grants nothing until
- * approved too. With `checkGrantable`, the actor must hold whatever is newly
- * granted. Returns the rows it approved; those already approved are skipped.
+ * Give the service its access: a role on its account, or an audience.
+ * Approving another service's role records the permissions it grants now.
+ * With `checkGrantable`, the actor must hold whatever is newly granted.
+ * Returns the rows it approved; those already approved are skipped.
  */
 export const approveAccessTx = async (
   tx: Tx,
@@ -375,7 +331,7 @@ const accessKey = (row: { kind: string; target: string }) =>
 
 /**
  * Make the service's access what its provisioning document lists, deciding
- * as core. Listed access missing or pending is approved, and so is listed
+ * as core. Listed access not yet on file is approved, and so is listed
  * access core revoked because an earlier document stopped listing it; access
  * an admin revoked stays revoked. Approved access to another service's role
  * follows the role, recording what it grants now. Approved access no longer
@@ -422,19 +378,20 @@ export const syncProvisionedAccessTx = async (
   });
   const listed = rows.filter((r) => wantedKeys.has(accessKey(r)));
 
-  const pending = listed.filter(
+  // Rows created just above start pending; nothing else is.
+  const toApprove = listed.filter(
     (r) =>
       r.status === "pending" ||
       (r.status === "revoked" && r.decidedBy === SYSTEM_USER_ID)
   );
   const approved =
-    pending.length === 0
+    toApprove.length === 0
       ? []
       : await approveAccessTx(
           tx,
           SYSTEM_ACTOR,
           service,
-          pending.map((r) => r.id),
+          toApprove.map((r) => r.id),
           { checkGrantable: false, meta }
         );
 
@@ -503,96 +460,4 @@ export const syncProvisionedAccessTx = async (
     narrowed: narrowed.map(accessKey),
     revoked: revoked.map(accessKey),
   };
-};
-
-const ProvisionedAccessSchema = z.object({
-  roles: z.array(z.string()),
-  audiences: z.array(z.string()),
-});
-
-/**
- * Approve, as core, the service's requests its provisioning file lists. Only
- * requests never decided: one an admin revoked, or one reopened because the
- * role gained permissions, waits for an admin. A requested role that no
- * longer resolves is left pending rather than failing the caller.
- */
-export const approveProvisionedAccess = async (
-  serviceId: string
-): Promise<void> => {
-  const service = await prisma.service.findUnique({
-    where: { id: serviceId },
-    select: {
-      id: true,
-      slug: true,
-      provisioned: true,
-      unprovisionedAt: true,
-      provisionedAccess: true,
-      client: {
-        select: { id: true, serviceAccountUser: { select: { id: true } } },
-      },
-    },
-  });
-  if (!service?.provisioned || service.unprovisionedAt) return;
-  const parsed = ProvisionedAccessSchema.safeParse(service.provisionedAccess);
-  if (!parsed.success) {
-    logger.warn(
-      { serviceId: service.id, err: parsed.error },
-      "Unreadable provisioned access; approving nothing"
-    );
-  }
-  const access = parsed.success ? parsed.data : { roles: [], audiences: [] };
-  const accountUserId = service.client?.serviceAccountUser?.id;
-  if (!service.client || !accountUserId) return;
-  if (access.roles.length + access.audiences.length === 0) return;
-
-  const undecided = (tx: Tx) =>
-    tx.serviceAccess.findMany({
-      where: {
-        serviceId,
-        status: "pending",
-        decidedAt: null,
-        OR: [
-          { kind: "role", target: { in: access.roles } },
-          { kind: "audience", target: { in: access.audiences } },
-        ],
-      },
-      select: { id: true, kind: true, target: true },
-    });
-  if ((await undecided(prisma)).length === 0) return;
-
-  const app: AppService = {
-    id: service.id,
-    slug: service.slug,
-    accountUserId,
-    client: { id: service.client.id },
-  };
-  await prisma.$transaction(async (tx) => {
-    // The locks an admin decision takes, so the rows read next stay
-    // undecided until this commits.
-    const candidates = await undecided(tx);
-    await lockRoleOwners(
-      tx,
-      serviceId,
-      candidates.map((r) => r.id)
-    );
-    await lockedAudience(tx, service.client!.id);
-    // Only rows whose owners are locked above: locking another owner now,
-    // after the client row, would invert the admin path's lock order.
-    const locked = new Set(candidates.map((r) => r.id));
-    const ids: string[] = [];
-    for (const row of await undecided(tx)) {
-      if (!locked.has(row.id)) continue;
-      if (row.kind === "role" && !(await resolveRoleTarget(row.target, tx)))
-        continue;
-      ids.push(row.id);
-    }
-    if (ids.length === 0) return;
-    await approveAccessTx(
-      tx,
-      { userId: SYSTEM_USER_ID, email: null },
-      app,
-      ids,
-      { checkGrantable: false }
-    );
-  });
 };

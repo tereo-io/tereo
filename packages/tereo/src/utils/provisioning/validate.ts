@@ -214,7 +214,6 @@ const checkDeclaration = (
     systemRoles: service.systemRoles,
     buckets: service.buckets,
     eventTypes: service.eventTypes,
-    requestedAccess: { roles: [], audiences: [] },
   };
   for (const p of [
     ...rolePrefixProblems(registryService, declaration),

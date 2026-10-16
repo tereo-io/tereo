@@ -10,7 +10,7 @@ import {
 
 /**
  * What an access token may do in core's own API (/account, /admin, /files,
- * /audit, /webhooks, /registry):
+ * /audit, /webhooks):
  *
  * - `full` — issued to core's UI or to a service: the user's (or service
  *   account's) live permissions, everywhere.

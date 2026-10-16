@@ -41,13 +41,6 @@ export interface EventTypeDefinition {
   readPermission?: string;
 }
 
-export interface RequestedAccess {
-  /** System roles to hold: a bare name for core's, `<slug>/<name>` for another service's. */
-  roles?: string[];
-  /** Slugs of services allowed to introspect this service's tokens. */
-  audiences?: string[];
-}
-
 export interface Declaration {
   /** Semver of the release declaring it; an older one than applied is ignored. */
   version: string;
@@ -55,5 +48,4 @@ export interface Declaration {
   systemRoles: RoleDefinition[];
   buckets: BucketDefinition[];
   eventTypes: EventTypeDefinition[];
-  requestedAccess?: RequestedAccess;
 }

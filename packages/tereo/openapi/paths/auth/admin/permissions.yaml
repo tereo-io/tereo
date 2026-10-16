@@ -4,8 +4,8 @@
       - Admin - Permissions
     summary: List permissions
     description: |
-      Returns a paginated list of permissions. Permissions are declared in
-      code by their services and registered at boot (`POST /v1/registry/declaration`);
+      Returns a paginated list of permissions. Permissions are declared by
+      their services — core in code, app services in provisioning documents;
       admins read them and compose custom roles from them, but never create,
       edit or delete them.
 

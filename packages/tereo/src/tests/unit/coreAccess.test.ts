@@ -1,5 +1,5 @@
-import { CORE_SCOPES, coreScopesOf } from "../../definitions/index.js";
 import { hasPermission } from "../../utils/permissions.js";
+import { coreScopesOf } from "../../definitions/index.js";
 import { describe, it, expect } from "vitest";
 import {
   allowsArea,
@@ -51,12 +51,6 @@ describe("resolveCoreAccess", () => {
         scopes: ["openid", "profile", "email", "offline_access"],
       })
     ).toEqual({ kind: "none" });
-  });
-
-  it("lets no scope reach /registry", () => {
-    expect(
-      allowsArea(delegated(...CORE_SCOPES.map((s) => s.name)), "registry")
-    ).toBe(false);
   });
 });
 
