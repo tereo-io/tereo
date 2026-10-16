@@ -107,7 +107,7 @@ a map of name to document ([reference](https://github.com/tereo-io/tereo/blob/ma
 The chart renders each as `<name>.json` in a ConfigMap, mounts it at `/etc/tereo/provisioning` and
 sets `PROVISIONING_PATH`; with none, none of that is rendered. Or set `provisioning.existingConfigMap`
 to mount a ConfigMap you manage. Core applies the documents at start, and a `post-install,post-upgrade`
-Job (`provisioning.job`) runs `provision` with core's environment, so a change takes effect without
+Job (`provisioning.job`: backoff, deadline, resources) runs `provision` with core's environment, so a change takes effect without
 restarting the pods. Never write a secret there: `secretFrom` names an environment variable, which
 must be a key of the Secret in `secrets.existingSecret` (or come from `extraEnvFrom`). See
 [`ci/provisioning-values.yaml`](https://github.com/tereo-io/tereo/blob/master/charts/tereo/ci/provisioning-values.yaml).

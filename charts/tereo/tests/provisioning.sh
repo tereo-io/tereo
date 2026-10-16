@@ -19,6 +19,12 @@ lacks "$out" 'checksum/provisioning' 'pods must not roll on provisioning changes
 has "$out" 'helm.sh/hook: post-install,post-upgrade' 'provision Job missing'
 has "$out" '"dist/cli/index.js", "provision"' 'Job does not run provision'
 
+lacks "$out" 'memory: 321Mi' 'provision Job resources rendered while unset'
+helm template t "$chart" -f "$chart/ci/provisioning-values.yaml" \
+  --set provisioning.job.resources.limits.memory=321Mi \
+  --show-only templates/provision-job.yaml >"$out"
+has "$out" 'memory: 321Mi' 'provisioning.job.resources not rendered'
+
 helm template t "$chart" -f "$chart/ci/provisioning-values.yaml" \
   --set provisioning.existingConfigMap=x >"$out"
 lacks "$out" 'kind: ConfigMap' 'ConfigMap rendered despite existingConfigMap'

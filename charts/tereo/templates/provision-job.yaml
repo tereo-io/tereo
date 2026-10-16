@@ -48,6 +48,10 @@ spec:
             {{- include "tereo.envFrom" . | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.provisioning.job.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: provisioning
               mountPath: /etc/tereo/provisioning

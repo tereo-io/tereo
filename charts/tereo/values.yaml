@@ -70,6 +70,7 @@ provisioning:
   job:
     backoffLimit: 1
     activeDeadlineSeconds: 300
+    resources: {}
 
 secrets:
   # A Secret you manage, holding DATABASE_URL, CORE_KEK (openssl rand -base64
