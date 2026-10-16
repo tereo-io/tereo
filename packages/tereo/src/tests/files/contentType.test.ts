@@ -1,3 +1,4 @@
+import { downloadCsp } from "../../routes/v1/files/buckets/bucket/objects/utils.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import { createHash, randomUUID } from "crypto";
@@ -15,6 +16,7 @@ import {
 // A browser takes the last type of a list: this renders as HTML.
 const SMUGGLED = "image/png, text/html";
 const SANDBOX = "sandbox; default-src 'none'";
+const NO_SANDBOX = "default-src 'none'";
 
 describe("object content types", () => {
   let token: string;
@@ -120,6 +122,43 @@ describe("object content types", () => {
     });
     expect(res.status).toBe(HTTP_STATUS.OK);
     expect(res.headers["content-security-policy"]).toBe(SANDBOX);
+  });
+
+  it("serves an inline PDF without the sandbox directive", async () => {
+    const { bucket, obj } = await uploaded("a.pdf");
+    await prisma.objectVersion.updateMany({
+      where: { objectId: obj.id, isCurrent: true },
+      data: { contentType: "application/pdf" },
+    });
+
+    const res = await axios.get(
+      `${BASE_URL}/buckets/${bucket.name}/objects/a.pdf`,
+      auth()
+    );
+    expect(res.headers["content-disposition"]).toMatch(/^inline;/);
+    expect(res.headers["content-security-policy"]).toBe(NO_SANDBOX);
+
+    const presign = await axios.post(
+      `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}/presign`,
+      { operation: "read", expiresInSeconds: 60 },
+      auth()
+    );
+    const signed = await axios.get(presign.data.url, {
+      validateStatus: () => true,
+    });
+    expect(signed.headers["content-disposition"]).toMatch(/^inline;/);
+    expect(signed.headers["content-security-policy"]).toBe(NO_SANDBOX);
+  });
+
+  it("downloadCsp keeps the sandbox for everything but inline PDFs", () => {
+    expect(downloadCsp("application/pdf", true)).toBe(NO_SANDBOX);
+    expect(downloadCsp("application/pdf; charset=binary", true)).toBe(
+      NO_SANDBOX
+    );
+    expect(downloadCsp("application/pdf", false)).toBe(SANDBOX);
+    expect(downloadCsp("image/png", true)).toBe(SANDBOX);
+    expect(downloadCsp("text/plain", true)).toBe(SANDBOX);
+    expect(downloadCsp("application/zip", false)).toBe(SANDBOX);
   });
 
   it("checks a completed multipart upload's content against the blocklist", async () => {

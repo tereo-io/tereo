@@ -275,10 +275,19 @@ export const setContentDisposition = (
     "Content-Disposition",
     contentDisposition(inline ? "inline" : "attachment", filename)
   );
-  res.setHeader("Content-Security-Policy", DOWNLOAD_CSP);
+  res.setHeader(
+    "Content-Security-Policy",
+    downloadCsp(opts.contentType, inline)
+  );
 };
 
-const DOWNLOAD_CSP = "sandbox; default-src 'none'";
+// Browsers' built-in PDF viewers don't run inside a sandboxed frame, so an
+// inline PDF keeps only `default-src 'none'`; the rest stays sandboxed.
+export const downloadCsp = (contentType: string, inline: boolean): string =>
+  inline &&
+  normalizeContentType(contentType)?.split(";")[0] === "application/pdf"
+    ? "default-src 'none'"
+    : "sandbox; default-src 'none'";
 
 export const handleMetadata = (req: Request) => {
   const metadataHeader = req.headers["x-metadata"] as string | undefined;
