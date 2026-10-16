@@ -55,8 +55,8 @@ Introspection uses `POST /oauth/introspect` over `CORE_PUBLIC_CLIENT` (the servi
 Basic auth); users and organizations use `/v1/admin/users/:id` and `/v1/admin/organizations/:id` over
 `CORE_CLIENT`, so the service needs access to read them. Core only reports a token active to this
 service when it was issued to this service's own client, or its audience includes this service's
-slug — an audience an admin approved for the issuing service (`requestedAccess.audiences`, see
-[registration](registry.md)).
+slug — an audience in the issuing service's provisioning document (`access.audiences`, see
+[provisioning](provisioning.md)).
 
 The cache is the Redis passed to `createCoreClient`, under `@tereo-io/sdk:<clientId>:auth-sdk:v1:`,
 shared by the service's replicas and by no other service — another service's introspection says nothing

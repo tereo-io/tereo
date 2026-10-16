@@ -23,10 +23,10 @@ event type; the outbox sets it to the row id. When omitted, one is generated per
 | `assertEventType(eventType)` | `void` | Throws `UnknownEventTypeError` if the type is not one the client knows. `outbox.emit` calls it |
 | `useEventTypes(eventTypes)` | `void` | Replaces the known types |
 
-Event types are declared in the service's [registration](registry.md), not here. The client learns
-them from `register()` (or from `createCoreClient({ eventTypes })`, which takes precedence) and
-rejects any other before a request is made. Before it knows any, it accepts every type and leaves
-the check to core, which answers 400 for an event type nobody registered (or a retired one) and 403
+Event types are declared in the service's [provisioning document](provisioning.md), not here. The
+client knows them only from `createCoreClient({ eventTypes })` and then rejects any other before a
+request is made. Before it knows any, it accepts every type and leaves
+the check to core, which answers 400 for an event type nobody declared (or a retired one) and 403
 for one another service owns. The service needs the `webhook_publisher` role. A batch takes at most
 100 events.
 

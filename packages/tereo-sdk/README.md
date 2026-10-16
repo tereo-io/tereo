@@ -25,15 +25,8 @@ const core = createCoreClient({
 });
 await core.start();
 
-// Every boot: what this service owns, and the access it needs. Retries until
-// core accepts; report not-ready until then (core.isRegistered()).
-await core.register({
-  permissions: [{ name: "product.items.read", displayName: "Read items" }],
-  systemRoles: [{ name: "product_reader", displayName: "Product reader", permissions: ["product.items.read"] }],
-  buckets: [{ bucketName: "product-images", policy: "private" }],
-  eventTypes: [{ eventType: "product.item.created", description: "Item created" }],
-  requestedAccess: { roles: ["file_user", "webhook_publisher", "audit_writer"] },
-});
+// What this service owns, and the access it needs, is not sent at boot: the build writes a
+// provisioning document (see docs/provisioning.md) and the deploy pipeline hands it to core.
 
 app.use(requestIdMiddleware());
 app.use(core.auth.requireAuth);
@@ -53,10 +46,10 @@ await core.stop();
 ## Sending notifications
 
 Core sends the message through a connection an admin configured (email first). Ask for the
-sender role in the declaration; an admin approves it, and until then requests are refused with 403:
+sender role in the service's provisioning document (`access.roles`); until it is applied, requests are refused with 403:
 
 ```ts
-await core.register({ requestedAccess: { roles: ["notification_sender"] } /* … */ });
+// provisioning document: service.access.roles includes "notification_sender"
 
 // Direct: throws on failure; an idempotencyKey is generated when you give none.
 const { id } = await core.notifications.send({
@@ -91,7 +84,7 @@ One per process — a second call throws until the first client is stopped.
 | `redis` | — (required) | An ioredis client with `maxRetriesPerRequest: null`. Owned by the caller |
 | `production` | `NODE_ENV === "production"` | Production handlers take priority over others sharing the Redis |
 | `auth` | `{}` | `publicRoutes` and `defaultTestPermissions` for `auth.requireAuth` — see [auth](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/auth.md) |
-| `eventTypes` | from `register()` | Event types `webhooks.emit` and `outbox.emit` accept |
+| `eventTypes` | any type | Event types `webhooks.emit` and `outbox.emit` accept |
 | `outbox` | none | The transactional outbox — see [outbox](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/outbox.md). Without it, reading `core.outbox` throws |
 | `testMode` | `false` | For an app's tests: accept `test-token-…` tokens and stub `auth` lookups and `files` — see [testing](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/testing.md). Throws with `NODE_ENV=production` or `production: true` |
 
@@ -108,10 +101,8 @@ The returned `CoreClient`:
 | `audit` | `AuditLogServiceClient` — best-effort writes and reads of this service's entries. [docs/audit.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/audit.md) |
 | `notifications` | `NotificationsClient` — `send` an email through core, `get` one back with its deliveries. See [Sending notifications](#sending-notifications) |
 | `outbox` | `OutboxClient` — audit entries, events and notifications written in the app's own transaction. [docs/outbox.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/outbox.md) |
-| `register(declaration)` | Registers what the service owns and the access it needs. [docs/registry.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/registry.md) |
-| `isRegistered()` / `whenRegistered()` | Readiness: true / resolves once core has accepted the declaration |
 | `start()` | Starts the request handler, the file cache's invalidation subscriber and the outbox reaper. Call once at boot |
-| `stop()` | Stops a registration still retrying, the reaper, the cache subscriber and the handler; another client may then be created |
+| `stop()` | Stops the reaper, the cache subscriber and the handler; another client may then be created |
 
 Testing — `testMode`'s test tokens and stubs, and the no-op clients — is in
 [docs/testing.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/testing.md).
@@ -139,8 +130,9 @@ When core answers 401 to the cached service token — revoked, or signed with a 
 rotated — the SDK drops the token and retries the call once with a new one. A call whose body is a
 stream (`uploadObject`) is not retried.
 
-What a call may do is what an admin approved for the service — see core's
-[registry](https://github.com/tereo-io/tereo/blob/master/packages/tereo/docs/registry.md) notes. The read caches (introspection, users,
+What a call may do is what the service's provisioning document grants — see
+[docs/provisioning.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/provisioning.md) and core's
+[provisioning](https://github.com/tereo-io/tereo/blob/master/packages/tereo/docs/provisioning.md) notes. The read caches (introspection, users,
 organizations, buckets, object metadata) live in the same Redis, under the same
 `@tereo-io/sdk:<clientId>` prefix, so no service reads another's; a Redis failure falls
 through to core. Mount `requestIdMiddleware()` to give each
@@ -166,19 +158,19 @@ One package, folders by kind, no per-area modules:
 
 | Path | Holds |
 |------|-------|
-| `src/index.ts` | Every export: `createCoreClient`, then outbox, registration, auth, files, webhooks, audit, errors |
+| `src/index.ts` | Every export: `createCoreClient`, then outbox, provisioning types, auth, files, webhooks, audit, errors |
 | `src/coreClient.ts` | `createCoreClient` and `CoreClientOptions` |
 | `src/handler.ts` | The request handler (one per process), `CORE_CLIENT` / `CORE_PUBLIC_CLIENT`, `requests`, transport-level types |
-| `src/clients/` | `auth.ts`, `files.ts`, `webhooks.ts`, `audit.ts`, `notifications.ts`, `registry.ts`, `outbox.ts` |
+| `src/clients/` | `auth.ts`, `files.ts`, `webhooks.ts`, `audit.ts`, `notifications.ts`, `outbox.ts` |
 | `src/templates/` | The one client template, `tereo`, and its request-id interceptor |
-| `src/requests/` | Request definitions, mirroring core's URL areas: `auth/`, `files/`, `webhooks/`, `audit/`, `notifications/`, `registry/` |
+| `src/requests/` | Request definitions, mirroring core's URL areas: `auth/`, `files/`, `webhooks/`, `audit/`, `notifications/` |
 | `src/types/` | SDK-level types, one file per area |
 | `src/utils/` | Errors, caches, test tokens, webhook verification, audit helpers, outbox table SQL |
 | `src/tests/` | Unit tests |
 
 ## Status
 
-One package, one client on core's paths, `register`, and the outbox.
+One package, one client on core's paths, the outbox, and the types of the provisioning document.
 
 It depends on the published `@dianemo/core` `^2.0.0`. Nothing in `tereo` depends on this
 package.

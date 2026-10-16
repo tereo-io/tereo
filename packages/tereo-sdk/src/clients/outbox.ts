@@ -73,8 +73,6 @@ export interface OutboxClientDeps {
   audit: AuditLogServiceClient;
   webhooks: WebhookServiceClient;
   notifications: NotificationsClient;
-  /** False while a registration is still pending: hold dispatch until core knows our event types. */
-  canDispatch: () => boolean;
 }
 
 /**
@@ -203,7 +201,6 @@ export class OutboxClient {
 
   /** One pass: claim a batch and dispatch it. Returns how many rows it handled. */
   async processBatch(): Promise<number> {
-    if (!this.deps.canDispatch()) return 0;
     const rows = await this.claim();
     for (const row of rows) {
       if (this.stopRequested) break;
