@@ -1,5 +1,5 @@
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
-import { removeLoginClients, removeServices } from "./utils/test-helpers.js";
+import type { CustomRoleEntry } from "../../utils/provisioning/schema.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { getTestPrincipalToken } from "../utils/principals.js";
 import { generateClientSecret } from "../../utils/crypto.js";
@@ -31,10 +31,16 @@ import {
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
 } from "../../definitions/index.js";
+import {
+  removeLoginClients,
+  removeRoles,
+  removeServices,
+} from "./utils/test-helpers.js";
 
 let adminToken: string;
 const createdSlugs: string[] = [];
 const createdClientIds: string[] = [];
+const createdRoleNames: string[] = [];
 
 beforeAll(async () => {
   // Events are written in this process, outside the server.
@@ -53,6 +59,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await removeRoles(createdRoleNames);
   await removeServices(createdSlugs);
   await removeLoginClients(createdClientIds);
 });
@@ -338,6 +345,7 @@ describe("applyProvisioning", () => {
       unprovisioned: [],
       declared: [],
       access: [],
+      roles: [],
     });
     expect(await auditCount(ids)).toBe(before);
     expect((await clientRow(client.clientId)).updatedAt).toEqual(updatedAt);
@@ -1138,6 +1146,216 @@ describe("access", () => {
     );
     expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
     expect((await serviceRow(d.service.slug)).client?.audience).toEqual([]);
+  });
+});
+
+describe("custom roles", () => {
+  const roleSpec = (
+    permissions: string[],
+    extra: Partial<CustomRoleEntry> = {}
+  ): CustomRoleEntry => {
+    const name = extra.name ?? `prov-role-${rand()}`;
+    createdRoleNames.push(name);
+    return {
+      name,
+      displayName: `Role ${name}`,
+      orgAssignable: false,
+      permissions,
+      ...extra,
+    };
+  };
+
+  const rolesDoc = (...roles: CustomRoleEntry[]): LoadedDocument => ({
+    file: "roles.json",
+    version: "1.0.0",
+    service: null,
+    clients: [],
+    roles,
+  });
+
+  const roleRow = (name: string) =>
+    prisma.role.findFirstOrThrow({
+      where: { name, serviceId: null },
+      include: { rolePermissions: { include: { permission: true } } },
+    });
+
+  const permissionsOf = async (name: string) =>
+    (await roleRow(name)).rolePermissions
+      .map((rp) => rp.permission.name)
+      .sort();
+
+  const ownerDoc = () => {
+    const ns = `prov-${rand()}`;
+    return serviceDoc({ slug: ns, namespace: ns, ...ownerDeclaration(ns) });
+  };
+
+  const roleApi = async (method: string, path: string, body?: unknown) =>
+    fetchJson(
+      method,
+      `${CORE_URL}${path}`,
+      await getTestPrincipalToken({ permissions: ["admin"] }),
+      body
+    );
+
+  it("creates a custom role over core and service permissions", async () => {
+    const owner = ownerDoc();
+    const ns = owner.service.namespace;
+    const role = roleSpec(["roles.read", `${ns}.items.read`]);
+    const result = await apply(owner, rolesDoc(role));
+    expect(result.roles).toEqual([`role:${role.name}`]);
+
+    const row = await roleRow(role.name);
+    expect(row.serviceId).toBeNull();
+    expect(row.provisioned).toBe(true);
+    expect(row.displayName).toBe(role.displayName);
+    expect(await permissionsOf(role.name)).toEqual(
+      ["roles.read", `${ns}.items.read`].sort()
+    );
+    const audit = await prisma.auditLogEntry.findFirst({
+      where: { entityId: row.id, action: "CREATE" },
+    });
+    expect(audit?.userId).toBe(SYSTEM_USER_ID);
+    expect(audit?.metadata).toMatchObject({
+      file: "roles.json",
+      version: "1.0.0",
+    });
+  });
+
+  it("replaces a custom role's permissions, auditing it once", async () => {
+    const owner = ownerDoc();
+    const ns = owner.service.namespace;
+    const role = roleSpec(["roles.read"]);
+    await apply(owner, rolesDoc(role));
+    const row = await roleRow(role.name);
+
+    const grown = {
+      ...role,
+      permissions: [`${ns}.items.write`],
+      description: "d",
+    };
+    const result = await apply(owner, rolesDoc(grown));
+    expect(result.roles).toEqual([`role:${role.name}`]);
+    expect(await permissionsOf(role.name)).toEqual([`${ns}.items.write`]);
+    expect((await roleRow(role.name)).description).toBe("d");
+    const updates = () =>
+      prisma.auditLogEntry.count({
+        where: { entityId: row.id, action: "UPDATE" },
+      });
+    expect(await updates()).toBe(1);
+
+    const again = await apply(owner, rolesDoc(grown));
+    expect(again.roles).toEqual([]);
+    expect(await updates()).toBe(1);
+  });
+
+  it("refuses a custom role whose name a hand-made role holds", async () => {
+    const name = `prov-role-${rand()}`;
+    createdRoleNames.push(name);
+    await prisma.role.create({
+      data: { name, displayName: "Hand made", requires2fa: false },
+    });
+    const problems = await problemsOf(
+      rolesDoc(roleSpec(["roles.read"], { name }))
+    );
+    expect(problems.join("\n")).toContain(
+      "was not created from the provisioning file"
+    );
+    expect((await roleRow(name)).provisioned).toBe(false);
+  });
+
+  it("refuses admin edits with 409 managed_by_provisioning, but still assigns the role", async () => {
+    const owner = ownerDoc();
+    const role = roleSpec([
+      "roles.read",
+      `${owner.service.namespace}.items.read`,
+    ]);
+    await apply(owner, rolesDoc(role));
+    const row = await roleRow(role.name);
+    const permissionId = row.rolePermissions[0].permissionId;
+
+    const attempts = [
+      await roleApi("PATCH", `/v1/admin/roles/${row.id}`, { displayName: "X" }),
+      await roleApi("PUT", `/v1/admin/roles/${row.id}/permissions`, {
+        permissionIds: [permissionId],
+      }),
+      await roleApi("POST", `/v1/admin/roles/${row.id}/archive`),
+      await roleApi("DELETE", `/v1/admin/roles/${row.id}`),
+    ];
+    for (const res of attempts) {
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expect(res.body.error).toBe("managed_by_provisioning");
+    }
+    const shown = await roleApi("GET", `/v1/admin/roles/${row.id}`);
+    expect(shown.body.provisioned).toBe(true);
+
+    const user = await prisma.user.create({
+      data: {
+        email: `prov-role-${rand()}@test.local`,
+        name: "Holder",
+        isActive: true,
+      },
+    });
+    try {
+      const assigned = await roleApi(
+        "PUT",
+        `/v1/admin/users/${user.id}/roles`,
+        { roleIds: [row.id] }
+      );
+      expect(assigned.status, JSON.stringify(assigned.body)).toBeLessThan(300);
+      expect(
+        await prisma.userRole.count({
+          where: { userId: user.id, roleId: row.id },
+        })
+      ).toBe(1);
+
+      const copy = await roleApi(
+        "POST",
+        `/v1/admin/roles/${row.id}/duplicate`,
+        { name: `${role.name}-copy` }
+      );
+      createdRoleNames.push(`${role.name}-copy`);
+      expect(copy.status, JSON.stringify(copy.body)).toBe(201);
+      expect(copy.body.provisioned).toBe(false);
+    } finally {
+      await prisma.userRole.deleteMany({ where: { userId: user.id } });
+      await prisma.user.delete({ where: { id: user.id } });
+    }
+  });
+
+  describe("retirement", () => {
+    const HOUR = 60 * 60 * 1000;
+    const grace = env.REGISTRY_RETIREMENT_GRACE_HOURS * HOUR;
+
+    it("archives a role missing from the set after the grace, and restores it when it returns", async () => {
+      const role = roleSpec(["roles.read"]);
+      await apply(rolesDoc(role));
+
+      const now = new Date();
+      const result = await applyProvisioning(setOf(), now);
+      expect(result.unprovisioned).toContain(`role:${role.name}`);
+      expect((await roleRow(role.name)).unprovisionedAt).toEqual(now);
+
+      const early = await deprovisionMissing(
+        new Date(now.getTime() + grace - HOUR)
+      );
+      expect(early.roles).toBe(0);
+      expect((await roleRow(role.name)).archivedAt).toBeNull();
+
+      const late = await deprovisionMissing(
+        new Date(now.getTime() + grace + HOUR)
+      );
+      expect(late.roles).toBeGreaterThanOrEqual(1);
+      const archived = await roleRow(role.name);
+      expect(archived.archivedAt).not.toBeNull();
+      expect(archived.isActive).toBe(false);
+
+      const back = await apply(rolesDoc(role));
+      expect(back.roles).toEqual([`role:${role.name}`]);
+      const restored = await roleRow(role.name);
+      expect(restored.archivedAt).toBeNull();
+      expect(restored.unprovisionedAt).toBeNull();
+      expect(restored.isActive).toBe(true);
+    });
   });
 });
 

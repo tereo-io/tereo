@@ -25,12 +25,17 @@ import {
   ValidationError,
   ConflictError,
   ForbiddenError,
+  ManagedByProvisioningError,
 } from "../../../../../utils/errors.js";
 import {
   logAuditTx,
   computeChanges,
   emitTx,
 } from "../../../../../utils/outbox.js";
+
+const refuseProvisioned = (role: { provisioned: boolean }) => {
+  if (role.provisioned) throw new ManagedByProvisioningError();
+};
 
 export const getRole = async (req: Request, res: Response) => {
   const params = validateParams(RoleIdParamSchema, req);
@@ -46,6 +51,7 @@ export const updateRole = async (req: Request, res: Response) => {
   const body = validateBody(UpdateRoleSchema, req);
 
   const existing = await db.roles.get(params.id);
+  refuseProvisioned(existing);
   // A system role is declared in code; only the 2FA policy is the admin's.
   const declared = Object.keys(body).filter((k) => k !== "requires2fa");
   if (existing.serviceId && declared.length > 0) {
@@ -197,6 +203,7 @@ export const duplicateRole = async (req: Request, res: Response) => {
 export const archiveRole = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const params = validateParams(RoleIdParamSchema, req);
+  refuseProvisioned(await db.roles.get(params.id));
 
   const affectedUserIds = await db.roles.getUserIdsByRoleId(params.id);
 
@@ -259,6 +266,7 @@ export const deleteRole = async (req: Request, res: Response) => {
   const params = validateParams(RoleIdParamSchema, req);
 
   const existing = await db.roles.getAny(params.id);
+  refuseProvisioned(existing);
   if (existing.serviceId) {
     throw new ForbiddenError("Cannot delete system role");
   }
@@ -304,6 +312,7 @@ export const setRolePermissions = async (req: Request, res: Response) => {
   const body = validateBody(SetPermissionsSchema, req);
 
   const existing = await db.roles.get(params.id);
+  refuseProvisioned(existing);
   if (existing.serviceId) {
     throw new ForbiddenError(
       "System roles are declared in code; duplicate it as a custom role to change its permissions"

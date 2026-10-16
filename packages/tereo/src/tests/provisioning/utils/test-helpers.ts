@@ -24,6 +24,17 @@ export async function removeServices(slugs: string[]) {
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
 }
 
+export async function removeRoles(names: string[]) {
+  const roles = await prisma.role.findMany({
+    where: { name: { in: names }, serviceId: null },
+    select: { id: true },
+  });
+  const ids = roles.map((r) => r.id);
+  await prisma.userRole.deleteMany({ where: { roleId: { in: ids } } });
+  await prisma.rolePermission.deleteMany({ where: { roleId: { in: ids } } });
+  await prisma.role.deleteMany({ where: { id: { in: ids } } });
+}
+
 export async function removeLoginClients(clientIds: string[]) {
   await prisma.oAuthClient.deleteMany({
     where: { clientId: { in: clientIds }, service: { is: null } },
@@ -41,6 +52,11 @@ export async function cleanupAllTestEntities() {
     },
     select: { slug: true },
   });
+  const roles = await prisma.role.findMany({
+    where: { name: { startsWith: "prov-role-" }, serviceId: null },
+    select: { name: true },
+  });
+  await removeRoles(roles.map((r) => r.name));
   await removeServices(services.map((s) => s.slug));
   const clients = await prisma.oAuthClient.findMany({
     where: { clientId: { startsWith: "prov-client-" }, service: { is: null } },

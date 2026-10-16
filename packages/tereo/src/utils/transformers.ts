@@ -164,6 +164,7 @@ export const formatRole = (role: Awaited<ReturnType<typeof db.roles.get>>) => {
     archivedAt: role.archivedAt,
     retiredAt: role.retiredAt,
     requires2fa: role.requires2fa,
+    provisioned: role.provisioned,
     createdAt: role.createdAt,
     updatedAt: role.updatedAt,
     permissions: role.rolePermissions.map((rp) => ({

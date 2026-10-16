@@ -1,16 +1,22 @@
-import { disconnectTokenSockets } from "../../websocket/emitters/index.js";
 import { deleteLoginClientTx, rotatedSecretFields } from "../clients.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
+import { formatClient, formatRole } from "../transformers.js";
 import { syncProvisionedAccessTx } from "../serviceAccess.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma, type Prisma } from "../db/prisma.js";
-import { formatClient } from "../transformers.js";
+import type { CustomRoleEntry } from "./schema.js";
 import { validateSet } from "./validate.js";
 import { AppError } from "../errors.js";
 import { logger } from "../logger.js";
 import db from "../db/index.js";
 import env from "../../env.js";
+import {
+  disconnectTokenSockets,
+  notifyRoleDeleted,
+  notifyRolePermissionsChanged,
+  notifyRoleStatusChanged,
+} from "../../websocket/emitters/index.js";
 import {
   createServiceTx,
   revokeServiceTokens,
@@ -43,6 +49,8 @@ export interface ProvisioningResult {
   declared: string[];
   /** Access granted, extended or revoked. */
   access: string[];
+  /** Custom roles created or changed. */
+  roles: string[];
 }
 
 /** An entry with the document it came from. */
@@ -56,6 +64,9 @@ interface ServiceInSet extends FromDocument {
 interface ClientInSet extends FromDocument {
   client: ResolvedClient;
 }
+interface RoleInSet extends FromDocument {
+  role: CustomRoleEntry;
+}
 
 const entriesOf = (set: ProvisioningSet) => ({
   services: set.documents.flatMap(({ file, version, service }) =>
@@ -63,6 +74,9 @@ const entriesOf = (set: ProvisioningSet) => ({
   ),
   clients: set.documents.flatMap(({ file, version, clients }) =>
     clients.map((client) => ({ file, version, client }))
+  ),
+  roles: set.documents.flatMap(({ file, version, roles }) =>
+    roles.map((role) => ({ file, version, role }))
   ),
 });
 
@@ -78,6 +92,8 @@ const serviceLabel = ({ file, service }: ServiceInSet) =>
   `${file}: services[${service.slug}]`;
 const clientLabel = ({ file, client }: ClientInSet) =>
   `${file}: clients[${client.clientId}]`;
+
+const roleLabel = ({ file, role }: RoleInSet) => `${file}: roles[${role.name}]`;
 
 const sortedUnique = (values: string[]) => [...new Set(values)].sort();
 
@@ -102,6 +118,10 @@ const loadState = async (tx: Tx, p: Entries) => {
     where: { clientId: { in: clientIds } },
     include: { service: { select: { slug: true } } },
   });
+  const roleRows = await tx.role.findMany({
+    where: { serviceId: null, name: { in: p.roles.map((e) => e.role.name) } },
+    select: { name: true, provisioned: true },
+  });
   const scopes = await tx.scope.findMany({
     where: { name: { in: clients.flatMap((c) => c.scopes) } },
     select: { name: true },
@@ -118,6 +138,7 @@ const loadState = async (tx: Tx, p: Entries) => {
   return {
     services: new Map(serviceRows.map((s) => [s.slug, s])),
     clients: new Map(clientRows.map((c) => [c.clientId, c])),
+    roles: new Map(roleRows.map((r) => [r.name, r])),
     scopes: new Set(scopes.map((s) => s.name)),
     secretHolders,
   };
@@ -230,6 +251,12 @@ const findProblems = async (
     if (spec.secretEnv && spec.secretHash)
       checkSecret(label, spec.secretEnv, spec.secretHash, existing?.id);
   }
+
+  for (const entry of p.roles)
+    if (state.roles.get(entry.role.name)?.provisioned === false)
+      problems.push(
+        `${roleLabel(entry)}: a role named "${entry.role.name}" already exists and was not created from the provisioning file`
+      );
 
   return problems;
 };
@@ -525,6 +552,154 @@ const applyClient = async (
   }
 };
 
+/** What a custom role's row holds for its entry. */
+const roleFields = (spec: CustomRoleEntry) => ({
+  displayName: spec.displayName,
+  description: spec.description ?? null,
+});
+
+/**
+ * Creates or updates each custom role, its permission set replaced. Returns
+ * the ids of roles whose permissions or activity changed, for the holders'
+ * tokens and sessions once the transaction commits.
+ */
+const applyRoles = async (
+  tx: Tx,
+  p: Entries,
+  result: ProvisioningResult
+): Promise<{ permissionsChanged: string[]; statusChanged: string[] }> => {
+  const permissionsChanged: string[] = [];
+  const statusChanged: string[] = [];
+  const permissions = await tx.permission.findMany({
+    where: {
+      name: { in: p.roles.flatMap((e) => e.role.permissions) },
+      retiredAt: null,
+    },
+    select: { id: true, name: true },
+  });
+  const idOf = new Map(permissions.map((perm) => [perm.name, perm.id]));
+
+  for (const from of p.roles) {
+    const spec = from.role;
+    const meta = documentMeta(from);
+    const entry = `role:${spec.name}`;
+    const wanted = sortedUnique(spec.permissions.map((n) => idOf.get(n)!));
+    const fields = roleFields(spec);
+    const existing = await tx.role.findFirst({
+      where: { name: spec.name, serviceId: null },
+      include: { rolePermissions: true },
+    });
+
+    if (!existing) {
+      const created = await db.roles.create(
+        {
+          name: spec.name,
+          displayName: spec.displayName,
+          description: spec.description,
+          provisioned: true,
+        },
+        tx
+      );
+      const role = await db.roles.setPermissions(created.id, wanted, tx);
+      await logAuditTx(tx, {
+        auth: SYSTEM_ACTOR,
+        action: "CREATE",
+        entityType: "Role",
+        entityId: role.id,
+        entityName: role.name,
+        metadata: {
+          displayName: role.displayName,
+          provisioned: true,
+          permissionIds: wanted,
+          ...meta,
+        },
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.role.created",
+        entityType: "Role",
+        entityId: role.id,
+        data: formatRole(role) as Record<string, unknown>,
+      });
+      result.roles.push(entry);
+      continue;
+    }
+
+    const held = sortedUnique(
+      existing.rolePermissions.map((rp) => rp.permissionId)
+    );
+    const permissionsDiffer =
+      held.length !== wanted.length || held.some((id, i) => id !== wanted[i]);
+    const restored = existing.archivedAt !== null;
+    const changes = computeChanges(
+      {
+        ...Object.fromEntries(
+          Object.keys(fields).map((k) => [
+            k,
+            existing[k as keyof typeof fields],
+          ])
+        ),
+        isActive: existing.isActive,
+        archivedAt: existing.archivedAt,
+        unprovisionedAt: existing.unprovisionedAt,
+      },
+      {
+        ...fields,
+        isActive: restored ? true : existing.isActive,
+        archivedAt: null,
+        unprovisionedAt: null,
+      }
+    );
+    if (!changes && !permissionsDiffer) continue;
+
+    await tx.role.update({
+      where: { id: existing.id },
+      data: {
+        ...fields,
+        archivedAt: null,
+        unprovisionedAt: null,
+        ...(restored && { isActive: true }),
+      },
+    });
+    if (permissionsDiffer)
+      await db.roles.setPermissions(existing.id, wanted, tx);
+    const role = await db.roles.get(existing.id, tx);
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      action: "UPDATE",
+      entityType: "Role",
+      entityId: role.id,
+      entityName: role.name,
+      changes,
+      metadata: {
+        action: "provisioned",
+        ...(permissionsDiffer && { permissionIds: wanted }),
+        ...meta,
+      },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: restored ? "auth.role.restored" : "auth.role.updated",
+      entityType: "Role",
+      entityId: role.id,
+      data: formatRole(role) as Record<string, unknown>,
+    });
+    if (permissionsDiffer) {
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.role.permissions-changed",
+        entityType: "Role",
+        entityId: role.id,
+        data: { id: role.id, name: role.name, permissionIds: wanted },
+      });
+      permissionsChanged.push(role.id);
+    }
+    if (restored) statusChanged.push(role.id);
+    result.roles.push(entry);
+  }
+  return { permissionsChanged, statusChanged };
+};
+
 const markMissing = async (
   tx: Tx,
   p: Entries,
@@ -597,6 +772,31 @@ const markMissing = async (
       data: formatClient(updated) as Record<string, unknown>,
     });
     result.unprovisioned.push(`client:${client.clientId}`);
+  }
+
+  const roles = await tx.role.findMany({
+    where: {
+      provisioned: true,
+      unprovisionedAt: null,
+      serviceId: null,
+      name: { notIn: p.roles.map((e) => e.role.name) },
+    },
+  });
+  for (const role of roles) {
+    await tx.role.update({
+      where: { id: role.id },
+      data: { unprovisionedAt: now },
+    });
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      action: "UPDATE",
+      entityType: "Role",
+      entityId: role.id,
+      entityName: role.name,
+      changes: { unprovisionedAt: { old: null, new: now } },
+      metadata: { action: "unprovisioned" },
+    });
+    result.unprovisioned.push(`role:${role.name}`);
   }
 };
 
@@ -696,7 +896,7 @@ export const applyProvisioning = async (
   if (invalid.length > 0) throw new ProvisioningError(invalid);
   const p = entriesOf(set);
 
-  const { result, revokedClients } = await prisma.$transaction(
+  const { result, revokedClients, roleChanges } = await prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
       const state = await loadState(tx, p);
@@ -716,32 +916,49 @@ export const applyProvisioning = async (
         unprovisioned: [],
         declared: [],
         access: [],
+        roles: [],
       };
       for (const entry of p.services)
         await applyService(tx, entry, state, now, result);
       const content = await applyServicesContent(tx, p, now, result);
       if (content.problems.length > 0)
         throw new ProvisioningError(content.problems);
+      const roleChanges = await applyRoles(tx, p, result);
       for (const entry of p.clients)
         await applyClient(tx, entry, state, now, result);
       await markMissing(tx, p, now, result);
-      return { result, revokedClients: content.revokedClients };
+      return { result, revokedClients: content.revokedClients, roleChanges };
     },
     { timeout: 120_000 }
   );
   // Their next token lacks what was revoked.
   for (const id of revokedClients) await revokeServiceTokens(id);
+  for (const id of roleChanges.permissionsChanged) {
+    await notifyRolePermissionsChanged(id);
+    await revokeHolderClientTokens(id);
+  }
+  for (const id of roleChanges.statusChanged) await notifyRoleStatusChanged(id);
   return result;
+};
+
+/** A service client holding the role gets its next token with what it grants now. */
+const revokeHolderClientTokens = async (roleId: string) => {
+  const holders = await db.roles.getUserIdsByRoleId(roleId);
+  const clientIds = new Set(
+    holders.flatMap((h) => (h.user.oauthClientId ? [h.user.oauthClientId] : []))
+  );
+  for (const clientId of clientIds)
+    await db.accessTokens.revokeByClientId(clientId);
 };
 
 // `now` is a parameter for tests.
 export const deprovisionMissing = async (
   now: Date = new Date()
-): Promise<{ services: number; clients: number }> => {
+): Promise<{ services: number; clients: number; roles: number }> => {
   const cutoff = new Date(
     now.getTime() - env.REGISTRY_RETIREMENT_GRACE_HOURS * 60 * 60 * 1000
   );
-  const { serviceClientIds, jtis, services, clients } =
+  const { serviceClientIds, jtis, services, clients, archivedRoles } =
     await prisma.$transaction(
       async (tx) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
@@ -774,21 +991,56 @@ export const deprovisionMissing = async (
         const jtis: string[] = [];
         for (const client of dueClients)
           jtis.push(...(await deleteLoginClientTx(tx, client, SYSTEM_ACTOR)));
+
+        const dueRoles = await tx.role.findMany({
+          where: { ...stale, serviceId: null, archivedAt: null },
+        });
+        const archivedRoles: { id: string; name: string }[] = [];
+        for (const role of dueRoles) {
+          await tx.role.update({
+            where: { id: role.id },
+            data: { isActive: false, archivedAt: now },
+          });
+          await logAuditTx(tx, {
+            auth: SYSTEM_ACTOR,
+            action: "ARCHIVE",
+            entityType: "Role",
+            entityId: role.id,
+            entityName: role.name,
+            metadata: { action: "unprovisioned" },
+          });
+          await emitTx(tx, {
+            organizationId: getDefaultOrganizationId(),
+            eventType: "auth.role.archived",
+            entityType: "Role",
+            entityId: role.id,
+            data: { id: role.id, name: role.name },
+          });
+          archivedRoles.push({ id: role.id, name: role.name });
+        }
         return {
           serviceClientIds,
           jtis,
           services: dueServices.length,
           clients: dueClients.length,
+          archivedRoles,
         };
       },
       { timeout: 30_000 }
     );
   for (const id of serviceClientIds) await revokeServiceTokens(id);
   disconnectTokenSockets(jtis);
-  if (services > 0 || clients > 0)
+  for (const { id } of archivedRoles) {
+    await revokeHolderClientTokens(id);
+    notifyRoleDeleted(
+      (await db.roles.getUserIdsByRoleId(id)).map((h) => h.userId)
+    );
+  }
+  const roles = archivedRoles.length;
+  if (services > 0 || clients > 0 || roles > 0)
     logger.info(
-      { services, clients },
+      { services, clients, roles },
       "Retired entries removed from the provisioning file"
     );
-  return { services, clients };
+  return { services, clients, roles };
 };
