@@ -1,5 +1,5 @@
 import { isRedisReady, limiterUnavailable } from "./rateLimit.js";
-import { getRedisClient } from "./redis.js";
+import { getRedisClient, redisKey } from "./redis.js";
 import { hashFlowToken } from "./crypto.js";
 import { logger } from "./logger.js";
 import env from "../env.js";
@@ -13,7 +13,7 @@ import env from "../env.js";
 // unlimited password guesses through.
 
 export const keyOf = (token: string, ip: string): string =>
-  `file-service:share-unlock:${hashFlowToken(token)}:${ip}`;
+  redisKey(`file-service:share-unlock:${hashFlowToken(token)}:${ip}`);
 
 export interface LimiterResult {
   allowed: boolean;

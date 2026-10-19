@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { safeCacheGet, safeCacheSet } from "../utils/cache.js";
+import { startFileServiceCache } from "../utils/fileCache.js";
 import { failUnlessRefused } from "../templates/core.js";
 import { createCoreClient } from "../coreClient.js";
 import type { AxiosError } from "axios";
@@ -152,6 +153,15 @@ describe("createCoreClient", () => {
     const second = createCoreClient({ ...options, clientId: "other", redis });
     expect(await safeCacheGet("auth-sdk:v1:token:abc")).toBeUndefined();
     await second.stop();
+  });
+
+  it("passes channelPrefix to the file cache", async () => {
+    const core = createCoreClient({ ...options, channelPrefix: "app1:" });
+    await core.start();
+    expect(startFileServiceCache).toHaveBeenLastCalledWith({
+      channelPrefix: "app1:",
+    });
+    await core.stop();
   });
 
   it("allows one client per process until it is stopped", async () => {

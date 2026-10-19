@@ -1,4 +1,4 @@
-import { getRedisClient, initializeRedis } from "../utils/redis.js";
+import { getRedisClient, initializeRedis, redisKey } from "../utils/redis.js";
 import { prisma } from "../utils/db/prisma.js";
 import { beforeAll, beforeEach } from "vitest";
 import { loadKeys } from "../utils/keys.js";
@@ -28,7 +28,7 @@ beforeEach(async () => {
     "webhook-service:idempotency:*",
     "audit-log-service:idempotency:*",
   ]) {
-    const keys = await redis.keys(pattern);
+    const keys = await redis.keys(redisKey(pattern));
     if (keys.length > 0) await redis.del(keys);
   }
 });

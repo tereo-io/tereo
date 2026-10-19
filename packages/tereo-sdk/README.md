@@ -86,6 +86,7 @@ One per process — a second call throws until the first client is stopped.
 | `auth` | `{}` | `publicRoutes` and `defaultTestPermissions` for `auth.requireAuth` — see [auth](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/auth.md) |
 | `eventTypes` | any type | Event types `webhooks.emit` and `outbox.emit` accept |
 | `outbox` | none | The transactional outbox — see [outbox](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/outbox.md). Without it, reading `core.outbox` throws |
+| `channelPrefix` | none | Core's `REDIS_KEY_PREFIX`, when it sets one: the file cache hears core's invalidations on channels under it |
 | `testMode` | `false` | For an app's tests: accept `test-token-…` tokens and stub `auth` lookups and `files` — see [testing](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/testing.md). Throws with `NODE_ENV=production` or `production: true` |
 
 A missing `url`, `clientId`, `clientSecret` or `requestHandlerKey` (option and env both) throws at

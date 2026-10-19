@@ -88,7 +88,9 @@ object's type is the `contentType` given to `initiateMultipart`.
 In the Redis passed to `createCoreClient`, shared by the service's replicas and by no other service.
 Object bytes are never cached. `core.start()` also subscribes (on a duplicate connection) to core's
 invalidation channels, `file-service:bucket-invalidate` and `file-service:object-invalidate`, so a
-change made anywhere drops the entry — when that Redis is the one core publishes on. On a Redis of
+change made anywhere drops the entry — when that Redis is the one core publishes on. A core with
+`REDIS_KEY_PREFIX` set publishes them under that prefix; pass the same value as `channelPrefix` to
+`createCoreClient`. On a Redis of
 its own, a change made elsewhere shows after the TTL; `uploadObject` and `patchObject` also drop the entry for their resulting key at
 once. A Redis failure falls through to core.
 

@@ -32,6 +32,12 @@ redis:
   # the password then comes from REDIS_PASSWORD in the secret.
   sentinels: ""
   masterName: ""
+  # Database index, 0-15 (REDIS_DB). Empty keeps REDIS_URL's path, else 0.
+  db: ""
+  # Prefix for every key and channel core uses (REDIS_KEY_PREFIX), e.g.
+  # "app1:", so several cores can share one Redis. App services pass the same
+  # value as the SDK's channelPrefix.
+  keyPrefix: ""
 
 # OTLP/HTTP endpoint for traces, e.g. http://otel-collector:4318. Empty
 # disables export.
@@ -49,7 +55,8 @@ extraEnvFrom: []
 # one document, rendered as <name>.json in a ConfigMap mounted at
 # /etc/tereo/provisioning, where PROVISIONING_PATH points. Core applies them at
 # start, and a post-install/post-upgrade Job runs `provision` so a changed
-# document takes effect without a restart. Empty renders neither. Secrets are
+# document takes effect without a restart (job.enabled: false leaves it to the
+# next start). Empty renders neither. Secrets are
 # never written here: `secretFrom` names an environment variable, which must
 # be a key of secrets.existingSecret (or the Secret built by
 # secrets.externalSecret), or come from extraEnvFrom.
@@ -68,6 +75,10 @@ provisioning:
   # chart then renders no ConfigMap of its own.
   existingConfigMap: ""
   job:
+    enabled: true
+    # Merged onto the Job's hook annotations, overriding any it shares, e.g.
+    # argocd.argoproj.io/hook: Sync to run it in Argo CD's Sync phase.
+    annotations: {}
     backoffLimit: 1
     activeDeadlineSeconds: 300
     resources: {}

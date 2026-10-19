@@ -1,7 +1,7 @@
 import { isRedisReady, limiterUnavailable } from "./rateLimit.js";
 import { canonicalJson } from "./uploadIdempotency.js";
+import { getRedisClient, redisKey } from "./redis.js";
 import { createHash, randomUUID } from "crypto";
-import { getRedisClient } from "./redis.js";
 import { logger } from "./logger.js";
 import {
   IdempotencyInProgressError,
@@ -72,7 +72,7 @@ export async function withAuditIdempotency<T>(
     }
   };
   const prefix = scope.prefix ?? AUDIT_IDEMPOTENCY_PREFIX;
-  const key = `${prefix}${scope.userId}:${scope.route}:${scope.key}`;
+  const key = redisKey(`${prefix}${scope.userId}:${scope.route}:${scope.key}`);
   const bodyHash = createHash("sha256")
     .update(canonicalJson(scope.body))
     .digest("hex");
