@@ -74,14 +74,24 @@ describe("GET /v1/account/service", () => {
     expect(response.data.declarationHash).toEqual(expect.any(String));
     expect(response.data.declaredAt).toEqual(expect.any(String));
     expect(response.data.access[0].decidedAt).toEqual(expect.any(String));
-    for (const key of [
-      "serviceAccountUser",
-      "creator",
-      "previousSecretExpiresAt",
-      "clientId",
-    ]) {
-      expect(response.data, key).not.toHaveProperty(key);
-    }
+    expect(Object.keys(response.data).sort()).toEqual(
+      [
+        "id",
+        "slug",
+        "name",
+        "namespace",
+        "isActive",
+        "provisioned",
+        "unprovisionedAt",
+        "declarationVersion",
+        "declarationHash",
+        "declaredAt",
+        "access",
+      ].sort()
+    );
+    expect(Object.keys(response.data.access[0]).sort()).toEqual(
+      ["kind", "target", "status", "decidedAt"].sort()
+    );
   });
 
   it("follows a re-provision that changes only the version", async () => {

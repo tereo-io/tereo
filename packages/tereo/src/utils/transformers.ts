@@ -1,9 +1,14 @@
-import { ClientType, UserType } from "../../prisma/generated/client/index.js";
 import { toOrgRef, toServiceRef, toUserRef, type OrgRef } from "./refs.js";
 import type { IntegrationRow, ServiceWithClient } from "./db/services.js";
 import { previousSecretExpiry } from "./webhookSigning.js";
 import { maskCustomHeaders } from "./webhookHeaders.js";
 import db from "./db/index.js";
+import {
+  ClientType,
+  UserType,
+  type Service,
+  type ServiceAccess,
+} from "../../prisma/generated/client/index.js";
 
 export const formatClient = (
   client: {
@@ -207,6 +212,33 @@ export const formatService = (service: ServiceWithClient) => ({
   creator: toUserRef(service.creator),
   createdAt: service.createdAt,
   updatedAt: service.updatedAt,
+});
+
+/**
+ * A service as `GET /v1/account/service` shows it to itself: the declaration
+ * core last applied and the access it holds. Its account, creator and secret
+ * overlap are admin detail.
+ */
+export const formatOwnService = (
+  service: Service,
+  access: Pick<ServiceAccess, "kind" | "target" | "status" | "decidedAt">[]
+) => ({
+  id: service.id,
+  slug: service.slug,
+  name: service.name,
+  namespace: service.namespace,
+  isActive: service.isActive,
+  provisioned: service.provisioned,
+  unprovisionedAt: service.unprovisionedAt,
+  declarationVersion: service.declarationVersion,
+  declarationHash: service.declarationHash,
+  declaredAt: service.declaredAt,
+  access: access.map(({ kind, target, status, decidedAt }) => ({
+    kind,
+    target,
+    status,
+    decidedAt,
+  })),
 });
 
 /**
