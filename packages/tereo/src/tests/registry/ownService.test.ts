@@ -61,6 +61,7 @@ describe("GET /v1/account/service", () => {
       namespace: service.namespace,
       isActive: true,
       provisioned: true,
+      unprovisionedAt: null,
       declarationVersion: "1.2.0",
       access: [
         {

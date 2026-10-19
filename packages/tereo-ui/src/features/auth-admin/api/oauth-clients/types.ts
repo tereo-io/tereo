@@ -23,6 +23,8 @@ export interface OAuthClient {
   /** Whether users approve the app after signing in; core's own login client never asks. */
   consentRequired: boolean;
   provisioned: boolean;
+  /** When it went missing from the provisioning documents; null while they list it. */
+  unprovisionedAt: string | null;
   ownerId: string;
   /**
    * Set for a service's client, which is managed under /admin/services: core

@@ -2492,6 +2492,7 @@ AccountService:
     - namespace
     - isActive
     - provisioned
+    - unprovisionedAt
     - declarationVersion
     - declarationHash
     - declaredAt
@@ -2512,6 +2513,12 @@ AccountService:
     provisioned:
       type: boolean
       description: True for a service declared in the provisioning documents.
+    unprovisionedAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        When the service went missing from the provisioning documents; null
+        while they list it, and for one never provisioned.
     declarationVersion:
       type: [string, 'null']
       description: The `version` of the last declaration applied; `null` until one is first applied.

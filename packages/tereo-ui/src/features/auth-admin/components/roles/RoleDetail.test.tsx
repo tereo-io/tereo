@@ -24,6 +24,7 @@ const role: Role = {
   retiredAt: null,
   requires2fa: false,
   provisioned: false,
+  unprovisionedAt: null,
   createdAt: "2026-10-01T00:00:00Z",
   updatedAt: "2026-10-01T00:00:00Z",
   permissions: [],

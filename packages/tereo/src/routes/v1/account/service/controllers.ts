@@ -31,6 +31,7 @@ export const getOwnService = async (req: Request, res: Response) => {
     namespace: formatted.namespace,
     isActive: formatted.isActive,
     provisioned: formatted.provisioned,
+    unprovisionedAt: formatted.unprovisionedAt,
     declarationVersion: formatted.declarationVersion,
     declarationHash: formatted.declarationHash,
     declaredAt: formatted.declaredAt,

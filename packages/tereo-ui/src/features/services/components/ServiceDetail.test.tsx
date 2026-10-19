@@ -18,6 +18,7 @@ const service: ServiceDetailData = {
   namespace: "billing",
   isActive: true,
   provisioned: false,
+  unprovisionedAt: null,
   clientId: "billing",
   serviceAccountUserId: null,
   serviceAccountUser: null,

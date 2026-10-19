@@ -20,6 +20,11 @@ export interface AuthServiceOwnService {
   namespace: string;
   isActive: boolean;
   provisioned: boolean;
+  /**
+   * ISO-8601 timestamp of when the service went missing from the
+   * provisioning documents; null while they list it.
+   */
+  unprovisionedAt: string | null;
   /** The `version` of the declaration last applied; null until one is. */
   declarationVersion: string | null;
   /** SHA-256 of the declaration last applied; null until one is. */

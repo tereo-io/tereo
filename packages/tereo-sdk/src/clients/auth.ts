@@ -331,6 +331,7 @@ export class AuthServiceClient {
         namespace: "test",
         isActive: true,
         provisioned: true,
+        unprovisionedAt: null,
         declarationVersion: null,
         declarationHash: null,
         declaredAt: null,

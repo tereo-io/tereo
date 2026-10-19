@@ -22987,6 +22987,7 @@ components:
         - namespace
         - isActive
         - provisioned
+        - unprovisionedAt
         - declarationVersion
         - declarationHash
         - declaredAt
@@ -23007,6 +23008,14 @@ components:
         provisioned:
           type: boolean
           description: True for a service declared in the provisioning documents.
+        unprovisionedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: |
+            When the service went missing from the provisioning documents; null
+            while they list it, and for one never provisioned.
         declarationVersion:
           type:
             - string

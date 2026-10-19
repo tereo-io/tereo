@@ -98,8 +98,8 @@ reads.
 ### Source
 
 `source` is self-reported, except for an app service: its client writes only entries whose
-`source` is its slug, and any other is `403` (one refuses a whole batch). Its reads, scoped by
-source and writer, so hold exactly what it wrote. Core's own entries have source `tereo`
+`source` is its slug, and any other is `403` (one refuses a whole batch). Its reads are scoped
+by source and writer, so they hold exactly what it wrote. Core's own entries have source `tereo`
 (`CORE_SOURCE`); `tereo` and `core` are reserved slugs (`CORE_RESERVED_SLUGS`), refused at
 provisioning and by the admin API, so no service can pass for core.
 

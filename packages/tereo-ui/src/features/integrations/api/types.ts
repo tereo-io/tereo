@@ -18,6 +18,8 @@ export interface Integration {
   organization: OrgRef | null;
   isActive: boolean;
   provisioned: boolean;
+  /** When it went missing from the provisioning documents; null while they list it. */
+  unprovisionedAt: string | null;
   clientId: string | null;
   serviceAccountUserId: string | null;
   serviceAccountUser: UserRef | null;
