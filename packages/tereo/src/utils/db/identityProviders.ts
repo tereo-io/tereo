@@ -11,8 +11,10 @@ export const list = async (opts: { activeOnly?: boolean } = {}) => {
   });
 };
 
-export const get = async (id: string) => {
-  const provider = await prisma.identityProvider.findUnique({ where: { id } });
+export const get = async (id: string, tx?: Tx) => {
+  const provider = await (tx ?? prisma).identityProvider.findUnique({
+    where: { id },
+  });
   if (!provider) throw new NotFoundError("Identity provider not found");
   return provider;
 };

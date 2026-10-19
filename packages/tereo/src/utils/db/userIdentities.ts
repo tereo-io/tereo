@@ -15,9 +15,10 @@ export const getByProviderSubject = async (
 
 export const getForUserAtProvider = async (
   userId: string,
-  providerId: string
+  providerId: string,
+  tx?: Tx
 ) => {
-  return await prisma.userIdentity.findUnique({
+  return await (tx ?? prisma).userIdentity.findUnique({
     where: { userId_providerId: { userId, providerId } },
   });
 };

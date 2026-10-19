@@ -52,7 +52,8 @@ export const unlinkIdentity = async (
       );
     }
     const domain = await db.identityProviders.findDomain(
-      emailDomain(user.email)
+      emailDomain(user.email),
+      tx
     );
     if (domain?.ssoOnly && domain.providerId === provider.id) {
       throw new ConflictError(

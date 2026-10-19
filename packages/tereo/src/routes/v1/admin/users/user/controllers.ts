@@ -204,7 +204,7 @@ export const setUserRoles = async (req: Request, res: Response) => {
     // A held role stays whatever its state: archived and retired ones keep
     // their assignment to come back on restore.
     const added = roleIds.filter((roleId) => !held.has(roleId));
-    const roles = await db.roles.getByIds(added);
+    const roles = await db.roles.getByIds(added, tx);
     const found = new Set(roles.map((r) => r.id));
     const missing = added.filter((roleId) => !found.has(roleId));
     if (missing.length > 0) {

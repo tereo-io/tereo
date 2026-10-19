@@ -60,7 +60,7 @@ export const assertOrgAssignableRoles = async (
     );
   }
   assertCanGrant(
-    await callerPermissionsIn(auth, organizationId),
+    await callerPermissionsIn(auth, organizationId, tx),
     db.roles.grantedPermissionNames(added)
   );
   return roles;
@@ -76,11 +76,12 @@ const callerPermissionsIn = async (
     AuthContext,
     "userId" | "permissions" | "ceiling" | "organizationId"
   >,
-  organizationId: string
+  organizationId: string,
+  tx?: Prisma.TransactionClient
 ): Promise<string[]> =>
   organizationId === auth.organizationId
     ? auth.permissions
     : capToCeiling(
-        await db.roles.getUserPermissions(auth.userId, organizationId),
+        await db.roles.getUserPermissions(auth.userId, organizationId, tx),
         auth.ceiling
       );

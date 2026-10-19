@@ -84,7 +84,7 @@ export const setMemberOrgRoles = async (req: Request, res: Response) => {
       )
     );
     const added = roleIds.filter((roleId) => !held.has(roleId));
-    await assertOrgAssignableRoles(auth, orgId, added, new Set());
+    await assertOrgAssignableRoles(auth, orgId, added, new Set(), tx);
     const result = await db.organizations.setMemberRoles(
       orgId,
       userId,
