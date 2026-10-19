@@ -126,10 +126,10 @@ filtered on by name.
 `audit_log_entries_YYYY_MM_DD`). Partitions are managed by:
 
 - the seed — creates partitions for today ±7 days
-- every process that serves the API (`ROLE` `all` or `api`), on start — creates today's and
-  tomorrow's partition of every partitioned table — audit entries, webhook deliveries,
-  notifications and their deliveries (`ensureCurrentPartitions`,
-  `src/utils/partitions.ts`). Without it, a worker down for more than the 7 days it creates
+- every process, whatever its `ROLE`, on start and before its first audited write (registering
+  core's declaration, provisioning) — creates today's and tomorrow's partition of every
+  partitioned table — audit entries, webhook deliveries, notifications and their deliveries
+  (`ensureCurrentPartitions`, `src/utils/partitions.ts`). Without it, a worker down for more than the 7 days it creates
   ahead would leave no partition for new entries, and every audited write in core would fail. A
   table it finds locked is tried up to three times; a partition still missing then, or any other
   failure, is logged (today's as an error) and does not stop the start.
