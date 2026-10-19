@@ -1,6 +1,6 @@
 #!/bin/sh
 # Renders the chart with ci/provisioning-values.yaml and checks the
-# provisioning resources. Run from the repository root.
+# provisioning resources, then the optional Redis env vars. Run from the repository root.
 set -eu
 
 chart=charts/tereo
@@ -48,4 +48,14 @@ has "$out" 'helm.sh/hook: post-install,post-upgrade' 'hook annotations dropped w
 helm template t "$chart" -f "$chart/ci/minimal-values.yaml" >"$out"
 lacks "$out" 'PROVISIONING_PATH' 'PROVISIONING_PATH set without documents'
 lacks "$out" 'provision' 'provisioning rendered without documents'
+helm template t "$chart" -f "$chart/ci/minimal-values.yaml" --set redis.db=null >"$out"
+lacks "$out" 'REDIS_DB' 'REDIS_DB rendered with redis.db=null'
+lacks "$out" '<nil>' 'a null value rendered as <nil>'
+helm template t "$chart" -f "$chart/ci/minimal-values.yaml" --set redis.db=0 >"$out"
+has "$out" 'name: REDIS_DB' 'REDIS_DB dropped with redis.db=0'
+has "$out" 'value: "0"' 'REDIS_DB=0 not rendered'
+helm template t "$chart" -f "$chart/ci/minimal-values.yaml" >"$out"
+lacks "$out" 'REDIS_DB' 'REDIS_DB rendered while unset'
+helm template t "$chart" -f "$chart/ci/minimal-values.yaml" --set redis.keyPrefix=null >"$out"
+lacks "$out" 'REDIS_KEY_PREFIX' 'REDIS_KEY_PREFIX rendered with redis.keyPrefix=null'
 echo OK

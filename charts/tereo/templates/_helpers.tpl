@@ -123,7 +123,7 @@ files: blobs live on the volume, so every core pod must share it.
 - name: REDIS_MASTER_NAME
   value: {{ .Values.redis.masterName | quote }}
 {{- end }}
-{{- if ne (toString .Values.redis.db) "" }}
+{{- if and (not (kindIs "invalid" .Values.redis.db)) (ne (toString .Values.redis.db) "") }}
 - name: REDIS_DB
   value: {{ .Values.redis.db | toString | quote }}
 {{- end }}
