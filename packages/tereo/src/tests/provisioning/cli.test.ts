@@ -10,8 +10,14 @@ import { randomBytes, randomUUID } from "crypto";
 import { CORE_URL } from "../utils/coreUrl.js";
 import { loadTestEnv } from "../testEnv.js";
 import { spawnSync } from "child_process";
+import db from "../../utils/db/index.js";
 import { tmpdir } from "os";
 import path from "path";
+import {
+  ensureCurrentPartitions,
+  partitionName,
+  utcDay,
+} from "../../utils/partitions.js";
 
 const packageDir = path.resolve(import.meta.dirname, "../../..");
 const dirs: string[] = [];
@@ -129,6 +135,43 @@ describe("provisioning CLI", () => {
         where: { id: permission.id },
         data: { retiredAt: permission.retiredAt },
       });
+    }
+  });
+
+  it("creates today's audit partition before registering core", async () => {
+    const today = partitionName("audit", utcDay());
+    const stash = `${today}_cli_stash`;
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "audit"."audit_log_entries" DETACH PARTITION "audit"."${today}"`
+    );
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "audit"."${today}" RENAME TO "${stash}"`
+    );
+    const core = await prisma.service.findUniqueOrThrow({
+      where: { id: CORE_SERVICE_ID },
+    });
+    // Re-registering core's declaration writes an audit entry.
+    await prisma.service.update({
+      where: { id: CORE_SERVICE_ID },
+      data: { declarationHash: null },
+    });
+    try {
+      const dir = tempDir();
+      const { env } = writeService(dir);
+      const res = cli(["provision", "--path", dir], env);
+      expect(res.status, res.stderr).toBe(0);
+      const partitions = await db.auditLogEntries.listPartitions();
+      expect(partitions.map((p) => p.child)).toContain(today);
+    } finally {
+      await prisma.service.update({
+        where: { id: CORE_SERVICE_ID },
+        data: { declarationHash: core.declarationHash },
+      });
+      await ensureCurrentPartitions();
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "audit"."audit_log_entries" SELECT * FROM "audit"."${stash}"`
+      );
+      await prisma.$executeRawUnsafe(`DROP TABLE "audit"."${stash}"`);
     }
   });
 

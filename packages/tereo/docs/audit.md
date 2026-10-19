@@ -148,13 +148,14 @@ filtered on by name.
 `audit_log_entries_YYYY_MM_DD`). Partitions are managed by:
 
 - the seed — creates partitions for today ±7 days
-- every process, whatever its `ROLE`, on start and before its first audited write (registering
-  core's declaration, provisioning) — creates today's and tomorrow's partition of every
+- every process, whatever its `ROLE`, and the `provision` CLI the chart's Job runs, before its
+  first audited write (registering core's declaration, provisioning) — creates today's and tomorrow's partition of every
   partitioned table — audit entries, webhook deliveries, notifications and their deliveries
   (`ensureCurrentPartitions`, `src/utils/partitions.ts`). Without it, a worker down for more than the 7 days it creates
   ahead would leave no partition for new entries, and every audited write in core would fail. A
   table it finds locked is tried up to three times; a partition still missing then, or any other
-  failure, is logged (today's as an error) and does not stop the start.
+  failure, is logged (today's as an error) and does not stop the start
+  (`prepareAndRegisterCore`, `src/utils/coreRegistration.ts`, shared by both).
 - the worker on start — runs `processEntryRetention()` once (`src/jobs/entryRetention.ts`)
 - the `entry-retention` BullMQ job, every 24h — creates partitions 7 days ahead and then drops
   those older than `AUDIT_RETENTION_DAYS` (default 90). Each drop is on its own: one that fails is

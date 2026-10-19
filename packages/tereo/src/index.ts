@@ -2,20 +2,17 @@ import "./preload.js";
 import { ensureBlobDirectory, ensureTempDirectory } from "./utils/storage.js";
 import { closeHttpServer, tuneServerKeepAlive } from "./utils/httpServer.js";
 import { ProvisioningError, provision } from "./utils/provisioning/index.js";
-import { ensureDefaultOrganization } from "./utils/defaultOrganization.js";
 import { closeRedisEmitter } from "./websocket/emitters/redisEmitter.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
+import { prepareAndRegisterCore } from "./utils/coreRegistration.js";
 import { loadKeys, startSigningKeyRefresh } from "./utils/keys.js";
-import { ensureCurrentPartitions } from "./utils/partitions.js";
 import { resealRowSecrets } from "./utils/resealRowSecrets.js";
 import { sealWebhookSecrets } from "./utils/webhookSecrets.js";
 import { startWorkerHealthServer } from "./utils/health.js";
-import { registerCore } from "./utils/coreRegistration.js";
 import { ensureLoginClient } from "./utils/loginClient.js";
 import { announceSetupIfPending } from "./utils/setup.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
 import { startWorker, stopWorker } from "./worker.js";
-import { assertSystemUser } from "./utils/users.js";
 import { shutdownOtel } from "./telemetry/index.js";
 import env, { stalePathWarnings } from "./env.js";
 import { createServer, Server } from "http";
@@ -74,17 +71,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
       await ensureBlobDirectory();
       await initializeRedis(env);
       await startCacheSubscriber();
-      await ensureDefaultOrganization();
-      // The actor on system writes; every actor column references it.
-      await assertSystemUser();
-      // Registering core and provisioning write audit entries, which need
-      // today's partition; the worker creates them a week ahead, but may be
-      // down. A failure is logged and the start goes on.
-      await ensureCurrentPartitions().catch((err) => {
-        logger.error({ err }, "Startup partition check failed");
-      });
-      // Core's own permissions, roles, buckets and event types.
-      await registerCore();
+      await prepareAndRegisterCore();
       // The UI's redirect URI follows UI_BASE_URL.
       await ensureLoginClient();
       // Services and login clients the deploy declares; a file that cannot
