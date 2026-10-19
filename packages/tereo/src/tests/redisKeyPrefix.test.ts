@@ -1,8 +1,15 @@
-import { getRedisClient, redisKey } from "../utils/redis.js";
 import { TrackedWorker } from "../jobs/workerRegistry.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { createQueue } from "../utils/bullmq.js";
 import env from "../env.js";
+import {
+  acquireLock,
+  closeRedisConnection,
+  getRedisClient,
+  initializeRedis,
+  redisKey,
+  releaseLock,
+} from "../utils/redis.js";
 
 const QUEUE = "redis-key-prefix-test";
 
@@ -42,5 +49,24 @@ describe("REDIS_KEY_PREFIX with BullMQ", () => {
   it("keeps BullMQ's default prefix when none is set", () => {
     env.REDIS_KEY_PREFIX = "";
     expect(redisKey("bull")).toBe("bull");
+  });
+});
+
+describe("REDIS_KEY_PREFIX with distributed locks", () => {
+  it("takes the lock prefix from the env Redis was initialized with", async () => {
+    await closeRedisConnection();
+    try {
+      await initializeRedis({ ...env, REDIS_KEY_PREFIX: "itest-lock:" });
+      const token = await acquireLock("redis-key-prefix-test");
+      expect(token).not.toBeNull();
+      const key = `itest-lock:${env.SERVICE_NAME}:lock:redis-key-prefix-test`;
+      expect(await getRedisClient().get(key)).toBe(token);
+      expect(await releaseLock("redis-key-prefix-test", token as string)).toBe(
+        true
+      );
+    } finally {
+      await closeRedisConnection();
+      await initializeRedis(env);
+    }
   });
 });

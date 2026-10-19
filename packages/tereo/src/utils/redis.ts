@@ -8,8 +8,11 @@ const LOCK_TTL = 30; // seconds
 let LOCK_PREFIX: string | null = null;
 let redisClient: Redis | null = null;
 
-/** A service's env, narrowed to what Redis init needs: connection + SERVICE_NAME. */
-export type RedisInitEnv = RedisEnv & { SERVICE_NAME: string };
+/** A service's env, narrowed to what Redis init needs: connection, key prefix and SERVICE_NAME. */
+export type RedisInitEnv = RedisEnv & {
+  SERVICE_NAME: string;
+  REDIS_KEY_PREFIX: string;
+};
 
 /**
  * Every key and channel core uses goes through here, so `REDIS_KEY_PREFIX`
@@ -28,7 +31,10 @@ export const createRedis = (
     : new Redis({ ...connection, ...options });
 };
 
-/** The distributed-lock prefix defaults to `<SERVICE_NAME>:lock:` under `redisKey`. */
+/**
+ * The distributed-lock prefix defaults to `<REDIS_KEY_PREFIX><SERVICE_NAME>:lock:`,
+ * both from `initEnv`, the env the connection comes from.
+ */
 export const initializeRedis = async (
   initEnv: RedisInitEnv,
   lockPrefix?: string
@@ -37,7 +43,8 @@ export const initializeRedis = async (
     logger.warn("Redis client already initialized");
     return;
   }
-  LOCK_PREFIX = lockPrefix ?? redisKey(initEnv.SERVICE_NAME, "lock:");
+  LOCK_PREFIX =
+    lockPrefix ?? `${initEnv.REDIS_KEY_PREFIX}${initEnv.SERVICE_NAME}:lock:`;
 
   redisClient = createRedis(
     {
