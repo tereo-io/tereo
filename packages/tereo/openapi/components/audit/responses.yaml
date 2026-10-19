@@ -71,11 +71,14 @@ AuditConflictResponse:
             description: A human-readable explanation of the error
             type: string
 
-AuditIdempotencyKeyConflictResponse:
+AuditWriteUnprocessableResponse:
   description: |
-    The `idempotencyKey` was already used on this endpoint, by this caller, with a different
-    request body (whether that request finished or is still in progress). Use a new key, or
-    retry with the original body.
+    `idempotency_key_conflict`: the `idempotencyKey` was already used on this endpoint, by this
+    caller, with a different request body (whether that request finished or is still in
+    progress). Use a new key, or retry with the original body.
+
+    `source_mismatch`: an app service's client sent an entry whose `source` is not its own
+    slug, which the message names. Nothing is written; retrying the same body never succeeds.
   headers:
     X-RateLimit-Limit:
       $ref: '../headers.yaml#/X-RateLimit-Limit'
@@ -92,10 +95,12 @@ AuditIdempotencyKeyConflictResponse:
             type: string
             enum:
               - idempotency_key_conflict
+              - source_mismatch
           error_description:
             type: string
             examples:
               - This idempotency key was already used with a different request body
+              - Service billing may only write entries with source "billing"
 
 AuditBadRequestResponse:
   description: |

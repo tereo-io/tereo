@@ -20,7 +20,7 @@
       organizations exist.
 
       **Source:** an app service's client writes only under its own slug: an entry whose
-      `source` is anything else is `403 forbidden`, and nothing is written. Its reads are
+      `source` is anything else is `422 source_mismatch`, and nothing is written. Its reads are
       scoped to that slug (see `GET /v1/audit/entries`). No service may take the slug `tereo`,
       the source of core's own entries. Other callers' `source` is as they report it.
 
@@ -34,6 +34,8 @@
       the same key on the other endpoint is a new request.
 
       **Errors (`400`):** `invalid_request` (validation), `unknown_user`, `unknown_organization`.
+
+      **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`.
 
       **Required permission:** `audit-logs.write`
     operationId: createEntry
@@ -68,7 +70,7 @@
       '409':
         $ref: '../../components/audit/responses.yaml#/AuditConflictResponse'
       '422':
-        $ref: '../../components/audit/responses.yaml#/AuditIdempotencyKeyConflictResponse'
+        $ref: '../../components/audit/responses.yaml#/AuditWriteUnprocessableResponse'
       '429':
         $ref: '../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -206,7 +208,7 @@
       **Organization:** each entry's `organizationId` is checked as for
       `POST /v1/audit/entries`; one entry the caller may not write refuses the whole batch with
       `403 forbidden`, and nothing is written. An app service's client may write only entries
-      whose `source` is its slug; one other refuses the batch the same way.
+      whose `source` is its slug; one other refuses the whole batch with `422 source_mismatch`.
 
       **Idempotency:** one optional `idempotencyKey` covers the whole batch (per-entry keys are
       rejected); it behaves as for single entries — a different body is
@@ -215,6 +217,8 @@
 
       **Errors (`400`):** `invalid_request` (validation, including any unknown field on an
       entry), `unknown_user`, `unknown_organization`.
+
+      **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`.
 
       **Required permission:** `audit-logs.write`
     operationId: createBatch
@@ -249,7 +253,7 @@
       '409':
         $ref: '../../components/audit/responses.yaml#/AuditConflictResponse'
       '422':
-        $ref: '../../components/audit/responses.yaml#/AuditIdempotencyKeyConflictResponse'
+        $ref: '../../components/audit/responses.yaml#/AuditWriteUnprocessableResponse'
       '429':
         $ref: '../../components/responses.yaml#/RateLimitResponse'
       '500':

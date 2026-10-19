@@ -5,7 +5,6 @@ import type { AuditLogEntryInput } from "../types/audit.js";
 import type { EmitEventParams } from "../types/webhooks.js";
 import type { WebhookServiceClient } from "./webhooks.js";
 import type { AuditLogServiceClient } from "./audit.js";
-import { getOriginalStatus } from "../utils/errors.js";
 import { UnknownEventTypeError } from "./webhooks.js";
 import { quoteTable } from "../utils/outboxSchema.js";
 import { logger } from "../utils/logger.js";
@@ -15,6 +14,11 @@ import {
   InvalidAuditEntryError,
   validateEntry,
 } from "../utils/auditSchemas.js";
+import {
+  getOriginalResponseData,
+  getOriginalStatus,
+  RequestError,
+} from "../utils/errors.js";
 import {
   context,
   propagation,
@@ -29,8 +33,10 @@ type Dispatch = (payload: unknown, row: OutboxRow) => Promise<void>;
 
 /**
  * Core refused the row itself (unknown user, undeclared event type, …), or the
- * SDK did before sending it, so a retry can't succeed. 409 is not: core answers it while the first request
- * with the same idempotency key is still in flight. Nor is 403: the service's
+ * SDK did before sending it, so a retry can't succeed — among them `422
+ * source_mismatch`, an audit `source` other than the service's slug. 409 is
+ * not: core answers it while the first request with the same idempotency key
+ * is still in flight. Nor is 403: the service's
  * requested access (`audit_writer`, `webhook_publisher`) is refused until an
  * admin approves it.
  */
@@ -44,6 +50,23 @@ const isRejected = (err: unknown): boolean => {
     status < 500 &&
     ![401, 403, 408, 409, 429].includes(status)
   );
+};
+
+/**
+ * The SDK's message names only the call; core's status, code and description
+ * say why, e.g. `422 source_mismatch` naming the slug the service must use.
+ */
+const failureReason = (err: unknown): string => {
+  const message = err instanceof Error ? err.message : String(err);
+  if (!(err instanceof RequestError) || err.httpStatus === undefined) {
+    return message;
+  }
+  const body = getOriginalResponseData(err) as
+    { error_description?: unknown } | undefined;
+  const status = [err.httpStatus, err.coreCode].filter(Boolean).join(" ");
+  return typeof body?.error_description === "string"
+    ? `${message}: ${status}: ${body.error_description}`
+    : `${message}: ${status}`;
 };
 
 const CHANNELS = ["email"];
@@ -311,7 +334,7 @@ export class OutboxClient {
               this.workerId
             );
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
+            const message = failureReason(err);
             span.setStatus({ code: SpanStatusCode.ERROR, message });
             if (attempts >= this.maxAttempts || isRejected(err)) {
               await this.deadLetter(row, attempts, message);

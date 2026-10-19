@@ -6,7 +6,7 @@ App services can read what core knows about them, and core is safer to run along
 
 Breaking changes:
 
-- A service's client may write only audit entries whose `source` is its own slug; any other is `403`, and refuses the whole batch.
+- A service's client may write only audit entries whose `source` is its own slug; any other is `422 source_mismatch`, naming the slug, and refuses the whole batch.
 - The slugs `core` and `tereo` are reserved for services and integrations, in provisioning documents and through the admin API.
 - Provisioning refuses any retired client secret, whether rotated away, revoked or replaced, for that client and every other. A deploy that reuses one fails at start; generate a fresh secret.
 - Client, role, service and integration responses, and their events, gain `unprovisionedAt`. `core.service.updated` always carries it, and dropping an integration or a custom role from the documents now emits `core.integration.updated` or `auth.role.updated`.

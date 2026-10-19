@@ -1474,8 +1474,8 @@ components:
       $ref: './components/audit/responses.yaml#/AuditForbiddenResponse'
     AuditConflictResponse:
       $ref: './components/audit/responses.yaml#/AuditConflictResponse'
-    AuditIdempotencyKeyConflictResponse:
-      $ref: './components/audit/responses.yaml#/AuditIdempotencyKeyConflictResponse'
+    AuditWriteUnprocessableResponse:
+      $ref: './components/audit/responses.yaml#/AuditWriteUnprocessableResponse'
     AuditBadRequestResponse:
       $ref: './components/audit/responses.yaml#/AuditBadRequestResponse'
     NotificationsInvalidConfigResponse:

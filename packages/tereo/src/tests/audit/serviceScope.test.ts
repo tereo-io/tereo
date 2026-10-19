@@ -248,8 +248,9 @@ describe("Audit reads scoped to the calling service", () => {
         entry(reader.slug),
         auth(writerToken)
       );
-      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-      expect(response.data.error_description).toContain(writer.slug);
+      expect(response.status).toBe(HTTP_STATUS.UNPROCESSABLE_ENTITY);
+      expect(response.data.error).toBe("source_mismatch");
+      expect(response.data.error_description).toContain(`"${writer.slug}"`);
     });
 
     it("refuses a batch with one entry under another source", async () => {
@@ -258,7 +259,8 @@ describe("Audit reads scoped to the calling service", () => {
         { entries: [entry(writer.slug), entry("tereo")] },
         auth(writerToken)
       );
-      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(response.status).toBe(HTTP_STATUS.UNPROCESSABLE_ENTITY);
+      expect(response.data.error).toBe("source_mismatch");
       expect(
         await prisma.auditLogEntry.count({
           where: { entityId: `write-${runId}` },

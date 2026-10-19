@@ -7,14 +7,23 @@ and not at all when it rolls back. A reaper then sends committed rows to core. C
 compare, is in the [outbox skill](../../../.claude/skills/outbox/SKILL.md).
 
 ```ts
-const core = createCoreClient({ service: "product-service", redis, outbox: { db: prisma } });
-await core.start();       // starts the reaper
+const core = createCoreClient({
+  service: "product-service",
+  redis,
+  outbox: { db: prisma },
+});
+await core.start(); // starts the reaper
 // the service's provisioning document lists its event types and asks for the roles
 // webhook_publisher, audit_writer and notification_sender (see provisioning.md)
 
 await prisma.$transaction(async (tx) => {
   const item = await tx.item.create({ data });
-  await core.outbox.audit(tx, { userId, action: "CREATE", entityType: "Item", entityId: item.id });
+  await core.outbox.audit(tx, {
+    userId,
+    action: "CREATE",
+    entityType: "Item",
+    entityId: item.id,
+  });
   await core.outbox.emit(tx, {
     organizationId,
     eventType: "product.item.created",
@@ -36,11 +45,11 @@ roles, approved by an admin, for the reaper's sends to succeed.
 
 ## Writers
 
-| Method | Takes | |
-|--------|-------|---|
-| `audit(tx, entry)` | `AuditLogEntryInput` — see [audit](audit.md#entries) | Row with `destination = "audit"` |
-| `emit(tx, event)` | `EmitEventParams` — see [webhooks](webhooks.md#emitting); `recipients` (up to 50 service or integration slugs) addresses the event and is stored with the row | Row with `destination = "webhook"`. Calls `webhooks.assertEventType` first, so an undeclared event type throws now, not at dispatch |
-| `notify(tx, input)` | `NotificationInput` — the body of core's `POST /v1/notifications` ([core's notifications.md](../../tereo/docs/notifications.md#sending)) | Row with `destination = "notification"`. Throws now for an unknown channel, a recipient count outside 1 to 50, or an email with no `to` recipient (one without `as` counts as `to`); core checks the rest at dispatch |
+| Method              | Takes                                                                                                                                                         |                                                                                                                                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audit(tx, entry)`  | `AuditLogEntryInput` — see [audit](audit.md#entries)                                                                                                          | Row with `destination = "audit"`                                                                                                                                                                                      |
+| `emit(tx, event)`   | `EmitEventParams` — see [webhooks](webhooks.md#emitting); `recipients` (up to 50 service or integration slugs) addresses the event and is stored with the row | Row with `destination = "webhook"`. Calls `webhooks.assertEventType` first, so an undeclared event type throws now, not at dispatch                                                                                   |
+| `notify(tx, input)` | `NotificationInput` — the body of core's `POST /v1/notifications` ([core's notifications.md](../../tereo/docs/notifications.md#sending))                      | Row with `destination = "notification"`. Throws now for an unknown channel, a recipient count outside 1 to 50, or an email with no `to` recipient (one without `as` counts as `to`); core checks the rest at dispatch |
 
 Leave `idempotencyKey` out: the reaper sets it to the row id. Nothing is filled from a request
 context — pass `ipAddress` and `correlationId` yourself. Each row also captures the active W3C trace
@@ -50,17 +59,17 @@ context; the reaper dispatches under it.
 
 `OutboxOptions`, passed as `createCoreClient({ outbox })`:
 
-| Option | Default | |
-|--------|---------|---|
-| `db` | — (required) | Anything with `$executeRawUnsafe` / `$queryRawUnsafe` (a Prisma client, or a thin `pg` wrapper). Used by the reaper outside any transaction. Postgres only |
-| `table` | `core_outbox` | Optionally schema-qualified (`billing.core_outbox`). Lowercase letters, digits and `_` — it is interpolated into SQL |
-| `dispatch` | `true` | Run the reaper in this process. `false` on write-only replicas |
-| `pollIntervalMs` | 1000 | |
-| `batchSize` | 100 | A full batch schedules the next pass at once |
-| `maxAttempts` | 100 | ≈ 12 hours of retries |
-| `retryBaseMs` | 2000 | |
-| `maxBackoffMs` | 30 min | |
-| `claimTtlMs` | 5 min | A claim older than this may be taken by another worker. Renewed per row just before it is sent, so it bounds one row's dispatch, retries included |
+| Option           | Default       |                                                                                                                                                            |
+| ---------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `db`             | — (required)  | Anything with `$executeRawUnsafe` / `$queryRawUnsafe` (a Prisma client, or a thin `pg` wrapper). Used by the reaper outside any transaction. Postgres only |
+| `table`          | `core_outbox` | Optionally schema-qualified (`billing.core_outbox`). Lowercase letters, digits and `_` — it is interpolated into SQL                                       |
+| `dispatch`       | `true`        | Run the reaper in this process. `false` on write-only replicas                                                                                             |
+| `pollIntervalMs` | 1000          |                                                                                                                                                            |
+| `batchSize`      | 100           | A full batch schedules the next pass at once                                                                                                               |
+| `maxAttempts`    | 100           | ≈ 12 hours of retries                                                                                                                                      |
+| `retryBaseMs`    | 2000          |                                                                                                                                                            |
+| `maxBackoffMs`   | 30 min        |                                                                                                                                                            |
+| `claimTtlMs`     | 5 min         | A claim older than this may be taken by another worker. Renewed per row just before it is sent, so it bounds one row's dispatch, retries included          |
 
 ## The table
 
@@ -97,18 +106,19 @@ Started by `core.start()`, stopped by `core.stop()`. Any number of replicas can 
 
 1. Claims due rows — oldest `next_attempt_at` first, not dead-lettered, unclaimed or with a stale
    claim — with `FOR UPDATE SKIP LOCKED`.
-3. Sends them one at a time: `audit` rows via `audit.logAsync`, `webhook` rows via
+2. Sends them one at a time: `audit` rows via `audit.logAsync`, `webhook` rows via
    `webhooks.emitAsync`, `notification` rows via `notifications.sendAsync`, each with
    `idempotencyKey: row.id`. Each row's claim is renewed just before
    it is sent; a row whose claim lapsed and another worker took is skipped. Success deletes the row.
    The delete and the updates below apply only while `claimed_by` is still this worker.
-4. On failure:
+3. On failure:
    - **Rejected by core** — any 4xx except 401, 403, 408, 409 (the same key still in flight) and 429 —
      the row is dead-lettered at once. Core answers 400 for an audit entry whose `userId` or
      `organizationId` it does not know, for an unregistered or retired event type or an unknown
      `recipients` slug, and for a
      notification it refuses (an unknown connection, an invalid recipient, an attachment it can't
-     find).
+     find). It answers `422 source_mismatch` for an audit entry whose `source` is not the
+     service's slug — a `service` option that does not match it.
    - **Refused by the SDK** before sending — an audit entry it finds invalid
      (`InvalidAuditEntryError`), an event type the service no longer declares
      (`UnknownEventTypeError`) — the row is dead-lettered at once.
@@ -116,12 +126,12 @@ Started by `core.start()`, stopped by `core.stop()`. Any number of replicas can 
      up to `retryBaseMs × 2^attempts`, capped at `maxBackoffMs` — until `maxAttempts`, then it is
      dead-lettered. A 403 is retried because the access the row needs (`audit_writer`,
      `webhook_publisher`, `notification_sender`) may still await an admin's approval: rows written before then go out once
-     it is approved. A `service` option that is not the service's slug is a 403 too — core takes
-     audit entries only under the caller's own slug — and is retried until dead-lettered.
+     it is approved.
    - A row whose `destination` has no dispatcher is dead-lettered.
 
 A dead-lettered row is kept, with `dead_lettered_at` and `last_error` set, and logged as
-`outbox.dead_letter` at error level. **Replay**: clear `dead_lettered_at`, set `attempts = 0` and
+`outbox.dead_letter` at error level. `last_error`, and the warning logged for each retry, carry
+core's status, error code and description after the SDK's message. **Replay**: clear `dead_lettered_at`, set `attempts = 0` and
 `next_attempt_at = NOW()`.
 
 Delivery is at-least-once, deduplicated by core on the idempotency key for 24 hours. Order is not

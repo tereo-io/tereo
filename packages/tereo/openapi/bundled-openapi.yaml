@@ -13444,7 +13444,7 @@ paths:
         organizations exist.
 
         **Source:** an app service's client writes only under its own slug: an entry whose
-        `source` is anything else is `403 forbidden`, and nothing is written. Its reads are
+        `source` is anything else is `422 source_mismatch`, and nothing is written. Its reads are
         scoped to that slug (see `GET /v1/audit/entries`). No service may take the slug `tereo`,
         the source of core's own entries. Other callers' `source` is as they report it.
 
@@ -13458,6 +13458,8 @@ paths:
         the same key on the other endpoint is a new request.
 
         **Errors (`400`):** `invalid_request` (validation), `unknown_user`, `unknown_organization`.
+
+        **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`.
 
         **Required permission:** `audit-logs.write`
       operationId: createEntry
@@ -13492,7 +13494,7 @@ paths:
         '409':
           $ref: '#/components/responses/AuditConflictResponse'
         '422':
-          $ref: '#/components/responses/AuditIdempotencyKeyConflictResponse'
+          $ref: '#/components/responses/AuditWriteUnprocessableResponse'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -13628,7 +13630,7 @@ paths:
         **Organization:** each entry's `organizationId` is checked as for
         `POST /v1/audit/entries`; one entry the caller may not write refuses the whole batch with
         `403 forbidden`, and nothing is written. An app service's client may write only entries
-        whose `source` is its slug; one other refuses the batch the same way.
+        whose `source` is its slug; one other refuses the whole batch with `422 source_mismatch`.
 
         **Idempotency:** one optional `idempotencyKey` covers the whole batch (per-entry keys are
         rejected); it behaves as for single entries — a different body is
@@ -13637,6 +13639,8 @@ paths:
 
         **Errors (`400`):** `invalid_request` (validation, including any unknown field on an
         entry), `unknown_user`, `unknown_organization`.
+
+        **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`.
 
         **Required permission:** `audit-logs.write`
       operationId: createBatch
@@ -13671,7 +13675,7 @@ paths:
         '409':
           $ref: '#/components/responses/AuditConflictResponse'
         '422':
-          $ref: '#/components/responses/AuditIdempotencyKeyConflictResponse'
+          $ref: '#/components/responses/AuditWriteUnprocessableResponse'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -19857,11 +19861,14 @@ components:
               error_description:
                 description: A human-readable explanation of the error
                 type: string
-    AuditIdempotencyKeyConflictResponse:
+    AuditWriteUnprocessableResponse:
       description: |
-        The `idempotencyKey` was already used on this endpoint, by this caller, with a different
-        request body (whether that request finished or is still in progress). Use a new key, or
-        retry with the original body.
+        `idempotency_key_conflict`: the `idempotencyKey` was already used on this endpoint, by this
+        caller, with a different request body (whether that request finished or is still in
+        progress). Use a new key, or retry with the original body.
+
+        `source_mismatch`: an app service's client sent an entry whose `source` is not its own
+        slug, which the message names. Nothing is written; retrying the same body never succeeds.
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -19878,10 +19885,12 @@ components:
                 type: string
                 enum:
                   - idempotency_key_conflict
+                  - source_mismatch
               error_description:
                 type: string
                 examples:
                   - This idempotency key was already used with a different request body
+                  - Service billing may only write entries with source "billing"
     AuditBadRequestResponse:
       description: |
         Invalid request. `error` is `invalid_request` for a validation failure, or a

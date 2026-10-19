@@ -295,6 +295,28 @@ describe("outbox reaper", () => {
     }
   });
 
+  it("dead-letters an audit entry under another service's source on the first attempt, keeping core's reason", async () => {
+    const app = fakeDb();
+    const description =
+      'Service billing may only write entries with source "billing"';
+    logAsync.mockRejectedValue(
+      new RequestError("AUD_0001", "Failed to log audit entry", {
+        metadata: {
+          originalError: {
+            status: 422,
+            data: { error: "source_mismatch", error_description: description },
+          },
+        },
+      })
+    );
+    app.claim([row({ destination: "audit", attempts: 0 })]);
+    await make(app.db, 100).processBatch();
+    const dead = app.calls.at(-1)!;
+    expect(dead.query).toContain('"dead_lettered_at" = NOW()');
+    expect(dead.values[2]).toContain("422 source_mismatch");
+    expect(dead.values[2]).toContain(description);
+  });
+
   it("dead-letters an audit row the SDK finds invalid on the first attempt", async () => {
     const app = fakeDb();
     logAsync.mockRejectedValue(new InvalidAuditEntryError("bad entry"));

@@ -58,7 +58,7 @@ Every read — list, get, entity history, facets — goes through `resolveAuditO
 
 `audit-logs.admin` is checked hierarchically, so the root `admin` permission qualifies.
 
-An *app service* is a client of a `kind = service` row (`callerService`, `src/utils/callerService.ts`)
+An _app service_ is a client of a `kind = service` row (`callerService`, `src/utils/callerService.ts`)
 whose token has no `org_id` and does not cover `audit-logs.admin`. Its reads also get
 `req.auditSourceScope` — `source` its slug and `writerUserId` its service account — which every
 read applies on top of the caller's filters: as an extra `AND` clause on the list (so
@@ -98,7 +98,9 @@ reads.
 ### Source
 
 `source` is self-reported, except for an app service: its client writes only entries whose
-`source` is its slug, and any other is `403` (one refuses a whole batch). Its reads are scoped
+`source` is its slug, and any other is `422 source_mismatch`, naming the slug (one refuses a
+whole batch). It is not a `403`: no grant fixes it, so the SDK outbox dead-letters the row at once
+rather than retrying. Its reads are scoped
 by source and writer, so they hold exactly what it wrote. Core's own entries have source `tereo`
 (`CORE_SOURCE`); `tereo` and `core` are reserved slugs (`CORE_RESERVED_SLUGS`), refused at
 provisioning and by the admin API, so no service can pass for core.

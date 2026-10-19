@@ -10,7 +10,7 @@ import db from "../../../../utils/db/index.js";
 import { Request, Response } from "express";
 import {
   BadRequestError,
-  ForbiddenError,
+  UnprocessableEntityError,
   ValidationError,
 } from "../../../../utils/errors.js";
 import {
@@ -77,7 +77,8 @@ const assertReferencesExist = async (
 
 /**
  * An app service writes entries only under its own slug, the source its reads
- * are scoped to; anyone else's `source` is self-reported.
+ * are scoped to; anyone else's `source` is self-reported. 422, not 403: no
+ * grant fixes it, so the SDK outbox dead-letters the row instead of retrying.
  */
 const assertOwnSource = async (
   auth: { oauthClientId: string | null },
@@ -85,7 +86,8 @@ const assertOwnSource = async (
 ) => {
   const service = await callerService(auth);
   if (service && sources.some((source) => source !== service.slug)) {
-    throw new ForbiddenError(
+    throw new UnprocessableEntityError(
+      "source_mismatch",
       `Service ${service.slug} may only write entries with source "${service.slug}"`
     );
   }
