@@ -49,7 +49,8 @@ extraEnvFrom: []
 # one document, rendered as <name>.json in a ConfigMap mounted at
 # /etc/tereo/provisioning, where PROVISIONING_PATH points. Core applies them at
 # start, and a post-install/post-upgrade Job runs `provision` so a changed
-# document takes effect without a restart. Empty renders neither. Secrets are
+# document takes effect without a restart (job.enabled: false leaves it to the
+# next start). Empty renders neither. Secrets are
 # never written here: `secretFrom` names an environment variable, which must
 # be a key of secrets.existingSecret (or the Secret built by
 # secrets.externalSecret), or come from extraEnvFrom.
@@ -68,6 +69,10 @@ provisioning:
   # chart then renders no ConfigMap of its own.
   existingConfigMap: ""
   job:
+    enabled: true
+    # Merged onto the Job's hook annotations, overriding any it shares, e.g.
+    # argocd.argoproj.io/hook: Sync to run it in Argo CD's Sync phase.
+    annotations: {}
     backoffLimit: 1
     activeDeadlineSeconds: 300
     resources: {}

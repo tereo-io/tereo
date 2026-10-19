@@ -30,6 +30,21 @@ helm template t "$chart" -f "$chart/ci/provisioning-values.yaml" \
 lacks "$out" 'kind: ConfigMap' 'ConfigMap rendered despite existingConfigMap'
 has "$out" 'name: x' 'existingConfigMap not mounted'
 
+helm template t "$chart" -f "$chart/ci/provisioning-values.yaml" \
+  --set provisioning.job.enabled=false >"$out"
+lacks "$out" '"dist/cli/index.js", "provision"' 'provision Job rendered with provisioning.job.enabled=false'
+has "$out" 'alpha.json: "{' 'ConfigMap dropped with the Job disabled'
+has "$out" 'value: /etc/tereo/provisioning' 'PROVISIONING_PATH dropped with the Job disabled'
+
+helm template t "$chart" -f "$chart/ci/provisioning-values.yaml" \
+  --set-string 'provisioning.job.annotations.argocd\.argoproj\.io/hook=Sync' \
+  --set-string 'provisioning.job.annotations.helm\.sh/hook-weight=5' \
+  --show-only templates/provision-job.yaml >"$out"
+has "$out" 'argocd.argoproj.io/hook: Sync' 'provisioning.job.annotations not rendered'
+has "$out" 'helm.sh/hook-weight: "5"' 'provisioning.job.annotations do not override the hook annotations'
+lacks "$out" 'helm.sh/hook-weight: "0"' 'hook annotation duplicated'
+has "$out" 'helm.sh/hook: post-install,post-upgrade' 'hook annotations dropped with annotations set'
+
 helm template t "$chart" -f "$chart/ci/minimal-values.yaml" >"$out"
 lacks "$out" 'PROVISIONING_PATH' 'PROVISIONING_PATH set without documents'
 lacks "$out" 'provision' 'provisioning rendered without documents'
