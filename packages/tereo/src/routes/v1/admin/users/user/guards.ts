@@ -51,7 +51,7 @@ const assertHoldsTargetPermissions = async (
   auth: Pick<AuthContext, "userId" | "ceiling">,
   targetId: string,
   action: string,
-  tx?: Prisma.TransactionClient
+  tx: Prisma.TransactionClient
 ) => {
   const targetPermissions = await db.roles.getUserPermissionsAnywhere(
     targetId,
@@ -73,24 +73,30 @@ const assertHoldsTargetPermissions = async (
 /**
  * Refuses a password, email, two-factor or identity reset of a user holding
  * any permission the caller does not: a reset hands the caller the target's
- * account, so it must not reach beyond what the caller already holds.
+ * account, so it must not reach beyond what the caller already holds. Takes
+ * the target's authority lock, so it runs first in the reset's transaction and
+ * no grant to the target commits between the check and the reset.
  */
 export const assertMayResetCredentials = async (
   auth: Pick<AuthContext, "userId" | "ceiling">,
   targetId: string,
-  tx?: Prisma.TransactionClient
-) =>
+  tx: Prisma.TransactionClient
+) => {
+  await db.users.lockAuthority(targetId, tx);
   await assertHoldsTargetPermissions(
     auth,
     targetId,
     "change the email, password, two-factor authentication or identities of",
     tx
   );
+};
 
 /**
  * Refuses deactivating, removing roles from or ending any session of a user
  * holding any permission the caller does not: `users.write` or `users.delete`
- * must not be enough to lock out or strip an administrator. Acting on yourself is not checked.
+ * must not be enough to lock out or strip an administrator. Acting on yourself
+ * is not checked. Takes the target's authority lock, as
+ * assertMayResetCredentials does.
  */
 export const assertMayDisempower = async (
   auth: Pick<AuthContext, "userId" | "ceiling">,
@@ -100,8 +106,9 @@ export const assertMayDisempower = async (
     | "remove roles from"
     | "end a session of"
     | "end all sessions of",
-  tx?: Prisma.TransactionClient
+  tx: Prisma.TransactionClient
 ) => {
   if (targetId === auth.userId) return;
+  await db.users.lockAuthority(targetId, tx);
   await assertHoldsTargetPermissions(auth, targetId, action, tx);
 };

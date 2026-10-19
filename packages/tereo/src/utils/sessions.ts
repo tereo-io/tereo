@@ -99,7 +99,8 @@ export interface Caller {
  * (the caller), its session and the SSO session that session was issued
  * under survive, as does its own access token, so the caller's browser stays
  * signed in. `record` runs in the revoking transaction (an audit entry, an
- * event). Returns the revoked session ids.
+ * event); `prepare` runs first in it, before any lock on the user's row.
+ * Returns the revoked session ids.
  *
  * Every ending below locks the users first (`db.users.lockForSessionEnd`) and
  * reads what to revoke after: a refresh or code exchange in flight would
@@ -108,7 +109,8 @@ export interface Caller {
 export const endUserSessions = async (
   userId: string,
   keep: Caller | null = null,
-  record?: RecordRevocation
+  record?: RecordRevocation,
+  prepare?: PrepareRevocation
 ): Promise<string[]> => {
   const keepRefreshTokenId = keep?.currentSessionId ?? null;
   const keepSsoSessionId = keepRefreshTokenId
@@ -116,6 +118,7 @@ export const endUserSessions = async (
     : null;
 
   const { ids, jtis } = await db.$transaction(async (tx) => {
+    await prepare?.(tx);
     await db.users.lockForSessionEnd(tx, { userIds: [userId] });
     const active = await db.refreshTokens.getActiveByUserId(userId, tx);
     const ids = active
@@ -154,6 +157,9 @@ export type RecordRevocation = (
   revokedSessionIds: string[],
   endedSsoSessionIds: string[]
 ) => Promise<void>;
+
+/** Runs first in a revoking transaction: the caller's locks and checks. */
+export type PrepareRevocation = (tx: Prisma.TransactionClient) => Promise<void>;
 
 export interface RevokedBrowserSessions {
   /** The refresh tokens revoked, with their users. */
@@ -235,11 +241,13 @@ export const endBrowserSessions = async (
  * family tied to it — otherwise that browser could mint new tokens with
  * prompt=none or an org switch. Other browsers' sessions are untouched.
  * The family goes by its authorization code, so a successor rotated from the
- * token in the meantime goes too. `record` runs in the revoking transaction.
+ * token in the meantime goes too. `record` runs in the revoking transaction,
+ * `prepare` first in it.
  */
 export const endSession = async (
   refreshTokenId: string,
-  record?: RecordRevocation
+  record?: RecordRevocation,
+  prepare?: PrepareRevocation
 ): Promise<{ ssoSessionIds: string[] }> => {
   const token = await db.refreshTokens.getById(refreshTokenId);
   if (!token) return { ssoSessionIds: [] };
@@ -248,6 +256,7 @@ export const endSession = async (
   ].filter((id): id is string => id !== null);
 
   const revoked = await db.$transaction(async (tx) => {
+    await prepare?.(tx);
     await db.users.lockForSessionEnd(tx, {
       userIds: [token.userId],
       userSessionIds,

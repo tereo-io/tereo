@@ -9,7 +9,8 @@ export const unlinkUserIdentity = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { id, identityId } = validateParams(UserIdentityParamsSchema, req);
   // Unlinking changes how the account is entered, as an identity invite does.
-  await assertMayResetCredentials(auth, id);
-  await unlinkIdentity(auth, id, identityId);
+  await unlinkIdentity(auth, id, identityId, (tx) =>
+    assertMayResetCredentials(auth, id, tx)
+  );
   res.status(204).send();
 };
