@@ -20,6 +20,7 @@ interface CreateClientData extends CreateClientInput {
 interface UpdateClientData extends UpdateClientInput {
   id: string;
   clientSecret?: string;
+  retiredSecretHashes?: string[];
   ownerId?: string;
 }
 
@@ -34,6 +35,7 @@ export interface ClientRecord {
   clientSecret: string | null;
   previousSecretHash: string | null;
   previousSecretExpiresAt: Date | null;
+  retiredSecretHashes: string[];
   redirectUris: string[];
   postLogoutRedirectUris: string[];
   grantTypes: string[];
@@ -200,6 +202,7 @@ export const update = async (
       name: data.name,
       clientType: data.clientType,
       clientSecret: data.clientSecret,
+      retiredSecretHashes: data.retiredSecretHashes,
       redirectUris: data.redirectUris,
       postLogoutRedirectUris: data.postLogoutRedirectUris,
       scopes: data.scopes,

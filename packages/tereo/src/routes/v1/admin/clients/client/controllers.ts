@@ -2,7 +2,6 @@ import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganizati
 import { disconnectTokenSockets } from "../../../../../websocket/emitters/index.js";
 import { UserType } from "../../../../../../prisma/generated/client/index.js";
 import { UpdateClientSchema, type UpdateClientInput } from "./schemas.js";
-import { deleteLoginClientTx } from "../../../../../utils/clients.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { formatClient } from "../../../../../utils/transformers.js";
 import { hasPermission } from "../../../../../utils/permissions.js";
@@ -15,10 +14,15 @@ import {
   validateParams,
 } from "../../../../../utils/validateReq.js";
 import {
+  deleteLoginClientTx,
+  withRetired,
+} from "../../../../../utils/clients.js";
+import {
   BadRequestError,
   ConflictError,
   ForbiddenError,
   ManagedByProvisioningError,
+  NotFoundError,
 } from "../../../../../utils/errors.js";
 import {
   logAuditTx,
@@ -252,8 +256,24 @@ export const regenerateClientSecret = async (req: Request, res: Response) => {
   const { plainSecret, hashedSecret } = generateClientSecret();
 
   const updated = await db.$transaction(async (tx) => {
+    // Locked, so a concurrent regeneration's secret is retired too.
+    const [current] = await tx.$queryRaw<
+      { client_secret: string | null; retired_secret_hashes: string[] }[]
+    >`
+      SELECT "client_secret", "retired_secret_hashes"
+      FROM "auth"."oauth_clients"
+      WHERE "id" = ${params.id}::uuid
+      FOR UPDATE`;
+    if (!current) throw new NotFoundError("Client not found");
     const result = await db.clients.update(
-      { id: params.id, clientSecret: hashedSecret },
+      {
+        id: params.id,
+        clientSecret: hashedSecret,
+        retiredSecretHashes: withRetired(
+          current.retired_secret_hashes,
+          current.client_secret
+        ),
+      },
       tx
     );
     await logAuditTx(tx, {
