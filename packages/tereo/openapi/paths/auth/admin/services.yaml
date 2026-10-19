@@ -537,7 +537,10 @@ core.service.updated:
     tags:
       - Admin - Services
     summary: Service updated
-    description: Fired when a service is renamed, deactivated or reactivated.
+    description: |
+      Fired when a service is renamed, deactivated or reactivated, and when a
+      provisioned service drops out of the provisioning documents or returns
+      to them (`unprovisionedAt` set, then null).
     operationId: webhookServiceUpdated
     security: []
     parameters:
@@ -560,7 +563,7 @@ core.service.updated:
                     const: Service
                   data:
                     type: object
-                    required: [id, slug, name, isActive]
+                    required: [id, slug, name, isActive, unprovisionedAt]
                     properties:
                       id:
                         type: string
@@ -571,6 +574,10 @@ core.service.updated:
                         type: string
                       isActive:
                         type: boolean
+                      unprovisionedAt:
+                        type: [string, 'null']
+                        format: date-time
+                        description: When it went missing from the provisioning documents; null while they list it.
     responses:
       '2XX':
         description: Any 2xx response acknowledges the delivery; anything else is retried.

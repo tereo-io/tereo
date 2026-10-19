@@ -70,7 +70,7 @@ export const integrationRef = (row: IntegrationRow): IntegrationRef => {
   };
 };
 
-const emitIntegration = (
+export const emitIntegration = (
   tx: Tx,
   eventType:
     | "core.integration.created"

@@ -19,6 +19,7 @@ export const formatClient = (
     consentRequired: boolean;
     trustedCoreScopes: string[];
     provisioned: boolean;
+    unprovisionedAt: Date | null;
     ownerId: string;
     organizationId: string | null;
     createdAt: Date;
@@ -54,6 +55,7 @@ export const formatClient = (
     consentRequired: client.consentRequired,
     trustedCoreScopes: client.trustedCoreScopes,
     provisioned: client.provisioned,
+    unprovisionedAt: client.unprovisionedAt?.toISOString() ?? null,
     ownerId: client.ownerId,
     organizationId: client.organizationId,
     // Set when the client is a service's: core refuses to edit, delete or
@@ -167,6 +169,7 @@ export const formatRole = (role: Awaited<ReturnType<typeof db.roles.get>>) => {
     retiredAt: role.retiredAt,
     requires2fa: role.requires2fa,
     provisioned: role.provisioned,
+    unprovisionedAt: role.unprovisionedAt,
     createdAt: role.createdAt,
     updatedAt: role.updatedAt,
     permissions: role.rolePermissions.map((rp) => ({
@@ -189,6 +192,7 @@ export const formatService = (service: ServiceWithClient) => ({
   namespace: service.namespace,
   isActive: service.isActive,
   provisioned: service.provisioned,
+  unprovisionedAt: service.unprovisionedAt,
   clientId: service.client?.clientId ?? null,
   serviceAccountUserId: service.client?.serviceAccountUser?.id ?? null,
   serviceAccountUser: toUserRef(service.client?.serviceAccountUser),
@@ -219,6 +223,7 @@ export const formatIntegration = (integration: IntegrationRow) => {
     organization: toOrgRef(integration.organization),
     isActive: integration.isActive,
     provisioned: integration.provisioned,
+    unprovisionedAt: integration.unprovisionedAt,
     clientId: integration.client?.clientId ?? null,
     serviceAccountUserId: account?.id ?? null,
     serviceAccountUser: toUserRef(account),

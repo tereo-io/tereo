@@ -71,6 +71,27 @@ afterAll(async () => {
 
 const rand = () => `p${randomBytes(5).toString("hex")}`;
 
+/** Waits for a delivery of `eventType` about `entityId` whose data has `fields`. */
+const waitForDelivered = (
+  endpointId: string,
+  eventType: string,
+  entityId: string,
+  fields: Record<string, unknown>
+) =>
+  waitFor(async () => {
+    const deliveries = await prisma.webhookDelivery.findMany({
+      where: {
+        webhookEndpointId: endpointId,
+        eventType,
+        payload: { path: ["entityId"], equals: entityId },
+      },
+    });
+    return deliveries.some((d) => {
+      const { data } = d.payload as { data: Record<string, unknown> };
+      return Object.entries(fields).every(([k, v]) => data[k] === v);
+    });
+  }, 10_000);
+
 const newSecret = () => {
   const { plainSecret, hashedSecret } = generateClientSecret();
   return { plain: plainSecret, hash: hashedSecret };
@@ -574,15 +595,9 @@ describe("applyProvisioning", () => {
       ["core.service.updated", s.id],
       ["auth.client.updated", c.id],
     ]) {
-      const where = {
-        webhookEndpointId: endpoint.id,
-        eventType,
-        payload: { path: ["entityId"], equals: entityId },
-      };
-      await waitFor(
-        async () => (await prisma.webhookDelivery.count({ where })) > 0,
-        10_000
-      );
+      await waitForDelivered(endpoint.id, eventType, entityId, {
+        unprovisionedAt: now.toISOString(),
+      });
     }
 
     // A later start without it keeps the first time it went missing.
@@ -595,6 +610,14 @@ describe("applyProvisioning", () => {
     );
     expect((await serviceRow(d.service.slug)).unprovisionedAt).toBeNull();
     expect((await clientRow(client.clientId)).unprovisionedAt).toBeNull();
+    for (const [eventType, entityId] of [
+      ["core.service.updated", s.id],
+      ["auth.client.updated", c.id],
+    ]) {
+      await waitForDelivered(endpoint.id, eventType, entityId, {
+        unprovisionedAt: null,
+      });
+    }
   });
 
   describe("retirement", () => {
@@ -1519,6 +1542,31 @@ describe("custom roles", () => {
       await prisma.userRole.deleteMany({ where: { userId: user.id } });
       await prisma.user.delete({ where: { id: user.id } });
     }
+  });
+
+  it("emits auth.role.updated with unprovisionedAt when a role drops out of the set and returns", async () => {
+    const endpoint = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      { eventTypes: ["auth.role.updated"] }
+    );
+    const role = roleSpec(["roles.read"]);
+    await apply(rolesDoc(role));
+    const { id } = await roleRow(role.name);
+
+    const now = new Date();
+    await applyProvisioning(setOf(), now);
+    await waitForDelivered(endpoint.id, "auth.role.updated", id, {
+      id,
+      name: role.name,
+      provisioned: true,
+      unprovisionedAt: now.toISOString(),
+    });
+
+    await apply(rolesDoc(role));
+    await waitForDelivered(endpoint.id, "auth.role.updated", id, {
+      id,
+      unprovisionedAt: null,
+    });
   });
 
   it("reactivates a provisioned role left inactive when the set lists it", async () => {

@@ -461,6 +461,17 @@ An entry that returns, before or after, is reactivated: a deactivated service be
 stops listing retire as in [registry](registry.md#retirement); its dropped webhooks are archived at
 once, as above.
 
+Marking an entry removed, and clearing the mark when it returns, sets the row's `unprovisionedAt`
+(shown by the admin API) and emits the entry's update event, whose `data` carries
+`unprovisionedAt` — the time it went missing, then `null`:
+
+| Entry | Event |
+|-------|-------|
+| Service | `core.service.updated` |
+| Integration | `core.integration.updated` |
+| Login client | `auth.client.updated` |
+| Custom role | `auth.role.updated` (`auth.role.restored` when it returns archived) |
+
 ## Managed rows
 
 Provisioned rows change only in the documents. The admin API answers `409` with code

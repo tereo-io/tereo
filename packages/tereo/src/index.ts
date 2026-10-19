@@ -77,6 +77,12 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
       await ensureDefaultOrganization();
       // The actor on system writes; every actor column references it.
       await assertSystemUser();
+      // Registering core and provisioning write audit entries, which need
+      // today's partition; the worker creates them a week ahead, but may be
+      // down. A failure is logged and the start goes on.
+      await ensureCurrentPartitions().catch((err) => {
+        logger.error({ err }, "Startup partition check failed");
+      });
       // Core's own permissions, roles, buckets and event types.
       await registerCore();
       // The UI's redirect URI follows UI_BASE_URL.
@@ -105,12 +111,6 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
         );
         return;
       }
-
-      // Audited writes and webhook deliveries need today's partition; the
-      // worker creates them a week ahead, but may be down.
-      await ensureCurrentPartitions().catch((err) => {
-        logger.error({ err }, "Startup partition check failed");
-      });
 
       // Only processes that serve /setup print a token for it.
       await announceSetupIfPending();

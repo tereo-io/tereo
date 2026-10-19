@@ -472,7 +472,11 @@ core.integration.updated:
     tags:
       - Admin - Integrations
     summary: Integration updated
-    description: Fired when an integration is renamed or reactivated, or its roles or audience change. `data` carries what changed.
+    description: |
+      Fired when an integration is renamed or reactivated, its roles or
+      audience change, or a provisioned integration drops out of the
+      provisioning documents or returns to them (`unprovisionedAt` set, then
+      null). `data` carries what changed.
     operationId: webhookIntegrationUpdated
     security: []
     parameters:
@@ -518,6 +522,10 @@ core.integration.updated:
                         type: array
                         items:
                           type: string
+                      unprovisionedAt:
+                        type: [string, 'null']
+                        format: date-time
+                        description: When it went missing from the provisioning documents; null when it returns.
     responses:
       '2XX':
         description: Any 2xx response acknowledges the delivery; anything else is retried.

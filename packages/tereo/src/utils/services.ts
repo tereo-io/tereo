@@ -169,6 +169,7 @@ export const updateServiceTx = async (
       slug: after.slug,
       name: after.name,
       isActive: after.isActive,
+      unprovisionedAt: after.unprovisionedAt?.toISOString() ?? null,
     },
   });
   return after;

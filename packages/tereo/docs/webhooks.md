@@ -363,7 +363,7 @@ Run by the worker (`ROLE=worker` or `all`):
   is gone. One whose outbox row remains is kept, so a replayed row still finds it.
 - **delivery-retention** (every 24h) — creates partitions 7 days ahead and then drops those older
   than 90 days, each create and drop under a 5-second `lock_timeout`: one that fails or finds the
-  table locked is logged and left for the next run. Every process that serves the API also creates today's and tomorrow's partition on
+  table locked is logged and left for the next run. Every process, whatever its `ROLE`, also creates today's and tomorrow's partition on
   start (`ensureCurrentPartitions`, `src/utils/partitions.ts`), so deliveries created by the API
   — `POST /v1/webhooks/events`, the endpoint test — keep working while the worker is down.
 
