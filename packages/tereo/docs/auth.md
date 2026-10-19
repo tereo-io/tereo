@@ -745,6 +745,11 @@ caller lacks: `users.write` alone resets only users who hold no more than `users
 third-party client's token (no core API scope reaches `admin`) resets an administrator. The system user and a service's account are refused, as on the other
 admin user routes.
 
+This check and `assertMayDisempower` run inside the change's transaction, under a per-user advisory lock
+(`db.users.lockAuthority`) that every admin change to the user's roles — global or in an organization,
+membership removal included — takes too, first: a role granted to the user concurrently is either
+committed before the check sees it, or waits until the reset or removal has committed.
+
 ## Session lifetimes
 
 Every lifetime is absolute — using a session never extends it:

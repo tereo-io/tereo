@@ -52,10 +52,6 @@ export const removeRoleUser = async (req: Request, res: Response) => {
         : "This user is a service account; revoke its access under /admin/services"
     );
   }
-  if (!organizationId) {
-    await assertMayDisempower(auth, userId, "remove roles from");
-  }
-
   const entityId = [
     roleId,
     userId,
@@ -64,6 +60,10 @@ export const removeRoleUser = async (req: Request, res: Response) => {
   const details = { roleId, userId, organizationId, roleName: role.name };
 
   await db.$transaction(async (tx) => {
+    await db.users.lockAuthority(userId, tx);
+    if (!organizationId) {
+      await assertMayDisempower(auth, userId, "remove roles from", tx);
+    }
     if (organizationId && callerOrgRole === "admin") {
       // Under the lock tier changes take, so the target's tier holds until
       // the write.

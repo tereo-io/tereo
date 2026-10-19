@@ -58,6 +58,19 @@ export const lockForSignInChange = async (
   await tx.$queryRaw`SELECT 1 FROM "auth"."users" WHERE id = ${userId}::uuid FOR UPDATE`;
 };
 
+/**
+ * Serializes admin changes to the user's roles (global or in an organization)
+ * with admin resets of their credentials, so a check that the caller holds
+ * what the target holds sees the target as of the write. Taken first in the
+ * transaction: before lockOrgOwners, assertAdminRemains and any user row lock.
+ */
+export const lockAuthority = async (
+  userId: string,
+  tx: Prisma.TransactionClient
+): Promise<void> => {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`core:user-authority:${userId}`}, 0))`;
+};
+
 export const get = async (id: string, tx?: Prisma.TransactionClient) => {
   const db = tx ?? prisma;
   const res = await db.user.findUnique({ where: { id } });

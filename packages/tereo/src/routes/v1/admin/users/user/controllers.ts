@@ -74,11 +74,13 @@ export const updateUser = async (req: Request, res: Response) => {
     if (emailTaken) throw new ConflictError("Email already in use");
   }
 
-  // A new email moves the account's sign-in identifier: the same takeover.
-  if (body.password || newEmail) {
-    await assertMayResetCredentials(auth, id);
-  }
-  if (deactivating) await assertMayDisempower(auth, id, "deactivate");
+  const authorize = async (tx: Prisma.TransactionClient) => {
+    // A new email moves the account's sign-in identifier: the same takeover.
+    if (body.password || newEmail) {
+      await assertMayResetCredentials(auth, id, tx);
+    }
+    if (deactivating) await assertMayDisempower(auth, id, "deactivate", tx);
+  };
 
   const update = async (tx: Prisma.TransactionClient) => {
     if (deactivating) {
@@ -116,11 +118,15 @@ export const updateUser = async (req: Request, res: Response) => {
 
   let newUser: Awaited<ReturnType<typeof update>>;
   if (deactivating) {
-    // Deactivation takes the admin-remains lock before the user's row, so it
-    // keeps its own transaction rather than running inside endUserSessions,
-    // which locks the row first. The user's tokens fail requireAuth as soon
-    // as it commits; the sessions end right after.
-    newUser = await db.$transaction(update);
+    // Deactivation takes the authority and admin-remains locks before the
+    // user's row, so it keeps its own transaction rather than running inside
+    // endUserSessions, which locks the row before its callback. The user's
+    // tokens fail requireAuth as soon as it commits; the sessions end right
+    // after.
+    newUser = await db.$transaction(async (tx) => {
+      await authorize(tx);
+      return await update(tx);
+    });
     await endDeactivatedUserSessions(
       id,
       body.password ? recordSessionsRevoked(auth, existing) : undefined
@@ -132,13 +138,21 @@ export const updateUser = async (req: Request, res: Response) => {
     const recordRevoked = recordSessionsRevoked(auth, existing);
     const keep = id === auth.userId ? auth : null;
     let reset: typeof newUser | undefined;
-    await endUserSessions(id, keep, async (tx, sessionIds, ssoSessionIds) => {
-      reset = await update(tx);
-      await recordRevoked(tx, sessionIds, ssoSessionIds);
-    });
+    await endUserSessions(
+      id,
+      keep,
+      async (tx, sessionIds, ssoSessionIds) => {
+        reset = await update(tx);
+        await recordRevoked(tx, sessionIds, ssoSessionIds);
+      },
+      authorize
+    );
     newUser = reset as typeof newUser;
   } else {
-    newUser = await db.$transaction(update);
+    newUser = await db.$transaction(async (tx) => {
+      await authorize(tx);
+      return await update(tx);
+    });
   }
 
   res.json(formatUser(newUser));
@@ -180,6 +194,8 @@ export const setUserRoles = async (req: Request, res: Response) => {
   await assertNotServiceAccount(targetUser);
 
   const userRoles = await db.$transaction(async (tx) => {
+    // A grant races a credential reset's check of what the user holds.
+    await db.users.lockAuthority(id, tx);
     // Read in the transaction, and only the roles new as of this read are
     // created: a held role removed concurrently is not put back unchecked.
     const held = new Set(
@@ -280,11 +296,12 @@ export const revokeUserSession = async (req: Request, res: Response) => {
   const { sessionId } = validateBody(RevokeSessionSchema, req);
 
   const user = await db.users.get(id);
-  await assertMayDisempower(auth, id, "end a session of");
   const session = await db.refreshTokens.getActiveForUser(sessionId, id);
   if (!session) throw new NotFoundError("Session not found");
 
-  await endSession(sessionId, recordSessionsRevoked(auth, user));
+  await endSession(sessionId, recordSessionsRevoked(auth, user), (tx) =>
+    assertMayDisempower(auth, id, "end a session of", tx)
+  );
 
   res.status(204).send();
 };
@@ -295,14 +312,14 @@ export const revokeAllUserSessions = async (req: Request, res: Response) => {
   const body = validateBody(RevokeAllSessionsSchema, req);
 
   const user = await db.users.get(id);
-  await assertMayDisempower(auth, id, "end all sessions of");
 
   // An admin signing themselves out keeps the session they act from unless
   // includeCurrentSession says otherwise.
   const revoked = await endUserSessions(
     id,
     body.includeCurrentSession ? null : auth,
-    recordSessionsRevoked(auth, user)
+    recordSessionsRevoked(auth, user),
+    (tx) => assertMayDisempower(auth, id, "end all sessions of", tx)
   );
 
   res.json({
