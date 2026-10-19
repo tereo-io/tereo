@@ -750,7 +750,9 @@ admin user routes.
 This check and `assertMayDisempower` run inside the change's transaction, under a per-user advisory lock
 (`db.users.lockAuthority`) that every admin change to the user's roles — global or in an organization,
 membership removal included — takes too, first: a role granted to the user concurrently is either
-committed before the check sees it, or waits until the reset or removal has committed.
+committed before the check sees it, or waits until the reset or removal has committed. Editing a
+role's permissions or restoring a role does not take it, so a role the user already holds can still
+gain permissions while the check runs.
 
 ## Session lifetimes
 
