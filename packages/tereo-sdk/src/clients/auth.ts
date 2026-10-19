@@ -23,6 +23,7 @@ import type {
   PublicRouteConfig,
   AuthServiceClientConfig,
   AuthServiceOrganization,
+  AuthServiceOwnService,
   AuthServiceUser,
 } from "../types/auth.js";
 
@@ -312,6 +313,31 @@ export class AuthServiceClient {
       }
       throw error;
     }
+  }
+
+  /**
+   * This service as core knows it: the provisioning document's version and
+   * hash core last applied, when, and the service's access. Not cached — call
+   * it at start to check the deploy's document has been applied.
+   *
+   * In test mode (`createCoreClient({ testMode: true })`), returns a stub.
+   */
+  async getService(): Promise<AuthServiceOwnService> {
+    if (this.testMode) {
+      return {
+        id: "00000000-0000-7000-8000-000000000000",
+        slug: "test-service",
+        name: "Test service",
+        namespace: "test",
+        isActive: true,
+        provisioned: true,
+        declarationVersion: null,
+        declarationHash: null,
+        declaredAt: null,
+        access: [],
+      };
+    }
+    return await requests.auth.getOwnService();
   }
 
   /**

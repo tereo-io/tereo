@@ -3,6 +3,8 @@ export type {
   ActiveIntrospectionResponse,
   InactiveIntrospectionResponse,
   AuthServiceOrganization,
+  AuthServiceOwnService,
+  AuthServiceOwnServiceAccess,
   AuthServiceUser,
 } from "../handler.js";
 

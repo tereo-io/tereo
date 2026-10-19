@@ -51,6 +51,7 @@ a client_credentials token), `permissions`, `currentSessionId`, `oauthClientId` 
 | `getUsers(userIds)` | `Map<userId, AuthServiceUser \| null>` — cache misses fetched together, one `GET /v1/admin/users?filter[id]=…&filter[id_op]=in` per 100 ids; a non-UUID id is null | as `getUser` |
 | `validateUserExists(userId)` | `boolean` | as `getUser` |
 | `getOrganization(id)` | `AuthServiceOrganization \| null` (null on 404) — `id` is the JWT `org_id` | 5 min; not-found 60 s |
+| `getService()` | `AuthServiceOwnService` — this service as core knows it: `slug`, `namespace`, `declarationVersion`, `declarationHash` and `declaredAt` of the provisioning document core last applied, and `access` (`{ kind, target, status, decidedAt }[]`). `GET /v1/account/service` over `CORE_CLIENT`; needs no permission. Throws when the client belongs to no service (404). Use it at start to check the deploy's document has been applied | None |
 
 Introspection uses `POST /oauth/introspect` over `CORE_PUBLIC_CLIENT` (the service's credentials as
 Basic auth); users and organizations use `/v1/admin/users/:id` and `/v1/admin/organizations/:id` over

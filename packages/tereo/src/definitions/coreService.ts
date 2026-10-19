@@ -11,6 +11,19 @@ export const CORE_SERVICE = {
 
 export const CORE_SERVICE_ID = CORE_SERVICE.id;
 
+/** `source` recorded on every audit entry and webhook event core produces. */
+export const CORE_SOURCE = "tereo";
+
+/**
+ * Slugs no service or integration may take: core's own, and `CORE_SOURCE` —
+ * a service writes and reads audit entries under its slug as their source, so
+ * one slugged `tereo` would pass for core.
+ */
+export const CORE_RESERVED_SLUGS: readonly string[] = [
+  CORE_SERVICE.slug,
+  CORE_SOURCE,
+];
+
 /**
  * Prefixes core's names already use besides its `core` namespace. Core's own
  * declaration is checked against them, and no service may take a namespace

@@ -47,6 +47,8 @@ export type {
   ActiveIntrospectionResponse,
   InactiveIntrospectionResponse,
   AuthServiceOrganization,
+  AuthServiceOwnService,
+  AuthServiceOwnServiceAccess,
   AuthServiceUser,
   AuthContext,
   OrganizationContext,

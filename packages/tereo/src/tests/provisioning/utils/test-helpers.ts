@@ -60,7 +60,11 @@ export async function removeServices(slugs: string[]) {
   await prisma.organizationMember.deleteMany({
     where: { userId: { in: userIds } },
   });
-  await prisma.auditLogEntry.deleteMany({ where: { userId: { in: userIds } } });
+  await prisma.auditLogEntry.deleteMany({
+    where: {
+      OR: [{ userId: { in: userIds } }, { writerUserId: { in: userIds } }],
+    },
+  });
   await prisma.service.deleteMany({ where: { id: { in: ids } } });
   // Its tokens and login-flow rows go with it (ON DELETE CASCADE).
   await prisma.oAuthClient.deleteMany({ where: { id: { in: clientIds } } });

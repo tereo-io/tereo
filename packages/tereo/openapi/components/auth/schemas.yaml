@@ -2480,6 +2480,68 @@ Service:
       type: string
       format: date-time
 
+AccountService:
+  type: object
+  description: |
+    The calling app service, as `GET /v1/account/service` returns it: the
+    declaration core last applied for it and the access it holds.
+  required:
+    - id
+    - slug
+    - name
+    - namespace
+    - isActive
+    - provisioned
+    - declarationVersion
+    - declarationHash
+    - declaredAt
+    - access
+  properties:
+    id:
+      type: string
+      format: uuid
+    slug:
+      type: string
+      description: Also the `source` of its audit entries.
+    name:
+      type: string
+    namespace:
+      type: string
+    isActive:
+      type: boolean
+    provisioned:
+      type: boolean
+      description: True for a service declared in the provisioning documents.
+    declarationVersion:
+      type: [string, 'null']
+      description: The `version` of the last declaration applied; `null` until one is first applied.
+    declarationHash:
+      type: [string, 'null']
+      description: SHA-256 of the last declaration applied; `null` until one is first applied.
+    declaredAt:
+      type: [string, 'null']
+      format: date-time
+      description: When a declaration was last applied.
+    access:
+      type: array
+      description: What the service has requested, and whether it holds it.
+      items:
+        type: object
+        required: [kind, target, status, decidedAt]
+        properties:
+          kind:
+            type: string
+            enum: [role, audience]
+          target:
+            type: string
+            description: A core role's name, `<slug>/<role>` for another service's role, or a service's slug for an audience.
+          status:
+            type: string
+            enum: [approved, revoked]
+          decidedAt:
+            type: [string, 'null']
+            format: date-time
+
 ServiceCredentials:
   type: object
   required:

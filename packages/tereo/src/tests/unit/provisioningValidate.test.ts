@@ -206,11 +206,26 @@ describe("validateSet", () => {
       validate(
         doc("a.json", {
           service: alpha({
-            access: { roles: ["file_user", "tenant_resolver"], audiences: [] },
+            access: {
+              roles: ["file_user", "tenant_resolver", "audit_reader"],
+              audiences: [],
+            },
           }),
         })
       )
     ).toEqual([]);
+  });
+
+  it("refuses core's slugs, including tereo, the source of core's entries", () => {
+    for (const slug of ["core", "tereo"]) {
+      expect(
+        validate(
+          doc("a.json", { service: { slug, namespace: `ns-${slug}-app` } })
+        )
+      ).toContain(
+        `a.json: services[${slug}]: slug "${slug}" is reserved for core`
+      );
+    }
   });
 
   it("refuses an audience naming no service in the set", () => {
