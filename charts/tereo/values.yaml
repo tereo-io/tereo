@@ -32,6 +32,12 @@ redis:
   # the password then comes from REDIS_PASSWORD in the secret.
   sentinels: ""
   masterName: ""
+  # Database index, 0-15 (REDIS_DB). Empty keeps REDIS_URL's path, else 0.
+  db: ""
+  # Prefix for every key and channel core uses (REDIS_KEY_PREFIX), e.g.
+  # "app1:", so several cores can share one Redis. App services pass the same
+  # value as the SDK's channelPrefix.
+  keyPrefix: ""
 
 # OTLP/HTTP endpoint for traces, e.g. http://otel-collector:4318. Empty
 # disables export.

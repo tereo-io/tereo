@@ -1,58 +1,51 @@
 import { buildRedisConnection, type RedisEnv } from "./redisEnv.js";
 import { redisRetryStrategy } from "./redisRetry.js";
+import { Redis, type RedisOptions } from "ioredis";
 import { logger } from "./logger.js";
-import { Redis } from "ioredis";
+import env from "../env.js";
 
 const LOCK_TTL = 30; // seconds
 let LOCK_PREFIX: string | null = null;
 let redisClient: Redis | null = null;
 
-/** Redis Sentinel (HA) connection — prod injects this in lieu of a single URL. */
-export interface RedisSentinelConfig {
-  sentinels: { host: string; port: number }[];
-  /** Sentinel master group name. */
-  name: string;
-  password?: string;
-}
-
-/** Either a single-node connection URL (dev/test) or a Sentinel config (prod HA). */
-export type RedisConnection = string | RedisSentinelConfig;
-
 /** A service's env, narrowed to what Redis init needs: connection + SERVICE_NAME. */
 export type RedisInitEnv = RedisEnv & { SERVICE_NAME: string };
 
 /**
- * Initialize the shared Redis client from a service's env. The connection
- * (single URL or Sentinel HA) is derived via `buildRedisConnection`, and the
- * distributed-lock key prefix defaults to `<SERVICE_NAME>:lock:` — pass
- * `lockPrefix` only to override it.
+ * Every key and channel core uses goes through here, so `REDIS_KEY_PREFIX`
+ * lets several deployments share one Redis database.
  */
+export const redisKey = (...parts: string[]): string =>
+  `${env.REDIS_KEY_PREFIX}${parts.join(":")}`;
+
+export const createRedis = (
+  options: RedisOptions = {},
+  redisEnv: RedisEnv = env
+): Redis => {
+  const { url, options: connection } = buildRedisConnection(redisEnv);
+  return url
+    ? new Redis(url, { ...connection, ...options })
+    : new Redis({ ...connection, ...options });
+};
+
+/** The distributed-lock prefix defaults to `<SERVICE_NAME>:lock:` under `redisKey`. */
 export const initializeRedis = async (
-  env: RedisInitEnv,
+  initEnv: RedisInitEnv,
   lockPrefix?: string
 ): Promise<void> => {
   if (redisClient) {
     logger.warn("Redis client already initialized");
     return;
   }
-  LOCK_PREFIX = lockPrefix ?? `${env.SERVICE_NAME}:lock:`;
+  LOCK_PREFIX = lockPrefix ?? redisKey(initEnv.SERVICE_NAME, "lock:");
 
-  const connection = buildRedisConnection(env);
-
-  const baseOptions = {
-    maxRetriesPerRequest: null,
-    retryStrategy: (times: number) => redisRetryStrategy(times),
-  } as const;
-
-  redisClient =
-    typeof connection === "string"
-      ? new Redis(connection, baseOptions)
-      : new Redis({
-          sentinels: connection.sentinels,
-          name: connection.name,
-          password: connection.password,
-          ...baseOptions,
-        });
+  redisClient = createRedis(
+    {
+      maxRetriesPerRequest: null,
+      retryStrategy: (times: number) => redisRetryStrategy(times),
+    },
+    initEnv
+  );
 
   redisClient.on("error", (err) => {
     logger.error({ err }, "Redis client error");

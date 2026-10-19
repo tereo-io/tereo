@@ -1,5 +1,5 @@
 import { Prisma } from "../../prisma/generated/client/index.js";
-import { getRedisClient } from "./redis.js";
+import { getRedisClient, redisKey } from "./redis.js";
 import { randomUUID } from "node:crypto";
 import { prisma } from "./db/prisma.js";
 import { logger } from "./logger.js";
@@ -45,10 +45,11 @@ async function releaseClaim(key: string, token: string): Promise<void> {
  * `busy()` thrown. Released when `fn` settles.
  */
 export async function withExclusiveClaim<T>(
-  key: string,
+  name: string,
   busy: () => Error,
   fn: () => Promise<T>
 ): Promise<T> {
+  const key = redisKey(name);
   const token = randomUUID();
   const claimed = await getRedisClient().set(
     key,
@@ -81,7 +82,7 @@ export interface IdempotencyResult<T> {
 }
 
 const pendingRedisKey = (scope: string, key: string): string =>
-  `${PENDING_PREFIX}${scope}:${key}`;
+  redisKey(`${PENDING_PREFIX}${scope}:${key}`);
 
 async function findLiveRecord(scope: string, key: string) {
   return prisma.idempotencyRecord.findFirst({
@@ -130,14 +131,14 @@ export async function withIdempotency<T>(
 ): Promise<IdempotencyResult<T>> {
   const { scope, key, requestHash, userId } = input;
   const redis = getRedisClient();
-  const redisKey = pendingRedisKey(scope, key);
+  const claimKey = pendingRedisKey(scope, key);
 
   const preExisting = await findLiveRecord(scope, key);
   if (preExisting) return replayOrConflict<T>(preExisting, requestHash);
 
   const token = randomUUID();
   const claimed = await redis.set(
-    redisKey,
+    claimKey,
     token,
     "EX",
     PENDING_TTL_SECONDS,
@@ -157,15 +158,15 @@ export async function withIdempotency<T>(
   // the claim between our first lookup and our claim; running the handler
   // again would repeat its write.
   const raced = await findLiveRecord(scope, key).catch(async (err) => {
-    await releaseClaim(redisKey, token);
+    await releaseClaim(claimKey, token);
     throw err;
   });
   if (raced) {
-    await releaseClaim(redisKey, token);
+    await releaseClaim(claimKey, token);
     return replayOrConflict<T>(raced, requestHash);
   }
 
-  const stopRenewal = keepClaimAlive(redisKey, token);
+  const stopRenewal = keepClaimAlive(claimKey, token);
   try {
     const result = await handler();
     const expiresAt = new Date(Date.now() + RESULT_TTL_SECONDS * 1000);
@@ -192,11 +193,11 @@ export async function withIdempotency<T>(
       },
     });
     stopRenewal();
-    await releaseClaim(redisKey, token);
+    await releaseClaim(claimKey, token);
     return { status: result.status, body: result.body, replayed: false };
   } catch (err) {
     stopRenewal();
-    await releaseClaim(redisKey, token);
+    await releaseClaim(claimKey, token);
     logger.warn(
       {
         scope,

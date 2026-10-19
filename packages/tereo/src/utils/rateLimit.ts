@@ -1,9 +1,9 @@
 import { ServiceUnavailableError, TooManyRequestsError } from "./errors.js";
 import { Request, RequestHandler, Response, NextFunction } from "express";
 import { RateLimiterRedis, RateLimiterRes } from "rate-limiter-flexible";
+import { getRedisClient, redisKey } from "./redis.js";
 import { BlockList, isIPv4, isIPv6 } from "node:net";
 import { redactUrl } from "../telemetry/redact.js";
-import { getRedisClient } from "./redis.js";
 import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
 
@@ -196,8 +196,8 @@ interface TieredLimiterConfig {
 
 // Fails open: see the policy at the top of this file.
 function createTieredLimiter(config: TieredLimiterConfig): RequestHandler {
-  const { keyPrefix, externalPoints, internalPoints, classify, getCost } =
-    config;
+  const { externalPoints, internalPoints, classify, getCost } = config;
+  const keyPrefix = redisKey(config.keyPrefix);
   const options = {
     storeClient: getRedisClient(),
     duration: DURATION_SECONDS,
@@ -360,7 +360,7 @@ export function createFailureLimiter(
   const getLimiter = () =>
     (limiter ??= new RateLimiterRedis({
       storeClient: getRedisClient(),
-      keyPrefix,
+      keyPrefix: redisKey(keyPrefix),
       points,
       duration,
       rejectIfRedisNotReady: true,
@@ -520,7 +520,7 @@ export function createBackoffLimiter(
     getKey,
   } = config;
   const keyOf = (req: Request, subject?: string) =>
-    `${keyPrefix}:${getKey(req, subject)}`;
+    redisKey(`${keyPrefix}:${getKey(req, subject)}`);
 
   const run = async <T>(
     fn: (redis: ReturnType<typeof getRedisClient>) => Promise<T>

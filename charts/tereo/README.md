@@ -21,6 +21,11 @@ Create the Secret core reads. Every key becomes an environment variable:
 | `REDIS_URL` | Redis, e.g. `redis://:password@redis:6379` |
 | `REDIS_PASSWORD` | Instead of `REDIS_URL`, with `redis.sentinels` and `redis.masterName` set |
 
+To share one Redis between several cores, give each its own `redis.keyPrefix` (e.g. `app1:`), and
+optionally its own `redis.db` (0–15, overriding a database in `REDIS_URL`'s path). Pub/sub channels
+span database indexes, so the prefix is what keeps cores apart; app services pass the same prefix
+to the SDK as `channelPrefix`.
+
 ```sh
 kubectl create secret generic tereo-secrets \
   --from-literal=DATABASE_URL='postgresql://…' \

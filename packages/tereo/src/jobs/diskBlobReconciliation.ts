@@ -1,5 +1,5 @@
+import { getRedisClient, redisKey } from "../utils/redis.js";
 import { TrackedWorker } from "./workerRegistry.js";
-import { getRedisClient } from "../utils/redis.js";
 import { logger } from "../utils/logger.js";
 import db from "../utils/db/index.js";
 import { Job, Worker } from "bullmq";
@@ -165,7 +165,7 @@ async function listFiles(subPath: string): Promise<string[]> {
  * age out via a single per-hash TTL.
  */
 function seenMissingKey(shard: string, sub: string): string {
-  return `${SEEN_MISSING_KEY_PREFIX}:${shard}:${sub}`;
+  return redisKey(`${SEEN_MISSING_KEY_PREFIX}:${shard}:${sub}`);
 }
 
 /**

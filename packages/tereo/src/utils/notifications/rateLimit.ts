@@ -1,4 +1,4 @@
-import { getRedisClient } from "../redis.js";
+import { getRedisClient, redisKey } from "../redis.js";
 
 const WINDOW_MS = 60_000;
 
@@ -14,7 +14,7 @@ export async function takeSendToken(
   if (maxPerMinute === null) return 0;
   const now = Date.now();
   const window = Math.floor(now / WINDOW_MS);
-  const key = `notifications:rate:${connectionId}:${window}`;
+  const key = redisKey(`notifications:rate:${connectionId}:${window}`);
   const result = await getRedisClient()
     .multi()
     .incr(key)

@@ -60,6 +60,7 @@ export {
   startFileServiceCache,
   closeFileServiceCache,
 } from "./utils/fileCache.js";
+export type { FileServiceCacheOptions } from "./utils/fileCache.js";
 
 // SDK-local types (bucket management + permissions) plus the object-level
 // types re-exported from the request handler for convenience.

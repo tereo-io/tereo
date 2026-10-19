@@ -1,6 +1,6 @@
 import { isRedisReady, limiterUnavailable } from "./rateLimit.js";
+import { getRedisClient, redisKey } from "./redis.js";
 import { ForbiddenError } from "./errors.js";
-import { getRedisClient } from "./redis.js";
 import { logger } from "./logger.js";
 import env from "../env.js";
 
@@ -12,7 +12,7 @@ import env from "../env.js";
 // Fails closed: without Redis a capped share neither mints nor serves (503).
 
 const keyOf = (shareId: string, nonce: string): string =>
-  `file-service:share-url:${shareId}:${nonce}`;
+  redisKey(`file-service:share-url:${shareId}:${nonce}`);
 
 const readyRedis = () => {
   const redis = getRedisClient();
