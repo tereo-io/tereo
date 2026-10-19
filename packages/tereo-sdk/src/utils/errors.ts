@@ -149,3 +149,10 @@ export class ForbiddenError extends HttpError {
     this.name = "ForbiddenError";
   }
 }
+
+export class NotFoundError extends HttpError {
+  constructor(message = "Not found") {
+    super(404, "not_found", message);
+    this.name = "NotFoundError";
+  }
+}
