@@ -917,6 +917,39 @@ describe("secrets", () => {
     expect((await fetchToken(fresh)).status).toBe(200);
   });
 
+  it("retires the secrets a regeneration pushes out and a revoke ends", async () => {
+    const service = await addService();
+    const row = () =>
+      prisma.oAuthClient.findUniqueOrThrow({
+        where: { clientId: service.credentials.clientId },
+      });
+    const first = (await row()).clientSecret;
+    for (let i = 0; i < 2; i++) {
+      const res = await api(
+        "POST",
+        `/v1/admin/services/${service.id}/regenerate-secret`,
+        adminToken
+      );
+      expect(res.status).toBe(200);
+    }
+    const rotated = await row();
+    expect(rotated.retiredSecretHashes).toEqual([first]);
+
+    const revoked = await api(
+      "POST",
+      `/v1/admin/services/${service.id}/revoke-previous-secret`,
+      adminToken
+    );
+    expect(revoked.status).toBe(200);
+    expect(JSON.stringify(revoked.body)).not.toContain(first!);
+    const after = await row();
+    expect(after.previousSecretHash).toBeNull();
+    expect(after.retiredSecretHashes).toEqual([
+      first,
+      rotated.previousSecretHash,
+    ]);
+  });
+
   it("reports no overlap, and refuses the previous secret, once it expires", async () => {
     const service = await addService();
     const regenerated = await api(

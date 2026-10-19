@@ -416,7 +416,7 @@ Core refuses a secret that
   **same** service may share one secret;
 - is the same value as another environment variable of core (so a database password pasted into a
   client secret is caught);
-- is the entry's previous secret (see rotation below).
+- is the entry's previous secret, or a secret retired from any client (see rotation below).
 
 Every message names the file, the variable and the rule. A secret's value, or any part of it, is never printed,
 logged or put in an audit entry. Secrets core generates itself (a client made in the admin UI,
@@ -435,9 +435,13 @@ If the old secret leaked, end a service's overlap at once with
 is allowed on a provisioned service, since the file cannot express it.
 
 Core refuses to start if the new value is the previous secret, which is what happens when a deploy
-is rolled back to the old Secret: the message says to generate a new secret. The guard covers only
-the most recent previous secret. A secret from two or more rotations back is accepted again, so
-always generate a fresh one rather than reusing an old value.
+is rolled back to the old Secret: the message says to generate a new secret. A secret that stops
+working is **retired**, and refused for good for this client and every other. That is the previous
+secret a later rotation (from the file or `regenerate-secret`) pushes out, the old secret of a
+rotation with `SERVICE_SECRET_OVERLAP_HOURS=0`, the one `revoke-previous-secret` ends, a login
+client's old secret after an admin regenerates it, and a login client's secret once the file makes
+it public. So a rollback past a revoke, or several rotations back, cannot revive a secret that may
+have leaked; generate a fresh one instead. Core keeps only the hashes, and never shows them.
 
 A webhook's secret rotates the same way, with `WEBHOOK_SECRET_OVERLAP_HOURS` of overlap
 ([webhooks](webhooks.md)).

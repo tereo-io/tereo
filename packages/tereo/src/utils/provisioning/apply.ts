@@ -1,5 +1,4 @@
 import { CORE_SERVICE_ID, SYSTEM_USER_ID } from "../../definitions/index.js";
-import { deleteLoginClientTx, rotatedSecretFields } from "../clients.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
 import { formatClient, formatRole } from "../transformers.js";
@@ -37,6 +36,11 @@ import {
   lockRegistries,
   type ParsedDeclaration,
 } from "../registry.js";
+import {
+  deleteLoginClientTx,
+  rotatedSecretFields,
+  withRetired,
+} from "../clients.js";
 import {
   ProvisioningError,
   type ProvisioningSet,
@@ -164,9 +168,15 @@ const loadState = async (tx: Tx, p: Entries) => {
       OR: [
         { clientSecret: { in: hashes } },
         { previousSecretHash: { in: hashes } },
+        { retiredSecretHashes: { hasSome: hashes } },
       ],
     },
-    select: { id: true, clientSecret: true, previousSecretHash: true },
+    select: {
+      id: true,
+      clientSecret: true,
+      previousSecretHash: true,
+      retiredSecretHashes: true,
+    },
   });
   return {
     // Integrations too: they share the table, and so the slugs.
@@ -197,10 +207,16 @@ const findProblems = async (
     ownRowId: string | undefined
   ) => {
     for (const holder of state.secretHolders) {
+      const retired = holder.retiredSecretHashes.includes(hash);
       if (holder.id === ownRowId) {
-        if (holder.clientSecret !== hash && holder.previousSecretHash === hash)
+        if (holder.clientSecret === hash) continue;
+        if (holder.previousSecretHash === hash)
           problems.push(
             `${label}: ${envName} holds this entry's previous secret, which a rotation replaced; a rollback cannot bring it back. Generate a new one with ${GENERATE_SECRET} and set ${envName} to it`
+          );
+        else if (retired)
+          problems.push(
+            `${label}: ${envName} holds a secret this entry used before, which was retired (rotated away, revoked or removed) and may have leaked; a rollback cannot bring it back. Generate a new one with ${GENERATE_SECRET} and set ${envName} to it`
           );
       } else if (
         holder.clientSecret === hash ||
@@ -208,6 +224,10 @@ const findProblems = async (
       ) {
         problems.push(
           `${label}: ${envName} is already the secret of another client; generate a new one with ${GENERATE_SECRET}`
+        );
+      } else if (retired) {
+        problems.push(
+          `${label}: ${envName} is a retired secret of another client and may have leaked; generate a new one with ${GENERATE_SECRET}`
         );
       }
     }
@@ -383,11 +403,16 @@ const findProblems = async (
 
 const rotateSecret = async (
   tx: Tx,
-  client: { id: string; clientSecret: string | null },
+  client: {
+    id: string;
+    clientSecret: string | null;
+    previousSecretHash: string | null;
+    retiredSecretHashes: string[];
+  },
   hash: string,
   now: Date
 ) => {
-  const data = rotatedSecretFields(client.clientSecret, hash, now);
+  const data = rotatedSecretFields(client, hash, now);
   await tx.oAuthClient.update({ where: { id: client.id }, data });
   return data.previousSecretExpiresAt;
 };
@@ -800,6 +825,11 @@ const applyClient = async (
           clientSecret: spec.secretHash,
           previousSecretHash: null,
           previousSecretExpiresAt: null,
+          retiredSecretHashes: withRetired(
+            existing.retiredSecretHashes,
+            existing.clientSecret,
+            existing.previousSecretHash
+          ),
         }),
       },
     });

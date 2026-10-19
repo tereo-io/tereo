@@ -796,6 +796,98 @@ describe("applyProvisioning", () => {
     expect(await fetchToken(d.service.clientId, next.plain)).toBe(200);
   });
 
+  it("refuses a rollback to a secret an admin revoked", async () => {
+    const d = serviceDoc();
+    await apply(d);
+    const next = newSecret();
+    await apply(withService(d, { secretHash: next.hash }));
+    const s = await serviceRow(d.service.slug);
+    const res = await api(
+      "POST",
+      `/v1/admin/services/${s.id}/revoke-previous-secret`
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const problems = await problemsOf(d);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(`${d.file}: services[${d.service.slug}]`);
+    expect(problems[0]).toContain("retired");
+    expect(problems[0]).toContain("generate-secret");
+    expect(problems[0]).not.toContain(d.service.secretHash);
+    expect((await serviceRow(d.service.slug)).client?.clientSecret).toBe(
+      next.hash
+    );
+    expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(401);
+  });
+
+  it("refuses a rollback past two rotations, and the old secret for another client", async () => {
+    const d = serviceDoc();
+    await apply(d);
+    const second = newSecret();
+    const third = newSecret();
+    await apply(withService(d, { secretHash: second.hash }));
+    const current = withService(d, { secretHash: third.hash });
+    await apply(current);
+
+    const problems = await problemsOf(d);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("retired");
+
+    const other = serviceDoc({ secretHash: d.service.secretHash });
+    const otherProblems = await problemsOf(current, other);
+    expect(otherProblems).toHaveLength(1);
+    expect(otherProblems[0]).toContain(`services[${other.service.slug}]`);
+    expect(
+      await prisma.service.findUnique({ where: { slug: other.service.slug } })
+    ).toBeNull();
+    expect((await serviceRow(d.service.slug)).client?.clientSecret).toBe(
+      third.hash
+    );
+  });
+
+  it("refuses a rollback after a rotation without an overlap", async () => {
+    const d = serviceDoc();
+    await apply(d);
+    const next = newSecret();
+    const overlap = env.SERVICE_SECRET_OVERLAP_HOURS;
+    env.SERVICE_SECRET_OVERLAP_HOURS = 0;
+    try {
+      await apply(withService(d, { secretHash: next.hash }));
+    } finally {
+      env.SERVICE_SECRET_OVERLAP_HOURS = overlap;
+    }
+    expect((await serviceRow(d.service.slug)).client?.previousSecretHash).toBe(
+      null
+    );
+
+    const problems = await problemsOf(d);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("retired");
+  });
+
+  it("refuses a login client's secret again once it was removed", async () => {
+    const secret = newSecret();
+    const confidential = clientSpec({
+      clientType: "confidential",
+      secretEnv: "APP_SECRET",
+      secretHash: secret.hash,
+    });
+    await apply(clientsDoc(confidential));
+    await apply(
+      clientsDoc({
+        ...confidential,
+        clientType: "public",
+        secretEnv: null,
+        secretHash: null,
+      })
+    );
+
+    const problems = await problemsOf(clientsDoc(confidential));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(`clients[${confidential.clientId}]`);
+    expect(problems[0]).toContain("retired");
+  });
+
   it("records audit entries as the system user, with the document's file and version", async () => {
     const d = serviceDoc({}, { version: "2.3.4" });
     const client = clientSpec();

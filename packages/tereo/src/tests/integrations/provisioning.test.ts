@@ -373,6 +373,45 @@ describe("provisioned integrations", () => {
     const problems = await problemsOf(doc({ integrations: [integration] }));
     expect(problems.join("\n")).toContain("no organization with id");
   });
+
+  it("refuses a rollback to a secret an admin revoked", async () => {
+    const { plainSecret: _p, ...integration } = integrationSpec();
+    const first = doc({ integrations: [integration] });
+    await applyProvisioning({ documents: [first] });
+    const next = newSecret();
+    await applyProvisioning({
+      documents: [
+        doc({ integrations: [{ ...integration, secretHash: next.hash }] }),
+      ],
+    });
+    const row = await prisma.service.findUniqueOrThrow({
+      where: { slug: integration.slug },
+    });
+    const res = await api(
+      "POST",
+      `/v1/admin/integrations/${row.id}/revoke-previous-secret`
+    );
+    expect(res.status).toBe(200);
+
+    const problems = await problemsOf(first);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(`integrations[${integration.slug}]`);
+    expect(problems[0]).toContain("retired");
+
+    // After another rotation, one secret back is the previous one.
+    const third = newSecret();
+    await applyProvisioning({
+      documents: [
+        doc({ integrations: [{ ...integration, secretHash: third.hash }] }),
+      ],
+    });
+    const back = await problemsOf(
+      doc({ integrations: [{ ...integration, secretHash: next.hash }] })
+    );
+    expect(back).toHaveLength(1);
+    expect(back[0]).toContain("previous secret");
+    expect((await problemsOf(first))[0]).toContain("retired");
+  });
 });
 
 describe("integrations in documents", () => {

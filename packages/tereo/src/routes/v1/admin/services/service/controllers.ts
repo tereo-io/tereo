@@ -1,7 +1,6 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { prisma, type Prisma } from "../../../../../utils/db/prisma.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
-import { rotatedSecretFields } from "../../../../../utils/clients.js";
 import { CORE_SERVICE_ID } from "../../../../../definitions/index.js";
 import { formatService } from "../../../../../utils/transformers.js";
 import { emitTx, logAuditTx } from "../../../../../utils/outbox.js";
@@ -23,6 +22,10 @@ import {
   revokeServiceTokens,
   updateServiceTx,
 } from "../../../../../utils/services.js";
+import {
+  revokePreviousSecretTx,
+  rotatedSecretFields,
+} from "../../../../../utils/clients.js";
 import {
   ForbiddenError,
   ManagedByProvisioningError,
@@ -167,14 +170,25 @@ export const regenerateSecret = async (req: Request, res: Response) => {
       // Locked: two regenerations at once would each keep the secret they
       // read as the previous one, and the first one's new secret would be lost.
       const [client] = await tx.$queryRaw<
-        { client_id: string; client_secret: string | null }[]
+        {
+          client_id: string;
+          client_secret: string | null;
+          previous_secret_hash: string | null;
+          retired_secret_hashes: string[];
+        }[]
       >`
-        SELECT "client_id", "client_secret" FROM "auth"."oauth_clients"
+        SELECT "client_id", "client_secret", "previous_secret_hash",
+          "retired_secret_hashes"
+        FROM "auth"."oauth_clients"
         WHERE "id" = ${service.client.id}::uuid
         FOR UPDATE`;
       if (!client) throw new NotFoundError("Client not found");
       const data = rotatedSecretFields(
-        client.client_secret,
+        {
+          clientSecret: client.client_secret,
+          previousSecretHash: client.previous_secret_hash,
+          retiredSecretHashes: client.retired_secret_hashes,
+        },
         hashedSecret,
         new Date()
       );
@@ -219,10 +233,7 @@ export const revokePreviousSecret = async (req: Request, res: Response) => {
   const service = await getAppService(req);
 
   const updated = await db.$transaction(async (tx) => {
-    await tx.oAuthClient.update({
-      where: { id: service.client.id },
-      data: { previousSecretHash: null, previousSecretExpiresAt: null },
-    });
+    await revokePreviousSecretTx(tx, service.client.id);
     await logAuditTx(tx, {
       auth,
       action: "UPDATE",
