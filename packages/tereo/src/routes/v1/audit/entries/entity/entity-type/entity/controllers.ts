@@ -22,6 +22,7 @@ export const getByEntity = async (req: Request, res: Response) => {
       entityType: params.entityType,
       entityId: params.entityId,
       organizationId: req.auditOrganizationId,
+      ...req.auditSourceScope,
     }
   );
 

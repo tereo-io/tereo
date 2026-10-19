@@ -1,0 +1,72 @@
+import { TrackedWorker } from "../jobs/workerRegistry.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { createQueue } from "../utils/bullmq.js";
+import env from "../env.js";
+import {
+  acquireLock,
+  closeRedisConnection,
+  getRedisClient,
+  initializeRedis,
+  redisKey,
+  releaseLock,
+} from "../utils/redis.js";
+
+const QUEUE = "redis-key-prefix-test";
+
+describe("REDIS_KEY_PREFIX with BullMQ", () => {
+  const original = env.REDIS_KEY_PREFIX;
+  afterEach(async () => {
+    env.REDIS_KEY_PREFIX = original;
+    const redis = getRedisClient();
+    const keys = await redis.keys(`*${QUEUE}*`);
+    if (keys.length > 0) await redis.del(keys);
+  });
+
+  it("puts queue and worker under the prefix, where they still meet", async () => {
+    env.REDIS_KEY_PREFIX = "itest-prefix:";
+    const queue = createQueue<{ n: number }>(QUEUE);
+    let done!: (n: number) => void;
+    const processed = new Promise<number>((resolve) => (done = resolve));
+    const worker = new TrackedWorker<{ n: number }>(
+      QUEUE,
+      async (job) => done(job.data.n),
+      { connection: getRedisClient().duplicate() }
+    );
+    try {
+      await queue.add("job", { n: 42 });
+      expect(await processed).toBe(42);
+      const redis = getRedisClient();
+      expect(
+        (await redis.keys(`itest-prefix:bull:${QUEUE}:*`)).length
+      ).toBeGreaterThan(0);
+      expect(await redis.keys(`bull:${QUEUE}:*`)).toEqual([]);
+    } finally {
+      await worker.close();
+      await queue.close();
+    }
+  });
+
+  it("keeps BullMQ's default prefix when none is set", () => {
+    env.REDIS_KEY_PREFIX = "";
+    expect(redisKey("bull")).toBe("bull");
+  });
+});
+
+describe("REDIS_KEY_PREFIX with distributed locks", () => {
+  it("takes the lock prefix from the env Redis was initialized with", async () => {
+    await closeRedisConnection();
+    try {
+      await initializeRedis({ ...env, REDIS_KEY_PREFIX: "itest-lock:" });
+      const token = await acquireLock("redis-key-prefix-test");
+      expect(token).not.toBeNull();
+      const key = `itest-lock:${env.SERVICE_NAME}:lock:redis-key-prefix-test`;
+      expect(await getRedisClient().get(key)).toBe(token);
+      expect(await releaseLock("redis-key-prefix-test", token as string)).toBe(
+        true
+      );
+    } finally {
+      await closeRedisConnection();
+      await initializeRedis(env);
+    }
+  });
+});

@@ -19,6 +19,7 @@ const base: Integration = {
   organization: { id: "o1", name: "Northwind", slug: "northwind" },
   isActive: true,
   provisioned: false,
+  unprovisionedAt: null,
   clientId: "abc",
   serviceAccountUserId: null,
   serviceAccountUser: null,

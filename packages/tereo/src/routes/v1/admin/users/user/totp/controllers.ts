@@ -4,6 +4,7 @@ import { validateParams } from "../../../../../../utils/validateReq.js";
 import { emitTx, logAuditTx } from "../../../../../../utils/outbox.js";
 import { endUserSessions } from "../../../../../../utils/sessions.js";
 import { BadRequestError } from "../../../../../../utils/errors.js";
+import type { Prisma } from "../../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../../utils/auth.js";
 import { logger } from "../../../../../../utils/logger.js";
 import db from "../../../../../../utils/db/index.js";
@@ -43,34 +44,41 @@ export const adminResetUserTotp = async (req: Request, res: Response) => {
 
   const user = await db.users.get(id);
   await assertNotServiceAccount(user);
-  await assertMayResetCredentials(auth, id);
-  if (!user.totpEnabled) {
-    throw new BadRequestError(
-      "totp_not_enabled",
-      "TOTP is not enabled for this user."
-    );
-  }
 
   const recordRevoked = recordSessionsRevoked(auth, user);
-  await endUserSessions(id, null, async (tx, sessionIds, ssoSessionIds) => {
-    await db.totp.disableTotp(id, tx);
-    await logAuditTx(tx, {
-      auth,
-      action: "UPDATE",
-      entityType: "User",
-      entityId: user.id,
-      entityName: user.email,
-      metadata: { action: "totp_reset" },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.user.totp-reset",
-      entityType: "User",
-      entityId: user.id,
-      data: { userId: user.id, email: user.email },
-    });
-    await recordRevoked(tx, sessionIds, ssoSessionIds);
-  });
+  const authorize = async (tx: Prisma.TransactionClient) => {
+    await assertMayResetCredentials(auth, id, tx);
+    if (!(await db.users.get(id, tx)).totpEnabled) {
+      throw new BadRequestError(
+        "totp_not_enabled",
+        "TOTP is not enabled for this user."
+      );
+    }
+  };
+  await endUserSessions(
+    id,
+    null,
+    async (tx, sessionIds, ssoSessionIds) => {
+      await db.totp.disableTotp(id, tx);
+      await logAuditTx(tx, {
+        auth,
+        action: "UPDATE",
+        entityType: "User",
+        entityId: user.id,
+        entityName: user.email,
+        metadata: { action: "totp_reset" },
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.user.totp-reset",
+        entityType: "User",
+        entityId: user.id,
+        data: { userId: user.id, email: user.email },
+      });
+      await recordRevoked(tx, sessionIds, ssoSessionIds);
+    },
+    authorize
+  );
 
   logger.debug({ userId: id, adminId: auth.userId }, "Admin reset user TOTP");
 

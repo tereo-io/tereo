@@ -1,11 +1,14 @@
-import { closeRedisClient, getRedisClient } from "./redis.js";
+import { closeRedisClient, getRedisClient, redisKey } from "./redis.js";
 import { logger } from "./logger.js";
 import { Redis } from "ioredis";
 
-const BUCKET_INVALIDATE_CHANNEL = "file-service:bucket-invalidate";
-const OBJECT_INVALIDATE_CHANNEL = "file-service:object-invalidate";
-const IDENTITY_PROVIDER_INVALIDATE_CHANNEL =
-  "auth:identity-provider-invalidate";
+// The SDK's file cache subscribes to the first two; its `channelPrefix` option
+// must equal REDIS_KEY_PREFIX.
+const BUCKET_INVALIDATE_CHANNEL = redisKey("file-service:bucket-invalidate");
+const OBJECT_INVALIDATE_CHANNEL = redisKey("file-service:object-invalidate");
+const IDENTITY_PROVIDER_INVALIDATE_CHANNEL = redisKey(
+  "auth:identity-provider-invalidate"
+);
 
 let publisher: Redis | null = null;
 let subscriber: Redis | null = null;

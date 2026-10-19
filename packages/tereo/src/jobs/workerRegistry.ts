@@ -1,6 +1,6 @@
+import { closeRedisClient, redisKey } from "../utils/redis.js";
 import { awaitClose, awaitStarted } from "../utils/bullmq.js";
 import { Processor, Worker, WorkerOptions } from "bullmq";
-import { closeRedisClient } from "../utils/redis.js";
 import { Redis } from "ioredis";
 
 const workers = new Set<
@@ -22,7 +22,7 @@ export class TrackedWorker<
     processor: Processor<DataType, ResultType, NameType>,
     opts: WorkerOptions
   ) {
-    super(name, processor, opts);
+    super(name, processor, { ...opts, prefix: redisKey("bull") });
     workers.add(this);
     this.once("closed", () => workers.delete(this));
     if (opts.connection instanceof Redis) this.redis = opts.connection;

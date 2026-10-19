@@ -177,7 +177,7 @@ A service's own document usually holds only `version` and `service`.
 | `clientId` | The service's OAuth client ID; defaults to the slug. Unique across services and login clients |
 | `internalHost` | Optional, max 253: the one host its own webhooks may reach at a private address ([below](#internal-webhook-targets)) |
 | `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)) |
-| `access.roles` | Requestable core roles, bare (`file_user`, `webhook_publisher`, `audit_writer`, `notification_sender`, `tenant_resolver`, `user_resolver`), or `<slug>/<name>`, a system role another service of the set declares |
+| `access.roles` | Requestable core roles, bare (`file_user`, `webhook_publisher`, `audit_writer`, `audit_reader`, `notification_sender`, `tenant_resolver`, `user_resolver`), or `<slug>/<name>`, a system role another service of the set declares |
 | `access.audiences` | Services of the set whose APIs this one may call (it can be introspected by them). Not core, not itself |
 | `permissions`, `systemRoles`, `buckets`, `eventTypes` | The service's declaration, with the namespacing, validation and update rules of [registry](registry.md#what-a-declaration-holds) |
 | `webhooks` | Service-owned endpoints: [Webhooks](#webhooks) |
@@ -221,7 +221,10 @@ private IP, or a name that resolves to one) declares it:
 - It is unique across the set. A change is audited and emits `core.service.updated`. It is not shown
   or settable through `/v1/admin/services`.
 
-The document's `version` is stored as the service's declared version.
+The document's `version` is stored as the service's declared version; the service reads it back,
+with the declaration's hash and its access, from `GET /v1/account/service`.
+
+`slug` may not be `core` or `tereo`, the source of core's own audit entries.
 
 ### `clients`
 
@@ -273,7 +276,7 @@ Shown alongside `customer.json` above, whose `customer-service` it names as an a
 
 | Field | Rule |
 |-------|------|
-| `slug` | Required, as a service slug; shares the slug space of services (never core's). It is also the integration's client ID |
+| `slug` | Required, as a service slug; shares the slug space of services (never `core` or `tereo`). It is also the integration's client ID |
 | `name` | Required, max 100 |
 | `organizationId` | Optional UUID. Set: **org-bound**, its tokens carry this organization. Absent: **platform**. Fixed once created; the organization must exist and not be archived |
 | `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)); rotates as a service's does |
@@ -416,7 +419,7 @@ Core refuses a secret that
   **same** service may share one secret;
 - is the same value as another environment variable of core (so a database password pasted into a
   client secret is caught);
-- is the entry's previous secret (see rotation below).
+- is the entry's previous secret, or a secret retired from any client (see rotation below).
 
 Every message names the file, the variable and the rule. A secret's value, or any part of it, is never printed,
 logged or put in an audit entry. Secrets core generates itself (a client made in the admin UI,
@@ -435,9 +438,13 @@ If the old secret leaked, end a service's overlap at once with
 is allowed on a provisioned service, since the file cannot express it.
 
 Core refuses to start if the new value is the previous secret, which is what happens when a deploy
-is rolled back to the old Secret: the message says to generate a new secret. The guard covers only
-the most recent previous secret. A secret from two or more rotations back is accepted again, so
-always generate a fresh one rather than reusing an old value.
+is rolled back to the old Secret: the message says to generate a new secret. A secret that stops
+working is **retired**, and refused for good for this client and every other. That is the previous
+secret a later rotation (from the file or `regenerate-secret`) pushes out, the old secret of a
+rotation with `SERVICE_SECRET_OVERLAP_HOURS=0`, the one `revoke-previous-secret` ends, a login
+client's old secret after an admin regenerates it, and a login client's secret once the file makes
+it public. So a rollback past a revoke, or several rotations back, cannot revive a secret that may
+have leaked; generate a fresh one instead. Core keeps only the hashes, and never shows them.
 
 A webhook's secret rotates the same way, with `WEBHOOK_SECRET_OVERLAP_HOURS` of overlap
 ([webhooks](webhooks.md)).
@@ -456,6 +463,17 @@ runs older documents does nothing. After that the hourly retirement job
 An entry that returns, before or after, is reactivated: a deactivated service becomes active again and an archived role is restored. A deleted login client is created anew. Items a service's declaration
 stops listing retire as in [registry](registry.md#retirement); its dropped webhooks are archived at
 once, as above.
+
+Marking an entry removed, and clearing the mark when it returns, sets the row's `unprovisionedAt`
+(shown by the admin API) and emits the entry's update event, whose `data` carries
+`unprovisionedAt` — the time it went missing, then `null`:
+
+| Entry | Event |
+|-------|-------|
+| Service | `core.service.updated` |
+| Integration | `core.integration.updated` |
+| Login client | `auth.client.updated` |
+| Custom role | `auth.role.updated` (`auth.role.restored` when it returns archived) |
 
 ## Managed rows
 

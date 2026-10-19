@@ -732,7 +732,9 @@ the user's sessions and token families, in the transaction that makes the reset
 (`endUserSessions`, recorded as a `sessions_revoked` entry and an `auth.user.sessions-revoked`
 event); an admin resetting their own password keeps the session they act from. Every such sign-out
 also revokes the access tokens issued without a refresh token (clients without the `refresh_token`
-grant), all but the caller's own, and closes their sockets. Either reset, an
+grant), all but the caller's own, and closes their sockets. An app service using `@tereo-io/sdk`
+may cache an active introspection for up to 60 s (its `introspectionCacheTtlSeconds`), so it can
+keep accepting a signed-out or revoked token that long. Either reset, an
 email change, an identity invite or an admin identity unlink
 (`DELETE /v1/admin/users/:id/identities/:identityId`) hands the caller the account or changes how it
 is entered, so it may not reach beyond what the caller holds (`assertMayResetCredentials`): every permission the user holds — through global roles
@@ -744,6 +746,13 @@ count, since the account reaches beyond that organization. Otherwise 403, naming
 caller lacks: `users.write` alone resets only users who hold no more than `users.write`, and no
 third-party client's token (no core API scope reaches `admin`) resets an administrator. The system user and a service's account are refused, as on the other
 admin user routes.
+
+This check and `assertMayDisempower` run inside the change's transaction, under a per-user advisory lock
+(`db.users.lockAuthority`) that every admin change to the user's roles — global or in an organization,
+membership removal included — takes too, first: a role granted to the user concurrently is either
+committed before the check sees it, or waits until the reset or removal has committed. Editing a
+role's permissions or restoring a role does not take it, so a role the user already holds can still
+gain permissions while the check runs.
 
 ## Session lifetimes
 

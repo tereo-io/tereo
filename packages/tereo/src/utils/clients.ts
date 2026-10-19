@@ -48,21 +48,59 @@ export const deleteLoginClientTx = async (
   return jtis;
 };
 
+/** `retired` with `hashes` added, once each. */
+export const withRetired = (
+  retired: string[],
+  ...hashes: (string | null)[]
+): string[] => [
+  ...new Set([...retired, ...hashes.filter((h): h is string => !!h)]),
+];
+
 /**
- * A client's secret columns once `newHash` replaces `oldHash`. The old secret
- * keeps working for `SERVICE_SECRET_OVERLAP_HOURS`, if there was one.
+ * A client's secret columns once `newHash` replaces its current secret. The
+ * old secret keeps working for `SERVICE_SECRET_OVERLAP_HOURS`, if there was
+ * one; whatever stops working is retired.
  */
 export const rotatedSecretFields = (
-  oldHash: string | null,
+  client: {
+    clientSecret: string | null;
+    previousSecretHash: string | null;
+    retiredSecretHashes: string[];
+  },
   newHash: string,
   now: Date
 ) => {
   const overlapMs = env.SERVICE_SECRET_OVERLAP_HOURS * 60 * 60 * 1000;
+  const oldHash = client.clientSecret;
   const previousSecretExpiresAt =
     overlapMs > 0 && oldHash ? new Date(now.getTime() + overlapMs) : null;
   return {
     clientSecret: newHash,
     previousSecretHash: previousSecretExpiresAt ? oldHash : null,
     previousSecretExpiresAt,
+    retiredSecretHashes: withRetired(
+      client.retiredSecretHashes,
+      client.previousSecretHash,
+      previousSecretExpiresAt ? null : oldHash
+    ),
   };
+};
+
+/** End a client's secret overlap now, retiring its previous secret. */
+export const revokePreviousSecretTx = async (
+  tx: Prisma.TransactionClient,
+  clientRowId: string
+) => {
+  await tx.$executeRaw`
+    UPDATE "auth"."oauth_clients"
+    SET "retired_secret_hashes" = CASE
+          WHEN "previous_secret_hash" IS NULL
+            OR "previous_secret_hash" = ANY ("retired_secret_hashes")
+          THEN "retired_secret_hashes"
+          ELSE array_append("retired_secret_hashes", "previous_secret_hash")
+        END,
+        "previous_secret_hash" = NULL,
+        "previous_secret_expires_at" = NULL,
+        "updated_at" = now()
+    WHERE "id" = ${clientRowId}::uuid`;
 };

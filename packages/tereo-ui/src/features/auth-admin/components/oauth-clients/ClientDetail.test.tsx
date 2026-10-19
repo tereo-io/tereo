@@ -24,6 +24,7 @@ const client: OAuthClient = {
   trustedCoreScopes: [],
   consentRequired: false,
   provisioned: false,
+  unprovisionedAt: null,
   ownerId: "u1",
   service: null,
   createdAt: "2026-10-01T00:00:00Z",

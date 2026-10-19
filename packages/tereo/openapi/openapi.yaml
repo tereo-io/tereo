@@ -337,8 +337,8 @@ info:
     | Domain | Permissions | Description |
     |---|---|---|
     | Audit Log Admin | `audit-logs.admin` | All audit log operations |
-    | Audit Log Read | `audit-logs.read` | Query and view audit log entries |
-    | Audit Log Write | `audit-logs.write` | Create audit log entries (service-to-service) |
+    | Audit Log Read | `audit-logs.read` | Query and view audit log entries; an app service's client, its own (core role `audit_reader`) |
+    | Audit Log Write | `audit-logs.write` | Create audit log entries (service-to-service); includes `audit-logs.read` |
     | Audit Log Delete | `audit-logs.delete` | Defined, but no endpoint uses it — entries cannot be deleted |
 
     ## Rate Limiting
@@ -750,14 +750,24 @@ info:
     `audit-logs.admin` (or anything that covers it, such as `admin`) may instead name an
     organization with `filter[organizationId]=<id>`, or read system-wide entries — those with
     no organization — with `filter[organizationId]=none`. Without the filter, an admin token
-    that has no `org_id` reads across all organizations. Any other token naming a different
-    organization, or having no `org_id`, is refused (`403`).
+    that has no `org_id` reads across all organizations.
+
+    An app service's client has no `org_id`. Without `audit-logs.admin` it reads the entries
+    it wrote — `source` its slug, `writerUserId` its service account — across all
+    organizations and system-wide, and may narrow them with `filter[organizationId]=<id>|none`;
+    an entry outside them is not found. `audit-logs.read` (core role `audit_reader`) or
+    `audit-logs.write` (`audit_writer`) is enough. Any other token naming a different
+    organization, or having no `org_id` — a person's, an integration's — is refused (`403`).
 
     Writes follow the same rule. Without `audit-logs.admin`, a token with an `org_id` writes
     only entries for that organization: another organization, or a system-wide entry, is
     `403`, and one such entry refuses a whole batch. A service account's token without an
     `org_id` — an app service's client, which writes for every tenant of its app — may write
     for any organization; a person's token without one may not write.
+
+    An app service's client writes only entries whose `source` is its slug (`403` otherwise),
+    so its reads above hold exactly what it wrote. No service or integration may take the slug
+    `tereo`, the source of core's own entries.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -1027,6 +1037,8 @@ paths:
     $ref: './paths/auth/account.yaml#/~1account~1sessions~1{sessionId}'
   /v1/account/password:
     $ref: './paths/auth/account.yaml#/~1account~1password'
+  /v1/account/service:
+    $ref: './paths/auth/account.yaml#/~1account~1service'
   /v1/account/photo:
     $ref: './paths/auth/account.yaml#/~1account~1photo'
   /v1/account/identities:
@@ -1462,8 +1474,8 @@ components:
       $ref: './components/audit/responses.yaml#/AuditForbiddenResponse'
     AuditConflictResponse:
       $ref: './components/audit/responses.yaml#/AuditConflictResponse'
-    AuditIdempotencyKeyConflictResponse:
-      $ref: './components/audit/responses.yaml#/AuditIdempotencyKeyConflictResponse'
+    AuditWriteUnprocessableResponse:
+      $ref: './components/audit/responses.yaml#/AuditWriteUnprocessableResponse'
     AuditBadRequestResponse:
       $ref: './components/audit/responses.yaml#/AuditBadRequestResponse'
     NotificationsInvalidConfigResponse:
@@ -1653,6 +1665,8 @@ components:
       $ref: './components/auth/schemas.yaml#/CompleteSetupResponse'
     Service:
       $ref: './components/auth/schemas.yaml#/Service'
+    AccountService:
+      $ref: './components/auth/schemas.yaml#/AccountService'
     ServiceCredentials:
       $ref: './components/auth/schemas.yaml#/ServiceCredentials'
     ServiceWithCredentials:

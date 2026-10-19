@@ -1,5 +1,6 @@
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import type { CustomRoleEntry } from "../../utils/provisioning/schema.js";
+import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateClientSecret } from "../../utils/crypto.js";
 import { prisma } from "../../utils/db/prisma.js";
@@ -10,6 +11,11 @@ import {
   removeRoles,
   removeServices,
 } from "../provisioning/utils/test-helpers.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../webhooks/utils/test-helpers.js";
 import {
   applyProvisioning,
   deprovisionMissing,
@@ -314,6 +320,45 @@ describe("provisioned integrations", () => {
     expect(row.isActive).toBe(false);
   });
 
+  it("emits core.integration.updated with unprovisionedAt when an integration drops out of the set and returns", async () => {
+    const endpoint = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      { eventTypes: ["core.integration.updated"] }
+    );
+    const { plainSecret: _p, ...integration } = integrationSpec();
+    const set = { documents: [doc({ integrations: [integration] })] };
+    await applyProvisioning(set);
+    const { id } = await prisma.service.findUniqueOrThrow({
+      where: { slug: integration.slug },
+    });
+
+    const delivered = (unprovisionedAt: string | null) =>
+      waitFor(async () => {
+        const deliveries = await prisma.webhookDelivery.findMany({
+          where: {
+            webhookEndpointId: endpoint.id,
+            eventType: "core.integration.updated",
+            payload: { path: ["entityId"], equals: id },
+          },
+        });
+        return deliveries.some((d) => {
+          const { data } = d.payload as { data: Record<string, unknown> };
+          return (
+            data.id === id &&
+            data.slug === integration.slug &&
+            data.unprovisionedAt === unprovisionedAt
+          );
+        });
+      }, 10_000);
+
+    const now = new Date();
+    await applyProvisioning({ documents: [doc({})] }, now);
+    await delivered(now.toISOString());
+
+    await applyProvisioning(set);
+    await delivered(null);
+  });
+
   it("validates roles, audiences and slugs across the set", async () => {
     const service = serviceSpec();
     const globalRole = roleEntry(["users.read"], false);
@@ -372,6 +417,45 @@ describe("provisioned integrations", () => {
     });
     const problems = await problemsOf(doc({ integrations: [integration] }));
     expect(problems.join("\n")).toContain("no organization with id");
+  });
+
+  it("refuses a rollback to a secret an admin revoked", async () => {
+    const { plainSecret: _p, ...integration } = integrationSpec();
+    const first = doc({ integrations: [integration] });
+    await applyProvisioning({ documents: [first] });
+    const next = newSecret();
+    await applyProvisioning({
+      documents: [
+        doc({ integrations: [{ ...integration, secretHash: next.hash }] }),
+      ],
+    });
+    const row = await prisma.service.findUniqueOrThrow({
+      where: { slug: integration.slug },
+    });
+    const res = await api(
+      "POST",
+      `/v1/admin/integrations/${row.id}/revoke-previous-secret`
+    );
+    expect(res.status).toBe(200);
+
+    const problems = await problemsOf(first);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(`integrations[${integration.slug}]`);
+    expect(problems[0]).toContain("retired");
+
+    // After another rotation, one secret back is the previous one.
+    const third = newSecret();
+    await applyProvisioning({
+      documents: [
+        doc({ integrations: [{ ...integration, secretHash: third.hash }] }),
+      ],
+    });
+    const back = await problemsOf(
+      doc({ integrations: [{ ...integration, secretHash: next.hash }] })
+    );
+    expect(back).toHaveLength(1);
+    expect(back[0]).toContain("previous secret");
+    expect((await problemsOf(first))[0]).toContain("retired");
   });
 });
 

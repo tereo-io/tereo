@@ -1,13 +1,18 @@
 import { assertAuditWriteScope } from "../../../../middleware/organizationId.js";
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
-import { BadRequestError, ValidationError } from "../../../../utils/errors.js";
 import { withAuditIdempotency } from "../../../../utils/auditIdempotency.js";
+import { callerService } from "../../../../utils/callerService.js";
 import { validateUser } from "../../../../middleware/auth.js";
 import { escapeLike } from "../../../../utils/db/like.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { hasNul } from "../../../../utils/pgInput.js";
 import db from "../../../../utils/db/index.js";
 import { Request, Response } from "express";
+import {
+  BadRequestError,
+  UnprocessableEntityError,
+  ValidationError,
+} from "../../../../utils/errors.js";
 import {
   applyCursorToWhere,
   buildCursorPageResponse,
@@ -70,10 +75,29 @@ const assertReferencesExist = async (
   }
 };
 
+/**
+ * An app service writes entries only under its own slug, the source its reads
+ * are scoped to; anyone else's `source` is self-reported. 422, not 403: no
+ * grant fixes it, so the SDK outbox dead-letters the row instead of retrying.
+ */
+const assertOwnSource = async (
+  auth: { oauthClientId: string | null },
+  sources: string[]
+) => {
+  const service = await callerService(auth);
+  if (service && sources.some((source) => source !== service.slug)) {
+    throw new UnprocessableEntityError(
+      "source_mismatch",
+      `Service ${service.slug} may only write entries with source "${service.slug}"`
+    );
+  }
+};
+
 export const createEntry = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { idempotencyKey, ...entryData } = validateBody(createEntrySchema, req);
   assertAuditWriteScope(auth, [entryData.organizationId]);
+  await assertOwnSource(auth, [entryData.source]);
   await assertReferencesExist([entryData]);
   const entryWithWriter = { ...entryData, ...writerIdentity(auth) };
 
@@ -95,6 +119,10 @@ export const createBatch = async (req: Request, res: Response) => {
   assertAuditWriteScope(
     auth,
     entries.map((e) => e.organizationId)
+  );
+  await assertOwnSource(
+    auth,
+    entries.map((e) => e.source)
   );
   await assertReferencesExist(entries);
   const writer = writerIdentity(auth);
@@ -130,9 +158,12 @@ export const list = async (req: Request, res: Response) => {
   const q = (search as { equals: string } | undefined)?.equals;
   if (q !== undefined) filters.createdAt = searchWindow(filters);
 
+  // A service's own scope is a clause of its own, so its filter[source]
+  // narrows within it rather than replacing it.
   const and = [
     ...((filters.AND as Record<string, unknown>[] | undefined) ?? []),
     ...metadataConditions,
+    ...(req.auditSourceScope ? [{ ...req.auditSourceScope }] : []),
   ];
   const baseFilter: Record<string, unknown> = {
     ...filters,
@@ -205,10 +236,11 @@ export const facets = async (req: Request, res: Response) => {
     query["filter[createdAt_gte]"] ??
     new Date(end.getTime() - FACETS_DEFAULT_DAYS * DAY_MS);
   res.json(
-    await db.auditLogEntries.getFacets(req.auditOrganizationId, {
-      gte,
-      ...(lte && { lte }),
-    })
+    await db.auditLogEntries.getFacets(
+      req.auditOrganizationId,
+      { gte, ...(lte && { lte }) },
+      req.auditSourceScope
+    )
   );
 };
 

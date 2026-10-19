@@ -21,6 +21,11 @@ Create the Secret core reads. Every key becomes an environment variable:
 | `REDIS_URL` | Redis, e.g. `redis://:password@redis:6379` |
 | `REDIS_PASSWORD` | Instead of `REDIS_URL`, with `redis.sentinels` and `redis.masterName` set |
 
+To share one Redis between several cores, give each its own `redis.keyPrefix` (e.g. `app1:`), and
+optionally its own `redis.db` (0–15, overriding a database in `REDIS_URL`'s path). Pub/sub channels
+span database indexes, so the prefix is what keeps cores apart; app services pass the same prefix
+to the SDK as `channelPrefix`.
+
 ```sh
 kubectl create secret generic tereo-secrets \
   --from-literal=DATABASE_URL='postgresql://…' \
@@ -108,7 +113,12 @@ The chart renders each as `<name>.json` in a ConfigMap, mounts it at `/etc/tereo
 sets `PROVISIONING_PATH`; with none, none of that is rendered. Or set `provisioning.existingConfigMap`
 to mount a ConfigMap you manage. Core applies the documents at start, and a `post-install,post-upgrade`
 Job (`provisioning.job`: backoff, deadline, resources) runs `provision` with core's environment, so a change takes effect without
-restarting the pods. Never write a secret there: `secretFrom` names an environment variable, which
+restarting the pods. `provisioning.job.annotations` are merged onto the Job's hook annotations,
+overriding any they share — with ArgoCD, which runs it as a PostSync hook, set
+`argocd.argoproj.io/hook` to move it. `provisioning.job.enabled: false` renders no Job: the
+ConfigMap and `PROVISIONING_PATH` stay, and core still applies the documents when its pods start,
+so a changed document then takes effect only once the pods restart (a document change alone
+does not roll them). Never write a secret there: `secretFrom` names an environment variable, which
 must be a key of the Secret in `secrets.existingSecret` (or come from `extraEnvFrom`). See
 [`ci/provisioning-values.yaml`](https://github.com/tereo-io/tereo/blob/master/charts/tereo/ci/provisioning-values.yaml).
 

@@ -71,6 +71,27 @@ afterAll(async () => {
 
 const rand = () => `p${randomBytes(5).toString("hex")}`;
 
+/** Waits for a delivery of `eventType` about `entityId` whose data has `fields`. */
+const waitForDelivered = (
+  endpointId: string,
+  eventType: string,
+  entityId: string,
+  fields: Record<string, unknown>
+) =>
+  waitFor(async () => {
+    const deliveries = await prisma.webhookDelivery.findMany({
+      where: {
+        webhookEndpointId: endpointId,
+        eventType,
+        payload: { path: ["entityId"], equals: entityId },
+      },
+    });
+    return deliveries.some((d) => {
+      const { data } = d.payload as { data: Record<string, unknown> };
+      return Object.entries(fields).every(([k, v]) => data[k] === v);
+    });
+  }, 10_000);
+
 const newSecret = () => {
   const { plainSecret, hashedSecret } = generateClientSecret();
   return { plain: plainSecret, hash: hashedSecret };
@@ -574,15 +595,9 @@ describe("applyProvisioning", () => {
       ["core.service.updated", s.id],
       ["auth.client.updated", c.id],
     ]) {
-      const where = {
-        webhookEndpointId: endpoint.id,
-        eventType,
-        payload: { path: ["entityId"], equals: entityId },
-      };
-      await waitFor(
-        async () => (await prisma.webhookDelivery.count({ where })) > 0,
-        10_000
-      );
+      await waitForDelivered(endpoint.id, eventType, entityId, {
+        unprovisionedAt: now.toISOString(),
+      });
     }
 
     // A later start without it keeps the first time it went missing.
@@ -595,6 +610,14 @@ describe("applyProvisioning", () => {
     );
     expect((await serviceRow(d.service.slug)).unprovisionedAt).toBeNull();
     expect((await clientRow(client.clientId)).unprovisionedAt).toBeNull();
+    for (const [eventType, entityId] of [
+      ["core.service.updated", s.id],
+      ["auth.client.updated", c.id],
+    ]) {
+      await waitForDelivered(endpoint.id, eventType, entityId, {
+        unprovisionedAt: null,
+      });
+    }
   });
 
   describe("retirement", () => {
@@ -794,6 +817,98 @@ describe("applyProvisioning", () => {
     );
     expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(401);
     expect(await fetchToken(d.service.clientId, next.plain)).toBe(200);
+  });
+
+  it("refuses a rollback to a secret an admin revoked", async () => {
+    const d = serviceDoc();
+    await apply(d);
+    const next = newSecret();
+    await apply(withService(d, { secretHash: next.hash }));
+    const s = await serviceRow(d.service.slug);
+    const res = await api(
+      "POST",
+      `/v1/admin/services/${s.id}/revoke-previous-secret`
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const problems = await problemsOf(d);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(`${d.file}: services[${d.service.slug}]`);
+    expect(problems[0]).toContain("retired");
+    expect(problems[0]).toContain("generate-secret");
+    expect(problems[0]).not.toContain(d.service.secretHash);
+    expect((await serviceRow(d.service.slug)).client?.clientSecret).toBe(
+      next.hash
+    );
+    expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(401);
+  });
+
+  it("refuses a rollback past two rotations, and the old secret for another client", async () => {
+    const d = serviceDoc();
+    await apply(d);
+    const second = newSecret();
+    const third = newSecret();
+    await apply(withService(d, { secretHash: second.hash }));
+    const current = withService(d, { secretHash: third.hash });
+    await apply(current);
+
+    const problems = await problemsOf(d);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("retired");
+
+    const other = serviceDoc({ secretHash: d.service.secretHash });
+    const otherProblems = await problemsOf(current, other);
+    expect(otherProblems).toHaveLength(1);
+    expect(otherProblems[0]).toContain(`services[${other.service.slug}]`);
+    expect(
+      await prisma.service.findUnique({ where: { slug: other.service.slug } })
+    ).toBeNull();
+    expect((await serviceRow(d.service.slug)).client?.clientSecret).toBe(
+      third.hash
+    );
+  });
+
+  it("refuses a rollback after a rotation without an overlap", async () => {
+    const d = serviceDoc();
+    await apply(d);
+    const next = newSecret();
+    const overlap = env.SERVICE_SECRET_OVERLAP_HOURS;
+    env.SERVICE_SECRET_OVERLAP_HOURS = 0;
+    try {
+      await apply(withService(d, { secretHash: next.hash }));
+    } finally {
+      env.SERVICE_SECRET_OVERLAP_HOURS = overlap;
+    }
+    expect((await serviceRow(d.service.slug)).client?.previousSecretHash).toBe(
+      null
+    );
+
+    const problems = await problemsOf(d);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("retired");
+  });
+
+  it("refuses a login client's secret again once it was removed", async () => {
+    const secret = newSecret();
+    const confidential = clientSpec({
+      clientType: "confidential",
+      secretEnv: "APP_SECRET",
+      secretHash: secret.hash,
+    });
+    await apply(clientsDoc(confidential));
+    await apply(
+      clientsDoc({
+        ...confidential,
+        clientType: "public",
+        secretEnv: null,
+        secretHash: null,
+      })
+    );
+
+    const problems = await problemsOf(clientsDoc(confidential));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(`clients[${confidential.clientId}]`);
+    expect(problems[0]).toContain("retired");
   });
 
   it("records audit entries as the system user, with the document's file and version", async () => {
@@ -1427,6 +1542,31 @@ describe("custom roles", () => {
       await prisma.userRole.deleteMany({ where: { userId: user.id } });
       await prisma.user.delete({ where: { id: user.id } });
     }
+  });
+
+  it("emits auth.role.updated with unprovisionedAt when a role drops out of the set and returns", async () => {
+    const endpoint = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      { eventTypes: ["auth.role.updated"] }
+    );
+    const role = roleSpec(["roles.read"]);
+    await apply(rolesDoc(role));
+    const { id } = await roleRow(role.name);
+
+    const now = new Date();
+    await applyProvisioning(setOf(), now);
+    await waitForDelivered(endpoint.id, "auth.role.updated", id, {
+      id,
+      name: role.name,
+      provisioned: true,
+      unprovisionedAt: now.toISOString(),
+    });
+
+    await apply(rolesDoc(role));
+    await waitForDelivered(endpoint.id, "auth.role.updated", id, {
+      id,
+      unprovisionedAt: null,
+    });
   });
 
   it("reactivates a provisioned role left inactive when the set lists it", async () => {

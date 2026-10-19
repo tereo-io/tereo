@@ -179,6 +179,9 @@ model OAuthClient {
   // so running copies of a service survive the rollout.
   previousSecretHash      String?    @map("previous_secret_hash") @db.VarChar(255)
   previousSecretExpiresAt DateTime?  @map("previous_secret_expires_at")
+  // Hashes this client used before and may never use again: provisioning
+  // refuses them, so a rollback cannot revive a revoked or leaked secret.
+  retiredSecretHashes     String[]   @default([]) @map("retired_secret_hashes")
   // Created from the provisioning file.
   provisioned             Boolean    @default(false)
   // When a provisioned login client was first missing from the file.

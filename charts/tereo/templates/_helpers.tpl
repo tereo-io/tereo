@@ -123,6 +123,14 @@ files: blobs live on the volume, so every core pod must share it.
 - name: REDIS_MASTER_NAME
   value: {{ .Values.redis.masterName | quote }}
 {{- end }}
+{{- if and (not (kindIs "invalid" .Values.redis.db)) (ne (toString .Values.redis.db) "") }}
+- name: REDIS_DB
+  value: {{ .Values.redis.db | toString | quote }}
+{{- end }}
+{{- with .Values.redis.keyPrefix }}
+- name: REDIS_KEY_PREFIX
+  value: {{ . | quote }}
+{{- end }}
 {{- with .Values.otelExporterEndpoint }}
 - name: OTEL_EXPORTER_OTLP_ENDPOINT
   value: {{ . | quote }}

@@ -29,32 +29,33 @@ export const createIdentityInvite = async (req: Request, res: Response) => {
 
   const user = await db.users.get(id);
   await assertNotServiceAccount(user);
-  // An invite is a new way into the account, as a password reset is.
-  await assertMayResetCredentials(auth, id);
-
-  const provider = await db.identityProviders.get(providerId).catch((err) => {
-    if (err instanceof NotFoundError) {
-      throw new BadRequestError(
-        "unknown_provider",
-        `Unknown identity provider: ${providerId}`
-      );
-    }
-    throw err;
-  });
-  if (!provider.isActive) {
-    throw new BadRequestError(
-      "provider_inactive",
-      "The identity provider is deactivated"
-    );
-  }
-  if (await db.userIdentities.getForUserAtProvider(id, provider.id)) {
-    throw new ConflictError(
-      "The user is already linked to this provider",
-      "already_linked"
-    );
-  }
 
   const invite = await db.$transaction(async (tx) => {
+    // An invite is a new way into the account, as a password reset is.
+    await assertMayResetCredentials(auth, id, tx);
+    const provider = await db.identityProviders
+      .get(providerId, tx)
+      .catch((err) => {
+        if (err instanceof NotFoundError) {
+          throw new BadRequestError(
+            "unknown_provider",
+            `Unknown identity provider: ${providerId}`
+          );
+        }
+        throw err;
+      });
+    if (!provider.isActive) {
+      throw new BadRequestError(
+        "provider_inactive",
+        "The identity provider is deactivated"
+      );
+    }
+    if (await db.userIdentities.getForUserAtProvider(id, provider.id, tx)) {
+      throw new ConflictError(
+        "The user is already linked to this provider",
+        "already_linked"
+      );
+    }
     const issued = await db.userIdentities.upsertInvite(
       {
         userId: id,

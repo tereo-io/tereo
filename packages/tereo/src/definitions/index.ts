@@ -7,8 +7,10 @@ export {
 export { CORE_DECLARATION } from "./declaration.js";
 export {
   CORE_RESERVED_NAMESPACES,
+  CORE_RESERVED_SLUGS,
   CORE_SERVICE,
   CORE_SERVICE_ID,
+  CORE_SOURCE,
 } from "./coreService.js";
 export {
   DEFAULT_ORGANIZATION,

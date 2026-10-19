@@ -1,4 +1,4 @@
-import { closeRedisClient, getRedisClient } from "./redis.js";
+import { closeRedisClient, getRedisClient, redisKey } from "./redis.js";
 import { JobsOptions, Queue, QueueOptions } from "bullmq";
 import type { Redis } from "ioredis";
 import {
@@ -128,7 +128,11 @@ export const createQueue = <T = unknown>(
   options?: Omit<QueueOptions, "connection">
 ): Queue<T> => {
   const connection = getRedisClient().duplicate();
-  const queue = new Queue<T>(name, { ...options, connection });
+  const queue = new Queue<T>(name, {
+    ...options,
+    prefix: redisKey("bull"),
+    connection,
+  });
 
   // BullMQ leaves a connection it was handed open.
   const originalClose = queue.close.bind(queue);

@@ -30,6 +30,8 @@ export interface Role {
   requires2fa: boolean;
   /** Declared in the provisioning file: read-only here, but still assignable to users. */
   provisioned: boolean;
+  /** When it went missing from the provisioning documents; null while they list it. */
+  unprovisionedAt: string | null;
   createdAt: string;
   updatedAt: string;
   permissions?: RolePermission[];

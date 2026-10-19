@@ -83,6 +83,13 @@ export const ROLES: RoleDefinition[] = [
     permissions: ["audit-logs.write"],
   },
   {
+    name: "audit_reader",
+    requestable: true,
+    displayName: "Audit Reader",
+    description: "Read the audit entries its own service wrote",
+    permissions: ["audit-logs.read"],
+  },
+  {
     name: "notification_sender",
     requestable: true,
     displayName: "Notification Sender",

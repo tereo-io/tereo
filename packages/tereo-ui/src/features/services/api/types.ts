@@ -12,6 +12,8 @@ export interface ServiceSummary {
 /** A service as `GET /admin/services` returns it. */
 export interface Service extends ServiceSummary {
   provisioned: boolean;
+  /** When it went missing from the provisioning documents; null while they list it. */
+  unprovisionedAt: string | null;
   /** Null only for core's own row, which has no OAuth client. */
   clientId: string | null;
   serviceAccountUserId: string | null;

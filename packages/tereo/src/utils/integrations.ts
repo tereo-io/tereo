@@ -1,3 +1,4 @@
+import { assertSlugUnreserved, serviceAccountEmail } from "./services.js";
 import { assertCanGrant, globalGrantablePermissions } from "./grants.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { UserType } from "../../prisma/generated/client/index.js";
@@ -6,7 +7,6 @@ import type { AuthContext } from "../middleware/auth.js";
 import type { IntegrationRow } from "./db/services.js";
 import { CORE_SERVICE } from "../definitions/index.js";
 import { prisma, type Prisma } from "./db/prisma.js";
-import { serviceAccountEmail } from "./services.js";
 import { emitTx, logAuditTx } from "./outbox.js";
 import db from "./db/index.js";
 import {
@@ -70,7 +70,7 @@ export const integrationRef = (row: IntegrationRow): IntegrationRef => {
   };
 };
 
-const emitIntegration = (
+export const emitIntegration = (
   tx: Tx,
   eventType:
     | "core.integration.created"
@@ -103,6 +103,7 @@ export const createIntegrationTx = async (
   actor: IntegrationActor
 ): Promise<IntegrationRow> => {
   const { slug, name, organizationId } = input;
+  assertSlugUnreserved(slug);
   if (await tx.service.findUnique({ where: { slug } })) {
     throw new ConflictError(
       `A service or integration with slug "${slug}" already exists`

@@ -1,9 +1,14 @@
-import { ClientType, UserType } from "../../prisma/generated/client/index.js";
 import { toOrgRef, toServiceRef, toUserRef, type OrgRef } from "./refs.js";
 import type { IntegrationRow, ServiceWithClient } from "./db/services.js";
 import { previousSecretExpiry } from "./webhookSigning.js";
 import { maskCustomHeaders } from "./webhookHeaders.js";
 import db from "./db/index.js";
+import {
+  ClientType,
+  UserType,
+  type Service,
+  type ServiceAccess,
+} from "../../prisma/generated/client/index.js";
 
 export const formatClient = (
   client: {
@@ -19,6 +24,7 @@ export const formatClient = (
     consentRequired: boolean;
     trustedCoreScopes: string[];
     provisioned: boolean;
+    unprovisionedAt: Date | null;
     ownerId: string;
     organizationId: string | null;
     createdAt: Date;
@@ -54,6 +60,7 @@ export const formatClient = (
     consentRequired: client.consentRequired,
     trustedCoreScopes: client.trustedCoreScopes,
     provisioned: client.provisioned,
+    unprovisionedAt: client.unprovisionedAt?.toISOString() ?? null,
     ownerId: client.ownerId,
     organizationId: client.organizationId,
     // Set when the client is a service's: core refuses to edit, delete or
@@ -167,6 +174,7 @@ export const formatRole = (role: Awaited<ReturnType<typeof db.roles.get>>) => {
     retiredAt: role.retiredAt,
     requires2fa: role.requires2fa,
     provisioned: role.provisioned,
+    unprovisionedAt: role.unprovisionedAt,
     createdAt: role.createdAt,
     updatedAt: role.updatedAt,
     permissions: role.rolePermissions.map((rp) => ({
@@ -189,6 +197,7 @@ export const formatService = (service: ServiceWithClient) => ({
   namespace: service.namespace,
   isActive: service.isActive,
   provisioned: service.provisioned,
+  unprovisionedAt: service.unprovisionedAt,
   clientId: service.client?.clientId ?? null,
   serviceAccountUserId: service.client?.serviceAccountUser?.id ?? null,
   serviceAccountUser: toUserRef(service.client?.serviceAccountUser),
@@ -206,6 +215,33 @@ export const formatService = (service: ServiceWithClient) => ({
 });
 
 /**
+ * A service as `GET /v1/account/service` shows it to itself: the declaration
+ * core last applied and the access it holds. Its account, creator and secret
+ * overlap are admin detail.
+ */
+export const formatOwnService = (
+  service: Service,
+  access: Pick<ServiceAccess, "kind" | "target" | "status" | "decidedAt">[]
+) => ({
+  id: service.id,
+  slug: service.slug,
+  name: service.name,
+  namespace: service.namespace,
+  isActive: service.isActive,
+  provisioned: service.provisioned,
+  unprovisionedAt: service.unprovisionedAt,
+  declarationVersion: service.declarationVersion,
+  declarationHash: service.declarationHash,
+  declaredAt: service.declaredAt,
+  access: access.map(({ kind, target, status, decidedAt }) => ({
+    kind,
+    target,
+    status,
+    decidedAt,
+  })),
+});
+
+/**
  * An integration. `roles` are those that count for it: in its organization
  * when it is bound to one, global otherwise.
  */
@@ -219,6 +255,7 @@ export const formatIntegration = (integration: IntegrationRow) => {
     organization: toOrgRef(integration.organization),
     isActive: integration.isActive,
     provisioned: integration.provisioned,
+    unprovisionedAt: integration.unprovisionedAt,
     clientId: integration.client?.clientId ?? null,
     serviceAccountUserId: account?.id ?? null,
     serviceAccountUser: toUserRef(account),

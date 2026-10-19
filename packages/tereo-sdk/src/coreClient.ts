@@ -35,7 +35,7 @@ export interface CoreClientOptions {
   redis: Redis;
   /** Default: `NODE_ENV === "production"`. */
   production?: boolean;
-  /** Public routes and test-token permissions for `auth.requireAuth`. */
+  /** Public routes, test-token permissions and introspection caching for `auth`. */
   auth?: AuthServiceClientConfig;
   /**
    * For an app service's tests: `auth` accepts forged `test-token-…` tokens
@@ -59,6 +59,11 @@ export interface CoreClientOptions {
    * `core.outbox` throws; `audit.log` and `webhooks.emit` remain, best-effort.
    */
   outbox?: OutboxOptions;
+  /**
+   * Core's `REDIS_KEY_PREFIX`, when it sets one: the file cache listens for
+   * core's invalidations on channels under it. Default: none.
+   */
+  channelPrefix?: string;
 }
 
 export interface CoreClient {
@@ -170,7 +175,7 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
     },
     start: async () => {
       await handler.start();
-      await startFileServiceCache();
+      await startFileServiceCache({ channelPrefix: options.channelPrefix });
       await audit.init();
       outbox?.start();
     },

@@ -1,10 +1,9 @@
-import { buildRedisConnection } from "../utils/redisEnv.js";
+import { closeRedisClient, createRedis, redisKey } from "../utils/redis.js";
 import { redisRetryStrategy } from "../utils/redisRetry.js";
 import { authenticateSocket } from "./middleware/auth.js";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { setIO } from "./emitters/permissionEmitters.js";
 import { checkAccessToken } from "../utils/sessions.js";
-import { closeRedisClient } from "../utils/redis.js";
 import type { Server as HttpServer } from "http";
 import { logger } from "../utils/logger.js";
 import handlers from "./handlers/index.js";
@@ -38,22 +37,11 @@ let subClient: Redis | null = null;
  * hearing other nodes' broadcasts.
  */
 const createRedisClient = (role: "pub" | "sub"): Redis => {
-  const connection = buildRedisConnection(env);
-  const options = {
+  const client = createRedis({
     maxRetriesPerRequest: role === "pub" ? 3 : null,
     retryStrategy: (times: number) =>
       redisRetryStrategy(times, "WebSocket Redis"),
-  } as const;
-
-  const client =
-    typeof connection === "string"
-      ? new Redis(connection, options)
-      : new Redis({
-          sentinels: connection.sentinels,
-          name: connection.name,
-          password: connection.password,
-          ...options,
-        });
+  });
   client.on("error", (err) => {
     logger.error({ err }, `Redis ${role} client error`);
   });
@@ -132,11 +120,13 @@ export const initializeWebSocket = async (server: HttpServer) => {
       maxHttpBufferSize: MAX_MESSAGE_BYTES,
     });
 
-    // Create dedicated Redis clients for Socket.io adapter (pub/sub)
     pubClient = createRedisClient("pub");
     subClient = createRedisClient("sub");
 
-    io.adapter(createAdapter(pubClient, subClient));
+    io.adapter(
+      // Must match the emitter's key (emitters/redisEmitter.ts).
+      createAdapter(pubClient, subClient, { key: redisKey("socket.io") })
+    );
     setIO(io);
 
     // Before authenticating, so a draining node does no database work.

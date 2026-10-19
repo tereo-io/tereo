@@ -667,6 +667,25 @@ describe("Admin Clients Endpoints", () => {
       expect(row.clientSecret).toBe(sha256Hex(data.clientSecret!));
     });
 
+    it("retires the replaced secret", async () => {
+      const before = await prisma.oAuthClient.findUniqueOrThrow({
+        where: { id: managedClient.id },
+      });
+      const response = await fetch(
+        `${BASE_URL}/v1/admin/clients/${managedClient.id}/regenerate-secret`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}` },
+        }
+      );
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      const row = await prisma.oAuthClient.findUniqueOrThrow({
+        where: { id: managedClient.id },
+      });
+      expect(row.retiredSecretHashes).toContain(before.clientSecret);
+      expect(row.retiredSecretHashes).not.toContain(row.clientSecret);
+    });
+
     it("refuses a public client, which has no secret: 400 invalid_request", async () => {
       const client = await createTestClient({ clientType: "public" });
       const response = await fetch(

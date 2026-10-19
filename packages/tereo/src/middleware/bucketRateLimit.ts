@@ -1,8 +1,8 @@
 import { onBucketInvalidate } from "../utils/cacheBroadcast.js";
+import { getRedisClient, redisKey } from "../utils/redis.js";
 import { Request, Response, NextFunction } from "express";
 import { TooManyRequestsError } from "../utils/errors.js";
 import { BoundedCache } from "../utils/boundedCache.js";
-import { getRedisClient } from "../utils/redis.js";
 import { logger } from "../utils/logger.js";
 import db from "../utils/db/index.js";
 
@@ -90,7 +90,7 @@ export const bucketRateLimit = async (
 
   const userId =
     (req as Request & { auth?: { userId?: string } }).auth?.userId ?? "anon";
-  const key = `file-service:bucket:${bucketId}:user:${userId}`;
+  const key = redisKey(`file-service:bucket:${bucketId}:user:${userId}`);
 
   const redis = getRedisClient();
   try {

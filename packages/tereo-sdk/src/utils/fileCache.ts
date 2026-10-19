@@ -16,6 +16,14 @@ const FILE_CACHE_PREFIX = buildCachePrefix("file-sdk");
 const BUCKET_INVALIDATE_CHANNEL = "file-service:bucket-invalidate";
 const OBJECT_INVALIDATE_CHANNEL = "file-service:object-invalidate";
 
+export interface FileServiceCacheOptions {
+  /** Core's `REDIS_KEY_PREFIX`, which core puts in front of its channel names. */
+  channelPrefix?: string;
+}
+
+let bucketChannel = BUCKET_INVALIDATE_CHANNEL;
+let objectChannel = OBJECT_INVALIDATE_CHANNEL;
+
 let subscriber: Redis | null = null;
 let subscriberStarted = false;
 
@@ -30,8 +38,13 @@ export class FileCache extends ScopedCache {
  * core. Safe to call multiple times; does nothing after the first
  * successful call. No-ops if the client has no Redis yet.
  */
-export async function startFileServiceCache(): Promise<void> {
+export async function startFileServiceCache(
+  options: FileServiceCacheOptions = {}
+): Promise<void> {
   if (subscriberStarted) return;
+  const prefix = options.channelPrefix ?? "";
+  bucketChannel = `${prefix}${BUCKET_INVALIDATE_CHANNEL}`;
+  objectChannel = `${prefix}${OBJECT_INVALIDATE_CHANNEL}`;
   try {
     subscriber = getCacheRedis().duplicate();
   } catch {
@@ -42,11 +55,11 @@ export async function startFileServiceCache(): Promise<void> {
   });
   subscriber.on("message", async (channel, message) => {
     try {
-      if (channel === BUCKET_INVALIDATE_CHANNEL) {
+      if (channel === bucketChannel) {
         await safeCacheDel(`${FILE_CACHE_PREFIX}bucket:${message}`);
         return;
       }
-      if (channel === OBJECT_INVALIDATE_CHANNEL) {
+      if (channel === objectChannel) {
         const { bucket, key } = JSON.parse(message) as {
           bucket: string;
           key: string;
@@ -65,20 +78,14 @@ export async function startFileServiceCache(): Promise<void> {
       );
     }
   });
-  await subscriber.subscribe(
-    BUCKET_INVALIDATE_CHANNEL,
-    OBJECT_INVALIDATE_CHANNEL
-  );
+  await subscriber.subscribe(bucketChannel, objectChannel);
   subscriberStarted = true;
 }
 
 export async function closeFileServiceCache(): Promise<void> {
   if (!subscriber) return;
   try {
-    await subscriber.unsubscribe(
-      BUCKET_INVALIDATE_CHANNEL,
-      OBJECT_INVALIDATE_CHANNEL
-    );
+    await subscriber.unsubscribe(bucketChannel, objectChannel);
     await subscriber.quit();
   } finally {
     subscriber = null;

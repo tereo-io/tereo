@@ -54,6 +54,7 @@ export const removeMember = async (req: Request, res: Response) => {
   await db.organizations.get(orgId);
   await assertNotIntegrationAccount(userId);
   await db.$transaction(async (tx) => {
+    await db.users.lockAuthority(userId, tx);
     await lockOrgOwners(tx, orgId);
     const removed = await db.organizations.removeMember(orgId, userId, tx);
     if (callerRole === "admin" && removed.memberRole === "owner") {

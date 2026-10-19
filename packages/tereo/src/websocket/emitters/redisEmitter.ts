@@ -1,8 +1,7 @@
-import { buildRedisConnection } from "../../utils/redisEnv.js";
+import { createRedis, redisKey } from "../../utils/redis.js";
 import { Emitter } from "@socket.io/redis-emitter";
 import { logger } from "../../utils/logger.js";
 import { Redis } from "ioredis";
-import env from "../../env.js";
 
 let client: Redis | null = null;
 let emitter: Emitter | null = null;
@@ -15,17 +14,7 @@ let emitter: Emitter | null = null;
  */
 export const getRedisEmitter = (): Emitter => {
   if (emitter) return emitter;
-  const connection = buildRedisConnection(env);
-  const options = { maxRetriesPerRequest: 3 } as const;
-  const redis =
-    typeof connection === "string"
-      ? new Redis(connection, options)
-      : new Redis({
-          sentinels: connection.sentinels,
-          name: connection.name,
-          password: connection.password,
-          ...options,
-        });
+  const redis = createRedis({ maxRetriesPerRequest: 3 });
   redis.on("error", (err) => {
     logger.warn({ err }, "Redis emitter client error");
   });
@@ -39,7 +28,7 @@ export const getRedisEmitter = (): Emitter => {
       return 0;
     });
   client = redis;
-  emitter = new Emitter(redis);
+  emitter = new Emitter(redis, { key: redisKey("socket.io") });
   return emitter;
 };
 

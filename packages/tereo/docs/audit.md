@@ -51,10 +51,22 @@ Every read — list, get, entity history, facets — goes through `resolveAuditO
 | `audit-logs.admin` | `<organization id>`                | that organization                               |
 | `audit-logs.admin` | `none`                             | system-wide entries (`organization_id IS NULL`) |
 | `audit-logs.admin` | absent, no `org_id`                | every organization                              |
+| app service        | absent                             | its own entries, every organization             |
+| app service        | `<organization id>` or `none`      | its own entries in that organization / none     |
 | anyone else        | their own organization's id        | the token's organization                        |
 | anyone else        | another id, `none`, or no `org_id` | `403`                                           |
 
-`audit-logs.admin` is checked hierarchically, so the root `admin` permission qualifies. A person's
+`audit-logs.admin` is checked hierarchically, so the root `admin` permission qualifies.
+
+An _app service_ is a client of a `kind = service` row (`callerService`, `src/utils/callerService.ts`)
+whose token has no `org_id` and does not cover `audit-logs.admin`. Its reads also get
+`req.auditSourceScope` — `source` its slug and `writerUserId` its service account — which every
+read applies on top of the caller's filters: as an extra `AND` clause on the list (so
+`filter[source]=<another>` is an empty page), in the entity history's base `where`, on
+`getById` (another service's entry is a `404`) and on the facets. `audit-logs.read` is enough,
+through the requestable core role `audit_reader`; `audit_writer` (`audit-logs.write`) covers it.
+Entries with the service's slug but another writer are not its own and stay hidden. An
+integration's token without an `org_id` is not an app service and keeps the `403`. A person's
 session always carries an `org_id`, so the admin UI reaches system-wide entries — those
 written with no organization — only through `filter[organizationId]=none`.
 
@@ -82,6 +94,16 @@ entries for every tenant of its app with one set of credentials. Its writes are 
 regardless — `writerUserId` is always the service account. A person's session always carries an
 `org_id`, so a person's token without one has no organization to write for and is refused, as for
 reads.
+
+### Source
+
+`source` is self-reported, except for an app service: its client writes only entries whose
+`source` is its slug, and any other is `422 source_mismatch`, naming the slug (one refuses a
+whole batch). It is not a `403`: no grant fixes it, so the SDK outbox dead-letters the row at once
+rather than retrying. Its reads are scoped
+by source and writer, so they hold exactly what it wrote. Core's own entries have source `tereo`
+(`CORE_SOURCE`); `tereo` and `core` are reserved slugs (`CORE_RESERVED_SLUGS`), refused at
+provisioning and by the admin API, so no service can pass for core.
 
 ## Filters and search
 
@@ -126,13 +148,14 @@ filtered on by name.
 `audit_log_entries_YYYY_MM_DD`). Partitions are managed by:
 
 - the seed — creates partitions for today ±7 days
-- every process that serves the API (`ROLE` `all` or `api`), on start — creates today's and
-  tomorrow's partition of every partitioned table — audit entries, webhook deliveries,
-  notifications and their deliveries (`ensureCurrentPartitions`,
-  `src/utils/partitions.ts`). Without it, a worker down for more than the 7 days it creates
+- every process, whatever its `ROLE`, and the `provision` CLI the chart's Job runs, before its
+  first audited write (registering core's declaration, provisioning) — creates today's and tomorrow's partition of every
+  partitioned table — audit entries, webhook deliveries, notifications and their deliveries
+  (`ensureCurrentPartitions`, `src/utils/partitions.ts`). Without it, a worker down for more than the 7 days it creates
   ahead would leave no partition for new entries, and every audited write in core would fail. A
   table it finds locked is tried up to three times; a partition still missing then, or any other
-  failure, is logged (today's as an error) and does not stop the start.
+  failure, is logged (today's as an error) and does not stop the start
+  (`prepareAndRegisterCore`, `src/utils/coreRegistration.ts`, shared by both).
 - the worker on start — runs `processEntryRetention()` once (`src/jobs/entryRetention.ts`)
 - the `entry-retention` BullMQ job, every 24h — creates partitions 7 days ahead and then drops
   those older than `AUDIT_RETENTION_DAYS` (default 90). Each drop is on its own: one that fails is

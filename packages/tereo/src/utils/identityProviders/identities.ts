@@ -1,6 +1,7 @@
 import { emitTx, logAuditTx, type AuditLogInput } from "../outbox.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { ConflictError, NotFoundError } from "../errors.js";
+import type { Prisma } from "../db/prisma.js";
 import { emailDomain } from "../email.js";
 import db from "../db/index.js";
 
@@ -26,17 +27,20 @@ export const formatUserIdentity = (identity: IdentityRow) => ({
 /**
  * Removes one of the user's identities, unless it is their last way in or
  * their email's domain must sign in through its provider. Throws
- * NotFoundError for an identity that is not the user's.
+ * NotFoundError for an identity that is not the user's. `prepare` runs first
+ * in the transaction, before the user's row is locked.
  */
 export const unlinkIdentity = async (
   auth: AuditLogInput["auth"],
   userId: string,
-  identityId: string
+  identityId: string,
+  prepare?: (tx: Prisma.TransactionClient) => Promise<void>
 ): Promise<void> => {
   const identity = await db.userIdentities.get(userId, identityId);
   const provider = await db.identityProviders.get(identity.providerId);
 
   await db.$transaction(async (tx) => {
+    await prepare?.(tx);
     // Two unlinks at once must not both find another way in.
     await db.users.lockForSignInChange(userId, tx);
     const user = await db.users.get(userId, tx);
@@ -48,7 +52,8 @@ export const unlinkIdentity = async (
       );
     }
     const domain = await db.identityProviders.findDomain(
-      emailDomain(user.email)
+      emailDomain(user.email),
+      tx
     );
     if (domain?.ssoOnly && domain.providerId === provider.id) {
       throw new ConflictError(

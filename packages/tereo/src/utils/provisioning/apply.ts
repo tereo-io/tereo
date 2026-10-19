@@ -1,5 +1,4 @@
 import { CORE_SERVICE_ID, SYSTEM_USER_ID } from "../../definitions/index.js";
-import { deleteLoginClientTx, rotatedSecretFields } from "../clients.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
 import { formatClient, formatRole } from "../transformers.js";
@@ -20,6 +19,7 @@ import {
 } from "../../websocket/emitters/index.js";
 import {
   createIntegrationTx,
+  emitIntegration,
   integrationRef,
   setIntegrationAudiencesTx,
   setIntegrationRolesTx,
@@ -37,6 +37,11 @@ import {
   lockRegistries,
   type ParsedDeclaration,
 } from "../registry.js";
+import {
+  deleteLoginClientTx,
+  rotatedSecretFields,
+  withRetired,
+} from "../clients.js";
 import {
   ProvisioningError,
   type ProvisioningSet,
@@ -164,9 +169,15 @@ const loadState = async (tx: Tx, p: Entries) => {
       OR: [
         { clientSecret: { in: hashes } },
         { previousSecretHash: { in: hashes } },
+        { retiredSecretHashes: { hasSome: hashes } },
       ],
     },
-    select: { id: true, clientSecret: true, previousSecretHash: true },
+    select: {
+      id: true,
+      clientSecret: true,
+      previousSecretHash: true,
+      retiredSecretHashes: true,
+    },
   });
   return {
     // Integrations too: they share the table, and so the slugs.
@@ -197,10 +208,16 @@ const findProblems = async (
     ownRowId: string | undefined
   ) => {
     for (const holder of state.secretHolders) {
+      const retired = holder.retiredSecretHashes.includes(hash);
       if (holder.id === ownRowId) {
-        if (holder.clientSecret !== hash && holder.previousSecretHash === hash)
+        if (holder.clientSecret === hash) continue;
+        if (holder.previousSecretHash === hash)
           problems.push(
             `${label}: ${envName} holds this entry's previous secret, which a rotation replaced; a rollback cannot bring it back. Generate a new one with ${GENERATE_SECRET} and set ${envName} to it`
+          );
+        else if (retired)
+          problems.push(
+            `${label}: ${envName} holds a secret this entry used before, which was retired (rotated away, revoked or removed) and may have leaked; a rollback cannot bring it back. Generate a new one with ${GENERATE_SECRET} and set ${envName} to it`
           );
       } else if (
         holder.clientSecret === hash ||
@@ -208,6 +225,10 @@ const findProblems = async (
       ) {
         problems.push(
           `${label}: ${envName} is already the secret of another client; generate a new one with ${GENERATE_SECRET}`
+        );
+      } else if (retired) {
+        problems.push(
+          `${label}: ${envName} is a retired secret of another client and may have leaked; generate a new one with ${GENERATE_SECRET}`
         );
       }
     }
@@ -383,11 +404,16 @@ const findProblems = async (
 
 const rotateSecret = async (
   tx: Tx,
-  client: { id: string; clientSecret: string | null },
+  client: {
+    id: string;
+    clientSecret: string | null;
+    previousSecretHash: string | null;
+    retiredSecretHashes: string[];
+  },
   hash: string,
   now: Date
 ) => {
-  const data = rotatedSecretFields(client.clientSecret, hash, now);
+  const data = rotatedSecretFields(client, hash, now);
   await tx.oAuthClient.update({ where: { id: client.id }, data });
   return data.previousSecretExpiresAt;
 };
@@ -478,6 +504,7 @@ const applyService = async (
         slug: existing.slug,
         name: spec.name,
         isActive: existing.isActive,
+        unprovisionedAt: null,
       },
     });
     result.updated.push(entry);
@@ -573,6 +600,9 @@ const applyIntegration = async (
         unprovisionedAt: { old: existing.unprovisionedAt, new: null },
       },
       metadata: { action: "provisioned", ...meta },
+    });
+    await emitIntegration(tx, "core.integration.updated", ref, {
+      unprovisionedAt: null,
     });
   }
   if (existing.name !== spec.name || !existing.isActive) {
@@ -800,6 +830,11 @@ const applyClient = async (
           clientSecret: spec.secretHash,
           previousSecretHash: null,
           previousSecretExpiresAt: null,
+          retiredSecretHashes: withRetired(
+            existing.retiredSecretHashes,
+            existing.clientSecret,
+            existing.previousSecretHash
+          ),
         }),
       },
     });
@@ -1238,6 +1273,7 @@ const markMissing = async (
         slug: service.slug,
         name: service.name,
         isActive: service.isActive,
+        unprovisionedAt: now.toISOString(),
       },
     });
     result.unprovisioned.push(`service:${service.slug}`);
@@ -1264,6 +1300,9 @@ const markMissing = async (
       entityName: integration.slug,
       changes: { unprovisionedAt: { old: null, new: now } },
       metadata: { action: "unprovisioned" },
+    });
+    await emitIntegration(tx, "core.integration.updated", integration, {
+      unprovisionedAt: now.toISOString(),
     });
     result.unprovisioned.push(`integration:${integration.slug}`);
   }
@@ -1321,6 +1360,16 @@ const markMissing = async (
       entityName: role.name,
       changes: { unprovisionedAt: { old: null, new: now } },
       metadata: { action: "unprovisioned" },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.role.updated",
+      entityType: "Role",
+      entityId: role.id,
+      data: formatRole(await db.roles.getAny(role.id, tx)) as Record<
+        string,
+        unknown
+      >,
     });
     result.unprovisioned.push(`role:${role.name}`);
   }

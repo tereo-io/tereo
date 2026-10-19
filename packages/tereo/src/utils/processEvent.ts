@@ -6,8 +6,8 @@ import { logAuditTx, PermanentDispatchError } from "./outbox.js";
 import type { DeliveryRef } from "./db/webhookDeliveries.js";
 import { createRecipientCheck } from "./webhookAccess.js";
 import { canonicalJson } from "./uploadIdempotency.js";
+import { getRedisClient, redisKey } from "./redis.js";
 import type { Prisma } from "./db/prisma.js";
-import { getRedisClient } from "./redis.js";
 import { prisma } from "./db/prisma.js";
 import { logger } from "./logger.js";
 import { createHash } from "crypto";
@@ -233,7 +233,9 @@ function idempotencyCacheKey(
   eventType: string,
   idempotencyKey: string
 ): string {
-  return `${IDEMPOTENCY_PREFIX}${callerUserId}:${organizationId}:${eventType}:${idempotencyKey}`;
+  return redisKey(
+    `${IDEMPOTENCY_PREFIX}${callerUserId}:${organizationId}:${eventType}:${idempotencyKey}`
+  );
 }
 
 const cacheKeyOf = (
