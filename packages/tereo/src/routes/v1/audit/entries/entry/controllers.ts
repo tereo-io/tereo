@@ -7,7 +7,8 @@ export const getEntry = async (req: Request, res: Response) => {
   const params = validateParams(entryParamsSchema, req);
   const entry = await db.auditLogEntries.getById(
     params.id,
-    req.auditOrganizationId
+    req.auditOrganizationId,
+    req.auditSourceScope
   );
   res.json(entry);
 };

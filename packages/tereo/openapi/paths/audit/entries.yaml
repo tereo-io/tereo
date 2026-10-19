@@ -19,6 +19,11 @@
       check runs before `unknown_organization`, so a refused caller learns nothing about which
       organizations exist.
 
+      **Source:** an app service's client writes only under its own slug: an entry whose
+      `source` is anything else is `403 forbidden`, and nothing is written. Its reads are
+      scoped to that slug (see `GET /v1/audit/entries`). No service may take the slug `tereo`,
+      the source of core's own entries. Other callers' `source` is as they report it.
+
       **Idempotency:** with an `idempotencyKey`, a repeat of the same request (same body,
       `idempotencyKey` aside) from the same caller within 24 hours returns the first response
       (`201`) without writing again; one that arrives while the first is still in progress gets
@@ -100,7 +105,15 @@
       Results are scoped to the organization in the bearer token's `org_id`. An
       `audit-logs.admin` token may read another organization, or system-wide entries, with
       `filter[organizationId]=<id>|none`; without the filter, an admin token that has no `org_id`
-      reads across organizations. Any other token without one is refused (`403`).
+      reads across organizations.
+
+      An app service's client (its token has no `org_id`) without `audit-logs.admin` reads the
+      entries it wrote — `source` its slug and `writerUserId` its service account — in every
+      organization and system-wide, and may narrow them with `filter[organizationId]=<id>|none`.
+      `audit-logs.read` (core role `audit_reader`) or `audit-logs.write` (`audit_writer`) is
+      enough. Its own filters apply within that scope: `filter[source]` naming another source
+      gives an empty page. Any other token without an `org_id` — a person's, an integration's —
+      is refused (`403`).
 
       Each entry names its `user`, `writer` and `organization`.
 
@@ -192,7 +205,8 @@
 
       **Organization:** each entry's `organizationId` is checked as for
       `POST /v1/audit/entries`; one entry the caller may not write refuses the whole batch with
-      `403 forbidden`, and nothing is written.
+      `403 forbidden`, and nothing is written. An app service's client may write only entries
+      whose `source` is its slug; one other refuses the batch the same way.
 
       **Idempotency:** one optional `idempotencyKey` covers the whole batch (per-entry keys are
       rejected); it behaves as for single entries — a different body is
@@ -268,7 +282,8 @@
     description: |
       Returns the distinct `source` and `entityType` values among the entries the caller can
       read, and the top-level `metadata` keys of recent entries, for filter dropdowns. Scoped to
-      the token's organization, and to `filter[organizationId]`, as for `GET /v1/audit/entries`.
+      the token's organization, and to `filter[organizationId]`, as for `GET /v1/audit/entries`;
+      an app service's client sees only the entries it wrote.
 
       Only entries created in a date window count, so the scan stays on recent partitions:
       `filter[createdAt_gte]` / `filter[createdAt_lte]`, as on the list. Without
@@ -330,7 +345,8 @@
       `organization`. An entry outside the token's organization — or outside the one
       `filter[organizationId]` names, as for `GET /v1/audit/entries` — is reported as not found. An
       `audit-logs.admin` token with no `org_id` and no filter can read an entry of any
-      organization. The permission is checked before the organization (`403` first).
+      organization. An app service's client reads only an entry it wrote; any other is not
+      found. The permission is checked before the organization (`403` first).
 
       **Required permission:** `audit-logs.read`
     operationId: getEntry
@@ -378,7 +394,7 @@
       **Required permission:** `audit-logs.read`
 
       Scoped to the token's organization, and to `filter[organizationId]`, as for
-      `GET /v1/audit/entries`.
+      `GET /v1/audit/entries`; an app service's client sees only the entries it wrote.
 
       **Supported filters:**
       - `source` - equals, in

@@ -116,7 +116,8 @@ Started by `core.start()`, stopped by `core.stop()`. Any number of replicas can 
      up to `retryBaseMs × 2^attempts`, capped at `maxBackoffMs` — until `maxAttempts`, then it is
      dead-lettered. A 403 is retried because the access the row needs (`audit_writer`,
      `webhook_publisher`, `notification_sender`) may still await an admin's approval: rows written before then go out once
-     it is approved.
+     it is approved. A `service` option that is not the service's slug is a 403 too — core takes
+     audit entries only under the caller's own slug — and is retried until dead-lettered.
    - A row whose `destination` has no dispatcher is dead-lettered.
 
 A dead-lettered row is kept, with `dead_lettered_at` and `last_error` set, and logged as

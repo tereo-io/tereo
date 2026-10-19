@@ -8,6 +8,7 @@ import {
   type NotificationInput,
 } from "./notifications/accept.js";
 import {
+  CORE_SOURCE,
   EVENT_TYPES,
   RESERVED_EVENT_TYPES,
   SYSTEM_USER_ID,
@@ -30,9 +31,6 @@ import {
  *   reaper (`createOutboxReaper`, run by the worker) dispatches it after
  *   commit, with the row id as the idempotency key.
  */
-
-/** `source` recorded on every audit entry and webhook event core produces. */
-const SOURCE = "tereo";
 
 type Tx = Prisma.TransactionClient;
 
@@ -69,7 +67,7 @@ export async function logAuditTx(tx: Tx, input: AuditLogInput): Promise<void> {
   const ip = getRequestIpAddress();
   await tx.auditLogEntry.create({
     data: {
-      source: SOURCE,
+      source: CORE_SOURCE,
       organizationId: input.organizationId ?? null,
       userId: input.auth.userId,
       userEmail: input.auth.email?.toLowerCase() ?? null,

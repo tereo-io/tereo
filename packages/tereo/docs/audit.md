@@ -51,10 +51,22 @@ Every read — list, get, entity history, facets — goes through `resolveAuditO
 | `audit-logs.admin` | `<organization id>`                | that organization                               |
 | `audit-logs.admin` | `none`                             | system-wide entries (`organization_id IS NULL`) |
 | `audit-logs.admin` | absent, no `org_id`                | every organization                              |
+| app service        | absent                             | its own entries, every organization             |
+| app service        | `<organization id>` or `none`      | its own entries in that organization / none     |
 | anyone else        | their own organization's id        | the token's organization                        |
 | anyone else        | another id, `none`, or no `org_id` | `403`                                           |
 
-`audit-logs.admin` is checked hierarchically, so the root `admin` permission qualifies. A person's
+`audit-logs.admin` is checked hierarchically, so the root `admin` permission qualifies.
+
+An *app service* is a client of a `kind = service` row (`callerService`, `src/utils/callerService.ts`)
+whose token has no `org_id` and does not cover `audit-logs.admin`. Its reads also get
+`req.auditSourceScope` — `source` its slug and `writerUserId` its service account — which every
+read applies on top of the caller's filters: as an extra `AND` clause on the list (so
+`filter[source]=<another>` is an empty page), in the entity history's base `where`, on
+`getById` (another service's entry is a `404`) and on the facets. `audit-logs.read` is enough,
+through the requestable core role `audit_reader`; `audit_writer` (`audit-logs.write`) covers it.
+Entries with the service's slug but another writer are not its own and stay hidden. An
+integration's token without an `org_id` is not an app service and keeps the `403`. A person's
 session always carries an `org_id`, so the admin UI reaches system-wide entries — those
 written with no organization — only through `filter[organizationId]=none`.
 
@@ -82,6 +94,14 @@ entries for every tenant of its app with one set of credentials. Its writes are 
 regardless — `writerUserId` is always the service account. A person's session always carries an
 `org_id`, so a person's token without one has no organization to write for and is refused, as for
 reads.
+
+### Source
+
+`source` is self-reported, except for an app service: its client writes only entries whose
+`source` is its slug, and any other is `403` (one refuses a whole batch). Its reads, scoped by
+source and writer, so hold exactly what it wrote. Core's own entries have source `tereo`
+(`CORE_SOURCE`); `tereo` and `core` are reserved slugs (`CORE_RESERVED_SLUGS`), refused at
+provisioning and by the admin API, so no service can pass for core.
 
 ## Filters and search
 

@@ -2,6 +2,7 @@ import { ForbiddenError, ValidationError } from "../utils/errors.js";
 import { UserType } from "../../prisma/generated/client/index.js";
 import { PERMISSIONS } from "../definitions/permissions.js";
 import { Request, Response, NextFunction } from "express";
+import { callerService } from "../utils/callerService.js";
 import { hasPermission } from "../utils/permissions.js";
 import type { AuthContext } from "./auth.js";
 import db from "../utils/db/index.js";
@@ -11,8 +12,16 @@ declare global {
     interface Request {
       organizationId?: string;
       auditOrganizationId?: string | null;
+      /** Set on audit reads by an app service: only the entries it wrote. */
+      auditSourceScope?: AuditSourceScope;
     }
   }
+}
+
+/** The entries an app service wrote: under its slug, by its own account. */
+export interface AuditSourceScope {
+  source: string;
+  writerUserId: string;
 }
 
 const UUID_RE =
@@ -73,6 +82,17 @@ const parseAuditOrganizationFilter = (
 };
 
 /**
+ * The scope of an app service reading the audit log with a token without an
+ * `org_id`: the entries it wrote, in every organization. Null for anyone else.
+ */
+const serviceReadScope = async (
+  auth: Pick<AuthContext, "userId" | "oauthClientId">
+): Promise<AuditSourceScope | null> => {
+  const service = await callerService(auth);
+  return service ? { source: service.slug, writerUserId: auth.userId } : null;
+};
+
+/**
  * Audit reads: sets `req.auditOrganizationId` — an organization id, `null` for
  * system-wide entries, or `undefined` for every organization.
  *
@@ -80,8 +100,12 @@ const parseAuditOrganizationFilter = (
  * for `audit-logs.admin`; anyone else may name only their own. Without it,
  * reads are scoped to the token's `org_id`, and an admin token without one
  * sees every organization.
+ *
+ * An app service's token has no `org_id`: without `audit-logs.admin` it reads
+ * the entries it wrote (`req.auditSourceScope`) in every organization, and may
+ * narrow them with `filter[organizationId]`.
  */
-export const resolveAuditOrganizationId = (
+export const resolveAuditOrganizationId = async (
   req: Request,
   _res: Response,
   next: NextFunction
@@ -92,6 +116,16 @@ export const resolveAuditOrganizationId = (
     PERMISSIONS.AUDIT_LOGS.ADMIN
   );
   const requested = parseAuditOrganizationFilter(req);
+  const serviceScope =
+    !isAdmin && !tokenOrgId && req.auth
+      ? await serviceReadScope(req.auth)
+      : null;
+
+  if (serviceScope) {
+    req.auditSourceScope = serviceScope;
+    req.auditOrganizationId = requested;
+    return next();
+  }
 
   if (requested !== undefined) {
     if (!isAdmin && (requested === null || requested !== tokenOrgId)) {

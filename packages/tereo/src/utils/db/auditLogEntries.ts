@@ -30,16 +30,33 @@ const withNames = {
   organization: orgRefSelect,
 } satisfies Prisma.AuditLogEntryInclude;
 
-/** `organizationId`: an id, `null` for system-wide entries, `undefined` for any. */
-export const findById = async (id: string, organizationId?: string | null) => {
+/** Limits a read to the entries one writer made under one source. */
+export interface EntryScope {
+  source: string;
+  writerUserId: string;
+}
+
+/**
+ * `organizationId`: an id, `null` for system-wide entries, `undefined` for any.
+ * `scope`: only an entry within it.
+ */
+export const findById = async (
+  id: string,
+  organizationId?: string | null,
+  scope?: EntryScope
+) => {
   return await prisma.auditLogEntry.findFirst({
-    where: { id, organizationId },
+    where: { id, organizationId, ...scope },
     include: withNames,
   });
 };
 
-export const getById = async (id: string, organizationId?: string | null) => {
-  const entry = await findById(id, organizationId);
+export const getById = async (
+  id: string,
+  organizationId?: string | null,
+  scope?: EntryScope
+) => {
+  const entry = await findById(id, organizationId, scope);
   if (!entry) throw new NotFoundError("Audit log entry not found");
   return entry;
 };
@@ -261,13 +278,14 @@ export interface FacetWindow {
  */
 const getMetadataKeys = async (
   organizationId: string | null | undefined,
-  createdAt: FacetWindow
+  createdAt: FacetWindow,
+  scope?: EntryScope
 ) => {
   const rows = await prisma.$queryRaw<{ key: string }[]>`
     SELECT DISTINCT k."key"
     FROM (
       SELECT "metadata" FROM "audit"."audit_log_entries"
-      WHERE ${compileWhere({ organizationId, createdAt })}
+      WHERE ${compileWhere({ organizationId, createdAt, ...scope })}
         AND jsonb_typeof("metadata") = 'object'
       ORDER BY "created_at" DESC
       LIMIT ${METADATA_KEY_SAMPLE_ROWS}
@@ -279,12 +297,16 @@ const getMetadataKeys = async (
   return rows.map((row) => row.key);
 };
 
-/** Facets of the entries created in `createdAt`, the caller's date window. */
+/**
+ * Facets of the entries created in `createdAt`, the caller's date window, and
+ * within `scope` when given.
+ */
 export const getFacets = async (
   organizationId: string | null | undefined,
-  createdAt: FacetWindow
+  createdAt: FacetWindow,
+  scope?: EntryScope
 ) => {
-  const where = { organizationId, createdAt };
+  const where = { organizationId, createdAt, ...scope };
   const [sources, entityTypes, metadataKeys] = await Promise.all([
     prisma.auditLogEntry.groupBy({
       by: ["source"],
@@ -296,7 +318,7 @@ export const getFacets = async (
       where,
       orderBy: { entityType: "asc" },
     }),
-    getMetadataKeys(organizationId, createdAt),
+    getMetadataKeys(organizationId, createdAt, scope),
   ]);
   return {
     sources: sources.map((row) => row.source),

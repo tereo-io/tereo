@@ -45,15 +45,20 @@ nothing else changed.
 
 ## Reads
 
-Scoped to this service's `source` unless `filter.source` names another, except `getById`. Paged
+Reads need the core role `audit_reader` (`audit-logs.read`) or `audit_writer` in the service's
+`access.roles`. Core scopes them to the entries this service wrote — `source` its slug, written by
+its own client — in every organization and system-wide; `filter.source` naming another source
+gives an empty page, and `getById` of another service's entry is a 404. The SDK also sends
+`filter[source]` as the client's `source` (the `service` option, which must be the service's slug:
+core refuses an entry under any other source with a 403). Paged
 results are `{ data, hasMore, limit, nextCursor }`; pass `nextCursor` back as `cursor`. Each entry
 carries `writerUserId` and names its `user`, `writer` and `organization` (`AuditLogReadResult`).
 
 | Method | |
 |--------|---|
 | `query(options?)` | `AuditLogQueryOptions`: `limit`, `cursor`, `sort: "createdAt"`, `sortDir`, `filter` (per field: `equals`, `in`, `contains`, `gte`/`lte` on `createdAt`; `q` searches text over at most 31 days) and `metadata` (`{ key: { equals?, contains? } }`) |
-| `getByEntity(entityType, entityId, options?)` | One entity's history. `options.organizationId` (an id or `"none"`) names the organization; anything but the token's own needs `audit-logs.admin` |
-| `getById(id)` | One entry, by id — not filtered to `source`: any entry the token's organization scope can read |
+| `getByEntity(entityType, entityId, options?)` | One entity's history. `options.organizationId` (an id or `"none"`) narrows it to one organization, or to system-wide entries |
+| `getById(id)` | One entry, by id — only one this service wrote |
 | `queryByEntityOrMetadata({ entityId, metadataKey, limit?, cursor?, sortDir?, filter? })` | A parent's history: entries whose `entityId` matches, merged with those whose `metadata[metadataKey]` does (e.g. order lines carrying `metadata.orderId`). Deduplicated, in core's order, one composite cursor. A page can hold fewer than `limit` entries while `hasMore` is true |
 
 ## Other

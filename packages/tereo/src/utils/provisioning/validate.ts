@@ -3,7 +3,7 @@ import { hasPermission } from "../permissions.js";
 import {
   CORE_DECLARATION,
   CORE_RESERVED_NAMESPACES,
-  CORE_SERVICE,
+  CORE_RESERVED_SLUGS,
   PERMISSION_CATALOG,
   RESERVED_EVENT_TYPES,
 } from "../../definitions/index.js";
@@ -157,8 +157,8 @@ const checkSetUniqueness = (
 
   services.forEach(({ file, service }, i) => {
     const label = serviceLabel(file, service);
-    if (service.slug === CORE_SERVICE.slug)
-      problems.push(`${label}: slug "${service.slug}" is core's`);
+    if (CORE_RESERVED_SLUGS.includes(service.slug))
+      problems.push(`${label}: slug "${service.slug}" is reserved for core`);
     const reserved = CORE_RESERVED_NAMESPACES.find((ns) =>
       namespacesOverlap(service.namespace, ns)
     );
@@ -373,8 +373,8 @@ const checkIntegration = (
   problems: string[]
 ) => {
   const label = `${file}: integrations[${integration.slug}]`;
-  if (integration.slug === CORE_SERVICE.slug)
-    problems.push(`${label}: slug "${integration.slug}" is core's`);
+  if (CORE_RESERVED_SLUGS.includes(integration.slug))
+    problems.push(`${label}: slug "${integration.slug}" is reserved for core`);
 
   const customRoles = new Map(
     set.documents.flatMap((d) => d.roles.map((r) => [r.name, r] as const))

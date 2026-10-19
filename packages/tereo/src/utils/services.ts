@@ -1,5 +1,6 @@
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { UserType } from "../../prisma/generated/client/index.js";
+import { CORE_RESERVED_SLUGS } from "../definitions/index.js";
 import { assertNamespaceAvailable } from "./registry.js";
 import { emitTx, logAuditTx } from "./outbox.js";
 import type { Prisma } from "./db/prisma.js";
@@ -32,12 +33,20 @@ export const slugify = (name: string) =>
 export const serviceAccountEmail = (slug: string) =>
   `${slug}@services.tereo.internal`;
 
+/** Throws for a slug no service or integration may take (`CORE_RESERVED_SLUGS`). */
+export const assertSlugUnreserved = (slug: string) => {
+  if (CORE_RESERVED_SLUGS.includes(slug)) {
+    throw new ConflictError(`Slug "${slug}" is reserved for core`);
+  }
+};
+
 export const createServiceTx = async (
   tx: Prisma.TransactionClient,
   input: CreateServiceInput,
   actor: { userId: string; email: string | null }
 ) => {
   const { slug, name, namespace } = input;
+  assertSlugUnreserved(slug);
   if (await tx.service.findUnique({ where: { slug } })) {
     throw new ConflictError(`A service with slug "${slug}" already exists`);
   }
