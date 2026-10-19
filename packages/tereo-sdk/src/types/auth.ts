@@ -42,4 +42,9 @@ export interface AuthServiceClientConfig {
   defaultTestPermissions?: string[];
   /** Routes that can be accessed without authentication (default: []). */
   publicRoutes?: PublicRouteConfig[];
+  /**
+   * Longest time an active introspection is cached (default: 60). A signed-out
+   * or revoked token stays accepted for up to this long; 0 asks core every time.
+   */
+  introspectionCacheTtlSeconds?: number;
 }

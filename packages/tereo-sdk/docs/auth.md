@@ -8,6 +8,7 @@ users and organizations. Configure it with `createCoreClient({ auth })`:
 |---------------|---------|---|
 | `publicRoutes` | `[]` | `{ pattern: RegExp, methods? }[]` — requests matching `pattern` (path without query) and a method (default `GET`, `HEAD`) pass `requireAuth` when they carry no `Authorization` header |
 | `defaultTestPermissions` | `[]` | Permissions a test token gets when it names none — see [testing](testing.md) |
+| `introspectionCacheTtlSeconds` | `60` | Longest time an active introspection is cached (never past the token's `exp`). A signed-out or revoked token stays accepted by this service for up to this many seconds; `0` asks core on every request |
 
 ## Middleware
 
@@ -22,10 +23,10 @@ router.get("/items", core.auth.requirePermission("product.items.read"), listItem
 | `requireAuth` | Reads `Authorization: Bearer …`, introspects it and sets `req.auth`. A missing, invalid or expired token throws `UnauthorizedError` (401) |
 | `requirePermission(permission)` | After `requireAuth`. Throws `ForbiddenError` (403) unless `req.auth.permissions` grants `permission` |
 | `validateUser(req)` | Returns `req.auth`, or throws `ForbiddenError` |
-| `validateOrganization(req, organizationId?)` | Returns `req.organization` (set by the app, not the SDK), or throws `ForbiddenError`; with `organizationId`, also when it differs |
+| `validateOrganization(req, organizationId?)` | Returns `req.organization` (set by the app, not the SDK), or throws `ForbiddenError` when it is missing; with `organizationId`, throws `NotFoundError` (404) when it differs, so another organization's resource reads as absent rather than as someone else's |
 
 All are arrow-function properties, safe to destructure. Errors go to the app's error handler with
-`statusCode` and `code` (`unauthorized`, `forbidden`).
+`statusCode` and `code` (`unauthorized`, `forbidden`, `not_found`).
 
 Permissions are hierarchical: `read` < `write` < `archive` < `delete` < `admin` on the same base
 (`product.items.write` grants `product.items.read`); `<base>.admin` also covers every permission
@@ -45,7 +46,7 @@ a client_credentials token), `permissions`, `currentSessionId`, `oauthClientId` 
 
 | Method | Returns | Cache |
 |--------|---------|-------|
-| `introspectToken(token)` | `IntrospectionResponse` — `{ active: false }` on any failure, including core being unreachable, which is logged at error | Active results 60 s, keyed by the token's SHA-256 |
+| `introspectToken(token)` | `IntrospectionResponse` — `{ active: false }` on any failure, including core being unreachable, which is logged at error | Active results up to `introspectionCacheTtlSeconds` (60 s), keyed by the token's SHA-256 |
 | `getUser(userId)` | `AuthServiceUser \| null` (null on 404) | 5 min; not-found 60 s |
 | `getUsers(userIds)` | `Map<userId, AuthServiceUser \| null>` — cache misses fetched together, one `GET /v1/admin/users?filter[id]=…&filter[id_op]=in` per 100 ids; a non-UUID id is null | as `getUser` |
 | `validateUserExists(userId)` | `boolean` | as `getUser` |

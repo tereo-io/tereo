@@ -38,6 +38,7 @@ export {
   HttpError,
   UnauthorizedError,
   ForbiddenError,
+  NotFoundError,
 } from "./utils/errors.js";
 export { AuthServiceClient } from "./clients/auth.js";
 export type {

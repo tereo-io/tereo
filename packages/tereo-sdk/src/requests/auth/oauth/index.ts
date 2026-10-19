@@ -33,10 +33,10 @@ export const introspectToken = async (
 export const getServiceAccessToken = async (
   scopes?: string[]
 ): Promise<ServiceAccessTokenResponse> => {
-  const body = new URLSearchParams({
-    grant_type: "client_credentials",
-    scope: scopes ? scopes.join(" ") : "openid",
-  });
+  // Service and integration clients hold no scopes, and core refuses any
+  // scope a client does not hold, so none is asked for unless given.
+  const body = new URLSearchParams({ grant_type: "client_credentials" });
+  if (scopes?.length) body.set("scope", scopes.join(" "));
   const res = await tryHandleRequest<ServiceAccessTokenResponse>(
     {
       clientName: CORE_PUBLIC_CLIENT,

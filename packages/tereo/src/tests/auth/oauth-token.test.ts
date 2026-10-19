@@ -1025,6 +1025,42 @@ describe("OAuth Token Endpoint", () => {
       expect(data.access_token).toBeUndefined();
     });
 
+    it("issues a token to a client holding no scopes, when none is asked for, and refuses openid", async () => {
+      // As a provisioned service or integration client: scopes [].
+      const scopeless = await createTestClient({
+        clientType: "confidential",
+        grantTypes: ["client_credentials"],
+        scopes: [],
+      });
+      const credentials = Buffer.from(
+        `${scopeless.clientId}:${scopeless.plainSecret}`
+      ).toString("base64");
+      const token = (body: Record<string, string>) =>
+        fetch(`${BASE_URL}/oauth/token`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${credentials}`,
+          },
+          body: new URLSearchParams(body),
+        });
+
+      const issued = await token({ grant_type: "client_credentials" });
+      expect(issued.status).toBe(HTTP_STATUS.OK);
+      expect(((await issued.json()) as TokenResponse).access_token).toEqual(
+        expect.any(String)
+      );
+
+      const refused = await token({
+        grant_type: "client_credentials",
+        scope: "openid",
+      });
+      expect(refused.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(((await refused.json()) as TokenResponse).error).toBe(
+        "invalid_scope"
+      );
+    });
+
     it("should reject client_credentials with wrong secret with 401 error", async () => {
       // Server requires Basic Auth for confidential clients
       const credentials = Buffer.from(

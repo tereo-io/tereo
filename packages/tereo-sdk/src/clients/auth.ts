@@ -1,12 +1,16 @@
 import type { ActiveIntrospectionResponse } from "../requests/auth/oauth/types.js";
 import { setAuthSpanAttrs, setRequiredPermission } from "../utils/otel.js";
-import { ForbiddenError, UnauthorizedError } from "../utils/errors.js";
 import type { Request, Response, NextFunction } from "express";
 import { getOriginalStatus, requests } from "../handler.js";
 import { parseTestToken } from "../utils/testTokens.js";
 import { hasPermission } from "../utils/permissions.js";
 import { logger } from "../utils/logger.js";
 import crypto from "crypto";
+import {
+  ForbiddenError,
+  NotFoundError,
+  UnauthorizedError,
+} from "../utils/errors.js";
 import {
   buildCachePrefix,
   safeCacheGet,
@@ -53,11 +57,12 @@ const INTROSPECT_CACHE_TTL_SECONDS = 60;
  * How long an active introspection may be cached: never past the token's
  * own `exp`, or an expired token would keep passing. 0 means not at all.
  */
-export const introspectionCacheTtl = (exp: number, nowMs = Date.now()) =>
-  Math.max(
-    0,
-    Math.min(INTROSPECT_CACHE_TTL_SECONDS, exp - Math.ceil(nowMs / 1000))
-  );
+export const introspectionCacheTtl = (
+  exp: number,
+  nowMs = Date.now(),
+  maxSeconds = INTROSPECT_CACHE_TTL_SECONDS
+) =>
+  Math.max(0, Math.min(Math.floor(maxSeconds), exp - Math.ceil(nowMs / 1000)));
 const USER_CACHE_TTL_SECONDS = 300;
 const USER_NOT_FOUND_CACHE_TTL_SECONDS = 60;
 const MAX_USER_IDS_PER_REQUEST = 100;
@@ -67,6 +72,7 @@ const UUID_RE =
 export class AuthServiceClient {
   private readonly defaultTestPermissions: string[];
   private readonly publicRoutes: PublicRouteConfig[];
+  private readonly introspectionCacheTtlSeconds: number;
 
   /**
    * `testMode` accepts forged test tokens and answers user and organization
@@ -79,6 +85,8 @@ export class AuthServiceClient {
   ) {
     this.defaultTestPermissions = config.defaultTestPermissions ?? [];
     this.publicRoutes = config.publicRoutes ?? [];
+    this.introspectionCacheTtlSeconds =
+      config.introspectionCacheTtlSeconds ?? INTROSPECT_CACHE_TTL_SECONDS;
   }
 
   /**
@@ -94,15 +102,25 @@ export class AuthServiceClient {
       if (testResult) return testResult;
     }
 
+    const caching = this.introspectionCacheTtlSeconds > 0;
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const cacheKey = `${AUTH_CACHE_PREFIX}token:${tokenHash}`;
 
-    const cached = await safeCacheGet<IntrospectionResponse>(cacheKey);
-    if (cached) return cached;
+    if (caching) {
+      const cached = await safeCacheGet<IntrospectionResponse>(cacheKey);
+      if (cached) return cached;
+    }
 
     try {
       const data = await requests.auth.introspectToken(token);
-      const ttl = data.active ? introspectionCacheTtl(data.exp) : 0;
+      const ttl =
+        caching && data.active
+          ? introspectionCacheTtl(
+              data.exp,
+              Date.now(),
+              this.introspectionCacheTtlSeconds
+            )
+          : 0;
       if (ttl > 0) await safeCacheSet(cacheKey, data, ttl);
       return data;
     } catch (err) {
@@ -385,7 +403,8 @@ export class AuthServiceClient {
   /**
    * Validates that req.organization exists and returns the OrganizationContext.
    * Optionally validates that the client ID matches a specific value.
-   * Throws ForbiddenError if client context is missing or mismatched.
+   * Throws ForbiddenError if client context is missing, and NotFoundError if
+   * it differs, so another organization's resource reads as absent.
    */
   validateOrganization = (
     req: Request,
@@ -398,7 +417,7 @@ export class AuthServiceClient {
       organizationId !== undefined &&
       organizationId !== req.organization.id
     ) {
-      throw new ForbiddenError("Resource does not belong to this client");
+      throw new NotFoundError();
     }
     return req.organization;
   };

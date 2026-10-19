@@ -62,7 +62,8 @@ const doc: ProvisioningDocument = {
 writeFileSync("billing.json", JSON.stringify(doc, null, 2) + "\n");
 ```
 
-- `version` is the release's semver. A document older than the one applied last is refused.
+- `version` is the release's semver. A document older than the one applied last is still applied
+  (a deliberate rollback); core logs a warning naming both versions.
 - Secrets are never in the file: `secretFrom` names an environment variable in **core's**
   environment.
 - Optional fields take the schema's defaults (`policy` `"private"`, `orgAssignable` `false`,

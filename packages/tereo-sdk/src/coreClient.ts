@@ -35,7 +35,7 @@ export interface CoreClientOptions {
   redis: Redis;
   /** Default: `NODE_ENV === "production"`. */
   production?: boolean;
-  /** Public routes and test-token permissions for `auth.requireAuth`. */
+  /** Public routes, test-token permissions and introspection caching for `auth`. */
   auth?: AuthServiceClientConfig;
   /**
    * For an app service's tests: `auth` accepts forged `test-token-…` tokens

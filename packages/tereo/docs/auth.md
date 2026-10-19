@@ -732,7 +732,9 @@ the user's sessions and token families, in the transaction that makes the reset
 (`endUserSessions`, recorded as a `sessions_revoked` entry and an `auth.user.sessions-revoked`
 event); an admin resetting their own password keeps the session they act from. Every such sign-out
 also revokes the access tokens issued without a refresh token (clients without the `refresh_token`
-grant), all but the caller's own, and closes their sockets. Either reset, an
+grant), all but the caller's own, and closes their sockets. An app service using `@tereo-io/sdk`
+may cache an active introspection for up to 60 s (its `introspectionCacheTtlSeconds`), so it can
+keep accepting a signed-out or revoked token that long. Either reset, an
 email change, an identity invite or an admin identity unlink
 (`DELETE /v1/admin/users/:id/identities/:identityId`) hands the caller the account or changes how it
 is entered, so it may not reach beyond what the caller holds (`assertMayResetCredentials`): every permission the user holds — through global roles
