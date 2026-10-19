@@ -15019,7 +15019,10 @@ webhooks:
       tags:
         - Admin - Roles
       summary: Role updated
-      description: Fired when a role is updated. `data` is the role after the change.
+      description: |
+        Fired when a role is updated, including when a provisioned custom role
+        drops out of the provisioning documents or returns to them
+        (`unprovisionedAt` set, then null). `data` is the role after the change.
       operationId: webhookRoleUpdated
       security: []
       parameters:
@@ -15269,7 +15272,9 @@ webhooks:
         - Admin - Clients
       summary: OAuth client updated
       description: |
-        Fired when an OAuth client is updated. `data` is the client after the
+        Fired when an OAuth client is updated, including when a provisioned
+        client drops out of the provisioning documents or returns to them
+        (`unprovisionedAt` set, then null). `data` is the client after the
         change (no secret, no `owner`).
       operationId: webhookClientUpdated
       security: []
@@ -16168,7 +16173,10 @@ webhooks:
       tags:
         - Admin - Services
       summary: Service updated
-      description: Fired when a service is renamed, deactivated or reactivated.
+      description: |
+        Fired when a service is renamed, deactivated or reactivated, and when a
+        provisioned service drops out of the provisioning documents or returns
+        to them (`unprovisionedAt` set, then null).
       operationId: webhookServiceUpdated
       security: []
       parameters:
@@ -16196,6 +16204,7 @@ webhooks:
                         - slug
                         - name
                         - isActive
+                        - unprovisionedAt
                       properties:
                         id:
                           type: string
@@ -16206,6 +16215,12 @@ webhooks:
                           type: string
                         isActive:
                           type: boolean
+                        unprovisionedAt:
+                          type:
+                            - string
+                            - 'null'
+                          format: date-time
+                          description: When it went missing from the provisioning documents; null while they list it.
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -16586,7 +16601,11 @@ webhooks:
       tags:
         - Admin - Integrations
       summary: Integration updated
-      description: Fired when an integration is renamed or reactivated, or its roles or audience change. `data` carries what changed.
+      description: |
+        Fired when an integration is renamed or reactivated, its roles or
+        audience change, or a provisioned integration drops out of the
+        provisioning documents or returns to them (`unprovisionedAt` set, then
+        null). `data` carries what changed.
       operationId: webhookIntegrationUpdated
       security: []
       parameters:
@@ -16637,6 +16656,12 @@ webhooks:
                           type: array
                           items:
                             type: string
+                        unprovisionedAt:
+                          type:
+                            - string
+                            - 'null'
+                          format: date-time
+                          description: When it went missing from the provisioning documents; null when it returns.
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -21754,6 +21779,7 @@ components:
         - consentRequired
         - trustedCoreScopes
         - provisioned
+        - unprovisionedAt
         - ownerId
         - organizationId
         - service
@@ -21828,6 +21854,15 @@ components:
             True for a client declared in the provisioning documents. It changes only
             there: updating, deleting or regenerating its secret here is `409
             managed_by_provisioning`.
+        unprovisionedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: |
+            When a provisioned client went missing from the provisioning
+            documents; null while they list it, and for one never provisioned.
+            Cleared when it returns.
         ownerId:
           type: string
           format: uuid
@@ -22092,6 +22127,7 @@ components:
         - service
         - requires2fa
         - provisioned
+        - unprovisionedAt
         - retiredAt
         - archivedAt
         - createdAt
@@ -22117,6 +22153,15 @@ components:
             changes only there: editing, deleting, archiving, restoring or
             changing its permissions here is `409 managed_by_provisioning`.
             Assigning it and duplicating it are allowed.
+        unprovisionedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: |
+            When a provisioned custom role went missing from the provisioning
+            documents; null while they list it, and for one never provisioned.
+            Cleared when it returns.
         isSystem:
           type: boolean
           description: True for a system role, declared in code by a service (`serviceId` set); read-only except `requires2fa`.
@@ -22772,6 +22817,7 @@ components:
         - namespace
         - isActive
         - provisioned
+        - unprovisionedAt
         - clientId
         - serviceAccountUserId
         - serviceAccountUser
@@ -22803,6 +22849,15 @@ components:
             True for a service declared in the provisioning documents. Only its access
             and the end of a secret overlap are decided here: updating it or
             regenerating its secret is `409 managed_by_provisioning`.
+        unprovisionedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: |
+            When a provisioned service went missing from the provisioning
+            documents; null while they list it, and for one never provisioned.
+            Cleared when it returns.
         clientId:
           type:
             - string
@@ -27709,6 +27764,7 @@ components:
         - organization
         - isActive
         - provisioned
+        - unprovisionedAt
         - clientId
         - serviceAccountUserId
         - serviceAccountUser
@@ -27746,6 +27802,15 @@ components:
             True for an integration from the provisioning documents. Only the end
             of a secret overlap is decided here; every other write is
             `409 managed_by_provisioning`.
+        unprovisionedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: |
+            When a provisioned integration went missing from the provisioning
+            documents; null while they list it, and for one never provisioned.
+            Cleared when it returns.
         clientId:
           type:
             - string

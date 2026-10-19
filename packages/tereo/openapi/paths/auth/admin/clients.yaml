@@ -369,7 +369,9 @@ auth.client.updated:
       - Admin - Clients
     summary: OAuth client updated
     description: |
-      Fired when an OAuth client is updated. `data` is the client after the
+      Fired when an OAuth client is updated, including when a provisioned
+      client drops out of the provisioning documents or returns to them
+      (`unprovisionedAt` set, then null). `data` is the client after the
       change (no secret, no `owner`).
     operationId: webhookClientUpdated
     security: []

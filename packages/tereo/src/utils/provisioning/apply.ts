@@ -20,6 +20,7 @@ import {
 } from "../../websocket/emitters/index.js";
 import {
   createIntegrationTx,
+  emitIntegration,
   integrationRef,
   setIntegrationAudiencesTx,
   setIntegrationRolesTx,
@@ -478,6 +479,7 @@ const applyService = async (
         slug: existing.slug,
         name: spec.name,
         isActive: existing.isActive,
+        unprovisionedAt: null,
       },
     });
     result.updated.push(entry);
@@ -573,6 +575,9 @@ const applyIntegration = async (
         unprovisionedAt: { old: existing.unprovisionedAt, new: null },
       },
       metadata: { action: "provisioned", ...meta },
+    });
+    await emitIntegration(tx, "core.integration.updated", ref, {
+      unprovisionedAt: null,
     });
   }
   if (existing.name !== spec.name || !existing.isActive) {
@@ -1238,6 +1243,7 @@ const markMissing = async (
         slug: service.slug,
         name: service.name,
         isActive: service.isActive,
+        unprovisionedAt: now.toISOString(),
       },
     });
     result.unprovisioned.push(`service:${service.slug}`);
@@ -1264,6 +1270,9 @@ const markMissing = async (
       entityName: integration.slug,
       changes: { unprovisionedAt: { old: null, new: now } },
       metadata: { action: "unprovisioned" },
+    });
+    await emitIntegration(tx, "core.integration.updated", integration, {
+      unprovisionedAt: now.toISOString(),
     });
     result.unprovisioned.push(`integration:${integration.slug}`);
   }
@@ -1321,6 +1330,16 @@ const markMissing = async (
       entityName: role.name,
       changes: { unprovisionedAt: { old: null, new: now } },
       metadata: { action: "unprovisioned" },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.role.updated",
+      entityType: "Role",
+      entityId: role.id,
+      data: formatRole(await db.roles.getAny(role.id, tx)) as Record<
+        string,
+        unknown
+      >,
     });
     result.unprovisioned.push(`role:${role.name}`);
   }

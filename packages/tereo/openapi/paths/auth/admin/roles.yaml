@@ -743,7 +743,10 @@ auth.role.updated:
     tags:
       - Admin - Roles
     summary: Role updated
-    description: Fired when a role is updated. `data` is the role after the change.
+    description: |
+      Fired when a role is updated, including when a provisioned custom role
+      drops out of the provisioning documents or returns to them
+      (`unprovisionedAt` set, then null). `data` is the role after the change.
     operationId: webhookRoleUpdated
     security: []
     parameters:
