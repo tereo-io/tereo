@@ -1,6 +1,6 @@
 {
   "name": "tereo-ui",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Admin UI for Tereo — auth, files, webhooks and audit log",
   "type": "module",
