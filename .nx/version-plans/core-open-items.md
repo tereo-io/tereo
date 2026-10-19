@@ -10,4 +10,4 @@ Breaking changes:
 - The slugs `core` and `tereo` are reserved for services and integrations, in provisioning documents and through the admin API.
 - Provisioning refuses any retired client secret, whether rotated away, revoked or replaced, for that client and every other. A deploy that reuses one fails at start; generate a fresh secret.
 - Client, role, service and integration responses, and their events, gain `unprovisionedAt`. `core.service.updated` always carries it, and dropping an integration or a custom role from the documents now emits `core.integration.updated` or `auth.role.updated`.
-- Some admin errors come in a different order: `DELETE /v1/admin/users/:id/sessions/:sessionId` for a missing session answers `404` before a `403`.
+- Some admin errors come in a different order: `DELETE /v1/admin/users/:id/sessions` naming a session that does not exist answers `404` before a `403`.
