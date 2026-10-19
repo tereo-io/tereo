@@ -183,6 +183,44 @@
         $ref: '../../components/responses.yaml#/RateLimitResponse'
       '500':
         $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/account/service:
+  get:
+    tags:
+      - Account - Profile
+    summary: Get the calling service
+    description: |
+      Returns the app service whose client is calling: the declaration version and hash core
+      last applied, when, and its access — so a service can check at start that its
+      provisioning document has been applied. No permission is needed.
+
+      Any other caller — a person, an integration — gets `404`.
+    operationId: getAccountService
+    security:
+      - BearerAuth: []
+    responses:
+      '200':
+        description: The calling service
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/AccountService'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/auth/responses.yaml#/AccountForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
 /account/password:
   post:
     tags:

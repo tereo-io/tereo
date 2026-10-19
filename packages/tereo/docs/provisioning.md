@@ -177,7 +177,7 @@ A service's own document usually holds only `version` and `service`.
 | `clientId` | The service's OAuth client ID; defaults to the slug. Unique across services and login clients |
 | `internalHost` | Optional, max 253: the one host its own webhooks may reach at a private address ([below](#internal-webhook-targets)) |
 | `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)) |
-| `access.roles` | Requestable core roles, bare (`file_user`, `webhook_publisher`, `audit_writer`, `notification_sender`, `tenant_resolver`, `user_resolver`), or `<slug>/<name>`, a system role another service of the set declares |
+| `access.roles` | Requestable core roles, bare (`file_user`, `webhook_publisher`, `audit_writer`, `audit_reader`, `notification_sender`, `tenant_resolver`, `user_resolver`), or `<slug>/<name>`, a system role another service of the set declares |
 | `access.audiences` | Services of the set whose APIs this one may call (it can be introspected by them). Not core, not itself |
 | `permissions`, `systemRoles`, `buckets`, `eventTypes` | The service's declaration, with the namespacing, validation and update rules of [registry](registry.md#what-a-declaration-holds) |
 | `webhooks` | Service-owned endpoints: [Webhooks](#webhooks) |
@@ -221,7 +221,10 @@ private IP, or a name that resolves to one) declares it:
 - It is unique across the set. A change is audited and emits `core.service.updated`. It is not shown
   or settable through `/v1/admin/services`.
 
-The document's `version` is stored as the service's declared version.
+The document's `version` is stored as the service's declared version; the service reads it back,
+with the declaration's hash and its access, from `GET /v1/account/service`.
+
+`slug` may not be `core` or `tereo`, the source of core's own audit entries.
 
 ### `clients`
 
@@ -273,7 +276,7 @@ Shown alongside `customer.json` above, whose `customer-service` it names as an a
 
 | Field | Rule |
 |-------|------|
-| `slug` | Required, as a service slug; shares the slug space of services (never core's). It is also the integration's client ID |
+| `slug` | Required, as a service slug; shares the slug space of services (never `core` or `tereo`). It is also the integration's client ID |
 | `name` | Required, max 100 |
 | `organizationId` | Optional UUID. Set: **org-bound**, its tokens carry this organization. Absent: **platform**. Fixed once created; the organization must exist and not be archived |
 | `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)); rotates as a service's does |

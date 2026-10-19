@@ -239,6 +239,10 @@ export type {
 } from "./requests/auth/users/types.js";
 
 export type { AuthServiceOrganization } from "./requests/auth/organizations/types.js";
+export type {
+  AuthServiceOwnService,
+  AuthServiceOwnServiceAccess,
+} from "./requests/auth/service/types.js";
 
 export type {
   AuthServiceClientType,

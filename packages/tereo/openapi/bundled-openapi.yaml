@@ -337,8 +337,8 @@ info:
     | Domain | Permissions | Description |
     |---|---|---|
     | Audit Log Admin | `audit-logs.admin` | All audit log operations |
-    | Audit Log Read | `audit-logs.read` | Query and view audit log entries |
-    | Audit Log Write | `audit-logs.write` | Create audit log entries (service-to-service) |
+    | Audit Log Read | `audit-logs.read` | Query and view audit log entries; an app service's client, its own (core role `audit_reader`) |
+    | Audit Log Write | `audit-logs.write` | Create audit log entries (service-to-service); includes `audit-logs.read` |
     | Audit Log Delete | `audit-logs.delete` | Defined, but no endpoint uses it — entries cannot be deleted |
 
     ## Rate Limiting
@@ -750,14 +750,24 @@ info:
     `audit-logs.admin` (or anything that covers it, such as `admin`) may instead name an
     organization with `filter[organizationId]=<id>`, or read system-wide entries — those with
     no organization — with `filter[organizationId]=none`. Without the filter, an admin token
-    that has no `org_id` reads across all organizations. Any other token naming a different
-    organization, or having no `org_id`, is refused (`403`).
+    that has no `org_id` reads across all organizations.
+
+    An app service's client has no `org_id`. Without `audit-logs.admin` it reads the entries
+    it wrote — `source` its slug, `writerUserId` its service account — across all
+    organizations and system-wide, and may narrow them with `filter[organizationId]=<id>|none`;
+    an entry outside them is not found. `audit-logs.read` (core role `audit_reader`) or
+    `audit-logs.write` (`audit_writer`) is enough. Any other token naming a different
+    organization, or having no `org_id` — a person's, an integration's — is refused (`403`).
 
     Writes follow the same rule. Without `audit-logs.admin`, a token with an `org_id` writes
     only entries for that organization: another organization, or a system-wide entry, is
     `403`, and one such entry refuses a whole batch. A service account's token without an
     `org_id` — an app service's client, which writes for every tenant of its app — may write
     for any organization; a person's token without one may not write.
+
+    An app service's client writes only entries whose `source` is its slug (`403` otherwise),
+    so its reads above hold exactly what it wrote. No service or integration may take the slug
+    `tereo`, the source of core's own entries.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -3361,6 +3371,44 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/account/service:
+    get:
+      tags:
+        - Account - Profile
+      summary: Get the calling service
+      description: |
+        Returns the app service whose client is calling: the declaration version and hash core
+        last applied, when, and its access — so a service can check at start that its
+        provisioning document has been applied. No permission is needed.
+
+        Any other caller — a person, an integration — gets `404`.
+      operationId: getAccountService
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The calling service
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountService'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/AccountForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/account/photo:
     post:
       tags:
@@ -13395,6 +13443,11 @@ paths:
         check runs before `unknown_organization`, so a refused caller learns nothing about which
         organizations exist.
 
+        **Source:** an app service's client writes only under its own slug: an entry whose
+        `source` is anything else is `403 forbidden`, and nothing is written. Its reads are
+        scoped to that slug (see `GET /v1/audit/entries`). No service may take the slug `tereo`,
+        the source of core's own entries. Other callers' `source` is as they report it.
+
         **Idempotency:** with an `idempotencyKey`, a repeat of the same request (same body,
         `idempotencyKey` aside) from the same caller within 24 hours returns the first response
         (`201`) without writing again; one that arrives while the first is still in progress gets
@@ -13475,7 +13528,15 @@ paths:
         Results are scoped to the organization in the bearer token's `org_id`. An
         `audit-logs.admin` token may read another organization, or system-wide entries, with
         `filter[organizationId]=<id>|none`; without the filter, an admin token that has no `org_id`
-        reads across organizations. Any other token without one is refused (`403`).
+        reads across organizations.
+
+        An app service's client (its token has no `org_id`) without `audit-logs.admin` reads the
+        entries it wrote — `source` its slug and `writerUserId` its service account — in every
+        organization and system-wide, and may narrow them with `filter[organizationId]=<id>|none`.
+        `audit-logs.read` (core role `audit_reader`) or `audit-logs.write` (`audit_writer`) is
+        enough. Its own filters apply within that scope: `filter[source]` naming another source
+        gives an empty page. Any other token without an `org_id` — a person's, an integration's —
+        is refused (`403`).
 
         Each entry names its `user`, `writer` and `organization`.
 
@@ -13566,7 +13627,8 @@ paths:
 
         **Organization:** each entry's `organizationId` is checked as for
         `POST /v1/audit/entries`; one entry the caller may not write refuses the whole batch with
-        `403 forbidden`, and nothing is written.
+        `403 forbidden`, and nothing is written. An app service's client may write only entries
+        whose `source` is its slug; one other refuses the batch the same way.
 
         **Idempotency:** one optional `idempotencyKey` covers the whole batch (per-entry keys are
         rejected); it behaves as for single entries — a different body is
@@ -13641,7 +13703,8 @@ paths:
       description: |
         Returns the distinct `source` and `entityType` values among the entries the caller can
         read, and the top-level `metadata` keys of recent entries, for filter dropdowns. Scoped to
-        the token's organization, and to `filter[organizationId]`, as for `GET /v1/audit/entries`.
+        the token's organization, and to `filter[organizationId]`, as for `GET /v1/audit/entries`;
+        an app service's client sees only the entries it wrote.
 
         Only entries created in a date window count, so the scan stays on recent partitions:
         `filter[createdAt_gte]` / `filter[createdAt_lte]`, as on the list. Without
@@ -13702,7 +13765,8 @@ paths:
         `organization`. An entry outside the token's organization — or outside the one
         `filter[organizationId]` names, as for `GET /v1/audit/entries` — is reported as not found. An
         `audit-logs.admin` token with no `org_id` and no filter can read an entry of any
-        organization. The permission is checked before the organization (`403` first).
+        organization. An app service's client reads only an entry it wrote; any other is not
+        found. The permission is checked before the organization (`403` first).
 
         **Required permission:** `audit-logs.read`
       operationId: getEntry
@@ -13749,7 +13813,7 @@ paths:
         **Required permission:** `audit-logs.read`
 
         Scoped to the token's organization, and to `filter[organizationId]`, as for
-        `GET /v1/audit/entries`.
+        `GET /v1/audit/entries`; an app service's client sees only the entries it wrote.
 
         **Supported filters:**
         - `source` - equals, in
@@ -22856,6 +22920,83 @@ components:
         updatedAt:
           type: string
           format: date-time
+    AccountService:
+      type: object
+      description: |
+        The calling app service, as `GET /v1/account/service` returns it: the
+        declaration core last applied for it and the access it holds.
+      required:
+        - id
+        - slug
+        - name
+        - namespace
+        - isActive
+        - provisioned
+        - declarationVersion
+        - declarationHash
+        - declaredAt
+        - access
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+          description: Also the `source` of its audit entries.
+        name:
+          type: string
+        namespace:
+          type: string
+        isActive:
+          type: boolean
+        provisioned:
+          type: boolean
+          description: True for a service declared in the provisioning documents.
+        declarationVersion:
+          type:
+            - string
+            - 'null'
+          description: The `version` of the last declaration applied; `null` until one is first applied.
+        declarationHash:
+          type:
+            - string
+            - 'null'
+          description: SHA-256 of the last declaration applied; `null` until one is first applied.
+        declaredAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When a declaration was last applied.
+        access:
+          type: array
+          description: What the service has requested, and whether it holds it.
+          items:
+            type: object
+            required:
+              - kind
+              - target
+              - status
+              - decidedAt
+            properties:
+              kind:
+                type: string
+                enum:
+                  - role
+                  - audience
+              target:
+                type: string
+                description: A core role's name, `<slug>/<role>` for another service's role, or a service's slug for an audience.
+              status:
+                type: string
+                enum:
+                  - approved
+                  - revoked
+              decidedAt:
+                type:
+                  - string
+                  - 'null'
+                format: date-time
     ServiceCredentials:
       type: object
       required:

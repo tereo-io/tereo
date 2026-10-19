@@ -20,6 +20,7 @@ In test mode:
 | `core.auth.introspectToken` / `requireAuth` | A test token (below) is accepted as active without introspection; any other token is introspected as usual |
 | `core.auth.getUser`, `getUsers`, `validateUserExists` | A mock user for any id (`test-user-{id}@example.com`) |
 | `core.auth.getOrganization` | A mock organization for any id, with a `code` from the id's last block |
+| `core.auth.getService` | A stub service, slug `test-service`, with no declaration and no access |
 | `core.files.*` | Every method returns a stub or does nothing — e.g. `downloadObject` returns `Buffer.from("test-file-contents:{bucket}/{key}")` |
 
 `core.audit`, `core.webhooks` and `core.outbox` are **not** stubbed: they call core (or,

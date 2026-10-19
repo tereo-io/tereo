@@ -72,7 +72,8 @@ A service's document carries its declaration (`permissions`, `systemRoles`, `buc
   provisioning problem naming the file, and nothing is applied.
 - **Versioned.** The document's `version` is stored beside the declaration's hash. A lower version
   than stored is applied with a warning, since the documents are the deploy's intended state
-  ([applying](provisioning.md#applying)).
+  ([applying](provisioning.md#applying)). A service reads what core last applied for it — version,
+  hash, `declaredAt` and its access — with `GET /v1/account/service`, which needs no permission.
 - **Idempotent.** The declaration is hashed (order-insensitive; `version` is not part of it).
   Unchanged since last time, nothing is written but a newer version.
 - **Org-assignable.** `orgAssignable` (default false) marks a permission a role assigned within an
@@ -128,7 +129,8 @@ Core's own roles are requestable by their bare name only; any other core role (`
 |------|--------|
 | `file_user` | `file-service.buckets.read` and `file-service.objects.read/write/delete` — on buckets the service holds a grant on (its own) |
 | `webhook_publisher` | `webhooks.emit` — only for event types the service declares |
-| `audit_writer` | `audit-logs.write` |
+| `audit_writer` | `audit-logs.write` — under the service's slug as `source`; covers reading its own entries |
+| `audit_reader` | `audit-logs.read` — only the entries the service wrote ([audit.md](audit.md#organization-scope)) |
 | `notification_sender` | `notifications.send` |
 
 Core's roles change only with core's code, so a granted core role gives whatever core's current
