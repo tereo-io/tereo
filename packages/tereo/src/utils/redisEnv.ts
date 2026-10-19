@@ -82,6 +82,9 @@ export const buildRedisConnection = (env: RedisEnv): RedisConnection => {
   }
   const url = env.REDIS_URL as string;
   if (env.REDIS_DB === undefined) return { url, options: {} };
+  // ioredis also takes a unix socket path, which has no database to rewrite.
+  if (!/^rediss?:\/\//i.test(url))
+    return { url, options: { db: env.REDIS_DB } };
   // ioredis prefers the URL's path to a `db` option, so rewrite the path.
   const withDb = new URL(url);
   withDb.pathname = `/${env.REDIS_DB}`;

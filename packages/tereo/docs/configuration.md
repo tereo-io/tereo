@@ -82,7 +82,7 @@ notes as a range; a value outside its range stops core at startup with the varia
 | `REDIS_SENTINELS` | — | Comma-separated `host:port` (port defaults to 26379) |
 | `REDIS_MASTER_NAME` | — | Sentinel master group |
 | `REDIS_PASSWORD` | — | Sentinel connections only |
-| `REDIS_DB` | URL's path, else `0` | 0–15. The database index, in URL and Sentinel modes alike; set, it overrides a database in `REDIS_URL`'s path |
+| `REDIS_DB` | URL's path, else `0` | 0–15. The database index, in URL, unix socket and Sentinel modes alike; set, it overrides a database in `REDIS_URL`'s path |
 | `REDIS_KEY_PREFIX` | empty | Up to 64 of `A-Z a-z 0-9 : _ . -`, e.g. `app1:`. Put in front of every key, pub/sub channel, BullMQ prefix (`<prefix>bull`) and socket.io adapter key (`<prefix>socket.io`) core uses, so several cores can share one Redis database. Pub/sub channels span every database index, so cores that share a Redis server on different `REDIS_DB`s still need distinct prefixes. App services must pass the same value as `channelPrefix` to `createCoreClient` to hear core's cache invalidations. Changing it orphans existing keys and jobs: change it only on a fresh Redis or with core stopped and its queues drained |
 | `TRUST_PROXY` | `loopback` outside production | Required in production. Express `trust proxy`: `loopback`, `linklocal`, `uniquelocal`, a hop count, a comma-separated IP/CIDR list, or `true`/`false`; `true` is refused in production |
 | `CORS_ALLOWED_ORIGINS` | `UI_BASE_URL`'s origin outside production | Comma-separated. Required in production |

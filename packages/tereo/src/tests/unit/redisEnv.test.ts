@@ -115,6 +115,18 @@ describe("buildRedisConnection", () => {
     client.disconnect();
   });
 
+  it("passes REDIS_DB as an option for a unix socket path", () => {
+    const { url, options } = buildRedisConnection({
+      REDIS_URL: "/var/run/redis/redis.sock",
+      REDIS_DB: 4,
+    });
+    expect(url).toBe("/var/run/redis/redis.sock");
+    const client = new Redis(url as string, { ...options, lazyConnect: true });
+    expect(client.options.path).toBe("/var/run/redis/redis.sock");
+    expect(client.options.db).toBe(4);
+    client.disconnect();
+  });
+
   it("keeps the URL's database when REDIS_DB is unset", () => {
     const { url, options } = buildRedisConnection({
       REDIS_URL: "redis://localhost:6379/2",
