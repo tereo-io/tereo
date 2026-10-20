@@ -672,10 +672,18 @@ info:
     - Creating a bucket also grants its creator full object access
       (`canRead`, `canWrite`, `canDelete`) — an ordinary grant, listed under
       `/permissions`, audited, emitted as `file-service.permission.granted`
-      and revocable; after revoking it the creator still manages the bucket
-      but needs a grant again for object access
+      and revocable
+    - Managing a bucket (settings, grants, deletion) takes `file-service.admin`
+      or being its owner (`ownerId`, at first the creator) with an active
+      grant on it; reading its settings takes any active grant. Once an admin
+      revokes the owner's grant, only `file-service.admin` can grant it back.
+      `PUT /v1/files/buckets/{name}/owner` (`file-service.admin`) transfers
+      ownership
+    - Managing shares takes an active `canRead` grant (or `file-service.admin`),
+      on a public bucket too
     - The lifecycle policy is a bucket setting: it takes the bucket-management
-      check (creator or `file-service.admin`), not an object grant
+      check (owner with an active grant, or `file-service.admin`), not the
+      object routes' role permissions
     - `file-service.admin` may manage any bucket; a bucket a service declared cannot be deleted
     - A retired bucket (its service no longer declares it) is read-only: writes
       return `409 bucket_retired`
@@ -8758,12 +8766,14 @@ paths:
         - Name must start and end with alphanumeric character
         - Maximum storage quota: 1 TB (1099511627776 bytes)
 
-        The caller becomes the bucket's creator: they manage its settings and
-        grants. In the same transaction they are also granted full object
-        access (`canRead`, `canWrite`, `canDelete`) — an ordinary grant, listed
-        under `GET /v1/files/buckets/{name}/permissions` and revocable like any
-        other; once revoked, the creator still manages the bucket but needs a
-        grant again to read or write its objects.
+        The caller becomes the bucket's creator (`createdBy`) and its owner
+        (`ownerId`): the owner manages its settings and grants while holding an
+        active grant on it. In the same transaction they are granted full
+        object access (`canRead`, `canWrite`, `canDelete`) — an ordinary grant,
+        listed under `GET /v1/files/buckets/{name}/permissions` and revocable
+        like any other; once an admin revokes it, the owner neither manages the
+        bucket nor reaches its objects until a `file-service.admin` holder
+        grants it again.
 
         Audit log entries are created for the bucket and for the grant and, for
         a bucket in an organization, `file-service.bucket.created` and
@@ -8816,7 +8826,7 @@ paths:
         is included for versioning-enabled buckets.
 
         **Required permissions:**
-        - System: `file-service.buckets.read` AND (`file-service.admin`, or bucket creator or an active bucket grant, from the bucket's organization)
+        - System: `file-service.buckets.read` AND (`file-service.admin`, or an active bucket grant, from the bucket's organization)
       operationId: getBucket
       security:
         - BearerAuth:
@@ -8860,7 +8870,7 @@ paths:
         Updates bucket properties.
 
         **Required permissions:**
-        - System: `file-service.buckets.write` AND (bucket creator or `file-service.admin`)
+        - System: `file-service.buckets.write` AND (`file-service.admin`, or the bucket's owner holding an active bucket grant, from the bucket's organization)
 
         **Updatable fields:**
         - description
@@ -8910,7 +8920,7 @@ paths:
           $ref: '#/components/responses/FilesUnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing file-service.buckets.write permission, not the bucket's creator (or `file-service.admin`), or no such bucket
+          description: Forbidden - missing file-service.buckets.write permission, not the bucket's owner with an active grant (or `file-service.admin`), or no such bucket
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket
@@ -8929,10 +8939,11 @@ paths:
         Deletes a bucket and all its contents (soft delete).
 
         **Required permissions:**
-        - System: `file-service.buckets.delete` AND (bucket creator or `file-service.admin`)
+        - System: `file-service.buckets.delete` AND (`file-service.admin`, or the bucket's owner holding an active bucket grant, from the bucket's organization)
 
         A bucket a service declared (`serviceId` set) exists for as long as the service declares it:
-        no one can delete it (`409 bucket_declared`), retired or not.
+        no one can delete it (`409 bucket_declared`) until it is retired or its service is
+        deactivated.
 
         **Warning:** This operation will delete all objects in the bucket. This action cannot be undone.
 
@@ -8954,13 +8965,13 @@ paths:
           $ref: '#/components/responses/FilesUnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing file-service.buckets.delete permission, not the bucket's creator (or `file-service.admin`), or no such bucket
+          description: Forbidden - missing file-service.buckets.delete permission, not the bucket's owner with an active grant (or `file-service.admin`), or no such bucket
         '404':
           $ref: '#/components/responses/NotFoundResponse'
-          description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket
+          description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket. Also the answer to the loser of two deletes racing
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`bucket_declared` - a declared bucket cannot be deleted'
+          description: '`bucket_declared` - a bucket its active service still declares cannot be deleted'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -8979,8 +8990,8 @@ paths:
         scopes' ceiling, so a `core:files.read` token reports `canWrite` and
         `canDelete` as `false` whatever the grant. `canRead` is also `true` on a
         public bucket. Every field is a boolean — `false` without an active
-        grant. Being the bucket's creator adds nothing: the creator's access is
-        the grant made at create time, and is gone once revoked. `canWrite` is
+        grant. Being the bucket's creator or owner adds nothing: their access is
+        their grant, and is gone once revoked. `canWrite` is
         `false` for everyone, admins included, on a retired bucket, which is
         read-only.
 
@@ -9034,7 +9045,9 @@ paths:
 
         Policies are applied by the daily `lifecycle-sweep` BullMQ worker.
         Object age (`expireObjectsAfterDays`) is counted from the object's last
-        write — its current version — not from when its key was created. Each
+        write — its current version — not from when its key was created; a
+        non-current version's age (`expireVersionsAfterDays`) from when a newer
+        version replaced it, as S3's `NoncurrentDays`. Each
         batch the sweep deletes is audited (`lifecycleSweep`, written by core's
         system user) in the transaction that deletes it.
 
@@ -9043,7 +9056,7 @@ paths:
         bucket's policy is not public).
 
         **Required permissions:**
-        - System: `file-service.buckets.read` AND (`file-service.admin`, or bucket creator or an active bucket grant, from the bucket's organization)
+        - System: `file-service.buckets.read` AND (`file-service.admin`, or an active bucket grant, from the bucket's organization)
       operationId: getLifecyclePolicy
       security:
         - BearerAuth:
@@ -9091,7 +9104,7 @@ paths:
         The policy is a bucket setting, managed like the bucket itself.
 
         **Required permissions:**
-        - System: `file-service.buckets.write` AND (bucket creator or `file-service.admin`)
+        - System: `file-service.buckets.write` AND (`file-service.admin`, or the bucket's owner holding an active bucket grant, from the bucket's organization)
 
         An audit log entry is written, and a `file-service.lifecycle.policy.updated`
         webhook event is emitted for a bucket that belongs to an organization.
@@ -9146,7 +9159,7 @@ paths:
         The policy is a bucket setting, managed like the bucket itself.
 
         **Required permissions:**
-        - System: `file-service.buckets.delete` AND (bucket creator or `file-service.admin`)
+        - System: `file-service.buckets.delete` AND (`file-service.admin`, or the bucket's owner holding an active bucket grant, from the bucket's organization)
 
         When a policy was removed, an audit log entry is written and a
         `file-service.lifecycle.policy.deleted` webhook event is emitted for a
@@ -9172,6 +9185,76 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket.
+        '429':
+          $ref: '#/components/responses/FilesRateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/files/buckets/{name}/owner:
+    put:
+      tags:
+        - Files - Buckets
+      summary: Transfer bucket ownership
+      description: |
+        Makes another user the bucket's owner, who manages it while holding an
+        active grant on it. `createdBy` is unchanged.
+
+        **Required permissions:**
+        - System: `file-service.admin`
+
+        **Notes:**
+        - The user must exist (`400 unknown_user`), be active (`400 user_inactive`)
+          and, for a bucket in an organization, be able to act in it
+          (`400 user_not_in_organization`)
+        - A new owner without an active grant gets a full one (`canRead`,
+          `canWrite`, `canDelete`), reviving a revoked one; an active grant is
+          kept as it is
+        - The previous owner keeps their grant, so their object access, but no
+          longer manages the bucket
+        - A declared bucket's owner is its service's account: `409 bucket_declared`
+
+        When the owner changes, an audit log entry is created (`changes.ownerId`)
+        and, for a bucket in an organization, a `file-service.bucket.owner-changed`
+        webhook event is emitted.
+      operationId: transferBucketOwnership
+      security:
+        - BearerAuth:
+            - file-service.admin
+      parameters:
+        - $ref: '#/components/parameters/BucketNameParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+                  format: uuid
+                  description: The new owner
+              required:
+                - userId
+      responses:
+        '200':
+          description: The bucket, with its new owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bucket'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+          description: '`invalid_request`, `unknown_user`, `user_inactive` or `user_not_in_organization`'
+        '401':
+          $ref: '#/components/responses/FilesUnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing `file-service.admin`
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: Bucket not found
+        '409':
+          $ref: '#/components/responses/FilesConflictResponse'
+          description: '`bucket_declared` - a declared bucket belongs to its service'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -9205,7 +9288,9 @@ paths:
         deleted while versioning was on, whose current version is a delete marker — as
         `DeletedObject`s, with the same filters, sorts (but `sizeBytes`) and pagination. Restoring a
         version (`POST .../by-id/{id}/versions/{versionId}/restore`) undeletes one. A bucket without
-        versioning keeps no version to restore, so lists none.
+        versioning keeps no version to restore, so lists none. It takes read access to the bucket
+        as a private one would: a caller a public bucket is served to only because it is public
+        gets `401` without a token and `403` with one.
       operationId: listObjects
       security:
         - {}
@@ -9353,11 +9438,10 @@ paths:
 
         Objects are deleted in batches of up to 100, each in its own
         transaction with its audit entry (`objects_bulk`, listing the batch's
-        objects), so every delete that commits is audited even if the request
-        stops part-way. One `file-service.objects.bulk-deleted` webhook event
-        is emitted for the entire request. Per-object webhooks are
-        deliberately **not** emitted — they would flood subscribers on large
-        folder deletes.
+        objects) and its `file-service.objects.bulk-deleted` webhook event, so
+        every delete that commits is audited and reported even if the request
+        stops part-way. Per-object webhooks are deliberately **not** emitted —
+        they would flood subscribers on large folder deletes.
 
         **Required permissions:**
         - System: `file-service.objects.delete` AND bucket-level `canDelete`
@@ -9445,9 +9529,9 @@ paths:
 
         Versions are purged in batches of up to 100, each in its own
         transaction with its audit entry (`object_versions_purge`, listing the
-        batch's version ids). One `file-service.objects.versions.purged`
-        webhook event is emitted per request — per-version webhooks would flood
-        subscribers on buckets with deep history.
+        batch's version ids) and its `file-service.objects.versions.purged`
+        webhook event — per-version webhooks would flood subscribers on
+        buckets with deep history.
 
         **Required permissions:**
         - System: `file-service.objects.delete` AND bucket-level `canDelete`
@@ -9603,7 +9687,10 @@ paths:
           write's transaction, so a concurrent write can't slip past them, and
           after the `Idempotency-Key` lookup, so a retry of a successful create
           is replayed rather than refused.
-        - `If-Match: "<etag>"` — replace only if the current version's ETag matches (412 otherwise).
+        - `If-Match: "<etag>"` — replace only if the current version's ETag strongly matches (412
+          otherwise; a `W/` tag never matches).
+        - `If-None-Match: "<etag>", …` — replace only if none of the tags matches the current
+          version's ETag, compared weakly (412 otherwise).
 
         **Content type:**
         The `file` part's content type becomes the object's. Executables and
@@ -9665,7 +9752,7 @@ paths:
             type: string
         - name: If-None-Match
           in: header
-          description: Use `*` for atomic create-only semantics.
+          description: Use `*` for atomic create-only semantics; a list of tags refuses (412) a write over content with one of them.
           required: false
           schema:
             type: string
@@ -9794,9 +9881,15 @@ paths:
         the old ones, and image content gets new ones in the background, so a
         `404` can mean they are not generated yet.
 
-        Supports `If-Match` / `If-None-Match` preconditions, compared against
-        the ETag of the version being served. A match on `If-None-Match`
-        returns `304 Not Modified`; both are checked before `Range`.
+        Supports the preconditions of RFC 9110 §13.2.2, against the `ETag`
+        and `Last-Modified` of the version being served and in its order:
+        `If-Match` (strong comparison) or else `If-Unmodified-Since` fail with
+        `412`; then `If-None-Match` (weak comparison) or else
+        `If-Modified-Since` answer `304 Not Modified`, carrying `ETag`,
+        `Last-Modified` and `Cache-Control`. All are checked before `Range`.
+
+        A `?versionId=` that is not the current version is `404` to a caller
+        a public bucket is served to only because it is public.
 
         Supports one byte range (`Range`, `If-Range`): `206 Partial Content`
         with `Content-Range`, or `416` for a range past the end. Content up to
@@ -9832,16 +9925,10 @@ paths:
               - thumb
               - small
               - medium
-        - name: If-Match
-          in: header
-          required: false
-          schema:
-            type: string
-        - name: If-None-Match
-          in: header
-          required: false
-          schema:
-            type: string
+        - $ref: '#/components/parameters/DownloadIfMatchHeaderParam'
+        - $ref: '#/components/parameters/DownloadIfNoneMatchHeaderParam'
+        - $ref: '#/components/parameters/IfModifiedSinceHeaderParam'
+        - $ref: '#/components/parameters/IfUnmodifiedSinceHeaderParam'
         - $ref: '#/components/parameters/RangeHeaderParam'
         - $ref: '#/components/parameters/IfRangeHeaderParam'
       responses:
@@ -9904,7 +9991,7 @@ paths:
         '206':
           $ref: '#/components/responses/PartialContentResponse'
         '304':
-          description: Not Modified (matched `If-None-Match`)
+          description: Not Modified (`If-None-Match` or `If-Modified-Since`); carries `ETag`, `Last-Modified` and `Cache-Control`
         '400':
           $ref: '#/components/responses/BadRequestResponse'
           description: Invalid object key, `versionId` or `thumbnail`
@@ -9918,7 +10005,7 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
           description: Bucket, object, version or thumbnail not found, or the version is a delete marker (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
         '412':
-          description: Precondition failed (If-Match)
+          description: Precondition failed (`If-Match` or `If-Unmodified-Since`)
           content:
             application/json:
               schema:
@@ -9939,16 +10026,14 @@ paths:
         - Files - Objects
       summary: Get object metadata
       description: |
-        Retrieves metadata for an object without downloading its content.
+        The headers `GET` would send — for the current version, the
+        `?versionId=` one or a `?thumbnail=` — without the body, under the
+        same preconditions.
 
         **Required permissions:**
         - **Public buckets**: No authentication required
         - **Private buckets**: Authentication required with `file-service.objects.read` AND bucket-level `canRead`
           (an anonymous request — for a private or a missing bucket — gets `401 invalid_token`)
-
-        Returns the `Content-Type`, `Content-Length`, `ETag`, and
-        `Last-Modified` of the current version without a response body.
-        Supports the same conditional headers as `GET`.
       operationId: headObject
       security:
         - {}
@@ -9956,16 +10041,27 @@ paths:
       parameters:
         - $ref: '#/components/parameters/BucketNameParam'
         - $ref: '#/components/parameters/ObjectKeyParam'
-        - name: If-Match
-          in: header
+        - name: versionId
+          in: query
+          description: Describe a specific version of the object (UUID).
           required: false
           schema:
             type: string
-        - name: If-None-Match
-          in: header
+            format: uuid
+        - name: thumbnail
+          in: query
+          description: Describe a generated thumbnail variant, as `GET` serves it.
           required: false
           schema:
             type: string
+            enum:
+              - thumb
+              - small
+              - medium
+        - $ref: '#/components/parameters/DownloadIfMatchHeaderParam'
+        - $ref: '#/components/parameters/DownloadIfNoneMatchHeaderParam'
+        - $ref: '#/components/parameters/IfModifiedSinceHeaderParam'
+        - $ref: '#/components/parameters/IfUnmodifiedSinceHeaderParam'
       responses:
         '200':
           description: Object metadata
@@ -9984,11 +10080,23 @@ paths:
                 type: string
                 format: http-date
               example: Mon, 15 Jan 2024 10:30:00 GMT
+            Cache-Control:
+              description: As on `GET`.
+              schema:
+                type: string
+            Content-Disposition:
+              description: As on `GET`.
+              schema:
+                type: string
             X-Object-Id:
-              description: The object's UUID.
+              description: The object's UUID — the parent's for a `?thumbnail=`.
               schema:
                 type: string
                 format: uuid
+            X-Content-Type-Options:
+              $ref: '#/components/headers/X-Content-Type-Options'
+            Content-Security-Policy:
+              $ref: '#/components/headers/Content-Security-Policy'
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
             X-RateLimit-Remaining:
@@ -9996,17 +10104,17 @@ paths:
             X-RateLimit-Reset:
               $ref: '#/components/headers/X-RateLimit-Reset'
         '304':
-          description: Not Modified (matched `If-None-Match`)
+          description: Not Modified (`If-None-Match` or `If-Modified-Since`)
         '400':
-          description: Invalid object key (no body)
+          description: Invalid object key, `versionId` or `thumbnail` (no body)
         '401':
           description: Unauthorized - invalid access token (no body)
         '403':
           description: Forbidden - missing file-service.objects.read permission or bucket-level canRead, private buckets only; or a delegated token whose core API scopes do not reach `/v1/files`, public bucket or not (no body)
         '404':
-          description: Bucket or object not found, no body (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403` — or `401` without a token)
+          description: Bucket, object, version or thumbnail not found, no body (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403` — or `401` without a token)
         '412':
-          description: Precondition failed (If-Match)
+          description: Precondition failed (`If-Match` or `If-Unmodified-Since`)
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -10084,6 +10192,9 @@ paths:
 
         **Required permissions:**
         - System: `file-service.objects.write` AND bucket-level `canWrite`
+        - Setting `deleteAfter` to a timestamp also takes `file-service.objects.delete` AND
+          bucket-level `canDelete`, since the lifecycle sweep deletes the object then; clearing
+          it (`null`) takes only write
 
         A rename that collides with another live key in the bucket returns 409.
         A metadata change on an object whose current version is a delete
@@ -10253,7 +10364,9 @@ paths:
       description: |
         Returns a paginated list of all versions of the object (default
         newest first; sort field `createdAt` only). Version history stays
-        visible after the object is deleted. Only available on buckets with
+        visible after the object is deleted — except to a caller a public
+        bucket is served to only because it is public, who sees only a live
+        object's current version. Only available on buckets with
         `versioningEnabled=true` — returns `400 versioning_disabled` otherwise
         (reported only once access is granted).
 
@@ -10319,7 +10432,9 @@ paths:
         `GET /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/download`
         (rename-stable) or the key-addressed
         `GET /v1/files/buckets/{name}/objects/{objectKey}?versionId=<uuid>`.
-        Unlike list items, the response carries no writer email/name.
+        Unlike list items, the response carries no writer email/name. A
+        version that is not current, or of a deleted object, is `404` to a
+        caller a public bucket is served to only because it is public.
 
         **Required permissions:**
         - **Public buckets**: No authentication required
@@ -10424,9 +10539,12 @@ paths:
         Response headers include `Content-Type`, `Content-Length`, `ETag`,
         `Content-Disposition`, `Cache-Control: <public|private>, max-age=31536000, immutable`
         (`public` only for a public bucket),
-        and `X-Content-Type-Options: nosniff`. `If-Match` / `If-None-Match`
-        are not evaluated on this route. The bytes of a specific version are
-        immutable, so aggressive caching is safe.
+        `Last-Modified` (when the version was written)
+        and `X-Content-Type-Options: nosniff`. The preconditions are those of
+        `GET /v1/files/buckets/{name}/objects/{objectKey}`. The bytes of a
+        specific version are immutable, so aggressive caching is safe. A
+        version that is not current, or of a deleted object, is `404` to a
+        caller a public bucket is served to only because it is public.
 
         Supports one byte range (`Range`, and `If-Range` with the `ETag`) as
         on `GET /v1/files/buckets/{name}/objects/{objectKey}`.
@@ -10443,6 +10561,10 @@ paths:
         - $ref: '#/components/parameters/BucketNameParam'
         - $ref: '#/components/parameters/ObjectIdParam'
         - $ref: '#/components/parameters/VersionIdParam'
+        - $ref: '#/components/parameters/DownloadIfMatchHeaderParam'
+        - $ref: '#/components/parameters/DownloadIfNoneMatchHeaderParam'
+        - $ref: '#/components/parameters/IfModifiedSinceHeaderParam'
+        - $ref: '#/components/parameters/IfUnmodifiedSinceHeaderParam'
         - $ref: '#/components/parameters/RangeHeaderParam'
         - $ref: '#/components/parameters/IfRangeHeaderParam'
       responses:
@@ -10485,6 +10607,8 @@ paths:
                 format: binary
         '206':
           $ref: '#/components/responses/PartialContentResponse'
+        '304':
+          description: Not Modified (`If-None-Match` or `If-Modified-Since`); carries `ETag`, `Last-Modified` and `Cache-Control`
         '400':
           $ref: '#/components/responses/BadRequestResponse'
           description: Versioning is not enabled for this bucket (`versioning_disabled`).
@@ -10496,6 +10620,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Object, version, or version content not found (e.g. delete marker) (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
+        '412':
+          description: Precondition failed (`If-Match` or `If-Unmodified-Since`)
         '416':
           $ref: '#/components/responses/RangeNotSatisfiableResponse'
         '429':
@@ -11065,7 +11191,7 @@ paths:
 
         **Required permissions:**
         - System: `file-service.permissions.read` AND `file-service.buckets.read`
-        - AND one of: `file-service.admin`, or bucket creator or an active bucket grant, from the bucket's organization
+        - AND one of: `file-service.admin`, or an active bucket grant, from the bucket's organization
 
         **Filter operators:**
         - userId: `equals`, `in` (UUIDs)
@@ -11129,7 +11255,7 @@ paths:
 
         **Required permissions:**
         - System: `file-service.permissions.write` AND `file-service.buckets.write`
-        - AND bucket creator (same organization) or `file-service.admin`
+        - AND the bucket's owner holding an active grant on it (same organization), or `file-service.admin`
 
         **Notes:**
         - The user must exist (`400 unknown_user` otherwise)
@@ -11140,7 +11266,7 @@ paths:
           (`400 user_not_in_organization`)
         - If an active permission already exists for the user, returns 409 Conflict
         - If a previously revoked permission exists, it will be un-revoked and updated with new permissions
-        - The bucket's creator is granted full object access when the bucket is created; if that grant is revoked, it can be granted again here
+        - The bucket's creator is granted full object access when the bucket is created; once that grant is revoked, the owner no longer manages the bucket, so only a `file-service.admin` holder can grant it again
         - `userId` must be a UUID (`400 invalid_request` otherwise)
         - The response is the grant as the list returns it, with the grantee and the granter named (`user`, `granter`, and their emails and names flat).
 
@@ -11200,7 +11326,7 @@ paths:
 
         **Required permissions:**
         - System: `file-service.permissions.delete` AND `file-service.buckets.delete`
-        - AND bucket creator (same organization) or `file-service.admin`
+        - AND the bucket's owner holding an active grant on it (same organization), or `file-service.admin`
 
         **Notes:**
         - On a declared bucket, the declaring service's own grant cannot be revoked
@@ -11269,8 +11395,8 @@ paths:
 
         **Required permissions:**
         - System: `file-service.shares.write`
-        - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-          bucket in the caller's organization, nor for `file-service.admin`)
+        - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+          bucket too (neither needed for `file-service.admin`)
 
         An audit log entry is created and, for a bucket in an organization, a
         `file-service.share.created` webhook event is emitted.
@@ -11330,8 +11456,8 @@ paths:
 
         **Required permissions:**
         - System: `file-service.shares.read`
-        - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-          bucket in the caller's organization, nor for `file-service.admin`)
+        - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+          bucket too (neither needed for `file-service.admin`)
 
         **Filter fields and operators:**
         - `kind`: `equals`, `in` (`OBJECT`, `ARCHIVE`)
@@ -11390,8 +11516,8 @@ paths:
       description: |
         **Required permissions:**
         - System: `file-service.shares.read`
-        - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-          bucket in the caller's organization, nor for `file-service.admin`)
+        - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+          bucket too (neither needed for `file-service.admin`)
 
         A share of another bucket returns 404.
       operationId: getShare
@@ -11448,8 +11574,8 @@ paths:
 
         **Required permissions:**
         - System: `file-service.shares.write`
-        - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-          bucket in the caller's organization, nor for `file-service.admin`); a caller who did not create the share also
+        - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+          bucket too (neither needed for `file-service.admin`); a caller who did not create the share also
           needs `file-service.objects.write` AND bucket-level `canWrite`
 
         An audit log entry is created and, for a bucket in an organization, a
@@ -11509,8 +11635,8 @@ paths:
 
         **Required permissions:**
         - System: `file-service.shares.delete`
-        - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-          bucket in the caller's organization, nor for `file-service.admin`); a caller who did not create the share also
+        - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+          bucket too (neither needed for `file-service.admin`); a caller who did not create the share also
           needs `file-service.objects.delete` AND bucket-level `canDelete`
 
         An audit log entry is created and, for a bucket in an organization, a
@@ -11556,7 +11682,7 @@ paths:
         |---|---|
         | No password | `200` with the file's details in headers |
         | Password required | `401`, no details (unlock to learn more) |
-        | Not serveable (missing / revoked / expired / exhausted) | `404` |
+        | Not serveable (missing / revoked / expired / exhausted, or its creator deactivated) | `404` |
 
         The detail headers are listed in `Access-Control-Expose-Headers` so a
         cross-origin `fetch(url, { method: "HEAD" })` can read them.
@@ -11641,7 +11767,7 @@ paths:
         |---|---|---|
         | No password | `302` → short-TTL presigned download URL | `302` → short-TTL presigned download URL |
         | Password required | `302` → `${FILE_SERVICE_SHARE_UI_BASE_URL}/shared/{token}` (the UI's unlock page; the base defaults to `UI_BASE_URL`) | `401 { requiresPassword: true }` |
-        | Not serveable (missing / revoked / expired / exhausted) | `404` | `404` |
+        | Not serveable (missing / revoked / expired / exhausted, or its creator deactivated) | `404` | `404` |
 
         A `302` to the download URL counts one download against `maxDownloads`
         and writes a `shareAccess` audit entry (plus a
@@ -11653,10 +11779,13 @@ paths:
         redirected to while it is valid. Archive downloads serve no ranges.
 
         For a share with `maxDownloads` the presigned URL (here or from
-        `/unlock`) is **single-use**: its first request spends it, a `HEAD` or
-        `Range` request included, and any later request gets the same `403` as an
-        expired or tampered URL. Fetch a capped share's content in one request.
-        Uncapped shares' URLs stay replayable until they expire.
+        `/unlock`) is **single-use**: the first `GET` that starts sending the
+        content spends it, a `Range` one included, and any later request gets
+        the same `403` as an expired or tampered URL. A `HEAD`, or a `GET` that
+        fails first (`404`, `416`, …), leaves it unspent. Fetch a capped share's
+        content in one request. Uncapped shares' URLs stay replayable until they
+        expire. A capped share's URL is recorded in Redis: while Redis is
+        unreachable, minting one here answers `503` without counting a download.
 
         Every unserveable state returns the same `404` — the endpoint is not
         a validity oracle.
@@ -11713,6 +11842,9 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+          description: '`temporarily_unavailable` - a capped share''s single-use URL cannot be recorded because Redis is unreachable; no download is counted. Retry after `Retry-After`.'
   /v1/files/shared/{token}/{filename}:
     description: |
       The cosmetic-filename form of a share URL. `HEAD` and `GET` answer exactly
@@ -11804,6 +11936,9 @@ paths:
           $ref: '#/components/responses/NotFoundResponse'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+          description: '`temporarily_unavailable` - a capped share''s single-use URL cannot be recorded because Redis is unreachable; no download is counted. Retry after `Retry-After`.'
   /v1/files/shared/{token}/unlock:
     post:
       tags:
@@ -11824,7 +11959,8 @@ paths:
         lock the recipients out, an address's first attempt in its
         `(token, ip)` window is still checked during the delay: the correct
         password unlocks, a wrong one gets the same `429`. A share without a
-        password also answers with a URL. An unserveable share returns `404`
+        password also answers with a URL, and needs no `password` in the body
+        (`{}` will do); a password share without one is `400`. An unserveable share returns `404`
         without counting an attempt. The limiter fails closed: while Redis is
         unreachable an attempt is refused with `503 temporarily_unavailable`
         and `Retry-After`, rather than going uncounted.
@@ -11841,14 +11977,14 @@ paths:
             maxLength: 64
             pattern: ^[A-Za-z0-9_-]{3,64}$
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/UnlockShareRequest'
       responses:
         '200':
-          description: Unlock succeeded. Navigate to `url` to download.
+          description: Unlock succeeded. Navigate to `url` to download (single-use for a share with `maxDownloads`, as on `GET /v1/files/shared/{token}`).
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
@@ -11904,6 +12040,40 @@ paths:
       - $ref: '#/components/parameters/SignedShareParam'
       - $ref: '#/components/parameters/SignedByParam'
       - $ref: '#/components/parameters/SignedVersionParam'
+    head:
+      tags:
+        - Files - Signed URLs
+      summary: Probe an object via a presigned URL
+      description: |
+        Answers with the headers `GET` would send — `Content-Type`,
+        `Content-Length` (the whole object), `Accept-Ranges`, `ETag`,
+        `Last-Modified`, `Content-Disposition` and the security headers — and
+        no body. Checked exactly as `GET` is (signature, share state, the
+        signer's access), but it spends nothing: a capped share's single-use
+        URL still serves its `GET` afterwards. No audit entry is written.
+      operationId: probeViaSignedUrl
+      security: []
+      parameters:
+        - name: disposition
+          in: query
+          required: false
+          description: 'Only `attachment` is honored; it forces `Content-Disposition: attachment`.'
+          schema:
+            type: string
+            enum:
+              - attachment
+        - $ref: '#/components/parameters/SignedFilenameParam'
+      responses:
+        '200':
+          description: The object would be served. No body.
+        '400':
+          description: A missing or malformed query parameter. No body (HEAD).
+        '403':
+          description: As for `GET`. No body (HEAD).
+        '404':
+          description: As for `GET`. No body (HEAD).
+        '429':
+          description: Rate limit exceeded. No body (HEAD).
     get:
       tags:
         - Files - Signed URLs
@@ -11917,15 +12087,26 @@ paths:
         is pinned to one).
 
         **Authentication:** none — the HMAC signature over
-        `(bucket, id, operation, expires, nonce, v[, share][, by][, version])` is verified
+        `(bucket, id, operation, expires, nonce, v[, share][, by][, version][, filename])` is verified
         instead. A URL signed for `write` does not verify here. When `share`
         is present, the share must still be serveable (not revoked, expired or
-        exhausted) on every hit.
+        exhausted, its creator still active) on every hit. Otherwise, when
+        `by` is present, the URL works only while its signer could still read
+        the object: an active user with `file-service.objects.read` and an
+        active read grant on the bucket (or `file-service.admin`); else `403`.
 
-        `disposition` and `filename` are presentation hints outside the
-        signature: they can only force `attachment` and rename the download,
-        never weaken disposition. Unsafe types (HTML, JavaScript, SVG, …) are
-        always served as attachments.
+        A share's URL is single-use when the share has `maxDownloads`: the
+        request that starts sending the content spends it, so one that fails
+        first (`404`, `416`, …) — or a `HEAD` — leaves it unspent, and of two
+        concurrent requests only one is served. Spending it needs Redis:
+        without it the request is `503`.
+
+        `disposition` is an unsigned presentation hint: it can only force
+        `attachment`, never weaken disposition. `filename` names the download
+        only when the signature covers it (share URLs with a custom
+        filename); one added to a URL afterwards is ignored, and changing or
+        removing a signed one is `403`. Unsafe types (HTML, JavaScript, SVG, …)
+        are always served as attachments.
 
         Supports one byte range (`Range`, and `If-Range` with the `ETag`) as
         on `GET /v1/files/buckets/{name}/objects/{objectKey}`, so media can seek
@@ -11934,8 +12115,8 @@ paths:
         Counts against the bucket's per-bucket rate limit, if configured (the
         signature is checked first).
 
-        An audit log entry (`presignedDownload`) is created for each download,
-        ranges included.
+        An audit log entry (`presignedDownload`) and an access-log entry
+        (`PRESIGNED_DOWNLOAD`) are created for each download, ranges included.
       operationId: downloadViaSignedUrl
       security: []
       parameters:
@@ -11947,12 +12128,7 @@ paths:
             type: string
             enum:
               - attachment
-        - name: filename
-          in: query
-          required: false
-          description: Overrides the download filename in `Content-Disposition` (sanitized).
-          schema:
-            type: string
+        - $ref: '#/components/parameters/SignedFilenameParam'
         - $ref: '#/components/parameters/RangeHeaderParam'
         - $ref: '#/components/parameters/IfRangeHeaderParam'
       responses:
@@ -11967,6 +12143,9 @@ paths:
               $ref: '#/components/headers/Accept-Ranges'
             ETag:
               $ref: '#/components/headers/ETag'
+            Last-Modified:
+              schema:
+                type: string
             Content-Disposition:
               description: '`inline` or `attachment`, with an ASCII `filename` (other characters become `_`) and the real name in RFC 5987 `filename*`.'
               schema:
@@ -12003,6 +12182,9 @@ paths:
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+          description: '`temporarily_unavailable` - the URL is a capped share''s single-use URL and Redis, which records it, is unreachable. Nothing is spent; retry after `Retry-After`.'
     put:
       tags:
         - Files - Signed URLs
@@ -12015,7 +12197,10 @@ paths:
         rename while the body uploads is followed. Share-bound URLs are refused.
 
         **Authentication:** none — the HMAC signature is verified instead. A
-        URL signed for `read` does not verify here.
+        URL signed for `read` does not verify here. When `by` is present, the
+        URL works only while its signer could still write the object: an
+        active user with `file-service.objects.write` and an active write
+        grant on the bucket (or `file-service.admin`); else `403`.
 
         The body is the file's bytes (not multipart). Its `Content-Type`
         header becomes the object's content type: a single `type/subtype`,
@@ -12027,7 +12212,8 @@ paths:
         retired. Counts against the bucket's per-bucket rate limit, if
         configured.
 
-        An audit log entry is created for this action, and — when the bucket
+        An audit log entry and an access-log entry (`PRESIGNED_UPLOAD`) are
+        created for this action, and — when the bucket
         belongs to an organization — a `file-service.object.updated` (or
         `file-service.object.created`) webhook event is emitted with
         `via: "presigned"`.
@@ -12106,15 +12292,21 @@ paths:
         `share`). The bucket is not in the path: it is resolved from the
         archive and bound into the signature.
 
-        **Authentication:** none — the HMAC signature is verified instead.
-        When `share` is present, the share must still be serveable on every
-        hit. Re-downloads within the URL's TTL are allowed. The archive itself
-        must not have expired.
+        **Authentication:** none — the HMAC signature is verified instead,
+        before anything about the archive is revealed: a missing archive is
+        the same `403` as a wrong signature. When `share` is present, the
+        share must still be serveable on every hit (and a capped share's URL
+        is single-use, spent when the stream starts; `503` without Redis).
+        Otherwise the archive's creator must still be able to read the bucket
+        (active, `file-service.objects.read` and an active read grant, or
+        `file-service.admin`); else `403`. Re-downloads within the URL's TTL
+        are allowed. The archive itself must not have expired.
 
         The response is streamed without `Content-Length`. If an error occurs
         after the body has started, the connection is reset.
 
-        An audit log entry (`archiveDownload`) is created for each download.
+        An audit log entry (`archiveDownload`) and an access-log entry
+        (`ARCHIVE_DOWNLOAD`) are created for each download.
       operationId: downloadArchiveViaSignedUrl
       security: []
       parameters:
@@ -12163,11 +12355,9 @@ paths:
           $ref: '#/components/responses/SignatureRejectedResponse'
         '404':
           description: |
-            Archive request (or an `id` that is not a UUID) or its bucket not
-            found — checked before the signature, since the archive names the
-            bucket the signature binds. An archive request is deleted
-            `FILE_SERVICE_SHARE_RETENTION_DAYS` (default 30) after it expires,
-            so its URL turns from `403` to `404` then.
+            The `id` is not a UUID. A well-formed id of a missing archive (one
+            deleted `FILE_SERVICE_SHARE_RETENTION_DAYS` after it expires
+            included) is `403`, like a wrong signature.
           content:
             application/json:
               schema:
@@ -12182,6 +12372,49 @@ paths:
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+          description: '`temporarily_unavailable` - the URL is a capped share''s single-use URL and Redis, which records it, is unreachable. Nothing is spent; retry after `Retry-After`.'
+    head:
+      tags:
+        - Files - Signed URLs
+      summary: Probe an archive via a presigned URL
+      description: |
+        Answers with the headers `GET` would send (`Content-Type`,
+        `Content-Disposition`, `Cache-Control`, `Content-Security-Policy`;
+        no `Content-Length`) and no body, after the same checks — including
+        `410` and `400 archive_too_large`. Spends nothing: a capped share's
+        single-use URL still serves its `GET` afterwards. No audit entry.
+      operationId: probeArchiveViaSignedUrl
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Archive request id. Bound into the signature.
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/SignedOpParam'
+        - $ref: '#/components/parameters/SignedExpiresParam'
+        - $ref: '#/components/parameters/SignedNonceParam'
+        - $ref: '#/components/parameters/SignedKeyVersionParam'
+        - $ref: '#/components/parameters/SignedSigParam'
+        - $ref: '#/components/parameters/SignedShareParam'
+        - $ref: '#/components/parameters/SignedByParam'
+      responses:
+        '200':
+          description: The archive would be served. No body.
+        '400':
+          description: A missing signature parameter, or `archive_too_large`. No body (HEAD).
+        '403':
+          description: As for `GET`. No body (HEAD).
+        '404':
+          description: The `id` is not a UUID. No body (HEAD).
+        '410':
+          description: As for `GET`. No body (HEAD).
+        '429':
+          description: Rate limit exceeded. No body (HEAD).
   /v1/webhooks/webhooks:
     parameters:
       - $ref: '#/components/parameters/OrganizationIdHeader'
@@ -16966,6 +17199,59 @@ webhooks:
       responses:
         2XX:
           description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+  file-service.bucket.owner-changed:
+    post:
+      tags:
+        - Files - Buckets
+      summary: Bucket ownership transferred
+      description: |-
+        Fired by `PUT /v1/files/buckets/{name}/owner` when the owner changes. `entityId` is the bucket's integer id.
+
+        A new owner who held no active grant also gets one, emitted as `file-service.permission.granted`.
+
+        Only emitted for buckets that belong to an organization.
+      operationId: webhookFilesBucketOwnerChanged
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      type: string
+                      enum:
+                        - file-service.bucket.owner-changed
+                    entityType:
+                      type: string
+                      enum:
+                        - bucket
+                    data:
+                      type: object
+                      properties:
+                        bucketName:
+                          type: string
+                        ownerId:
+                          type: string
+                          format: uuid
+                        previousOwnerId:
+                          type: string
+                          format: uuid
+                      required:
+                        - bucketName
+                        - ownerId
+                        - previousOwnerId
+      responses:
+        2XX:
+          description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
   file-service.bucket.deleted:
     post:
       tags:
@@ -17088,7 +17374,7 @@ webhooks:
         - Files - Objects
       summary: Object updated
       description: |-
-        Fired when an upload (authenticated, presigned or multipart) overwrites an existing object, and on every `PATCH /v1/files/buckets/{name}/objects/by-id/{id}` (rename, metadata, tags, content type or `deleteAfter`). `entityId` is the object id.
+        Fired when an upload (authenticated, presigned or multipart) overwrites an existing object, on every `PATCH /v1/files/buckets/{name}/objects/by-id/{id}` (rename, metadata, tags, content type or `deleteAfter`), and when a version restore undeletes a deleted object (alongside `file-service.object.version.restored`). `entityId` is the object id.
 
         The `data` shape depends on the path that fired it.
 
@@ -17187,6 +17473,45 @@ webhooks:
                             - objectId
                             - renamed
                             - branchedVersion
+                        - type: object
+                          description: '`POST /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/restore` that undeleted the object — its restored content.'
+                          properties:
+                            bucketName:
+                              type: string
+                            objectKey:
+                              type: string
+                            objectId:
+                              type: string
+                              format: uuid
+                            contentType:
+                              type: string
+                            sizeBytes:
+                              type: string
+                              pattern: ^[0-9]+$
+                              description: Plaintext size in bytes, as a decimal string.
+                            etag:
+                              type: string
+                            tags:
+                              type: array
+                              items:
+                                type: string
+                            via:
+                              type: string
+                              enum:
+                                - restore
+                            restoredFromVersionId:
+                              type: string
+                              format: uuid
+                          required:
+                            - bucketName
+                            - objectKey
+                            - objectId
+                            - contentType
+                            - sizeBytes
+                            - etag
+                            - tags
+                            - via
+                            - restoredFromVersionId
       responses:
         2XX:
           description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
@@ -17250,7 +17575,7 @@ webhooks:
         - Files - Objects
       summary: Objects bulk-deleted
       description: |-
-        Fired once per `POST /v1/files/buckets/{name}/objects/bulk-delete`; no per-object events are emitted. `entityId` is the bucket's integer id.
+        Fired once per committed batch of up to 100 objects of a `POST /v1/files/buckets/{name}/objects/bulk-delete`, in the batch's transaction, so a request that stops part-way still reports every delete that committed; no per-object events are emitted. `batchIndex` counts a request's batches from 0. Whether the request stopped at its cap is in its response (`truncated`), not in the events. `entityId` is the bucket's integer id.
 
         Only emitted for buckets that belong to an organization.
       operationId: webhookFilesObjectsBulkDeleted
@@ -17310,17 +17635,19 @@ webhooks:
                                 - kind
                                 - ids
                           description: The request's selector.
+                        batchIndex:
+                          type: integer
+                          minimum: 0
+                          description: The batch's position in its request, from 0.
                         deletedCount:
                           type: integer
-                        truncated:
-                          type: boolean
-                          description: True when the per-request cap stopped the delete early.
+                          description: Objects deleted in this batch.
                         versionedTombstone:
                           type: boolean
                         objects:
                           type: array
                           maxItems: 100
-                          description: The first 100 deleted objects; use `deletedCount` for the total.
+                          description: The objects deleted in this batch.
                           items:
                             type: object
                             properties:
@@ -17335,8 +17662,8 @@ webhooks:
                       required:
                         - bucketName
                         - filter
+                        - batchIndex
                         - deletedCount
-                        - truncated
                         - versionedTombstone
                         - objects
       responses:
@@ -17537,7 +17864,7 @@ webhooks:
         - Files - Objects
       summary: Non-current versions purged
       description: |-
-        Fired once per `POST /v1/files/buckets/{name}/objects/purge-non-current-versions`. `entityId` is the bucket's integer id.
+        Fired once per committed batch of up to 100 versions of a `POST /v1/files/buckets/{name}/objects/purge-non-current-versions`, in the batch's transaction, as `file-service.objects.bulk-deleted`. `batchIndex` counts a request's batches from 0; whether the request stopped at its cap is in its response (`truncated`). `entityId` is the bucket's integer id.
 
         Only emitted for buckets that belong to an organization.
       operationId: webhookFilesObjectsVersionsPurged
@@ -17569,19 +17896,30 @@ webhooks:
                       properties:
                         bucketName:
                           type: string
+                        batchIndex:
+                          type: integer
+                          minimum: 0
+                          description: The batch's position in its request, from 0.
                         purgedCount:
                           type: integer
+                          description: Versions purged in this batch.
                         bytesFreed:
                           type: string
                           pattern: ^[0-9]+$
-                          description: Bytes released, as a decimal string.
-                        truncated:
-                          type: boolean
+                          description: Bytes this batch released, as a decimal string.
+                        versionIds:
+                          type: array
+                          maxItems: 100
+                          items:
+                            type: string
+                            format: uuid
+                          description: The versions purged in this batch.
                       required:
                         - bucketName
+                        - batchIndex
                         - purgedCount
                         - bytesFreed
-                        - truncated
+                        - versionIds
       responses:
         2XX:
           description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
@@ -17591,7 +17929,7 @@ webhooks:
         - Files - Permissions
       summary: Bucket permission granted
       description: |-
-        Fired by `POST /v1/files/buckets/{name}/permissions`, including re-granting a previously revoked permission, and by `POST /v1/files/buckets` for the creator's own grant (`canRead`, `canWrite` and `canDelete` all true, `grantedBy` the creator). `entityId` is the permission's integer id.
+        Fired by `POST /v1/files/buckets/{name}/permissions`, including re-granting a previously revoked permission, by `POST /v1/files/buckets` for the creator's own grant (`canRead`, `canWrite` and `canDelete` all true, `grantedBy` the creator), and by `PUT /v1/files/buckets/{name}/owner` for a new owner without an active grant (all three true, `grantedBy` the admin). `entityId` is the permission's integer id.
 
         Only emitted for buckets that belong to an organization.
       operationId: webhookFilesPermissionGranted
@@ -17652,7 +17990,7 @@ webhooks:
         - Files - Permissions
       summary: Bucket permission revoked
       description: |-
-        Fired by `DELETE /v1/files/buckets/{name}/permissions/{userId}`. `entityId` is the permission's integer id.
+        Fired by `DELETE /v1/files/buckets/{name}/permissions/{userId}`, and by `DELETE /v1/admin/organizations/{id}/members/{userId}` for each grant the removed member held on the organization's buckets. `entityId` is the permission's integer id.
 
         Only emitted for buckets that belong to an organization.
       operationId: webhookFilesPermissionRevoked
@@ -18886,8 +19224,9 @@ components:
       description: |
         Send `Range` only if the content is unchanged: an entity tag that matches
         the `ETag` (weak tags never do) or, where the response carries
-        `Last-Modified`, that date to the second. Otherwise the whole content is
-        sent.
+        `Last-Modified`, that date to the second — taken only once it is at least
+        a second older than the response's `Date` (a strong date validator,
+        RFC 9110 §8.8.2.2). Otherwise the whole content is sent.
       schema:
         type: string
       example: '"5d41402abc4b2a76b9719d911017c592"'
@@ -19012,7 +19351,9 @@ components:
       description: |
         Id of the user who minted the URL, bound into the signature. An upload
         through the URL is recorded as created by this user; URLs without it are
-        attributed to core's system user.
+        attributed to core's system user. The URL acts with this user's access,
+        re-checked on every request: once they are deactivated or lose the
+        permission or bucket grant the operation needs, it is refused (`403`).
       schema:
         type: string
         format: uuid
@@ -19222,6 +19563,36 @@ components:
       schema:
         type: string
         format: uuid
+    DownloadIfMatchHeaderParam:
+      name: If-Match
+      in: header
+      required: false
+      description: '`412` unless one tag strongly matches the `ETag` (a `W/` tag never does), or `*`.'
+      schema:
+        type: string
+    DownloadIfNoneMatchHeaderParam:
+      name: If-None-Match
+      in: header
+      required: false
+      description: '`304` when a tag matches the `ETag`, compared weakly, or `*`.'
+      schema:
+        type: string
+    IfModifiedSinceHeaderParam:
+      name: If-Modified-Since
+      in: header
+      required: false
+      description: '`304` when `Last-Modified` is not later. Ignored with `If-None-Match`.'
+      schema:
+        type: string
+        format: http-date
+    IfUnmodifiedSinceHeaderParam:
+      name: If-Unmodified-Since
+      in: header
+      required: false
+      description: '`412` when `Last-Modified` is later. Ignored with `If-Match`.'
+      schema:
+        type: string
+        format: http-date
     SignedVersionParam:
       name: version
       in: query
@@ -19234,6 +19605,18 @@ components:
       schema:
         type: string
         format: uuid
+    SignedFilenameParam:
+      name: filename
+      in: query
+      required: false
+      description: |
+        The download filename for `Content-Disposition` (sanitized), honored only
+        when bound into the signature — share URLs carry the share's
+        `urlFilename` this way. One added to a URL after signing is ignored;
+        changing or removing a signed one is `403`.
+      schema:
+        type: string
+        maxLength: 255
     WebhooksIncludeArchivedParam:
       name: includeArchived
       in: query
@@ -23823,6 +24206,16 @@ components:
         creator:
           description: The user `createdBy` names.
           $ref: '#/components/schemas/UserRef'
+        ownerId:
+          description: |
+            User id of the owner, who manages the bucket while holding an active
+            grant on it. Starts as `createdBy`; changes only by
+            `PUT /v1/files/buckets/{name}/owner` (`file-service.admin`).
+          type: string
+          format: uuid
+        owner:
+          description: The user `ownerId` names.
+          $ref: '#/components/schemas/UserRef'
         serviceId:
           description: |
             The service that declared the bucket in its provisioning document; null for a bucket a
@@ -23884,6 +24277,8 @@ components:
         - organization
         - createdBy
         - creator
+        - ownerId
+        - owner
         - serviceId
         - serviceName
         - service
@@ -23972,6 +24367,9 @@ components:
           minimum: 1
           maximum: 100000
         requestCost:
+          description: |
+            Tokens each request takes. At most `maxTokens` (`400` otherwise): a
+            request costing more than the bucket can hold would never be admitted.
           type: number
           exclusiveMinimum: 0
           default: 1
@@ -24132,8 +24530,8 @@ components:
         caller's active grant flag (`false` without one) AND the matching role
         permission (`file-service.objects.read` / `.write` / `.delete`, cut to a
         delegated token's ceiling), and `canRead` is also `true` on a public
-        bucket. Being the bucket's creator adds nothing beyond the grant made at
-        create time. Never `null`.
+        bucket. Being the bucket's creator or owner adds nothing beyond their
+        grant. Never `null`.
       properties:
         canRead:
           description: Whether the current user can read from this bucket
@@ -24175,8 +24573,12 @@ components:
             - 30
         expireVersionsAfterDays:
           description: |
-            Hard-delete non-current versions whose `createdAt` is older than N
-            days. `null` disables the rule. Only meaningful on buckets with
+            Hard-delete versions that have been non-current for more than N
+            days — counted from when a newer version replaced them (an overwrite,
+            delete marker, restore or branching PATCH), as S3's `NoncurrentDays`
+            counts it, not from their own `createdAt`. A year-old file
+            overwritten today keeps its old version for N more days. `null`
+            disables the rule. Only meaningful on buckets with
             `versioningEnabled=true`.
           type:
             - integer
@@ -24654,7 +25056,7 @@ components:
           description: |
             Per-object expiry overriding the bucket's lifecycle policy (ISO 8601).
             `null` clears it; omit to leave it unchanged. Later uploads to the
-            object's key keep it.
+            object's key keep it. Setting it takes delete access to the bucket.
           type:
             - string
             - 'null'
@@ -24729,8 +25131,10 @@ components:
           type: string
           format: date-time
         createdBy:
-          description: User ID that wrote this version.
-          type: string
+          description: User ID that wrote this version; null, like the email and name, for a caller a public bucket is served to only because it is public.
+          type:
+            - string
+            - 'null'
           format: uuid
           examples:
             - 019dd4c2-e0b3-778e-b8db-a52e61927416
@@ -25271,11 +25675,14 @@ components:
       enum:
         - active
         - revoked
+        - creator_inactive
         - expired
         - exhausted
       description: |
-        Derived field — the server computes this from (revokedAt, expiresAt,
-        downloadCount, maxDownloads) so clients do not have to re-derive it.
+        Derived field — the server computes this from (revokedAt, the creator's
+        activation, expiresAt, downloadCount, maxDownloads) so clients do not have
+        to re-derive it. `creator_inactive`: the share's creator is deactivated,
+        so it no longer serves.
     Share:
       type: object
       description: |
@@ -25565,13 +25972,12 @@ components:
         - requiresPassword
     UnlockShareRequest:
       type: object
-      required:
-        - password
       properties:
         password:
           type: string
           minLength: 1
           maxLength: 128
+          description: The share's password. Required for a password share; may be left out otherwise.
     UnlockShareResponse:
       type: object
       required:
