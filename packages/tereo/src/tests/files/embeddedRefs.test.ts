@@ -210,7 +210,7 @@ describe("File responses name the ids they return", () => {
     // Served only because the bucket is public: anonymous, or another
     // organization's caller.
     const unnamed = {
-      createdBy: ownerId,
+      createdBy: null,
       createdByEmail: null,
       createdByName: null,
       creator: null,
@@ -257,11 +257,8 @@ describe("File responses name the ids they return", () => {
       }),
     ]);
 
+    // A public bucket's history is for callers with a grant.
     const anon = await axios.get(url, as());
-    expect(anon.status).toBe(HTTP_STATUS.OK);
-    expect(anon.data.data[0]).toMatchObject({
-      deletedBy: ownerId,
-      deletedByUser: null,
-    });
+    expect(anon.status).toBe(HTTP_STATUS.UNAUTHORIZED);
   });
 });
