@@ -6,7 +6,7 @@ import db from "../../../../../../../../utils/db/index.js";
 import { Request, Response } from "express";
 import {
   canWriteBucket,
-  getAccessibleBucket,
+  getGrantedBucket,
   validateBucketAccess,
   validateBucketPermission,
 } from "../../../../../../../../utils/bucketAccess.js";
@@ -36,7 +36,7 @@ export const getShare = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { name, id } = validateParams(shareIdParamSchema, req);
 
-  const bucket = await getAccessibleBucket(auth, name, "read");
+  const bucket = await getGrantedBucket(auth, name, "read");
   setAccessLog(res, { bucketId: bucket.id, operation: "GET_SHARE" });
 
   const share = await db.shares.get(id);
@@ -57,14 +57,15 @@ export const updateShare = async (req: Request, res: Response) => {
   const { name, id } = validateParams(shareIdParamSchema, req);
   const body = validateBody(updateShareBodySchema, req);
 
-  const bucket = await getAccessibleBucket(auth, name, "read");
+  const bucket = await getGrantedBucket(auth, name, "read");
 
   const existing = await db.shares.get(id);
   if (existing.bucketId !== bucket.id) {
     throw new NotFoundError("Share not found");
   }
-  // Creator or a user with bucket write may edit; admins pass the check.
-  // Permission only: shares go on in a retired bucket.
+  // Creator (still holding the read grant checked above) or a user with
+  // bucket write may edit; admins pass the check. Permission only: shares go
+  // on in a retired bucket.
   if (existing.createdByUserId !== auth.userId) {
     await validateBucketPermission(auth, name, "write");
   }
@@ -133,7 +134,12 @@ export const updateShare = async (req: Request, res: Response) => {
       entityType: "share",
       entityId: next.id,
       changes: computeChanges(before, after),
-      metadata: { bucketName: bucket.name, kind: next.kind },
+      // `hasPassword` alone misses one password replaced by another.
+      metadata: {
+        bucketName: bucket.name,
+        kind: next.kind,
+        passwordChanged: "password" in body,
+      },
     });
 
     if (bucket.organizationId) {
@@ -161,7 +167,7 @@ export const revokeShare = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { name, id } = validateParams(shareIdParamSchema, req);
 
-  const bucket = await getAccessibleBucket(auth, name, "read");
+  const bucket = await getGrantedBucket(auth, name, "read");
 
   const existing = await db.shares.get(id);
   if (existing.bucketId !== bucket.id) {

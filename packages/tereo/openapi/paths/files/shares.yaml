@@ -30,8 +30,8 @@
 
       **Required permissions:**
       - System: `file-service.shares.write`
-      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-        bucket in the caller's organization, nor for `file-service.admin`)
+      - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+        bucket too (neither needed for `file-service.admin`)
 
       An audit log entry is created and, for a bucket in an organization, a
       `file-service.share.created` webhook event is emitted.
@@ -90,8 +90,8 @@
 
       **Required permissions:**
       - System: `file-service.shares.read`
-      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-        bucket in the caller's organization, nor for `file-service.admin`)
+      - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+        bucket too (neither needed for `file-service.admin`)
 
       **Filter fields and operators:**
       - `kind`: `equals`, `in` (`OBJECT`, `ARCHIVE`)
@@ -150,8 +150,8 @@
     description: |
       **Required permissions:**
       - System: `file-service.shares.read`
-      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-        bucket in the caller's organization, nor for `file-service.admin`)
+      - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+        bucket too (neither needed for `file-service.admin`)
 
       A share of another bucket returns 404.
     operationId: getShare
@@ -207,8 +207,8 @@
 
       **Required permissions:**
       - System: `file-service.shares.write`
-      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-        bucket in the caller's organization, nor for `file-service.admin`); a caller who did not create the share also
+      - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+        bucket too (neither needed for `file-service.admin`); a caller who did not create the share also
         needs `file-service.objects.write` AND bucket-level `canWrite`
 
       An audit log entry is created and, for a bucket in an organization, a
@@ -267,8 +267,8 @@
 
       **Required permissions:**
       - System: `file-service.shares.delete`
-      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-        bucket in the caller's organization, nor for `file-service.admin`); a caller who did not create the share also
+      - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+        bucket too (neither needed for `file-service.admin`); a caller who did not create the share also
         needs `file-service.objects.delete` AND bucket-level `canDelete`
 
       An audit log entry is created and, for a bucket in an organization, a

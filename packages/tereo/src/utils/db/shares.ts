@@ -52,7 +52,8 @@ const includeTargets = {
       expiresAt: true,
     },
   },
-  creator: userRefSelect,
+  // `isActive`: a deactivated creator's shares stop serving.
+  creator: { select: { ...userRefSelect.select, isActive: true } },
   revoker: userRefSelect,
 } satisfies Prisma.ShareInclude;
 
@@ -271,24 +272,30 @@ export const backfillExpiry = async (maxTtlSeconds: number): Promise<number> =>
  * for longer than `retentionGraceMs`. The audit trail itself lives in
  * the audit log and is unaffected — we only drop the local row that
  * cannot serve another download. Bounded by `limit` per call; the share-
- * sweep worker calls this in a loop until the batch is empty.
+ * sweep worker calls this in a loop until the batch is empty, and audits
+ * what it deleted in the same transaction. Returns the deleted rows.
  */
 export const deleteExpired = async (
   retentionGraceMs: number,
-  now: Date = new Date(),
-  limit = 500
-): Promise<number> => {
+  now: Date,
+  limit: number,
+  tx: Prisma.TransactionClient
+) => {
   const cutoff = new Date(now.getTime() - retentionGraceMs);
-  const expired = await prisma.share.findMany({
+  const expired = await tx.share.findMany({
     where: {
       OR: [{ expiresAt: { lt: cutoff } }, { revokedAt: { lt: cutoff } }],
     },
-    select: { id: true },
+    select: {
+      id: true,
+      kind: true,
+      bucket: { select: { id: true, name: true, organizationId: true } },
+    },
     take: limit,
   });
-  if (expired.length === 0) return 0;
-  const result = await prisma.share.deleteMany({
+  if (expired.length === 0) return [];
+  await tx.share.deleteMany({
     where: { id: { in: expired.map((r) => r.id) } },
   });
-  return result.count;
+  return expired;
 };
