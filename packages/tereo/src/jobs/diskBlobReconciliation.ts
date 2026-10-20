@@ -27,11 +27,14 @@ const JOB_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 // copies, or container image bakes. Mtime is not a safety signal.
 const MIN_AGE_MS = 24 * 60 * 60 * 1000;
 // How long an unused "first seen missing" entry lingers before Redis expires
-// it. 7 days comfortably exceeds the weekly job interval so a reconciliation
-// that runs every week always sees the prior run's bookkeeping; it also
-// collects itself naturally if a shard is retired or renamed.
-const SEEN_MISSING_TTL_SECONDS = 7 * 24 * 60 * 60;
+// it. Several intervals, so a run that comes late, or a shard whose pass the
+// per-run ceiling spreads over more than one run, still finds the previous
+// sighting; it also collects itself if a shard is retired or renamed.
+const SEEN_MISSING_TTL_SECONDS = (4 * JOB_INTERVAL_MS) / 1000;
 const SEEN_MISSING_KEY_PREFIX = "file-service:reconcile:seen-missing";
+// Where a shard's pass stopped at the per-run ceiling, for the next run.
+const SHARD_CURSOR_KEY_PREFIX = "file-service:reconcile:cursor";
+const SHARD_CURSOR_TTL_SECONDS = (4 * JOB_INTERVAL_MS) / 1000;
 
 let orchestratorWorker: Worker | null = null;
 let shardWorker: Worker | null = null;
@@ -195,6 +198,32 @@ async function touchFirstSeenMissing(
   return Number.isFinite(parsed) ? parsed : now;
 }
 
+function shardCursorKey(shard: string): string {
+  return redisKey(`${SHARD_CURSOR_KEY_PREFIX}:${shard}`);
+}
+
+async function loadShardCursor(shard: string): Promise<ShardCursor> {
+  const raw = await getRedisClient().get(shardCursorKey(shard));
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as ShardCursor;
+  } catch {
+    return {};
+  }
+}
+
+async function saveShardCursor(
+  shard: string,
+  cursor: ShardCursor
+): Promise<void> {
+  await getRedisClient().set(
+    shardCursorKey(shard),
+    JSON.stringify(cursor),
+    "EX",
+    SHARD_CURSOR_TTL_SECONDS
+  );
+}
+
 async function clearFirstSeenMissing(
   shard: string,
   sub: string,
@@ -248,15 +277,17 @@ async function tickShard(
     // Resume point within this sub-dir (if we crashed mid-way).
     const resumeAfter =
       cursor.sub === sub && cursor.afterFile ? cursor.afterFile : null;
+    let lastVisited = resumeAfter;
     for (const name of files) {
       if (resumeAfter && name <= resumeAfter) continue;
       if (counters.scanned >= ceiling || processed >= batchLimit) {
         return {
-          cursor: { sub, afterFile: name },
+          cursor: lastVisited ? { sub, afterFile: lastVisited } : { sub },
           hasMore: true,
           processed,
         };
       }
+      lastVisited = name;
 
       const p = path.join(subPath, name);
       try {
@@ -331,7 +362,10 @@ async function processDiskReconShard(job: Job<ShardJobData>): Promise<void> {
 
   const { shard } = job.data;
   const ceiling = env.FILE_SERVICE_DISK_RECONCILIATION_MAX_FILES_PER_SHARD;
-  let cursor: ShardCursor = job.data.cursor ?? {};
+  // A run's first job resumes where the last run's ceiling stopped it, so a
+  // shard larger than the ceiling is covered over successive runs.
+  let cursor: ShardCursor = job.data.cursor ?? (await loadShardCursor(shard));
+  let shardFinished = false;
   const counters = {
     scanned: job.data.filesScanned ?? 0,
     removed: job.data.filesRemoved ?? 0,
@@ -350,6 +384,8 @@ async function processDiskReconShard(job: Job<ShardJobData>): Promise<void> {
         counters,
         ceiling
       );
+      cursor = res.cursor;
+      shardFinished = !res.hasMore;
       return {
         cursor: res.cursor,
         hasMore: res.hasMore && counters.scanned < ceiling,
@@ -358,8 +394,13 @@ async function processDiskReconShard(job: Job<ShardJobData>): Promise<void> {
     },
   });
 
+  if (shardFinished) {
+    await getRedisClient().del(shardCursorKey(shard));
+  } else {
+    await saveShardCursor(shard, cursor);
+  }
+
   if (!result.completed && counters.scanned < ceiling && result.resumeCursor) {
-    cursor = result.resumeCursor;
     await reenqueueShard(job, cursor, counters);
   }
 
