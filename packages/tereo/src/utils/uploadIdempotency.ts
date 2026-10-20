@@ -68,6 +68,11 @@ export async function withExclusiveClaim<T>(
   }
 }
 
+/** Whether `withExclusiveClaim(name, …)` is running somewhere now. */
+export async function isClaimHeld(name: string): Promise<boolean> {
+  return (await getRedisClient().exists(redisKey(name))) === 1;
+}
+
 export interface IdempotencyInput {
   scope: string;
   key: string;
@@ -88,6 +93,14 @@ async function findLiveRecord(scope: string, key: string) {
   return prisma.idempotencyRecord.findFirst({
     where: { scope, key, expiresAt: { gt: new Date() } },
   });
+}
+
+/** Whether a request under (scope, key) has a stored response to replay. */
+export async function hasStoredResult(
+  scope: string,
+  key: string
+): Promise<boolean> {
+  return (await findLiveRecord(scope, key)) !== null;
 }
 
 function replayOrConflict<T>(
@@ -112,6 +125,11 @@ function replayOrConflict<T>(
   };
 }
 
+export type PersistIdempotentResult<T> = (
+  tx: Prisma.TransactionClient,
+  result: { status: number; body: T }
+) => Promise<void>;
+
 /**
  * Wrap a handler with idempotency semantics.
  *
@@ -121,15 +139,22 @@ function replayOrConflict<T>(
  * - Concurrent call with same key: throws 409 `idempotency_request_in_progress`.
  * - On handler error: releases the Redis claim and propagates.
  *
+ * A handler that writes calls `persist` inside its own transaction, so the
+ * record commits with the write or not at all: a retry after a failure
+ * between the two would otherwise repeat the write. A handler that returns
+ * without calling it (it wrote nothing) has its result stored afterwards.
+ *
  * Lookup order: Postgres first (source of truth for completed requests),
  * Redis second (concurrency guard only, 60s TTL). Expired Postgres rows are
  * ignored so a deterministic key can be safely reused after its TTL.
  */
 export async function withIdempotency<T>(
   input: IdempotencyInput,
-  handler: () => Promise<{ status: number; body: T }>
+  handler: (
+    persist: PersistIdempotentResult<T>
+  ) => Promise<{ status: number; body: T }>
 ): Promise<IdempotencyResult<T>> {
-  const { scope, key, requestHash, userId } = input;
+  const { scope, key, requestHash } = input;
   const redis = getRedisClient();
   const claimKey = pendingRedisKey(scope, key);
 
@@ -166,32 +191,16 @@ export async function withIdempotency<T>(
     return replayOrConflict<T>(raced, requestHash);
   }
 
+  let persisted = false;
+  const persist: PersistIdempotentResult<T> = async (tx, result) => {
+    await storeRecord(tx, input, result);
+    persisted = true;
+  };
+
   const stopRenewal = keepClaimAlive(claimKey, token);
   try {
-    const result = await handler();
-    const expiresAt = new Date(Date.now() + RESULT_TTL_SECONDS * 1000);
-    // Upsert so a not-yet-swept expired row with the same (scope, key) is
-    // refreshed rather than colliding on the unique index.
-    await prisma.idempotencyRecord.upsert({
-      where: { scope_key: { scope, key } },
-      create: {
-        scope,
-        key,
-        requestHash,
-        responseStatus: result.status,
-        responseBody: result.body as Prisma.InputJsonValue,
-        createdBy: userId,
-        expiresAt,
-      },
-      update: {
-        requestHash,
-        responseStatus: result.status,
-        responseBody: result.body as Prisma.InputJsonValue,
-        createdBy: userId,
-        createdAt: new Date(),
-        expiresAt,
-      },
-    });
+    const result = await handler(persist);
+    if (!persisted) await storeRecord(prisma, input, result);
     stopRenewal();
     await releaseClaim(claimKey, token);
     return { status: result.status, body: result.body, replayed: false };
@@ -208,6 +217,37 @@ export async function withIdempotency<T>(
     );
     throw err;
   }
+}
+
+async function storeRecord(
+  client: Prisma.TransactionClient,
+  input: IdempotencyInput,
+  result: { status: number; body: unknown }
+): Promise<void> {
+  const { scope, key, requestHash, userId } = input;
+  const expiresAt = new Date(Date.now() + RESULT_TTL_SECONDS * 1000);
+  // Upsert so a not-yet-swept expired row with the same (scope, key) is
+  // refreshed rather than colliding on the unique index.
+  await client.idempotencyRecord.upsert({
+    where: { scope_key: { scope, key } },
+    create: {
+      scope,
+      key,
+      requestHash,
+      responseStatus: result.status,
+      responseBody: result.body as Prisma.InputJsonValue,
+      createdBy: userId,
+      expiresAt,
+    },
+    update: {
+      requestHash,
+      responseStatus: result.status,
+      responseBody: result.body as Prisma.InputJsonValue,
+      createdBy: userId,
+      createdAt: new Date(),
+      expiresAt,
+    },
+  });
 }
 
 /**

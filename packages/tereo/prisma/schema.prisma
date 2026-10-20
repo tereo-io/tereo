@@ -887,6 +887,7 @@ model ContentBlob {
   hash             String    @id @db.VarChar(64)
   sizeBytes        BigInt    @map("size_bytes")
   fsPath           String    @map("fs_path") @db.VarChar(1024)
+  // CHECK (ref_count >= 0) in raw SQL: a release counted twice fails loudly.
   refCount         Int       @default(0) @map("ref_count")
   wrappedDek       Bytes     @map("wrapped_dek")
   iv               Bytes
@@ -1039,6 +1040,9 @@ model MultipartPart {
   etag       String   @db.VarChar(64)
   fsPath     String   @map("fs_path") @db.VarChar(1024)
   uploadedAt DateTime @default(now()) @map("uploaded_at")
+  // Encrypted with AAD `${uploadId}|${partNumber}`; false for parts staged
+  // before parts were bound, which decrypt without AAD.
+  aadBound   Boolean  @default(false) @map("aad_bound")
 
   upload MultipartUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
 

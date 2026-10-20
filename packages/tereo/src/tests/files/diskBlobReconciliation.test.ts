@@ -1,13 +1,15 @@
 import { processDiskReconShard } from "../../jobs/diskBlobReconciliation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getRedisClient } from "../../utils/redis.js";
+import { getRedisClient, redisKey } from "../../utils/redis.js";
 import { getBlobPath } from "../../utils/storage.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes } from "node:crypto";
 import db from "../../utils/db/index.js";
 import type { Job } from "bullmq";
 import fs from "node:fs/promises";
+import env from "../../env.js";
 import path from "node:path";
+import os from "node:os";
 import {
   cleanupTestEntities,
   createTestBucket,
@@ -152,5 +154,60 @@ describe("diskBlobReconciliation against a concurrent upload", () => {
     await run;
 
     expect(await exists(getBlobPath(hash))).toBe(true);
+  });
+});
+
+describe("diskBlobReconciliation over runs", () => {
+  const storage = { previous: "", root: "" };
+  const ceiling = { previous: 0 };
+  // A shard of five unreferenced files, two checked per run.
+  const shard = "f0";
+  const sub = "0d";
+  const names = Array.from(
+    { length: 5 },
+    (_, i) =>
+      `${shard}${sub}${String(i).padStart(2, "0")}${randomBytes(29).toString("hex")}`
+  ).sort();
+  const seenKey = redisKey(
+    `file-service:reconcile:seen-missing:${shard}:${sub}`
+  );
+  const cursorKey = redisKey(`file-service:reconcile:cursor:${shard}`);
+  const sighted = async () => (await getRedisClient().hkeys(seenKey)).sort();
+
+  beforeAll(async () => {
+    storage.previous = env.FILE_SERVICE_STORAGE_PATH;
+    ceiling.previous = env.FILE_SERVICE_DISK_RECONCILIATION_MAX_FILES_PER_SHARD;
+    storage.root = await fs.mkdtemp(path.join(os.tmpdir(), "recon-"));
+    env.FILE_SERVICE_STORAGE_PATH = storage.root;
+    env.FILE_SERVICE_DISK_RECONCILIATION_MAX_FILES_PER_SHARD = 2;
+    const dir = path.join(storage.root, "blobs", shard, sub);
+    await fs.mkdir(dir, { recursive: true });
+    for (const name of names) await fs.writeFile(path.join(dir, name), "x");
+    await getRedisClient().del(seenKey, cursorKey);
+  });
+
+  afterAll(async () => {
+    env.FILE_SERVICE_STORAGE_PATH = storage.previous;
+    env.FILE_SERVICE_DISK_RECONCILIATION_MAX_FILES_PER_SHARD = ceiling.previous;
+    await fs.rm(storage.root, { recursive: true, force: true });
+    await getRedisClient().del(seenKey, cursorKey);
+  });
+
+  it("resumes where the last run's ceiling stopped it, and starts over once done", async () => {
+    await runShard(shard);
+    expect(await sighted()).toEqual(names.slice(0, 2));
+    expect(await getRedisClient().get(cursorKey)).not.toBeNull();
+
+    await runShard(shard);
+    expect(await sighted()).toEqual(names.slice(0, 4));
+
+    await runShard(shard);
+    expect(await sighted()).toEqual(names);
+    expect(await getRedisClient().get(cursorKey)).toBeNull();
+
+    // Starting over: the first files are seen again, not skipped.
+    await getRedisClient().del(seenKey);
+    await runShard(shard);
+    expect(await sighted()).toEqual(names.slice(0, 2));
   });
 });

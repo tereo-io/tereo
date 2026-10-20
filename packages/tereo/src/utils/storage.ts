@@ -15,6 +15,7 @@ import {
   createEncryptStream,
   createMultipartPartDecryptStream,
   createMultipartPartEncryptStream,
+  aadForPart,
 } from "./encryption.js";
 
 const pipeline = promisify(pipelineCb);
@@ -204,7 +205,10 @@ export async function stagePart(
     },
   });
 
-  const partCipher = createMultipartPartEncryptStream(stagingDek);
+  const partCipher = createMultipartPartEncryptStream(
+    stagingDek,
+    aadForPart(uploadId, partNumber)
+  );
   try {
     await pipeline(source, meter, partCipher, createWriteStream(fsPath));
   } catch (err) {
@@ -221,15 +225,18 @@ export async function stagePart(
 
 /**
  * Open a read stream that yields plaintext bytes from a staged multipart
- * part. The part is decrypted under the upload's staging DEK as it streams.
+ * part. The part is decrypted under the upload's staging DEK as it streams;
+ * `aad` is null for a part staged unbound (`aad_bound = false`).
  */
 export function openMultipartPartStream(
   fsPath: string,
-  stagingDek: Buffer
+  stagingDek: Buffer,
+  aad: Buffer | null
 ): Readable {
-  const file = createReadStream(fsPath);
-  const decrypt = createMultipartPartDecryptStream(stagingDek);
-  return file.pipe(decrypt) as unknown as Readable;
+  const decrypt = createMultipartPartDecryptStream(stagingDek, aad);
+  // pipeline, not pipe: a read error (a missing file) reaches the reader.
+  pipelineCb(createReadStream(fsPath), decrypt, () => {});
+  return decrypt;
 }
 
 /**

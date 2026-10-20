@@ -1,5 +1,6 @@
 import { Prisma } from "../../../prisma/generated/client/index.js";
 import { NotFoundError } from "../errors.js";
+import { logger } from "../logger.js";
 import { prisma } from "./prisma.js";
 import {
   deleteBlobFile,
@@ -152,9 +153,10 @@ export const incRef = async (
 };
 
 /**
- * Decrement refCount on a blob atomically. Clamps to zero (defensive).
- * When the count reaches zero, sets orphanedAt = now so the orphan cleanup
- * worker can sweep it after the configured grace period. Returns the new refCount.
+ * Decrement refCount on a blob atomically. When the count reaches zero, sets
+ * orphanedAt = now so the orphan cleanup worker can sweep it after the
+ * configured grace period. Returns the new refCount. A release counted twice
+ * fails on the `ref_count >= 0` CHECK instead of hiding the drift.
  */
 export const decRef = async (
   hash: string,
@@ -162,9 +164,9 @@ export const decRef = async (
 ): Promise<number> => {
   const rows = await tx.$queryRaw<{ ref_count: number }[]>`
     UPDATE "files"."content_blobs"
-    SET "ref_count" = GREATEST(0, "ref_count" - 1),
+    SET "ref_count" = "ref_count" - 1,
         "orphaned_at" = CASE
-          WHEN GREATEST(0, "ref_count" - 1) = 0 THEN NOW()
+          WHEN "ref_count" - 1 = 0 THEN NOW()
           ELSE "orphaned_at"
         END
     WHERE "hash" = ${hash}
@@ -182,6 +184,11 @@ export const decRef = async (
  *
  * Uses FOR UPDATE SKIP LOCKED so concurrent workers don't fight for the same
  * row. Caller must either delete the row + file or release the lock.
+ *
+ * A ref_count of 0 is not trusted on its own: a blob a live version still
+ * references has drifted, and deleting it would null that version's content
+ * through the FK's ON DELETE SET NULL. Such a blob gets its count repaired
+ * and is not claimed.
  */
 export const claimOrphan = async (
   hash: string,
@@ -205,7 +212,35 @@ export const claimOrphan = async (
     FOR UPDATE SKIP LOCKED
   `;
   if (rows.length === 0) return null;
+  const live = await liveReferenceCount(hash, tx);
+  if (live > 0) {
+    logger.error(
+      { hash, liveReferences: live },
+      "Orphaned content blob still has live references; repairing ref_count instead of deleting"
+    );
+    await tx.$executeRaw`
+      UPDATE "files"."content_blobs"
+      SET "ref_count" = ${live}, "orphaned_at" = NULL
+      WHERE "hash" = ${hash}
+    `;
+    return null;
+  }
   return rows[0];
+};
+
+// Every table with a foreign key to content_blobs belongs in this count.
+const liveReferenceCount = async (
+  hash: string,
+  tx: Prisma.TransactionClient
+): Promise<number> => {
+  const rows = await tx.$queryRaw<{ count: number }[]>`
+    SELECT COUNT(*)::int AS "count"
+    FROM "files"."object_versions"
+    WHERE "content_blob_hash" = ${hash}
+      AND "deleted_at" IS NULL
+      AND "is_delete_marker" = false
+  `;
+  return rows[0]?.count ?? 0;
 };
 
 /**
@@ -309,9 +344,9 @@ export const decRefMany = async (
     { hash: string; ref_count: number; released_bytes: bigint }[]
   >`
     UPDATE "files"."content_blobs" cb
-    SET "ref_count" = GREATEST(0, cb."ref_count" - counts.cnt),
+    SET "ref_count" = cb."ref_count" - counts.cnt,
         "orphaned_at" = CASE
-          WHEN GREATEST(0, cb."ref_count" - counts.cnt) = 0 THEN NOW()
+          WHEN cb."ref_count" - counts.cnt = 0 THEN NOW()
           ELSE cb."orphaned_at"
         END
     FROM unnest(${[...counts.keys()]}::text[], ${[...counts.values()]}::int[])

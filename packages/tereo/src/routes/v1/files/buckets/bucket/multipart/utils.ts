@@ -57,3 +57,7 @@ export const assertStagingFits = (
     throw new InsufficientStorageError("Storage quota exceeded");
   }
 };
+
+/** The claim a complete of `uploadId` holds while it runs. */
+export const multipartCompleteClaim = (uploadId: string) =>
+  `file-service:multipart-complete:${uploadId}`;

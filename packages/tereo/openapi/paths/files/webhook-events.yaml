@@ -479,7 +479,7 @@ file-service.objects.bulk-deleted:
       - Files - Objects
     summary: Objects bulk-deleted
     description: |-
-      Fired once per `POST /v1/files/buckets/{name}/objects/bulk-delete`; no per-object events are emitted. `entityId` is the bucket's integer id.
+      Fired once per committed batch of up to 100 objects of a `POST /v1/files/buckets/{name}/objects/bulk-delete`, in the batch's transaction, so a request that stops part-way still reports every delete that committed; no per-object events are emitted. `batchIndex` counts a request's batches from 0. Whether the request stopped at its cap is in its response (`truncated`), not in the events. `entityId` is the bucket's integer id.
 
       Only emitted for buckets that belong to an organization.
     operationId: webhookFilesObjectsBulkDeleted
@@ -539,17 +539,19 @@ file-service.objects.bulk-deleted:
                               - kind
                               - ids
                         description: The request's selector.
+                      batchIndex:
+                        type: integer
+                        minimum: 0
+                        description: The batch's position in its request, from 0.
                       deletedCount:
                         type: integer
-                      truncated:
-                        type: boolean
-                        description: True when the per-request cap stopped the delete early.
+                        description: Objects deleted in this batch.
                       versionedTombstone:
                         type: boolean
                       objects:
                         type: array
                         maxItems: 100
-                        description: The first 100 deleted objects; use `deletedCount` for the total.
+                        description: The objects deleted in this batch.
                         items:
                           type: object
                           properties:
@@ -564,8 +566,8 @@ file-service.objects.bulk-deleted:
                     required:
                       - bucketName
                       - filter
+                      - batchIndex
                       - deletedCount
-                      - truncated
                       - versionedTombstone
                       - objects
     responses:
@@ -770,7 +772,7 @@ file-service.objects.versions.purged:
       - Files - Objects
     summary: Non-current versions purged
     description: |-
-      Fired once per `POST /v1/files/buckets/{name}/objects/purge-non-current-versions`. `entityId` is the bucket's integer id.
+      Fired once per committed batch of up to 100 versions of a `POST /v1/files/buckets/{name}/objects/purge-non-current-versions`, in the batch's transaction, as `file-service.objects.bulk-deleted`. `batchIndex` counts a request's batches from 0; whether the request stopped at its cap is in its response (`truncated`). `entityId` is the bucket's integer id.
 
       Only emitted for buckets that belong to an organization.
     operationId: webhookFilesObjectsVersionsPurged
@@ -802,19 +804,30 @@ file-service.objects.versions.purged:
                     properties:
                       bucketName:
                         type: string
+                      batchIndex:
+                        type: integer
+                        minimum: 0
+                        description: The batch's position in its request, from 0.
                       purgedCount:
                         type: integer
+                        description: Versions purged in this batch.
                       bytesFreed:
                         type: string
                         pattern: ^[0-9]+$
-                        description: Bytes released, as a decimal string.
-                      truncated:
-                        type: boolean
+                        description: Bytes this batch released, as a decimal string.
+                      versionIds:
+                        type: array
+                        maxItems: 100
+                        items:
+                          type: string
+                          format: uuid
+                        description: The versions purged in this batch.
                     required:
                       - bucketName
+                      - batchIndex
                       - purgedCount
                       - bytesFreed
-                      - truncated
+                      - versionIds
     responses:
       2XX:
         description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.

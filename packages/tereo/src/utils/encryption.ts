@@ -110,6 +110,14 @@ export function aadForUploadId(uploadId: string): Buffer {
 }
 
 /**
+ * AAD bytes binding a staged part's ciphertext to its upload and position, so
+ * a part file moved to another part's row fails to decrypt.
+ */
+export function aadForPart(uploadId: string, partNumber: number): Buffer {
+  return Buffer.from(`${uploadId}|${partNumber}`, "utf8");
+}
+
+/**
  * Streaming cipher that emits `BLOB_MAGIC_V1 || ciphertext || tag`. The DEK
  * is wrapped *after* the stream finishes — the caller must invoke
  * `finalize(blobHash)` with the plaintext SHA-256, which becomes the AAD
@@ -313,16 +321,18 @@ export function generateStagingDek(uploadId: string): {
 }
 
 /**
- * Encrypt a multipart part stream under the upload's staging DEK. On-disk
- * format: `iv(12) || ciphertext || tag(16)`. Fresh per-part IV so reusing
- * the same DEK across parts is safe. No magic header — parts are internal
- * scratch, swept after TTL.
+ * Encrypt a multipart part stream under the upload's staging DEK, with
+ * `aadForPart` as AAD. On-disk format: `iv(12) || ciphertext || tag(16)`.
+ * Fresh per-part IV so reusing the same DEK across parts is safe. No magic
+ * header — parts are internal scratch, swept after TTL.
  */
 export function createMultipartPartEncryptStream(
-  stagingDek: Buffer
+  stagingDek: Buffer,
+  aad: Buffer
 ): Transform {
   const iv = crypto.randomBytes(IV_BYTES);
   const cipher = crypto.createCipheriv("aes-256-gcm", stagingDek, iv);
+  cipher.setAAD(aad);
   let ivEmitted = false;
   return new Transform({
     transform(chunk, _enc, cb) {
@@ -356,10 +366,12 @@ export function createMultipartPartEncryptStream(
 /**
  * Decrypt a multipart part stream produced by
  * `createMultipartPartEncryptStream`. Reads the leading 12-byte IV and
- * trailing 16-byte tag.
+ * trailing 16-byte tag. `aad` is null for a part staged before parts were
+ * bound to their position (`aad_bound = false`), which still decrypts.
  */
 export function createMultipartPartDecryptStream(
-  stagingDek: Buffer
+  stagingDek: Buffer,
+  aad: Buffer | null
 ): Transform {
   let ivRemaining = IV_BYTES;
   let ivBuf = Buffer.alloc(0);
@@ -381,6 +393,7 @@ export function createMultipartPartDecryptStream(
             stagingDek,
             iv
           ) as crypto.DecipherGCM;
+          if (aad) decipher.setAAD(aad);
           body = ivBuf.subarray(IV_BYTES);
           ivRemaining = 0;
           ivBuf = Buffer.alloc(0);
