@@ -24,6 +24,40 @@
     - $ref: '../../components/files/parameters.yaml#/SignedByParam'
     - $ref: '../../components/files/parameters.yaml#/SignedVersionParam'
 
+  head:
+    tags:
+      - Files - Signed URLs
+    summary: Probe an object via a presigned URL
+    description: |
+      Answers with the headers `GET` would send — `Content-Type`,
+      `Content-Length` (the whole object), `Accept-Ranges`, `ETag`,
+      `Last-Modified`, `Content-Disposition` and the security headers — and
+      no body. Checked exactly as `GET` is (signature, share state, the
+      signer's access), but it spends nothing: a capped share's single-use
+      URL still serves its `GET` afterwards. No audit entry is written.
+    operationId: probeViaSignedUrl
+    security: []
+    parameters:
+      - name: disposition
+        in: query
+        required: false
+        description: 'Only `attachment` is honored; it forces `Content-Disposition: attachment`.'
+        schema:
+          type: string
+          enum: [attachment]
+      - $ref: '../../components/files/parameters.yaml#/SignedFilenameParam'
+    responses:
+      '200':
+        description: The object would be served. No body.
+      '400':
+        description: A missing or malformed query parameter. No body (HEAD).
+      '403':
+        description: As for `GET`. No body (HEAD).
+      '404':
+        description: As for `GET`. No body (HEAD).
+      '429':
+        description: Rate limit exceeded. No body (HEAD).
+
   get:
     tags:
       - Files - Signed URLs
@@ -37,15 +71,26 @@
       is pinned to one).
 
       **Authentication:** none — the HMAC signature over
-      `(bucket, id, operation, expires, nonce, v[, share][, by][, version])` is verified
+      `(bucket, id, operation, expires, nonce, v[, share][, by][, version][, filename])` is verified
       instead. A URL signed for `write` does not verify here. When `share`
       is present, the share must still be serveable (not revoked, expired or
-      exhausted) on every hit.
+      exhausted, its creator still active) on every hit. Otherwise, when
+      `by` is present, the URL works only while its signer could still read
+      the object: an active user with `file-service.objects.read` and an
+      active read grant on the bucket (or `file-service.admin`); else `403`.
 
-      `disposition` and `filename` are presentation hints outside the
-      signature: they can only force `attachment` and rename the download,
-      never weaken disposition. Unsafe types (HTML, JavaScript, SVG, …) are
-      always served as attachments.
+      A share's URL is single-use when the share has `maxDownloads`: the
+      request that starts sending the content spends it, so one that fails
+      first (`404`, `416`, …) — or a `HEAD` — leaves it unspent, and of two
+      concurrent requests only one is served. Spending it needs Redis:
+      without it the request is `503`.
+
+      `disposition` is an unsigned presentation hint: it can only force
+      `attachment`, never weaken disposition. `filename` names the download
+      only when the signature covers it (share URLs with a custom
+      filename); one added to a URL afterwards is ignored, and changing or
+      removing a signed one is `403`. Unsafe types (HTML, JavaScript, SVG, …)
+      are always served as attachments.
 
       Supports one byte range (`Range`, and `If-Range` with the `ETag`) as
       on `GET /v1/files/buckets/{name}/objects/{objectKey}`, so media can seek
@@ -54,8 +99,8 @@
       Counts against the bucket's per-bucket rate limit, if configured (the
       signature is checked first).
 
-      An audit log entry (`presignedDownload`) is created for each download,
-      ranges included.
+      An audit log entry (`presignedDownload`) and an access-log entry
+      (`PRESIGNED_DOWNLOAD`) are created for each download, ranges included.
     operationId: downloadViaSignedUrl
     security: []
     parameters:
@@ -66,12 +111,7 @@
         schema:
           type: string
           enum: [attachment]
-      - name: filename
-        in: query
-        required: false
-        description: Overrides the download filename in `Content-Disposition` (sanitized).
-        schema:
-          type: string
+      - $ref: '../../components/files/parameters.yaml#/SignedFilenameParam'
       - $ref: '../../components/files/parameters.yaml#/RangeHeaderParam'
       - $ref: '../../components/files/parameters.yaml#/IfRangeHeaderParam'
     responses:
@@ -86,6 +126,9 @@
             $ref: '../../components/files/headers.yaml#/Accept-Ranges'
           ETag:
             $ref: '../../components/files/headers.yaml#/ETag'
+          Last-Modified:
+            schema:
+              type: string
           Content-Disposition:
             description: '`inline` or `attachment`, with an ASCII `filename` (other characters become `_`) and the real name in RFC 5987 `filename*`.'
             schema:
@@ -121,6 +164,9 @@
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
         $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+        description: '`temporarily_unavailable` - the URL is a capped share''s single-use URL and Redis, which records it, is unreachable. Nothing is spent; retry after `Retry-After`.'
 
   put:
     tags:
@@ -134,7 +180,10 @@
       rename while the body uploads is followed. Share-bound URLs are refused.
 
       **Authentication:** none — the HMAC signature is verified instead. A
-      URL signed for `read` does not verify here.
+      URL signed for `read` does not verify here. When `by` is present, the
+      URL works only while its signer could still write the object: an
+      active user with `file-service.objects.write` and an active write
+      grant on the bucket (or `file-service.admin`); else `403`.
 
       The body is the file's bytes (not multipart). Its `Content-Type`
       header becomes the object's content type: a single `type/subtype`,
@@ -146,7 +195,8 @@
       retired. Counts against the bucket's per-bucket rate limit, if
       configured.
 
-      An audit log entry is created for this action, and — when the bucket
+      An audit log entry and an access-log entry (`PRESIGNED_UPLOAD`) are
+      created for this action, and — when the bucket
       belongs to an organization — a `file-service.object.updated` (or
       `file-service.object.created`) webhook event is emitted with
       `via: "presigned"`.
@@ -226,15 +276,21 @@
       `share`). The bucket is not in the path: it is resolved from the
       archive and bound into the signature.
 
-      **Authentication:** none — the HMAC signature is verified instead.
-      When `share` is present, the share must still be serveable on every
-      hit. Re-downloads within the URL's TTL are allowed. The archive itself
-      must not have expired.
+      **Authentication:** none — the HMAC signature is verified instead,
+      before anything about the archive is revealed: a missing archive is
+      the same `403` as a wrong signature. When `share` is present, the
+      share must still be serveable on every hit (and a capped share's URL
+      is single-use, spent when the stream starts; `503` without Redis).
+      Otherwise the archive's creator must still be able to read the bucket
+      (active, `file-service.objects.read` and an active read grant, or
+      `file-service.admin`); else `403`. Re-downloads within the URL's TTL
+      are allowed. The archive itself must not have expired.
 
       The response is streamed without `Content-Length`. If an error occurs
       after the body has started, the connection is reset.
 
-      An audit log entry (`archiveDownload`) is created for each download.
+      An audit log entry (`archiveDownload`) and an access-log entry
+      (`ARCHIVE_DOWNLOAD`) are created for each download.
     operationId: downloadArchiveViaSignedUrl
     security: []
     parameters:
@@ -282,11 +338,9 @@
         $ref: '../../components/files/responses.yaml#/SignatureRejectedResponse'
       '404':
         description: |
-          Archive request (or an `id` that is not a UUID) or its bucket not
-          found — checked before the signature, since the archive names the
-          bucket the signature binds. An archive request is deleted
-          `FILE_SERVICE_SHARE_RETENTION_DAYS` (default 30) after it expires,
-          so its URL turns from `403` to `404` then.
+          The `id` is not a UUID. A well-formed id of a missing archive (one
+          deleted `FILE_SERVICE_SHARE_RETENTION_DAYS` after it expires
+          included) is `403`, like a wrong signature.
         content:
           application/json:
             schema:
@@ -301,3 +355,46 @@
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
         $ref: '../../components/responses.yaml#/ServerErrorResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+        description: '`temporarily_unavailable` - the URL is a capped share''s single-use URL and Redis, which records it, is unreachable. Nothing is spent; retry after `Retry-After`.'
+  head:
+    tags:
+      - Files - Signed URLs
+    summary: Probe an archive via a presigned URL
+    description: |
+      Answers with the headers `GET` would send (`Content-Type`,
+      `Content-Disposition`, `Cache-Control`, `Content-Security-Policy`;
+      no `Content-Length`) and no body, after the same checks — including
+      `410` and `400 archive_too_large`. Spends nothing: a capped share's
+      single-use URL still serves its `GET` afterwards. No audit entry.
+    operationId: probeArchiveViaSignedUrl
+    security: []
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Archive request id. Bound into the signature.
+        schema:
+          type: string
+          format: uuid
+      - $ref: '../../components/files/parameters.yaml#/SignedOpParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedExpiresParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedNonceParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedKeyVersionParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedSigParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedShareParam'
+      - $ref: '../../components/files/parameters.yaml#/SignedByParam'
+    responses:
+      '200':
+        description: The archive would be served. No body.
+      '400':
+        description: A missing signature parameter, or `archive_too_large`. No body (HEAD).
+      '403':
+        description: As for `GET`. No body (HEAD).
+      '404':
+        description: The `id` is not a UUID. No body (HEAD).
+      '410':
+        description: As for `GET`. No body (HEAD).
+      '429':
+        description: Rate limit exceeded. No body (HEAD).

@@ -229,10 +229,25 @@ SignedByParam:
   description: |
     Id of the user who minted the URL, bound into the signature. An upload
     through the URL is recorded as created by this user; URLs without it are
-    attributed to core's system user.
+    attributed to core's system user. The URL acts with this user's access,
+    re-checked on every request: once they are deactivated or lose the
+    permission or bucket grant the operation needs, it is refused (`403`).
   schema:
     type: string
     format: uuid
+
+SignedFilenameParam:
+  name: filename
+  in: query
+  required: false
+  description: |
+    The download filename for `Content-Disposition` (sanitized), honored only
+    when bound into the signature — share URLs carry the share's
+    `urlFilename` this way. One added to a URL after signing is ignored;
+    changing or removing a signed one is `403`.
+  schema:
+    type: string
+    maxLength: 255
 
 RangeHeaderParam:
   name: Range
