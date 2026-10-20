@@ -29,6 +29,7 @@ const ORG_ID = FIXTURE_ORGANIZATION_IDS[0];
 const EVENT_TYPES = [
   "file-service.bucket.created",
   "file-service.bucket.updated",
+  "file-service.bucket.owner-changed",
   "file-service.object.created",
   "file-service.object.updated",
   "file-service.object.version.created",
@@ -221,6 +222,33 @@ describe("file-service webhook events", () => {
         canWrite: true,
         canDelete: true,
         grantedBy: bucket.createdBy,
+      },
+    });
+  });
+
+  it("emits bucket.owner-changed on a transfer", async () => {
+    const bucket = await createTestBucket(token);
+    const next = randomUUID();
+    await ensureTestMembership(next, ORG_ID);
+
+    const res = await axios.put(
+      `${BASE_URL}/buckets/${bucket.name}/owner`,
+      { userId: next },
+      { headers: auth() }
+    );
+    expect(res.status).toBe(HTTP_STATUS.OK);
+
+    const [payload] = await delivered(
+      "file-service.bucket.owner-changed",
+      String(bucket.id)
+    );
+    expect(payload).toMatchObject({
+      organizationId: ORG_ID,
+      entityType: "bucket",
+      data: {
+        bucketName: bucket.name,
+        ownerId: next,
+        previousOwnerId: bucket.createdBy,
       },
     });
   });

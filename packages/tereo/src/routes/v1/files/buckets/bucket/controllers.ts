@@ -45,6 +45,7 @@ export function serializeBucket(
   bucket: Bucket & {
     service: ServiceRef | null;
     creator: UserRef;
+    owner: UserRef;
     organization: OrgRef | null;
   },
   liveUsageBytes?: bigint
@@ -72,6 +73,8 @@ export function serializeBucket(
     organization: toOrgRef(bucket.organization),
     createdBy: bucket.createdBy,
     creator: toUserRef(bucket.creator),
+    ownerId: bucket.ownerId,
+    owner: toUserRef(bucket.owner),
     serviceId: bucket.serviceId,
     serviceName: bucket.service?.name ?? null,
     service: toServiceRef(bucket.service),

@@ -3,6 +3,7 @@ import { logger } from "../../utils/logger.js";
 import db from "../../utils/db/index.js";
 import type { Server } from "socket.io";
 import type {
+  BucketAccessChangePayload,
   PermissionChangePayload,
   ServerToClientEvents,
   ClientToServerEvents,
@@ -97,4 +98,29 @@ export const notifyRoleDeleted = (affectedUserIds: string[]) => {
     reason: "role_deleted",
     timestamp: Date.now(),
   });
+};
+
+/**
+ * A grant on the bucket was given, revoked, or its owner changed. Grants are
+ * not in the token, so unlike a role change this asks for no token refresh.
+ */
+export const notifyBucketAccessChanged = (
+  userIds: string[],
+  bucketName: string
+) => {
+  if (userIds.length === 0) return;
+  const ioInstance = getIO();
+  const payload: BucketAccessChangePayload = {
+    bucketName,
+    timestamp: Date.now(),
+  };
+  for (const userId of new Set(userIds)) {
+    ioInstance
+      .to(`user:${userId}`)
+      .emit("files:bucket-access:changed", payload);
+  }
+  logger.debug(
+    { bucketName, userIds },
+    `Emitted bucket access change to ${userIds.length} users`
+  );
 };

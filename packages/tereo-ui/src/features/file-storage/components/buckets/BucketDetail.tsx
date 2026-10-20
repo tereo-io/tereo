@@ -256,6 +256,14 @@ export const BucketDetail = () => {
                     </span>
                   ),
                 },
+                {
+                  label: "Owner",
+                  value: (
+                    <span title={bucket.owner.email}>
+                      {userLabel(bucket.owner)}
+                    </span>
+                  ),
+                },
                 { label: "Created", value: formatDate(bucket.createdAt) },
               ]}
               headerActions={

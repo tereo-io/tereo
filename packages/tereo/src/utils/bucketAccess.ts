@@ -68,6 +68,21 @@ export const getAccessibleBucket = async (
 };
 
 /**
+ * `getAccessibleBucket` without the public-bucket shortcut: managing shares
+ * takes a grant (or `file-service.admin`) even where anyone may download.
+ */
+export const getGrantedBucket = async (
+  auth: AuthContext,
+  bucketName: string,
+  operation: "read" | "write" | "delete"
+) => {
+  if (!(await checkBucketAccess(auth, bucketName, operation, false))) {
+    throw new ForbiddenError(`Insufficient permissions to ${operation} bucket`);
+  }
+  return await db.buckets.getByName(bucketName);
+};
+
+/**
  * For the read routes admitted without a token: a public bucket is served to
  * anyone. Otherwise — private or missing alike — the caller needs a token
  * (401) and then read access (403).
@@ -102,7 +117,8 @@ export const canWriteBucket = (auth: AuthContext, bucketName: string) =>
 const checkBucketAccess = async (
   auth: BucketAccessor,
   bucketName: string,
-  operation: "read" | "write" | "delete"
+  operation: "read" | "write" | "delete",
+  publicReads = true
 ): Promise<boolean> => {
   if (hasPermission(auth.permissions, "file-service.admin")) return true;
 
@@ -114,7 +130,9 @@ const checkBucketAccess = async (
     return false;
   }
 
-  if (bucket.policy === "public" && operation === "read") return true;
+  if (publicReads && bucket.policy === "public" && operation === "read") {
+    return true;
+  }
   if (!hasPermission(auth.permissions, `file-service.objects.${operation}`)) {
     return false;
   }
@@ -164,8 +182,10 @@ export const assertUploadInBucket = (
 };
 
 /**
- * Settings, grants and deletion: the bucket's creator, or a `file-service.admin`
- * holder on any bucket. What a declaration owns is guarded separately
+ * Settings, grants and deletion: a `file-service.admin` holder on any bucket,
+ * or the bucket's owner while they hold an active grant on it — so an owner
+ * whose grant was revoked can't grant it back. Reading the settings takes any
+ * active grant. What a declaration owns is guarded separately
  * (`assertBucketDeletable`, `assertDeclaredFieldsUnchanged`).
  */
 export const validateBucketManagement = async (
@@ -205,18 +225,14 @@ const checkBucketManagement = async (
     return false;
   }
 
-  // Reading a bucket's settings follows the bucket list: the ones the caller
-  // created or holds an active grant on.
-  if (operation === "read") {
-    if (bucket.createdBy === auth.userId) return true;
-    const grant = await db.bucketPermissions.getByBucketAndUser(
-      bucket.id,
-      auth.userId
-    );
-    return !!grant && !grant.revokedAt;
-  }
+  const grant = await db.bucketPermissions.getByBucketAndUser(
+    bucket.id,
+    auth.userId
+  );
+  if (!grant || grant.revokedAt) return false;
 
-  return bucket.createdBy === auth.userId;
+  // Reading a bucket's settings follows the bucket list: any active grant.
+  return operation === "read" || bucket.ownerId === auth.userId;
 };
 
 const declaredConflict = (bucketName: string, what: string) =>
@@ -257,10 +273,20 @@ export const assertDeclaredFieldsUnchanged = (
 };
 
 export const assertNotDeclaringServiceGrant = (
-  bucket: { name: string; serviceId: string | null; createdBy: string },
+  bucket: { name: string; serviceId: string | null; ownerId: string },
   grantUserId: string
 ) => {
-  if (bucket.serviceId && grantUserId === bucket.createdBy) {
+  if (bucket.serviceId && grantUserId === bucket.ownerId) {
     throw declaredConflict(bucket.name, "its own grant on it");
+  }
+};
+
+/** A declared bucket's owner is its service's account, set by the declaration. */
+export const assertOwnerTransferable = (bucket: {
+  name: string;
+  serviceId: string | null;
+}) => {
+  if (bucket.serviceId) {
+    throw declaredConflict(bucket.name, "its ownership");
   }
 };

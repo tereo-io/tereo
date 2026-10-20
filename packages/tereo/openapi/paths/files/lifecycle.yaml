@@ -18,7 +18,7 @@
       bucket's policy is not public).
 
       **Required permissions:**
-      - System: `file-service.buckets.read` AND (`file-service.admin`, or bucket creator or an active bucket grant, from the bucket's organization)
+      - System: `file-service.buckets.read` AND (`file-service.admin`, or an active bucket grant, from the bucket's organization)
     operationId: getLifecyclePolicy
     security:
       - BearerAuth: [file-service.buckets.read]
@@ -65,7 +65,7 @@
       The policy is a bucket setting, managed like the bucket itself.
 
       **Required permissions:**
-      - System: `file-service.buckets.write` AND (bucket creator or `file-service.admin`)
+      - System: `file-service.buckets.write` AND (`file-service.admin`, or the bucket's owner holding an active bucket grant, from the bucket's organization)
 
       An audit log entry is written, and a `file-service.lifecycle.policy.updated`
       webhook event is emitted for a bucket that belongs to an organization.
@@ -119,7 +119,7 @@
       The policy is a bucket setting, managed like the bucket itself.
 
       **Required permissions:**
-      - System: `file-service.buckets.delete` AND (bucket creator or `file-service.admin`)
+      - System: `file-service.buckets.delete` AND (`file-service.admin`, or the bucket's owner holding an active bucket grant, from the bucket's organization)
 
       When a policy was removed, an audit log entry is written and a
       `file-service.lifecycle.policy.deleted` webhook event is emitted for a

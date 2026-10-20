@@ -42,11 +42,17 @@ export interface OrganizationChangePayload {
   timestamp: number;
 }
 
+export interface BucketAccessChangePayload {
+  bucketName: string;
+  timestamp: number;
+}
+
 export interface ServerToClientEvents {
   "auth:permissions:changed": (payload: PermissionChangePayload) => void;
   "auth:session:revoked": (payload: SessionRevokedPayload) => void;
   "auth:organization:changed": (payload: OrganizationChangePayload) => void;
   "auth:pong": (payload: { timestamp: number }) => void;
+  "files:bucket-access:changed": (payload: BucketAccessChangePayload) => void;
 }
 
 export interface ClientToServerEvents {

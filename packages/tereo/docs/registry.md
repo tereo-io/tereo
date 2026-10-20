@@ -91,12 +91,14 @@ The declaring service owns a bucket's name and existence; admins tune the rest.
 | Who | May |
 |-----|-----|
 | `file-service.admin` (or anything that includes it) | Change policy, quota, versioning, thumbnails, CORS and rate limit; grant and revoke other users' access |
-| The service (the bucket's creator) | The same, through its own token |
+| The service (the bucket's creator and owner) | The same, through its own token, while it holds its grant |
 | Anyone | Not delete it, retired or not: `409 bucket_declared` |
 
 Two edits are refused with `409 bucket_declared` because the next apply would undo them:
-changing the description, and revoking the service's own grant. Everything else an admin sets is
-kept — the declaration never re-applies it. Bucket responses carry `createdBy`, `serviceId`,
+changing the description, and revoking the service's own grant. Transferring its ownership
+(`PUT /buckets/:name/owner`) is refused the same way: its owner is the service's account.
+Everything else an admin sets is kept — the declaration never re-applies it. Bucket responses
+carry `createdBy`, `ownerId` (both the service's account user), `serviceId`,
 `serviceName`, `missingSince` and `retiredAt`.
 
 ## Access

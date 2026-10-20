@@ -3,6 +3,7 @@ export {
   notifyRolePermissionsChanged,
   notifyRoleStatusChanged,
   notifyRoleDeleted,
+  notifyBucketAccessChanged,
 } from "./permissionEmitters.js";
 
 export {

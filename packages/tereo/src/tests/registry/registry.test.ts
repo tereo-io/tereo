@@ -228,6 +228,7 @@ describe("adding a service", () => {
         name: `${namespace}-images`,
         policy: "private",
         createdBy: SYSTEM_USER_ID,
+        ownerId: SYSTEM_USER_ID,
       },
     });
     try {

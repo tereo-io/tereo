@@ -1,7 +1,7 @@
-import { notifyOrgMembershipChanged } from "../../../../../../../websocket/emitters/index.js";
 import { getDefaultOrganizationId } from "../../../../../../../utils/defaultOrganization.js";
 import { OrgMemberRole } from "../../../../../../../../prisma/generated/client/index.js";
 import { assertNotIntegrationAccount } from "../../../../../../../utils/integrations.js";
+import { revokeOrganizationGrantsTx } from "../../../../../../../utils/bucketGrants.js";
 import { formatOrganizationMember } from "../../../../../../../utils/transformers.js";
 import { endOrganizationSessions } from "../../../../../../../utils/sessions.js";
 import { MemberUserIdParamSchema, UpdateMemberRoleSchema } from "./schemas.js";
@@ -10,6 +10,10 @@ import { validateUser } from "../../../../../../../utils/auth.js";
 import db from "../../../../../../../utils/db/index.js";
 import { OrgIdParamSchema } from "../../../schemas.js";
 import type { Request, Response } from "express";
+import {
+  notifyBucketAccessChanged,
+  notifyOrgMembershipChanged,
+} from "../../../../../../../websocket/emitters/index.js";
 import {
   lockOrgOwners,
   requireOrgRole,
@@ -53,7 +57,7 @@ export const removeMember = async (req: Request, res: Response) => {
 
   await db.organizations.get(orgId);
   await assertNotIntegrationAccount(userId);
-  await db.$transaction(async (tx) => {
+  const revokedBuckets = await db.$transaction(async (tx) => {
     await db.users.lockAuthority(userId, tx);
     await lockOrgOwners(tx, orgId);
     const removed = await db.organizations.removeMember(orgId, userId, tx);
@@ -89,12 +93,18 @@ export const removeMember = async (req: Request, res: Response) => {
         memberRole: removed.memberRole,
       },
     });
+    // Like the roles, a grant on the organization's buckets would come back
+    // with a re-added membership.
+    return await revokeOrganizationGrantsTx(tx, auth, orgId, userId);
   });
 
   // Tokens and SSO sessions bound to this organization end with the
   // membership.
   await endOrganizationSessions(userId, orgId);
   notifyOrgMembershipChanged(userId, orgId);
+  for (const bucketName of revokedBuckets) {
+    notifyBucketAccessChanged([userId], bucketName);
+  }
 
   res.status(204).send();
 };

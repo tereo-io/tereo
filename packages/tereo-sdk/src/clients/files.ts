@@ -320,6 +320,19 @@ export class FileServiceClient {
     await this.cache.del(`bucket:${name}`);
   }
 
+  /** `file-service.admin` only. The new owner gets a full grant if they hold none. */
+  async transferBucketOwnership(name: string, userId: string): Promise<Bucket> {
+    if (this.testMode) {
+      return { ...this.makeMockBucket(name), ownerId: userId };
+    }
+    const bucket = (await requests.files.transferBucketOwnership(
+      name,
+      userId
+    )) as unknown as Bucket;
+    await this.cache.del(`bucket:${name}`);
+    return bucket;
+  }
+
   async getMyBucketPermissions(name: string): Promise<MyBucketPermissions> {
     if (this.testMode) {
       return {
@@ -811,6 +824,8 @@ export class FileServiceClient {
       rateLimitConfig: null,
       createdBy: TEST_USER.id,
       creator: TEST_USER,
+      ownerId: TEST_USER.id,
+      owner: TEST_USER,
       organizationId: null,
       organization: null,
       serviceId: null,

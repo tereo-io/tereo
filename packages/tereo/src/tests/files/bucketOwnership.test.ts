@@ -50,6 +50,7 @@ describe("Bucket ownership", () => {
         policy: "private",
         serviceId: TEST_SERVICE_ID,
         createdBy: serviceUserId,
+        ownerId: serviceUserId,
       },
     });
     declaredId = bucket.id;
@@ -81,6 +82,7 @@ describe("Bucket ownership", () => {
       expect(res.status).toBe(HTTP_STATUS.OK);
       expect(res.data).toMatchObject({
         createdBy: serviceUserId,
+        ownerId: serviceUserId,
         serviceId: TEST_SERVICE_ID,
         serviceName: TEST_SERVICE.name,
         missingSince: null,
@@ -177,7 +179,7 @@ describe("Bucket ownership", () => {
       expect(row.deletedAt).toBeNull();
     });
 
-    it("is 403 for a non-admin who did not create it", async () => {
+    it("is 403 for a non-admin who does not own it", async () => {
       expect(
         (await axios.put(url, { storageQuotaBytes: "1" }, as(outsiderToken)))
           .status
@@ -207,6 +209,8 @@ describe("Bucket ownership", () => {
       const bucket = await createTestBucket(token);
       expect(bucket).toMatchObject({
         createdBy: creatorId,
+        ownerId: creatorId,
+        owner: { id: creatorId },
         serviceId: null,
         serviceName: null,
         missingSince: null,
@@ -238,7 +242,7 @@ describe("Bucket ownership", () => {
       );
     });
 
-    it("is 403 for a non-admin who did not create it", async () => {
+    it("is 403 for a non-admin who does not own it", async () => {
       const token = await getTestPrincipalToken({ permissions: MANAGER });
       const bucket = await createTestBucket(token);
       const url = `${BASE_URL}/buckets/${bucket.name}`;

@@ -16,6 +16,7 @@ export interface CreateBucketInput {
   policy: BucketPolicy;
   storageQuotaBytes?: bigint;
   createdBy: string;
+  ownerId: string;
   organizationId?: string;
 }
 
@@ -41,6 +42,7 @@ export interface GetPaginatedOptions {
 const withRefs = {
   service: serviceRefSelect,
   creator: userRefSelect,
+  owner: userRefSelect,
   organization: orgRefSelect,
 } satisfies Prisma.BucketInclude;
 
@@ -93,15 +95,11 @@ export const getPaginated = async (
     isAdmin,
   } = options;
 
-  // Admins see every bucket — org isolation and the ownership/grant filter are both bypassed.
+  // Admins see every bucket — org isolation and the grant filter are both
+  // bypassed. An owner without an active grant no longer sees theirs.
   const and: Prisma.BucketWhereInput[] = [];
   if (!isAdmin) {
-    and.push({
-      OR: [
-        { createdBy: userId },
-        { permissions: { some: { userId, revokedAt: null } } },
-      ],
-    });
+    and.push({ permissions: { some: { userId, revokedAt: null } } });
     // Matches the access check: an organization's bucket is only for callers
     // in that organization, so a caller without one sees org-less buckets.
     and.push(
@@ -177,6 +175,26 @@ export const update = async (
     },
     include: withRefs,
   });
+};
+
+/** Set the owner under the bucket's row lock; returns the one it replaced. */
+export const setOwner = async (
+  id: number,
+  ownerId: string,
+  tx: Prisma.TransactionClient
+) => {
+  const [locked] = await tx.$queryRaw<{ owner_id: string }[]>`
+    SELECT "owner_id" FROM "files"."buckets"
+    WHERE "id" = ${id} AND "deleted_at" IS NULL
+    FOR NO KEY UPDATE
+  `;
+  if (!locked) throw new NotFoundError("Bucket not found");
+  const bucket = await tx.bucket.update({
+    where: { id },
+    data: { ownerId, updatedAt: new Date() },
+    include: withRefs,
+  });
+  return { bucket, previousOwnerId: locked.owner_id };
 };
 
 /**
