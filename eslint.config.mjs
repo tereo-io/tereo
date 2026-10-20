@@ -23,6 +23,10 @@ export default tseslint.config(
       "**/node_modules/",
       "**/generated/",
       "local/",
+      // The e2e suite's per-run state (its UI build) and Playwright's output.
+      "**/.e2e-state/",
+      "**/test-results/",
+      "**/playwright-report/",
       // Linted from its own directory, with its own config (npm run lint).
       "packages/tereo-ui/",
     ],

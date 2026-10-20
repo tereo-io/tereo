@@ -41,6 +41,7 @@ const UpdateMemberRoleButton = ({
     <>
       <IconButton
         icon={faPencil}
+        title="Change role"
         size="sm"
         variant="secondary"
         onClick={handleOpen}

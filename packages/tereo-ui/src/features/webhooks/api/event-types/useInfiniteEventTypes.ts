@@ -69,6 +69,7 @@ const useInfiniteEventTypes = (): UseInfiniteReturn<EventTypeRow> => {
     hasMore: lastPage?.hasMore ?? query.hasNextPage ?? false,
     isLoading: query.isLoading,
     isReloading: query.isRefetching && data.length > 0,
+    error: query.error,
     total: 0,
     onQueryChange,
     reload,

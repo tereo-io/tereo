@@ -56,6 +56,9 @@
     "sort-imports": "tsx scripts/sort-imports.ts",
     "sort-imports:check": "tsx scripts/sort-imports.ts --check",
     "check": "nx run-many -t check",
+    "e2e": "npm run e2e -w tereo-e2e --",
+    "e2e:all": "npm run e2e:all -w tereo-e2e --",
+    "e2e:ui": "npm run e2e:ui -w tereo-e2e --",
     "version-plan": "nx release plan"
   }
 }

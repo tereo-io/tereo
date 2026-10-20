@@ -9,6 +9,7 @@ import { ConnectedAccounts } from "./ConnectedAccounts";
 import { PageHeader } from "@/components/PageHeader";
 import RevokeButton from "./buttons/RevokeButton";
 import ProfilePhoto from "./ProfilePhoto";
+import { useState } from "react";
 import "../users/sessions.css";
 import "./styles.css";
 import {
@@ -30,6 +31,7 @@ import {
 export const MyAccountPage = () => {
   const { data: profile, isLoading: profileLoading } = useAccountProfile();
   const { data: sessionsData } = useAccountSessions();
+  const [enrollingTotp, setEnrollingTotp] = useState(false);
 
   if (profileLoading) {
     return (
@@ -189,14 +191,17 @@ export const MyAccountPage = () => {
               },
             ]}
             footerButtons={
-              profile.totp.enabled ? (
+              // Verifying refetches the profile, which enables 2FA before the
+              // user has saved the recovery codes; EnableTotpButton holds them,
+              // so it stays mounted until its modal closes.
+              profile.totp.enabled && !enrollingTotp ? (
                 <>
                   <RegenerateRecoveryCodesButton />
                   {/* Core refuses while a role or the policy requires 2FA. */}
                   {!profile.totp.required && <DisableTotpButton />}
                 </>
               ) : (
-                <EnableTotpButton />
+                <EnableTotpButton onOpenChange={setEnrollingTotp} />
               )
             }
           />
