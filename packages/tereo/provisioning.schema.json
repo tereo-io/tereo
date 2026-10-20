@@ -169,9 +169,17 @@
                 ]
               },
               "storageQuotaBytes": {
-                "type": "integer",
-                "exclusiveMinimum": 0,
-                "maximum": 9007199254740991
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1099511627776
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^\\d+$"
+                  }
+                ]
               }
             },
             "required": [

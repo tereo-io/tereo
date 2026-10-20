@@ -1,3 +1,4 @@
+import { broadcastBucketInvalidate } from "../../../../utils/cacheBroadcast.js";
 import { BucketPolicy } from "../../../../../prisma/generated/client/index.js";
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
 import { assertBucketNameUnreserved } from "../../../../utils/registry.js";
@@ -181,6 +182,10 @@ export const createBucket = async (req: Request, res: Response) => {
   });
 
   setAccessLog(res, { bucketId: bucket.id, operation: "CREATE_BUCKET" });
+
+  // A cache may hold the name's earlier answer: not found, or a deleted
+  // bucket of the same name.
+  await broadcastBucketInvalidate(bucket.name);
 
   res.status(201).json(serializeBucket(bucket));
 };

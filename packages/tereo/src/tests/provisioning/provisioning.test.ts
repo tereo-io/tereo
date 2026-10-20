@@ -3,6 +3,7 @@ import type { CustomRoleEntry } from "../../utils/provisioning/schema.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { openEndpointSecrets } from "../../utils/webhookSecrets.js";
 import { generateClientSecret } from "../../utils/crypto.js";
+import { retireMissing } from "../../utils/registry.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { logger } from "../../utils/logger.js";
 import { CORE_URL } from "../utils/coreUrl.js";
@@ -28,6 +29,11 @@ import {
   type ResolvedService,
   type ResolvedWebhook,
 } from "../../utils/provisioning/load.js";
+import {
+  closeCacheBroadcast,
+  onBucketInvalidate,
+  startCacheSubscriber,
+} from "../../utils/cacheBroadcast.js";
 import {
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
@@ -681,6 +687,52 @@ describe("applyProvisioning", () => {
       expect(back.created).toContain(`client:${client.clientId}`);
     });
 
+    it("lets a deactivated service's buckets be deleted, and declares them again on its return", async () => {
+      const slug = `prov-${rand()}`;
+      const bucketName = `${slug}-files`;
+      const d = serviceDoc({
+        slug,
+        buckets: [{ bucketName, policy: "private" }],
+      });
+      await apply(d);
+      const token = await getTestPrincipalToken({
+        permissions: ["file-service.admin", "file-service.buckets.delete"],
+      });
+      const del = () =>
+        fetchJson(
+          "DELETE",
+          `${CORE_URL}/v1/files/buckets/${bucketName}`,
+          token
+        );
+      const refused = await del();
+      expect(refused.status).toBe(409);
+
+      const now = new Date();
+      await applyProvisioning(setOf(), now);
+      const later = new Date(now.getTime() + grace + HOUR);
+      await deprovisionMissing(later);
+      const bucket = await prisma.bucket.findFirstOrThrow({
+        where: { name: bucketName, deletedAt: null },
+      });
+      expect(bucket.missingSince).toEqual(later);
+
+      // Returning, it declares the bucket again.
+      await apply(d);
+      expect(
+        (await prisma.bucket.findUniqueOrThrow({ where: { id: bucket.id } }))
+          .missingSince
+      ).toBeNull();
+      expect((await del()).status).toBe(409);
+
+      await applyProvisioning(setOf(), now);
+      await deprovisionMissing(later);
+      expect((await del()).status).toBe(204);
+      expect(
+        (await prisma.bucket.findUniqueOrThrow({ where: { id: bucket.id } }))
+          .deletedAt
+      ).not.toBeNull();
+    });
+
     it("leaves entries inside the grace untouched", async () => {
       const d = serviceDoc();
       const client = clientSpec();
@@ -942,6 +994,54 @@ describe("applyProvisioning", () => {
       file: "clients.json",
       version: "1.0.0",
     });
+  });
+});
+
+describe("bucket cache invalidation", () => {
+  const seen = new Set<string>();
+  beforeAll(async () => {
+    await startCacheSubscriber();
+    onBucketInvalidate((name) => seen.add(name));
+  });
+  afterAll(async () => {
+    await closeCacheBroadcast();
+  });
+  const invalidated = (name: string) =>
+    waitFor(async () => seen.has(name), 5_000);
+
+  it("is broadcast for buckets declared, dropped and retired", async () => {
+    const slug = `prov-${rand()}`;
+    const kept = `${slug}-kept`;
+    const dropped = `${slug}-dropped`;
+    const d = serviceDoc({
+      slug,
+      buckets: [
+        { bucketName: kept, policy: "private" },
+        { bucketName: dropped, policy: "private" },
+      ],
+    });
+    await apply(d);
+    await invalidated(kept);
+    await invalidated(dropped);
+
+    seen.clear();
+    await apply(
+      withService(
+        d,
+        { buckets: [{ bucketName: kept, policy: "private" }] },
+        { version: "1.1.0" }
+      )
+    );
+    await invalidated(dropped);
+
+    seen.clear();
+    const retired = await retireMissing(
+      new Date(
+        Date.now() + (env.REGISTRY_RETIREMENT_GRACE_HOURS + 1) * 3_600_000
+      )
+    );
+    expect(retired.retiredBuckets).toContain(dropped);
+    await invalidated(dropped);
   });
 });
 

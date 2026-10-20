@@ -1,6 +1,8 @@
 import { ForbiddenError, NotFoundError, ConflictError } from "./errors.js";
 import { validateUser, type AuthContext } from "../middleware/auth.js";
 import { hasPermission } from "./permissions.js";
+import { lockRegistries } from "./registry.js";
+import type { Prisma } from "./db/prisma.js";
 import type { Request } from "express";
 import db from "./db/index.js";
 
@@ -225,14 +227,27 @@ const declaredConflict = (bucketName: string, what: string) =>
     "bucket_declared"
   );
 
-/** A declared bucket exists for as long as its service declares it. */
-export const assertBucketDeletable = (bucket: {
-  name: string;
-  serviceId: string | null;
-}) => {
-  if (bucket.serviceId) {
-    throw declaredConflict(bucket.name, "its existence: it cannot be deleted");
-  }
+/**
+ * A declared bucket exists for as long as its service declares it: it can be
+ * deleted once retired, or once its service is deactivated. Checked under the
+ * service's registry lock, so a declaration applied at the same moment can't
+ * bring it back between the check and the delete. In the delete's transaction.
+ */
+export const assertBucketDeletable = async (
+  bucket: { id: number; name: string; serviceId: string | null },
+  tx: Prisma.TransactionClient
+) => {
+  if (!bucket.serviceId) return;
+  await lockRegistries(tx, [bucket.serviceId]);
+  const row = await tx.bucket.findUnique({
+    where: { id: bucket.id },
+    select: { retiredAt: true, service: { select: { isActive: true } } },
+  });
+  if (row && (row.retiredAt || row.service?.isActive === false)) return;
+  throw declaredConflict(
+    bucket.name,
+    "its existence: it cannot be deleted while declared"
+  );
 };
 
 /**
