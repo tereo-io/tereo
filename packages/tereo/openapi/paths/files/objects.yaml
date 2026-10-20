@@ -231,11 +231,10 @@
 
       Objects are deleted in batches of up to 100, each in its own
       transaction with its audit entry (`objects_bulk`, listing the batch's
-      objects), so every delete that commits is audited even if the request
-      stops part-way. One `file-service.objects.bulk-deleted` webhook event
-      is emitted for the entire request. Per-object webhooks are
-      deliberately **not** emitted — they would flood subscribers on large
-      folder deletes.
+      objects) and its `file-service.objects.bulk-deleted` webhook event, so
+      every delete that commits is audited and reported even if the request
+      stops part-way. Per-object webhooks are deliberately **not** emitted —
+      they would flood subscribers on large folder deletes.
 
       **Required permissions:**
       - System: `file-service.objects.delete` AND bucket-level `canDelete`
@@ -318,9 +317,9 @@
 
       Versions are purged in batches of up to 100, each in its own
       transaction with its audit entry (`object_versions_purge`, listing the
-      batch's version ids). One `file-service.objects.versions.purged`
-      webhook event is emitted per request — per-version webhooks would flood
-      subscribers on buckets with deep history.
+      batch's version ids) and its `file-service.objects.versions.purged`
+      webhook event — per-version webhooks would flood subscribers on
+      buckets with deep history.
 
       **Required permissions:**
       - System: `file-service.objects.delete` AND bucket-level `canDelete`
