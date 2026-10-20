@@ -41,12 +41,13 @@ export interface UpsertWithBlobInput {
    */
   stagedPath: string;
   /**
-   * `If-Match` / `If-None-Match: *`, checked again under the object's row
-   * lock so a write committed after the caller's early check can't slip past
-   * them.
+   * `If-Match` (strong tags or `*`) / `If-None-Match` (opaque tags, or
+   * `*`), checked under the object's row lock so a write committed after the
+   * caller's early check can't slip past them.
    */
   preconditions?: {
     ifMatch: string[] | null;
+    ifNoneMatch?: string[] | null;
     ifNoneMatchWildcard: boolean;
   };
   /**
@@ -469,7 +470,8 @@ export const upsertWithBlob = async (
       );
     }
     const ifMatch = data.preconditions?.ifMatch;
-    if (ifMatch) {
+    const ifNoneMatch = data.preconditions?.ifNoneMatch;
+    if (ifMatch || ifNoneMatch?.length) {
       const current = existingRow
         ? await tx.objectVersion.findFirst({
             where: {
@@ -481,10 +483,14 @@ export const upsertWithBlob = async (
           })
         : null;
       if (
-        !current?.etag ||
-        !(ifMatch.includes("*") || ifMatch.includes(current.etag))
+        ifMatch &&
+        (!current?.etag ||
+          !(ifMatch.includes("*") || ifMatch.includes(current.etag)))
       ) {
         throw new PreconditionFailedError("ETag mismatch (If-Match)");
+      }
+      if (current?.etag && ifNoneMatch?.includes(current.etag)) {
+        throw new PreconditionFailedError("ETag matches (If-None-Match)");
       }
     }
 

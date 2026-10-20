@@ -96,6 +96,11 @@ describe("Range downloads", () => {
   });
 
   it("honours If-Range only while the validator still matches", async () => {
+    // A date validator is strong only once it is a second old.
+    await prisma.object.update({
+      where: { id: objectId },
+      data: { updatedAt: new Date(Date.now() - 10_000) },
+    });
     const full = await get(url);
     expect(full.headers["accept-ranges"]).toBe("bytes");
     const etag = full.headers.etag as string;
@@ -122,6 +127,21 @@ describe("Range downloads", () => {
       "If-Range": new Date(0).toUTCString(),
     });
     expect(older.status).toBe(HTTP_STATUS.OK);
+  });
+
+  it("ignores an If-Range date from the second the response is sent in", async () => {
+    // Ahead of the clock, so the request cannot cross into a later second.
+    await prisma.object.update({
+      where: { id: objectId },
+      data: { updatedAt: new Date(Date.now() + 5_000) },
+    });
+    const lastModified = (await get(url)).headers["last-modified"] as string;
+    const res = await get(url, {
+      Range: "bytes=0-3",
+      "If-Range": lastModified,
+    });
+    expect(res.status).toBe(HTTP_STATUS.OK);
+    expect(body(res)).toEqual(content);
   });
 
   it("keeps If-None-Match ahead of Range", async () => {

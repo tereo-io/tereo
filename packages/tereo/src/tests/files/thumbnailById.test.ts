@@ -86,6 +86,29 @@ describe("thumbnails are not addressable by their own id", () => {
     expect(res.headers["x-object-id"]).toBe(parentId);
   });
 
+  it("answers HEAD ?thumbnail= with the thumbnail's GET headers", async () => {
+    const url = `${BASE_URL}/buckets/${bucketName}/objects/photo.png`;
+    const opts = { ...auth(), params: { thumbnail: "medium" } };
+    const get = await axios.get(url, opts);
+    const head = await axios.head(url, opts);
+    expect(head.status).toBe(HTTP_STATUS.OK);
+    for (const name of [
+      "content-type",
+      "content-length",
+      "etag",
+      "last-modified",
+      "cache-control",
+      "content-disposition",
+      "content-security-policy",
+      "x-content-type-options",
+      "x-object-id",
+    ]) {
+      expect([name, head.headers[name]]).toEqual([name, get.headers[name]]);
+    }
+    const parent = await axios.head(url, auth());
+    expect(parent.headers.etag).not.toBe(head.headers.etag);
+  });
+
   it("returns 404 for GET /objects/by-id/:thumbnailId", async () => {
     const res = await axios.get(
       `${BASE_URL}/buckets/${bucketName}/objects/by-id/${thumbId}`,

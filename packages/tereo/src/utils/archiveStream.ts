@@ -1,8 +1,13 @@
 import type { ObjectForArchiveStream } from "./db/archives.js";
 import { Archiver, TarArchive, ZipArchive } from "archiver";
-import { openBlobStream } from "./storage.js";
-import type { Readable } from "stream";
+import { ServiceUnavailableError } from "./errors.js";
+import { PassThrough, type Readable } from "stream";
 import { logger } from "./logger.js";
+import {
+  assertBlobFileReadable,
+  loadVerifiedBlobIfSmall,
+  openBlobStream,
+} from "./storage.js";
 
 export type ArchiveFormat = "zip" | "tar";
 
@@ -36,11 +41,10 @@ export class ArchiveAbortedError extends Error {
 const MANIFEST_FILENAME = "MISSING_FILES.txt";
 
 /**
- * Build a streaming zip/tar from pre-loaded object metadata. Each entry's
- * plaintext is produced by `openBlobStream()` — archiver consumes that stream
- * and appends the entry. Per-entry read/decrypt failures are caught and logged
- * to a trailing manifest rather than aborting the whole archive, so a single
- * corrupt blob doesn't take the rest of the download with it.
+ * Build a streaming zip/tar from pre-loaded object metadata. An entry whose
+ * blob is missing or fails verification is left out and listed in a trailing
+ * manifest rather than aborting the whole archive, so a single corrupt blob
+ * doesn't take the rest of the download with it.
  *
  * Entries are opened one at a time, each once the one before it has been read
  * to the end, so an archive holds one blob file open at a time rather than
@@ -94,46 +98,59 @@ export function buildArchiveStream(
     for (const obj of input.objects) {
       if (stopped) break;
       const entryName = entryNameFor(obj.objectKey, input.stripPrefix);
+      const meta = {
+        fsPath: obj.contentBlob.fsPath,
+        keyMaterial: {
+          wrappedDek: Buffer.from(obj.contentBlob.wrappedDek),
+          iv: Buffer.from(obj.contentBlob.iv),
+          masterKeyVersion: obj.contentBlob.masterKeyVersion,
+        },
+      };
+      let entryStream: Readable;
       try {
-        const entryStream = openBlobStream(
-          {
-            fsPath: obj.contentBlob.fsPath,
-            keyMaterial: {
-              wrappedDek: Buffer.from(obj.contentBlob.wrappedDek),
-              iv: Buffer.from(obj.contentBlob.iv),
-              masterKeyVersion: obj.contentBlob.masterKeyVersion,
-            },
-          },
-          obj.contentBlob.hash
+        // Archiver makes an entry stream's error fatal to the whole archive,
+        // so a blob is proven readable before it is appended: a small one
+        // read and verified whole, a large one's file opened and its header
+        // checked.
+        const verified = await loadVerifiedBlobIfSmall(
+          meta,
+          obj.contentBlob.hash,
+          Number(obj.contentBlob.sizeBytes)
         );
-        // A per-entry error event here would otherwise crash the process —
-        // archiver forwards entry errors to its own error handler, but we
-        // also want to capture the key in the manifest.
-        entryStream.on("error", (err) => {
-          logger.warn(
-            {
-              objectKey: obj.objectKey,
-              err,
-            },
-            "Archive entry stream error"
-          );
-          missing.push({ objectKey: obj.objectKey, reason: err.message });
-        });
-        current = entryStream;
-        archive.append(entryStream, { name: entryName });
-        await consumed(entryStream);
-        current = null;
+        if (verified) {
+          entryStream = new PassThrough().end(verified.buffer);
+          entryStream.once("close", verified.release);
+        } else {
+          await assertBlobFileReadable(meta.fsPath);
+          entryStream = openBlobStream(meta, obj.contentBlob.hash);
+        }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.warn(
+        logger.error(
           {
             objectKey: obj.objectKey,
             err,
           },
           "Failed to open blob for archive entry"
         );
-        missing.push({ objectKey: obj.objectKey, reason: message });
+        missing.push({ objectKey: obj.objectKey, reason: entryFailure(err) });
+        continue;
       }
+      if (stopped) {
+        entryStream.destroy();
+        break;
+      }
+      // Past the checks above, a failure is mid-stream (a large blob's GCM
+      // tag): archiver aborts the archive, and the route resets the response.
+      entryStream.on("error", (err) => {
+        logger.error(
+          { objectKey: obj.objectKey, hash: obj.contentBlob.hash, err },
+          "Archive entry stream error"
+        );
+      });
+      current = entryStream;
+      archive.append(entryStream, { name: entryName });
+      await consumed(entryStream);
+      current = null;
     }
 
     if (aborted) throw new ArchiveAbortedError();
@@ -151,6 +168,15 @@ export function buildArchiveStream(
   })();
 
   return { stream: archive, finalized, abort };
+}
+
+/** A manifest line's reason; an fs error's message would name the path. */
+function entryFailure(err: unknown): string {
+  if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    return "content file is missing";
+  }
+  if (err instanceof ServiceUnavailableError) return "server busy";
+  return "content could not be read or failed verification";
 }
 
 function entryNameFor(

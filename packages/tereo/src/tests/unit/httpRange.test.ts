@@ -57,4 +57,12 @@ describe("ifRangeAllows", () => {
     expect(ifRangeAllows(http, "abc")).toBe(false);
     expect(ifRangeAllows("not a date", "abc", modified)).toBe(false);
   });
+
+  it("takes a date only once it is a second older than the response", () => {
+    const http = modified.toUTCString();
+    const sameSecond = new Date("2026-10-01T12:00:00.900Z");
+    const nextSecond = new Date("2026-10-01T12:00:01.000Z");
+    expect(ifRangeAllows(http, "abc", modified, sameSecond)).toBe(false);
+    expect(ifRangeAllows(http, "abc", modified, nextSecond)).toBe(true);
+  });
 });

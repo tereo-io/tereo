@@ -276,7 +276,7 @@ file-service.object.updated:
       - Files - Objects
     summary: Object updated
     description: |-
-      Fired when an upload (authenticated, presigned or multipart) overwrites an existing object, and on every `PATCH /v1/files/buckets/{name}/objects/by-id/{id}` (rename, metadata, tags, content type or `deleteAfter`). `entityId` is the object id.
+      Fired when an upload (authenticated, presigned or multipart) overwrites an existing object, on every `PATCH /v1/files/buckets/{name}/objects/by-id/{id}` (rename, metadata, tags, content type or `deleteAfter`), and when a version restore undeletes a deleted object (alongside `file-service.object.version.restored`). `entityId` is the object id.
 
       The `data` shape depends on the path that fired it.
 
@@ -375,6 +375,45 @@ file-service.object.updated:
                           - objectId
                           - renamed
                           - branchedVersion
+                      - type: object
+                        description: '`POST /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/restore` that undeleted the object — its restored content.'
+                        properties:
+                          bucketName:
+                            type: string
+                          objectKey:
+                            type: string
+                          objectId:
+                            type: string
+                            format: uuid
+                          contentType:
+                            type: string
+                          sizeBytes:
+                            type: string
+                            pattern: ^[0-9]+$
+                            description: Plaintext size in bytes, as a decimal string.
+                          etag:
+                            type: string
+                          tags:
+                            type: array
+                            items:
+                              type: string
+                          via:
+                            type: string
+                            enum:
+                              - restore
+                          restoredFromVersionId:
+                            type: string
+                            format: uuid
+                        required:
+                          - bucketName
+                          - objectKey
+                          - objectId
+                          - contentType
+                          - sizeBytes
+                          - etag
+                          - tags
+                          - via
+                          - restoredFromVersionId
     responses:
       2XX:
         description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.

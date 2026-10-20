@@ -3,7 +3,6 @@ import { enqueueOrphanBlobCleanupSafe } from "../../../../../../../../../../jobs
 import { setAccessLog } from "../../../../../../../../../../middleware/accessLog.js";
 import { validateUser } from "../../../../../../../../../../middleware/auth.js";
 import { NotFoundError } from "../../../../../../../../../../utils/errors.js";
-import { resolveObjectById, serializeVersions } from "../utils.js";
 import db from "../../../../../../../../../../utils/db/index.js";
 import { byIdVersionParamsSchema } from "./schemas.js";
 import env from "../../../../../../../../../../env.js";
@@ -13,11 +12,15 @@ import {
   emitTx,
 } from "../../../../../../../../../../utils/outbox.js";
 import {
-  downloadCacheControl,
+  prepareDownload,
   queueObjectWriteFollowUps,
   sendBlobBody,
-  setContentDisposition,
 } from "../../../../utils.js";
+import {
+  getVisibleVersion,
+  resolveObjectById,
+  serializeVersions,
+} from "../utils.js";
 
 /**
  * Download the content bytes for a specific version by id. Unlike the
@@ -31,22 +34,27 @@ export const downloadObjectVersionById = async (
   req: Request,
   res: Response
 ) => {
-  const { bucket, object, params } = await resolveObjectById(
+  const { bucket, object, params, history } = await resolveObjectById(
     req,
     "read",
     byIdVersionParamsSchema
   );
-  const version = await db.objectVersions.getByVersionId(
-    object.id,
-    params.versionId
-  );
+  const version = await getVisibleVersion(object.id, params.versionId, history);
   if (!version.contentBlob || version.isDeleteMarker) {
     throw new NotFoundError(
       "Requested version has no retrievable content (delete marker)"
     );
   }
-  const contentBlob = version.contentBlob;
   const etag = version.etag ?? "";
+  const handled = prepareDownload(req, res, {
+    bucket,
+    pinnedVersion: true,
+    objectKey: object.objectKey,
+    contentType: version.contentType,
+    etag,
+    lastModified: version.createdAt,
+  });
+  if (handled) return;
 
   setAccessLog(res, {
     bucketId: bucket.id,
@@ -54,31 +62,19 @@ export const downloadObjectVersionById = async (
     operation: "DOWNLOAD_VERSION",
   });
 
-  res.setHeader(
-    "Content-Type",
-    version.contentType ?? "application/octet-stream"
-  );
-  res.setHeader("ETag", `"${etag}"`);
-  res.setHeader("Cache-Control", downloadCacheControl(bucket, true));
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  setContentDisposition(res, {
-    contentType: version.contentType ?? "application/octet-stream",
-    objectKey: object.objectKey,
+  await sendBlobBody(req, res, version.contentBlob, {
+    etag,
+    lastModified: version.createdAt,
   });
-
-  await sendBlobBody(req, res, contentBlob, { etag });
 };
 
 export const getObjectVersionById = async (req: Request, res: Response) => {
-  const { bucket, object, params } = await resolveObjectById(
+  const { bucket, object, params, history } = await resolveObjectById(
     req,
     "read",
     byIdVersionParamsSchema
   );
-  const version = await db.objectVersions.getByVersionId(
-    object.id,
-    params.versionId
-  );
+  const version = await getVisibleVersion(object.id, params.versionId, history);
 
   setAccessLog(res, {
     bucketId: bucket.id,
@@ -145,6 +141,27 @@ export const restoreObjectVersionById = async (req: Request, res: Response) => {
             undeleted: result.undeleted,
           },
         });
+        // The object is back: for subscribers it reappears as updated.
+        if (result.undeleted) {
+          await emitTx(tx, {
+            eventType: "file-service.object.updated",
+            organizationId: bucket.organizationId,
+            entityType: "object",
+            entityId: params.id,
+            data: {
+              bucketName: bucket.name,
+              objectKey: object.objectKey,
+              objectId: params.id,
+              contentType:
+                result.restored.contentType ?? "application/octet-stream",
+              sizeBytes: result.source.contentBlob?.sizeBytes.toString() ?? "0",
+              etag: result.restored.etag ?? "",
+              tags: result.restored.tags,
+              via: "restore",
+              restoredFromVersionId: result.source.id,
+            },
+          });
+        }
       }
 
       return result;

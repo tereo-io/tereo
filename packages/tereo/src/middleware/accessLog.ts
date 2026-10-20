@@ -115,8 +115,23 @@ export const accessLogMiddleware = (
   res.on("finish", () => {
     if (res.accessLog && !logged) logRequest();
   });
+  // A response cut off mid-body (a failed blob stream, a client gone) never
+  // finishes.
+  res.on("close", () => {
+    if (!res.accessLog || logged) return;
+    if (!res.writableFinished) {
+      noteAccessLogError(res, new Error("Response closed before completion"));
+    }
+    logRequest();
+  });
 
   next();
+};
+
+/** Records why a response failed on its access-log row; the first wins. */
+export const noteAccessLogError = (res: Response, err: unknown): void => {
+  const target = res as Response & { accessLogFallbackError?: unknown };
+  target.accessLogFallbackError ??= err;
 };
 
 /**

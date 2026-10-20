@@ -951,8 +951,8 @@ ObjectVersion:
       type: string
       format: date-time
     createdBy:
-      description: User ID that wrote this version.
-      type: string
+      description: User ID that wrote this version; null, like the email and name, for a caller a public bucket is served to only because it is public.
+      type: [string, 'null']
       format: uuid
       examples:
         - "019dd4c2-e0b3-778e-b8db-a52e61927416"

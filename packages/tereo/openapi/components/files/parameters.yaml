@@ -262,6 +262,36 @@ RangeHeaderParam:
     type: string
   example: "bytes=0-1023"
 
+DownloadIfMatchHeaderParam:
+  name: If-Match
+  in: header
+  required: false
+  description: '`412` unless one tag strongly matches the `ETag` (a `W/` tag never does), or `*`.'
+  schema:
+    type: string
+DownloadIfNoneMatchHeaderParam:
+  name: If-None-Match
+  in: header
+  required: false
+  description: '`304` when a tag matches the `ETag`, compared weakly, or `*`.'
+  schema:
+    type: string
+IfModifiedSinceHeaderParam:
+  name: If-Modified-Since
+  in: header
+  required: false
+  description: '`304` when `Last-Modified` is not later. Ignored with `If-None-Match`.'
+  schema:
+    type: string
+    format: http-date
+IfUnmodifiedSinceHeaderParam:
+  name: If-Unmodified-Since
+  in: header
+  required: false
+  description: '`412` when `Last-Modified` is later. Ignored with `If-Match`.'
+  schema:
+    type: string
+    format: http-date
 IfRangeHeaderParam:
   name: If-Range
   in: header
@@ -269,8 +299,9 @@ IfRangeHeaderParam:
   description: |
     Send `Range` only if the content is unchanged: an entity tag that matches
     the `ETag` (weak tags never do) or, where the response carries
-    `Last-Modified`, that date to the second. Otherwise the whole content is
-    sent.
+    `Last-Modified`, that date to the second — taken only once it is at least
+    a second older than the response's `Date` (a strong date validator,
+    RFC 9110 §8.8.2.2). Otherwise the whole content is sent.
   schema:
     type: string
   example: '"5d41402abc4b2a76b9719d911017c592"'

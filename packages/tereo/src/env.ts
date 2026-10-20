@@ -345,6 +345,10 @@ const EnvFields = z
       .positive()
       .max(10240)
       .default(100),
+    // Plaintext held at once by downloads of blobs verified in memory, and
+    // how long a download waits for room in it before a 503.
+    FILE_SERVICE_VERIFIED_READ_BUDGET_MB: int(16, 65536, 256),
+    FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS: int(1, 600, 30),
     FILE_SERVICE_ACTIVE_MASTER_KEY_VERSION: z.coerce
       .number()
       .int()

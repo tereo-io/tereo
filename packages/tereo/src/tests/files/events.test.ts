@@ -345,6 +345,44 @@ describe("file-service webhook events", () => {
     expect(count).toBe(0);
   });
 
+  it("emits object.updated when a version restore undeletes the object", async () => {
+    const bucket = await createTestBucket(token);
+    await enableVersioning(bucket.name);
+    const obj = await uploadTestObject(
+      token,
+      bucket.name,
+      "undeleted.txt",
+      createTestFile(`restore-${randomUUID()}`, "undeleted.txt")
+    );
+    const original = await prisma.objectVersion.findFirstOrThrow({
+      where: { objectId: obj.id, isCurrent: true },
+    });
+    const del = await axios.delete(
+      `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}`,
+      { headers: auth() }
+    );
+    expect(del.status).toBe(HTTP_STATUS.NO_CONTENT);
+    const restore = await axios.post(
+      `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}/versions/${original.id}/restore`,
+      {},
+      { headers: auth() }
+    );
+    expect(restore.status).toBe(HTTP_STATUS.CREATED);
+
+    const [payload] = await delivered("file-service.object.updated", obj.id);
+    expect(payload).toMatchObject({
+      entityType: "object",
+      data: {
+        bucketName: bucket.name,
+        objectKey: "undeleted.txt",
+        objectId: obj.id,
+        etag: original.etag,
+        via: "restore",
+        restoredFromVersionId: original.id,
+      },
+    });
+  });
+
   it("emits permission.granted and permission.revoked", async () => {
     const bucket = await createTestBucket(token);
     const userId = randomUUID();

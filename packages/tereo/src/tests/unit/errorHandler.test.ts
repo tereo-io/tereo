@@ -3,13 +3,19 @@ import { NextFunction, Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 import { logger } from "../../utils/logger.js";
 import {
+  AppError,
   NotFoundError,
   TooManyRequestsError,
   errorHandler,
 } from "../../utils/errors.js";
 
 const handle = (err: unknown) => {
-  const res = { status: vi.fn(), json: vi.fn() };
+  const res = {
+    status: vi.fn(),
+    json: vi.fn(),
+    setHeader: vi.fn(),
+    removeHeader: vi.fn(),
+  };
   res.status.mockReturnValue(res);
   errorHandler(
     err as Error,
@@ -43,7 +49,12 @@ describe("errorHandler", () => {
   });
 
   it("adds a rate-limit refusal's retry_after to the body and Retry-After", () => {
-    const res = { status: vi.fn(), json: vi.fn(), setHeader: vi.fn() };
+    const res = {
+      status: vi.fn(),
+      json: vi.fn(),
+      setHeader: vi.fn(),
+      removeHeader: vi.fn(),
+    };
     res.status.mockReturnValue(res);
     errorHandler(
       new TooManyRequestsError(7),
@@ -147,6 +158,57 @@ describe("errorHandler", () => {
   });
 });
 
+describe("errorHandler response headers", () => {
+  const respond = (err: Error, headersSent = false) => {
+    const headers = new Map<string, unknown>([
+      ["Content-Type", "application/pdf"],
+      ["Content-Disposition", 'attachment; filename="a.pdf"'],
+      ["ETag", '"abc"'],
+      ["Last-Modified", "Tue, 20 Oct 2026 10:00:00 GMT"],
+      ["Content-Range", "bytes 0-9/100"],
+      ["Cache-Control", "public, max-age=31536000, immutable"],
+    ]);
+    const res = {
+      headersSent,
+      status: vi.fn(),
+      json: vi.fn(),
+      destroy: vi.fn(),
+      setHeader: (name: string, value: unknown) => headers.set(name, value),
+      removeHeader: (name: string) => headers.delete(name),
+    };
+    res.status.mockReturnValue(res);
+    vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    errorHandler(err, {} as Request, res as unknown as Response, vi.fn());
+    vi.restoreAllMocks();
+    return { headers, res };
+  };
+
+  it("drops a download's headers from the JSON error", () => {
+    const { headers } = respond(new Error("integrity"));
+    expect(Object.fromEntries(headers)).toEqual({
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+  });
+
+  it("keeps the Content-Range an error sets itself", () => {
+    const { headers } = respond(
+      new AppError(416, "range_not_satisfiable", "Out of range", {
+        headers: { "Content-Range": "bytes */100" },
+      })
+    );
+    expect(headers.get("Content-Range")).toBe("bytes */100");
+    expect(headers.has("Content-Disposition")).toBe(false);
+  });
+
+  it("resets the connection once headers are out", () => {
+    const { res } = respond(new Error("stream"), true);
+    expect(res.destroy).toHaveBeenCalled();
+    expect(res.json).not.toHaveBeenCalled();
+  });
+});
+
 describe("errorHandler logging", () => {
   const req = {
     method: "GET",
@@ -155,7 +217,12 @@ describe("errorHandler logging", () => {
   const run = (err: Error, request: Request = req) => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     const error = vi.spyOn(logger, "error").mockImplementation(() => undefined);
-    const res = { status: vi.fn(), json: vi.fn() };
+    const res = {
+      status: vi.fn(),
+      json: vi.fn(),
+      setHeader: vi.fn(),
+      removeHeader: vi.fn(),
+    };
     res.status.mockReturnValue(res);
     errorHandler(err, request, res as unknown as Response, vi.fn());
     const calls = { warn: warn.mock.calls, error: error.mock.calls };

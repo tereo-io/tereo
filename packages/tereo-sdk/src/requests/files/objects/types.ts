@@ -56,6 +56,13 @@ export interface ListObjectsOptions {
   "objectKey:equals"?: string;
   "contentType:contains"?: string;
   "contentType:equals"?: string;
+  /**
+   * List a versioned bucket's deleted objects instead of its live ones. Their
+   * rows carry `id`, `key`, `deletedAt`, `deletedBy`, `deletedByUser`,
+   * `createdAt` and `updatedAt`, no content fields; `sort: "sizeBytes"` is
+   * refused. Takes read access to the bucket beyond its being public.
+   */
+  deleted?: boolean;
 }
 
 export interface ListObjectsResponse {

@@ -27,7 +27,9 @@
       deleted while versioning was on, whose current version is a delete marker — as
       `DeletedObject`s, with the same filters, sorts (but `sizeBytes`) and pagination. Restoring a
       version (`POST .../by-id/{id}/versions/{versionId}/restore`) undeletes one. A bucket without
-      versioning keeps no version to restore, so lists none.
+      versioning keeps no version to restore, so lists none. It takes read access to the bucket
+      as a private one would: a caller a public bucket is served to only because it is public
+      gets `401` without a token and `403` with one.
     operationId: listObjects
     security:
       - {}
@@ -418,7 +420,10 @@
         write's transaction, so a concurrent write can't slip past them, and
         after the `Idempotency-Key` lookup, so a retry of a successful create
         is replayed rather than refused.
-      - `If-Match: "<etag>"` — replace only if the current version's ETag matches (412 otherwise).
+      - `If-Match: "<etag>"` — replace only if the current version's ETag strongly matches (412
+        otherwise; a `W/` tag never matches).
+      - `If-None-Match: "<etag>", …` — replace only if none of the tags matches the current
+        version's ETag, compared weakly (412 otherwise).
 
       **Content type:**
       The `file` part's content type becomes the object's. Executables and
@@ -479,7 +484,7 @@
           type: string
       - name: If-None-Match
         in: header
-        description: Use `*` for atomic create-only semantics.
+        description: Use `*` for atomic create-only semantics; a list of tags refuses (412) a write over content with one of them.
         required: false
         schema:
           type: string
@@ -606,9 +611,15 @@
       the old ones, and image content gets new ones in the background, so a
       `404` can mean they are not generated yet.
 
-      Supports `If-Match` / `If-None-Match` preconditions, compared against
-      the ETag of the version being served. A match on `If-None-Match`
-      returns `304 Not Modified`; both are checked before `Range`.
+      Supports the preconditions of RFC 9110 §13.2.2, against the `ETag`
+      and `Last-Modified` of the version being served and in its order:
+      `If-Match` (strong comparison) or else `If-Unmodified-Since` fail with
+      `412`; then `If-None-Match` (weak comparison) or else
+      `If-Modified-Since` answer `304 Not Modified`, carrying `ETag`,
+      `Last-Modified` and `Cache-Control`. All are checked before `Range`.
+
+      A `?versionId=` that is not the current version is `404` to a caller
+      a public bucket is served to only because it is public.
 
       Supports one byte range (`Range`, `If-Range`): `206 Partial Content`
       with `Content-Range`, or `416` for a range past the end. Content up to
@@ -644,16 +655,10 @@
             - thumb
             - small
             - medium
-      - name: If-Match
-        in: header
-        required: false
-        schema:
-          type: string
-      - name: If-None-Match
-        in: header
-        required: false
-        schema:
-          type: string
+      - $ref: '../../components/files/parameters.yaml#/DownloadIfMatchHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/DownloadIfNoneMatchHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/IfModifiedSinceHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/IfUnmodifiedSinceHeaderParam'
       - $ref: '../../components/files/parameters.yaml#/RangeHeaderParam'
       - $ref: '../../components/files/parameters.yaml#/IfRangeHeaderParam'
     responses:
@@ -716,7 +721,7 @@
       '206':
         $ref: '../../components/files/responses.yaml#/PartialContentResponse'
       '304':
-        description: Not Modified (matched `If-None-Match`)
+        description: Not Modified (`If-None-Match` or `If-Modified-Since`); carries `ETag`, `Last-Modified` and `Cache-Control`
       '400':
         $ref: '../../components/responses.yaml#/BadRequestResponse'
         description: Invalid object key, `versionId` or `thumbnail`
@@ -730,7 +735,7 @@
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: 'Bucket, object, version or thumbnail not found, or the version is a delete marker (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
       '412':
-        description: Precondition failed (If-Match)
+        description: Precondition failed (`If-Match` or `If-Unmodified-Since`)
         content:
           application/json:
             schema:
@@ -751,16 +756,14 @@
       - Files - Objects
     summary: Get object metadata
     description: |
-      Retrieves metadata for an object without downloading its content.
+      The headers `GET` would send — for the current version, the
+      `?versionId=` one or a `?thumbnail=` — without the body, under the
+      same preconditions.
 
       **Required permissions:**
       - **Public buckets**: No authentication required
       - **Private buckets**: Authentication required with `file-service.objects.read` AND bucket-level `canRead`
         (an anonymous request — for a private or a missing bucket — gets `401 invalid_token`)
-
-      Returns the `Content-Type`, `Content-Length`, `ETag`, and
-      `Last-Modified` of the current version without a response body.
-      Supports the same conditional headers as `GET`.
     operationId: headObject
     security:
       - {}
@@ -768,16 +771,27 @@
     parameters:
       - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
       - $ref: '../../components/files/parameters.yaml#/ObjectKeyParam'
-      - name: If-Match
-        in: header
+      - name: versionId
+        in: query
+        description: Describe a specific version of the object (UUID).
         required: false
         schema:
           type: string
-      - name: If-None-Match
-        in: header
+          format: uuid
+      - name: thumbnail
+        in: query
+        description: Describe a generated thumbnail variant, as `GET` serves it.
         required: false
         schema:
           type: string
+          enum:
+            - thumb
+            - small
+            - medium
+      - $ref: '../../components/files/parameters.yaml#/DownloadIfMatchHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/DownloadIfNoneMatchHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/IfModifiedSinceHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/IfUnmodifiedSinceHeaderParam'
     responses:
       '200':
         description: Object metadata
@@ -796,11 +810,23 @@
               type: string
               format: http-date
             example: "Mon, 15 Jan 2024 10:30:00 GMT"
+          Cache-Control:
+            description: As on `GET`.
+            schema:
+              type: string
+          Content-Disposition:
+            description: As on `GET`.
+            schema:
+              type: string
           X-Object-Id:
-            description: The object's UUID.
+            description: The object's UUID — the parent's for a `?thumbnail=`.
             schema:
               type: string
               format: uuid
+          X-Content-Type-Options:
+            $ref: '../../components/files/headers.yaml#/X-Content-Type-Options'
+          Content-Security-Policy:
+            $ref: '../../components/files/headers.yaml#/Content-Security-Policy'
           X-RateLimit-Limit:
             $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
           X-RateLimit-Remaining:
@@ -808,17 +834,17 @@
           X-RateLimit-Reset:
             $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
       '304':
-        description: Not Modified (matched `If-None-Match`)
+        description: Not Modified (`If-None-Match` or `If-Modified-Since`)
       '400':
-        description: Invalid object key (no body)
+        description: Invalid object key, `versionId` or `thumbnail` (no body)
       '401':
         description: Unauthorized - invalid access token (no body)
       '403':
         description: Forbidden - missing file-service.objects.read permission or bucket-level canRead, private buckets only; or a delegated token whose core API scopes do not reach `/v1/files`, public bucket or not (no body)
       '404':
-        description: 'Bucket or object not found, no body (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403` — or `401` without a token)'
+        description: 'Bucket, object, version or thumbnail not found, no body (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403` — or `401` without a token)'
       '412':
-        description: Precondition failed (If-Match)
+        description: Precondition failed (`If-Match` or `If-Unmodified-Since`)
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -1071,7 +1097,9 @@
     description: |
       Returns a paginated list of all versions of the object (default
       newest first; sort field `createdAt` only). Version history stays
-      visible after the object is deleted. Only available on buckets with
+      visible after the object is deleted — except to a caller a public
+      bucket is served to only because it is public, who sees only a live
+      object's current version. Only available on buckets with
       `versioningEnabled=true` — returns `400 versioning_disabled` otherwise
       (reported only once access is granted).
 
@@ -1137,7 +1165,9 @@
       `GET /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/download`
       (rename-stable) or the key-addressed
       `GET /v1/files/buckets/{name}/objects/{objectKey}?versionId=<uuid>`.
-      Unlike list items, the response carries no writer email/name.
+      Unlike list items, the response carries no writer email/name. A
+      version that is not current, or of a deleted object, is `404` to a
+      caller a public bucket is served to only because it is public.
 
       **Required permissions:**
       - **Public buckets**: No authentication required
@@ -1242,9 +1272,12 @@
       Response headers include `Content-Type`, `Content-Length`, `ETag`,
       `Content-Disposition`, `Cache-Control: <public|private>, max-age=31536000, immutable`
       (`public` only for a public bucket),
-      and `X-Content-Type-Options: nosniff`. `If-Match` / `If-None-Match`
-      are not evaluated on this route. The bytes of a specific version are
-      immutable, so aggressive caching is safe.
+      `Last-Modified` (when the version was written)
+      and `X-Content-Type-Options: nosniff`. The preconditions are those of
+      `GET /v1/files/buckets/{name}/objects/{objectKey}`. The bytes of a
+      specific version are immutable, so aggressive caching is safe. A
+      version that is not current, or of a deleted object, is `404` to a
+      caller a public bucket is served to only because it is public.
 
       Supports one byte range (`Range`, and `If-Range` with the `ETag`) as
       on `GET /v1/files/buckets/{name}/objects/{objectKey}`.
@@ -1261,6 +1294,10 @@
       - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
       - $ref: '../../components/files/parameters.yaml#/ObjectIdParam'
       - $ref: '../../components/files/parameters.yaml#/VersionIdParam'
+      - $ref: '../../components/files/parameters.yaml#/DownloadIfMatchHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/DownloadIfNoneMatchHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/IfModifiedSinceHeaderParam'
+      - $ref: '../../components/files/parameters.yaml#/IfUnmodifiedSinceHeaderParam'
       - $ref: '../../components/files/parameters.yaml#/RangeHeaderParam'
       - $ref: '../../components/files/parameters.yaml#/IfRangeHeaderParam'
     responses:
@@ -1303,6 +1340,8 @@
               format: binary
       '206':
         $ref: '../../components/files/responses.yaml#/PartialContentResponse'
+      '304':
+        description: Not Modified (`If-None-Match` or `If-Modified-Since`); carries `ETag`, `Last-Modified` and `Cache-Control`
       '400':
         $ref: '../../components/responses.yaml#/BadRequestResponse'
         description: Versioning is not enabled for this bucket (`versioning_disabled`).
@@ -1314,6 +1353,8 @@
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: 'Object, version, or version content not found (e.g. delete marker) (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '412':
+        description: Precondition failed (`If-Match` or `If-Unmodified-Since`)
       '416':
         $ref: '../../components/files/responses.yaml#/RangeNotSatisfiableResponse'
       '429':

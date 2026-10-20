@@ -97,6 +97,13 @@ describe("listObjects params", () => {
     });
   });
 
+  it("sends deleted as core's true/false", () => {
+    expect(listObjectsParams({ deleted: true, limit: 5 })).toEqual({
+      deleted: "true",
+      limit: 5,
+    });
+  });
+
   it("refuses two operators on one field, which core cannot combine", () => {
     expect(() =>
       listObjectsParams({

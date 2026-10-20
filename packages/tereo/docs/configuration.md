@@ -209,6 +209,8 @@ env (no overlap).
 | `FILE_SERVICE_PUBLIC_BASE_URL` | `${PUBLIC_URL}/v1/files` | Base of presigned and share URLs; not localhost in production |
 | `FILE_SERVICE_SHARE_UI_BASE_URL` | `UI_BASE_URL` | Where password-protected shares send browsers to unlock |
 | `FILE_SERVICE_MAX_UPLOAD_SIZE_MB` | `100` | Above 0, at most 10240. Single-request uploads; larger files use multipart |
+| `FILE_SERVICE_VERIFIED_READ_BUDGET_MB` | `256` | 16–65536. Plaintext all downloads together may hold in memory: a blob up to 16 MiB is decrypted and verified whole before it is sent, and waits for room in this budget. See [files.md](files.md#range-requests) |
+| `FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS` | `30` | 1–600. How long such a download waits for room before `503 temporarily_unavailable` |
 | `FILE_SERVICE_MIN_PART_SIZE_MB` | `5` | Above 0, at most 5120 |
 | `FILE_SERVICE_MAX_MULTIPART_PARTS` | `10000` | 1–100000 |
 | `FILE_SERVICE_MAX_ACTIVE_MULTIPART_UPLOADS` | `100` | 1–100000. Multipart uploads one user may have in progress in a bucket |
