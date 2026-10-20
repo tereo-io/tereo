@@ -1,5 +1,6 @@
 import { Readable, Transform, pipeline as pipelineCb } from "stream";
 import { createReadStream, createWriteStream } from "fs";
+import { ByteBudget } from "./byteBudget.js";
 import { promisify } from "util";
 import fs from "fs/promises";
 import crypto from "crypto";
@@ -326,14 +327,7 @@ export async function openBlobRangeStream(
   start: number,
   end: number
 ): Promise<Readable> {
-  const fh = await fs.open(meta.fsPath, "r");
-  try {
-    const header = Buffer.alloc(BLOB_HEADER_BYTES);
-    const { bytesRead } = await fh.read(header, 0, BLOB_HEADER_BYTES, 0);
-    checkBlobHeader(header.subarray(0, bytesRead));
-  } finally {
-    await fh.close();
-  }
+  await assertBlobFileReadable(meta.fsPath);
   const { decipher, fileOffset, skip } = createRangeDecipher(
     meta.keyMaterial,
     blobHash,
@@ -383,6 +377,17 @@ async function readBlob(meta: BlobMeta, blobHash: string): Promise<Buffer> {
 // price lists, JSON — all small, predictable-plaintext targets) cheaply.
 const INTEGRITY_VERIFY_MAX_BYTES = 16 * 1024 * 1024; // 16 MiB
 
+const verifiedReadBudget = new ByteBudget(
+  env.FILE_SERVICE_VERIFIED_READ_BUDGET_MB * 1024 * 1024,
+  env.FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS * 1000
+);
+
+export interface VerifiedBlob {
+  buffer: Buffer;
+  /** Returns the buffer's bytes to the verified-read budget. Idempotent. */
+  release: () => void;
+}
+
 /**
  * For blobs small enough to buffer (<= INTEGRITY_VERIFY_MAX_BYTES), return the
  * fully decrypted plaintext only after verifying it end-to-end: `readBlob`
@@ -391,21 +396,46 @@ const INTEGRITY_VERIFY_MAX_BYTES = 16 * 1024 * 1024; // 16 MiB
  * should stream). THROWS on any integrity failure — callers MUST await this
  * BEFORE writing response headers/body so a tampered blob produces a clean
  * error instead of a forged, complete-looking download.
+ *
+ * The plaintext counts against a process-wide budget
+ * (`FILE_SERVICE_VERIFIED_READ_BUDGET_MB`) until the caller calls `release`,
+ * once the buffer has been sent; a read that finds no room in time is a 503.
  */
 export async function loadVerifiedBlobIfSmall(
   meta: BlobMeta,
   blobHash: string,
   sizeBytes: number
-): Promise<Buffer | null> {
+): Promise<VerifiedBlob | null> {
   if (sizeBytes > INTEGRITY_VERIFY_MAX_BYTES) return null;
-  const buf = await readBlob(meta, blobHash);
-  const actual = crypto.createHash("sha256").update(buf).digest("hex");
-  if (actual !== blobHash) {
-    throw new Error(
-      `Blob integrity check failed: content hash mismatch for ${blobHash}`
-    );
+  const release = await verifiedReadBudget.acquire(sizeBytes);
+  try {
+    const buffer = await readBlob(meta, blobHash);
+    const actual = crypto.createHash("sha256").update(buffer).digest("hex");
+    if (actual !== blobHash) {
+      throw new Error(
+        `Blob integrity check failed: content hash mismatch for ${blobHash}`
+      );
+    }
+    return { buffer, release };
+  } catch (err) {
+    release();
+    throw err;
   }
-  return buf;
+}
+
+/**
+ * Throws unless the blob file is there and starts with a blob header, so a
+ * missing or foreign file is caught before its stream is handed on.
+ */
+export async function assertBlobFileReadable(fsPath: string): Promise<void> {
+  const fh = await fs.open(fsPath, "r");
+  try {
+    const header = Buffer.alloc(BLOB_HEADER_BYTES);
+    const { bytesRead } = await fh.read(header, 0, BLOB_HEADER_BYTES, 0);
+    checkBlobHeader(header.subarray(0, bytesRead));
+  } finally {
+    await fh.close();
+  }
 }
 
 /**
