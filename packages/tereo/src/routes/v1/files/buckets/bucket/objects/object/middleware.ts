@@ -9,6 +9,7 @@ import {
 } from "../../../../../../../utils/multipartLimits.js";
 import {
   BadRequestError,
+  InsufficientStorageError,
   PayloadTooLargeError,
 } from "../../../../../../../utils/errors.js";
 
@@ -25,6 +26,10 @@ const upload = multer({
   },
 });
 
+const isSystemError = (err: unknown): err is NodeJS.ErrnoException =>
+  err instanceof Error &&
+  typeof (err as NodeJS.ErrnoException).syscall === "string";
+
 export const handleMulterErrors = (
   req: Request,
   res: Response,
@@ -38,17 +43,28 @@ export const handleMulterErrors = (
         if (req.file?.path) {
           await fs.unlink(req.file.path).catch(() => {});
         }
-        const message =
-          err instanceof Error ? err.message : "File upload error";
-        if (
-          err &&
-          typeof err === "object" &&
-          "code" in err &&
-          TOO_LARGE_MULTER_CODES.has((err as { code: string }).code)
-        ) {
-          throw new PayloadTooLargeError(message);
+        if (err instanceof multer.MulterError) {
+          if (TOO_LARGE_MULTER_CODES.has(err.code)) {
+            throw new PayloadTooLargeError(err.message);
+          }
+          throw new BadRequestError("invalid_request", err.message);
         }
-        throw new BadRequestError("invalid_request", message);
+        // A system error is the temp directory failing (ENOENT, EACCES, …),
+        // not the request; its message names the temp path, so it is not
+        // passed on.
+        if (isSystemError(err)) {
+          if (err.code === "ENOSPC") {
+            throw new InsufficientStorageError(
+              "No space left to stage the upload"
+            );
+          }
+          throw err;
+        }
+        // What is left is busboy refusing a malformed multipart body.
+        throw new BadRequestError(
+          "invalid_request",
+          err instanceof Error ? err.message : "Malformed multipart body"
+        );
       }
       // Defensive belt-and-suspenders cap in case multer's internal counter
       // disagreed with the on-disk size.

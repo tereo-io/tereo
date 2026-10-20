@@ -2,9 +2,7 @@ import { broadcastObjectInvalidate } from "../../../../../../utils/cacheBroadcas
 import { enqueueOrphanBlobCleanupSafe } from "../../../../../../jobs/index.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { logAuditTx, emitTx } from "../../../../../../utils/outbox.js";
-import { serializeDeletedObject, serializeObject } from "./utils.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
-import { BadRequestError } from "../../../../../../utils/errors.js";
 import { withUserRefs } from "../../../../../../utils/users.js";
 import db from "../../../../../../utils/db/index.js";
 import { bucketNameSchema } from "../../schemas.js";
@@ -20,6 +18,10 @@ import {
   validateQuery,
 } from "../../../../../../utils/validateReq.js";
 import {
+  BadRequestError,
+  ForbiddenError,
+} from "../../../../../../utils/errors.js";
+import {
   applyCursorToWhere,
   decodeListCursor,
   encodeListCursor,
@@ -30,6 +32,11 @@ import {
   listObjectsQuerySchema,
   listPrefixesQuerySchema,
 } from "./schemas.js";
+import {
+  seesBucketHistory,
+  serializeDeletedObject,
+  serializeObject,
+} from "./utils.js";
 
 /**
  * List objects in a bucket
@@ -46,6 +53,12 @@ export const listObjects = async (req: Request, res: Response) => {
   const { deleted } = validateQuery(listObjectsExtraQuerySchema, req);
 
   if (deleted) {
+    if (!(await seesBucketHistory(req, bucket))) {
+      validateUser(req);
+      throw new ForbiddenError(
+        "Listing deleted objects takes read access to the bucket"
+      );
+    }
     // A deleted object's current version is its delete marker: no content
     // to size.
     if (query.sort === "sizeBytes") {

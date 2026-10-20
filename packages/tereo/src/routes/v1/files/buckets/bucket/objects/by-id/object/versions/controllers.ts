@@ -13,7 +13,7 @@ import {
 } from "./schemas.js";
 
 export const listObjectVersionsById = async (req: Request, res: Response) => {
-  const { bucket, object } = await resolveObjectById(
+  const { bucket, object, history } = await resolveObjectById(
     req,
     "read",
     byIdListVersionsParamsSchema
@@ -26,7 +26,10 @@ export const listObjectVersionsById = async (req: Request, res: Response) => {
     operation: "LIST_VERSIONS",
   });
 
-  const where = applyCursorToWhere(query);
+  const where = applyCursorToWhere(
+    query,
+    history ? undefined : { isCurrent: true }
+  );
 
   const result = await db.objectVersions.listPaginated({
     objectId: object.id,

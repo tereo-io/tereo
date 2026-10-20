@@ -1,9 +1,9 @@
 import { isBucketReader } from "../../../../../../../../../utils/bucketAccess.js";
 import { validateParams } from "../../../../../../../../../utils/validateReq.js";
-import { BadRequestError } from "../../../../../../../../../utils/errors.js";
 import { validateUser } from "../../../../../../../../../middleware/auth.js";
 import { withUserRefs } from "../../../../../../../../../utils/users.js";
 import db from "../../../../../../../../../utils/db/index.js";
+import { seesBucketHistory } from "../../../utils.js";
 import { Request } from "express";
 import { z } from "zod";
 import type {
@@ -14,6 +14,10 @@ import {
   getAccessibleBucket,
   getReadableBucket,
 } from "../../../../../../../../../utils/bucketAccess.js";
+import {
+  BadRequestError,
+  NotFoundError,
+} from "../../../../../../../../../utils/errors.js";
 
 /**
  * Resolve (bucket, object) for any by-id versions route. Enforces access,
@@ -45,24 +49,42 @@ export async function resolveObjectById<T extends { name: string; id: string }>(
       "Versioning is not enabled for this bucket"
     );
   }
-  // Include soft-deleted objects — a versioned bucket's DELETE soft-deletes
-  // the Object row + inserts a delete-marker; version history must remain
-  // visible via the by-id route.
-  const object = await db.objects.getByIdIncludingDeleted(bucket.id, params.id);
-  return { bucket, object, params };
+  // A versioned bucket's DELETE soft-deletes the Object row and inserts a
+  // delete marker; its history stays readable by id, to those who see the
+  // bucket's history.
+  const history =
+    operation !== "read" || (await seesBucketHistory(req, bucket));
+  const object = history
+    ? await db.objects.getByIdIncludingDeleted(bucket.id, params.id)
+    : await db.objects.getById(bucket.id, params.id);
+  return { bucket, object, params, history };
+}
+
+/** A version, unless it is history the caller does not see. */
+export async function getVisibleVersion(
+  objectId: string,
+  versionId: string,
+  history: boolean
+) {
+  const version = await db.objectVersions.getByVersionId(objectId, versionId);
+  if (!history && !version.isCurrent) {
+    throw new NotFoundError("Version not found");
+  }
+  return version;
 }
 
 /**
  * Versions as the list and the detail return them. Who wrote each is named
- * only to readers of the bucket: writers' emails and names are not for the
- * public a public bucket is served to.
+ * only to readers of the bucket: writers' ids, emails and names are not for
+ * the public a public bucket is served to.
  */
 export async function serializeVersions(
   req: Request,
   bucketName: string,
   versions: (ObjectVersion & { contentBlob: ContentBlob | null })[]
 ) {
-  const named = (await isBucketReader(req, bucketName))
+  const reader = await isBucketReader(req, bucketName);
+  const named = reader
     ? await withUserRefs(versions, { creator: "createdBy" })
     : versions.map((v) => ({ ...v, creator: null }));
   return named.map((v) => ({
@@ -77,7 +99,7 @@ export async function serializeVersions(
     isDeleteMarker: v.isDeleteMarker,
     restoredFromVersionId: v.restoredFromVersionId,
     createdAt: v.createdAt,
-    createdBy: v.createdBy,
+    createdBy: reader ? v.createdBy : null,
     createdByEmail: v.creator?.email ?? null,
     createdByName: v.creator?.name ?? null,
     creator: v.creator,

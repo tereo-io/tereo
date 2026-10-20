@@ -452,7 +452,7 @@ describe("Bucket access", () => {
       ).toEqual([versionId]);
       // Writers' identities are for the bucket's own readers only.
       expect(list.data.data[0]).toMatchObject({
-        createdBy: creatorId,
+        createdBy: null,
         createdByEmail: null,
         createdByName: null,
       });

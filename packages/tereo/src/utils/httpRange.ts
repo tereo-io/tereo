@@ -38,13 +38,17 @@ export function parseRange(
 
 /**
  * Whether `If-Range` lets a range through: an entity tag must match `etag`
- * strongly (a weak tag never does), a date must equal `lastModified` to the
- * second. Without the header there is nothing to check.
+ * strongly (a weak tag never does). A date must equal `lastModified` to the
+ * second, and counts only as a strong validator (RFC 9110 §8.8.2.2): one at
+ * least a second older than the response's `Date` (`now`), since the content
+ * could change again within the second it names. Without the header there
+ * is nothing to check.
  */
 export function ifRangeAllows(
   header: string | undefined,
   etag: string,
-  lastModified?: Date
+  lastModified?: Date,
+  now: Date = new Date()
 ): boolean {
   if (header === undefined) return true;
   const value = header.trim();
@@ -52,5 +56,7 @@ export function ifRangeAllows(
   if (value.startsWith('"')) return value === `"${etag}"`;
   const date = Date.parse(value);
   if (Number.isNaN(date) || !lastModified) return false;
-  return Math.floor(date / 1000) === Math.floor(lastModified.getTime() / 1000);
+  const modified = Math.floor(lastModified.getTime() / 1000);
+  if (modified >= Math.floor(now.getTime() / 1000)) return false;
+  return Math.floor(date / 1000) === modified;
 }

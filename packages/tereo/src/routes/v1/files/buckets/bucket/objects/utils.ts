@@ -1,14 +1,23 @@
 import type { ObjectWithCurrent } from "../../../../../../utils/db/objects.js";
-import { getAccessibleBucket } from "../../../../../../utils/bucketAccess.js";
+import { noteAccessLogError } from "../../../../../../middleware/accessLog.js";
 import { normalizeContentType } from "../../../../../../utils/contentType.js";
 import { isThumbnailSource } from "../../../../../../utils/thumbnails.js";
 import type { AuthContext } from "../../../../../../middleware/auth.js";
 import { fileTypeFromBuffer, fileTypeFromFile } from "file-type";
 import type { UserRef } from "../../../../../../utils/refs.js";
 import { logger } from "../../../../../../utils/logger.js";
-import { metadataSchema } from "./schemas.js";
+import { metadataSchema, tagsSchema } from "./schemas.js";
 import { Request, Response } from "express";
+import { finished } from "stream";
 import fs from "fs/promises";
+import {
+  answerReadPreconditions,
+  parseEntityTagList,
+} from "../../../../../../utils/conditionalRequests.js";
+import {
+  holdsBucketReadAccess,
+  getAccessibleBucket,
+} from "../../../../../../utils/bucketAccess.js";
 import {
   ifRangeAllows,
   parseRange,
@@ -346,52 +355,41 @@ export const standardizeObjectKey = (req: Request) => {
 };
 
 export interface EtagPreconditions {
+  /** Strong tags only (or `*`): a weak tag never satisfies `If-Match`. */
   ifMatch: string[] | null;
+  /** Opaque tags, `W/` dropped: `If-None-Match` compares weakly. */
   ifNoneMatch: string[] | null;
   ifNoneMatchWildcard: boolean;
 }
 
-/**
- * Parse If-Match / If-None-Match headers. Per RFC 7232, values are a
- * comma-separated list of ETags or `*`. We strip surrounding quotes and `W/`
- * weak-validator prefixes for comparison.
- */
+/** `If-Match` / `If-None-Match` of a write, for `upsertWithBlob`. */
 export const parseEtagPreconditions = (req: Request): EtagPreconditions => {
-  const parseList = (header: string | undefined): string[] | null => {
-    if (!header) return null;
-    return header
-      .split(",")
-      .map((s) => s.trim())
-      .map((s) => (s.startsWith("W/") ? s.slice(2) : s))
-      .map((s) => (s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1) : s))
-      .filter((s) => s.length > 0);
-  };
-  const ifMatchRaw = req.headers["if-match"] as string | undefined;
-  const ifNoneMatchRaw = req.headers["if-none-match"] as string | undefined;
+  const ifMatch = parseEntityTagList(req.header("If-Match"));
+  const ifNoneMatch = parseEntityTagList(req.header("If-None-Match"));
   return {
-    ifMatch: parseList(ifMatchRaw),
-    ifNoneMatch: parseList(ifNoneMatchRaw),
-    ifNoneMatchWildcard: ifNoneMatchRaw?.trim() === "*",
+    ifMatch:
+      ifMatch === null
+        ? null
+        : ifMatch === "*"
+          ? ["*"]
+          : ifMatch.filter((t) => !t.weak).map((t) => t.opaque),
+    ifNoneMatch:
+      ifNoneMatch === null || ifNoneMatch === "*"
+        ? null
+        : ifNoneMatch.map((t) => t.opaque),
+    ifNoneMatchWildcard: ifNoneMatch === "*",
   };
 };
 
-const parseJsonTags = (raw: string): string[] => {
-  let parsed: unknown;
+const parseJsonTags = (raw: string): unknown => {
   try {
-    parsed = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch {
-    parsed = undefined;
-  }
-  if (
-    !Array.isArray(parsed) ||
-    !parsed.every((t): t is string => typeof t === "string" && t.length > 0)
-  ) {
     throw new BadRequestError(
       "invalid_request",
       'X-Tags starting with "[" must be a JSON array of non-empty strings'
     );
   }
-  return parsed;
 };
 
 /**
@@ -399,7 +397,8 @@ const parseJsonTags = (raw: string): string[] => {
  * strings — with non-ASCII characters `\u`-escaped, since a header value
  * cannot carry them — taken as is, like `tags` in a JSON body. Any other value
  * is comma-separated, each tag trimmed and empty ones dropped. A value
- * starting with `[` is never read as the comma form.
+ * starting with `[` is never read as the comma form. Either is held to the
+ * body's `tagsSchema`.
  */
 export const extractTagsFromRequest = (req: Request): string[] | undefined => {
   const raw = req.headers["x-tags"] as string | undefined;
@@ -416,18 +415,22 @@ export const extractTagsFromRequest = (req: Request): string[] | undefined => {
         .split(",")
         .map((t) => t.trim())
         .filter((t) => t.length > 0);
-  if (tags.length > 50) {
+  const parsed = tagsSchema.safeParse(tags);
+  if (parsed.success) return parsed.data;
+  const issue = parsed.error.issues[0];
+  if (issue.code === "too_big" && issue.path.length === 0) {
     throw new BadRequestError("too_many_tags", "Maximum 50 tags per object");
   }
-  for (const tag of tags) {
-    if (tag.length > 128) {
-      throw new BadRequestError(
-        "tag_too_long",
-        "Tag length exceeds 128 characters"
-      );
-    }
+  if (issue.code === "too_big") {
+    throw new BadRequestError(
+      "tag_too_long",
+      "Tag length exceeds 128 characters"
+    );
   }
-  return tags;
+  throw new BadRequestError(
+    "invalid_request",
+    'X-Tags starting with "[" must be a JSON array of non-empty strings'
+  );
 };
 
 /**
@@ -502,6 +505,56 @@ export const downloadCacheControl = (
   }`;
 
 /**
+ * Whether the caller may see the bucket's history — deleted objects and
+ * versions no longer current. Not on a public bucket for a caller it is
+ * served to only because it is public.
+ */
+export const seesBucketHistory = async (
+  req: Request,
+  bucket: { name: string; policy: string }
+) =>
+  bucket.policy !== "public" || (await holdsBucketReadAccess(req, bucket.name));
+
+/**
+ * The headers of a download, for its `GET` and `HEAD` alike, with its
+ * preconditions answered in between: true when that ended the response
+ * (`304`). Validators and `Cache-Control` are set first, so a 304 has them;
+ * a `412` is thrown.
+ */
+export const prepareDownload = (
+  req: Request,
+  res: Response,
+  opts: {
+    bucket: { policy: string };
+    pinnedVersion: boolean;
+    objectKey: string;
+    contentType: string | null;
+    etag: string;
+    lastModified: Date;
+  }
+): boolean => {
+  const contentType = opts.contentType ?? "application/octet-stream";
+  res.setHeader("ETag", `"${opts.etag}"`);
+  res.setHeader("Last-Modified", opts.lastModified.toUTCString());
+  res.setHeader(
+    "Cache-Control",
+    downloadCacheControl(opts.bucket, opts.pinnedVersion)
+  );
+  if (
+    answerReadPreconditions(req, res, {
+      etag: opts.etag,
+      lastModified: opts.lastModified,
+    })
+  ) {
+    return true;
+  }
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  setContentDisposition(res, { contentType, objectKey: opts.objectKey });
+  return false;
+};
+
+/**
  * Send a blob's plaintext as the body of a download whose other headers are
  * set: the whole of it, or one byte range (`Range`, honoured unless
  * `If-Range` says the client's copy is stale) as `206 Partial Content`. An
@@ -535,12 +588,11 @@ export const sendBlobBody = async (
     ? parseRange(req.header("Range"), size)
     : null;
   if (requested === "unsatisfiable") {
-    res.setHeader("Content-Range", `bytes */${size}`);
-    res.removeHeader("Content-Disposition");
     throw new AppError(
       416,
       "range_not_satisfiable",
-      "The requested range is outside the content"
+      "The requested range is outside the content",
+      { headers: { "Content-Range": `bytes */${size}` } }
     );
   }
   if (requested) {
@@ -567,12 +619,12 @@ export const sendBlobBody = async (
   };
 
   // Throws before anything is sent, so tampered storage is a clean 500.
-  const buffered = await loadVerifiedBlobIfSmall(meta, blob.hash, size);
-  if (buffered) {
+  const verified = await loadVerifiedBlobIfSmall(meta, blob.hash, size);
+  if (verified) {
+    finished(res, verified.release);
+    const { buffer } = verified;
     res.end(
-      requested
-        ? buffered.subarray(requested.start, requested.end + 1)
-        : buffered
+      requested ? buffer.subarray(requested.start, requested.end + 1) : buffer
     );
     return;
   }
@@ -581,6 +633,8 @@ export const sendBlobBody = async (
     ? await openBlobRangeStream(meta, blob.hash, requested.start, requested.end)
     : openBlobStream(meta, blob.hash);
   stream.on("error", (err) => {
+    logger.error({ err, hash: blob.hash }, "Blob stream failed");
+    noteAccessLogError(res, err);
     if (res.headersSent) {
       // Headers are out (e.g. GCM verification failed at the end): reset the
       // connection so the client sees a truncated response, not a whole one.

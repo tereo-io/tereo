@@ -85,6 +85,18 @@ export const getReadableBucket = async (req: Request, bucketName: string) => {
 export const isBucketReader = async (req: Request, bucketName: string) =>
   !!req.auth && (await checkBucketAccess(req.auth, bucketName, "read"));
 
+/**
+ * Whether the caller could read the bucket were it private — false for
+ * everyone served only because it is public, a member without a grant
+ * included. A public bucket's history (deleted objects, replaced versions)
+ * is shown only behind this.
+ */
+export const holdsBucketReadAccess = async (req: Request, bucketName: string) =>
+  !!req.auth &&
+  (await checkBucketAccess(req.auth, bucketName, "read", {
+    publicReads: false,
+  }));
+
 /** The part of a caller that bucket access depends on. */
 export type BucketAccessor = Pick<
   AuthContext,
@@ -102,7 +114,8 @@ export const canWriteBucket = (auth: AuthContext, bucketName: string) =>
 const checkBucketAccess = async (
   auth: BucketAccessor,
   bucketName: string,
-  operation: "read" | "write" | "delete"
+  operation: "read" | "write" | "delete",
+  { publicReads = true }: { publicReads?: boolean } = {}
 ): Promise<boolean> => {
   if (hasPermission(auth.permissions, "file-service.admin")) return true;
 
@@ -114,7 +127,9 @@ const checkBucketAccess = async (
     return false;
   }
 
-  if (bucket.policy === "public" && operation === "read") return true;
+  if (publicReads && bucket.policy === "public" && operation === "read") {
+    return true;
+  }
   if (!hasPermission(auth.permissions, `file-service.objects.${operation}`)) {
     return false;
   }
