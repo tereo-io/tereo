@@ -3,6 +3,7 @@ import { emitObjectWrittenTx } from "../../../../../buckets/bucket/objects/event
 import { assertBucketWritable } from "../../../../../../../../utils/bucketAccess.js";
 import { createEncryptStream } from "../../../../../../../../utils/encryption.js";
 import { parseContentType } from "../../../../../../../../utils/contentType.js";
+import { answerReadPreconditions } from "../../../../../../../../utils/conditionalRequests.js";
 import { setAccessLog } from "../../../../../../../../middleware/accessLog.js";
 import { SYSTEM_USER_ID } from "../../../../../../../../definitions/index.js";
 import { logAuditTx } from "../../../../../../../../utils/outbox.js";
@@ -64,10 +65,11 @@ const resolveSignedDownload = async (req: Request, res: Response) => {
   }
   const contentType = current.contentType ?? "application/octet-stream";
   const etag = current.etag ?? "";
+  const lastModified = verified.version ? current.createdAt : object.updatedAt;
 
   res.setHeader("Content-Type", contentType);
   res.setHeader("ETag", `"${etag}"`);
-  res.setHeader("Last-Modified", object.updatedAt.toUTCString());
+  res.setHeader("Last-Modified", lastModified.toUTCString());
   res.setHeader("Cache-Control", "private, max-age=60");
   res.setHeader("X-Content-Type-Options", "nosniff");
   // Unsafe types (text/html, image/svg+xml, …) are always attachments, so a
@@ -89,19 +91,23 @@ const resolveSignedDownload = async (req: Request, res: Response) => {
     current,
     blob: current.contentBlob,
     etag,
+    lastModified,
   };
 };
 
 export const probeViaSignedUrl = async (req: Request, res: Response) => {
-  const { blob } = await resolveSignedDownload(req, res);
+  const { blob, etag, lastModified } = await resolveSignedDownload(req, res);
+  if (answerReadPreconditions(req, res, { etag, lastModified })) return;
   res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Content-Length", blob.sizeBytes.toString());
   res.status(200).end();
 };
 
 export const downloadViaSignedUrl = async (req: Request, res: Response) => {
-  const { verified, share, bucket, object, current, blob, etag } =
+  const { verified, share, bucket, object, current, blob, etag, lastModified } =
     await resolveSignedDownload(req, res);
+  // A 304 sends no body, so it spends no nonce and writes no audit row.
+  if (answerReadPreconditions(req, res, { etag, lastModified })) return;
 
   setAccessLog(res, {
     bucketId: bucket.id,
@@ -113,7 +119,7 @@ export const downloadViaSignedUrl = async (req: Request, res: Response) => {
     req,
     res,
     blob,
-    { etag, lastModified: object.updatedAt },
+    { etag, lastModified },
     {
       // In one transaction with the nonce, so a URL already spent leaves no
       // audit row, and one that is spent always has its row.

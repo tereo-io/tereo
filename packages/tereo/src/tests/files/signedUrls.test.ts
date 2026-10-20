@@ -188,6 +188,32 @@ describe("signed URLs", () => {
       expect((await axios.get(url, anyStatus)).status).toBe(HTTP_STATUS.OK);
     });
 
+    it("survives a 304 and answers a failed If-Match with 412", async () => {
+      const share = await createShare({
+        kind: "OBJECT",
+        objectId,
+        maxDownloads: 1,
+      });
+      const url = await signedUrlFor(share.url);
+      const etag = (await axios.head(url, anyStatus)).headers["etag"];
+
+      const notModified = await axios.get(url, {
+        headers: { "If-None-Match": etag },
+        ...anyStatus,
+      });
+      expect(notModified.status).toBe(304);
+      expect(notModified.headers["etag"]).toBe(etag);
+      const failed = await axios.get(url, {
+        headers: { "If-Match": '"not-the-etag"' },
+        ...anyStatus,
+      });
+      expect(failed.status).toBe(412);
+
+      const get = await axios.get(url, anyStatus);
+      expect(get.status).toBe(HTTP_STATUS.OK);
+      expect(get.data).toBe("pdf-bytes");
+    });
+
     it("survives an unsatisfiable range", async () => {
       const share = await createShare({
         kind: "OBJECT",
