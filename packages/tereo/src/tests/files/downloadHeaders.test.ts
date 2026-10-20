@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getTestPrincipalToken } from "../utils/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes, randomUUID } from "crypto";
-import { chmod, open } from "fs/promises";
+import { open, rename, rm, writeFile } from "fs/promises";
 import FormData from "form-data";
 import env from "../../env.js";
 import axios from "axios";
@@ -284,7 +284,12 @@ describe("download responses", () => {
 
   describe("upload staging failures", () => {
     it("answers a temp directory it cannot write with 500, naming no path", async () => {
-      await chmod(env.FILE_SERVICE_TEMP_PATH, 0o555);
+      // A file where the directory should be: unwritable even as root, which
+      // the Docker test stack runs as (a read-only mode would not stop it).
+      const tempPath = env.FILE_SERVICE_TEMP_PATH;
+      const movedAside = `${tempPath}.moved-aside`;
+      await rename(tempPath, movedAside);
+      await writeFile(tempPath, "");
       try {
         const form = new FormData();
         form.append("file", Buffer.from("staged"), {
@@ -308,7 +313,8 @@ describe("download responses", () => {
           env.FILE_SERVICE_TEMP_PATH
         );
       } finally {
-        await chmod(env.FILE_SERVICE_TEMP_PATH, 0o755);
+        await rm(tempPath);
+        await rename(movedAside, tempPath);
       }
     });
   });
