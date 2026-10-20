@@ -89,11 +89,15 @@ export const get = async (id: string) => {
   return share;
 };
 
-/** Fetch the share row by token without joins. Public-route callers do
- * kind-aware target resolution (`getLiveObjectTarget` / `getLiveArchiveTarget`)
- * so a single by-token lookup never LEFT-JOINs the two unused target tables. */
+/** Fetch the share row by token, with only its creator's `isActive`. Public-
+ * route callers do kind-aware target resolution (`getLiveObjectTarget` /
+ * `getLiveArchiveTarget`) so a single by-token lookup never LEFT-JOINs the
+ * two unused target tables. */
 export const getByTokenRaw = async (token: string) => {
-  return await prisma.share.findUnique({ where: { token } });
+  return await prisma.share.findUnique({
+    where: { token },
+    include: { creator: { select: { isActive: true } } },
+  });
 };
 
 /** OBJECT-share target resolver. Returns null when the object (or pinned
@@ -156,13 +160,8 @@ export const getObjectTargetDetails = async (
 };
 
 /**
- * Cheap state check by id used by the signed-download handlers when a URL
- * carries a HMAC-bound `share=<id>` parameter. Returns whether the share is
- * still serveable; never throws. The lookup is by primary key so this stays
- * O(1) per signed-URL hit (cost paid only when minted from a share).
- */
-/**
- * Null when the share no longer serves; otherwise whether it has a download
+ * For a signed URL minted from a share: null when the share no longer serves
+ * (a deactivated creator's included); otherwise whether it has a download
  * cap, whose URLs are single-use.
  */
 export const getServeableShare = async (
@@ -175,10 +174,11 @@ export const getServeableShare = async (
       expiresAt: true,
       maxDownloads: true,
       downloadCount: true,
+      creator: { select: { isActive: true } },
     },
   });
   if (!share) return null;
-  if (share.revokedAt) return null;
+  if (share.revokedAt || !share.creator.isActive) return null;
   if (share.expiresAt && share.expiresAt.getTime() < Date.now()) return null;
   if (share.maxDownloads !== null && share.downloadCount > share.maxDownloads) {
     return null;

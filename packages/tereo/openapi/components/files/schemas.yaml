@@ -1963,12 +1963,12 @@ PasswordRequiredResponse:
 
 UnlockShareRequest:
   type: object
-  required: [password]
   properties:
     password:
       type: string
       minLength: 1
       maxLength: 128
+      description: The share's password. Required for a password share; may be left out otherwise.
 
 UnlockShareResponse:
   type: object

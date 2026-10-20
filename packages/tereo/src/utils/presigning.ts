@@ -34,6 +34,11 @@ export interface PresignInput {
    * pinned to a version). Bound by the HMAC and carried as `&version=<id>`.
    */
   version?: string;
+  /**
+   * For `read`: the download filename, carried as `&filename=` and bound by
+   * the HMAC so it can't be swapped for another.
+   */
+  filename?: string;
 }
 
 export interface PresignResult {
@@ -57,6 +62,8 @@ export interface VerifiedPresign {
   by: string | null;
   /** Set iff the URL carried a HMAC-bound `version` parameter. */
   version: string | null;
+  /** Set iff the URL carried a HMAC-bound `filename`; an unsigned one is dropped. */
+  filename: string | null;
 }
 
 function getSigningKey(version: number): Buffer {
@@ -87,7 +94,8 @@ function canonicalString(
   keyVersion: number,
   share: string | null,
   by: string | null,
-  version: string | null
+  version: string | null,
+  filename: string | null
 ): string {
   const parts: (string | number)[] = [
     bucket,
@@ -103,6 +111,8 @@ function canonicalString(
   if (share) parts.push(`share=${share}`);
   if (by) parts.push(`by=${by}`);
   if (version) parts.push(`version=${version}`);
+  // Encoded, so a `|` in a filename can't forge another segment.
+  if (filename) parts.push(`filename=${encodeURIComponent(filename)}`);
   return parts.join("|");
 }
 
@@ -168,6 +178,7 @@ export function sign(input: PresignInput): PresignResult {
   const share = input.share ?? null;
   const by = input.by ?? null;
   const version = input.version ?? null;
+  const filename = input.filename ?? null;
   const canon = canonicalString(
     bucket,
     id,
@@ -177,7 +188,8 @@ export function sign(input: PresignInput): PresignResult {
     keyVersion,
     share,
     by,
-    version
+    version,
+    filename
   );
   const sig = base64UrlEncode(hmac(signingKey, canon));
 
@@ -199,6 +211,7 @@ export function sign(input: PresignInput): PresignResult {
   if (share) query.set("share", share);
   if (by) query.set("by", by);
   if (version) query.set("version", version);
+  if (filename) query.set("filename", filename);
   const url = `${env.FILE_SERVICE_PUBLIC_BASE_URL}${path}?${query.toString()}`;
 
   return { url, expiresAt: new Date(expiresAt * 1000), operation, nonce };
@@ -219,6 +232,8 @@ export function verify(params: {
   by?: string | null;
   /** Optional `version=<version id>` from the URL, bound when present. */
   version?: string | null;
+  /** Optional `filename` from the URL. Kept only when the HMAC binds it. */
+  filename?: string | null;
 }): VerifiedPresign {
   const { bucket, id, operation, expires, nonce, v, sig } = params;
   const share = params.share ?? null;
@@ -244,30 +259,43 @@ export function verify(params: {
   }
 
   const signingKey = getSigningKey(keyVersion);
-  const canon = canonicalString(
-    bucket,
-    id,
-    operation,
-    expiresAt,
-    nonce,
-    keyVersion,
-    share,
-    by,
-    version
-  );
-  // Compare in the base64-url encoding the client sent, not the decoded
-  // bytes. A 32-byte HMAC encodes to 43 unpadded base64 chars where the
-  // last character carries only 4 significant bits — the remaining 2 bits
-  // are discarded on decode. Byte-level comparison would therefore accept
-  // three variants of the final character as equivalent, making the
-  // signature malleable (and tamper-detection tests flaky ~1/16 of runs).
-  const expected = base64UrlEncode(hmac(signingKey, canon));
-  const expectedBuf = Buffer.from(expected, "utf8");
-  const providedBuf = Buffer.from(sig, "utf8");
-  if (
-    expectedBuf.length !== providedBuf.length ||
-    !crypto.timingSafeEqual(expectedBuf, providedBuf)
-  ) {
+  const matches = (filename: string | null) => {
+    const canon = canonicalString(
+      bucket,
+      id,
+      operation,
+      expiresAt,
+      nonce,
+      keyVersion,
+      share,
+      by,
+      version,
+      filename
+    );
+    // Compare in the base64-url encoding the client sent, not the decoded
+    // bytes. A 32-byte HMAC encodes to 43 unpadded base64 chars where the
+    // last character carries only 4 significant bits — the remaining 2 bits
+    // are discarded on decode. Byte-level comparison would therefore accept
+    // three variants of the final character as equivalent, making the
+    // signature malleable (and tamper-detection tests flaky ~1/16 of runs).
+    const expected = Buffer.from(
+      base64UrlEncode(hmac(signingKey, canon)),
+      "utf8"
+    );
+    const provided = Buffer.from(sig, "utf8");
+    return (
+      expected.length === provided.length &&
+      crypto.timingSafeEqual(expected, provided)
+    );
+  };
+
+  // A `filename` the signature doesn't cover was added after signing (or the
+  // URL predates signed filenames): it is ignored, not honored.
+  const offered = params.filename || null;
+  let filename: string | null = null;
+  if (offered && matches(offered)) {
+    filename = offered;
+  } else if (!matches(null)) {
     throw new ForbiddenError("Invalid signature");
   }
 
@@ -281,5 +309,6 @@ export function verify(params: {
     share,
     by,
     version,
+    filename,
   };
 }

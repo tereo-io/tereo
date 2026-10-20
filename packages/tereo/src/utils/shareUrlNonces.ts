@@ -6,7 +6,8 @@ import env from "../env.js";
 
 // Single-use signed URLs for shares with `maxDownloads`. The URL's nonce,
 // already bound by its HMAC, is stored when the URL is minted and deleted by
-// the first request that uses it, so a capped share's URL serves once. Keys
+// the first GET that starts sending the content, so a capped share's URL
+// serves once. Keys
 // look like `file-service:share-url:{shareId}:{nonce}` and expire with the URL.
 //
 // Fails closed: without Redis a capped share neither mints nor serves (503).
