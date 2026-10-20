@@ -1,6 +1,5 @@
 import shareRouter from "./share/index.js";
 import { Router } from "express";
-import express from "express";
 
 /**
  * Public share-link surface. No auth middleware — the token (and optionally
@@ -15,13 +14,9 @@ import express from "express";
  *   counts a download.
  * `POST /shared/:token/unlock { password }` — rate-limited; on success
  *   returns `{ url, expiresAt }` pointing at a short-lived presigned URL.
+ *   `password` may be left out for a share without one.
  */
 const sharedRouter = Router();
-
-// Parse JSON bodies here specifically — the global parser is applied above
-// in app.ts already, but keep this self-contained so a future rearrangement
-// doesn't accidentally drop body parsing for the unlock endpoint.
-sharedRouter.use(express.json({ limit: "1mb" }));
 
 sharedRouter.use("/:token", shareRouter);
 

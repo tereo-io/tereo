@@ -96,7 +96,7 @@ export const canReadBucket = (auth: BucketAccessor, bucketName: string) =>
   checkBucketAccess(auth, bucketName, "read");
 
 /** Whether `auth` holds write access to the bucket; false for a missing one. */
-export const canWriteBucket = (auth: AuthContext, bucketName: string) =>
+export const canWriteBucket = (auth: BucketAccessor, bucketName: string) =>
   checkBucketAccess(auth, bucketName, "write");
 
 const checkBucketAccess = async (

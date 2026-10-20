@@ -523,7 +523,11 @@ export const sendBlobBody = async (
     iv: Uint8Array;
     masterKeyVersion: number;
   },
-  validators: { etag: string; lastModified?: Date }
+  validators: { etag: string; lastModified?: Date },
+  options: {
+    /** Runs once the content is known to be servable, before any byte is sent. */
+    beforeBody?: () => Promise<void>;
+  } = {}
 ) => {
   const size = Number(blob.sizeBytes);
   res.setHeader("Accept-Ranges", "bytes");
@@ -568,6 +572,7 @@ export const sendBlobBody = async (
 
   // Throws before anything is sent, so tampered storage is a clean 500.
   const buffered = await loadVerifiedBlobIfSmall(meta, blob.hash, size);
+  await options.beforeBody?.();
   if (buffered) {
     res.end(
       requested

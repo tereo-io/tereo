@@ -164,3 +164,46 @@ describe("presigned URL parameter shapes", () => {
     );
   });
 });
+
+describe("presigned URL filename", () => {
+  const ID = "018ebd2a-b2b3-7d1c-a7c2-3e3f9a1c8d00";
+
+  const verifyUrl = (url: string, filename: string | null) => {
+    const params = parseUrl(url);
+    return verify({
+      bucket: "b",
+      id: ID,
+      operation: "read",
+      expires: params.get("expires")!,
+      nonce: params.get("nonce")!,
+      v: params.get("v")!,
+      sig: params.get("sig")!,
+      filename,
+    });
+  };
+
+  const signWith = (filename?: string) =>
+    sign({
+      bucket: "b",
+      id: ID,
+      operation: "read",
+      expiresInSeconds: 60,
+      filename,
+    }).url;
+
+  it("keeps a signed filename, `|` included", () => {
+    const url = signWith("a|by=x.pdf");
+    expect(parseUrl(url).get("filename")).toBe("a|by=x.pdf");
+    expect(verifyUrl(url, "a|by=x.pdf").filename).toBe("a|by=x.pdf");
+  });
+
+  it("refuses a signed filename changed or removed", () => {
+    const url = signWith("report.pdf");
+    expect(() => verifyUrl(url, "evil.html")).toThrow("Invalid signature");
+    expect(() => verifyUrl(url, null)).toThrow("Invalid signature");
+  });
+
+  it("ignores a filename the signature doesn't cover", () => {
+    expect(verifyUrl(signWith(), "evil.html").filename).toBeNull();
+  });
+});
