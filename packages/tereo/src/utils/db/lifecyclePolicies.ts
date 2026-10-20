@@ -53,6 +53,7 @@ export const listEnabled = async () => {
   return await prisma.bucketLifecyclePolicy.findMany({
     where: {
       enabled: true,
+      bucket: { deletedAt: null },
       // Skip no-op policies (all three *AfterDays NULL) — they have nothing
       // to sweep but would still enqueue a daily job per bucket.
       OR: [
@@ -108,7 +109,9 @@ export const findVersionsPastExpiration = async (
     where: {
       deletedAt: null,
       isCurrent: false,
-      createdAt: { lt: cutoff },
+      // Counted from when a newer version replaced it, as S3's
+      // NoncurrentDays is, not from its own upload.
+      noncurrentSince: { lt: cutoff },
       object: { bucketId },
       ...(afterId !== undefined ? { id: { gt: afterId } } : {}),
     },

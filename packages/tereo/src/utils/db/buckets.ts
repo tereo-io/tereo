@@ -160,8 +160,9 @@ export const update = async (
   // Prisma distinguishes "undefined" (don't update) from "null" (set to null);
   // pass through the exact shape so consumers can clear corsConfig / rateLimitConfig.
   const { corsConfig, rateLimitConfig, ...rest } = data;
-  return await client.bucket.update({
-    where: { id },
+  // Conditional, so an update racing the bucket's delete can't write to it.
+  const { count } = await client.bucket.updateMany({
+    where: { id, deletedAt: null },
     data: {
       ...rest,
       ...(corsConfig !== undefined
@@ -175,6 +176,10 @@ export const update = async (
         : {}),
       updatedAt: new Date(),
     },
+  });
+  if (count === 0) throw new NotFoundError("Bucket not found");
+  return await client.bucket.findUniqueOrThrow({
+    where: { id },
     include: withRefs,
   });
 };
@@ -242,6 +247,36 @@ export const getLiveUsageBytes = async (id: number): Promise<bigint> => {
       AND o."deleted_at" IS NULL
   `;
   return rows[0]?.live_bytes ?? 0n;
+};
+
+/**
+ * Deleted buckets, deleted at least `minAgeSeconds` ago, that still have live
+ * versions holding blob refs — what `releaseBucketBlobRefsBatch` would
+ * release. By id, after `afterId`.
+ */
+export const listDeletedHoldingRefs = async (
+  minAgeSeconds: number,
+  limit: number,
+  afterId = 0
+): Promise<{ id: number; deletedBy: string | null }[]> => {
+  return await prisma.$queryRaw<{ id: number; deletedBy: string | null }[]>`
+    SELECT b."id", b."deleted_by" AS "deletedBy"
+    FROM "files"."buckets" b
+    WHERE b."deleted_at" IS NOT NULL
+      AND b."deleted_at" < NOW() - (${minAgeSeconds}::int || ' seconds')::interval
+      AND b."id" > ${afterId}::int
+      AND EXISTS (
+        SELECT 1
+        FROM "files"."objects" o
+        INNER JOIN "files"."object_versions" ov ON ov."object_id" = o."id"
+        WHERE o."bucket_id" = b."id"
+          AND ov."deleted_at" IS NULL
+          AND ov."is_delete_marker" = false
+          AND ov."content_blob_hash" IS NOT NULL
+      )
+    ORDER BY b."id" ASC
+    LIMIT ${limit}
+  `;
 };
 
 /**

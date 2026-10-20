@@ -44,7 +44,9 @@ Creating a bucket also grants its creator full object access (`canRead`, `canWri
 
 **Access is checked before anything about the bucket is revealed.** A caller without access gets the same `403` for a bucket that doesn't exist as for one they can't access — only callers who could see it (`file-service.admin`) get `404 Bucket not found`. On the read routes admitted without a token, an anonymous caller is served from a public bucket and gets `401` for a private or missing one. Bucket settings (`versioning_disabled` on the versions routes, a retired bucket's `409 bucket_retired`) are only reported once the permission check has passed. `getAccessibleBucket` / `getReadableBucket` / `getManagedBucket` in `utils/bucketAccess.ts`.
 
-**Managing a bucket** — updating it (policy, quota, CORS, rate limit, …), granting and revoking access, deleting it — takes the matching `file-service.buckets.*` / `file-service.permissions.*` permission and either being its creator or holding `file-service.admin` (checked hierarchically, so the bare `admin` permission counts). The lifecycle policy (`/lifecycle`) is a bucket setting and takes the same check — no `file-service.objects.*` permission or grant, and a public bucket's policy is not public. `validateBucketManagement` in `utils/bucketAccess.ts`. A bucket a service declared (`serviceId` set) cannot be deleted, and its description and the service's own grant are the declaration's: changing them is `409 bucket_declared` (see [registry.md](registry.md#declared-buckets)).
+**Managing a bucket** — updating it (policy, quota, CORS, rate limit, …), granting and revoking access, deleting it — takes the matching `file-service.buckets.*` / `file-service.permissions.*` permission and either being its creator or holding `file-service.admin` (checked hierarchically, so the bare `admin` permission counts). The lifecycle policy (`/lifecycle`) is a bucket setting and takes the same check — no `file-service.objects.*` permission or grant, and a public bucket's policy is not public. `validateBucketManagement` in `utils/bucketAccess.ts`. A bucket a service declared (`serviceId` set) cannot be deleted while declared, and its description and the service's own grant are the declaration's: changing them is `409 bucket_declared` (see [registry.md](registry.md#declared-buckets)).
+
+**Deleting a bucket** sets its `deletedAt` (a conditional update: of two deletes or a delete and an update racing, the loser gets `404`, and only one audit entry and event is written), then enqueues the `bucket-cleanup` job, which releases its versions' blob refs in batches. Every 6 hours the `bucket-cleanup-reconcile` job gives a cleanup run to every bucket deleted over an hour ago that still has live versions holding refs, so a lost or failed enqueue only delays the release. Bucket cleanup releases nothing in a bucket that is not deleted.
 
 `PUT /buckets/:name` with `storageQuotaBytes: null` clears the quota, as `null` on create sets none. A bucket's `rateLimitConfig` is a per-user token bucket applied on top of the general limiter; going over it answers like the general limiter — `429 too_many_requests` with `retry_after`, `Retry-After` and `X-RateLimit-Limit/Remaining/Reset` (for the bucket's limit).
 
@@ -317,8 +319,11 @@ Per-bucket policy stored in `BucketLifecyclePolicy`:
 - `expireObjectsAfterDays` — soft-delete objects last written more than N days ago. Age counts from
   the current version's `createdAt` (the last upload, restore or branching PATCH), as S3 counts it —
   not from when the key was first created, so an object overwritten yesterday is kept.
-- `expireVersionsAfterDays` — hard-delete non-current versions older than N days
-- `purgeSoftDeletedAfterDays` — hard-delete soft-deleted object rows
+- `expireVersionsAfterDays` — hard-delete versions non-current for more than N days. As S3's
+  `NoncurrentDays`, age counts from when a newer version replaced the version (`noncurrentSince`, set
+  by an overwrite, delete marker, restore or branching PATCH), not from its own upload: a year-old
+  file overwritten today keeps its old version for N more days.
+- `purgeSoftDeletedAfterDays` — hard-delete soft-deleted object rows (`0`: at the next sweep)
 - Per-object `deleteAfter` timestamp overrides policy.
 
 Daily `lifecycle-sweep` worker runs via BullMQ. Each sweep reads a batch, then deletes it in one

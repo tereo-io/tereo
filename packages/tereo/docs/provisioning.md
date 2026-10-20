@@ -456,7 +456,8 @@ for `REGISTRY_RETIREMENT_GRACE_HOURS` (default 24), so a rollback or a rolling d
 runs older documents does nothing. After that the hourly retirement job
 
 - **deactivates** a service: its tokens are revoked and it cannot get new ones; its data and
-  history stay;
+  history stay. Its buckets are marked missing, so they retire one grace period later, and can be
+  deleted by an admin from now on ([registry](registry.md#declared-buckets));
 - **deletes** a login client, as the admin delete does;
 - **archives** a custom role.
 

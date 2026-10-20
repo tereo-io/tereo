@@ -194,6 +194,33 @@ describe("parseDocuments", () => {
     expect(bare.documents[0].service!.webhooks).toEqual([]);
   });
 
+  it("limits a declared bucket's quota as the bucket API does", () => {
+    const withQuota = (storageQuotaBytes: unknown) =>
+      doc({
+        service: service({
+          buckets: [
+            { bucketName: "vanquished-inventory-files", storageQuotaBytes },
+          ],
+        }),
+      });
+    const quotaOf = (value: unknown) =>
+      parse({ "a.json": withQuota(value) }).documents[0].service!.buckets[0]
+        .storageQuotaBytes;
+    expect(quotaOf(1_048_576)).toBe(1_048_576);
+    expect(quotaOf("1099511627776")).toBe("1099511627776");
+
+    for (const value of [
+      2 ** 40 + 1,
+      "1099511627777",
+      2 ** 60,
+      "9".repeat(30),
+    ]) {
+      expect(problemsOf({ "a.json": withQuota(value) }).join("\n")).toContain(
+        "storageQuotaBytes"
+      );
+    }
+  });
+
   it("resolves service, client and webhook secrets", () => {
     const set = parse({
       "a.json": doc({

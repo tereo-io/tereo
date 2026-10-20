@@ -252,7 +252,8 @@
       - System: `file-service.buckets.delete` AND (bucket creator or `file-service.admin`)
 
       A bucket a service declared (`serviceId` set) exists for as long as the service declares it:
-      no one can delete it (`409 bucket_declared`), retired or not.
+      no one can delete it (`409 bucket_declared`) until it is retired or its service is
+      deactivated.
 
       **Warning:** This operation will delete all objects in the bucket. This action cannot be undone.
 
@@ -276,10 +277,10 @@
         description: Forbidden - missing file-service.buckets.delete permission, not the bucket's creator (or `file-service.admin`), or no such bucket
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
-        description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket
+        description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket. Also the answer to the loser of two deletes racing
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`bucket_declared` - a declared bucket cannot be deleted'
+        description: '`bucket_declared` - a bucket its active service still declares cannot be deleted'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':

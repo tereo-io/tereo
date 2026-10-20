@@ -1,6 +1,7 @@
 import { CORE_SERVICE_ID, SYSTEM_USER_ID } from "../../definitions/index.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
+import { broadcastBucketInvalidate } from "../cacheBroadcast.js";
 import { formatClient, formatRole } from "../transformers.js";
 import { syncProvisionedAccessTx } from "../serviceAccess.js";
 import { openSigningSecret } from "../webhookSecrets.js";
@@ -1406,7 +1407,11 @@ const applyServicesContent = async (
   p: Entries,
   now: Date,
   result: ProvisioningResult
-): Promise<{ problems: string[]; revokedClients: string[] }> => {
+): Promise<{
+  problems: string[];
+  revokedClients: string[];
+  bucketNames: string[];
+}> => {
   const rows = new Map(
     (
       await tx.service.findMany({
@@ -1416,11 +1421,12 @@ const applyServicesContent = async (
     ).map((row) => [row.slug, row])
   );
   const problems: string[] = [];
+  const bucketNames: string[] = [];
 
   for (const entry of p.services) {
     const row = rows.get(entry.service.slug)!;
     await asProblem(serviceLabel(entry), problems, async () => {
-      const { changed } = await applyDeclarationTx(
+      const applied = await applyDeclarationTx(
         tx,
         // Its namespace is the entry's: findProblems refuses a change.
         { ...row, namespace: entry.service.namespace },
@@ -1429,11 +1435,12 @@ const applyServicesContent = async (
         now,
         documentMeta(entry)
       );
-      if (changed) result.declared.push(`service:${row.slug}`);
+      if (applied.changed) result.declared.push(`service:${row.slug}`);
+      bucketNames.push(...applied.bucketNames);
     });
   }
   const revokedClients: string[] = [];
-  if (problems.length > 0) return { problems, revokedClients };
+  if (problems.length > 0) return { problems, revokedClients, bucketNames };
 
   for (const entry of p.services) {
     const row = rows.get(entry.service.slug)!;
@@ -1463,7 +1470,7 @@ const applyServicesContent = async (
         revokedClients.push(client.id);
     });
   }
-  return { problems, revokedClients };
+  return { problems, revokedClients, bucketNames };
 };
 
 class DryRunRollback extends Error {
@@ -1533,7 +1540,12 @@ export const applyProvisioning = async (
         await markMissing(tx, p, now, result);
         // A dry run computed the result against the real rows; roll it back.
         if (options.dryRun) throw new DryRunRollback(result);
-        return { result, revokedClients: content.revokedClients, roleChanges };
+        return {
+          result,
+          revokedClients: content.revokedClients,
+          bucketNames: content.bucketNames,
+          roleChanges,
+        };
       },
       { timeout: 120_000 }
     );
@@ -1541,7 +1553,7 @@ export const applyProvisioning = async (
     if (err instanceof DryRunRollback) return err.result;
     throw err;
   }
-  const { result, revokedClients, roleChanges } = applied;
+  const { result, revokedClients, bucketNames, roleChanges } = applied;
   // Tokens first: a failed push must not leave a revoked role's holders with
   // working tokens. The apply is committed, so a failure here is logged.
   const after = async (what: string, step: () => Promise<unknown>) => {
@@ -1565,6 +1577,8 @@ export const applyProvisioning = async (
     await after("notifying a role's status change", () =>
       notifyRoleStatusChanged(id)
     );
+  for (const name of new Set(bucketNames))
+    await broadcastBucketInvalidate(name);
   return result;
 };
 
@@ -1592,6 +1606,7 @@ export const deprovisionMissing = async (
   );
   const {
     serviceClientIds,
+    missingBuckets,
     jtis,
     services,
     integrations,
@@ -1606,6 +1621,7 @@ export const deprovisionMissing = async (
         include: { client: { include: { serviceAccountUser: true } } },
       });
       const serviceClientIds: string[] = [];
+      const missingBuckets: string[] = [];
       for (const service of dueServices) {
         const { client, accountUserId } = serviceRows(service);
         await updateServiceTx(
@@ -1621,6 +1637,24 @@ export const deprovisionMissing = async (
           SYSTEM_ACTOR
         );
         serviceClientIds.push(client.id);
+        // No declaration is left to drop them from; they retire, and can be
+        // deleted, as if one had. A cleared hash makes a return re-apply the
+        // declaration, which brings back the buckets it lists.
+        await tx.service.update({
+          where: { id: service.id },
+          data: { declarationHash: null },
+        });
+        const buckets = await tx.bucket.updateManyAndReturn({
+          where: {
+            serviceId: service.id,
+            deletedAt: null,
+            missingSince: null,
+            retiredAt: null,
+          },
+          data: { missingSince: now },
+          select: { name: true },
+        });
+        missingBuckets.push(...buckets.map((b) => b.name));
       }
 
       // Their tokens are revoked with the deactivation.
@@ -1672,6 +1706,7 @@ export const deprovisionMissing = async (
       }
       return {
         serviceClientIds,
+        missingBuckets,
         jtis,
         services: dueServices.length,
         integrations: dueIntegrations.length,
@@ -1682,6 +1717,7 @@ export const deprovisionMissing = async (
     { timeout: 30_000 }
   );
   for (const id of serviceClientIds) await revokeServiceTokens(id);
+  for (const name of missingBuckets) await broadcastBucketInvalidate(name);
   disconnectTokenSockets(jtis);
   for (const { id } of archivedRoles) {
     await revokeHolderClientTokens(id);

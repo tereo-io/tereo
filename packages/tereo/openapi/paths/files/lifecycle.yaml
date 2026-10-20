@@ -9,7 +9,9 @@
 
       Policies are applied by the daily `lifecycle-sweep` BullMQ worker.
       Object age (`expireObjectsAfterDays`) is counted from the object's last
-      write — its current version — not from when its key was created. Each
+      write — its current version — not from when its key was created; a
+      non-current version's age (`expireVersionsAfterDays`) from when a newer
+      version replaced it, as S3's `NoncurrentDays`. Each
       batch the sweep deletes is audited (`lifecycleSweep`, written by core's
       system user) in the transaction that deletes it.
 
