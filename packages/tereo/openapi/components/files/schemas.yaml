@@ -72,6 +72,9 @@ RateLimitConfig:
       minimum: 1
       maximum: 100000
     requestCost:
+      description: |
+        Tokens each request takes. At most `maxTokens` (`400` otherwise): a
+        request costing more than the bucket can hold would never be admitted.
       type: number
       exclusiveMinimum: 0
       default: 1
@@ -1325,8 +1328,12 @@ LifecyclePolicy:
         - 30
     expireVersionsAfterDays:
       description: |
-        Hard-delete non-current versions whose `createdAt` is older than N
-        days. `null` disables the rule. Only meaningful on buckets with
+        Hard-delete versions that have been non-current for more than N
+        days — counted from when a newer version replaced them (an overwrite,
+        delete marker, restore or branching PATCH), as S3's `NoncurrentDays`
+        counts it, not from their own `createdAt`. A year-old file
+        overwritten today keeps its old version for N more days. `null`
+        disables the rule. Only meaningful on buckets with
         `versioningEnabled=true`.
       type: [integer, 'null']
       minimum: 1

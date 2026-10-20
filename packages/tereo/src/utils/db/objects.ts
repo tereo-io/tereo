@@ -557,7 +557,7 @@ export const upsertWithBlob = async (
         if (priorCurrent) {
           await tx.objectVersion.update({
             where: { id: priorCurrent.id },
-            data: { isCurrent: false },
+            data: { isCurrent: false, noncurrentSince: new Date() },
           });
         }
       } else {
@@ -731,7 +731,7 @@ const removeLockedObject = async (
     if (current) {
       await tx.objectVersion.update({
         where: { id: current.id },
-        data: { isCurrent: false },
+        data: { isCurrent: false, noncurrentSince: new Date() },
       });
     }
     await objectVersions.create(
@@ -1677,12 +1677,14 @@ export const softDeleteBucket = async (
   bucketId: number,
   deletedBy: string,
   tx?: Prisma.TransactionClient
-): Promise<void> => {
+): Promise<boolean> => {
   const client = tx ?? prisma;
-  await client.bucket.update({
-    where: { id: bucketId },
+  // False when a concurrent delete got there first.
+  const { count } = await client.bucket.updateMany({
+    where: { id: bucketId, deletedAt: null },
     data: { deletedAt: new Date(), deletedBy },
   });
+  return count > 0;
 };
 
 /**
@@ -1706,8 +1708,8 @@ export const softDeleteBucket = async (
  * shorter than `batchSize` with `hasMore` set means the remaining versions
  * are row-locked by another writer.
  *
- * Note: this must run AFTER the bucket has already been soft-deleted by
- * `softDeleteBucket` so no new uploads can add references behind our back.
+ * Releases nothing in a bucket `softDeleteBucket` has not deleted: until
+ * then, uploads can still add references behind its back.
  */
 export const releaseBucketBlobRefsBatch = async (
   bucketId: number,
@@ -1724,7 +1726,9 @@ export const releaseBucketBlobRefsBatch = async (
       SELECT ov."id", ov."content_blob_hash"
       FROM "files"."object_versions" ov
       INNER JOIN "files"."objects" o ON o."id" = ov."object_id"
+      INNER JOIN "files"."buckets" b ON b."id" = o."bucket_id"
       WHERE o."bucket_id" = ${bucketId}
+        AND b."deleted_at" IS NOT NULL
         AND ov."deleted_at" IS NULL
         AND ov."is_delete_marker" = false
         AND ov."content_blob_hash" IS NOT NULL
@@ -1741,7 +1745,9 @@ export const releaseBucketBlobRefsBatch = async (
           SELECT 1
           FROM "files"."object_versions" ov
           INNER JOIN "files"."objects" o ON o."id" = ov."object_id"
+          INNER JOIN "files"."buckets" b ON b."id" = o."bucket_id"
           WHERE o."bucket_id" = ${bucketId}
+            AND b."deleted_at" IS NOT NULL
             AND ov."deleted_at" IS NULL
             AND ov."is_delete_marker" = false
             AND ov."content_blob_hash" IS NOT NULL

@@ -964,6 +964,8 @@ model ObjectVersion {
   tags                  String[]  @default([])
   isCurrent             Boolean   @default(false) @map("is_current")
   isDeleteMarker        Boolean   @default(false) @map("is_delete_marker")
+  // When a newer version replaced this one; null while it is current.
+  noncurrentSince       DateTime? @map("noncurrent_since")
   restoredFromVersionId String?   @map("restored_from_version_id") @db.Uuid
   createdAt             DateTime  @default(now()) @map("created_at")
   createdBy             String    @map("created_by") @db.Uuid
