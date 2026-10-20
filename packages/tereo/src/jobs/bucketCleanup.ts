@@ -1,5 +1,6 @@
 import { BUCKET_CLEANUP_QUEUE, getBucketCleanupQueue } from "./queues.js";
 import { enqueueOrphanBlobCleanup } from "./orphanBlobCleanup.js";
+import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { TrackedWorker } from "./workerRegistry.js";
 import { getRedisClient } from "../utils/redis.js";
 import { logger } from "../utils/logger.js";
@@ -14,6 +15,12 @@ import {
 const BATCH_SIZE = 500;
 // How long to wait before retrying versions another writer holds locked.
 const CONTENDED_RETRY_MS = 5_000;
+// Each run checks every deleted bucket for live refs, so not hourly.
+const RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Leaves a just-deleted bucket to the cleanup its DELETE enqueued.
+const RECONCILE_MIN_AGE_SECONDS = 60 * 60;
+const RECONCILE_BATCH = 100;
+const RECONCILE_JOB = "bucket-cleanup-reconcile";
 
 let worker: Worker | null = null;
 
@@ -21,7 +28,19 @@ export interface BucketCleanupJobData {
   bucketId: number;
   deletedBy: string;
   continuation?: number;
+  /**
+   * Set on a reconciler's run: its job ids are its own, as the original
+   * run's (`bucket-cleanup__<id>`, `…__c<n>`) may still be retained.
+   */
+  runId?: string;
 }
+
+const jobIdOf = (data: BucketCleanupJobData) =>
+  [
+    `bucket-cleanup__${data.bucketId}`,
+    ...(data.runId ? [data.runId] : []),
+    ...(data.continuation ? [`c${data.continuation}`] : []),
+  ].join("__");
 
 /**
  * Enqueue a bucket-cleanup job. Called immediately after `softDeleteBucket`
@@ -32,11 +51,53 @@ export async function enqueueBucketCleanup(
   bucketId: number,
   deletedBy: string
 ): Promise<void> {
-  await getBucketCleanupQueue().add(
-    "bucket-cleanup",
-    { bucketId, deletedBy, continuation: 0 } satisfies BucketCleanupJobData,
-    { jobId: `bucket-cleanup__${bucketId}` }
-  );
+  const data: BucketCleanupJobData = { bucketId, deletedBy, continuation: 0 };
+  await getBucketCleanupQueue().add("bucket-cleanup", data, {
+    jobId: jobIdOf(data),
+  });
+}
+
+/**
+ * Give every deleted bucket that still holds blob refs a cleanup run: its
+ * DELETE's enqueue may have failed, or its run failed past its retries. The
+ * orphan backstop can't stand in, as those blobs' ref counts are not 0.
+ */
+async function processBucketCleanupReconcile(): Promise<number> {
+  const runId = `r${Date.now()}`;
+  const queue = getBucketCleanupQueue();
+  let enqueued = 0;
+  let afterId = 0;
+  for (;;) {
+    if (isShuttingDown()) break;
+    const buckets = await db.buckets.listDeletedHoldingRefs(
+      RECONCILE_MIN_AGE_SECONDS,
+      RECONCILE_BATCH,
+      afterId
+    );
+    for (const { id, deletedBy } of buckets) {
+      const data: BucketCleanupJobData = {
+        bucketId: id,
+        deletedBy: deletedBy ?? SYSTEM_USER_ID,
+        continuation: 0,
+        runId,
+      };
+      try {
+        await queue.add("bucket-cleanup", data, { jobId: jobIdOf(data) });
+        enqueued++;
+      } catch (err) {
+        logger.warn(
+          { bucketId: id, err },
+          "bucket-cleanup reconcile enqueue failed"
+        );
+      }
+    }
+    if (buckets.length < RECONCILE_BATCH) break;
+    afterId = buckets[buckets.length - 1].id;
+  }
+  if (enqueued > 0) {
+    logger.info({ enqueued }, "Bucket cleanup reconciler enqueued cleanups");
+  }
+  return enqueued;
 }
 
 /**
@@ -129,26 +190,26 @@ async function reenqueue(
   delayMs = 0
 ): Promise<void> {
   const queue = getBucketCleanupQueue();
-  const continuation = (job.data.continuation ?? 0) + 1;
-  await scheduleContinuation(
-    queue,
-    "bucket-cleanup",
-    {
-      bucketId: job.data.bucketId,
-      deletedBy: job.data.deletedBy,
-      continuation,
-    } satisfies BucketCleanupJobData,
-    {
-      jobId: `bucket-cleanup__${job.data.bucketId}__c${continuation}`,
-      delayMs,
-    }
-  );
+  const data: BucketCleanupJobData = {
+    bucketId: job.data.bucketId,
+    deletedBy: job.data.deletedBy,
+    continuation: (job.data.continuation ?? 0) + 1,
+    ...(job.data.runId ? { runId: job.data.runId } : {}),
+  };
+  await scheduleContinuation(queue, "bucket-cleanup", data, {
+    jobId: jobIdOf(data),
+    delayMs,
+  });
 }
 
 export async function startBucketCleanup(): Promise<void> {
   worker = new TrackedWorker<BucketCleanupJobData>(
     BUCKET_CLEANUP_QUEUE,
     async (job) => {
+      if (job.name === RECONCILE_JOB) {
+        if (!isShuttingDown()) await processBucketCleanupReconcile();
+        return;
+      }
       await processBucketCleanup(job);
     },
     // Parallelism across buckets, but bounded so we don't saturate pg during
@@ -167,7 +228,15 @@ export async function startBucketCleanup(): Promise<void> {
     );
   });
 
-  logger.info("Bucket cleanup worker started");
+  await getBucketCleanupQueue().upsertJobScheduler(
+    `${RECONCILE_JOB}-scheduler`,
+    { every: RECONCILE_INTERVAL_MS },
+    { name: RECONCILE_JOB }
+  );
+  logger.info(
+    { reconcileIntervalMs: RECONCILE_INTERVAL_MS },
+    "Bucket cleanup worker started"
+  );
 }
 
 export async function stopBucketCleanup(): Promise<void> {
@@ -177,4 +246,4 @@ export async function stopBucketCleanup(): Promise<void> {
   }
 }
 
-export { processBucketCleanup };
+export { processBucketCleanup, processBucketCleanupReconcile };

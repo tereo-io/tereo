@@ -1,8 +1,15 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { processBucketCleanup } from "../../jobs/bucketCleanup.js";
 import { prisma } from "../../utils/db/prisma.js";
+import db from "../../utils/db/index.js";
 import type { Job } from "bullmq";
 import axios from "axios";
+import {
+  processBucketCleanup,
+  processBucketCleanupReconcile,
+  startBucketCleanup,
+  stopBucketCleanup,
+  type BucketCleanupJobData,
+} from "../../jobs/bucketCleanup.js";
 import {
   BASE_URL,
   cleanupTestEntities,
@@ -10,11 +17,22 @@ import {
   createTestFile,
   getTestAccessToken,
   uploadTestObject,
+  waitFor,
 } from "./utils/test-helpers.js";
 import {
   getBucketCleanupQueue,
   getOrphanBlobCleanupQueue,
 } from "../../jobs/queues.js";
+
+const liveRefs = (bucketId: number) =>
+  prisma.objectVersion.count({
+    where: {
+      object: { bucketId },
+      deletedAt: null,
+      isDeleteMarker: false,
+      contentBlobHash: { not: null },
+    },
+  });
 
 function fakeJob<T>(data: T, id = "fake-1"): Job<T> {
   return {
@@ -194,6 +212,89 @@ describe("bucket cleanup job", () => {
       if (versions.some((v) => v.contentBlobHash === j.data.hash)) {
         await j.remove().catch(() => undefined);
       }
+    }
+  });
+
+  it("releases nothing in a bucket that is not deleted", async () => {
+    const bucket = await createTestBucket(token, { policy: "private" });
+    await uploadTestObject(
+      token,
+      bucket.name,
+      "live.txt",
+      createTestFile(`live ${Date.now()}`, "live.txt", "text/plain")
+    );
+
+    const res = await db.objects.releaseBucketBlobRefsBatch(
+      bucket.id,
+      "00000000-0000-7001-0000-000000000001",
+      500
+    );
+    expect(res).toEqual({ processed: 0, freedHashes: [], hasMore: false });
+    expect(await liveRefs(bucket.id)).toBe(1);
+  });
+
+  it("reconciles a deleted bucket whose cleanup was never enqueued", async () => {
+    const bucket = await createTestBucket(token, { policy: "private" });
+    for (let i = 0; i < 2; i++) {
+      await uploadTestObject(
+        token,
+        bucket.name,
+        `lost-${i}.txt`,
+        createTestFile(`lost ${i} ${Date.now()}`, `lost-${i}.txt`, "text/plain")
+      );
+    }
+    const deletedBy = "00000000-0000-7001-0000-000000000001";
+    // Deleted two hours ago, its cleanup job lost.
+    await prisma.bucket.update({
+      where: { id: bucket.id },
+      data: { deletedAt: new Date(Date.now() - 2 * 60 * 60 * 1000), deletedBy },
+    });
+
+    const recent = await createTestBucket(token, { policy: "private" });
+    await uploadTestObject(
+      token,
+      recent.name,
+      "recent.txt",
+      createTestFile(`recent ${Date.now()}`, "recent.txt", "text/plain")
+    );
+    await prisma.bucket.update({
+      where: { id: recent.id },
+      data: { deletedAt: new Date(), deletedBy },
+    });
+
+    await processBucketCleanupReconcile();
+
+    const jobs = await getBucketCleanupQueue().getJobs(
+      ["wait", "delayed", "active", "completed"],
+      0,
+      -1
+    );
+    const forBucket = (id: number) =>
+      jobs.filter((j) => (j.data as BucketCleanupJobData).bucketId === id);
+    const [job] = forBucket(bucket.id);
+    expect(job?.data).toMatchObject({ bucketId: bucket.id, deletedBy });
+    expect(job?.id).toMatch(new RegExp(`^bucket-cleanup__${bucket.id}__r`));
+    // Still within the hour its own DELETE's cleanup has.
+    expect(forBucket(recent.id)).toHaveLength(0);
+
+    // The server's worker may be running it too; whichever gets there first
+    // releases the refs.
+    await processBucketCleanup(fakeJob(job.data as BucketCleanupJobData));
+    await waitFor(async () => (await liveRefs(bucket.id)) === 0, 10_000);
+  });
+
+  it("schedules the reconciler", async () => {
+    const queue = getBucketCleanupQueue();
+    await queue.pause();
+    try {
+      await startBucketCleanup();
+      const scheduler = await queue.getJobScheduler(
+        "bucket-cleanup-reconcile-scheduler"
+      );
+      expect(scheduler?.every).toBe(6 * 60 * 60 * 1000);
+    } finally {
+      await stopBucketCleanup();
+      await queue.resume();
     }
   });
 });

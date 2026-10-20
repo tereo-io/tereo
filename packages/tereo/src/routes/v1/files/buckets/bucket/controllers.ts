@@ -26,6 +26,7 @@ import {
 import {
   BadRequestError,
   ForbiddenError,
+  NotFoundError,
 } from "../../../../../utils/errors.js";
 import {
   computeChanges,
@@ -201,7 +202,6 @@ export const deleteBucket = async (req: Request, res: Response) => {
   const { name } = validateParams(bucketNameSchema, req);
 
   const bucket = await getManagedBucket(auth, name, "delete");
-  assertBucketDeletable(bucket);
 
   setAccessLog(res, { bucketId: bucket.id, operation: "DELETE_BUCKET" });
 
@@ -211,7 +211,10 @@ export const deleteBucket = async (req: Request, res: Response) => {
   // preventing new versions from being inserted while the background cleanup
   // releases refs below.
   await db.$transaction(async (tx) => {
-    await db.objects.softDeleteBucket(bucket.id, auth.userId, tx);
+    await assertBucketDeletable(bucket, tx);
+    if (!(await db.objects.softDeleteBucket(bucket.id, auth.userId, tx))) {
+      throw new NotFoundError("Bucket not found");
+    }
 
     await logAuditTx(tx, {
       auth,
@@ -241,8 +244,9 @@ export const deleteBucket = async (req: Request, res: Response) => {
 
   // Phase 2 (async): defer the (potentially multi-minute) blob-ref release +
   // orphan-cleanup enqueue to the `bucket-cleanup` BullMQ worker so the HTTP
-  // caller isn't blocked. Fire-and-forget: failure to enqueue falls back to
-  // the orphan-blob-backstop safety net.
+  // caller isn't blocked. A failed enqueue is picked up by the hourly
+  // `bucket-cleanup-reconcile` job, which finds deleted buckets still
+  // holding refs.
   enqueueBucketCleanup(bucket.id, auth.userId).catch((error) => {
     logger.warn(
       {
