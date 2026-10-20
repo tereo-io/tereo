@@ -1,12 +1,12 @@
-import { createEncryptStream } from "../../../../../../../utils/encryption.js";
+import { broadcastObjectInvalidate } from "../../../../../../../utils/cacheBroadcast.js";
 import { setAccessLog } from "../../../../../../../middleware/accessLog.js";
 import { logAuditTx, emitTx } from "../../../../../../../utils/outbox.js";
+import { assertMultipartFits, multipartCompleteClaim } from "../utils.js";
 import { completeBodySchema, uploadIdParamsSchema } from "./schemas.js";
 import { validateUser } from "../../../../../../../middleware/auth.js";
 import { Readable, Transform, pipeline as pipelineCb } from "stream";
 import { emitObjectWrittenTx } from "../../objects/events.js";
 import db from "../../../../../../../utils/db/index.js";
-import { assertMultipartFits } from "../utils.js";
 import env from "../../../../../../../env.js";
 import { Request, Response } from "express";
 import { createWriteStream } from "fs";
@@ -17,6 +17,7 @@ import path from "path";
 import {
   canonicalJson,
   findStoredResponse,
+  PersistIdempotentResult,
   requireIdempotencyKey,
   withExclusiveClaim,
   withIdempotency,
@@ -31,6 +32,10 @@ import {
   validateParams,
 } from "../../../../../../../utils/validateReq.js";
 import {
+  aadForPart,
+  createEncryptStream,
+} from "../../../../../../../utils/encryption.js";
+import {
   getBlobPath,
   openMultipartPartStream,
   removeMultipartDir,
@@ -38,6 +43,7 @@ import {
 import {
   BadRequestError,
   ConflictError,
+  UnprocessableEntityError,
 } from "../../../../../../../utils/errors.js";
 import {
   queueObjectWriteFollowUps,
@@ -57,6 +63,7 @@ export const listMultipartParts = async (req: Request, res: Response) => {
   const bucket = await getAccessibleBucket(auth, params.name, "read");
   const upload = await db.multipartUploads.getAny(params.uploadId);
   assertUploadInBucket(upload, bucket);
+  validateMultipartOwnership(auth, upload.createdBy);
 
   const parts = await db.multipartUploads.listParts(params.uploadId);
 
@@ -192,21 +199,21 @@ export const completeMultipart = async (req: Request, res: Response) => {
   // once the result is stored, so a retry gets 409 while it runs and the
   // stored result afterwards.
   const idem = await withExclusiveClaim(
-    `file-service:multipart-complete:${params.uploadId}`,
+    multipartCompleteClaim(params.uploadId),
     () =>
       new ConflictError(
         "This multipart upload is already being completed; retry shortly",
         "multipart_complete_in_progress"
       ),
     () =>
-      withIdempotency(
+      withIdempotency<ReturnType<typeof serializeObject>>(
         {
           scope: completeScope(auth.userId),
           key: idempotencyKey,
           requestHash,
           userId: auth.userId,
         },
-        () =>
+        (persist) =>
           runComplete(
             res,
             auth,
@@ -214,7 +221,8 @@ export const completeMultipart = async (req: Request, res: Response) => {
             params.uploadId,
             ordered,
             requestHash,
-            [completeScope(upload.createdBy), completeScope(auth.userId)]
+            [completeScope(upload.createdBy), completeScope(auth.userId)],
+            persist
           )
       )
   );
@@ -232,7 +240,8 @@ const runComplete = async (
   uploadId: string,
   ordered: Array<{ partNumber: number; etag: string }>,
   requestHash: string,
-  completeScopes: string[]
+  completeScopes: string[],
+  persist: PersistIdempotentResult<ReturnType<typeof serializeObject>>
 ): Promise<{ status: number; body: ReturnType<typeof serializeObject> }> => {
   const params = { uploadId };
   // Completed already under another idempotency key: the same parts get
@@ -248,10 +257,12 @@ const runComplete = async (
   // Re-read inside the handler to ensure the upload is still active.
   // A replay of an already-completed upload short-circuits before this
   // runs (handled by withIdempotency); a different parts list after
-  // completion is refused here.
-  const activeUpload = await db.multipartUploads.getActive(params.uploadId);
+  // completion is refused here. Part PUTs are refused from here on (this
+  // complete's claim is held), and one already recording its part has
+  // committed before these parts are read.
+  const { upload: activeUpload, parts: staged } =
+    await db.multipartUploads.getActiveWithParts(params.uploadId);
   const stagingDek = db.multipartUploads.unwrapStagingDek(activeUpload);
-  const staged = await db.multipartUploads.listParts(params.uploadId);
   const stagedByNumber = new Map(staged.map((p) => [p.partNumber, p]));
 
   // Validate the request matches what was uploaded.
@@ -336,11 +347,28 @@ const runComplete = async (
   // Each staged part is encrypted on disk under the upload's staging DEK.
   // Decrypt as we concat so the plaintextMeter sees real bytes for hashing
   // + size accounting, then re-encrypt the whole concatenation under the
-  // final blob DEK.
+  // final blob DEK. Each part's plaintext must hash to the etag it was
+  // recorded with, which the combined etag below is built from.
   const concatSource = async function* () {
     for (const p of ordered) {
       const part = stagedByNumber.get(p.partNumber)!;
-      yield* openMultipartPartStream(part.fsPath, stagingDek);
+      const md5 = crypto.createHash("md5");
+      try {
+        for await (const chunk of openMultipartPartStream(
+          part.fsPath,
+          stagingDek,
+          part.aadBound ? aadForPart(params.uploadId, part.partNumber) : null
+        )) {
+          md5.update(chunk as Buffer);
+          yield chunk as Buffer;
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") throw err;
+        throw partIntegrityError(part.partNumber);
+      }
+      if (md5.digest("hex") !== part.etag) {
+        throw partIntegrityError(part.partNumber);
+      }
     }
   };
 
@@ -400,6 +428,25 @@ const runComplete = async (
         tx
       );
 
+      const serialized = serializeObject(upsert.object);
+
+      await logAuditTx(tx, {
+        auth,
+        organizationId: bucket.organizationId ?? undefined,
+        action: upsert.type === "updated" ? "UPDATE" : "CREATE",
+        entityType: "object",
+        entityId: String(upsert.object.id),
+        entityName: activeUpload.objectKey,
+        metadata: {
+          bucketName: bucket.name,
+          objectKey: serialized.key,
+          contentType: serialized.contentType,
+          sizeBytes: serialized.sizeBytes,
+          etag: serialized.etag,
+          multipartUploadId: activeUpload.id,
+        },
+      });
+
       await logAuditTx(tx, {
         auth,
         organizationId: bucket.organizationId ?? undefined,
@@ -436,7 +483,13 @@ const runComplete = async (
 
       await emitObjectWrittenTx(tx, bucket, upsert, "multipart");
 
-      return upsert;
+      const response = {
+        status: upsert.type === "updated" ? 200 : 201,
+        body: serialized,
+      };
+      await persist(tx, response);
+
+      return { ...upsert, response };
     });
   } catch (err) {
     await db.contentBlobs.releaseStaged({
@@ -468,8 +521,13 @@ const runComplete = async (
     result.releasedBlobHashes
   );
 
-  return {
-    status: result.type === "updated" ? 200 : 201,
-    body: serializeObject(result.object),
-  };
+  await broadcastObjectInvalidate(bucket.name, activeUpload.objectKey);
+
+  return result.response;
 };
+
+const partIntegrityError = (partNumber: number) =>
+  new UnprocessableEntityError(
+    "part_integrity_mismatch",
+    `Part ${partNumber} does not match what was uploaded for it; upload it again`
+  );

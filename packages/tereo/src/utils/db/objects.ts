@@ -462,6 +462,7 @@ export const upsertWithBlob = async (
     }
     const { versioningEnabled } = bucketRow;
     const releasedBlobHashes: string[] = [];
+    const completingUploadId = data.markMultipartCompleted?.uploadId;
 
     if (data.preconditions?.ifNoneMatchWildcard && existingRow) {
       throw new PreconditionFailedError(
@@ -542,11 +543,16 @@ export const upsertWithBlob = async (
       //  - Versioning ON: prior blob is retained on disk (it now backs a
       //    historical version), so the bucket grows by the full new size.
       if (versioningEnabled) {
-        await reserveQuota(data.bucketId, data.sizeBytes, tx);
+        await reserveQuota(
+          data.bucketId,
+          data.sizeBytes,
+          tx,
+          completingUploadId
+        );
       } else {
         const sizeDelta = data.sizeBytes - priorSize;
         if (sizeDelta > 0n) {
-          await reserveQuota(data.bucketId, sizeDelta, tx);
+          await reserveQuota(data.bucketId, sizeDelta, tx, completingUploadId);
         } else if (sizeDelta < 0n) {
           await decrementUsage(data.bucketId, -sizeDelta, tx);
         }
@@ -622,7 +628,7 @@ export const upsertWithBlob = async (
       };
     }
 
-    await reserveQuota(data.bucketId, data.sizeBytes, tx);
+    await reserveQuota(data.bucketId, data.sizeBytes, tx, completingUploadId);
 
     const created = await createIdentity(
       {

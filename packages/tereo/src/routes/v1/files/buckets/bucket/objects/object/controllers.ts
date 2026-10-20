@@ -12,6 +12,7 @@ import { createReadStream } from "fs";
 import { createHash } from "crypto";
 import {
   canonicalJson,
+  hasStoredResult,
   requireIdempotencyKey,
   withIdempotency,
 } from "../../../../../../../utils/uploadIdempotency.js";
@@ -44,6 +45,9 @@ import {
   validateMimeType,
 } from "../utils.js";
 
+const putObjectScope = (userId: string, bucketId: number) =>
+  `user:${userId}:bucket:${bucketId}:put-object`;
+
 function etagMatches(provided: string[] | null, actual: string): boolean {
   if (!provided) return false;
   if (provided.includes("*")) return true;
@@ -52,8 +56,8 @@ function etagMatches(provided: string[] | null, actual: string): boolean {
 
 /**
  * Runs before the multipart body is read, so a request that would be refused
- * anyway (no Idempotency-Key, bad key, no write access) never has its file
- * staged to disk.
+ * anyway (no Idempotency-Key, bad key, no write access, a declared length the
+ * quota has no room for) never has its file staged to disk.
  */
 export const authorizeUpload = async (
   req: Request,
@@ -63,10 +67,27 @@ export const authorizeUpload = async (
   const auth = validateUser(req);
   standardizeObjectKey(req);
   const params = validateParams(objectParamsSchema, req);
-  requireIdempotencyKey(req.header("Idempotency-Key"));
-  res.locals.uploadBucket = await getBucket(params.name, auth);
+  const idempotencyKey = requireIdempotencyKey(req.header("Idempotency-Key"));
+  const bucket = await getBucket(params.name, auth);
+  res.locals.uploadBucket = bucket;
   // After the access check, so a caller without access learns nothing.
   assertObjectKeyNotReserved(params.objectKey);
+  const declared = Number(req.headers["content-length"]);
+  // A retry of an upload that filled the bucket gets its stored response.
+  if (
+    Number.isSafeInteger(declared) &&
+    declared > 0 &&
+    !(await hasStoredResult(
+      putObjectScope(auth.userId, bucket.id),
+      idempotencyKey
+    ))
+  ) {
+    await db.buckets.assertUploadMayFit(
+      bucket.id,
+      params.objectKey,
+      BigInt(declared)
+    );
+  }
   next();
 };
 
@@ -125,14 +146,14 @@ const storeUpload = async (req: Request, res: Response) => {
 
   // A replay or refusal never reaches the write, which places or drops the
   // staged file; the `finally` below drops it then.
-  const idem = await withIdempotency(
+  const idem = await withIdempotency<ReturnType<typeof serializeObject>>(
     {
-      scope: `user:${auth.userId}:bucket:${bucket.id}:put-object`,
+      scope: putObjectScope(auth.userId, bucket.id),
       key: idempotencyKey,
       requestHash,
       userId: auth.userId,
     },
-    async () => {
+    async (persist) => {
       let result;
       try {
         // Wrap upsertWithBlob + audit/webhook outbox in a single transaction
@@ -181,6 +202,11 @@ const storeUpload = async (req: Request, res: Response) => {
           });
 
           await emitObjectWrittenTx(tx, bucket, upsert, "direct");
+
+          await persist(tx, {
+            status: upsert.type === "updated" ? 200 : 201,
+            body: serialized,
+          });
 
           return { ...upsert, body: serialized };
         });

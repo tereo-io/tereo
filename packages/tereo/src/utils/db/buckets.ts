@@ -246,14 +246,21 @@ export const getLiveUsageBytes = async (id: number): Promise<bigint> => {
 
 /**
  * Atomically reserve quota for an upload.
- * Increments current_usage_bytes only if the result does not exceed storage_quota_bytes.
+ * Increments current_usage_bytes only if the result, with the `expectedSize`s
+ * active multipart uploads hold against the quota, does not exceed
+ * storage_quota_bytes. `completingUploadId` is the multipart upload this
+ * write completes, whose own reservation the write takes up.
  * Throws InsufficientStorageError if the quota would be exceeded.
  */
 export const reserveQuota = async (
   id: number,
   sizeBytes: bigint,
-  tx: Prisma.TransactionClient
+  tx: Prisma.TransactionClient,
+  completingUploadId?: string
 ): Promise<void> => {
+  // The lock multipart initiates take, so neither this write nor an initiate
+  // counts the quota without the other's bytes.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`files:multipart:${id}`}, 0))`;
   const result = await tx.$queryRaw<{ count: bigint }[]>`
     UPDATE "files"."buckets"
     SET "current_usage_bytes" = "current_usage_bytes" + ${sizeBytes}::bigint
@@ -261,12 +268,77 @@ export const reserveQuota = async (
       AND "deleted_at" IS NULL
       AND (
         "storage_quota_bytes" IS NULL
-        OR "current_usage_bytes" + ${sizeBytes}::bigint <= "storage_quota_bytes"
+        OR "current_usage_bytes" + ${sizeBytes}::bigint + (
+          SELECT COALESCE(SUM(mu."expected_size"), 0)
+          FROM "files"."multipart_uploads" mu
+          WHERE mu."bucket_id" = ${id}
+            AND mu."completed_at" IS NULL
+            AND mu."aborted_at" IS NULL
+            AND mu."expires_at" > NOW()
+            AND mu."id" IS DISTINCT FROM ${completingUploadId ?? null}::uuid
+        ) <= "storage_quota_bytes"
       )
     RETURNING 1 AS count
   `;
 
   if (result.length === 0) {
+    throw new InsufficientStorageError("Storage quota exceeded");
+  }
+};
+
+/**
+ * Refuse, before its body is read, an upload of `declaredBytes` to
+ * `objectKey` that `reserveQuota` would refuse once it was stored. In a
+ * bucket without versioning an overwrite frees the current version's bytes,
+ * so those count as room. A request body is a little larger than the file it
+ * carries, so this can only err towards refusing at the quota's very edge.
+ */
+export const assertUploadMayFit = async (
+  id: number,
+  objectKey: string,
+  declaredBytes: bigint
+): Promise<void> => {
+  const rows = await prisma.$queryRaw<
+    {
+      quota: bigint | null;
+      usage: bigint;
+      versioning_enabled: boolean;
+      reserved: bigint;
+      replaced: bigint;
+    }[]
+  >`
+    SELECT
+      b."storage_quota_bytes" AS "quota",
+      b."current_usage_bytes" AS "usage",
+      b."versioning_enabled",
+      (
+        SELECT COALESCE(SUM(mu."expected_size"), 0)
+        FROM "files"."multipart_uploads" mu
+        WHERE mu."bucket_id" = b."id"
+          AND mu."completed_at" IS NULL
+          AND mu."aborted_at" IS NULL
+          AND mu."expires_at" > NOW()
+      )::bigint AS "reserved",
+      COALESCE((
+        SELECT cb."size_bytes"
+        FROM "files"."objects" o
+        JOIN "files"."object_versions" ov
+          ON ov."object_id" = o."id"
+          AND ov."is_current" = true
+          AND ov."deleted_at" IS NULL
+        JOIN "files"."content_blobs" cb ON cb."hash" = ov."content_blob_hash"
+        WHERE o."bucket_id" = b."id"
+          AND o."object_key" = ${objectKey}
+          AND o."deleted_at" IS NULL
+        LIMIT 1
+      ), 0)::bigint AS "replaced"
+    FROM "files"."buckets" b
+    WHERE b."id" = ${id}
+  `;
+  const row = rows[0];
+  if (!row || row.quota === null) return;
+  const freed = row.versioning_enabled ? 0n : row.replaced;
+  if (row.usage + row.reserved + declaredBytes - freed > row.quota) {
     throw new InsufficientStorageError("Storage quota exceeded");
   }
 };

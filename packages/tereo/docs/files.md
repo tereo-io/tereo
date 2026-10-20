@@ -46,7 +46,7 @@ Creating a bucket also grants its creator full object access (`canRead`, `canWri
 
 **Managing a bucket** — updating it (policy, quota, CORS, rate limit, …), granting and revoking access, deleting it — takes the matching `file-service.buckets.*` / `file-service.permissions.*` permission and either being its creator or holding `file-service.admin` (checked hierarchically, so the bare `admin` permission counts). The lifecycle policy (`/lifecycle`) is a bucket setting and takes the same check — no `file-service.objects.*` permission or grant, and a public bucket's policy is not public. `validateBucketManagement` in `utils/bucketAccess.ts`. A bucket a service declared (`serviceId` set) cannot be deleted, and its description and the service's own grant are the declaration's: changing them is `409 bucket_declared` (see [registry.md](registry.md#declared-buckets)).
 
-`PUT /buckets/:name` with `storageQuotaBytes: null` clears the quota, as `null` on create sets none. A bucket's `rateLimitConfig` is a per-user token bucket applied on top of the general limiter; going over it answers like the general limiter — `429 too_many_requests` with `retry_after`, `Retry-After` and `X-RateLimit-Limit/Remaining/Reset` (for the bucket's limit).
+`PUT /buckets/:name` with `storageQuotaBytes: null` clears the quota, as `null` on create sets none. An upload (`PUT /objects/*objectKey`) whose `Content-Length`, with the bucket's usage and the active multipart uploads' `expectedSize`s, would pass the quota is `507 insufficient_storage` before its body is read (`assertUploadMayFit`); in a bucket without versioning the current version it would replace counts as room. The length is the whole request body, a little more than the file, so only a file within that margin of the quota is refused early that would otherwise fit; the authoritative check stays in the write's transaction. A bucket's `rateLimitConfig` is a per-user token bucket applied on top of the general limiter; going over it answers like the general limiter — `429 too_many_requests` with `retry_after`, `Retry-After` and `X-RateLimit-Limit/Remaining/Reset` (for the bucket's limit).
 
 ## Storage Architecture
 
@@ -55,9 +55,10 @@ Files stored content-addressably by SHA-256 hash at a **global** path:
 - On-disk format: 5-byte magic header `VFBE\x01` + AES-256-GCM ciphertext + 16-byte auth tag.
 - `ContentBlob` table owns physical storage and reference count; `Object` rows are pointers via the required `contentBlobHash` FK.
 - **Writing a blob.** A write encrypts to a staged temp file (`saveBlobStream`), then attaches it in its transaction (`contentBlobs.attach`): under a per-hash advisory lock (`lockHash`) held to commit, the write that creates the `ContentBlob` row moves its staged file to the blob path; any other — concurrent or later — finds the row, shares its file and key material, and drops its own. So identical content uploaded at the same moment is stored once and both writes succeed. A write that fails calls `contentBlobs.releaseStaged`, which, under the same lock, deletes the file at the blob path only if no row stands for it. Orphan cleanup and disk reconciliation unlink a file under that lock too, after re-checking the row.
+- **Reference counts.** `refCount` is not clamped: a release counted twice fails the `ref_count >= 0` CHECK and rolls its transaction back rather than hiding the drift. Orphan cleanup (`claimOrphan`) also counts the blob's live versions before deleting a row with `refCount` 0; if any remain (a deleted row would null their content through the foreign key), it logs an error, sets `refCount` to that count and leaves the blob.
 - Every blob is encrypted at rest — `ContentBlob.wrappedDek`, `iv`, and `masterKeyVersion` are non-nullable.
 - The wrapped DEK is **AAD-bound to the blob hash**: an attacker with DB write access cannot swap `(wrappedDek, iv, masterKeyVersion)` between rows — GCM verification fails when the AAD doesn't match the stored `hash`.
-- In-flight multipart parts are also encrypted at rest under a per-upload staging DEK (wrapped under the master key with AAD = upload id), with a fresh per-part IV prepended to each part file (`iv(12) || ciphertext || tag(16)`). On `complete`, parts are decrypted while concatenating, then the concatenated plaintext is re-encrypted under the final blob DEK.
+- In-flight multipart parts are also encrypted at rest under a per-upload staging DEK (wrapped under the master key with AAD = upload id), with a fresh per-part IV prepended to each part file (`iv(12) || ciphertext || tag(16)`) and AAD `{uploadId}|{partNumber}`, so a part file moved to another part or upload fails to decrypt. On `complete`, parts are decrypted while concatenating, each part's plaintext MD5 is checked against its recorded etag, and the concatenated plaintext is re-encrypted under the final blob DEK; a part that fails either check is `422 part_integrity_mismatch`. Parts staged before parts were bound (`multipart_parts.aad_bound = false`) still decrypt without AAD.
 
 ## Object model
 
@@ -198,7 +199,7 @@ through the NULLs too (last ascending, first descending): the list's schema name
 
 `PUT /buckets/:name/objects/*objectKey` and `POST /buckets/:name/multipart/:uploadId/complete` **require** an `Idempotency-Key` header. Missing or empty → `400 idempotency_key_required`.
 
-- **Storage**: Postgres `IdempotencyRecord` (24h TTL) is the source of truth for replay; Redis `SET NX` (60s TTL) is a concurrency guard only. Lookups filter `expiresAt > now()` so swept/expired rows don't block legitimate reuse.
+- **Storage**: Postgres `IdempotencyRecord` (24h TTL) is the source of truth for replay; Redis `SET NX` (60s TTL) is a concurrency guard only. Lookups filter `expiresAt > now()` so swept/expired rows don't block legitimate reuse. The record is written in the write's own transaction (the handler calls the `persist` it is given), so a request either commits its object and its record together or neither: a retry after any failure runs again rather than writing a second version.
 - **Scope**: `userId + bucketId + endpoint + key` — different users never share a replay cache even if they pick the same key.
 - **Request hash**: PUT = `sha256(bucketId|objectKey|blobHash|canonical(metadata)|canonical(sortedTags))`. Multipart complete = `sha256(uploadId|canonical(sortedParts))`. `canonical()` sorts object keys recursively so differently-ordered metadata hashes identically.
 - **Replay** (same key + same hash) → returns cached response + `Idempotency-Replay: true`.
@@ -246,7 +247,20 @@ taken by every initiate (`initiate` in `utils/db/multipartUploads.ts`), so concu
 see each other's reservations. An upload without an `expectedSize` holds nothing: it is refused at
 initiate only when the others' already pass the quota, and its parts are checked against the
 quota as they arrive, as above. Nothing is reserved in `currentUsageBytes`; the bytes are charged
-when the upload completes, and a reservation ends when the upload does.
+when the upload completes, and a reservation ends when the upload does. Every other write's quota
+check (`reserveQuota`, under the same advisory lock) counts active uploads' `expectedSize`s too,
+so a direct upload cannot take the room a multipart upload holds; the completing upload's own
+reservation is left out of its check.
+
+**Parts and complete.** A part PUT is refused with `400 upload_not_active` when the upload was
+completed, aborted or expired, checked again under the upload's row lock when the part is recorded
+(its staged file is deleted). While a complete of the upload runs, a part PUT is
+`409 multipart_complete_in_progress`: the complete reads the parts under a share lock on the same
+row, and a part sent again would delete the file it replaces. Listing an upload's parts
+(`GET …/multipart/:uploadId`) is, like its other routes, for the user who initiated it or a
+`file-service.admin` holder (`403`). Complete writes the object's own audit entry (`object`,
+`CREATE` or `UPDATE`) besides the `multipartUpload` one, and broadcasts the object's cache
+invalidation, as a direct upload does.
 
 Parts staged at `{storage}/multipart/{uploadId}/{partNumber}.{nonce}`. Expired uploads swept hourly by `multipart-sweep` worker. The same sweep deletes the files core writes in `FILE_SERVICE_TEMP_PATH` (`upload-*`, `signed-upload-*`, `mp-complete-*`: staged uploads and multer spool files) left by a crash, once older than a day or the multipart TTL, whichever is longer; anything else there is left alone. Each process sweeps only when it runs the job, so the path should be local to the worker or shared by all.
 
@@ -322,8 +336,8 @@ transaction, re-checking each object under its lock that it still qualifies
 re-created under its key or given a later expiry since the read is left alone, and one another writer
 holds is skipped until the next sweep. Each batch's audit entry (`lifecycleSweep`, by the system user,
 listing what it deleted) is written in that transaction, so a crash can't lose it. Bulk delete and the
-history purge do the same per batch of 100 (`objects_bulk`, `object_versions_purge`); their one webhook
-event per request still follows the batches.
+history purge do the same per batch of 100 (`objects_bulk`, `object_versions_purge`), each batch with
+its webhook event in the same transaction.
 
 ## Webhook Events
 
@@ -331,9 +345,9 @@ Emitted with `emitTx` on mutations. Event types are declared in `src/definitions
 
 - `file-service.bucket.created/updated/deleted` — `updated` only when an update changed something (an unchanged `PUT` writes no audit entry or event)
 - `file-service.object.created/updated/deleted` — `created`/`updated` fire for every content write (authenticated upload, presigned upload, multipart complete; `data.via` says which), and `updated` also for a rename or metadata PATCH
-- `file-service.objects.bulk-deleted` — one event per bulk-delete request (by prefix or by id list), rather than N per-object events
+- `file-service.objects.bulk-deleted` — one event per committed batch of up to 100 objects of a bulk-delete request (by prefix or by id list), rather than N per-object events; `data.batchIndex` counts the request's batches from 0
 - `file-service.object.version.created/restored/deleted` — `created` fires in a versioned bucket for each new version a write makes (alongside `object.created/updated`) and for a PATCH with `createNewVersion`; restores fire `restored` instead
-- `file-service.objects.versions.purged` — one per on-demand purge of non-current versions across a bucket
+- `file-service.objects.versions.purged` — one per committed batch of up to 100 versions of an on-demand purge of non-current versions across a bucket, with `data.batchIndex` as above
 - `file-service.permission.granted/revoked`
 - `file-service.lifecycle.policy.updated/deleted` — a bucket's lifecycle policy created or replaced, or removed
 - `file-service.lifecycle.policy.applied` — the `lifecycle-sweep` worker applied a policy (soft-deletes, version purge or hard-delete)
@@ -393,7 +407,7 @@ The files-specific ones, from `src/env.ts`; core's shared settings (`DATABASE_UR
 | `FILE_SERVICE_SHARE_UI_BASE_URL` | Where browsers opening a password-protected share are redirected for the unlock page (`{ui}/shared/:token`). Defaults to `UI_BASE_URL` |
 | `FILE_SERVICE_SHARE_RETENTION_DAYS` | Days between a share becoming unserveable and the share sweep deleting it, and between an archive request expiring and the archive sweep deleting it (default 30) |
 | `FILE_SERVICE_SWEEP_TIME_BOX_SECONDS` / `_HEARTBEAT_SECONDS` | Sweep job time box and heartbeat (default 60 / 5) |
-| `FILE_SERVICE_DISK_RECONCILIATION_MAX_FILES_PER_SHARD` | Default 10000 |
+| `FILE_SERVICE_DISK_RECONCILIATION_MAX_FILES_PER_SHARD` | Default 10000 — files one weekly run checks per top-level shard; a run stops at it and the next resumes there (cursor in Redis), starting the shard over once it is finished |
 
 ## Commands
 

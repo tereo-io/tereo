@@ -9,6 +9,7 @@ import os from "os";
 import {
   BLOB_MAGIC_V1,
   aadForBlobHash,
+  aadForPart,
   aadForUploadId,
   createDecryptStream,
   createEncryptStream,
@@ -147,11 +148,52 @@ describe("multipart staging DEK", () => {
     const dek = unwrapDek(wrapped, masterKeyVersion, aadForUploadId(uploadId));
 
     const plain = crypto.randomBytes(48 * 1024);
-    const enc = createMultipartPartEncryptStream(dek);
+    const enc = createMultipartPartEncryptStream(dek, aadForPart(uploadId, 1));
     const cipher = await collectStream(Readable.from([plain]).pipe(enc));
 
-    const dec = createMultipartPartDecryptStream(dek);
+    const dec = createMultipartPartDecryptStream(dek, aadForPart(uploadId, 1));
     const out = await collectStream(Readable.from([cipher]).pipe(dec));
+    expect(out.equals(plain)).toBe(true);
+  });
+
+  it("a part fails to decrypt as another part or another upload's", async () => {
+    const uploadId = crypto.randomUUID();
+    const { wrapped, masterKeyVersion } = generateStagingDek(uploadId);
+    const dek = unwrapDek(wrapped, masterKeyVersion, aadForUploadId(uploadId));
+    const cipher = await collectStream(
+      Readable.from([crypto.randomBytes(1024)]).pipe(
+        createMultipartPartEncryptStream(dek, aadForPart(uploadId, 1))
+      )
+    );
+    for (const aad of [
+      aadForPart(uploadId, 2),
+      aadForPart(crypto.randomUUID(), 1),
+      null,
+    ]) {
+      await expect(
+        collectStream(
+          Readable.from([cipher]).pipe(
+            createMultipartPartDecryptStream(dek, aad)
+          )
+        )
+      ).rejects.toThrow();
+    }
+  });
+
+  it("a part staged before parts were bound decrypts without AAD", async () => {
+    const uploadId = crypto.randomUUID();
+    const { wrapped, masterKeyVersion } = generateStagingDek(uploadId);
+    const dek = unwrapDek(wrapped, masterKeyVersion, aadForUploadId(uploadId));
+    const plain = crypto.randomBytes(1024);
+    // An empty AAD is what GCM authenticates when none is set.
+    const cipher = await collectStream(
+      Readable.from([plain]).pipe(
+        createMultipartPartEncryptStream(dek, Buffer.alloc(0))
+      )
+    );
+    const out = await collectStream(
+      Readable.from([cipher]).pipe(createMultipartPartDecryptStream(dek, null))
+    );
     expect(out.equals(plain)).toBe(true);
   });
 
@@ -178,9 +220,11 @@ describe("multipart staging DEK", () => {
       crypto.randomBytes(8 * 1024),
     ];
     const ciphers = await Promise.all(
-      parts.map((p) =>
+      parts.map((p, i) =>
         collectStream(
-          Readable.from([p]).pipe(createMultipartPartEncryptStream(dek))
+          Readable.from([p]).pipe(
+            createMultipartPartEncryptStream(dek, aadForPart(uploadId, i + 1))
+          )
         )
       )
     );
@@ -188,9 +232,11 @@ describe("multipart staging DEK", () => {
     // plaintext under the same key.
     expect(ciphers[0].equals(ciphers[1])).toBe(false);
     const out = await Promise.all(
-      ciphers.map((c) =>
+      ciphers.map((c, i) =>
         collectStream(
-          Readable.from([c]).pipe(createMultipartPartDecryptStream(dek))
+          Readable.from([c]).pipe(
+            createMultipartPartDecryptStream(dek, aadForPart(uploadId, i + 1))
+          )
         )
       )
     );

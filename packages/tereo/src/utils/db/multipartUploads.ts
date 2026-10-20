@@ -149,28 +149,72 @@ export const listParts = async (uploadId: string) => {
 };
 
 /**
+ * The active upload and its parts, read under a share lock on the upload's
+ * row: a part PUT records its part under that row's update lock, so the parts
+ * read here are not displaced while being read.
+ */
+export const getActiveWithParts = async (uploadId: string) =>
+  prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT "id" FROM "files"."multipart_uploads"
+      WHERE "id" = ${uploadId}::uuid
+      FOR SHARE
+    `;
+    const upload = await tx.multipartUpload.findFirst({
+      where: {
+        id: uploadId,
+        completedAt: null,
+        abortedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+    });
+    if (!upload)
+      throw new NotFoundError("Multipart upload not found or no longer active");
+    const parts = await tx.multipartPart.findMany({
+      where: { uploadId },
+      orderBy: { partNumber: "asc" },
+    });
+    return { upload, parts };
+  });
+
+/**
  * Upsert a staged part. Returns the prior `fsPath` (if any) so the caller
  * can unlink the displaced file. Each part PUT writes to a unique-nonce
  * path under `multipart/{uploadId}/`, so two concurrent PUTs to the same
  * `partNumber` never race on the same file; the upload's row lock orders
  * their upserts, so the later one finds the earlier one's file to unlink.
  *
- * `assertFits` gets the bytes the upload's other parts hold, under that
- * lock, and throws to refuse the part; the caller then unlinks its file.
+ * Under that lock, `assertNotCompleting` throws while a complete of the
+ * upload runs, and `assertFits` gets the bytes the upload's other parts hold
+ * and throws to refuse the part; the caller then unlinks its file. An upload
+ * completed, aborted or expired since the caller read it is refused too.
  */
 export const upsertPart = async (
   input: UpsertPartInput,
-  assertFits: (otherPartsBytes: bigint) => void
+  checks: {
+    assertNotCompleting: () => Promise<void>;
+    assertFits: (otherPartsBytes: bigint) => void;
+  }
 ) =>
   prisma.$transaction(async (tx) => {
     // Parts of one upload are recorded one at a time, so each sees the bytes
     // the others staged.
-    await tx.$queryRaw`
-      SELECT "id" FROM "files"."multipart_uploads"
+    const rows = await tx.$queryRaw<{ active: boolean }[]>`
+      SELECT ("completed_at" IS NULL
+        AND "aborted_at" IS NULL
+        AND "expires_at" > NOW()) AS "active"
+      FROM "files"."multipart_uploads"
       WHERE "id" = ${input.uploadId}::uuid
       FOR UPDATE
     `;
-    assertFits(await stagedBytes(input.uploadId, input.partNumber, tx));
+    if (!rows[0]?.active) {
+      throw new BadRequestError(
+        "upload_not_active",
+        "Upload is not in an active state"
+      );
+    }
+    await checks.assertNotCompleting();
+    checks.assertFits(await stagedBytes(input.uploadId, input.partNumber, tx));
     return recordPart(input, tx);
   });
 
@@ -217,11 +261,13 @@ const recordPart = async (
       sizeBytes: input.sizeBytes,
       etag: input.etag,
       fsPath: input.fsPath,
+      aadBound: true,
     },
     update: {
       sizeBytes: input.sizeBytes,
       etag: input.etag,
       fsPath: input.fsPath,
+      aadBound: true,
       uploadedAt: new Date(),
     },
   });
