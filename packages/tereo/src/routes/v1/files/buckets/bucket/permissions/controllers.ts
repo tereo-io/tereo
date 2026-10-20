@@ -1,8 +1,9 @@
 import type { BucketPermission } from "../../../../../../../prisma/generated/client/index.js";
+import { notifyBucketAccessChanged } from "../../../../../../websocket/emitters/index.js";
 import { getManagedBucket } from "../../../../../../utils/bucketAccess.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
-import { emitTx, logAuditTx } from "../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
+import { grantTx } from "../../../../../../utils/bucketGrants.js";
 import db from "../../../../../../utils/db/index.js";
 import { bucketNameSchema } from "../../schemas.js";
 import { Request, Response } from "express";
@@ -127,76 +128,25 @@ export const grantPermission = async (req: Request, res: Response) => {
     bucket.id,
     body.userId
   );
-
   if (existing && !existing.revokedAt) {
     throw new ConflictError("Permission already exists for this user");
   }
 
-  const permission = await db.$transaction(async (tx) => {
-    let p;
-    if (existing && existing.revokedAt) {
-      p = await db.bucketPermissions.unrevoke(
-        existing.id,
-        {
-          canRead: body.canRead,
-          canWrite: body.canWrite,
-          canDelete: body.canDelete,
-          grantedBy: auth.userId,
-        },
-        tx
-      );
-      if (!p) {
-        throw new ConflictError("Permission already exists for this user");
-      }
-    } else {
-      p = await db.bucketPermissions.create(
-        {
-          bucketId: bucket.id,
-          userId: body.userId,
-          canRead: body.canRead,
-          canWrite: body.canWrite,
-          canDelete: body.canDelete,
-          grantedBy: auth.userId,
-        },
-        tx
-      );
-    }
-
-    await logAuditTx(tx, {
+  const permission = await db.$transaction((tx) =>
+    grantTx(
+      tx,
       auth,
-      organizationId: bucket.organizationId ?? undefined,
-      action: "CREATE",
-      entityType: "bucketPermission",
-      entityId: String(p.id),
-      entityName: `${bucket.name}:${p.userId}`,
-      metadata: {
-        bucketName: bucket.name,
-        targetUserId: p.userId,
-        canRead: p.canRead,
-        canWrite: p.canWrite,
-        canDelete: p.canDelete,
+      bucket,
+      body.userId,
+      {
+        canRead: body.canRead,
+        canWrite: body.canWrite,
+        canDelete: body.canDelete,
       },
-    });
-
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.permission.granted",
-        organizationId: bucket.organizationId,
-        entityType: "bucketPermission",
-        entityId: String(p.id),
-        data: {
-          bucketName: bucket.name,
-          userId: p.userId,
-          canRead: p.canRead,
-          canWrite: p.canWrite,
-          canDelete: p.canDelete,
-          grantedBy: p.grantedBy,
-        },
-      });
-    }
-
-    return p;
-  });
+      existing
+    )
+  );
+  notifyBucketAccessChanged([permission.userId], bucket.name);
 
   const [serialized] = await serializePermissions([permission]);
   res.status(201).json(serialized);

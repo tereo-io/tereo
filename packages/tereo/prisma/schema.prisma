@@ -116,6 +116,7 @@ model User {
 
   // Actor columns in files and audit. Users are deactivated, never deleted.
   bucketsCreated            Bucket[]            @relation("BucketCreator")
+  bucketsOwned              Bucket[]            @relation("BucketOwner")
   bucketsDeleted            Bucket[]            @relation("BucketDeleter")
   objectsCreated            Object[]            @relation("ObjectCreator")
   objectsDeleted            Object[]            @relation("ObjectDeleter")
@@ -848,6 +849,9 @@ model Bucket {
   createdAt         DateTime     @default(now()) @map("created_at")
   updatedAt         DateTime     @updatedAt @map("updated_at")
   createdBy         String       @map("created_by") @db.Uuid
+  // Who manages the bucket (with an active grant); starts as the creator and
+  // changes only by an admin's transfer. `createdBy` stays the creator.
+  ownerId           String       @map("owner_id") @db.Uuid
   deletedAt         DateTime?    @map("deleted_at")
   deletedBy         String?      @map("deleted_by") @db.Uuid
   organizationId    String?      @map("organization_id") @db.Uuid
@@ -864,12 +868,14 @@ model Bucket {
   shares           Share[]
   lifecyclePolicy  BucketLifecyclePolicy?
   creator          User                   @relation("BucketCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  owner            User                   @relation("BucketOwner", fields: [ownerId], references: [id], onDelete: Restrict)
   deleter          User?                  @relation("BucketDeleter", fields: [deletedBy], references: [id], onDelete: Restrict)
   organization     Organization?          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   service          Service?               @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 
   @@index([policy])
   @@index([serviceId])
+  @@index([ownerId])
   @@index([createdAt])
   @@index([deletedAt])
   @@index([organizationId])

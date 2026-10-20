@@ -68,6 +68,13 @@ export interface Bucket {
   createdBy: string;
   /** The user `createdBy` names. */
   creator: UserRef;
+  /**
+   * The user who manages the bucket, while they hold an active grant on it.
+   * Starts as `createdBy`; changes only by a `file-service.admin` transfer.
+   */
+  ownerId: string;
+  /** The user `ownerId` names. */
+  owner: UserRef;
   /** The service that declared the bucket; `null` for an admin-created one. */
   serviceId: string | null;
   organizationId: string | null;

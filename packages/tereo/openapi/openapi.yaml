@@ -672,10 +672,18 @@ info:
     - Creating a bucket also grants its creator full object access
       (`canRead`, `canWrite`, `canDelete`) — an ordinary grant, listed under
       `/permissions`, audited, emitted as `file-service.permission.granted`
-      and revocable; after revoking it the creator still manages the bucket
-      but needs a grant again for object access
+      and revocable
+    - Managing a bucket (settings, grants, deletion) takes `file-service.admin`
+      or being its owner (`ownerId`, at first the creator) with an active
+      grant on it; reading its settings takes any active grant. Once an admin
+      revokes the owner's grant, only `file-service.admin` can grant it back.
+      `PUT /v1/files/buckets/{name}/owner` (`file-service.admin`) transfers
+      ownership
+    - Managing shares takes an active `canRead` grant (or `file-service.admin`),
+      on a public bucket too
     - The lifecycle policy is a bucket setting: it takes the bucket-management
-      check (creator or `file-service.admin`), not an object grant
+      check (owner with an active grant, or `file-service.admin`), not the
+      object routes' role permissions
     - `file-service.admin` may manage any bucket; a bucket a service declared cannot be deleted
     - A retired bucket (its service no longer declares it) is read-only: writes
       return `409 bucket_retired`
@@ -1172,6 +1180,8 @@ paths:
     $ref: './paths/files/buckets.yaml#/~1files~1buckets~1{name}~1my-permissions'
   /v1/files/buckets/{name}/lifecycle:
     $ref: './paths/files/lifecycle.yaml#/~1files~1buckets~1{name}~1lifecycle'
+  /v1/files/buckets/{name}/owner:
+    $ref: './paths/files/buckets.yaml#/~1files~1buckets~1{name}~1owner'
   /v1/files/buckets/{name}/objects:
     $ref: './paths/files/objects.yaml#/~1files~1buckets~1{name}~1objects'
   /v1/files/buckets/{name}/objects/prefixes:
@@ -2021,6 +2031,8 @@ webhooks:
     $ref: './paths/files/webhook-events.yaml#/file-service.bucket.created'
   file-service.bucket.updated:
     $ref: './paths/files/webhook-events.yaml#/file-service.bucket.updated'
+  file-service.bucket.owner-changed:
+    $ref: './paths/files/webhook-events.yaml#/file-service.bucket.owner-changed'
   file-service.bucket.deleted:
     $ref: './paths/files/webhook-events.yaml#/file-service.bucket.deleted'
   file-service.object.created:

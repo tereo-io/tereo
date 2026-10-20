@@ -1,7 +1,8 @@
+import { notifyBucketAccessChanged } from "../../../../../../../websocket/emitters/index.js";
 import { setAccessLog } from "../../../../../../../middleware/accessLog.js";
 import { validateParams } from "../../../../../../../utils/validateReq.js";
-import { emitTx, logAuditTx } from "../../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../../middleware/auth.js";
+import { revokeTx } from "../../../../../../../utils/bucketGrants.js";
 import { NotFoundError } from "../../../../../../../utils/errors.js";
 import db from "../../../../../../../utils/db/index.js";
 import { userIdParamSchema } from "./schemas.js";
@@ -32,37 +33,11 @@ export const revokePermission = async (req: Request, res: Response) => {
   assertNotDeclaringServiceGrant(bucket, permission.userId);
 
   await db.$transaction(async (tx) => {
-    if (!(await db.bucketPermissions.revoke(permission.id, auth.userId, tx))) {
+    if (!(await revokeTx(tx, auth, bucket, permission))) {
       throw new NotFoundError("Permission not found");
     }
-
-    await logAuditTx(tx, {
-      auth,
-      organizationId: bucket.organizationId ?? undefined,
-      action: "DELETE",
-      entityType: "bucketPermission",
-      entityId: String(permission.id),
-      entityName: `${bucket.name}:${permission.userId}`,
-      metadata: {
-        bucketName: bucket.name,
-        targetUserId: permission.userId,
-      },
-    });
-
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.permission.revoked",
-        organizationId: bucket.organizationId,
-        entityType: "bucketPermission",
-        entityId: String(permission.id),
-        data: {
-          bucketName: bucket.name,
-          userId: permission.userId,
-          revokedBy: auth.userId,
-        },
-      });
-    }
   });
+  notifyBucketAccessChanged([permission.userId], bucket.name);
 
   res.status(204).send();
 };

@@ -758,6 +758,7 @@ const applyBuckets = async (
                 : BigInt(b.storageQuotaBytes),
             serviceId: service.id,
             createdBy: userId!,
+            ownerId: userId!,
           },
         });
     // Core reaches its buckets in-process; an app service gets a grant on

@@ -829,6 +829,7 @@ Events go to the user's room, after the change commits (`websocket/emitters/`):
 | `auth:permissions:changed`  | `{ reason, timestamp }`                 | the user's global roles change, or an admin changes a role they hold (a registry retirement is not notified; the UI sees it on its next token refresh)                                                            |
 | `auth:session:revoked`      | `{ sessionId, timestamp }`              | one of the user's sessions is revoked; its sockets close after                                                                                                                                                    |
 | `auth:organization:changed` | `{ reason, organizationId, timestamp }` | `membership_changed`: added, removed, or member tier changed; `roles_changed`: org-scoped roles set; `org_deactivated`: to every member, after the organization's tokens are revoked and before its sockets close |
+| `files:bucket-access:changed` | `{ bucketName, timestamp }` | a bucket grant was given to or revoked from the user (a member removal included), or the bucket's ownership moved to or from them (see [files.md](files.md)) |
 
 The UI refreshes its token on `auth:permissions:changed` and `auth:organization:changed`; a refresh
 core rejects signs it out.

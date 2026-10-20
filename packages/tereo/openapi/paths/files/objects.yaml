@@ -901,6 +901,9 @@
 
       **Required permissions:**
       - System: `file-service.objects.write` AND bucket-level `canWrite`
+      - Setting `deleteAfter` to a timestamp also takes `file-service.objects.delete` AND
+        bucket-level `canDelete`, since the lifecycle sweep deletes the object then; clearing
+        it (`null`) takes only write
 
       A rename that collides with another live key in the bucket returns 409.
       A metadata change on an object whose current version is a delete

@@ -24,9 +24,31 @@ export interface GetPaginatedOptions {
   where?: Record<string, unknown>;
 }
 
-export const getByBucketAndUser = async (bucketId: number, userId: string) => {
-  return await prisma.bucketPermission.findUnique({
+export const getByBucketAndUser = async (
+  bucketId: number,
+  userId: string,
+  tx?: Prisma.TransactionClient
+) => {
+  return await (tx ?? prisma).bucketPermission.findUnique({
     where: { bucketId_userId: { bucketId, userId } },
+  });
+};
+
+/** The user's active grants on the organization's live buckets. */
+export const getActiveInOrganization = async (
+  organizationId: string,
+  userId: string,
+  tx?: Prisma.TransactionClient
+) => {
+  return await (tx ?? prisma).bucketPermission.findMany({
+    where: {
+      userId,
+      revokedAt: null,
+      bucket: { organizationId, deletedAt: null },
+    },
+    include: {
+      bucket: { select: { id: true, name: true, organizationId: true } },
+    },
   });
 };
 

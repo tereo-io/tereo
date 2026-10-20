@@ -1,7 +1,8 @@
 import type { UserRef } from "../../refs.js";
 
 export type ShareKind = "OBJECT" | "ARCHIVE";
-export type ShareStatus = "active" | "revoked" | "expired" | "exhausted";
+export type ShareStatus =
+  "active" | "revoked" | "creator_inactive" | "expired" | "exhausted";
 export type ShareArchiveFormat = "zip" | "tar";
 
 export interface ShareTargetObject {

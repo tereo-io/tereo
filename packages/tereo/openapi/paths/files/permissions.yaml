@@ -9,7 +9,7 @@
 
       **Required permissions:**
       - System: `file-service.permissions.read` AND `file-service.buckets.read`
-      - AND one of: `file-service.admin`, or bucket creator or an active bucket grant, from the bucket's organization
+      - AND one of: `file-service.admin`, or an active bucket grant, from the bucket's organization
 
       **Filter operators:**
       - userId: `equals`, `in` (UUIDs)
@@ -72,7 +72,7 @@
 
       **Required permissions:**
       - System: `file-service.permissions.write` AND `file-service.buckets.write`
-      - AND bucket creator (same organization) or `file-service.admin`
+      - AND the bucket's owner holding an active grant on it (same organization), or `file-service.admin`
 
       **Notes:**
       - The user must exist (`400 unknown_user` otherwise)
@@ -83,7 +83,7 @@
         (`400 user_not_in_organization`)
       - If an active permission already exists for the user, returns 409 Conflict
       - If a previously revoked permission exists, it will be un-revoked and updated with new permissions
-      - The bucket's creator is granted full object access when the bucket is created; if that grant is revoked, it can be granted again here
+      - The bucket's creator is granted full object access when the bucket is created; once that grant is revoked, the owner no longer manages the bucket, so only a `file-service.admin` holder can grant it again
       - `userId` must be a UUID (`400 invalid_request` otherwise)
       - The response is the grant as the list returns it, with the grantee and the granter named (`user`, `granter`, and their emails and names flat).
 
@@ -143,7 +143,7 @@
 
       **Required permissions:**
       - System: `file-service.permissions.delete` AND `file-service.buckets.delete`
-      - AND bucket creator (same organization) or `file-service.admin`
+      - AND the bucket's owner holding an active grant on it (same organization), or `file-service.admin`
 
       **Notes:**
       - On a declared bucket, the declaring service's own grant cannot be revoked

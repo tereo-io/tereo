@@ -8,6 +8,7 @@ import multipartRouter from "./multipart/index.js";
 import archivesRouter from "./archives/index.js";
 import objectsRouter from "./objects/index.js";
 import sharesRouter from "./shares/index.js";
+import ownerRouter from "./owner/index.js";
 import { Router } from "express";
 import {
   getBucket,
@@ -23,6 +24,7 @@ bucketRouter.use("/archives", bucketCors, bucketRateLimit, archivesRouter);
 bucketRouter.use("/shares", sharesRouter);
 bucketRouter.use("/permissions", permissionsRouter);
 bucketRouter.use("/lifecycle", lifecycleRouter);
+bucketRouter.use("/owner", ownerRouter);
 // Every multipart route — initiate, part upload, complete, abort — lives
 // under a single `/buckets/:name/multipart` namespace. Object key travels in
 // the initiate body, keeping the path clear of splats. Same per-bucket CORS

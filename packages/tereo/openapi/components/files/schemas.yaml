@@ -181,6 +181,16 @@ Bucket:
     creator:
       description: The user `createdBy` names.
       $ref: '../schemas.yaml#/UserRef'
+    ownerId:
+      description: |
+        User id of the owner, who manages the bucket while holding an active
+        grant on it. Starts as `createdBy`; changes only by
+        `PUT /v1/files/buckets/{name}/owner` (`file-service.admin`).
+      type: string
+      format: uuid
+    owner:
+      description: The user `ownerId` names.
+      $ref: '../schemas.yaml#/UserRef'
     serviceId:
       description: |
         The service that declared the bucket in its provisioning document; null for a bucket a
@@ -234,6 +244,8 @@ Bucket:
     - organization
     - createdBy
     - creator
+    - ownerId
+    - owner
     - serviceId
     - serviceName
     - service
@@ -389,8 +401,8 @@ BucketPermissions:
     caller's active grant flag (`false` without one) AND the matching role
     permission (`file-service.objects.read` / `.write` / `.delete`, cut to a
     delegated token's ceiling), and `canRead` is also `true` on a public
-    bucket. Being the bucket's creator adds nothing beyond the grant made at
-    create time. Never `null`.
+    bucket. Being the bucket's creator or owner adds nothing beyond their
+    grant. Never `null`.
   properties:
     canRead:
       description: Whether the current user can read from this bucket
@@ -877,7 +889,7 @@ PatchObjectRequest:
       description: |
         Per-object expiry overriding the bucket's lifecycle policy (ISO 8601).
         `null` clears it; omit to leave it unchanged. Later uploads to the
-        object's key keep it.
+        object's key keep it. Setting it takes delete access to the bucket.
       type: [string, 'null']
       format: date-time
 
@@ -1655,10 +1667,12 @@ ShareKind:
 
 ShareStatus:
   type: string
-  enum: [active, revoked, expired, exhausted]
+  enum: [active, revoked, creator_inactive, expired, exhausted]
   description: |
-    Derived field — the server computes this from (revokedAt, expiresAt,
-    downloadCount, maxDownloads) so clients do not have to re-derive it.
+    Derived field — the server computes this from (revokedAt, the creator's
+    activation, expiresAt, downloadCount, maxDownloads) so clients do not have
+    to re-derive it. `creator_inactive`: the share's creator is deactivated,
+    so it no longer serves.
 
 ShareTargetObject:
   type: object

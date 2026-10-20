@@ -99,6 +99,7 @@ export const createBucket = async (req: Request, res: Response) => {
         policy: body.policy as BucketPolicy,
         storageQuotaBytes: body.storageQuotaBytes || undefined,
         createdBy: auth.userId,
+        ownerId: auth.userId,
         organizationId: auth.organizationId ?? undefined,
       },
       tx
@@ -132,7 +133,8 @@ export const createBucket = async (req: Request, res: Response) => {
     }
 
     // The creator's object access is an ordinary grant: listed with the
-    // others, and revocable like them.
+    // others, and revocable like them. Managing the bucket as its owner
+    // needs it too.
     const grant = await db.bucketPermissions.create(
       {
         bucketId: created.id,

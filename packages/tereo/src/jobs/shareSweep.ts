@@ -1,7 +1,9 @@
 import { getShareSweepQueue, SHARE_SWEEP_QUEUE } from "./queues.js";
 import { createTimeBoxedLoop, isShuttingDown } from "./jobUtils.js";
+import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { TrackedWorker } from "./workerRegistry.js";
 import { getRedisClient } from "../utils/redis.js";
+import { logAuditTx } from "../utils/outbox.js";
 import { logger } from "../utils/logger.js";
 import db from "../utils/db/index.js";
 import { Job, Worker } from "bullmq";
@@ -22,11 +24,40 @@ export async function processShareSweepTick(): Promise<{
 }> {
   await db.shares.backfillExpiry(env.FILE_SERVICE_MAX_SHARE_TTL_SECONDS);
   const graceMs = env.FILE_SERVICE_SHARE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  const processed = await db.shares.deleteExpired(
-    graceMs,
-    new Date(),
-    BATCH_LIMIT
-  );
+  const processed = await db.$transaction(async (tx) => {
+    const deleted = await db.shares.deleteExpired(
+      graceMs,
+      new Date(),
+      BATCH_LIMIT,
+      tx
+    );
+    // One entry per bucket in the batch, so each lands in its organization's
+    // audit log.
+    const byBucket = new Map<number, typeof deleted>();
+    for (const share of deleted) {
+      const group = byBucket.get(share.bucket.id) ?? [];
+      group.push(share);
+      byBucket.set(share.bucket.id, group);
+    }
+    for (const shares of byBucket.values()) {
+      const { bucket } = shares[0];
+      await logAuditTx(tx, {
+        auth: { userId: SYSTEM_USER_ID, email: null },
+        organizationId: bucket.organizationId,
+        action: "DELETE",
+        entityType: "shareSweep",
+        entityId: String(bucket.id),
+        entityName: bucket.name,
+        metadata: {
+          bucketName: bucket.name,
+          retentionDays: env.FILE_SERVICE_SHARE_RETENTION_DAYS,
+          processed: shares.length,
+          shares: shares.map((s) => ({ id: s.id, kind: s.kind })),
+        },
+      });
+    }
+    return deleted.length;
+  });
   return { processed, hasMore: processed >= BATCH_LIMIT };
 }
 

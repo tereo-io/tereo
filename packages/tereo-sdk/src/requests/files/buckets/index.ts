@@ -106,3 +106,21 @@ export const getMyBucketPermissions = async (
   );
   return res.data;
 };
+
+export const transferBucketOwnership = async (
+  name: string,
+  userId: string
+): Promise<Bucket> => {
+  const res = await tryHandleRequest<Bucket>(
+    {
+      clientName: CORE_CLIENT,
+      requestName: "core.files.transferBucketOwnership",
+      method: "PUT",
+      url: urlPath`/v1/files/buckets/${name}/owner`,
+      data: { userId },
+    },
+    "FS_0007",
+    `Failed to transfer ownership of bucket ${name}`
+  );
+  return res.data;
+};
