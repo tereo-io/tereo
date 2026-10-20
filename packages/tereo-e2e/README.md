@@ -107,8 +107,9 @@ src/tests/
   inherits the admin's storage state, so use these helpers.
 - **Locators:** `getByRole` / `getByLabel` / `getByText`; no CSS selectors or fixed waits. kosmeo
   puts the required-field `*` inside `<label>`, so use `getByRole("textbox", { name, exact: true })`
-  where `getByLabel(…, { exact: true })` would miss. Its modals are `role="dialog"` with no name;
-  scope with `page.getByRole("dialog")` (one is open at a time).
+  where `getByLabel(…, { exact: true })` would miss. Its modals are named by their title, so
+  `page.getByRole("dialog", { name: "Create Webhook Endpoint" })` finds one; an unnamed
+  `page.getByRole("dialog")` also works, as one is open at a time.
 - Each browser context gets its own `X-Forwarded-For` address (`utils/clientIp.ts`). Core limits
   failed sign-ins per client and IP, and a few specs fail one on purpose.
 - A test that uncovers an app bug stays, as `test.fixme` with a comment describing the bug.

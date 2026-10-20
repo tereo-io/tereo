@@ -49,6 +49,48 @@ test("an admin creates a webhook endpoint for an event type", async ({
   ).toBeVisible();
 });
 
+test("an admin picks event types with the keyboard and keeps the form", async ({
+  page,
+  uid,
+}) => {
+  const url = hookUrl(uid("keyboard"));
+  const description = `Keyboard ${uid("k")}`;
+
+  await page.goto("/webhooks/endpoints");
+  await page.getByRole("button", { name: "Add new" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create Webhook Endpoint" });
+  await dialog.getByLabel("URL").fill(url);
+  await dialog.getByLabel("Description").fill(description);
+
+  const eventTypes = dialog.getByRole("combobox", { name: "Event Types" });
+  await eventTypes.click();
+  const search = dialog.getByRole("textbox", { name: "Search options" });
+  await expect(search).toBeFocused();
+  await search.fill("auth.user.created");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  // Escape dismisses the open list; the dialog and what was typed stay.
+  await page.keyboard.press("Escape");
+  await expect(search).toBeHidden();
+  await expect(eventTypes).toContainText("auth.user.created");
+  await expect(dialog.getByLabel("URL")).toHaveValue(url);
+  await expect(dialog.getByLabel("Description")).toHaveValue(description);
+
+  await dialog.getByRole("button", { name: "Create Endpoint" }).click();
+  await page
+    .getByRole("dialog", { name: "Webhook Endpoint Created" })
+    .getByRole("button", { name: "I have saved the signing secret" })
+    .click();
+
+  await page.getByRole("textbox", { name: "URL" }).fill(url);
+  const row = page.getByRole("row", { name: new RegExp(url) });
+  await expect(row).toContainText(description);
+  await row.click();
+  await expect(
+    page.getByRole("listitem").filter({ hasText: "auth.user.created" })
+  ).toBeVisible();
+});
+
 test("deliveries: a test event and a real one are recorded", async ({
   page,
   api,
