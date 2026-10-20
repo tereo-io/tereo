@@ -130,6 +130,9 @@ describe("Generated keys", () => {
   });
 
   afterAll(async () => {
+    // `end()` resolves before its connections have closed, so the forced drop
+    // below can kill one still closing, and the pool re-emits that error.
+    db?.on("error", () => {});
     await db?.end();
     const admin = new Pool({ connectionString: suiteDbUrl.toString() });
     await admin
