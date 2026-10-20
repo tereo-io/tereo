@@ -1,9 +1,9 @@
+import { answerReadPreconditions } from "../../../../../../../../utils/conditionalRequests.js";
 import { broadcastObjectInvalidate } from "../../../../../../../../utils/cacheBroadcast.js";
 import { emitObjectWrittenTx } from "../../../../../buckets/bucket/objects/events.js";
 import { assertBucketWritable } from "../../../../../../../../utils/bucketAccess.js";
 import { createEncryptStream } from "../../../../../../../../utils/encryption.js";
 import { parseContentType } from "../../../../../../../../utils/contentType.js";
-import { answerReadPreconditions } from "../../../../../../../../utils/conditionalRequests.js";
 import { setAccessLog } from "../../../../../../../../middleware/accessLog.js";
 import { SYSTEM_USER_ID } from "../../../../../../../../definitions/index.js";
 import { logAuditTx } from "../../../../../../../../utils/outbox.js";
