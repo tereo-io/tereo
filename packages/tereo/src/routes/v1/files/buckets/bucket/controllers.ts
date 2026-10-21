@@ -29,6 +29,7 @@ import {
   NotFoundError,
 } from "../../../../../utils/errors.js";
 import {
+  bucketEventScope,
   computeChanges,
   logAuditTx,
   emitTx,
@@ -117,25 +118,28 @@ export const updateBucket = async (req: Request, res: Response) => {
   const { name } = validateParams(bucketNameSchema, req);
   const body = validateBody(updateBucketSchema, req);
 
-  // With the service, like `update` returns it: computeChanges diffs the two.
   await validateBucketManagement(auth, name, "write");
-  const bucket = await db.buckets.getByNameWithService(name);
-  assertDeclaredFieldsUnchanged(bucket, body);
+  const bucket = await db.buckets.getByName(name);
 
-  // Disallow flipping versioningEnabled from true -> false while historical
-  // versions still exist. Otherwise those rows (and the blob refs they hold)
-  // become invisible to the normal write paths — lifecycle is the only thing
-  // that cleans them up, and the UI gives no indication they still exist.
-  // The operator must clear history first (e.g. set `expireVersionsAfterDays`
-  // on a lifecycle policy and let the sweep drain the non-current rows).
-  // Checked under the bucket's lock, which every upload and delete takes
-  // before reading the setting: one that commits history first is seen here,
-  // and one that commits after goes by the new setting.
   const updated = await db.$transaction(async (tx) => {
+    // Diffed against the row as it is under the lock, with the service, like
+    // `update` returns it: a read before this transaction could record an
+    // update committed since as this one's.
+    const current = await db.buckets.getForUpdate(bucket.id, tx);
+    assertDeclaredFieldsUnchanged(current, body);
+
+    // Disallow flipping versioningEnabled from true -> false while historical
+    // versions still exist. Otherwise those rows (and the blob refs they hold)
+    // become invisible to the normal write paths — lifecycle is the only thing
+    // that cleans them up, and the UI gives no indication they still exist.
+    // The operator must clear history first (e.g. set `expireVersionsAfterDays`
+    // on a lifecycle policy and let the sweep drain the non-current rows).
+    // Read under the bucket's lock, which every upload and delete takes
+    // before reading the setting: one that commits history first is seen here,
+    // and one that commits after goes by the new setting.
     if (body.versioningEnabled === false) {
-      const locked = await db.buckets.lockForWrite(bucket.id, tx);
       if (
-        locked?.versioningEnabled &&
+        current.versioningEnabled &&
         (await db.objectVersions.hasHistoricalVersions(bucket.id, tx))
       ) {
         throw new BadRequestError(
@@ -159,7 +163,7 @@ export const updateBucket = async (req: Request, res: Response) => {
       tx
     );
 
-    const changes = computeChanges(bucket, next);
+    const changes = computeChanges(current, next);
     if (changes) {
       await logAuditTx(tx, {
         auth,
@@ -171,12 +175,9 @@ export const updateBucket = async (req: Request, res: Response) => {
         changes,
         metadata: { bucketName: next.name },
       });
-    }
-
-    if (changes && next.organizationId) {
       await emitTx(tx, {
         eventType: "file-service.bucket.updated",
-        organizationId: next.organizationId,
+        ...bucketEventScope(next),
         entityType: "bucket",
         entityId: String(next.id),
         data: {
@@ -232,15 +233,13 @@ export const deleteBucket = async (req: Request, res: Response) => {
       },
     });
 
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.bucket.deleted",
-        organizationId: bucket.organizationId,
-        entityType: "bucket",
-        entityId: String(bucket.id),
-        data: { bucketName: bucket.name },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.bucket.deleted",
+      ...bucketEventScope(bucket),
+      entityType: "bucket",
+      entityId: String(bucket.id),
+      data: { bucketName: bucket.name },
+    });
   });
 
   await broadcastBucketInvalidate(bucket.name);

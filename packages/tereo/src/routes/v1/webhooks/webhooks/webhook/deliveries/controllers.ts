@@ -7,6 +7,8 @@ import { Request, Response } from "express";
 import {
   assertNotManagedByIntegration,
   getVisibleEndpoint,
+  isFileEvent,
+  mayResendFileEvents,
   redactUnreadable,
 } from "../../../../../../utils/webhookAccess.js";
 import {
@@ -17,6 +19,7 @@ import {
 import {
   ArchivedError,
   BadRequestError,
+  ForbiddenError,
 } from "../../../../../../utils/errors.js";
 import {
   applyCursorToWhere,
@@ -76,9 +79,20 @@ export const bulkRetryDeliveries = async (req: Request, res: Response) => {
     );
   }
   assertRetryableEndpoint(endpoint.status);
+  // Anyone else's bulk retry leaves the file-service deliveries out.
+  const withFileEvents = mayResendFileEvents(auth, endpoint);
+  if (!withFileEvents && body.eventType && isFileEvent(body.eventType)) {
+    throw new ForbiddenError(
+      "Only the endpoint's creator or webhooks.admin may retry its file-service deliveries"
+    );
+  }
 
   const reset = await db.$transaction(async (tx) => {
-    const rows = await db.webhookDeliveries.bulkResetForRetry(id, body, tx);
+    const rows = await db.webhookDeliveries.bulkResetForRetry(
+      id,
+      { ...body, excludeFileEvents: !withFileEvents },
+      tx
+    );
     if (rows.length > 0) {
       await logAuditTx(tx, {
         auth,
@@ -90,6 +104,7 @@ export const bulkRetryDeliveries = async (req: Request, res: Response) => {
           action: "retry-deliveries",
           retriedCount: rows.length,
           filters: body,
+          ...(!withFileEvents && { fileEventsExcluded: true }),
         },
       });
     }

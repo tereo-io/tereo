@@ -9,7 +9,8 @@ file-service.bucket.created:
     description: |-
       Fired by `POST /v1/files/buckets`. `entityId` is the bucket's integer id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesBucketCreated
     security: []
     parameters:
@@ -60,9 +61,10 @@ file-service.bucket.updated:
       - Files - Buckets
     summary: Bucket updated
     description: |-
-      Fired by `PUT /v1/files/buckets/{name}` when something changed; a call that changes nothing emits no event. `entityId` is the bucket's integer id.
+      Fired by `PUT /v1/files/buckets/{name}` when something changed; a call that changes nothing emits no event. Also fired, with `retired: true`, when the registry retires a bucket its service stopped declaring. `entityId` is the bucket's integer id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesBucketUpdated
     security: []
     parameters:
@@ -92,6 +94,9 @@ file-service.bucket.updated:
                     properties:
                       bucketName:
                         type: string
+                      retired:
+                        type: boolean
+                        description: Present, and true, when the registry retired the bucket; it is read-only from then on.
                     required:
                       - bucketName
     responses:
@@ -99,6 +104,7 @@ file-service.bucket.updated:
         description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
 
 file-service.bucket.owner-changed:
+
   post:
     tags:
       - Files - Buckets
@@ -108,7 +114,8 @@ file-service.bucket.owner-changed:
 
       A new owner who held no active grant also gets one, emitted as `file-service.permission.granted`.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesBucketOwnerChanged
     security: []
     parameters:
@@ -160,7 +167,8 @@ file-service.bucket.deleted:
     description: |-
       Fired by `DELETE /v1/files/buckets/{name}` (soft delete). `entityId` is the bucket's integer id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesBucketDeleted
     security: []
     parameters:
@@ -206,7 +214,8 @@ file-service.object.created:
 
       Covers authenticated uploads, presigned uploads and completed multipart uploads; `data.via` says which.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesObjectCreated
     security: []
     parameters:
@@ -276,11 +285,12 @@ file-service.object.updated:
       - Files - Objects
     summary: Object updated
     description: |-
-      Fired when an upload (authenticated, presigned or multipart) overwrites an existing object, on every `PATCH /v1/files/buckets/{name}/objects/by-id/{id}` (rename, metadata, tags, content type or `deleteAfter`), and when a version restore undeletes a deleted object (alongside `file-service.object.version.restored`). `entityId` is the object id.
+      Fired when an upload (authenticated, presigned or multipart) overwrites an existing object, on a `PATCH /v1/files/buckets/{name}/objects/by-id/{id}` that changes something (rename, metadata, tags, content type or `deleteAfter`; one that changes nothing emits no event), and on every version restore, which replaces the current version and undeletes a deleted object (alongside `file-service.object.version.restored`). `entityId` is the object id.
 
       The `data` shape depends on the path that fired it.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesObjectUpdated
     security: []
     parameters:
@@ -404,6 +414,9 @@ file-service.object.updated:
                           restoredFromVersionId:
                             type: string
                             format: uuid
+                          undeleted:
+                            type: boolean
+                            description: Whether the restore brought back a deleted object.
                         required:
                           - bucketName
                           - objectKey
@@ -414,6 +427,7 @@ file-service.object.updated:
                           - tags
                           - via
                           - restoredFromVersionId
+                          - undeleted
     responses:
       2XX:
         description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
@@ -426,7 +440,8 @@ file-service.object.deleted:
     description: |-
       Fired by `DELETE /v1/files/buckets/{name}/objects/by-id/{id}` (soft delete, or a delete marker in a versioned bucket). `entityId` is the object id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesObjectDeleted
     security: []
     parameters:
@@ -481,7 +496,8 @@ file-service.objects.bulk-deleted:
     description: |-
       Fired once per committed batch of up to 100 objects of a `POST /v1/files/buckets/{name}/objects/bulk-delete`, in the batch's transaction, so a request that stops part-way still reports every delete that committed; no per-object events are emitted. `batchIndex` counts a request's batches from 0. Whether the request stopped at its cap is in its response (`truncated`), not in the events. `entityId` is the bucket's integer id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesObjectsBulkDeleted
     security: []
     parameters:
@@ -582,7 +598,8 @@ file-service.object.version.created:
     description: |-
       Fired in a versioning-enabled bucket for every new version a write creates: each upload (authenticated, presigned or multipart, alongside `file-service.object.created` / `.updated`) and `PATCH /v1/files/buckets/{name}/objects/by-id/{id}` with `createNewVersion`. `entityId` is the new version's id. Restores fire `file-service.object.version.restored` instead; delete markers fire `file-service.object.deleted`.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesObjectVersionCreated
     security: []
     parameters:
@@ -663,7 +680,8 @@ file-service.object.version.restored:
     description: |-
       Fired by `POST /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/restore`, including a restore that undeletes a deleted object. `entityId` is the id of the new current version created by the restore.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesObjectVersionRestored
     security: []
     parameters:
@@ -723,7 +741,8 @@ file-service.object.version.deleted:
     description: |-
       Fired by `DELETE /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}`. `entityId` is the deleted version's id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesObjectVersionDeleted
     security: []
     parameters:
@@ -774,7 +793,8 @@ file-service.objects.versions.purged:
     description: |-
       Fired once per committed batch of up to 100 versions of a `POST /v1/files/buckets/{name}/objects/purge-non-current-versions`, in the batch's transaction, as `file-service.objects.bulk-deleted`. `batchIndex` counts a request's batches from 0; whether the request stopped at its cap is in its response (`truncated`). `entityId` is the bucket's integer id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesObjectsVersionsPurged
     security: []
     parameters:
@@ -840,7 +860,8 @@ file-service.permission.granted:
     description: |-
       Fired by `POST /v1/files/buckets/{name}/permissions`, including re-granting a previously revoked permission, by `POST /v1/files/buckets` for the creator's own grant (`canRead`, `canWrite` and `canDelete` all true, `grantedBy` the creator), and by `PUT /v1/files/buckets/{name}/owner` for a new owner without an active grant (all three true, `grantedBy` the admin). `entityId` is the permission's integer id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesPermissionGranted
     security: []
     parameters:
@@ -902,7 +923,8 @@ file-service.permission.revoked:
     description: |-
       Fired by `DELETE /v1/files/buckets/{name}/permissions/{userId}`, and by `DELETE /v1/admin/organizations/{id}/members/{userId}` for each grant the removed member held on the organization's buckets. `entityId` is the permission's integer id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesPermissionRevoked
     security: []
     parameters:
@@ -955,7 +977,8 @@ file-service.multipart.initiated:
     description: |-
       Fired by `POST /v1/files/buckets/{name}/multipart`. `entityId` is the upload id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesMultipartInitiated
     security: []
     parameters:
@@ -1010,7 +1033,8 @@ file-service.multipart.completed:
     description: |-
       Fired by `POST /v1/files/buckets/{name}/multipart/{uploadId}/complete`. `entityId` is the upload id. The resulting object also fires `file-service.object.created` / `.updated` (with `via: multipart`), and `file-service.object.version.created` in a versioned bucket.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesMultipartCompleted
     security: []
     parameters:
@@ -1073,7 +1097,8 @@ file-service.multipart.aborted:
     description: |-
       Fired by `DELETE /v1/files/buckets/{name}/multipart/{uploadId}` and by the worker's multipart sweep when an upload expires uncompleted. `entityId` is the upload id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesMultipartAborted
     security: []
     parameters:
@@ -1127,7 +1152,8 @@ file-service.lifecycle.policy.updated:
     description: |-
       Fired by `PUT /v1/files/buckets/{name}/lifecycle`, which creates or replaces the bucket's policy. `data` carries the policy as stored. `entityId` is the bucket's integer id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesLifecyclePolicyUpdated
     security: []
     parameters:
@@ -1187,7 +1213,8 @@ file-service.lifecycle.policy.deleted:
     description: |-
       Fired by `DELETE /v1/files/buckets/{name}/lifecycle` when the bucket had a policy; deleting a missing policy emits no event. `entityId` is the bucket's integer id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesLifecyclePolicyDeleted
     security: []
     parameters:
@@ -1235,7 +1262,8 @@ file-service.lifecycle.policy.applied:
     description: |-
       Fired by the worker's lifecycle sweep, once per bucket per stage per batch that processed anything. `entityId` is the bucket's integer id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesLifecyclePolicyApplied
     security: []
     parameters:

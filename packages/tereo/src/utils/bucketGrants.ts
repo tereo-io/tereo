@@ -1,10 +1,15 @@
 import type { BucketPermission } from "../../prisma/generated/client/index.js";
-import { emitTx, logAuditTx, type AuditLogInput } from "./outbox.js";
 import { ConflictError, ForbiddenError } from "./errors.js";
 import { PERMISSIONS } from "../definitions/permissions.js";
 import { hasPermission } from "./permissions.js";
 import type { Prisma } from "./db/prisma.js";
 import db from "./db/index.js";
+import {
+  bucketEventScope,
+  emitTx,
+  logAuditTx,
+  type AuditLogInput,
+} from "./outbox.js";
 
 type Tx = Prisma.TransactionClient;
 type Actor = AuditLogInput["auth"];
@@ -12,6 +17,7 @@ type GrantedBucket = {
   id: number;
   name: string;
   organizationId: string | null;
+  serviceId: string | null;
 };
 
 export interface GrantFlags {
@@ -67,22 +73,20 @@ export const grantTx = async (
     },
   });
 
-  if (bucket.organizationId) {
-    await emitTx(tx, {
-      eventType: "file-service.permission.granted",
-      organizationId: bucket.organizationId,
-      entityType: "bucketPermission",
-      entityId: String(p.id),
-      data: {
-        bucketName: bucket.name,
-        userId: p.userId,
-        canRead: p.canRead,
-        canWrite: p.canWrite,
-        canDelete: p.canDelete,
-        grantedBy: p.grantedBy,
-      },
-    });
-  }
+  await emitTx(tx, {
+    eventType: "file-service.permission.granted",
+    ...bucketEventScope(bucket),
+    entityType: "bucketPermission",
+    entityId: String(p.id),
+    data: {
+      bucketName: bucket.name,
+      userId: p.userId,
+      canRead: p.canRead,
+      canWrite: p.canWrite,
+      canDelete: p.canDelete,
+      grantedBy: p.grantedBy,
+    },
+  });
 
   return p;
 };
@@ -141,19 +145,17 @@ export const revokeTx = async (
     },
   });
 
-  if (bucket.organizationId) {
-    await emitTx(tx, {
-      eventType: "file-service.permission.revoked",
-      organizationId: bucket.organizationId,
-      entityType: "bucketPermission",
-      entityId: String(permission.id),
-      data: {
-        bucketName: bucket.name,
-        userId: permission.userId,
-        revokedBy: auth.userId,
-      },
-    });
-  }
+  await emitTx(tx, {
+    eventType: "file-service.permission.revoked",
+    ...bucketEventScope(bucket),
+    entityType: "bucketPermission",
+    entityId: String(permission.id),
+    data: {
+      bucketName: bucket.name,
+      userId: permission.userId,
+      revokedBy: auth.userId,
+    },
+  });
   return true;
 };
 

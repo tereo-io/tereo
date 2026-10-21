@@ -1,6 +1,6 @@
+import { SYSTEM_USER_ID, TEST_EVENT_TYPE } from "../definitions/index.js";
 import { PERMISSIONS } from "../definitions/permissions.js";
 import type { WebhookScope } from "./webhookOwnership.js";
-import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { canReadBucket } from "./bucketAccess.js";
 import { hasPermission } from "./permissions.js";
 import { prisma } from "./db/prisma.js";
@@ -53,17 +53,19 @@ export const assertMaySubscribe = (
 /**
  * The permissions a user acts with in `organizationId`: their global roles,
  * and that organization's roles while they are a member of it and it is
- * active. Null for an inactive user, who acts with none.
+ * active. Outside any organization, only their global roles. Null for an
+ * inactive user, who acts with none.
  */
 const actingPermissions = async (
   userId: string,
-  organizationId: string
+  organizationId: string | null
 ): Promise<string[] | null> => {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { isActive: true },
   });
   if (!user?.isActive) return null;
+  if (!organizationId) return db.roles.getUserPermissions(userId, null);
   const member = await prisma.organizationMember.findFirst({
     where: {
       userId,
@@ -76,7 +78,7 @@ const actingPermissions = async (
 };
 
 export interface FanoutEvent {
-  organizationId: string;
+  organizationId: string | null;
   eventType: string;
   data: Record<string, unknown>;
 }
@@ -192,7 +194,57 @@ export const assertNotManagedByIntegration = (
   throw new ManagedByIntegrationError();
 };
 
+export const isFileEvent = (eventType: string) =>
+  eventType.startsWith(BUCKET_EVENT_PREFIX);
+
+/**
+ * Whether `caller` may choose where `endpoint`'s file events go. They are
+ * sent by its creator's bucket access, which no one else's permissions are
+ * checked against: only the creator or `webhooks.admin` may.
+ */
+const mayDirectFileEvents = (
+  caller: { userId: string; permissions: string[] },
+  endpoint: { createdBy: string }
+): boolean =>
+  endpoint.createdBy === caller.userId ||
+  hasPermission(caller.permissions, PERMISSIONS.WEBHOOKS.ADMIN);
+
+/**
+ * 403 unless the caller may direct the endpoint's file events, for a change
+ * that would send them somewhere its creator did not choose: a new URL or
+ * custom headers while it is (or will be) subscribed to a `file-service.*`
+ * event type, or a `file-service.*` event type it is not yet subscribed to.
+ */
+export const assertMayRedirectFileEvents = (
+  caller: { userId: string; permissions: string[] },
+  endpoint: { createdBy: string; eventTypes: string[] },
+  change: { redirects: boolean; eventTypes?: string[] }
+): void => {
+  if (mayDirectFileEvents(caller, endpoint)) return;
+  const before = endpoint.eventTypes.filter(isFileEvent);
+  const after = (change.eventTypes ?? endpoint.eventTypes).filter(isFileEvent);
+  const redirected =
+    change.redirects && (before.length > 0 || after.length > 0);
+  const added = after.some((eventType) => !before.includes(eventType));
+  if (redirected || added) {
+    throw new ForbiddenError(
+      "Only the endpoint's creator or webhooks.admin may change where its file-service events go: its URL, custom headers or file-service event types"
+    );
+  }
+};
+
+/**
+ * Whether `caller` may resend `endpoint`'s file-service deliveries, which its
+ * creator's bucket access let through. A provisioned endpoint's URL comes
+ * from its document; any other's may have been changed since the delivery.
+ */
+export const mayResendFileEvents = (
+  caller: { userId: string; permissions: string[] },
+  endpoint: { createdBy: string; provisioned: boolean }
+): boolean => endpoint.provisioned || mayDirectFileEvents(caller, endpoint);
+
 /** 409 `managed_by_provisioning`: a provisioned endpoint changes only through its file. */
+
 export const assertNotProvisioned = (endpoint: {
   provisioned: boolean;
 }): void => {
@@ -222,11 +274,11 @@ export const redactUnreadable = async <T extends StoredDelivery>(
   const readPermissions = await db.eventTypes.readPermissions(
     deliveries.map((d) => d.eventType)
   );
-  const permissionsIn = new Map<string, Promise<string[]>>();
+  const permissionsIn = new Map<string | null, Promise<string[]>>();
   if (organizationId) {
     permissionsIn.set(organizationId, Promise.resolve(viewer.permissions));
   }
-  const permissionsOf = (org: string) => {
+  const permissionsOf = (org: string | null) => {
     let permissions = permissionsIn.get(org);
     if (!permissions) {
       permissions = actingPermissions(viewer.userId, org).then((p) => p ?? []);
@@ -244,16 +296,26 @@ export const redactUnreadable = async <T extends StoredDelivery>(
         payload?.data && typeof payload.data === "object"
           ? (payload.data as Record<string, unknown>)
           : {};
-      // A test send names no organization; it is the request's, and a
-      // platform integration's has none: core's own test payload, read with
-      // the integration's global permissions.
+      // An event of no organization (an app service's bucket) is read with
+      // global permissions. A test send names no organization; it is the
+      // request's, and a platform integration's has none: core's own test
+      // payload, read with the integration's global permissions.
+      const outsideOrganizations =
+        payload?.organizationId === null &&
+        delivery.eventType !== TEST_EVENT_TYPE;
       const eventOrg =
         typeof payload?.organizationId === "string"
           ? payload.organizationId
           : organizationId;
       const readPermission = readPermissions.get(delivery.eventType) ?? null;
-      const readable =
-        eventOrg === null
+      const readable = outsideOrganizations
+        ? await mayReadEvent(
+            { userId: viewer.userId, permissions: await permissionsOf(null) },
+            { organizationId: null, eventType: delivery.eventType, data },
+            readPermission,
+            { requireWebhooksRead: !owner }
+          )
+        : eventOrg === null
           ? !readPermission || hasPermission(viewer.permissions, readPermission)
           : await mayReadEvent(
               {

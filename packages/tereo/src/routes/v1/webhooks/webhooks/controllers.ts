@@ -6,6 +6,7 @@ import { formatWebhookEndpoint } from "../../../../utils/transformers.js";
 import { assertMaySubscribe } from "../../../../utils/webhookAccess.js";
 import { webhookScope } from "../../../../utils/webhookOwnership.js";
 import { PERMISSIONS } from "../../../../definitions/permissions.js";
+import { emitEndpointEventTx, redactWebhookUrl } from "./events.js";
 import { hasPermission } from "../../../../utils/permissions.js";
 import { validateUser } from "../../../../middleware/auth.js";
 import { BadRequestError } from "../../../../utils/errors.js";
@@ -114,10 +115,11 @@ export const createWebhookEndpoint = async (req: Request, res: Response) => {
       entityType: "WebhookEndpoint",
       entityId: created.endpoint.id,
       metadata: {
-        url: body.url,
+        url: redactWebhookUrl(body.url),
         eventTypes: body.eventTypes,
       },
     });
+    await emitEndpointEventTx(tx, "created", created.endpoint);
     return created;
   });
 

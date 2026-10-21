@@ -1,6 +1,5 @@
 import { getManagedBucket } from "../../../../../../utils/bucketAccess.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
-import { emitTx, logAuditTx } from "../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { NotFoundError } from "../../../../../../utils/errors.js";
 import { lifecyclePolicyBodySchema } from "./schemas.js";
@@ -11,6 +10,11 @@ import {
   validateBody,
   validateParams,
 } from "../../../../../../utils/validateReq.js";
+import {
+  bucketEventScope,
+  emitTx,
+  logAuditTx,
+} from "../../../../../../utils/outbox.js";
 
 export const getLifecyclePolicy = async (req: Request, res: Response) => {
   const auth = validateUser(req);
@@ -66,22 +70,20 @@ export const upsertLifecyclePolicy = async (req: Request, res: Response) => {
       },
     });
 
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.lifecycle.policy.updated",
-        organizationId: bucket.organizationId,
-        entityType: "bucket",
-        entityId: String(bucket.id),
-        data: {
-          bucketId: bucket.id,
-          bucketName: bucket.name,
-          expireObjectsAfterDays: next.expireObjectsAfterDays,
-          expireVersionsAfterDays: next.expireVersionsAfterDays,
-          purgeSoftDeletedAfterDays: next.purgeSoftDeletedAfterDays,
-          enabled: next.enabled,
-        },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.lifecycle.policy.updated",
+      ...bucketEventScope(bucket),
+      entityType: "bucket",
+      entityId: String(bucket.id),
+      data: {
+        bucketId: bucket.id,
+        bucketName: bucket.name,
+        expireObjectsAfterDays: next.expireObjectsAfterDays,
+        expireVersionsAfterDays: next.expireVersionsAfterDays,
+        purgeSoftDeletedAfterDays: next.purgeSoftDeletedAfterDays,
+        enabled: next.enabled,
+      },
+    });
 
     return next;
   });
@@ -120,15 +122,13 @@ export const deleteLifecyclePolicy = async (req: Request, res: Response) => {
       metadata: { bucketName: bucket.name },
     });
 
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.lifecycle.policy.deleted",
-        organizationId: bucket.organizationId,
-        entityType: "bucket",
-        entityId: String(bucket.id),
-        data: { bucketId: bucket.id, bucketName: bucket.name },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.lifecycle.policy.deleted",
+      ...bucketEventScope(bucket),
+      entityType: "bucket",
+      entityId: String(bucket.id),
+      data: { bucketId: bucket.id, bucketName: bucket.name },
+    });
   });
 
   setAccessLog(res, {

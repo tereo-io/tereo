@@ -157,7 +157,9 @@ describe("Outbox webhook dispatcher", () => {
     const key = crypto.randomUUID();
     const ev = { ...event("never.registered.claim"), idempotencyKey: key };
     try {
-      await expect(emitWithIdempotency(ev, SYSTEM_USER_ID)).rejects.toThrow();
+      await expect(
+        emitWithIdempotency(ev, { userId: SYSTEM_USER_ID, email: null })
+      ).rejects.toThrow();
     } finally {
       del.mockRestore();
     }

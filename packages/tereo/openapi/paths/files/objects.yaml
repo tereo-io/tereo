@@ -911,7 +911,9 @@
       (the UUID `id` is stable across renames); `contentType`, `metadata`,
       and `tags` update the current version's metadata; `deleteAfter` sets
       or clears the object's own expiry. At least one editable field
-      (excluding `createNewVersion`) must be provided.
+      (excluding `createNewVersion`) must be provided. A request whose values
+      are already the object's (and that creates no version) returns the
+      object without writing an audit entry or emitting an event.
 
       **Versioning:**
       Setting `createNewVersion: true` on a bucket with

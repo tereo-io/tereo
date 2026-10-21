@@ -34,7 +34,7 @@ describe("Event Emission", () => {
     ...extra,
   });
 
-  /** Deliveries plus no-match audit entries written for an event type. */
+  /** Deliveries plus emit audit entries written for an event type. */
   const writesFor = async (eventType: string) => {
     const deliveries = await prisma.webhookDelivery.count({
       where: { eventType },
@@ -83,6 +83,18 @@ describe("Event Emission", () => {
 
       expect(response.status).toBe(HTTP_STATUS.ACCEPTED);
       expect(response.data.deliveriesCreated).toBe(1);
+
+      const audit = await prisma.auditLogEntry.findFirstOrThrow({
+        where: {
+          entityType: "WebhookEvent",
+          metadata: { path: ["eventType"], equals: et.eventType },
+        },
+      });
+      expect(audit.userId).toBe(getTestUserId());
+      expect(audit.organizationId).toBe(getTestOrgId());
+      expect(audit.metadata).toMatchObject({ deliveriesCreated: 1 });
+      // Not the event's data, which the audit log's readers may not read.
+      expect(JSON.stringify(audit.metadata)).not.toContain("nested");
 
       // Verify delivery record was created in database
       const deliveries = await prisma.webhookDelivery.findMany({
@@ -649,6 +661,17 @@ describe("Event Emission", () => {
         })
       ).toBe(4);
       expect(await writesFor(noEndpoint.eventType)).toBe(1);
+      // One audit entry per event, under the caller.
+      const audits = await prisma.auditLogEntry.findMany({
+        where: {
+          entityType: "WebhookEvent",
+          metadata: { path: ["eventType"], equals: et.eventType },
+        },
+      });
+      expect(audits.map((a) => a.userId)).toEqual([
+        getTestUserId(),
+        getTestUserId(),
+      ]);
     });
 
     it("fails the whole batch with 409 while one key is in progress, releasing its own claims", async () => {
@@ -747,7 +770,8 @@ describe("Event Emission", () => {
 
       expect(response.status).toBe(422);
       expect(response.data.error).toBe("idempotency_key_conflict");
-      expect(await writesFor(et.eventType)).toBe(1);
+      // The first emit's delivery and audit entry.
+      expect(await writesFor(et.eventType)).toBe(2);
     });
 
     it("returns 422 for a different event while the key's first request is processing", async () => {

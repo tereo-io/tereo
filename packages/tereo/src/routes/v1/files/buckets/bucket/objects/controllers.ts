@@ -1,7 +1,6 @@
 import { broadcastObjectInvalidate } from "../../../../../../utils/cacheBroadcast.js";
 import { enqueueOrphanBlobCleanupSafe } from "../../../../../../jobs/index.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
-import { logAuditTx, emitTx } from "../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { withUserRefs } from "../../../../../../utils/users.js";
 import db from "../../../../../../utils/db/index.js";
@@ -17,6 +16,11 @@ import {
   validateParams,
   validateQuery,
 } from "../../../../../../utils/validateReq.js";
+import {
+  bucketEventScope,
+  logAuditTx,
+  emitTx,
+} from "../../../../../../utils/outbox.js";
 import {
   BadRequestError,
   ForbiddenError,
@@ -296,22 +300,20 @@ export const bulkDeleteObjects = async (req: Request, res: Response) => {
             versionedTombstone: batch.versioningEnabled,
           },
         });
-        if (bucket.organizationId) {
-          await emitTx(tx, {
-            eventType: "file-service.objects.bulk-deleted",
-            organizationId: bucket.organizationId,
-            entityType: "bucket",
-            entityId: String(bucket.id),
-            data: {
-              bucketName: bucket.name,
-              filter,
-              batchIndex: index,
-              deletedCount: batch.deleted.length,
-              versionedTombstone: batch.versioningEnabled,
-              objects: batch.deleted,
-            },
-          });
-        }
+        await emitTx(tx, {
+          eventType: "file-service.objects.bulk-deleted",
+          ...bucketEventScope(bucket),
+          entityType: "bucket",
+          entityId: String(bucket.id),
+          data: {
+            bucketName: bucket.name,
+            filter,
+            batchIndex: index,
+            deletedCount: batch.deleted.length,
+            versionedTombstone: batch.versioningEnabled,
+            objects: batch.deleted,
+          },
+        });
       },
     }
   );
@@ -385,21 +387,19 @@ export const purgeNonCurrentVersions = async (req: Request, res: Response) => {
             versionIds: batch.versionIds,
           },
         });
-        if (bucket.organizationId) {
-          await emitTx(tx, {
-            eventType: "file-service.objects.versions.purged",
-            organizationId: bucket.organizationId,
-            entityType: "bucket",
-            entityId: String(bucket.id),
-            data: {
-              bucketName: bucket.name,
-              batchIndex: index,
-              purgedCount: batch.versionIds.length,
-              bytesFreed: batch.bytesFreed.toString(),
-              versionIds: batch.versionIds,
-            },
-          });
-        }
+        await emitTx(tx, {
+          eventType: "file-service.objects.versions.purged",
+          ...bucketEventScope(bucket),
+          entityType: "bucket",
+          entityId: String(bucket.id),
+          data: {
+            bucketName: bucket.name,
+            batchIndex: index,
+            purgedCount: batch.versionIds.length,
+            bytesFreed: batch.bytesFreed.toString(),
+            versionIds: batch.versionIds,
+          },
+        });
       },
     }
   );

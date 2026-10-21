@@ -1,8 +1,8 @@
 import { broadcastObjectInvalidate } from "../../../../../../../../utils/cacheBroadcast.js";
 import { enqueueOrphanBlobCleanupSafe } from "../../../../../../../../jobs/index.js";
+import type { ObjectWithCurrent } from "../../../../../../../../utils/db/objects.js";
 import { setAccessLog } from "../../../../../../../../middleware/accessLog.js";
 import { assertObjectKeyNotReserved, serializeObject } from "../../utils.js";
-import { logAuditTx, emitTx } from "../../../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../../../middleware/auth.js";
 import { byIdParamsSchema, patchObjectBodySchema } from "./schemas.js";
 import db from "../../../../../../../../utils/db/index.js";
@@ -21,6 +21,21 @@ import {
   BadRequestError,
   NotFoundError,
 } from "../../../../../../../../utils/errors.js";
+import {
+  bucketEventScope,
+  computeChanges,
+  emitTx,
+  logAuditTx,
+} from "../../../../../../../../utils/outbox.js";
+
+/** What a PATCH can change, to tell whether it changed anything. */
+const patchableFields = (object: ObjectWithCurrent) => ({
+  objectKey: object.objectKey,
+  deleteAfter: object.deleteAfter,
+  contentType: object.versions[0]?.contentType ?? null,
+  metadata: object.versions[0]?.metadata ?? null,
+  tags: object.versions[0]?.tags ?? null,
+});
 
 /**
  * GET /buckets/:name/objects/by-id/:id
@@ -76,20 +91,18 @@ export const deleteObjectById = async (req: Request, res: Response) => {
       },
     });
 
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.object.deleted",
-        organizationId: bucket.organizationId,
-        entityType: "object",
-        entityId: String(result.id),
-        data: {
-          bucketName: bucket.name,
-          objectKey: result.objectKey,
-          objectId: params.id,
-          versionedTombstone: result.versioningEnabled,
-        },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.object.deleted",
+      ...bucketEventScope(bucket),
+      entityType: "object",
+      entityId: String(result.id),
+      data: {
+        bucketName: bucket.name,
+        objectKey: result.objectKey,
+        objectId: params.id,
+        versionedTombstone: result.versioningEnabled,
+      },
+    });
 
     return result;
   });
@@ -134,98 +147,109 @@ export const patchObject = async (req: Request, res: Response) => {
     body.contentType !== undefined ||
     body.metadata !== undefined ||
     body.tags !== undefined;
-  const { object, renamed, previousKey } = await db.$transaction(async (tx) => {
-    // The current version is read under the object's lock, so an upload
-    // committed since the request arrived can't leave this edit on a version
-    // that is no longer current (or, unversioned, no longer exists).
-    const locked = await db.objects.checkByIdForUpdate(
-      bucket.id,
-      params.id,
-      tx
-    );
-    if (!locked) throw new NotFoundError("Object not found");
-    const previousKey = locked.objectKey;
-    const current = metadataChanged
-      ? await db.objectVersions.getCurrent(locked.id, tx)
-      : null;
-    if (metadataChanged && !current) {
-      throw new BadRequestError(
-        "no_current_version",
-        "Object has no current version to patch"
-      );
-    }
-
-    let renamedRes: { previousKey: string; newKey: string } | null = null;
-    if (body.objectKey !== undefined && body.objectKey !== previousKey) {
-      const r = await db.objects.renameObject(
+  const { object, renamed, previousKey, changed } = await db.$transaction(
+    async (tx) => {
+      // The current version is read under the object's lock, so an upload
+      // committed since the request arrived can't leave this edit on a version
+      // that is no longer current (or, unversioned, no longer exists).
+      const locked = await db.objects.checkByIdForUpdate(
         bucket.id,
         params.id,
-        body.objectKey,
-        auth.userId,
         tx
       );
-      renamedRes = { previousKey: r.previousKey, newKey: r.newKey };
-    }
+      if (!locked) throw new NotFoundError("Object not found");
+      const before = await db.objects.getById(bucket.id, params.id, tx);
+      const previousKey = locked.objectKey;
+      const current = metadataChanged
+        ? await db.objectVersions.getCurrent(locked.id, tx)
+        : null;
+      if (metadataChanged && !current) {
+        throw new BadRequestError(
+          "no_current_version",
+          "Object has no current version to patch"
+        );
+      }
 
-    if (body.deleteAfter !== undefined) {
-      await db.objects.updateDeleteAfter(params.id, body.deleteAfter, tx);
-    }
-
-    // `createNewVersion` only has an effect on versioning-enabled buckets
-    // (read under the bucket's lock); elsewhere the edit is made in place, so
-    // callers can pass it unconditionally.
-    let branchVersion = false;
-    if (current) {
-      if (body.createNewVersion === true) {
-        branchVersion = await db.objects.branchCurrentVersion(
+      let renamedRes: { previousKey: string; newKey: string } | null = null;
+      if (body.objectKey !== undefined && body.objectKey !== previousKey) {
+        const r = await db.objects.renameObject(
           bucket.id,
           params.id,
-          {
-            contentType: body.contentType,
-            metadata: body.metadata as never,
-            tags: body.tags,
-            createdBy: auth.userId,
-          },
+          body.objectKey,
+          auth.userId,
           tx
         );
+        renamedRes = { previousKey: r.previousKey, newKey: r.newKey };
       }
-      if (!branchVersion) {
-        await db.objectVersions.updateCurrentMetadata(
-          current.id,
-          {
-            contentType: body.contentType,
-            metadata: body.metadata as never,
-            tags: body.tags,
-          },
-          tx
-        );
+
+      if (body.deleteAfter !== undefined) {
+        await db.objects.updateDeleteAfter(params.id, body.deleteAfter, tx);
       }
-    }
 
-    const refreshed = await db.objects.getById(bucket.id, params.id, tx);
+      // `createNewVersion` only has an effect on versioning-enabled buckets
+      // (read under the bucket's lock); elsewhere the edit is made in place, so
+      // callers can pass it unconditionally.
+      let branchVersion = false;
+      if (current) {
+        if (body.createNewVersion === true) {
+          branchVersion = await db.objects.branchCurrentVersion(
+            bucket.id,
+            params.id,
+            {
+              contentType: body.contentType,
+              metadata: body.metadata as never,
+              tags: body.tags,
+              createdBy: auth.userId,
+            },
+            tx
+          );
+        }
+        if (!branchVersion) {
+          await db.objectVersions.updateCurrentMetadata(
+            current.id,
+            {
+              contentType: body.contentType,
+              metadata: body.metadata as never,
+              tags: body.tags,
+            },
+            tx
+          );
+        }
+      }
 
-    await logAuditTx(tx, {
-      auth,
-      organizationId: bucket.organizationId ?? undefined,
-      action: "UPDATE",
-      entityType: "object",
-      entityId: String(refreshed.id),
-      entityName: refreshed.objectKey,
-      metadata: {
-        bucketName: bucket.name,
-        objectId: params.id,
-        renamed: renamedRes,
-        branchedVersion: branchVersion,
-        changedFields: Object.keys(body).filter(
-          (k) => k !== "createNewVersion"
-        ),
-      },
-    });
+      const refreshed = await db.objects.getById(bucket.id, params.id, tx);
+      const changes = computeChanges(
+        patchableFields(before),
+        patchableFields(refreshed)
+      );
+      if (!changes && !branchVersion) {
+        return {
+          object: refreshed,
+          renamed: null,
+          previousKey,
+          changed: false,
+        };
+      }
 
-    if (bucket.organizationId) {
+      await logAuditTx(tx, {
+        auth,
+        organizationId: bucket.organizationId ?? undefined,
+        action: "UPDATE",
+        entityType: "object",
+        entityId: String(refreshed.id),
+        entityName: refreshed.objectKey,
+        metadata: {
+          bucketName: bucket.name,
+          objectId: params.id,
+          renamed: renamedRes,
+          branchedVersion: branchVersion,
+          changedFields: Object.keys(changes ?? {}),
+        },
+      });
+
       await emitTx(tx, {
         eventType: "file-service.object.updated",
-        organizationId: bucket.organizationId,
+        ...bucketEventScope(bucket),
         entityType: "object",
         entityId: String(refreshed.id),
         data: {
@@ -236,14 +260,19 @@ export const patchObject = async (req: Request, res: Response) => {
           branchedVersion: branchVersion,
         },
       });
-    }
 
-    if (branchVersion) {
-      await emitVersionCreatedTx(tx, bucket, refreshed, "metadata");
-    }
+      if (branchVersion) {
+        await emitVersionCreatedTx(tx, bucket, refreshed, "metadata");
+      }
 
-    return { object: refreshed, renamed: renamedRes, previousKey };
-  });
+      return {
+        object: refreshed,
+        renamed: renamedRes,
+        previousKey,
+        changed: true,
+      };
+    }
+  );
 
   setAccessLog(res, {
     bucketId: bucket.id,
@@ -253,7 +282,7 @@ export const patchObject = async (req: Request, res: Response) => {
 
   // Invalidate both the old and new keys (if renamed) so cached metadata on
   // either addressing path is dropped.
-  await broadcastObjectInvalidate(bucket.name, previousKey);
+  if (changed) await broadcastObjectInvalidate(bucket.name, previousKey);
   if (renamed) await broadcastObjectInvalidate(bucket.name, renamed.newKey);
 
   res.json(serializeObject(object));

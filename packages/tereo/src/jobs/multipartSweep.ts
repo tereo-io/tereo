@@ -1,8 +1,8 @@
 import { getMultipartSweepQueue, MULTIPART_SWEEP_QUEUE } from "./queues.js";
+import { bucketEventScope, emitTx, logAuditTx } from "../utils/outbox.js";
 import { createTimeBoxedLoop, isShuttingDown } from "./jobUtils.js";
 import { removeMultipartDir } from "../utils/storage.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
-import { emitTx, logAuditTx } from "../utils/outbox.js";
 import { TrackedWorker } from "./workerRegistry.js";
 import { getRedisClient } from "../utils/redis.js";
 import { logger } from "../utils/logger.js";
@@ -48,19 +48,17 @@ async function processMultipartSweepTick(): Promise<{
           },
         });
 
-        if (upload.bucket.organizationId) {
-          await emitTx(tx, {
-            eventType: "file-service.multipart.aborted",
-            organizationId: upload.bucket.organizationId,
-            entityType: "multipartUpload",
-            entityId: upload.id,
-            data: {
-              bucketName: upload.bucket.name,
-              objectKey: upload.objectKey,
-              reason: "expired",
-            },
-          });
-        }
+        await emitTx(tx, {
+          eventType: "file-service.multipart.aborted",
+          ...bucketEventScope(upload.bucket),
+          entityType: "multipartUpload",
+          entityId: upload.id,
+          data: {
+            bucketName: upload.bucket.name,
+            objectKey: upload.objectKey,
+            reason: "expired",
+          },
+        });
         return true;
       });
       // Finalized by a concurrent complete or abort, which cleans up itself.

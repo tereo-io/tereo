@@ -19,13 +19,18 @@ WebhookEvent:
       examples:
         - "0b6f3f8e-2a5c-4d1e-9f3b-7c2d8e4a1b90"
     organizationId:
-      type: string
+      type:
+        - string
+        - "null"
       format: uuid
       description: |
         Organization the event was emitted for. Present on every emitted event
         (see `OrganizationWebhookEvent`): auth and core events carry the
-        default organization, and files events are emitted only for buckets
-        that belong to an organization. Absent on `webhook.test` deliveries.
+        default organization, files events their bucket's. It is null for an
+        event outside any organization — a bucket an app service declares,
+        or a webhook endpoint of all organizations — which goes only to
+        endpoints of all organizations and to the owning service's endpoints.
+        Absent on `webhook.test` deliveries.
       examples:
         - "019dd4c2-e0b3-778e-b8db-a52e61927416"
     eventType:

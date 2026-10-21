@@ -361,18 +361,19 @@ its webhook event in the same transaction.
 
 ## Webhook Events
 
-Emitted with `emitTx` on mutations. Event types are declared in `src/definitions/eventTypes.ts`; payloads are in the OpenAPI spec's `webhooks:` section (`openapi/paths/files/webhook-events.yaml`). Only buckets that belong to an organization emit events.
+Emitted with `emitTx` on mutations. Event types are declared in `src/definitions/eventTypes.ts`; payloads are in the OpenAPI spec's `webhooks:` section (`openapi/paths/files/webhook-events.yaml`). A bucket's events are emitted under its organization; a bucket outside any organization (one an app service declares) emits them with `organizationId: null` and its service's id (`bucketEventScope` in `utils/outbox.ts`), and they go only to endpoints of all organizations and to endpoints the bucket's service owns, each still subject to its creator's access to the bucket. Share events (`file-service.share.*`) are still emitted only for buckets that belong to an organization.
 
-- `file-service.bucket.created/updated/deleted` — `updated` only when an update changed something (an unchanged `PUT` writes no audit entry or event)
+- `file-service.bucket.created/updated/deleted` — `updated` only when an update changed something (an unchanged `PUT` writes no audit entry or event), diffed against the bucket as read under its row lock; also when the registry retires a declared bucket (`data.retired: true`)
 - `file-service.bucket.owner-changed` — `PUT /buckets/:name/owner` changed the owner (`data.ownerId`, `data.previousOwnerId`)
-- `file-service.object.created/updated/deleted` — `created`/`updated` fire for every content write (authenticated upload, presigned upload, multipart complete; `data.via` says which), and `updated` also for a rename or metadata PATCH
+- `file-service.object.created/updated/deleted` — `created`/`updated` fire for every content write (authenticated upload, presigned upload, multipart complete; `data.via` says which), and `updated` also for a rename or metadata PATCH that changes something (one whose values are already the object's writes no audit entry and emits nothing) and for every version restore (`via: "restore"`, `undeleted` true when it brought back a deleted object)
 - `file-service.objects.bulk-deleted` — one event per committed batch of up to 100 objects of a bulk-delete request (by prefix or by id list), rather than N per-object events; `data.batchIndex` counts the request's batches from 0
 - `file-service.object.version.created/restored/deleted` — `created` fires in a versioned bucket for each new version a write makes (alongside `object.created/updated`) and for a PATCH with `createNewVersion`; restores fire `restored` instead
 - `file-service.objects.versions.purged` — one per committed batch of up to 100 versions of an on-demand purge of non-current versions across a bucket, with `data.batchIndex` as above
 - `file-service.permission.granted/revoked`
 - `file-service.lifecycle.policy.updated/deleted` — a bucket's lifecycle policy created or replaced, or removed
 - `file-service.lifecycle.policy.applied` — the `lifecycle-sweep` worker applied a policy (soft-deletes, version purge or hard-delete)
-- `file-service.multipart.initiated/completed/aborted` — `aborted` carries `reason: "aborted"` for the DELETE and `reason: "expired"` when the `multipart-sweep` worker expires an upload
+- `file-service.multipart.initiated/completed/aborted` — the upload's audit entries are `CREATE` at initiation and `UPDATE` (`metadata.completed: true`) at completion; `aborted` carries
+ `reason: "aborted"` for the DELETE and `reason: "expired"` when the `multipart-sweep` worker expires an upload
 - `file-service.share.created/updated/revoked`
 - `file-service.share.accessed` — one per download, gated by `FILE_SERVICE_EMIT_SHARE_ACCESS_EVENTS` (default off — noisy)
 

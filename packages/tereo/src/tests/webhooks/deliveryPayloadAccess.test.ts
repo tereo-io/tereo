@@ -159,10 +159,9 @@ describe("delivery payloads are shown only to who could read the event", () => {
     });
   });
 
-  it("is not copied into the audit entry of an event nobody was sent", async () => {
+  it("writes no audit entry for a core event nobody was sent", async () => {
     const organizationId = testOrgId(`delivery-unsent-${randomUUID()}`);
     await ensureTestMembership(randomUUID(), organizationId);
-    const email = `unsent-secret-${randomUUID()}@example.com`;
     const entityId = randomUUID();
     await dispatchOutboxEvent(
       {
@@ -170,19 +169,20 @@ describe("delivery payloads are shown only to who could read the event", () => {
         eventType: "auth.user.created",
         entityType: "User",
         entityId,
-        data: { email },
+        data: { email: `unsent-${randomUUID()}@example.com` },
       },
       randomUUID(),
       new Date()
     );
-    const entry = await prisma.auditLogEntry.findFirstOrThrow({
-      where: {
-        organizationId,
-        entityType: "WebhookEvent",
-        metadata: { path: ["entityId"], equals: entityId },
-      },
-    });
-    expect(JSON.stringify(entry.metadata)).not.toContain(email);
+    expect(
+      await prisma.auditLogEntry.count({
+        where: {
+          organizationId,
+          entityType: "WebhookEvent",
+          metadata: { path: ["entityId"], equals: entityId },
+        },
+      })
+    ).toBe(0);
   });
 
   describe("a file event", () => {

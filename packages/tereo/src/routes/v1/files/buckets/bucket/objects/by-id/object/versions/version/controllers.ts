@@ -8,6 +8,7 @@ import { byIdVersionParamsSchema } from "./schemas.js";
 import env from "../../../../../../../../../../env.js";
 import { Request, Response } from "express";
 import {
+  bucketEventScope,
   logAuditTx,
   emitTx,
 } from "../../../../../../../../../../utils/outbox.js";
@@ -127,42 +128,40 @@ export const restoreObjectVersionById = async (req: Request, res: Response) => {
         },
       });
 
-      if (bucket.organizationId) {
-        await emitTx(tx, {
-          eventType: "file-service.object.version.restored",
-          organizationId: bucket.organizationId,
-          entityType: "objectVersion",
-          entityId: result.restored.id,
-          data: {
-            bucketName: bucket.name,
-            objectKey: object.objectKey,
-            objectId: params.id,
-            restoredFromVersionId: result.source.id,
-            undeleted: result.undeleted,
-          },
-        });
-        // The object is back: for subscribers it reappears as updated.
-        if (result.undeleted) {
-          await emitTx(tx, {
-            eventType: "file-service.object.updated",
-            organizationId: bucket.organizationId,
-            entityType: "object",
-            entityId: params.id,
-            data: {
-              bucketName: bucket.name,
-              objectKey: object.objectKey,
-              objectId: params.id,
-              contentType:
-                result.restored.contentType ?? "application/octet-stream",
-              sizeBytes: result.source.contentBlob?.sizeBytes.toString() ?? "0",
-              etag: result.restored.etag ?? "",
-              tags: result.restored.tags,
-              via: "restore",
-              restoredFromVersionId: result.source.id,
-            },
-          });
-        }
-      }
+      await emitTx(tx, {
+        eventType: "file-service.object.version.restored",
+        ...bucketEventScope(bucket),
+        entityType: "objectVersion",
+        entityId: result.restored.id,
+        data: {
+          bucketName: bucket.name,
+          objectKey: object.objectKey,
+          objectId: params.id,
+          restoredFromVersionId: result.source.id,
+          undeleted: result.undeleted,
+        },
+      });
+      // A restore always replaces the current version, as an upload would;
+      // a deleted object reappears.
+      await emitTx(tx, {
+        eventType: "file-service.object.updated",
+        ...bucketEventScope(bucket),
+        entityType: "object",
+        entityId: params.id,
+        data: {
+          bucketName: bucket.name,
+          objectKey: object.objectKey,
+          objectId: params.id,
+          contentType:
+            result.restored.contentType ?? "application/octet-stream",
+          sizeBytes: result.source.contentBlob?.sizeBytes.toString() ?? "0",
+          etag: result.restored.etag ?? "",
+          tags: result.restored.tags,
+          via: "restore",
+          restoredFromVersionId: result.source.id,
+          undeleted: result.undeleted,
+        },
+      });
 
       return result;
     }
@@ -230,19 +229,17 @@ export const deleteObjectVersionById = async (req: Request, res: Response) => {
       },
     });
 
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.object.version.deleted",
-        organizationId: bucket.organizationId,
-        entityType: "objectVersion",
-        entityId: v.id,
-        data: {
-          bucketName: bucket.name,
-          objectKey: object.objectKey,
-          objectId: params.id,
-        },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.object.version.deleted",
+      ...bucketEventScope(bucket),
+      entityType: "objectVersion",
+      entityId: v.id,
+      data: {
+        bucketName: bucket.name,
+        objectKey: object.objectKey,
+        objectId: params.id,
+      },
+    });
 
     return v;
   });
