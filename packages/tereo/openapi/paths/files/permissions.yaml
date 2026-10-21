@@ -83,6 +83,8 @@
         (`400 user_not_in_organization`)
       - If an active permission already exists for the user, returns 409 Conflict
       - If a previously revoked permission exists, it will be un-revoked and updated with new permissions
+      - A grant gives no flag the caller's own active grant on the bucket lacks
+        (`403`); `file-service.admin`, which needs no grant, may give any
       - The bucket's creator is granted full object access when the bucket is created; once that grant is revoked, the owner no longer manages the bucket, so only a `file-service.admin` holder can grant it again
       - `userId` must be a UUID (`400 invalid_request` otherwise)
       - The response is the grant as the list returns it, with the grantee and the granter named (`user`, `granter`, and their emails and names flat).
@@ -121,7 +123,7 @@
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing file-service.permissions.write permission or no bucket access
+        description: Forbidden - missing file-service.permissions.write permission, no bucket access, or a flag beyond the caller's own grant
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: 'Bucket not found (only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
@@ -149,21 +151,26 @@
       - On a declared bucket, the declaring service's own grant cannot be revoked
         (`409 bucket_declared`): its declaration re-applies it when it changes
       - Revoked permissions are soft-deleted (marked with revokedAt timestamp)
+      - The user's shares on the bucket keep serving unless `revokeShares=true`,
+        which revokes those still live in the same transaction
 
       An audit log entry is created and, for a bucket in an organization, a
-      `file-service.permission.revoked` webhook event is emitted.
+      `file-service.permission.revoked` webhook event is emitted. Each share
+      `revokeShares` revokes gets its own audit entry
+      (`reason: "permission_revoked"`) and `file-service.share.revoked` event.
     operationId: revokeBucketPermission
     security:
       - BearerAuth: [file-service.permissions.delete]
     parameters:
       - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
       - $ref: '../../components/files/parameters.yaml#/FilesUserIdParam'
+      - $ref: '../../components/files/parameters.yaml#/RevokeSharesParam'
     responses:
       '204':
         $ref: '../../components/responses.yaml#/NoContentResponse'
       '400':
         $ref: '../../components/responses.yaml#/BadRequestResponse'
-        description: '`userId` is not a UUID (`invalid_request`)'
+        description: '`userId` is not a UUID, or `revokeShares` is neither `true` nor `false` (`invalid_request`)'
       '401':
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
       '403':

@@ -371,14 +371,15 @@
       effective access. A delegated token's permissions are already cut to its
       scopes' ceiling, so a `core:files.read` token reports `canWrite` and
       `canDelete` as `false` whatever the grant. `canRead` is also `true` on a
-      public bucket. Every field is a boolean — `false` without an active
-      grant. Being the bucket's creator or owner adds nothing: their access is
+      public bucket. Every field is a boolean. Being the bucket's creator or owner adds nothing: their access is
       their grant, and is gone once revoked. `canWrite` is
       `false` for everyone, admins included, on a retired bucket, which is
       read-only.
 
-      A missing bucket, or one of another organization, is refused with `403`
-      (a `file-service.admin` holder gets `404` for a missing one).
+      A missing bucket, one of another organization, and a private bucket the
+      caller holds no active grant on are all refused with the same `403`, so
+      the answer can't confirm that a bucket exists (a `file-service.admin`
+      holder gets `404` for a missing one).
 
       **Required permissions:**
       - None beyond a valid token (authenticated users can check their own permissions)
@@ -408,7 +409,7 @@
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - no such bucket, or the bucket belongs to another organization
+        description: Forbidden - no such bucket, the bucket belongs to another organization, or it is private and the caller holds no active grant on it
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket

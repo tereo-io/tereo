@@ -58,7 +58,9 @@ Sent over SMTP with nodemailer.
   accept and again when the delivery is sent, as at accept: the sender's live permissions and
   grants, in the token's organization and capped by its scopes (both stored on the notification as
   `sender_access`, never returned). Access lost in between fails the delivery permanently with
-  `attachment_forbidden`; core's own sends read every bucket.
+  `attachment_forbidden`; core's own sends read every bucket. As in the files API, a public
+  bucket's history is not public: at accept, a version that is no longer current takes a grant on
+  the bucket (or `file-service.admin`), and is `attachment_not_found` without one.
 - An address named twice is sent to once, at the most visible `as` (`to` over `cc` over `bcc`).
   One email is one delivery.
 - `Message-ID` is `<delivery id>@<from domain>`.
