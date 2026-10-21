@@ -379,6 +379,16 @@ checked against that organization). Setting `ssoOnly: true` (on create or `PATCH
 `provider_inactive` while the provider is deactivated, since its users would have no way in.
 Deleting a custom role removes it from every domain's default roles.
 
+**`ssoOnly` hands the domain's accounts to the provider.** The next password sign-in of an existing
+user at an SSO-only domain is force-linked to the provider and the password dropped (see _Linking
+from the account page and SSO-only domains_), so whoever controls the provider's issuer and client
+gets those accounts. `identity-providers.write` bounds nothing about those accounts, so only a
+caller holding `admin` through a global role may make a domain SSO-only (on create or `PATCH`),
+change the `domain` of an SSO-only one, turn `ssoOnly` off or delete an SSO-only domain (the last
+two reopen the accounts to passwords), or change the `issuer` or `clientId` of a provider that has
+an SSO-only domain; 403 otherwise. The checks run under the provider's row lock, which every domain
+write takes.
+
 A domain's `autoAccept` only matches the provider that owns the domain. A user with a matching
 email who already exists is never signed in by it: see _No matching by email_ below.
 
@@ -602,6 +612,10 @@ declaration ([registry.md](registry.md)). Admins cannot create, edit, archive or
 - Changing any role's `requires2fa` needs a caller holding every permission the role grants (403
   otherwise, as when granting them): the policy guards what the role gives, so only `admin` changes
   it on core's `admin` role.
+- A role held by an integration's account cannot come to grant `admin`, which integrations never
+  hold: adding `admin` to it (`PUT …/permissions`) or reactivating it while it carries `admin` is
+  `403 role_not_allowed_for_integration`, naming the integrations. The role's row lock serializes
+  the check with an integration taking the role.
 - Custom roles (`serviceId` null) are the admin's: any unretired permission can be added, and a
   retired one may stay on a role (`permissions[].retired`) but grants nothing.
 - Resolution (`getUserPermissions`) skips archived, deactivated and retired roles, and retired
@@ -706,6 +720,11 @@ The `totpPolicy` system setting (`PATCH /v1/admin/settings`) is `disabled`, `opt
 - `required` — every user must enrol; login redirects to setup until they do.
 - `optional` — users may enrol; a user holding an active role with `requires2fa` must.
 
+`settings.write` may tighten the policy, but relaxing it (`required` to anything, `optional` to
+`disabled`) needs `admin` through a global role (403 otherwise), checked in the change's
+transaction under a lock on the setting: `disabled` overrides every role's `requires2fa`, `admin`'s
+included, so no narrower permission bounds it.
+
 Enrolling at login (`/oauth/totp/setup/verify`) ends the user's other sessions in the transaction
 that enables TOTP, as enrolling from the account page does: sessions opened with the password alone
 do not outlive the switch to 2FA.
@@ -728,6 +747,17 @@ and its refresh tokens are refused with `invalid_grant`, so the client signs the
 login that used a second factor (`otp`, `recovery`, or a provider's `mfa`) is unaffected, as are
 client-credentials tokens. Enrolling from the account page does not count: the session that enrolled
 keeps going.
+
+Permissions are read on every request, so a password-only access token would otherwise keep working
+under the new requirement until it expired. The change that makes it — `PATCH /v1/admin/settings`
+moving the policy up (to `required`: every person; `disabled` to `optional`: holders of a role with
+`requires2fa`), `PATCH /v1/admin/roles/:id` turning `requires2fa` on or reactivating such a role (its
+holders), and `PUT /v1/admin/users/:id/roles` or `PUT /v1/admin/organizations/:id/members/:userId/roles`
+adding such a role (that user) — revokes those people's live access tokens from a login without a
+second factor (`db.accessTokens.revokeWithoutMfa`) in its transaction, and closes their sockets. The
+client's next refresh then meets the step-up above. The audit entry records `accessTokensRevoked`.
+Other ways a role comes to count (joining or reactivating an organization) revoke nothing; refresh
+and the next login still enforce them.
 
 - `disabled` — new enrolment is refused with 403 `totp_disabled` on `POST /v1/account/totp/setup`,
   `/v1/account/totp/setup/verify`, `/oauth/totp/setup` and `/oauth/totp/setup/verify` (a setup started
@@ -789,12 +819,18 @@ org-assignable permissions), counting deactivated roles too, since an admin can 
 cut down to their token's scope ceiling for a delegated token. The caller's org-scoped roles do not
 count, since the account reaches beyond that organization. Otherwise 403, naming the permissions the
 caller lacks: `users.write` alone resets only users who hold no more than `users.write`, and no
-third-party client's token (no core API scope reaches `admin`) resets an administrator. The system user and a service's account are refused, as on the other
-admin user routes.
+third-party client's token (no core API scope reaches `admin`) resets an administrator. An `owner`
+or `admin` membership in any organization (inactive and archived ones included) is authority no
+permission names, so it needs the caller to hold `organizations.write`, the global permission that
+manages any organization's owners and admins (`requireOrgRole`): otherwise 403 naming
+`organizations.write`. The same rule covers deactivating, ending sessions of and removing roles from
+another user (`assertMayDisempower`), and reactivating a deactivated user (`assertMayReactivate`),
+whose account comes back with all it holds. The system user and a service's account are refused, as
+on the other admin user routes.
 
 This check and `assertMayDisempower` run inside the change's transaction, under a per-user advisory lock
 (`db.users.lockAuthority`) that every admin change to the user's roles — global or in an organization,
-membership removal included — takes too, first: a role granted to the user concurrently is either
+membership additions, tier changes and removals included — takes too, first: a role granted to the user concurrently is either
 committed before the check sees it, or waits until the reset or removal has committed. Editing a
 role's permissions or restoring a role does not take it, so a role the user already holds can still
 gain permissions while the check runs.

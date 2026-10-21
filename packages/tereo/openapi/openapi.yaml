@@ -783,13 +783,14 @@ info:
 
     Writes follow the same rule. Without `audit-logs.admin`, a token with an `org_id` writes
     only entries for that organization: another organization, or a system-wide entry, is
-    `403`, and one such entry refuses a whole batch. A service account's token without an
-    `org_id` — an app service's client, which writes for every tenant of its app — may write
-    for any organization; a person's token without one may not write.
+    `403`, and one such entry refuses a whole batch. An app service's token without an
+    `org_id` — its client writes for every tenant of its app — may write for any
+    organization; anyone else's token without one (a person's, an integration's) may not write.
 
-    An app service's client writes only entries whose `source` is its slug (`403` otherwise),
-    so its reads above hold exactly what it wrote. No service or integration may take the slug
-    `tereo`, the source of core's own entries.
+    An app service's client writes only entries whose `source` is its slug (`422
+    source_mismatch` otherwise), so its reads above hold exactly what it wrote. No service or
+    integration may take the slug `tereo`, the source of core's own entries, and no other writer
+    may use `tereo`, `core` or an app service's slug as `source` (`422 source_reserved`).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0

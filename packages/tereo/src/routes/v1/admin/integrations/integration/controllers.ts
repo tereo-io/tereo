@@ -2,6 +2,7 @@ import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganizati
 import { formatIntegration } from "../../../../../utils/transformers.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { emitTx, logAuditTx } from "../../../../../utils/outbox.js";
+import { assertMayChangeAudience } from "../../clients/utils.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
@@ -72,9 +73,13 @@ export const setRoles = async (req: Request, res: Response) => {
   res.json(formatIntegration(updated));
 };
 
-/** The services that may introspect its tokens. */
+/**
+ * The services that may introspect its tokens: naming one lets it read them,
+ * so services.approve, as for a client's audience.
+ */
 export const setAudiences = async (req: Request, res: Response) => {
   const auth = validateUser(req);
+  assertMayChangeAudience(auth);
   const { slugs } = validateBody(SetIntegrationAudiencesSchema, req);
   const existing = await getEditable(req);
 

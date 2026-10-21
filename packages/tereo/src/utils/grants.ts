@@ -60,3 +60,19 @@ export const globalGrantablePermissions = async (
     await db.roles.getUserPermissions(auth.userId, null, tx),
     auth.ceiling
   );
+
+/**
+ * Refuses a caller without a global `admin` (capped by a delegated token's
+ * ceiling, as `globalGrantablePermissions` is): for a change that weakens a
+ * protection every account relies on, which no narrower permission is
+ * bounded by.
+ */
+export const assertGlobalAdmin = async (
+  auth: Pick<AuthContext, "userId" | "ceiling">,
+  refusal: string,
+  tx?: Prisma.TransactionClient
+): Promise<void> => {
+  if (!hasPermission(await globalGrantablePermissions(auth, tx), "admin")) {
+    throw new ForbiddenError(refusal);
+  }
+};

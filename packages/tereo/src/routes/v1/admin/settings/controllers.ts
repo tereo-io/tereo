@@ -1,4 +1,7 @@
 import { getDefaultOrganizationId } from "../../../../utils/defaultOrganization.js";
+import { disconnectTokenSockets } from "../../../../websocket/emitters/index.js";
+import type { TotpPolicy } from "../../../../utils/db/settings.js";
+import { assertGlobalAdmin } from "../../../../utils/grants.js";
 import { validateBody } from "../../../../utils/validateReq.js";
 import { OAuth2Error } from "../../../../utils/errors.js";
 import { validateUser } from "../../../../utils/auth.js";
@@ -11,6 +14,12 @@ import {
   emitTx,
   logAuditTx,
 } from "../../../../utils/outbox.js";
+
+const POLICY_STRENGTH: Record<TotpPolicy, number> = {
+  disabled: 0,
+  optional: 1,
+  required: 2,
+};
 
 export const getSettings = async (_req: Request, res: Response) => {
   const settings = await db.settings.getTotpSettings();
@@ -29,9 +38,36 @@ export const updateSettings = async (req: Request, res: Response) => {
     throw new OAuth2Error("invalid_request", "No settings to update");
   }
 
-  const updatedSettings = await db.$transaction(async (tx) => {
+  const { updatedSettings, revokedJtis } = await db.$transaction(async (tx) => {
+    // A relaxation is judged against the policy it replaces, which no
+    // concurrent change may move in between.
+    await db.settings.lockTotpSettings(tx);
     const existing = await db.settings.getTotpSettings(tx);
+    const next = body.totpPolicy ?? existing.totpPolicy;
+    const change = POLICY_STRENGTH[next] - POLICY_STRENGTH[existing.totpPolicy];
+    // `disabled` overrides every role's requires2fa, admin's included, so
+    // no narrower permission bounds it.
+    if (change < 0) {
+      await assertGlobalAdmin(
+        auth,
+        "Only an administrator (global admin) can relax the two-factor policy",
+        tx
+      );
+    }
     const updated = await db.settings.updateTotpSettings(body, tx);
+    // Permissions are read live, so a token from a password-only login
+    // would keep working under the stricter policy; revoked, its refresh
+    // meets the step-up. `optional` newly requires 2FA only of holders of
+    // a role that requires it.
+    const revokedJtis =
+      change > 0
+        ? await db.accessTokens.revokeWithoutMfa(
+            next === "required"
+              ? {}
+              : { userRoles: { some: { role: { requires2fa: true } } } },
+            tx
+          )
+        : [];
     await logAuditTx(tx, {
       auth,
       action: "UPDATE",
@@ -39,6 +75,9 @@ export const updateSettings = async (req: Request, res: Response) => {
       entityId: "totp",
       entityName: "TOTP settings",
       changes: computeChanges({ ...existing }, { ...updated }),
+      ...(revokedJtis.length > 0 && {
+        metadata: { accessTokensRevoked: revokedJtis.length },
+      }),
     });
     await emitTx(tx, {
       organizationId: getDefaultOrganizationId(),
@@ -50,8 +89,10 @@ export const updateSettings = async (req: Request, res: Response) => {
         totpRecoveryCodeCount: updated.totpRecoveryCodeCount,
       },
     });
-    return updated;
+    return { updatedSettings: updated, revokedJtis };
   });
+
+  disconnectTokenSockets(revokedJtis);
 
   logger.debug(
     {

@@ -139,7 +139,10 @@
       the provider (409 `provider_has_invites`): withdraw the invites first.
       Turning `countsAsMfa` on needs a caller holding `admin` through a global role
       (403 otherwise), and so does changing `issuer` or `clientId` while it stays
-      on; turning it off does not. Other errors are those of create.
+      on; turning it off does not. Changing `issuer` or `clientId` of a provider
+      with an SSO-only domain needs global `admin` too (403 otherwise): its
+      password users are force-linked to whoever the provider vouches for.
+      Other errors are those of create.
 
       An audit log entry is created for this action.
       An `auth.identity-provider.updated` webhook event is emitted.
@@ -303,7 +306,9 @@
       `roleIds`; `ssoOnly` refuses password sign-in for the domain's users. The two
       are independent. `domain` is lowercased and a leading `@` dropped.
       `ssoOnly: true` is refused with 409 `provider_inactive` while the provider
-      is deactivated, since the domain's users would have no way to sign in.
+      is deactivated, since the domain's users would have no way to sign in, and
+      with 403 unless the caller holds `admin` through a global role: a password
+      sign-in at an SSO-only domain is force-linked to the provider.
 
       `roleIds` must be roles that may be assigned within an organization: 400
       `unknown_role` for an unknown, archived or retired role, 400
@@ -392,7 +397,8 @@
       to another `organizationId` grants its roles (those sent, or else its current
       ones) in that organization, so all of them are checked there. Errors are those
       of adding a domain, including 409 `provider_inactive` for `ssoOnly: true` on a
-      deactivated provider.
+      deactivated provider. Turning `ssoOnly` on or off, or changing the `domain` of
+      an SSO-only domain, needs `admin` through a global role (403 otherwise).
 
       An audit log entry is created for this action.
     operationId: updateAdminIdentityProviderDomain
@@ -435,8 +441,9 @@
     summary: Remove a domain
     description: |
       Releases the domain and its default roles. Users already created through it
-      keep their accounts and identities. An audit log entry is created for this
-      action.
+      keep their accounts and identities. Deleting an SSO-only domain reopens its
+      users to passwords, so it needs `admin` through a global role (403
+      otherwise). An audit log entry is created for this action.
     operationId: deleteAdminIdentityProviderDomain
     security:
       - BearerAuth: [identity-providers.write]

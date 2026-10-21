@@ -412,6 +412,112 @@ describe("Admin password and two-factor resets", () => {
     });
   });
 
+  describe("a target managing an organization", () => {
+    const memberOf = async (memberRole: "owner" | "admin" | "member") => {
+      const target = await createTestUser();
+      await prisma.organizationMember.create({
+        data: {
+          organizationId: await ensureTestOrganization(
+            "credential-resets-managed-org"
+          ),
+          userId: target.id,
+          memberRole,
+        },
+      });
+      return target;
+    };
+
+    it("refuses a users.write caller a reset or deactivation of an owner or admin who holds no permission", async () => {
+      for (const memberRole of ["owner", "admin"] as const) {
+        const target = await memberOf(memberRole);
+        await enrolTotp(target.id);
+        const before = await passwordHash(target.id);
+
+        for (const response of [
+          await patchUser(writerToken, target.id, { password: NEW_PASSWORD }),
+          await patchUser(writerToken, target.id, {
+            email: `moved-${crypto.randomUUID()}@example.com`,
+          }),
+          await resetTotp(writerToken, target.id),
+          await patchUser(writerToken, target.id, { isActive: false }),
+        ]) {
+          expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+          expect(
+            ((await response.json()) as { error_description: string })
+              .error_description
+          ).toContain("organizations.write");
+        }
+        const row = await prisma.user.findUniqueOrThrow({
+          where: { id: target.id },
+        });
+        expect(row.passwordHash).toBe(before);
+        expect(row.email).toBe(target.email);
+        expect(row.totpEnabled).toBe(true);
+        expect(row.isActive).toBe(true);
+      }
+    });
+
+    it("lets a users.write caller reset a plain member", async () => {
+      const target = await memberOf("member");
+      expect(
+        (await patchUser(writerToken, target.id, { password: NEW_PASSWORD }))
+          .status
+      ).toBe(HTTP_STATUS.OK);
+    });
+
+    it("lets a users.write + organizations.write caller reset an owner", async () => {
+      const caller = await getTestPrincipalToken({
+        permissions: ["users.write", "organizations.write"],
+      });
+      const target = await memberOf("owner");
+      expect(
+        (await patchUser(caller, target.id, { password: NEW_PASSWORD })).status
+      ).toBe(HTTP_STATUS.OK);
+    });
+  });
+
+  describe("PATCH /admin/users/:id reactivating", () => {
+    const deactivated = async (permissions: string[]) => {
+      const target = await createTestUser();
+      if (permissions.length > 0) {
+        await getTestPrincipalToken({ userId: target.id, permissions });
+      }
+      await prisma.user.update({
+        where: { id: target.id },
+        data: { isActive: false },
+      });
+      return target;
+    };
+
+    it("refuses a users.write caller reactivating a roles.write holder", async () => {
+      const target = await deactivated(["roles.write"]);
+      const response = await patchUser(writerToken, target.id, {
+        isActive: true,
+      });
+      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(
+        ((await response.json()) as { error_description: string })
+          .error_description
+      ).toContain("roles.write");
+      expect(
+        (await prisma.user.findUniqueOrThrow({ where: { id: target.id } }))
+          .isActive
+      ).toBe(false);
+
+      const byAdmin = await patchUser(adminToken, target.id, {
+        isActive: true,
+      });
+      expect(byAdmin.status).toBe(HTTP_STATUS.OK);
+    });
+
+    it("lets a users.write caller reactivate a user holding nothing beyond it", async () => {
+      const target = await deactivated(["users.read"]);
+      expect(
+        (await patchUser(writerToken, target.id, { isActive: true })).status
+      ).toBe(HTTP_STATUS.OK);
+    });
+  });
+
   describe("PATCH /admin/users/:id with a password", () => {
     it("ends every session and token family, audited and emitted as a revoke", async () => {
       const endpoint = await createTestWebhookEndpoint(

@@ -1,6 +1,7 @@
 import { assertAuditWriteScope } from "../../../../middleware/organizationId.js";
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
 import { withAuditIdempotency } from "../../../../utils/auditIdempotency.js";
+import { CORE_SERVICE, CORE_SOURCE } from "../../../../definitions/index.js";
 import { callerService } from "../../../../utils/callerService.js";
 import { validateUser } from "../../../../middleware/auth.js";
 import { escapeLike } from "../../../../utils/db/like.js";
@@ -77,18 +78,37 @@ const assertReferencesExist = async (
 
 /**
  * An app service writes entries only under its own slug, the source its reads
- * are scoped to; anyone else's `source` is self-reported. 422, not 403: no
- * grant fixes it, so the SDK outbox dead-letters the row instead of retrying.
+ * are scoped to, and no one else may: core's source and every app service's
+ * slug are reserved, so an entry under one was written by its owner. Any
+ * other `source` is self-reported. 422, not 403: no grant fixes it, so the
+ * SDK outbox dead-letters the row instead of retrying.
  */
-const assertOwnSource = async (
+const assertSourceAllowed = async (
   auth: { oauthClientId: string | null },
   sources: string[]
 ) => {
   const service = await callerService(auth);
-  if (service && sources.some((source) => source !== service.slug)) {
+  if (service) {
+    if (sources.some((source) => source !== service.slug)) {
+      throw new UnprocessableEntityError(
+        "source_mismatch",
+        `Service ${service.slug} may only write entries with source "${service.slug}"`
+      );
+    }
+    return;
+  }
+  const unique = [...new Set(sources)];
+  const serviceSlugs = await db.services.findSlugs(unique);
+  const reserved = unique.filter(
+    (source) =>
+      source === CORE_SOURCE ||
+      source === CORE_SERVICE.slug ||
+      serviceSlugs.has(source)
+  );
+  if (reserved.length > 0) {
     throw new UnprocessableEntityError(
-      "source_mismatch",
-      `Service ${service.slug} may only write entries with source "${service.slug}"`
+      "source_reserved",
+      `Only the service it names may write entries with source: ${reserved.join(", ")}`
     );
   }
 };
@@ -96,8 +116,8 @@ const assertOwnSource = async (
 export const createEntry = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { idempotencyKey, ...entryData } = validateBody(createEntrySchema, req);
-  assertAuditWriteScope(auth, [entryData.organizationId]);
-  await assertOwnSource(auth, [entryData.source]);
+  await assertAuditWriteScope(auth, [entryData.organizationId]);
+  await assertSourceAllowed(auth, [entryData.source]);
   await assertReferencesExist([entryData]);
   const entryWithWriter = { ...entryData, ...writerIdentity(auth) };
 
@@ -116,11 +136,11 @@ export const createEntry = async (req: Request, res: Response) => {
 export const createBatch = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { idempotencyKey, entries } = validateBody(createBatchSchema, req);
-  assertAuditWriteScope(
+  await assertAuditWriteScope(
     auth,
     entries.map((e) => e.organizationId)
   );
-  await assertOwnSource(
+  await assertSourceAllowed(
     auth,
     entries.map((e) => e.source)
   );

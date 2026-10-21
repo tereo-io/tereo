@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { getTestPrincipalToken } from "../utils/principals.js";
+import { makeServiceOf } from "../utils/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   BASE_URL,
@@ -26,6 +28,10 @@ describe("Admin Settings Endpoints", () => {
 
   beforeAll(async () => {
     testClient = await createTestClient();
+    // A service's client: its tokens carry the user's full rights. Any other
+    // client's are capped by its core scopes, which never reach the `admin`
+    // relaxing the 2FA policy needs.
+    await makeServiceOf(testClient.id);
     adminUser = await createAdminUser();
     regularUser = await createTestUser();
 
@@ -244,6 +250,68 @@ describe("Admin Settings Endpoints", () => {
       });
 
       expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    });
+
+    it("lets only a global admin relax the 2FA policy", async () => {
+      const setPolicy = (value: string) =>
+        prisma.systemSetting.upsert({
+          where: { key: "totpPolicy" },
+          update: { value },
+          create: { key: "totpPolicy", value },
+        });
+      const storedPolicy = async () =>
+        (
+          await prisma.systemSetting.findUniqueOrThrow({
+            where: { key: "totpPolicy" },
+          })
+        ).value;
+      const patch = (token: string, body: SettingsResponse) =>
+        fetch(`${BASE_URL}/v1/admin/settings`, {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+      const writer = await getTestPrincipalToken({
+        permissions: ["settings.write"],
+      });
+      const before = await storedPolicy().catch(() => "optional");
+
+      try {
+        await setPolicy("required");
+        for (const totpPolicy of ["optional", "disabled"] as const) {
+          const refused = await patch(writer, { totpPolicy });
+          expect(refused.status).toBe(HTTP_STATUS.FORBIDDEN);
+        }
+        expect(await storedPolicy()).toBe("required");
+        // Not a relaxation: the policy it sends is the one in force.
+        expect((await patch(writer, { totpPolicy: "required" })).status).toBe(
+          HTTP_STATUS.OK
+        );
+        expect(
+          (await patch(writer, { totpRecoveryCodeCount: 10 })).status
+        ).toBe(HTTP_STATUS.OK);
+
+        await setPolicy("optional");
+        expect((await patch(writer, { totpPolicy: "disabled" })).status).toBe(
+          HTTP_STATUS.FORBIDDEN
+        );
+        expect(await storedPolicy()).toBe("optional");
+
+        const admin = await getTestPrincipalToken({ permissions: ["admin"] });
+        expect((await patch(admin, { totpPolicy: "disabled" })).status).toBe(
+          HTTP_STATUS.OK
+        );
+        // Tightening needs nothing beyond settings.write.
+        expect((await patch(writer, { totpPolicy: "optional" })).status).toBe(
+          HTTP_STATUS.OK
+        );
+        expect(await storedPolicy()).toBe("optional");
+      } finally {
+        await setPolicy(before);
+      }
     });
 
     it("should reject request with non-admin token", async () => {

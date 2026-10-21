@@ -74,8 +74,9 @@ organization in `X-Organization-ID` (an unknown id is a 404, a malformed one a 4
 header is ignored. The admin UI's organization switcher sends it on webhooks requests only.
 `POST /v1/webhooks/events` takes `organizationId` in the body instead (service-to-service), under the
 same rule as audit writes (`assertEmitScope`, `src/middleware/organizationId.ts`): a token with an
-`org_id` emits only into that organization; a service account's token without one, or a
-`webhooks.admin` caller, into any; a person's token without one, into none. It is checked before
+`org_id` emits only into that organization; an app service's token without one, or a
+`webhooks.admin` caller, into any; anyone else's token without one (a person's, an
+integration's), into none. It is checked before
 the organization is looked up.
 
 **Recipients act as their creator.** An endpoint is sent an event only while the user who created
