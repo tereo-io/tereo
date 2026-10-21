@@ -84,6 +84,17 @@ export const checkAccessToken = async (
   return { active: true, token, user, isClientToken, access };
 };
 
+/**
+ * The jtis among `jtis` that `checkAccessToken` would not call active, in
+ * one query: for re-checking many connected sockets at once.
+ */
+export const findInactiveAccessTokens = async (
+  jtis: string[]
+): Promise<string[]> => {
+  const active = new Set(await db.accessTokens.getActiveJtis(jtis));
+  return jtis.filter((jti) => !active.has(jti));
+};
+
 /** The caller whose own session and access token a sign-out leaves alone. */
 export interface Caller {
   /** Its refresh token, null for a token issued without one. */
@@ -93,7 +104,8 @@ export interface Caller {
 
 /**
  * Signs a user out everywhere: revokes their live refresh tokens with their
- * access tokens, access tokens issued without a refresh token, and their SSO
+ * token families' access tokens (those of a refresh token already rotated
+ * away included), access tokens issued without a refresh token, and their SSO
  * sessions so no browser can mint new ones without a password, and deletes
  * their login steps already past the password. With `keep`
  * (the caller), its session and the SSO session that session was issued
@@ -116,20 +128,35 @@ export const endUserSessions = async (
   const keepSsoSessionId = keepRefreshTokenId
     ? await db.userSessions.getIdByRefreshTokenId(keepRefreshTokenId)
     : null;
+  const keepFamily = keepRefreshTokenId
+    ? ((await db.refreshTokens.getById(keepRefreshTokenId))?.authCodeId ?? null)
+    : null;
 
   const { ids, jtis } = await db.$transaction(async (tx) => {
     await prepare?.(tx);
     await db.users.lockForSessionEnd(tx, { userIds: [userId] });
     const active = await db.refreshTokens.getActiveByUserId(userId, tx);
-    const ids = active
-      .filter((rt) => rt.id !== keepRefreshTokenId)
-      .map((rt) => rt.id);
-    await db.accessTokens.revokeByRefreshTokenIds(ids, tx);
+    const ending = active.filter((rt) => rt.id !== keepRefreshTokenId);
+    const ids = ending.map((rt) => rt.id);
+    const jtis = await db.accessTokens.revokeByRefreshTokenIds(ids, tx);
+    // The access tokens of a refresh token since rotated away fail their
+    // checks already, but sit in session rooms nothing here closes: revoke
+    // them with their families, the caller's spared, to close their sockets.
+    const families = [
+      ...new Set(
+        ending.flatMap((rt) =>
+          rt.authCodeId && rt.authCodeId !== keepFamily ? [rt.authCodeId] : []
+        )
+      ),
+    ];
+    jtis.push(...(await db.accessTokens.revokeByAuthCodeIds(families, tx)));
     await db.refreshTokens.revokeByIds(ids, tx);
-    const jtis = await db.accessTokens.revokeSessionlessByUserId(
-      userId,
-      keep?.jti ?? null,
-      tx
+    jtis.push(
+      ...(await db.accessTokens.revokeSessionlessByUserId(
+        userId,
+        keep?.jti ?? null,
+        tx
+      ))
     );
     const ssoSessionIds = await db.userSessions.deleteUserSessionsByUserId(
       userId,
@@ -143,7 +170,8 @@ export const endUserSessions = async (
   });
 
   notifySessionsRevoked(userId, ids);
-  // Their sockets joined no session room.
+  // Sessionless tokens' sockets joined no session room, and those of rotated
+  // tokens a room nothing closes.
   disconnectTokenSockets(jtis);
   return ids;
 };
@@ -292,6 +320,20 @@ export const endOrganizationSessions = async (
   userId: string,
   organizationId: string
 ): Promise<void> => {
+  try {
+    await endOrganizationTokens(userId, organizationId);
+  } finally {
+    // Access tokens issued there without a session have no session room.
+    // Closed even if the revocation failed: whatever the user still holds
+    // there is dead with the membership.
+    disconnectUserSockets(userId, organizationId);
+  }
+};
+
+const endOrganizationTokens = async (
+  userId: string,
+  organizationId: string
+) => {
   const { revoked, loose } = await db.$transaction(async (tx) => {
     await db.users.lockForSessionEnd(tx, { userIds: [userId] });
     const userSessionIds = await db.userSessions.getIdsByUserAndOrganization(
@@ -329,19 +371,20 @@ export const endOrganizationSessions = async (
     revoked,
     loose.map((id) => ({ id, userId }))
   );
-  // Access tokens issued there without a session have no session room.
-  disconnectUserSockets(userId, organizationId);
 };
 
 /**
  * Signs a deactivated user out everywhere, and closes all their sockets —
- * including those of tokens issued without a session.
+ * including those of tokens issued without a session. The deactivation has
+ * committed already, so the sockets close even if the sign-out fails.
  */
 export const endDeactivatedUserSessions = async (
   userId: string,
   record?: RecordRevocation
 ): Promise<string[]> => {
-  const ids = await endUserSessions(userId, null, record);
-  disconnectUserSockets(userId);
-  return ids;
+  try {
+    return await endUserSessions(userId, null, record);
+  } finally {
+    disconnectUserSockets(userId);
+  }
 };

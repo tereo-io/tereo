@@ -184,6 +184,7 @@ env (no overlap).
 |----------|---------|-------|
 | `ISSUER` | `PUBLIC_URL` | A URL with no query or fragment, `https://` in production; a trailing slash is dropped. Changing it invalidates every outstanding token. Discovery's endpoint URLs are built from `PUBLIC_URL`, where core is reached |
 | `JWT_ACCESS_TOKEN_TTL` | `3600` | Seconds, 1–86400 (24 h) |
+| `WEBSOCKET_REVALIDATE_INTERVAL_SECONDS` | `60` | Seconds, 0–3600. How often each core process checks the tokens of its connected sockets again and closes those no longer active (a session rotated away, a token or user revoked by a path that closes no socket); `0` turns it off. See [auth.md](auth.md#session-lifetimes) |
 | `JWT_REFRESH_TOKEN_TTL` | `2592000` | Seconds, absolute from the code exchange; at most 31536000 (365 d) |
 | `USER_SESSION_TTL` | `604800` | Seconds, absolute from login; at most 31536000 (365 d) |
 | `USER_SESSION_IDLE_TTL` | `259200`, or `USER_SESSION_TTL` when shorter | Seconds an SSO session may go without issuing a code before it counts as expired; at most `USER_SESSION_TTL` |

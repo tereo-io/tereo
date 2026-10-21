@@ -330,6 +330,9 @@ const EnvFields = z
     // Defaults to the public key's JWK thumbprint.
     JWT_KEY_ID: z.string().optional(),
     JWT_ACCESS_TOKEN_TTL: int(1, DAY, 3600),
+    // How often each node checks its sockets' tokens again and closes those no
+    // longer active; 0 turns the check off.
+    WEBSOCKET_REVALIDATE_INTERVAL_SECONDS: int(0, HOUR, 60),
     // Absolute lifetime of a refresh-token family, from the code exchange;
     // rotation keeps the family's original expiry.
     JWT_REFRESH_TOKEN_TTL: int(1, 365 * DAY, 30 * DAY),
