@@ -169,7 +169,12 @@
       the service clients holding it. People's tokens are not revoked:
       permissions are read on every request, so they lose the role at once.
       Deactivating a role that grants `admin` is refused when it would leave
-      no active administrator (`409 conflict`).
+      no active administrator (`409 conflict`). Reactivating a role that
+      grants `admin` while an integration's account holds it is refused
+      (`403 role_not_allowed_for_integration`). Turning `requires2fa` on, or
+      reactivating a role that has it, revokes its holders' access tokens
+      from logins without a second factor, so their next refresh meets the
+      2FA step-up.
 
       An audit log entry is created for this action.
       An `auth.role.updated` webhook event is emitted.
@@ -482,7 +487,9 @@
       a retired permission may stay on the role but cannot be newly added.
       A repeated id counts once. Archived roles are refused with
       `409 resource_archived`. Dropping `admin` from a role is refused when
-      it would leave no active administrator (`409 conflict`).
+      it would leave no active administrator (`409 conflict`). Keeping or
+      adding `admin` on a role an integration's account holds is refused
+      (`403 role_not_allowed_for_integration`): integrations never hold it.
 
       Only grant what you hold: each permission not already on the role
       must be one the caller holds through a global role (`admin` holds

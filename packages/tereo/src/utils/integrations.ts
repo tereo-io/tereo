@@ -275,6 +275,9 @@ export const setIntegrationRolesTx = async (
   const held = new Set(heldIds);
   const added = wanted.filter((id) => !held.has(id));
 
+  // Shared: a role gaining `admin` locks it exclusively and checks for
+  // integration holders, so one of the two sees the other.
+  await db.roles.lockRoles(wanted, "share", tx);
   const carryingAdmin = (await db.roles.getByIds(wanted, tx)).filter((role) =>
     db.roles.grantedPermissionNames([role]).includes("admin")
   );

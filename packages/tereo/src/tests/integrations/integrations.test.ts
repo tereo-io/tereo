@@ -26,6 +26,7 @@ beforeAll(async () => {
       "integrations.write",
       "services.read",
       "services.write",
+      "services.approve",
       "webhooks.read",
     ],
   });
@@ -316,6 +317,68 @@ describe("roles", () => {
     expect(got.body.roles).toEqual([]);
   });
 
+  it("refuses adding admin to a role an integration holds", async () => {
+    const created = await createIntegration();
+    const roleId = await customRole(["users.read"]);
+    const granter = await getTestPrincipalToken({
+      permissions: ["integrations.write", "users.read"],
+    });
+    const granted = await api(
+      "PUT",
+      `/v1/admin/integrations/${created.id}/roles`,
+      { roleIds: [roleId] },
+      granter
+    );
+    expect(granted.status).toBe(200);
+
+    const roleAdmin = await getTestPrincipalToken({ permissions: ["admin"] });
+    const permissionIds = [
+      (await ensurePermission("users.read")).id,
+      (
+        await prisma.permission.findFirstOrThrow({
+          where: { name: "admin", retiredAt: null },
+        })
+      ).id,
+    ];
+    const res = await api(
+      "PUT",
+      `/v1/admin/roles/${roleId}/permissions`,
+      { permissionIds },
+      roleAdmin
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("role_not_allowed_for_integration");
+    expect(res.body.error_description).toContain(created.slug);
+    expect(await permissionsOf(created)).not.toContain("admin");
+  });
+
+  it("refuses reactivating an admin role an integration holds", async () => {
+    const created = await createIntegration();
+    const userId = (await api("GET", `/v1/admin/integrations/${created.id}`))
+      .body.serviceAccountUserId as string;
+    const roleId = await customRole(["admin"]);
+    await prisma.role.update({
+      where: { id: roleId },
+      data: { isActive: false },
+    });
+    // Held while inactive, as only a direct write can leave it.
+    await prisma.userRole.create({ data: { userId, roleId } });
+
+    const roleAdmin = await getTestPrincipalToken({ permissions: ["admin"] });
+    const res = await api(
+      "PATCH",
+      `/v1/admin/roles/${roleId}`,
+      { isActive: true },
+      roleAdmin
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("role_not_allowed_for_integration");
+    expect(
+      (await prisma.role.findUniqueOrThrow({ where: { id: roleId } }))
+        .isActive
+    ).toBe(false);
+  });
+
   it("grants global roles to a platform integration", async () => {
     const created = await createIntegration();
     const roleId = await customRole(["users.read"]);
@@ -478,6 +541,21 @@ describe("audiences", () => {
       { slugs: [other.slug] }
     );
     expect(refused.status).toBe(422);
+  });
+
+  it("requires services.approve", async () => {
+    const created = await createIntegration();
+    const writer = await getTestPrincipalToken({
+      permissions: ["integrations.read", "integrations.write"],
+    });
+    const res = await api(
+      "PUT",
+      `/v1/admin/integrations/${created.id}/audiences`,
+      { slugs: [] },
+      writer
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error_description).toContain("services.approve");
   });
 });
 

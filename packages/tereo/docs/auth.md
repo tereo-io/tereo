@@ -569,6 +569,10 @@ declaration ([registry.md](registry.md)). Admins cannot create, edit, archive or
 - Changing any role's `requires2fa` needs a caller holding every permission the role grants (403
   otherwise, as when granting them): the policy guards what the role gives, so only `admin` changes
   it on core's `admin` role.
+- A role held by an integration's account cannot come to grant `admin`, which integrations never
+  hold: adding `admin` to it (`PUT …/permissions`) or reactivating it while it carries `admin` is
+  `403 role_not_allowed_for_integration`, naming the integrations. The role's row lock serializes
+  the check with an integration taking the role.
 - Custom roles (`serviceId` null) are the admin's: any unretired permission can be added, and a
   retired one may stay on a role (`permissions[].retired`) but grants nothing.
 - Resolution (`getUserPermissions`) skips archived, deactivated and retired roles, and retired
@@ -673,6 +677,11 @@ The `totpPolicy` system setting (`PATCH /v1/admin/settings`) is `disabled`, `opt
 - `required` — every user must enrol; login redirects to setup until they do.
 - `optional` — users may enrol; a user holding an active role with `requires2fa` must.
 
+`settings.write` may tighten the policy, but relaxing it (`required` to anything, `optional` to
+`disabled`) needs `admin` through a global role (403 otherwise), checked in the change's
+transaction under a lock on the setting: `disabled` overrides every role's `requires2fa`, `admin`'s
+included, so no narrower permission bounds it.
+
 Enrolling at login (`/oauth/totp/setup/verify`) ends the user's other sessions in the transaction
 that enables TOTP, as enrolling from the account page does: sessions opened with the password alone
 do not outlive the switch to 2FA.
@@ -695,6 +704,17 @@ and its refresh tokens are refused with `invalid_grant`, so the client signs the
 login that used a second factor (`otp`, `recovery`, or a provider's `mfa`) is unaffected, as are
 client-credentials tokens. Enrolling from the account page does not count: the session that enrolled
 keeps going.
+
+Permissions are read on every request, so a password-only access token would otherwise keep working
+under the new requirement until it expired. The change that makes it — `PATCH /v1/admin/settings`
+moving the policy up (to `required`: every person; `disabled` to `optional`: holders of a role with
+`requires2fa`), `PATCH /v1/admin/roles/:id` turning `requires2fa` on or reactivating such a role (its
+holders), and `PUT /v1/admin/users/:id/roles` or `PUT /v1/admin/organizations/:id/members/:userId/roles`
+adding such a role (that user) — revokes those people's live access tokens from a login without a
+second factor (`db.accessTokens.revokeWithoutMfa`) in its transaction, and closes their sockets. The
+client's next refresh then meets the step-up above. The audit entry records `accessTokensRevoked`.
+Other ways a role comes to count (joining or reactivating an organization) revoke nothing; refresh
+and the next login still enforce them.
 
 - `disabled` — new enrolment is refused with 403 `totp_disabled` on `POST /v1/account/totp/setup`,
   `/v1/account/totp/setup/verify`, `/oauth/totp/setup` and `/oauth/totp/setup/verify` (a setup started
