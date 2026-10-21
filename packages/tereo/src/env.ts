@@ -294,6 +294,10 @@ const EnvFields = z
     // Caps the HTTP server's open connections (WebSockets included); past
     // it, new ones are closed at once. Unset, unlimited.
     HTTP_MAX_CONNECTIONS: z.coerce.number().int().min(1).max(1_000_000).optional(),
+    // On SIGTERM, how long in-flight requests and running jobs get, side by
+    // side, before they are cut off. Keep it a few seconds under the
+    // orchestrator's grace period (after any preStop delay).
+    SHUTDOWN_TIMEOUT_SECONDS: int(1, 3600, 25),
     // ROLE=worker serves no API; it answers GET /health on this port instead.
     WORKER_HEALTH_PORT: int(0, 65535, 4002),
     // Externally reachable base URL of this service. Defaults derived from it:

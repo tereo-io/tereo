@@ -92,6 +92,7 @@ notes as a range; a value outside its range stops core at startup with the varia
 | `ROLE` | `all` | See [Process roles](#process-roles) |
 | `PORT` | `4001` | 1–65535 |
 | `HTTP_MAX_CONNECTIONS` | unlimited | 1–1000000. The most connections the HTTP server holds open at once, WebSockets included; past it, a new connection is closed at once. See [HTTP limits](#http-limits) |
+| `SHUTDOWN_TIMEOUT_SECONDS` | `25` | 1–3600. On SIGTERM, how long in-flight HTTP requests and running background jobs get, side by side, before connections are forced closed and the jobs left to BullMQ (another worker takes each up once its lock lapses); closing Redis and the database follows. Keep it a few seconds under the time the orchestrator allows after SIGTERM: the chart gives 30 seconds after its `preStopSleepSeconds` |
 | `WORKER_HEALTH_PORT` | `4002` | 0–65535. `ROLE=worker` only: its `/health` listener. See [Health checks](#health-checks) |
 | `PUBLIC_URL` | `http://localhost:4001` outside production | Required in production, and `https://` there |
 | `DATABASE_URL` | — | Required. Sessions run with `timezone=UTC` whatever the server default; an `options` parameter in the URL replaces that |

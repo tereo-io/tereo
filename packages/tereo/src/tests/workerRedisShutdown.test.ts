@@ -1,5 +1,5 @@
 import { startRedisProxy, withinMs } from "./utils/redisOutage.js";
-import { startWorker, stopWorker } from "../worker.js";
+import { closeWorkerQueues, startWorker, stopWorker } from "../worker.js";
 import { describe, expect, it } from "vitest";
 import env from "../env.js";
 import {
@@ -24,6 +24,7 @@ describe("stopping the worker while Redis is unreachable", () => {
       }
 
       await withinMs(stopWorker(), 10_000, "stopWorker");
+      await withinMs(closeWorkerQueues(), 10_000, "closeWorkerQueues");
       await closeRedisConnection();
 
       // Nothing the worker opened is still reconnecting.

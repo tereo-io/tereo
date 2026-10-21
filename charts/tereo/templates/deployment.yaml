@@ -43,7 +43,8 @@ spec:
       {{- end }}
       {{- if eq .component "api" }}
       # The preStop sleep counts against the grace period; core's own drain
-      # needs the default 30 s after SIGTERM.
+      # (SHUTDOWN_TIMEOUT_SECONDS, 25 s by default, then closing Redis and the
+      # database) needs the 30 s after SIGTERM.
       terminationGracePeriodSeconds: {{ add 30 (int $.Values.preStopSleepSeconds) }}
       {{- end }}
       securityContext:

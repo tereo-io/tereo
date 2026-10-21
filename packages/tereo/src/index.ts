@@ -16,7 +16,7 @@ import { startWorkerHealthServer } from "./utils/health.js";
 import { ensureLoginClient } from "./utils/loginClient.js";
 import { announceSetupIfPending } from "./utils/setup.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
-import { startWorker, stopWorker } from "./worker.js";
+import { closeWorkerQueues, startWorker, stopWorker } from "./worker.js";
 import { shutdownOtel } from "./telemetry/index.js";
 import env, { stalePathWarnings } from "./env.js";
 import { createServer, Server } from "http";
@@ -31,10 +31,27 @@ import {
   shutdownWebSocket,
 } from "./websocket/index.js";
 
-// k8s terminationGracePeriod is typically 30s; give ourselves a 25s drain
-// window for in-flight HTTP requests before we forcibly close idle and then
-// all remaining connections.
-const DRAIN_TIMEOUT_MS = 25_000;
+// In-flight HTTP requests and running jobs get this long, side by side,
+// before connections are forced closed and the workers abandoned. The rest of
+// the shutdown (Redis, the database, telemetry) takes a moment more, so the
+// default 25s fits the 30s that follow SIGTERM in the chart's pods.
+const DRAIN_TIMEOUT_MS = env.SHUTDOWN_TIMEOUT_SECONDS * 1000;
+
+/** `work`, or a rejection once `ms` have passed without it settling. */
+const withinDrain = async (work: Promise<void>, ms: number, what: string) => {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${what} did not stop within ${ms}ms`)),
+      ms
+    );
+  });
+  try {
+    await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 const runsApi = env.ROLE === "all" || env.ROLE === "api";
 const runsWorker = env.ROLE === "all" || env.ROLE === "worker";
@@ -149,22 +166,40 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
           }
         };
 
-        // Drain HTTP before tearing anything down — handlers would otherwise
-        // throw "pool ended" / "client closed" mid-flight. WebSocket clients
-        // are disconnected alongside, or the close would wait on them.
+        // Drain HTTP and stop the workers, side by side, before tearing
+        // anything down — handlers and jobs would otherwise throw "pool
+        // ended" / "client closed" mid-flight. WebSocket clients are
+        // disconnected alongside, or the close would wait on them.
+        const draining: Promise<void>[] = [];
         if (server) {
           const closing = server;
           server = null;
-          await step("http", async () => {
-            await closeHttpServer(
-              closing,
-              disconnectWebSocketClients,
-              DRAIN_TIMEOUT_MS
-            );
-            logger.info("HTTP server closed");
-          });
-          await step("websocket", shutdownWebSocket);
+          draining.push(
+            (async () => {
+              await step("http", async () => {
+                await closeHttpServer(
+                  closing,
+                  disconnectWebSocketClients,
+                  DRAIN_TIMEOUT_MS
+                );
+                logger.info("HTTP server closed");
+              });
+              await step("websocket", shutdownWebSocket);
+            })()
+          );
         }
+        // A job still running at the deadline is left to BullMQ, which hands
+        // it to another worker once its lock lapses.
+        if (runsWorker) {
+          draining.push(
+            step("worker", () =>
+              withinDrain(stopWorker(), DRAIN_TIMEOUT_MS, "Workers")
+            )
+          );
+        }
+        await Promise.all(draining);
+        // After the drain: requests add jobs to these queues.
+        if (runsWorker) await step("queues", closeWorkerQueues);
 
         stopKeyRefresh?.();
         stopKeyRefresh = null;
@@ -180,7 +215,6 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
             await closed;
           });
         }
-        if (runsWorker) await step("worker", stopWorker);
         await step("cacheBroadcast", closeCacheBroadcast);
         await step("redisEmitter", closeRedisEmitter);
         await step("redis", closeRedisConnection);

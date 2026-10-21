@@ -97,6 +97,13 @@ export async function stopWorker(): Promise<void> {
   await stopNotificationStaleSweep();
   await stopOutboxRetentionWorker();
   await stopAccessLogRetentionWorker();
+}
+
+/**
+ * Closes the queues jobs are added to. Separate from `stopWorker`: in a
+ * process that also serves HTTP, requests still draining add jobs to them.
+ */
+export async function closeWorkerQueues(): Promise<void> {
   await closeFileQueues();
   await closeWebhookQueues();
   await closeAuditQueues();

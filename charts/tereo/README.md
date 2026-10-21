@@ -78,6 +78,9 @@ non-https `publicUrl`, `trustProxy: "true"`, or no secret.
   only checks the port, so an outage does not restart core.
 - **Stopping.** An API pod sleeps `preStopSleepSeconds` (5) before core gets SIGTERM, so the ingress
   has stopped routing to it before it shuts down. Raise it if your ingress is slower to notice.
+  Core then has 30 seconds: it drains requests and stops its jobs for up to
+  `SHUTDOWN_TIMEOUT_SECONDS` (25), then closes its connections. Raising that (in `env`) needs a
+  longer grace period than the chart sets.
 
 ## More than one API pod
 
