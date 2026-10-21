@@ -73,9 +73,11 @@ const apply = (name: string, value: string) => {
   else fields[name] = value;
 };
 
+const MIN_RSA_MODULUS_BITS = 2048;
+
 const generateRsaPrivateKey = (): string =>
   generateKeyPairSync("rsa", {
-    modulusLength: 2048,
+    modulusLength: MIN_RSA_MODULUS_BITS,
     publicKeyEncoding: { type: "spki", format: "pem" },
     privateKeyEncoding: { type: "pkcs8", format: "pem" },
   }).privateKey;
@@ -565,9 +567,11 @@ const load = async () => {
 
   if (jwtKeysFromEnv) {
     let publicKey: string;
+    let modulusLength: number | undefined;
     try {
       const derived = createPublicKey(createPrivateKey(env.JWT_PRIVATE_KEY));
       if (derived.asymmetricKeyType !== "rsa") throw new Error("not RSA");
+      modulusLength = derived.asymmetricKeyDetails?.modulusLength;
       publicKey = createPublicKey(env.JWT_PUBLIC_KEY)
         .export({ type: "spki", format: "pem" })
         .toString();
@@ -579,6 +583,11 @@ const load = async () => {
     } catch {
       throw new Error(
         "JWT_PRIVATE_KEY / JWT_PUBLIC_KEY is not a valid, matching RSA key pair"
+      );
+    }
+    if (!modulusLength || modulusLength < MIN_RSA_MODULUS_BITS) {
+      throw new Error(
+        `JWT_PRIVATE_KEY must be an RSA key of at least ${MIN_RSA_MODULUS_BITS} bits; it has ${modulusLength ?? "an unknown number of"}`
       );
     }
     useSigningKeys([

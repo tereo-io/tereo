@@ -99,7 +99,7 @@ notes as a range; a value outside its range stops core at startup with the varia
 |----------|-------|
 | `CORE_KEK` | Base64, 32 bytes (`openssl rand -base64 32`). Key-encryption key: AES-256-GCM over every value in `core.secrets`. **Required in production** — core refuses to start without it. Outside production, when unset, a fixed development KEK is used (public, protects nothing) and a warning is logged. Keep it outside the database; losing it makes the stored keys unreadable. See [Key encryption](#key-encryption) |
 | `CORE_KEK_PREVIOUS` | Base64, 32 bytes. Only while rotating the KEK: rows still under it are re-encrypted under `CORE_KEK` on start. Needs `CORE_KEK`. See [Rotating the KEK](#rotating-the-kek) |
-| `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` | Base64-encoded PEM, both or neither. When set, the only signing key: stored versions are ignored and `/v1/admin/signing-keys/rotate` refuses. See [JWT signing keys](#jwt-signing-keys) |
+| `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` | Base64-encoded PEM, both or neither: an RSA key pair of at least 2048 bits (core refuses to start otherwise). When set, the only signing key: stored versions are ignored and `/v1/admin/signing-keys/rotate` refuses. See [JWT signing keys](#jwt-signing-keys) |
 | `JWT_KEY_ID` | The kid of an env-supplied key pair; defaults to its JWK thumbprint. Generated keys always use their thumbprint |
 | `AUTH_CODE_HMAC_KEY` | Base64, 32 bytes. Binds authorization codes to their client and keys the hash they are looked up by |
 | `TOTP_ENCRYPTION_KEY` | 64 hex characters |
