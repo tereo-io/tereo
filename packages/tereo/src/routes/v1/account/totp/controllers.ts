@@ -86,7 +86,8 @@ export const verifySetup = async (req: Request, res: Response) => {
   await assertTotpSetupAllowed();
 
   const setupSession = await db.totp.getSetupSession(body.setupToken);
-  if (!setupSession) {
+  // One begun at login is bound to that login's OAuth request instead.
+  if (!setupSession || setupSession.clientId !== null) {
     throw new OAuth2Error(
       "invalid_setup_token",
       "Invalid or expired setup token. Please start again."

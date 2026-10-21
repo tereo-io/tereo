@@ -1409,8 +1409,10 @@
     description: |
       Verify and complete TOTP setup during OAuth flow. Refused with 403
       `totp_disabled` while the system 2FA policy is `disabled`, including for
-      a setup started before the change. 400 `invalid_setup_token` or
-      `setup_expired` for the setup session, 401 `invalid_code` for a wrong
+      a setup started before the change. 400 `invalid_setup_token` (also for
+      a setup begun from `POST /v1/account/totp/setup`, which only
+      `/v1/account/totp/setup/verify` completes) or `setup_expired` for the
+      setup session, 401 `invalid_code` for a wrong
       code. Attempts count toward the user's lockout shared with
       `POST /oauth/totp/verify` (five per user in five minutes, then 429 for
       the rest of the window). The code that completes setup is spent: it

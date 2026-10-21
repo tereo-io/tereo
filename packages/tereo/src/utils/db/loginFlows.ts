@@ -31,32 +31,34 @@ export const writeStepConsuming =
 
 /**
  * Deletes the user's login steps already past the first factor: consent and
- * organization picks, TOTP verifications, 2FA setup grants and the setups
- * they started, identity link grants. Consent for an org switch of
- * `keepUserSessionId` stays. Setups begun from the account page belong to a
- * signed-in token instead, which the caller revokes or keeps.
+ * organization picks, TOTP verifications, 2FA setup grants and every setup
+ * session (the account page's too), identity link grants and provider round
+ * trips, and authorization codes not yet exchanged. Consent for an org
+ * switch of `keepUserSessionId`, and that session's codes, stay.
  */
 export const deletePendingForUser = async (
   userId: string,
   keepUserSessionId: string | null,
   tx: Prisma.TransactionClient
 ): Promise<void> => {
-  await tx.consentSession.deleteMany({
-    where: {
-      userId,
-      ...(keepUserSessionId && {
+  const outsideKept = keepUserSessionId
+    ? {
         OR: [
           { userSessionId: null },
           { userSessionId: { not: keepUserSessionId } },
         ],
-      }),
-    },
-  });
+      }
+    : {};
+  await tx.consentSession.deleteMany({ where: { userId, ...outsideKept } });
   await tx.orgSelectionSession.deleteMany({ where: { userId } });
   await tx.totpVerification.deleteMany({ where: { userId } });
   await tx.totpSetupGrant.deleteMany({ where: { userId } });
-  await tx.totpSetupSession.deleteMany({
-    where: { userId, clientId: { not: null } },
-  });
+  await tx.totpSetupSession.deleteMany({ where: { userId } });
   await tx.identityLinkGrant.deleteMany({ where: { userId } });
+  await tx.upstreamAuthSession.deleteMany({ where: { userId } });
+  // Unused, so no token cascades with it; deleted rather than marked used,
+  // which the exchange would report as a replay.
+  await tx.authorizationCode.deleteMany({
+    where: { userId, usedAt: null, ...outsideKept },
+  });
 };

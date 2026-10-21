@@ -700,7 +700,9 @@ in the `tereo_2fa_setup_grant_{client_id}` cookie. `POST /oauth/totp/setup` take
 `setup_grant`; it must match the cookie, it is consumed on use, and the user and OAuth request come
 from it. The setup session it starts is then completed with `POST /oauth/totp/setup/verify`, after
 which the UI restarts `/oauth/authorize` and the user logs in with the new factor. Signed-in users
-enrol from `POST /v1/account/totp/setup`, which acts on the token's user.
+enrol from `POST /v1/account/totp/setup`, which acts on the token's user. Each verify completes only
+its own kind of setup: `/oauth/totp/setup/verify` refuses a setup begun from the account page, and
+`/v1/account/totp/setup/verify` one begun at login, with 400 `invalid_setup_token`.
 
 A TOTP code is accepted once. `auth.users.totp_last_window` holds the 30-second step of the last
 code accepted for the user's secret; every check — the 2FA step at login, both setup verifies, and
@@ -787,8 +789,11 @@ switch ends with that session, and the code is issued only while the session sti
 under the user's lock that logout takes too; otherwise the client gets `error=login_required`. A
 password change, an admin reset or any other sign-out of every session (`endUserSessions`) also
 deletes the user's login steps already past the password — consent and organization picks, 2FA
-verifications, 2FA setup grants and the setups they began, identity link grants — so a password
-that has just been replaced cannot finish a login it started. A step after the password check is
+verifications, 2FA setup grants, every 2FA setup session (those begun from the account page too),
+identity link grants, provider round trips (an account-page link included) and authorization codes
+not yet exchanged — so a password that has just been replaced cannot finish a login it started, nor
+enrol a factor or link a provider. A sign-out that keeps the caller's browser keeps that browser's
+SSO session, its consent for an org switch and its unexchanged codes. A step after the password check is
 written only while that password is still the user's, holding the user's row as a token issue does
 (`writeStepWhilePasswordIs` in `utils/firstFactor.ts`): a change that committed after the check
 refuses the login as a wrong password would, and one in progress waits for the step and deletes it.

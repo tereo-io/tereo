@@ -768,7 +768,7 @@
             schema:
               $ref: '../../components/auth/schemas.yaml#/TotpSetupVerifyResponse'
       '400':
-        description: Bad request - invalid body (`invalid_request`), or an unknown (`invalid_setup_token`) or expired (`setup_expired`) setup token
+        description: Bad request - invalid body (`invalid_request`), or an unknown setup token or one begun at login (`invalid_setup_token`), or an expired one (`setup_expired`)
         headers:
           X-RateLimit-Limit:
             $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
