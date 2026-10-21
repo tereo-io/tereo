@@ -7,7 +7,9 @@ import type { Attributes, Span } from "@opentelemetry/api";
  * arguments.
  */
 
-const TOKEN_SEGMENT = /(\/shared\/)[^/?#]+/;
+// Express routes case-insensitively, so `/SHARED/<token>` reaches the share
+// routes too.
+const TOKEN_SEGMENT = /(\/shared\/)[^/?#]+/i;
 
 /** The URL or path without its query, fragment and share token. */
 export const redactUrl = (url: string): string =>
