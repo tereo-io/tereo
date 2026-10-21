@@ -29,6 +29,10 @@ import {
   stopDeliveryRetentionWorker,
 } from "./jobs/deliveryRetention.js";
 import {
+  startAccessLogRetentionWorker,
+  stopAccessLogRetentionWorker,
+} from "./jobs/accessLogRetention.js";
+import {
   startOutboxRetentionWorker,
   stopOutboxRetentionWorker,
 } from "./jobs/outboxRetention.js";
@@ -64,6 +68,7 @@ export async function startWorker(): Promise<void> {
     await startNotificationDeliveryWorker();
     await startNotificationStaleSweep();
     await startOutboxRetentionWorker();
+    await startAccessLogRetentionWorker();
   }
 
   // Webhook events written by `emitTx` fan out to subscribed endpoints. The
@@ -91,6 +96,7 @@ export async function stopWorker(): Promise<void> {
   await stopNotificationDeliveryWorker();
   await stopNotificationStaleSweep();
   await stopOutboxRetentionWorker();
+  await stopAccessLogRetentionWorker();
   await closeFileQueues();
   await closeWebhookQueues();
   await closeAuditQueues();

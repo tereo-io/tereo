@@ -463,6 +463,9 @@ const EnvFields = z
     // Grace window between a share becoming unserveable (revoked/expired), or
     // an archive request expiring, and the sweep hard-deleting the row.
     FILE_SERVICE_SHARE_RETENTION_DAYS: int(0, 3650, 30),
+    // How long a `files.access_logs` row is kept before the daily sweep
+    // deletes it.
+    ACCESS_LOG_RETENTION_DAYS: int(1, 3650, 90),
     FILE_SERVICE_SWEEP_TIME_BOX_SECONDS: int(1, HOUR, 60),
     FILE_SERVICE_SWEEP_HEARTBEAT_SECONDS: int(1, HOUR, 5),
     FILE_SERVICE_DISK_RECONCILIATION_MAX_FILES_PER_SHARD: int(

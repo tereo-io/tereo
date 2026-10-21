@@ -233,6 +233,7 @@ env (no overlap).
 | `FILE_SERVICE_SHARE_DEFAULT_TOKEN_BYTES` | `18` | 12–48 |
 | `FILE_SERVICE_SHARE_RETENTION_DAYS` | `30` | 0–3650. Before a revoked or expired share, or an expired archive request, is hard-deleted |
 | `FILE_SERVICE_EMIT_SHARE_ACCESS_EVENTS` | `false` | One `share.accessed` event per download |
+| `ACCESS_LOG_RETENTION_DAYS` | `90` | 1–3650. How long a `files.access_logs` row is kept before the daily sweep deletes it |
 | `FILE_SERVICE_SWEEP_TIME_BOX_SECONDS` | `60` | 1–3600 |
 | `FILE_SERVICE_SWEEP_HEARTBEAT_SECONDS` | `5` | 1–3600 |
 | `FILE_SERVICE_DISK_RECONCILIATION_MAX_FILES_PER_SHARD` | `10000` | 1–10000000 |
