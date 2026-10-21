@@ -3,7 +3,7 @@ import { CreateUserInput } from "../../routes/v1/admin/users/schemas.js";
 import { Prisma } from "../../../prisma/generated/client/index.js";
 import { BadRequestError, NotFoundError } from "../errors.js";
 import { normalizeEmail } from "../email.js";
-import { hashPassword } from "../crypto.js";
+import { hashPassword, needsRehash } from "../crypto.js";
 import { prisma } from "./prisma.js";
 
 /**
@@ -170,6 +170,27 @@ export const update = async (
   }
 
   return await db.user.update({ where: { id }, data: updateData });
+};
+
+/**
+ * Stores `password`, just verified against `currentHash`, at the current
+ * scrypt parameters when that hash is on older ones. Returns the hash the
+ * user now has: the new one, or `currentHash` when nothing was due or the
+ * password changed since it was read (the update is conditional on it, so a
+ * concurrent change is never overwritten).
+ */
+export const upgradePasswordHash = async (
+  id: string,
+  currentHash: string,
+  password: string
+): Promise<string> => {
+  if (!needsRehash(currentHash)) return currentHash;
+  const passwordHash = await hashPassword(password);
+  const { count } = await prisma.user.updateMany({
+    where: { id, passwordHash: currentHash },
+    data: { passwordHash },
+  });
+  return count === 1 ? passwordHash : currentHash;
 };
 
 export const clearPassword = async (

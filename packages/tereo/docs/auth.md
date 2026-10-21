@@ -803,7 +803,15 @@ confidential-client secrets and refresh tokens (256 random bits each): a secret 
 hashing the presented one and comparing in constant time, and a refresh token is looked up by its
 hash, so `/oauth/token`, `/oauth/revoke` and `/oauth/introspect` give an unauthenticated caller no
 slow hash to make core compute. scrypt (`utils/password.ts`) is kept for the low-entropy secrets:
-passwords, recovery codes and share passwords. Every
+passwords, recovery codes and share passwords, stored as `scrypt$N$r$p$salt$key` so each hash names
+its own cost. Passwords (login and share) use N=2^14, r=8, p=5 (OWASP's equivalent of 16 MiB at
+p=1, with five times the CPU); recovery codes, 60 random bits each and all checked at a recovery
+login, stay at p=1. Hashes from before the format (`salt:key`, N=2^14, r=8, p=1) still verify, topped
+up to the current cost so an account on an old hash answers as slowly as an unknown email, and a
+correct login password is stored again at the current parameters — conditionally on the hash read,
+so a concurrent password change wins. Since the known-device cookie covers the password hash, that
+one rehash voids the account's earlier known-device cookies; the login that rehashed gets a new one.
+Every
 password login gives the browser's SSO session a new token (session fixation); silent and org-switch
 continuations keep it.
 

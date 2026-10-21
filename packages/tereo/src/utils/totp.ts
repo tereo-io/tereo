@@ -1,3 +1,4 @@
+import { RECOVERY_CODE_PARAMS } from "./password.js";
 import { hashFlowToken, hashPassword, verifyPassword } from "./crypto.js";
 import { getTotpPolicy } from "./db/settings.js";
 import { OAuth2Error } from "./errors.js";
@@ -159,7 +160,7 @@ export const generateRecoveryCodes = async (
     const code = generateRecoveryCodeString();
     plainCodes.push(code);
     const normalizedCode = code.replace(/-/g, "");
-    hashedCodes.push(await hashPassword(normalizedCode));
+    hashedCodes.push(await hashPassword(normalizedCode, RECOVERY_CODE_PARAMS));
   }
 
   return { plainCodes, hashedCodes };
@@ -170,7 +171,7 @@ export const verifyRecoveryCode = async (
   hashedCode: string
 ): Promise<boolean> => {
   const normalizedCode = code.replace(/-/g, "").toUpperCase();
-  return verifyPassword(hashedCode, normalizedCode);
+  return verifyPassword(hashedCode, normalizedCode, RECOVERY_CODE_PARAMS);
 };
 
 export const encryptTotpSecret = (secret: string): string => {
