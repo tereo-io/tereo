@@ -218,8 +218,7 @@ describe("OAuth Security Tests", () => {
         new URL(s256.headers.get("location") ?? "", BASE_URL).searchParams.get(
           "error"
         )
-      ).toBeNull(
-      );
+      ).toBeNull();
     });
   });
 
