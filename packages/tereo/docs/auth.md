@@ -779,8 +779,8 @@ login step or the consent screen — carries `iss`, the issuer (RFC 9207, built 
 
 `/oauth/authorize` with `prompt=none` answers `login_required` when the SSO session is missing,
 expired, older than `max_age`, or belongs to a deactivated user. With `org_id`, the same cases fall
-through to the password login. A code older than its `max_age` is refused at `/oauth/token` with
-`400 invalid_grant`. For core's own login client (`isFirstPartyClient` in `definitions/`) and for a client with
+through to the password login. `max_age` is enforced there, at authorize: a code always carries a
+login that satisfied it, and `/oauth/token` does not check it again. For core's own login client (`isFirstPartyClient` in `definitions/`) and for a client with
 `consentRequired: false` asking for no `core:*` scope, `prompt=none` or an `org_id` switch with a
 live session skips the consent screen and redirects with the code. Any other client is answered `error=consent_required` (with `state`) at its `redirect_uri`
 for `prompt=none` — consent is not remembered, and a silent request cannot show the consent screen

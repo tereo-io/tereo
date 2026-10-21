@@ -473,9 +473,7 @@
       - 400 `invalid_grant` — missing `code_verifier`, a bad, expired, used or
         revoked code or refresh token, a concurrent request for the same one, a
         code or refresh token whose user is inactive, an authorization code
-        whose authentication is older than the `max_age` it was requested with
-        (re-authentication required), an authorization code whose SSO
-        session has ended (logout, or a sign-out of other sessions) since it
+        whose SSO session has ended (logout, or a sign-out of other sessions) since it
         was issued, or a code or refresh token issued for an organization the
         user has since left or that has since been deactivated (such a refresh
         token is revoked). A refresh or code exchange in flight when the
@@ -508,12 +506,13 @@
       inactive user) clears both cookies in that 400 response, so the browser
       stops retrying it. A refresh that only lost the race to a concurrent
       one with the same token ("is being processed", or a token rotated in
-      the last 30 seconds) leaves them.
+      the last 5 seconds whose successor is still unused) leaves them.
 
-      Replaying a rotated refresh token within 30 seconds of its rotation
-      (two tabs refreshing at once) is `invalid_grant` that leaves the token
-      family and the cookies alone; later, it is treated as theft and the
-      whole family is revoked. A token revoked by logout or `/oauth/revoke`
+      Replaying a rotated refresh token within 5 seconds of its rotation,
+      while the token that replaced it has not been used yet (two tabs
+      refreshing at once), is `invalid_grant` that leaves the token family
+      and the cookies alone; later, or once the successor has been used, it
+      is treated as theft and the whole family is revoked. A token revoked by logout or `/oauth/revoke`
       is plain `invalid_grant`.
 
       Refresh tokens rotate on every use, but a token family has an absolute
