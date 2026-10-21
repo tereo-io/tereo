@@ -7,11 +7,13 @@ import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes, randomUUID } from "crypto";
 import { CORE_URL } from "../utils/coreUrl.js";
 import { fetchJson } from "../utils/http.js";
+import axios from "axios";
 import {
   closeNotificationQueues,
   getNotificationQueue,
 } from "../../jobs/notificationQueues.js";
 import {
+  BASE_URL,
   cleanupTestEntities,
   createTestBucket,
   createTestFile,
@@ -510,6 +512,49 @@ describe("POST /v1/notifications", () => {
         403,
         "attachment_forbidden"
       );
+    });
+
+    it("takes a public bucket's replaced version only from a grant holder", async () => {
+      const filesToken = await getTestAccessToken();
+      const bucket = (await createTestBucket(filesToken, { policy: "public" }))
+        .name;
+      await axios.put(
+        `${BASE_URL}/buckets/${bucket}`,
+        { versioningEnabled: true },
+        { headers: { Authorization: `Bearer ${filesToken}` } }
+      );
+      const id = await uploadTestObjectAndGetId(
+        filesToken,
+        bucket,
+        "history.txt",
+        createTestFile(`first ${rand()}`, "history.txt", "text/plain")
+      );
+      const replaced = (await currentVersion(id)).id;
+      await uploadTestObjectAndGetId(
+        filesToken,
+        bucket,
+        "history.txt",
+        createTestFile(`second ${rand()}`, "history.txt", "text/plain")
+      );
+      const current = (await currentVersion(id)).id;
+      expect(current).not.toBe(replaced);
+      const attach = (v: string) =>
+        message({ attachments: [{ bucket, objectId: id, versionId: v }] });
+
+      // The public bucket serves its current content to anyone...
+      const open = await send(attach(current), otherSenderToken);
+      expect(open.status, JSON.stringify(open.body)).toBe(202);
+      // ...but its history only with a grant.
+      expectError(
+        await send(attach(replaced), otherSenderToken),
+        400,
+        "attachment_not_found"
+      );
+      await grantTestPermission(filesToken, bucket, senderId, {
+        canRead: true,
+      });
+      const granted = await send(attach(replaced));
+      expect(granted.status, JSON.stringify(granted.body)).toBe(202);
     });
 
     it("refuses attachments over 20 MB in total", async () => {

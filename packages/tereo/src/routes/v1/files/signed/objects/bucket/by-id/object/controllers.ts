@@ -39,8 +39,8 @@ import {
   extractBucketName,
   assertShareServeable,
   assertSignerMayAccess,
+  auditAndSpendShareUrl,
   forcesAttachment,
-  spendShareUrl,
   verifiedSignedUrl,
 } from "../../../../utils.js";
 
@@ -121,11 +121,9 @@ export const downloadViaSignedUrl = async (req: Request, res: Response) => {
     blob,
     { etag, lastModified },
     {
-      // In one transaction with the nonce, so a URL already spent leaves no
-      // audit row, and one that is spent always has its row.
       beforeBody: () =>
-        db.$transaction(async (tx) => {
-          await logAuditTx(tx, {
+        auditAndSpendShareUrl(verified, share, (tx) =>
+          logAuditTx(tx, {
             auth: { userId: verified.by ?? SYSTEM_USER_ID, email: null },
             organizationId: bucket.organizationId ?? undefined,
             action: "CREATE",
@@ -139,9 +137,8 @@ export const downloadViaSignedUrl = async (req: Request, res: Response) => {
               versionId: current.id,
               keyVersion: verified.keyVersion,
             },
-          });
-          await spendShareUrl(verified, share);
-        }),
+          })
+        ),
     }
   );
 };

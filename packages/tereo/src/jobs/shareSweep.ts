@@ -18,11 +18,46 @@ const BATCH_LIMIT = 500;
 
 let worker: Worker | null = null;
 
+/**
+ * Gives the shares still without an expiry the longest one allowed, with one
+ * audit entry per bucket they are on.
+ */
+const backfillShareExpiry = async (): Promise<number> =>
+  await db.$transaction(async (tx) => {
+    const filled = await db.shares.backfillExpiry(
+      env.FILE_SERVICE_MAX_SHARE_TTL_SECONDS,
+      tx
+    );
+    if (filled.length === 0) return 0;
+    const buckets = await tx.bucket.findMany({
+      where: { id: { in: [...new Set(filled.map((s) => s.bucketId))] } },
+      select: { id: true, name: true, organizationId: true },
+    });
+    for (const bucket of buckets) {
+      const shares = filled.filter((s) => s.bucketId === bucket.id);
+      await logAuditTx(tx, {
+        auth: { userId: SYSTEM_USER_ID, email: null },
+        organizationId: bucket.organizationId,
+        action: "UPDATE",
+        entityType: "shareExpiryBackfill",
+        entityId: String(bucket.id),
+        entityName: bucket.name,
+        metadata: {
+          bucketName: bucket.name,
+          maxTtlSeconds: env.FILE_SERVICE_MAX_SHARE_TTL_SECONDS,
+          processed: shares.length,
+          shares: shares.map((s) => ({ id: s.id, expiresAt: s.expiresAt })),
+        },
+      });
+    }
+    return filled.length;
+  });
+
 export async function processShareSweepTick(): Promise<{
   processed: number;
   hasMore: boolean;
 }> {
-  await db.shares.backfillExpiry(env.FILE_SERVICE_MAX_SHARE_TTL_SECONDS);
+  await backfillShareExpiry();
   const graceMs = env.FILE_SERVICE_SHARE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
   const processed = await db.$transaction(async (tx) => {
     const deleted = await db.shares.deleteExpired(

@@ -1,7 +1,9 @@
 import type { BucketPermission } from "../../prisma/generated/client/index.js";
 import { emitTx, logAuditTx, type AuditLogInput } from "./outbox.js";
+import { ConflictError, ForbiddenError } from "./errors.js";
+import { PERMISSIONS } from "../definitions/permissions.js";
+import { hasPermission } from "./permissions.js";
 import type { Prisma } from "./db/prisma.js";
-import { ConflictError } from "./errors.js";
 import db from "./db/index.js";
 
 type Tx = Prisma.TransactionClient;
@@ -83,6 +85,31 @@ export const grantTx = async (
   }
 
   return p;
+};
+
+/**
+ * A grant gives no more than the granter holds on the bucket themselves;
+ * `file-service.admin`, which needs no grant, may give any flag.
+ */
+export const assertWithinOwnGrant = async (
+  auth: { userId: string; permissions: string[] },
+  bucketId: number,
+  flags: GrantFlags
+): Promise<void> => {
+  if (hasPermission(auth.permissions, PERMISSIONS.admin)) return;
+  const own = await db.bucketPermissions.getByBucketAndUser(
+    bucketId,
+    auth.userId
+  );
+  const held = own && !own.revokedAt ? own : null;
+  const beyond = (Object.keys(flags) as (keyof GrantFlags)[]).filter(
+    (flag) => flags[flag] && !held?.[flag]
+  );
+  if (beyond.length > 0) {
+    throw new ForbiddenError(
+      `Cannot grant ${beyond.join(", ")}: your own grant on this bucket does not include it`
+    );
+  }
 };
 
 /**

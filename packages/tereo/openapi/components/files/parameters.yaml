@@ -103,6 +103,20 @@ FilesUserIdParam:
     type: string
     format: uuid
 
+RevokeSharesParam:
+  name: revokeShares
+  in: query
+  required: false
+  description: |
+    Also revoke the shares the user created that still serve (on this bucket,
+    or on the organization's buckets for a member removal), in the same
+    transaction. Without it they keep serving: a share outlives its creator's
+    access.
+  schema:
+    type: string
+    enum: ['true', 'false']
+    default: 'false'
+
 IdempotencyKeyHeader:
   name: Idempotency-Key
   in: header

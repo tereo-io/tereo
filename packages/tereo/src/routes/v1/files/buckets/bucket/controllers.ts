@@ -298,6 +298,11 @@ export const getMyPermissions = async (req: Request, res: Response) => {
     auth.userId
   );
   const active = grant && !grant.revokedAt ? grant : null;
+  // Without a grant a private bucket is refused like a missing one, so the
+  // answer can't confirm that a name exists.
+  if (!active && bucket.policy !== "public") {
+    throw new ForbiddenError("Insufficient permissions to read bucket");
+  }
 
   // What the object routes would let the caller do: the grant and the role
   // permission they require with it (already cut to a delegated token's

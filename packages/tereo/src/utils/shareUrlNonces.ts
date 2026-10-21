@@ -42,6 +42,23 @@ export async function storeShareUrlNonce(
 }
 
 /**
+ * Gives back a nonce `consumeShareUrlNonce` spent for a download that then
+ * failed before serving anything. Only its spender may call this, so the URL
+ * still serves at most once. Best-effort: without Redis the URL stays spent.
+ */
+export async function restoreShareUrlNonce(
+  shareId: string,
+  nonce: string,
+  expiresAt: Date
+): Promise<void> {
+  try {
+    await storeShareUrlNonce(shareId, nonce, expiresAt);
+  } catch (err) {
+    logger.warn({ shareId, err }, "Share URL nonce restore failed");
+  }
+}
+
+/**
  * Spends a URL's nonce. A nonce that was never stored, already spent or
  * expired is the same 403 as a bad signature.
  */

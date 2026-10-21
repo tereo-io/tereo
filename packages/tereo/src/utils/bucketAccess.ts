@@ -124,6 +124,13 @@ export type BucketAccessor = Pick<
   "userId" | "permissions" | "organizationId"
 >;
 
+/**
+ * `holdsBucketReadAccess` for a caller outside a request: read access other
+ * than through the bucket being public.
+ */
+export const holdsBucketGrant = (auth: BucketAccessor, bucketName: string) =>
+  checkBucketAccess(auth, bucketName, "read", { publicReads: false });
+
 /** Whether `auth` could download from the bucket; false for a missing one. */
 export const canReadBucket = (auth: BucketAccessor, bucketName: string) =>
   checkBucketAccess(auth, bucketName, "read");
@@ -215,6 +222,13 @@ export const validateBucketManagement = async (
   if (hasAccess) return;
   throw new ForbiddenError(`Insufficient permissions to ${operation} bucket`);
 };
+
+/** Whether `auth` passes `validateBucketManagement`. */
+export const canManageBucket = (
+  auth: AuthContext,
+  bucketName: string,
+  operation: "read" | "write" | "delete"
+) => checkBucketManagement(auth, bucketName, operation);
 
 /** `validateBucketManagement`, then the bucket — see `getAccessibleBucket`. */
 export const getManagedBucket = async (

@@ -22,7 +22,7 @@ import {
   extractId,
   assertShareServeable,
   assertSignerMayAccess,
-  spendShareUrl,
+  auditAndSpendShareUrl,
   verifySignedQuery,
 } from "../../utils.js";
 
@@ -128,9 +128,9 @@ export const downloadArchiveViaSignedUrl = async (
     await resolveSignedArchive(req);
 
   // Audited before streaming, since an error can't be answered once the body
-  // starts; in one transaction with the nonce, so a spent URL leaves no row.
-  await db.$transaction(async (tx) => {
-    await logAuditTx(tx, {
+  // starts.
+  await auditAndSpendShareUrl(verified, share, (tx) =>
+    logAuditTx(tx, {
       auth: { userId: signer ?? SYSTEM_USER_ID, email: null },
       organizationId: bucket.organizationId ?? undefined,
       action: "CREATE",
@@ -147,9 +147,8 @@ export const downloadArchiveViaSignedUrl = async (
         format: archive.format,
         keyVersion: verified.keyVersion,
       },
-    });
-    await spendShareUrl(verified, share);
-  });
+    })
+  );
 
   setAccessLog(res, { bucketId: bucket.id, operation: "ARCHIVE_DOWNLOAD" });
   setArchiveHeaders(res, archive);

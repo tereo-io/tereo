@@ -1,5 +1,6 @@
 import { processArchiveSweepTick } from "../../jobs/archiveSweep.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes } from "crypto";
 import env from "../../env.js";
@@ -86,5 +87,55 @@ describe("archiveSweep worker", () => {
         where: { archiveRequestId: lapsed.id },
       })
     ).toBe(0);
+  });
+
+  it("revokes a share still live before the delete, and audits the sweep", async () => {
+    const graceMs = env.FILE_SERVICE_SHARE_RETENTION_DAYS * DAY_MS;
+    const lapsed = await createArchive(new Date(Date.now() - graceMs - DAY_MS));
+    const share = (expiresAt: Date | null, revokedAt: Date | null = null) =>
+      prisma.share.create({
+        data: {
+          token: randomBytes(18).toString("base64url"),
+          bucketId,
+          kind: "ARCHIVE",
+          archiveRequestId: lapsed.id,
+          expiresAt,
+          revokedAt,
+          createdByUserId: getTestUserId(),
+        },
+      });
+    const live = await share(new Date(Date.now() + DAY_MS));
+    const expired = await share(new Date(Date.now() - DAY_MS));
+    const revoked = await share(null, new Date());
+
+    await processArchiveSweepTick();
+
+    const revocations = await prisma.auditLogEntry.findMany({
+      where: {
+        entityType: "share",
+        action: "DELETE",
+        entityId: { in: [live.id, expired.id, revoked.id] },
+      },
+    });
+    expect(revocations.map((e) => e.entityId)).toEqual([live.id]);
+    expect(revocations[0].userId).toBe(SYSTEM_USER_ID);
+    expect(revocations[0].metadata).toMatchObject({
+      reason: "archive_expired",
+      kind: "ARCHIVE",
+    });
+
+    const sweeps = await prisma.auditLogEntry.findMany({
+      where: { entityType: "archiveSweep", entityId: String(bucketId) },
+    });
+    const entry = sweeps.find((e) =>
+      JSON.stringify(e.metadata).includes(lapsed.id)
+    );
+    expect(entry?.action).toBe("DELETE");
+    const archives = (
+      entry?.metadata as { archives: { id: string; shareIds: string[] }[] }
+    ).archives;
+    expect(archives.find((a) => a.id === lapsed.id)?.shareIds.sort()).toEqual(
+      [live.id, expired.id, revoked.id].sort()
+    );
   });
 });

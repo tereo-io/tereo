@@ -173,11 +173,7 @@ describe("Bucket access", () => {
         `${BASE_URL}/buckets/${bucket.name}/my-permissions`,
         as(creatorToken)
       );
-      expect(mine.data).toStrictEqual({
-        canRead: false,
-        canWrite: false,
-        canDelete: false,
-      });
+      expect(mine.status).toBe(HTTP_STATUS.FORBIDDEN);
     });
   });
 
@@ -196,18 +192,13 @@ describe("Bucket access", () => {
       });
     });
 
-    it("returns false, not null, without a grant", async () => {
+    it("is 403 without a grant on a private bucket, as for a missing one", async () => {
       const bucket = await createTestBucket(creatorToken);
       const res = await axios.get(
         `${BASE_URL}/buckets/${bucket.name}/my-permissions`,
         as(outsiderToken)
       );
-      expect(res.status).toBe(HTTP_STATUS.OK);
-      expect(res.data).toStrictEqual({
-        canRead: false,
-        canWrite: false,
-        canDelete: false,
-      });
+      expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
     });
 
     it("reports a partial grant flag by flag", async () => {

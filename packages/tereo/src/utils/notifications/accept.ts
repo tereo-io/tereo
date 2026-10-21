@@ -1,11 +1,11 @@
 import type { NotificationConnection } from "../../../prisma/generated/client/index.js";
 import { assertNotificationWriteScope } from "../../middleware/organizationId.js";
 import { AppError, BadRequestError, ValidationError } from "../errors.js";
+import { canReadBucket, holdsBucketGrant } from "../bucketAccess.js";
 import { enqueueNotificationTx, logAuditTx } from "../outbox.js";
 import type { AuthContext } from "../../middleware/auth.js";
 import { CHANNELS, getAdapter } from "./channels/index.js";
 import { toConnectionView } from "./connections.js";
-import { canReadBucket } from "../bucketAccess.js";
 import { hasNul, pgText } from "../pgInput.js";
 import type { Prisma } from "../db/prisma.js";
 import { prisma } from "../db/prisma.js";
@@ -211,6 +211,7 @@ const resolveAttachments = async (
   }
 
   const readable = new Map<string, boolean>();
+  const historyReadable = new Map<string, boolean>();
   const stored: StoredAttachment[] = [];
   let total = 0;
   for (const a of attachments) {
@@ -231,7 +232,7 @@ const resolveAttachments = async (
     }
     const bucket = await client.bucket.findFirst({
       where: { name: a.bucket, deletedAt: null },
-      select: { id: true },
+      select: { id: true, policy: true },
     });
     if (!bucket) throw attachmentNotFound(a);
     const object = await client.object.findFirst({
@@ -250,6 +251,20 @@ const resolveAttachments = async (
     });
     if (!version || version.isDeleteMarker || !version.contentBlob) {
       throw attachmentNotFound(a);
+    }
+    // A public bucket serves its current content to anyone, but its history
+    // only to grant holders, as the files API does.
+    if (
+      !version.isCurrent &&
+      bucket.policy === "public" &&
+      sender.auth !== "system"
+    ) {
+      let granted = historyReadable.get(a.bucket);
+      if (granted === undefined) {
+        granted = await holdsBucketGrant(sender.auth, a.bucket);
+        historyReadable.set(a.bucket, granted);
+      }
+      if (!granted) throw attachmentNotFound(a);
     }
 
     const size = Number(version.contentBlob.sizeBytes);

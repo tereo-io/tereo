@@ -1,12 +1,16 @@
 import { BadRequestError, ForbiddenError } from "../../../../utils/errors.js";
-import { consumeShareUrlNonce } from "../../../../utils/shareUrlNonces.js";
 import { validateQuery } from "../../../../utils/validateReq.js";
+import type { Prisma } from "../../../../utils/db/prisma.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { signedQuerySchema } from "./schemas.js";
 import { pipeline as pipelineCb } from "stream";
 import db from "../../../../utils/db/index.js";
 import { Request, Response } from "express";
 import { promisify } from "util";
+import {
+  consumeShareUrlNonce,
+  restoreShareUrlNonce,
+} from "../../../../utils/shareUrlNonces.js";
 import {
   canReadBucket,
   canWriteBucket,
@@ -72,12 +76,44 @@ export async function assertShareServeable(
 }
 
 /** A capped share's URL serves once: GETDEL, so of two racing hits one wins. */
-export async function spendShareUrl(
+async function spendShareUrl(
   verified: Pick<VerifiedPresign, "share" | "nonce">,
   share: { capped: boolean } | null
+): Promise<boolean> {
+  if (!verified.share || !share?.capped) return false;
+  await consumeShareUrlNonce(verified.share, verified.nonce);
+  return true;
+}
+
+/**
+ * Writes a download's audit entry and spends a capped share's URL, before
+ * any of the body is sent. The nonce is spent last in the transaction, so a
+ * URL already used rolls the entry back. Redis can't join the transaction:
+ * when the commit fails after the nonce was spent, it is given back
+ * (best-effort), so a download that never started doesn't burn the URL.
+ * GETDEL decides between concurrent hits whatever happens to the commit, and
+ * only the winner can give it back.
+ */
+export async function auditAndSpendShareUrl(
+  verified: Pick<VerifiedPresign, "share" | "nonce" | "expiresAt">,
+  share: { capped: boolean } | null,
+  audit: (tx: Prisma.TransactionClient) => Promise<void>
 ): Promise<void> {
-  if (verified.share && share?.capped) {
-    await consumeShareUrlNonce(verified.share, verified.nonce);
+  let spent = false;
+  try {
+    await db.$transaction(async (tx) => {
+      await audit(tx);
+      spent = await spendShareUrl(verified, share);
+    });
+  } catch (err) {
+    if (spent && verified.share) {
+      await restoreShareUrlNonce(
+        verified.share,
+        verified.nonce,
+        verified.expiresAt
+      );
+    }
+    throw err;
   }
 }
 

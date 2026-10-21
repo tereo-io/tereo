@@ -613,6 +613,12 @@
       `owner` is refused (`409 conflict`). Refused on an archived
       organization (`409 resource_archived`).
 
+      Their grants on the organization's buckets are revoked. The shares they
+      created there keep serving unless `revokeShares=true`, which revokes
+      those still live in the same transaction, each audited
+      (`reason: "organization_member_removed"`) and emitted as
+      `file-service.share.revoked`.
+
       On an archived organization every mutation answers
       `409 resource_archived` once the caller passes the member-tier check
       (a member, or `organizations.read`) and before the route's own role
@@ -634,6 +640,7 @@
         schema:
           type: string
           format: uuid
+      - $ref: '../../../components/files/parameters.yaml#/RevokeSharesParam'
     responses:
       '204':
         description: Member removed successfully

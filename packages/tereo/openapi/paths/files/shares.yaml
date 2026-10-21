@@ -210,6 +210,12 @@
       - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
         bucket too (neither needed for `file-service.admin`); a caller who did not create the share also
         needs `file-service.objects.write` AND bucket-level `canWrite`
+      - An edit that makes the share reach further — removing its password,
+        removing or raising `maxDownloads`, or a later `expiresAt` (`null`
+        included) — is only for the share's creator, a caller who manages the
+        bucket (its owner with an active grant and
+        `file-service.buckets.write`) or `file-service.admin`; anyone else
+        gets `403`
 
       An audit log entry is created and, for a bucket in an organization, a
       `file-service.share.updated` webhook event is emitted.
@@ -245,7 +251,7 @@
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing permission or grant, or no such bucket
+        description: Forbidden - missing permission or grant, no such bucket, or an edit loosening the share by a caller who neither created it nor manages the bucket
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
@@ -596,6 +602,11 @@
       without counting an attempt. The limiter fails closed: while Redis is
       unreachable an attempt is refused with `503 temporarily_unavailable`
       and `Retry-After`, rather than going uncounted.
+
+      A wrong password is audited (`shareUnlockFailure`, by the system user,
+      never with the password) when it uses up its address's `(token, ip)`
+      window, or when it was checked during the per-token delay; other wrong
+      passwords leave no entry.
     operationId: unlockShare
     security: []
     parameters:

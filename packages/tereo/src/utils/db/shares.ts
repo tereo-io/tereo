@@ -215,6 +215,36 @@ export const revoke = async (
 };
 
 /**
+ * The shares `userId` created that still serve (not revoked or expired), on
+ * one bucket or on every live bucket of an organization.
+ */
+export const getActiveByCreator = async (
+  scope: { userId: string } & (
+    { bucketId: number } | { organizationId: string }
+  ),
+  tx?: Prisma.TransactionClient
+) => {
+  const client = tx ?? prisma;
+  return await client.share.findMany({
+    where: {
+      createdByUserId: scope.userId,
+      revokedAt: null,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      bucket:
+        "bucketId" in scope
+          ? { id: scope.bucketId }
+          : { organizationId: scope.organizationId, deletedAt: null },
+    },
+    select: {
+      id: true,
+      kind: true,
+      bucket: { select: { name: true, organizationId: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+};
+
+/**
  * Atomic check-and-increment. Returns the updated Share when the download was
  * permitted, null when the cap is already saturated. Concurrent downloads race
  * safely: maxDownloads=3 + 20 parallel calls = exactly 3 successes.
@@ -258,14 +288,19 @@ export const getPaginated = async (options: GetPaginatedOptions) => {
 /**
  * Give every share without an expiry the longest one allowed, counted from its
  * creation. Shares created before expiries were required have none; the
- * `expires_at` index makes this a no-op lookup once they are filled.
+ * `expires_at` index makes this a no-op lookup once they are filled. Returns
+ * the shares it gave one.
  */
-export const backfillExpiry = async (maxTtlSeconds: number): Promise<number> =>
-  await prisma.$executeRaw`
+export const backfillExpiry = async (
+  maxTtlSeconds: number,
+  tx: Prisma.TransactionClient
+): Promise<{ id: string; bucketId: number; expiresAt: Date }[]> =>
+  await tx.$queryRaw`
     UPDATE "files"."shares"
     SET expires_at = created_at + make_interval(secs => ${maxTtlSeconds}::double precision),
         updated_at = now()
-    WHERE expires_at IS NULL`;
+    WHERE expires_at IS NULL
+    RETURNING id, bucket_id AS "bucketId", expires_at AS "expiresAt"`;
 
 /**
  * Hard-delete share rows whose audit value has lapsed: revoked or expired
