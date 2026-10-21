@@ -45,7 +45,11 @@ Run at least one process with `all` or `worker`, or nothing delivers webhooks or
 ### Health checks
 
 `all` and `api` answer `GET /health` on `PORT`: 200 with `status: "ok"` when Postgres and Redis
-answer, 503 and `"degraded"` (naming `db` or `redis` as `"fail"`) when either does not.
+answer, 503 and `"degraded"` (naming `db` or `redis` as `"fail"`) when either does not. The
+probe result is shared for one second, and requests are rate-limited per client IP (1000 a second
+from an internal network address, 300 otherwise), so point probes at it directly rather than
+through a proxy that sets `X-Forwarded-For`. It names no version; an admin finds core's as the
+core service's `declarationVersion` (`GET /v1/admin/services`).
 
 A `worker` serves no API, so it listens on `WORKER_HEALTH_PORT` (default `4002`) for `GET` (or `HEAD`)
 `/health` alone. Besides the Postgres and Redis pings, it is degraded when no BullMQ worker is running or any is

@@ -426,8 +426,10 @@ info:
     `/v1/files/buckets/{name}/objects`, `/multipart` and `/archives` routes and on presigned
     (`/v1/files/signed/objects/**`) traffic.
 
-    #### Unprotected Endpoints
-    - **Health check** (`/health`): No rate limiting
+    #### Health Checks and Preflights
+    `GET /health` and the CORS preflights (`OPTIONS`) of bucket object, multipart and archive
+    routes each have a per-address limit of their own, at the same rates as the limit before
+    authentication.
 
     ### Rate Limit Headers
 
@@ -934,7 +936,10 @@ paths:
       description: |
         Probes Postgres and Redis (500 ms timeout each). Returns `200` with
         `status: ok` when both answer, `503` with `status: degraded` and the
-        failing dependency marked `fail` otherwise. Public and not rate-limited.
+        failing dependency marked `fail` otherwise. Public, so it names no
+        version. The probe result is shared for one second, and requests are
+        limited per client IP (300 a second, 1000 for a direct connection from
+        an internal network address).
       operationId: getHealth
       security: []
       responses:
@@ -944,6 +949,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthStatus'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
         '503':
           description: Postgres or Redis is unreachable
           content:
@@ -20976,7 +20983,6 @@ components:
       required:
         - status
         - service
-        - version
         - timestamp
       properties:
         status:
@@ -20987,9 +20993,6 @@ components:
         service:
           type: string
           description: '`SERVICE_NAME`'
-        version:
-          type: string
-          description: Package version (`0.0.0` when unknown)
         timestamp:
           type: string
           format: date-time

@@ -3163,7 +3163,6 @@ HealthStatus:
   required:
     - status
     - service
-    - version
     - timestamp
   properties:
     status:
@@ -3172,9 +3171,6 @@ HealthStatus:
     service:
       type: string
       description: '`SERVICE_NAME`'
-    version:
-      type: string
-      description: Package version (`0.0.0` when unknown)
     timestamp:
       type: string
       format: date-time
