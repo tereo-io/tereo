@@ -1,3 +1,4 @@
+import { apiBodyParsers } from "../../../middleware/bodyParsers.js";
 import { PERMISSIONS } from "../../../definitions/permissions.js";
 import notificationRouter from "./notification/index.js";
 import { sendNotification } from "./controllers.js";
@@ -16,6 +17,8 @@ const notificationsRouter = Router();
 notificationsRouter.use(rateLimitPreAuth);
 notificationsRouter.use(createRequireAuth({ area: "notifications" }));
 notificationsRouter.use(rateLimitGeneral);
+// Content is inline; attachments are references to stored objects.
+notificationsRouter.use(...apiBodyParsers("10mb"));
 
 notificationsRouter.use("/:id", notificationRouter);
 

@@ -1,3 +1,4 @@
+import { apiBodyParsers } from "../../../middleware/bodyParsers.js";
 import { createRequireAuth } from "../../../middleware/auth.js";
 import entriesRouter from "./entries/index.js";
 import { Router } from "express";
@@ -12,6 +13,8 @@ const apiRouter = Router();
 apiRouter.use(rateLimitPreAuth);
 apiRouter.use(createRequireAuth({ area: "audit" }));
 apiRouter.use(rateLimitGeneral);
+apiRouter.use("/entries/batch", ...apiBodyParsers("10mb"));
+apiRouter.use(...apiBodyParsers());
 
 apiRouter.use("/entries", entriesRouter);
 

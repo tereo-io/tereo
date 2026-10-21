@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { redactUrl } from "../telemetry/redact.js";
+import { AppError } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import db from "../utils/db/index.js";
 
@@ -145,6 +146,20 @@ export const setAccessLog = (
 };
 
 /**
+ * Marks the request so `accessLogErrorFallback` writes no row for a 401 or
+ * 429 that reached it with no access log set: a rejection an unauthenticated
+ * caller can produce at will.
+ */
+export const skipRejectedAccessLogs = (
+  _req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  res.locals.skipRejectedAccessLogs = true;
+  next();
+};
+
+/**
  * Express error middleware that synthesizes an access-log entry for requests
  * that errored BEFORE a controller had a chance to call `setAccessLog`
  * (validation errors, 401, 404, 412, etc.). Keeps the primary-path semantics
@@ -159,6 +174,14 @@ export const accessLogErrorFallback = (
   res: Response,
   next: NextFunction
 ) => {
+  const status = err instanceof AppError ? err.statusCode : undefined;
+  if (
+    !res.accessLog &&
+    res.locals.skipRejectedAccessLogs === true &&
+    (status === 401 || status === 429)
+  ) {
+    return next(err);
+  }
   if (!res.accessLog) {
     // Synthesize a minimal record so the main log handler still writes a row
     // on error paths. Without a resolved bucket we leave `bucketId` off —
