@@ -40,8 +40,19 @@ export const listForUser = async (userId: string) => {
   });
 };
 
-export const countForUser = async (userId: string, tx?: Tx) => {
-  return await (tx ?? prisma).userIdentity.count({ where: { userId } });
+/** The user's identities a sign-in could use now: those at active providers. */
+export const countUsableForUser = async (
+  userId: string,
+  except: string | null,
+  tx?: Tx
+) => {
+  return await (tx ?? prisma).userIdentity.count({
+    where: {
+      userId,
+      provider: { isActive: true },
+      ...(except && { id: { not: except } }),
+    },
+  });
 };
 
 export const create = async (

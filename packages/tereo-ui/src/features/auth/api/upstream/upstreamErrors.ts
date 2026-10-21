@@ -2,6 +2,8 @@ const UPSTREAM_ERROR_MESSAGES: Record<string, string> = {
   upstream_cancelled: "Sign-in was cancelled at the identity provider.",
   upstream_failed:
     "The identity provider could not sign you in. Try again, or use another way to sign in.",
+  upstream_reauth_failed:
+    "The identity provider did not ask you to sign in again. Sign out there, then try again.",
   session_expired: "That sign-in took too long. Please try again.",
   provider_inactive: "This identity provider is turned off.",
   no_account:

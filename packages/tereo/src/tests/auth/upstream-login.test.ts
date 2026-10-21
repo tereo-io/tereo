@@ -161,7 +161,13 @@ const verifyTotp = async (jar: CookieJar, location: URL, secret: string) => {
 const loginFlow = (
   fake: FakeOidcProvider,
   provider: Provider,
-  extra: { claims?: { sub: string }; acrValues?: string; ip?: string } = {}
+  extra: {
+    claims?: { sub: string; auth_time?: number };
+    acrValues?: string;
+    maxAge?: number;
+    prompt?: string;
+    ip?: string;
+  } = {}
 ) =>
   upstreamLogin({
     provider: fake,
@@ -510,6 +516,20 @@ describe("sign-in through a provider", () => {
     expectLoginFailure(callback, "upstream_failed", true);
   });
 
+  it("refuses a token response over 1 MiB as upstream_failed", async () => {
+    const { claims } = await linkedUser(provider);
+    fake.tamper({ oversizeTokenResponse: true });
+    const { callback } = await loginFlow(fake, provider, { claims });
+    expectLoginFailure(callback, "upstream_failed", true);
+  });
+
+  it("refuses a subject longer than 255 characters as upstream_failed", async () => {
+    const { callback } = await loginFlow(fake, provider, {
+      claims: { sub: "s".repeat(256) },
+    });
+    expectLoginFailure(callback, "upstream_failed", true);
+  });
+
   it("maps access_denied at the provider to upstream_cancelled", async () => {
     fake.tamper({ error: "access_denied" });
     const { callback } = await loginFlow(fake, provider);
@@ -611,6 +631,104 @@ describe("sign-in through a provider", () => {
     const location = new URL(res.headers.get("location") ?? "");
     expect(location.pathname).toBe("/login");
     expect(location.searchParams.get("error")).toBe("session_expired");
+  });
+});
+
+describe("re-authentication at the provider", () => {
+  let fake: FakeOidcProvider;
+  let provider: Provider;
+  const secondsAgo = (s: number) => Math.floor(Date.now() / 1000) - s;
+
+  beforeAll(async () => {
+    fake = await startFakeOidcProvider();
+    provider = await createProvider(fake);
+  });
+
+  afterAll(async () => {
+    await fake.close();
+  });
+
+  it("asks the provider for nothing when the request asks for nothing", async () => {
+    const { claims } = await linkedUser(provider);
+    await loginFlow(fake, provider, { claims });
+    const sent = fake.lastAuthorizeQuery()!;
+    expect(sent.has("prompt")).toBe(false);
+    expect(sent.has("max_age")).toBe(false);
+  });
+
+  it("passes prompt=login and max_age on to the provider", async () => {
+    const { claims } = await linkedUser(provider);
+    await loginFlow(fake, provider, { claims, prompt: "login", maxAge: 300 });
+    const sent = fake.lastAuthorizeQuery()!;
+    expect(sent.get("prompt")).toBe("login");
+    expect(sent.get("max_age")).toBe("300");
+  });
+
+  it("sends max_age=0 as prompt=login too", async () => {
+    const { claims } = await linkedUser(provider);
+    await loginFlow(fake, provider, { claims, maxAge: 0 });
+    const sent = fake.lastAuthorizeQuery()!;
+    expect(sent.get("prompt")).toBe("login");
+    expect(sent.get("max_age")).toBe("0");
+  });
+
+  it("carries the provider's auth_time into core's tokens", async () => {
+    const { claims } = await linkedUser(provider);
+    const authTime = secondsAgo(3600);
+    const { jar, location, verifier } = await loginFlow(fake, provider, {
+      claims: { ...claims, auth_time: authTime },
+    });
+    const idToken = await exchange(
+      await approveConsent(jar, location),
+      verifier
+    );
+    expect(idToken.auth_time).toBe(authTime);
+  });
+
+  it("refuses an auth_time older than max_age as upstream_reauth_failed", async () => {
+    const { claims } = await linkedUser(provider);
+    const { callback } = await loginFlow(fake, provider, {
+      claims: { ...claims, auth_time: secondsAgo(3600) },
+      maxAge: 0,
+    });
+    expectLoginFailure(callback, "upstream_reauth_failed", true);
+  });
+
+  it("accepts a fresh auth_time under max_age=0", async () => {
+    const { claims } = await linkedUser(provider);
+    const authTime = secondsAgo(1);
+    const { jar, location, verifier } = await loginFlow(fake, provider, {
+      claims: { ...claims, auth_time: authTime },
+      maxAge: 0,
+    });
+    const idToken = await exchange(
+      await approveConsent(jar, location),
+      verifier
+    );
+    expect(idToken.auth_time).toBe(authTime);
+  });
+
+  it("refuses a missing auth_time under a max_age that sent no prompt=login", async () => {
+    const { claims } = await linkedUser(provider);
+    const { callback } = await loginFlow(fake, provider, {
+      claims,
+      maxAge: 300,
+    });
+    expectLoginFailure(callback, "upstream_reauth_failed", true);
+  });
+
+  it("takes a missing auth_time under prompt=login as now", async () => {
+    const { claims } = await linkedUser(provider);
+    const before = Math.floor(Date.now() / 1000);
+    const { jar, location, verifier } = await loginFlow(fake, provider, {
+      claims,
+      prompt: "login",
+    });
+    const idToken = await exchange(
+      await approveConsent(jar, location),
+      verifier
+    );
+    expect(idToken.auth_time).toBeGreaterThanOrEqual(before);
   });
 });
 

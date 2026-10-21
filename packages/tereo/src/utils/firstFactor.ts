@@ -50,6 +50,10 @@ export interface FirstFactorContinuation {
   authMethods: string[];
   /** The provider already vouched for a second factor, so core asks for none. */
   mfaSatisfied: boolean;
+  /** When the first factor was presented, if not now: a provider's `auth_time`. */
+  authTime?: Date;
+  /** Held by a TOTP step, which commits it (`utils/identityProviders/forcedLink.ts`). */
+  pendingLinkId?: string;
   /** Writes the step the login goes on to; by default on its own. */
   writeStep?: StepWriter;
 }
@@ -88,6 +92,8 @@ export const continueAfterFirstFactor = async (
     request,
     authMethods,
     mfaSatisfied,
+    authTime = new Date(),
+    pendingLinkId,
     writeStep = db.loginFlows.writeStep,
   }: FirstFactorContinuation
 ): Promise<{ redirect_url: string }> => {
@@ -190,6 +196,7 @@ export const continueAfterFirstFactor = async (
             acrValues: request.acrValues,
             prompt: request.prompt,
             firstFactor: authMethods,
+            pendingLinkId,
           },
           tx
         )
@@ -220,7 +227,7 @@ export const continueAfterFirstFactor = async (
     request.codeChallenge,
     request.codeChallengeMethod,
     request.nonce,
-    new Date(),
+    authTime,
     request.maxAge,
     request.acrValues,
     request.prompt,

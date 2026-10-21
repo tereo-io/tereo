@@ -15,6 +15,8 @@ export interface UpstreamLoginOptions {
   /** Bound to the fake's next `/authorize`; omit when a tamper answers it. */
   claims?: Partial<FakeClaims> & { sub: string };
   acrValues?: string;
+  maxAge?: number;
+  prompt?: string;
   jar?: CookieJar;
   /** Sent as X-Forwarded-For, for a test that needs its own limiter key. */
   ip?: string;
@@ -38,6 +40,8 @@ export const upstreamToCallback = async ({
   scope,
   claims,
   acrValues,
+  maxAge,
+  prompt,
   jar = new Map(),
   ip,
 }: UpstreamLoginOptions) => {
@@ -51,6 +55,8 @@ export const upstreamToCallback = async ({
     code_challenge: pkce.challenge,
     code_challenge_method: "S256",
     ...(acrValues && { acr_values: acrValues }),
+    ...(maxAge !== undefined && { max_age: String(maxAge) }),
+    ...(prompt && { prompt }),
   };
   const query = new URLSearchParams(params);
 

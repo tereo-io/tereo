@@ -1,5 +1,6 @@
 import { formatUserIdentity } from "../../../../utils/identityProviders/identities.js";
 import type { UpstreamRoundTrip } from "../../../../utils/identityProviders/begin.js";
+import { ssoProviderElsewhere } from "../../../../utils/identityProviders/resolve.js";
 import { UpstreamAuthError } from "../../../../utils/identityProviders/errors.js";
 import { beginUpstreamAuth } from "../../../../utils/identityProviders/begin.js";
 import { validateBody } from "../../../../utils/validateReq.js";
@@ -14,6 +15,7 @@ import {
 } from "../../../../utils/cookies.js";
 import {
   AppError,
+  ConflictError,
   ForbiddenError,
   NotFoundError,
 } from "../../../../utils/errors.js";
@@ -34,6 +36,13 @@ export const startLink = async (req: Request, res: Response) => {
   const provider = await db.identityProviders.getBySlug(body.provider);
   if (!provider?.isActive) {
     throw new NotFoundError("Identity provider not found");
+  }
+  const required = await ssoProviderElsewhere(auth.email, provider.id);
+  if (required) {
+    throw new ConflictError(
+      `Your account must sign in with ${required.displayName}`,
+      "sso_required"
+    );
   }
 
   let trip: UpstreamRoundTrip;

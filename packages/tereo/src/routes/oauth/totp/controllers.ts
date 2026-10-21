@@ -1,3 +1,4 @@
+import { writeStepAfterSecondFactor } from "../../../utils/identityProviders/forcedLink.js";
 import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js";
 import { handlePostAuthOrgSelection } from "../../../utils/orgSelection.js";
 import { recordSessionsRevoked } from "../../../utils/sessionEvents.js";
@@ -102,8 +103,9 @@ export const totpVerifyHandler = async (req: Request, res: Response) => {
   // One code, one login: a concurrent request with the same session loses.
   // The session is consumed where the next step is written, so a password
   // change cannot end it between the two and leave that step behind.
-  const writeStep = db.loginFlows.writeStepConsuming(
-    verification.userId,
+  const writeStep = await writeStepAfterSecondFactor(
+    verification,
+    client.clientId,
     async (tx) => {
       if (!(await db.totp.consumeVerificationSession(verification.id, tx))) {
         throw new OAuth2Error(
@@ -213,8 +215,9 @@ export const totpRecoveryHandler = async (req: Request, res: Response) => {
 
   // Both atomic, so neither the code nor the session serves two logins, and
   // in the transaction that writes the next step, as at the TOTP step.
-  const writeStep = db.loginFlows.writeStepConsuming(
-    verification.userId,
+  const writeStep = await writeStepAfterSecondFactor(
+    verification,
+    client.clientId,
     async (tx) => {
       if (
         !(await db.totp.consumeVerificationSession(verification.id, tx)) ||

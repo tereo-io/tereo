@@ -367,7 +367,7 @@ to **one organization** and a set of **default roles** in it, and has two indepe
 | Flag         | Effect                                                                                                                                                                                                      |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `autoAccept` | A first sign-in with a verified email at this domain **creates the user**: no password, name from the claims, `member` of the domain's organization, the default roles assigned there, the identity linked. |
-| `ssoOnly`    | Password sign-in is refused for users at this domain.                                                                                                                                                       |
+| `ssoOnly`    | The domain's provider is the only way in: password sign-in, and sign-in or linking through any other provider, is refused for its users.                                                                    |
 
 They combine freely: "staff must use Google, and nobody joins automatically" is `ssoOnly` without
 `autoAccept`. Default roles must be roles assignable within an organization, and the admin setting
@@ -395,7 +395,8 @@ never carry `hd`, cannot be auto-accepted: those users can arrive only by **invi
 A provider identity (the pair of provider and the provider's stable `sub`) is **never matched to an
 existing account by email**. A first sign-in lands in exactly one of three ways, tried in order:
 
-1. The identity is already linked: it signs in that user.
+1. The identity is already linked: it signs in that user, unless the user's email domain is SSO-only
+   for another provider (below).
 2. An unexpired **invite** exists for that provider, the invited user's email equals the provider's
    verified email (and `hd`, for Google): the invite is claimed, once, and the identity linked.
 3. The email's domain is an `autoAccept` domain of this provider and no account has that email: a new
@@ -449,8 +450,9 @@ provider, among the codes below), and at `/login?error=session_expired` when the
 already gone (a link session with no user lands on `/account?error=session_expired`).
 
 `DELETE /v1/account/identities/{id}` unlinks, under the same two rules. It is refused with 409
-`last_sign_in_method` when the user has no password and it is their only identity, and with 409
-`sso_required` when their email's domain is `ssoOnly` for that provider. An admin can unlink with
+`last_sign_in_method` when the user has no password and no other identity at an active provider (one
+at a deactivated provider is no way in), and with 409 `sso_required` when their email's domain is
+`ssoOnly` for that provider. An admin can unlink with
 `DELETE /v1/admin/users/{id}/identities/{identityId}`, with the same 409s but no recent-login rule.
 
 For an `ssoOnly` domain, the password check runs first and unchanged, so nothing reveals whether an
@@ -473,6 +475,25 @@ and emits `auth.user.password-changed` with `reason: "sso_only"`; the login then
 provider login (`amr` `["fed"]`). A failure lands on `/login` with the authorize parameters and
 leaves the grant usable until it expires.
 
+When a second factor is due (by the usual rules: the user's TOTP, the instance policy, a role, or
+`acr_values`, and the provider not `countsAsMfa`), a password and the provider account alone change
+nothing: the callback records the vouched-for identity as a pending link (`auth.pending_identity_links`)
+held by the TOTP step, and that transaction runs only when the TOTP or recovery code passes, in the
+one that consumes the step (the `LOGIN` entry then names the new identity, `amr` `["fed","otp"]`).
+The pending link belongs to the grant: a password change, a sign-out everywhere or the grant's
+expiry removes it and its TOTP step (400 `invalid_session`). A user who must first enrol goes to 2FA
+setup with nothing changed, and after enrolling signs in again through the password and the
+provider.
+
+**No other provider.** An SSO-only domain's provider is the only way in for the domain's users.
+A callback at any other provider that would sign one of them in, through an identity linked earlier
+or by claiming an invite, ends on `/login?error=sso_required&provider=<slug>` naming the domain's
+provider, and leaves the invite unclaimed. Linking another provider from the account page is refused
+with 409 `sso_required` at `POST /v1/account/identities`, and at the callback
+(`/account?error=sso_required`) when the domain turned SSO-only during the round trip. Identities
+already linked at other providers stay (listed, and the user may unlink them), but sign no one in
+while the domain is SSO-only; turning SSO-only off makes them usable again.
+
 A user whose email at the provider differs from their email in core cannot complete the forced link
 (`account_mismatch`), and an invite does not help, because claiming one also requires the
 provider's verified email to equal the user's. The way through is to change the user's email in
@@ -492,6 +513,19 @@ A provider login records its method in the session's `authMethods`, which become
 `usedMfa()` counts `mfa` alongside `otp` and `recovery`, so the ID token's `acr` reads
 `urn:auth-service:mfa` for a `countsAsMfa` login and session reuse, `max_age` and `acr_values` need
 no other rule.
+
+**Re-authentication and `auth_time`.** A provider login's `auth_time` is the provider's own
+(the ID token's `auth_time` claim), not the moment core's callback ran, so a silent sign-in on an old
+session at the provider does not pass for a fresh login. When the authorize request carries
+`prompt=login` or `max_age`, core sends them on to the provider (`max_age=0` also as `prompt=login`,
+which it means), and checks the answer against them, counting from the start of the round trip with
+30 seconds for clock skew: an `auth_time` older than `max_age` allows, or from before the round trip
+under `prompt=login`, ends the callback on `/login?error=upstream_reauth_failed`. A provider that
+sends no `auth_time` is taken to have just asked when `prompt=login` was sent, and is refused under a
+`max_age` without it (OIDC requires the claim whenever `max_age` was asked). Without either, a
+missing claim reads as now. This is what makes the account page's `max_age=0` re-sign-in, and an
+app's `prompt=login`, ask the user again at the provider. After a TOTP step the login's `auth_time`
+is that step's.
 
 **`countsAsMfa` is a trust decision.** Turning it on says "this provider enforces its own MFA", and
 core then treats the login as multi-factor **everywhere**: the instance policy, roles with
@@ -514,7 +548,8 @@ authorize parameters (so the user can retry) and `error=<code>`. They never redi
 | Code                                     | Meaning                                                                                                                                                                                                                                      |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `upstream_cancelled`                     | The provider returned `access_denied`: the user declined or cancelled                                                                                                                                                                        |
-| `upstream_failed`                        | The provider returned an error, or the code exchange or ID token validation failed (logged with the cause)                                                                                                                                   |
+| `upstream_failed`                        | The provider returned an error, or the code exchange or ID token validation failed (logged with the cause), or sent a response over 1 MiB or a `sub` over 255 characters                                                                     |
+| `upstream_reauth_failed`                 | The request asked for `prompt=login` or `max_age`, and the provider's `auth_time` is too old, or missing under `max_age` alone                                                                                                               |
 | `session_expired`                        | No or mismatched `upstream_auth` cookie, or an unknown, used or expired round trip (10 minutes), or no authorize session cookie at start; for a link grant, a missing cookie, a used or expired grant, or another provider than the domain's |
 | `provider_inactive`                      | The provider was deactivated before or during the flow                                                                                                                                                                                       |
 | `no_account`                             | No linked identity, no invite, and no auto-accept domain of this provider (also: no email claim, or the domain's organization is archived or inactive)                                                                                       |
@@ -523,7 +558,7 @@ authorize parameters (so the user can retry) and `error=<code>`. They never redi
 | `account_inactive`                       | The user is deactivated, or is a service account                                                                                                                                                                                             |
 | `account_mismatch`                       | Forced link: the provider account's verified email is not the user's                                                                                                                                                                         |
 | `identity_in_use`, `already_linked`      | Linking, on `/account?error=`, or an SSO-only user's forced link on `/login`: the provider account belongs to another user, or the user already has this provider (or this account)                                                          |
-| `sso_required`                           | Password sign-in for an SSO-only domain whose provider the user has linked (403 JSON from the password POST, with `provider`); also 409 from account and admin unlink of the provider an SSO-only domain requires                            |
+| `sso_required`                           | Password sign-in for an SSO-only domain whose provider the user linked (403 JSON, with `provider`); a callback at another provider (`&provider=`); 409 on unlinking the domain's provider or linking another                                 |
 | `reauth_required`, `last_sign_in_method` | JSON from the account API: linking or unlinking without a login under 10 minutes old (403), or unlinking the only way in (409)                                                                                                               |
 | `too_many_attempts`                      | Too many failed callbacks from this address (below); on `/account?error=` for a link                                                                                                                                                         |
 

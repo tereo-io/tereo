@@ -1250,6 +1250,13 @@
       `invalid_code` and counts toward the lockout. That includes the code
       that completed TOTP setup.
 
+      A 2FA session from an SSO-only user's forced link (see
+      `GET /oauth/upstream/{slug}/start`) holds the link: the right code
+      links the identity, clears the password, consumes the link grant and
+      ends the user's other sessions in the transaction that consumes the
+      session. A grant gone meanwhile takes the session with it (400
+      `invalid_session`).
+
       The 2FA session is single-use too: of two concurrent requests with a
       right code, the second is 401 `invalid_code` when it carries the same
       code and 400 `invalid_session` when it carries another.
@@ -1312,7 +1319,8 @@
       Session, cookie, errors and lockout as for `POST /oauth/totp/verify`,
       plus 400 `no_recovery_codes` when the user has none left. The code and
       the 2FA session are consumed atomically: a code or session already used
-      by a concurrent request is 400 `invalid_session`.
+      by a concurrent request is 400 `invalid_session`. A forced link's
+      2FA session commits the link as at `POST /oauth/totp/verify`.
 
       An audit log entry (User, `metadata.action: recovery_code_used`, the
       user as actor) is created in the same transaction.
