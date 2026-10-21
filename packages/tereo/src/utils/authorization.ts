@@ -3,9 +3,15 @@ import { maySelectOrganization } from "./supportAccess.js";
 import { LOGIN_CLIENT } from "../definitions/index.js";
 import type { Request, Response } from "express";
 import { emitTx, logAuditTx } from "./outbox.js";
+import type { Prisma } from "./db/prisma.js";
 import { OAuth2Error } from "./errors.js";
 import db from "./db/index.js";
 import env from "../env.js";
+import {
+  notifyRevoked,
+  revokeBrowserSessions,
+  type RevokedBrowserSessions,
+} from "./sessions.js";
 import {
   clearUserSessionCookie,
   getUserSessionFromCookie,
@@ -117,12 +123,16 @@ export const grantAfterLogin = (
  * continues) this browser's SSO session, setting its cookie. Returns the
  * client's redirect URI with the code and state, or with `login_required`
  * when the SSO session a request without credentials continues has ended.
+ * `consumeStep` spends the login step that led here under the user's lock
+ * and throws when it is gone, so a sign-out that deleted it (a password
+ * change) cannot be followed by a code.
  */
 export const issueAuthorizationCode = async (
   req: Request,
   res: Response,
   client: { id: string; clientId: string },
-  grant: ApprovedAuthorization
+  grant: ApprovedAuthorization,
+  consumeStep?: (tx: Prisma.TransactionClient) => Promise<void>
 ): Promise<string> => {
   const { code, codeHash } = generateAuthorizationCode(client.clientId);
 
@@ -155,6 +165,7 @@ export const issueAuthorizationCode = async (
     // session end takes them; the sessions are read under the lock, so a
     // logout that committed first is seen.
     await db.users.lockForTokenIssue(grant.userId, tx);
+    await consumeStep?.(tx);
 
     const freshLogin = grant.userSessionId === null;
     const continued = grant.userSessionId
@@ -210,7 +221,16 @@ export const issueAuthorizationCode = async (
       expiresAt: userSessionExpiresAt,
     };
 
-    if (replaced) {
+    // Another user's session ends as a logout of this browser would, with
+    // the token families issued under it; this user's own expired one goes.
+    let revokedOther: RevokedBrowserSessions | null = null;
+    if (replaced && replaced.userId !== grant.userId) {
+      await db.users.lockForSessionEnd(tx, { userSessionIds: [replaced.id] });
+      revokedOther = await revokeBrowserSessions(tx, {
+        userSessionIds: [replaced.id],
+        authCodeIds: [],
+      });
+    } else if (replaced) {
       await db.userSessions.deleteUserSessionsByIds([replaced.id], tx);
     }
     const session = reuse
@@ -291,8 +311,9 @@ export const issueAuthorizationCode = async (
         },
       });
     }
-    return { sessionToken, userSessionExpiresAt };
+    return { sessionToken, userSessionExpiresAt, revokedOther };
   });
+  if (issued?.revokedOther) notifyRevoked(issued.revokedOther);
   if (!issued) {
     clearUserSessionCookie(res, client.clientId);
     return authorizationResponseUrl(grant.redirectUri, {

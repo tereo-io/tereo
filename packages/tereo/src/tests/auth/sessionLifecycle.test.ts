@@ -1277,7 +1277,7 @@ describe("Session lifecycle", () => {
     it("a completed prompt=login as another user ends the previous user's SSO session", async () => {
       const first = await createUser();
       const second = await createUser();
-      const { jar } = await login(first);
+      const { jar, tokens } = await login(first);
 
       const { code, verifier } = await loginToCode(second, jar, {
         prompt: "login",
@@ -1286,6 +1286,15 @@ describe("Session lifecycle", () => {
 
       expect(await userSessionRows(first.id)).toHaveLength(0);
       expect(await userSessionRows(second.id)).toHaveLength(1);
+      // Its token families end with it, as at a logout of this browser.
+      const family = await prisma.refreshToken.findUnique({
+        where: { tokenHash: hashFlowToken(tokens.refresh_token) },
+      });
+      expect(family?.revokedAt).not.toBeNull();
+      const access = await fetch(`${BASE_URL}/v1/account/me`, {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
+      expect(access.status).toBe(401);
     });
 
     it("max_age on a password login is satisfied by the fresh auth_time", async () => {

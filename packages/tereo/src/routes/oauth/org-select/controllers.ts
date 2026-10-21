@@ -4,6 +4,7 @@ import { OAuth2Error, BadRequestError } from "../../../utils/errors.js";
 import { maySelectOrganization } from "../../../utils/supportAccess.js";
 import { generateRandomString } from "../../../utils/crypto.js";
 import { skipsConsent } from "../../../definitions/index.js";
+import type { Prisma } from "../../../utils/db/prisma.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
 import env from "../../../env.js";
@@ -118,44 +119,56 @@ export const orgSelectSubmitHandler = async (req: Request, res: Response) => {
   }
 
   // One pick, one consent: a concurrent submit with the same session loses.
-  if (!(await db.orgSelectionSessions.consume(session.id))) {
-    throw new OAuth2Error(
-      "invalid_session",
-      "Session not found. Please login again."
-    );
-  }
-  clearOrgSelectSessionCookie(res, client.clientId);
+  // Consumed under the user's lock where the next step is written, so a
+  // password change that deleted it cannot be followed by that step.
+  const consume = async (tx: Prisma.TransactionClient) => {
+    if (!(await db.orgSelectionSessions.consume(session.id, tx))) {
+      throw new OAuth2Error(
+        "invalid_session",
+        "Session not found. Please login again."
+      );
+    }
+  };
 
   if (skipsConsent(client, session.scopes)) {
     const redirectUrl = await issueAuthorizationCode(
       req,
       res,
       client,
-      grantAfterLogin(session, body.organization_id)
+      grantAfterLogin(session, body.organization_id),
+      consume
     );
+    clearOrgSelectSessionCookie(res, client.clientId);
     res.json({ redirect_url: redirectUrl });
     return;
   }
 
   const consentSessionToken = generateRandomString(32);
-  await db.consent.createConsentSession({
-    sessionToken: consentSessionToken,
-    userId: session.userId,
-    clientId: session.clientId,
-    organizationId: body.organization_id,
-    redirectUri: session.redirectUri,
-    scopes: session.scopes,
-    state: session.state,
-    codeChallenge: session.codeChallenge,
-    codeChallengeMethod: session.codeChallengeMethod,
-    nonce: session.nonce,
-    authTime: session.authTime,
-    expiresAt: new Date(Date.now() + env.LOGIN_FLOW_TTL * 1000),
-    maxAge: session.maxAge,
-    acrValues: session.acrValues,
-    prompt: session.prompt,
-    authMethods: session.authMethods,
-  });
+  const writeStep = db.loginFlows.writeStepConsuming(session.userId, consume);
+  await writeStep((tx) =>
+    db.consent.createConsentSession(
+      {
+        sessionToken: consentSessionToken,
+        userId: session.userId,
+        clientId: session.clientId,
+        organizationId: body.organization_id,
+        redirectUri: session.redirectUri,
+        scopes: session.scopes,
+        state: session.state,
+        codeChallenge: session.codeChallenge,
+        codeChallengeMethod: session.codeChallengeMethod,
+        nonce: session.nonce,
+        authTime: session.authTime,
+        expiresAt: new Date(Date.now() + env.LOGIN_FLOW_TTL * 1000),
+        maxAge: session.maxAge,
+        acrValues: session.acrValues,
+        prompt: session.prompt,
+        authMethods: session.authMethods,
+      },
+      tx
+    )
+  );
+  clearOrgSelectSessionCookie(res, client.clientId);
 
   setConsentSessionCookie(res, consentSessionToken, client.clientId);
 

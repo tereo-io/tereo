@@ -780,7 +780,8 @@ live session skips the consent screen and redirects with the code. Any other cli
 for `prompt=none` — consent is not remembered, and a silent request cannot show the consent screen
 (OIDC Core 3.1.2.6) — and sent to `{UI}/consent` for an `org_id` switch. `prompt=login` goes to the password
 login without touching the SSO session (any site can send a browser there); the login, once it
-succeeds, continues that session or, for another user, replaces it.
+succeeds, continues that session or, for another user, replaces it — ending the other user's
+session as a logout of this browser would, with every token family issued under it.
 
 A request let in by the SSO session alone stays tied to it: the consent screen of an `org_id`
 switch ends with that session, and the code is issued only while the session still exists, checked
@@ -795,7 +796,9 @@ refuses the login as a wrong password would, and one in progress waits for the s
 The 2FA step (`/oauth/totp/verify`, `/oauth/totp/recovery`) and 2FA setup (`/oauth/totp/setup`)
 likewise consume their row in the transaction that writes the next step, under the same lock
 (`writeStepConsuming` in `utils/db/loginFlows.ts`), so the row a sign-out deleted cannot be followed
-by a step it missed.
+by a step it missed. The consent and org-select submits consume theirs in the transaction that
+issues the code (`consumeStep` of `issueAuthorizationCode`) or writes the consent step, after the
+user's lock; a step already gone is `invalid_session`.
 
 The SSO cookie and the 2FA setup token are random tokens stored only as their SHA-256
 (`hashFlowToken`, in the db layer), as the consent, org-select and 2FA flow tokens are. So are
