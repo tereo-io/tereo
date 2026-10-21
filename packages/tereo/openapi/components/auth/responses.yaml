@@ -86,12 +86,10 @@ CheckPermissionForbiddenResponse:
 
 CrossOriginRefusedResponse:
   description: |
-    Forbidden (`access_denied`) - the request carries core's credential
-    cookies but comes from a page that may not act on them: `Sec-Fetch-Site`
-    is neither `same-origin` nor `same-site` with an allowed `Origin`, or,
-    without `Sec-Fetch-Site`, `Origin` is not allowed. Allowed origins are
-    core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) and
-    `CORS_ALLOWED_ORIGINS`. See "Cookie-Authenticated Requests".
+    Forbidden (`access_denied`) - the request uses a client's credential
+    cookie but comes from a page that may not act for that client: neither
+    core (`PUBLIC_URL`), the UI (`UI_BASE_URL`) nor an origin of the
+    client's redirect URIs. See "Cookie-Authenticated Requests".
   headers:
     X-RateLimit-Limit:
       $ref: '../headers.yaml#/X-RateLimit-Limit'
@@ -111,7 +109,7 @@ CrossOriginRefusedResponse:
             type: string
       example:
         error: "access_denied"
-        error_description: "Cross-origin request refused: this origin may not act on the browser's session"
+        error_description: "Cross-origin request refused: this origin may not act on this client's session"
 
 OAuth2ErrorResponse:
   description: |

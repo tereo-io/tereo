@@ -275,21 +275,25 @@ info:
 
     ### Cookie-Authenticated Requests
 
-    The browser's login state lives in cookies scoped to `/oauth`: the refresh token
-    (`trt_{client_id}`, cookie mode) and the `tereo_*` SSO and login-flow sessions. They
-    are `SameSite=Lax`, so a cross-site page cannot send them with a POST — but a same-site one
-    (another port or subdomain) can. Every POST (or other unsafe method) under `/oauth` that
-    carries one of them is therefore checked:
+    The browser's login state lives in per-client cookies: the refresh token
+    (`trt_{client_id}`, cookie mode) and the `tereo_*_{client_id}` SSO and login-flow sessions.
+    When Secure and `COOKIE_DOMAIN` is unset they are `__Host-` cookies (`__Host-trt_{client_id}`,
+    path `/`); otherwise unprefixed and scoped to `/oauth`. Only `/oauth` reads them. They are
+    `SameSite=Lax`, so a cross-site page cannot send them with a POST — but a same-site one
+    (another port or subdomain) can, along with every other client's. So a POST (or other unsafe
+    method) under `/oauth` that uses client X's cookie must come from:
 
-    - with `Sec-Fetch-Site`, it must be `same-origin`, or `same-site` with an allowed `Origin`;
-    - without it, `Origin`, when sent, must be allowed;
-    - a request with neither header is not from a browser page and passes.
+    - core's own origin (`Sec-Fetch-Site: same-origin`, or `Origin` = `PUBLIC_URL`'s), or the
+      UI's (`UI_BASE_URL`, which hosts every client's login pages);
+    - or, with `Sec-Fetch-Site: same-site` (or no `Sec-Fetch-Site`), an `Origin` of one of X's
+      registered redirect URIs.
 
-    Allowed origins are core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) and
-    `CORS_ALLOWED_ORIGINS` (any, when that is `*`). A refused request is 403 `access_denied`. This
-    covers the login, consent, org-select and 2FA submits, `POST /oauth/token` and
-    `POST /oauth/revoke` with the refresh cookie, and the sign-out confirmation. A request without
-    these cookies (a client authenticating with a secret, a code or a bearer token) is not checked.
+    A request with neither header is not from a browser page and passes. Any other is 403
+    `access_denied` once the endpoint reads the cookie: the login, consent, org-select and 2FA
+    submits, `POST /oauth/token` and `POST /oauth/revoke` with the refresh cookie, and the
+    sign-out confirmation. `CORS_ALLOWED_ORIGINS` does not widen this; it is only the CORS list.
+    A request that uses none of these cookies (a client authenticating with a secret, a code or a
+    bearer token) is not affected by the ones it carries.
 
     ### OpenID Connect Discovery
 

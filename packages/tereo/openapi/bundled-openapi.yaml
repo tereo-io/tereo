@@ -275,21 +275,25 @@ info:
 
     ### Cookie-Authenticated Requests
 
-    The browser's login state lives in cookies scoped to `/oauth`: the refresh token
-    (`trt_{client_id}`, cookie mode) and the `tereo_*` SSO and login-flow sessions. They
-    are `SameSite=Lax`, so a cross-site page cannot send them with a POST — but a same-site one
-    (another port or subdomain) can. Every POST (or other unsafe method) under `/oauth` that
-    carries one of them is therefore checked:
+    The browser's login state lives in per-client cookies: the refresh token
+    (`trt_{client_id}`, cookie mode) and the `tereo_*_{client_id}` SSO and login-flow sessions.
+    When Secure and `COOKIE_DOMAIN` is unset they are `__Host-` cookies (`__Host-trt_{client_id}`,
+    path `/`); otherwise unprefixed and scoped to `/oauth`. Only `/oauth` reads them. They are
+    `SameSite=Lax`, so a cross-site page cannot send them with a POST — but a same-site one
+    (another port or subdomain) can, along with every other client's. So a POST (or other unsafe
+    method) under `/oauth` that uses client X's cookie must come from:
 
-    - with `Sec-Fetch-Site`, it must be `same-origin`, or `same-site` with an allowed `Origin`;
-    - without it, `Origin`, when sent, must be allowed;
-    - a request with neither header is not from a browser page and passes.
+    - core's own origin (`Sec-Fetch-Site: same-origin`, or `Origin` = `PUBLIC_URL`'s), or the
+      UI's (`UI_BASE_URL`, which hosts every client's login pages);
+    - or, with `Sec-Fetch-Site: same-site` (or no `Sec-Fetch-Site`), an `Origin` of one of X's
+      registered redirect URIs.
 
-    Allowed origins are core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) and
-    `CORS_ALLOWED_ORIGINS` (any, when that is `*`). A refused request is 403 `access_denied`. This
-    covers the login, consent, org-select and 2FA submits, `POST /oauth/token` and
-    `POST /oauth/revoke` with the refresh cookie, and the sign-out confirmation. A request without
-    these cookies (a client authenticating with a secret, a code or a bearer token) is not checked.
+    A request with neither header is not from a browser page and passes. Any other is 403
+    `access_denied` once the endpoint reads the cookie: the login, consent, org-select and 2FA
+    submits, `POST /oauth/token` and `POST /oauth/revoke` with the refresh cookie, and the
+    sign-out confirmation. `CORS_ALLOWED_ORIGINS` does not widen this; it is only the CORS list.
+    A request that uses none of these cookies (a client authenticating with a secret, a code or a
+    bearer token) is not affected by the ones it carries.
 
     ### OpenID Connect Discovery
 
@@ -20559,12 +20563,10 @@ components:
                 type: string
     CrossOriginRefusedResponse:
       description: |
-        Forbidden (`access_denied`) - the request carries core's credential
-        cookies but comes from a page that may not act on them: `Sec-Fetch-Site`
-        is neither `same-origin` nor `same-site` with an allowed `Origin`, or,
-        without `Sec-Fetch-Site`, `Origin` is not allowed. Allowed origins are
-        core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) and
-        `CORS_ALLOWED_ORIGINS`. See "Cookie-Authenticated Requests".
+        Forbidden (`access_denied`) - the request uses a client's credential
+        cookie but comes from a page that may not act for that client: neither
+        core (`PUBLIC_URL`), the UI (`UI_BASE_URL`) nor an origin of the
+        client's redirect URIs. See "Cookie-Authenticated Requests".
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -20585,7 +20587,7 @@ components:
                 type: string
           example:
             error: access_denied
-            error_description: 'Cross-origin request refused: this origin may not act on the browser''s session'
+            error_description: 'Cross-origin request refused: this origin may not act on this client''s session'
     CheckPermissionForbiddenResponse:
       description: |
         Forbidden - `forbidden` when the client may not ask about this user or
