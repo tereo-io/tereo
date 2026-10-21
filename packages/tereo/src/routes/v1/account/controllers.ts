@@ -1,6 +1,7 @@
 import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js";
 import { accountPasswordFailure } from "../../../middleware/rateLimit.js";
 import { BadRequestError, NotFoundError } from "../../../utils/errors.js";
+import { beginPasswordAttempt } from "../../../utils/passwordAttempts.js";
 import { hashPassword, verifyPassword } from "../../../utils/crypto.js";
 import { recordSessionsRevoked } from "../../../utils/sessionEvents.js";
 import { presignUserPhotoUrl } from "../../../utils/userPhotos.js";
@@ -73,13 +74,16 @@ export const changePassword = async (req: Request, res: Response) => {
     body.currentPassword
   );
 
+  const attempt = beginPasswordAttempt(req, user, "password_change");
   if (!isCurrentPasswordValid) {
+    await attempt.failed("invalid_password");
     throw new BadRequestError(
       "invalid_password",
       "Current password is incorrect"
     );
   }
   await accountPasswordFailure.reset(req);
+  await attempt.succeeded();
 
   if (body.currentPassword === body.newPassword) {
     throw new BadRequestError(

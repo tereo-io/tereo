@@ -1,6 +1,11 @@
-import { authLog, logAuthFailure, logTokenIssued } from "../../utils/audit.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { logger } from "../../utils/logger.js";
+import {
+  authLog,
+  logAuthFailure,
+  logPasswordFailure,
+  logTokenIssued,
+} from "../../utils/audit.js";
 
 describe("authLog levels", () => {
   afterEach(() => {
@@ -30,6 +35,31 @@ describe("authLog levels", () => {
       "auth_failure"
     );
     expect(log.info).not.toHaveBeenCalled();
+  });
+
+  it("logs a wrong password at warn, with no credential in it", () => {
+    const log = spies();
+    logPasswordFailure({
+      check: "login",
+      reason: "invalid_password",
+      userId: "user",
+      consecutiveFailures: 2,
+    });
+    expect(log.warn).toHaveBeenCalledWith(
+      {
+        audit: true,
+        userId: "user",
+        clientId: undefined,
+        ip: undefined,
+        error: "invalid_credentials",
+        details: {
+          check: "login",
+          reason: "invalid_password",
+          consecutiveFailures: 2,
+        },
+      },
+      "password_failure"
+    );
   });
 
   it("logs successes at info", () => {

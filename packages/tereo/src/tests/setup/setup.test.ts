@@ -4,6 +4,11 @@ import { logger } from "../../utils/logger.js";
 import env from "../../env.js";
 import axios from "axios";
 import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../webhooks/utils/test-helpers.js";
+import {
   BASE_URL,
   HTTP_STATUS,
   generateUniqueId,
@@ -100,6 +105,16 @@ describe("First-boot setup", () => {
   });
 
   it("creates the admin and names the default organization", async () => {
+    const endpoint = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      {
+        eventTypes: [
+          "auth.user.created",
+          "auth.user.roles-changed",
+          "auth.organization.member-added",
+        ],
+      }
+    );
     const token = await issueSetupToken();
     const body = setupBody(token);
 
@@ -138,12 +153,67 @@ describe("First-boot setup", () => {
     expect(await status()).toEqual({ setupComplete: true });
 
     const audit = await prisma.auditLogEntry.findMany({
-      where: { userId: user.id, entityType: { in: ["User", "Organization"] } },
+      where: {
+        userId: user.id,
+        entityType: { in: ["User", "Organization", "OrganizationMember"] },
+      },
     });
     expect(audit.map((e) => `${e.action} ${e.entityType}`).sort()).toEqual([
+      "CREATE OrganizationMember",
       "CREATE User",
       "UPDATE Organization",
+      "UPDATE User",
     ]);
+    const roleIds = user.userRoles.map((ur) => ur.roleId).sort();
+    const grant = audit.find(
+      (e) => e.action === "UPDATE" && e.entityType === "User"
+    );
+    expect(grant?.metadata).toMatchObject({ action: "roles_changed" });
+    expect(
+      [...(grant?.metadata as { roleIds: string[] }).roleIds].sort()
+    ).toEqual(roleIds);
+    const [member] = user.organizationMembers;
+    expect(
+      audit.find((e) => e.entityType === "OrganizationMember")
+    ).toMatchObject({
+      entityId: member.id,
+      organizationId: DEFAULT_ORGANIZATION_ID,
+    });
+
+    const deliveries = () =>
+      prisma.webhookDelivery.findMany({
+        where: { webhookEndpointId: endpoint.id },
+      });
+    await waitFor(async () => (await deliveries()).length === 3, 10_000);
+    const byType = Object.fromEntries(
+      (await deliveries()).map((d) => [d.eventType, d.payload])
+    );
+    expect(byType["auth.user.created"]).toMatchObject({
+      entityType: "User",
+      entityId: user.id,
+      data: { id: user.id, email: user.email, userType: "human" },
+    });
+    expect(byType["auth.user.roles-changed"]).toMatchObject({
+      entityId: user.id,
+      data: { userId: user.id, email: user.email },
+    });
+    expect(
+      [
+        ...(
+          byType["auth.user.roles-changed"] as { data: { roleIds: string[] } }
+        ).data.roleIds,
+      ].sort()
+    ).toEqual(roleIds);
+    expect(byType["auth.organization.member-added"]).toMatchObject({
+      entityType: "OrganizationMember",
+      entityId: member.id,
+      data: {
+        organizationId: DEFAULT_ORGANIZATION_ID,
+        userId: user.id,
+        email: user.email,
+        memberRole: "owner",
+      },
+    });
   });
 
   it("lets the new admin sign in and use the admin API", async () => {

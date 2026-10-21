@@ -3,7 +3,7 @@ import { disconnectTokenSockets } from "../../../../websocket/emitters/index.js"
 import type { TotpPolicy } from "../../../../utils/db/settings.js";
 import { assertGlobalAdmin } from "../../../../utils/grants.js";
 import { validateBody } from "../../../../utils/validateReq.js";
-import { OAuth2Error } from "../../../../utils/errors.js";
+import { BadRequestError } from "../../../../utils/errors.js";
 import { validateUser } from "../../../../utils/auth.js";
 import { logger } from "../../../../utils/logger.js";
 import { UpdateSettingsSchema } from "./schemas.js";
@@ -35,7 +35,7 @@ export const updateSettings = async (req: Request, res: Response) => {
   const body = validateBody(UpdateSettingsSchema, req);
 
   if (Object.keys(body).length === 0) {
-    throw new OAuth2Error("invalid_request", "No settings to update");
+    throw new BadRequestError("invalid_request", "No settings to update");
   }
 
   const { updatedSettings, revokedJtis } = await db.$transaction(async (tx) => {

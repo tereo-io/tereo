@@ -4,6 +4,7 @@ export type AuditEventType =
   | "http_request"
   | "auth_success"
   | "auth_failure"
+  | "password_failure"
   | "token_issued"
   | "token_refreshed"
   | "token_revoked"
@@ -43,6 +44,7 @@ export interface AuditLogEntry {
 // server call produces, at debug; everything else, the successes, at info.
 const WARN_EVENTS: ReadonlySet<AuditEventType> = new Set([
   "auth_failure",
+  "password_failure",
   "auth_code_reuse",
   "refresh_token_reuse",
   "auth_code_validation_failure",
@@ -73,6 +75,26 @@ export const logAuthFailure = (
     error,
     errorDescription,
     ip,
+  });
+};
+
+/** A wrong password; `userId` is absent for an email no account has. */
+export const logPasswordFailure = (entry: {
+  check: "login" | "password_change";
+  reason: string;
+  userId?: string;
+  clientId?: string;
+  ip?: string;
+  consecutiveFailures?: number;
+}): void => {
+  const { check, reason, userId, clientId, ip, consecutiveFailures } = entry;
+  authLog({
+    event: "password_failure",
+    userId,
+    clientId,
+    ip,
+    error: "invalid_credentials",
+    details: { check, reason, consecutiveFailures },
   });
 };
 

@@ -243,6 +243,16 @@ describe("OAuth TOTP Endpoints", () => {
       expect(session.userId).toBe(user.id);
       expect(session.clientId).toBe(testClient.id);
       expect(session.state).toBe(login.state);
+
+      const entry = await prisma.auditLogEntry.findFirst({
+        where: {
+          entityType: "User",
+          entityId: user.id,
+          metadata: { path: ["action"], equals: "totp_setup_started" },
+        },
+      });
+      expect(entry).toMatchObject({ action: "UPDATE", userId: user.id });
+      expect(entry?.metadata).toMatchObject({ clientId: testClient.clientId });
     });
 
     it("returns 400 without a grant", async () => {

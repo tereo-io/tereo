@@ -1,4 +1,7 @@
-import { logAuditTx } from "../../../../utils/outbox.js";
+import { getDefaultOrganizationId } from "../../../../utils/defaultOrganization.js";
+import type { Prisma } from "../../../../../prisma/generated/client/index.js";
+import { emitTx, logAuditTx } from "../../../../utils/outbox.js";
+import { formatUser } from "../../../../utils/transformers.js";
 import { validateUser } from "../../../../utils/auth.js";
 import { logger } from "../../../../utils/logger.js";
 import type { Request, Response } from "express";
@@ -16,6 +19,18 @@ import {
   NotFoundError,
   PayloadTooLargeError,
 } from "../../../../utils/errors.js";
+
+const emitUserUpdated = (
+  tx: Prisma.TransactionClient,
+  user: Parameters<typeof formatUser>[0]
+) =>
+  emitTx(tx, {
+    organizationId: getDefaultOrganizationId(),
+    eventType: "auth.user.updated",
+    entityType: "User",
+    entityId: user.id,
+    data: formatUser(user) as unknown as Record<string, unknown>,
+  });
 
 export const uploadPhoto = async (req: Request, res: Response) => {
   const auth = validateUser(req);
@@ -46,7 +61,7 @@ export const uploadPhoto = async (req: Request, res: Response) => {
     file.buffer,
     file.mimetype,
     async (tx, objectId) => {
-      await tx.user.update({
+      const updated = await tx.user.update({
         where: { id: userId },
         data: { photoObjectId: objectId },
       });
@@ -58,6 +73,7 @@ export const uploadPhoto = async (req: Request, res: Response) => {
         entityName: auth.email,
         metadata: { action: "photo_changed", photoObjectId: objectId },
       });
+      await emitUserUpdated(tx, updated);
     }
   );
 
@@ -83,7 +99,7 @@ export const deletePhoto = async (req: Request, res: Response) => {
   }
 
   await deleteUserPhoto(userId, photoObjectId, async (tx) => {
-    await tx.user.update({
+    const updated = await tx.user.update({
       where: { id: userId },
       data: { photoObjectId: null },
     });
@@ -95,6 +111,7 @@ export const deletePhoto = async (req: Request, res: Response) => {
       entityName: auth.email,
       metadata: { action: "photo_removed", photoObjectId },
     });
+    await emitUserUpdated(tx, updated);
   });
   logger.debug({ userId, photoObjectId }, "Profile photo deleted");
   res.status(204).send();
