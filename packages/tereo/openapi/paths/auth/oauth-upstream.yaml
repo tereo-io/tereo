@@ -67,8 +67,11 @@
       account-page link), requires the provider account's verified email to be
       the user's (`email_unverified`, `account_mismatch`), clears the user's
       password, consumes the grant, ends the user's other sessions and
-      completes the login as a provider login. A failed callback leaves the
-      grant usable until it expires.
+      completes the login as a provider login. When a second factor is due,
+      none of that happens at the callback: the TOTP step holds the link and
+      commits it once the code passes, and a user who must first enrol goes
+      to 2FA setup with nothing changed. A failed callback leaves the grant
+      usable until it expires.
 
       Errors that are not safe to redirect are JSON, as at `GET /oauth/authorize`:
       400 `invalid_request` (validation — a `slug` not matching its pattern

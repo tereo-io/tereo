@@ -1520,8 +1520,11 @@ paths:
         account-page link), requires the provider account's verified email to be
         the user's (`email_unverified`, `account_mismatch`), clears the user's
         password, consumes the grant, ends the user's other sessions and
-        completes the login as a provider login. A failed callback leaves the
-        grant usable until it expires.
+        completes the login as a provider login. When a second factor is due,
+        none of that happens at the callback: the TOTP step holds the link and
+        commits it once the code passes, and a user who must first enrol goes
+        to 2FA setup with nothing changed. A failed callback leaves the grant
+        usable until it expires.
 
         Errors that are not safe to redirect are JSON, as at `GET /oauth/authorize`:
         400 `invalid_request` (validation — a `slug` not matching its pattern
@@ -2802,6 +2805,13 @@ paths:
         `invalid_code` and counts toward the lockout. That includes the code
         that completed TOTP setup.
 
+        A 2FA session from an SSO-only user's forced link (see
+        `GET /oauth/upstream/{slug}/start`) holds the link: the right code
+        links the identity, clears the password, consumes the link grant and
+        ends the user's other sessions in the transaction that consumes the
+        session. A grant gone meanwhile takes the session with it (400
+        `invalid_session`).
+
         The 2FA session is single-use too: of two concurrent requests with a
         right code, the second is 401 `invalid_code` when it carries the same
         code and 400 `invalid_session` when it carries another.
@@ -2864,7 +2874,8 @@ paths:
         Session, cookie, errors and lockout as for `POST /oauth/totp/verify`,
         plus 400 `no_recovery_codes` when the user has none left. The code and
         the 2FA session are consumed atomically: a code or session already used
-        by a concurrent request is 400 `invalid_session`.
+        by a concurrent request is 400 `invalid_session`. A forced link's
+        2FA session commits the link as at `POST /oauth/totp/verify`.
 
         An audit log entry (User, `metadata.action: recovery_code_used`, the
         user as actor) is created in the same transaction.

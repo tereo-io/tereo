@@ -467,6 +467,16 @@ and emits `auth.user.password-changed` with `reason: "sso_only"`; the login then
 provider login (`amr` `["fed"]`). A failure lands on `/login` with the authorize parameters and
 leaves the grant usable until it expires.
 
+When a second factor is due (by the usual rules: the user's TOTP, the instance policy, a role, or
+`acr_values`, and the provider not `countsAsMfa`), a password and the provider account alone change
+nothing: the callback records the vouched-for identity as a pending link (`auth.pending_identity_links`)
+held by the TOTP step, and that transaction runs only when the TOTP or recovery code passes, in the
+one that consumes the step (the `LOGIN` entry then names the new identity, `amr` `["fed","otp"]`).
+The pending link belongs to the grant: a password change, a sign-out everywhere or the grant's
+expiry removes it and its TOTP step (400 `invalid_session`). A user who must first enrol goes to 2FA
+setup with nothing changed, and after enrolling signs in again through the password and the
+provider.
+
 **No other provider.** An SSO-only domain's provider is the only way in for the domain's users.
 A callback at any other provider that would sign one of them in, through an identity linked earlier
 or by claiming an invite, ends on `/login?error=sso_required&provider=<slug>` naming the domain's

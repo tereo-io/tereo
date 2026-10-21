@@ -641,12 +641,20 @@ describe("the forced link", () => {
       },
     });
     const { jar, grant, ip, verifier } = await toLinkRequired(user);
+    const sub = `sub-${randomUUID()}`;
     const callback = await forcedLink(provider.slug, grant, jar, ip, {
-      sub: `sub-${randomUUID()}`,
+      sub,
       email: user.email,
     });
     const twoFactor = new URL(callback.headers.get("location") ?? "");
     expect(twoFactor.pathname).toBe("/login/2fa");
+
+    // Nothing is committed before the second factor.
+    expect(await passwordHashOf(user.id)).not.toBeNull();
+    expect(
+      await prisma.userIdentity.count({ where: { userId: user.id } })
+    ).toBe(0);
+    expect(await grantCount(user.id)).toBe(1);
 
     const verify = await fetch(`${CORE_URL}/oauth/totp/verify`, {
       method: "POST",
@@ -668,6 +676,139 @@ describe("the forced link", () => {
     );
     expect(claims.amr).toEqual(["fed", "otp"]);
     expect(await passwordHashOf(user.id)).toBeNull();
+    expect(await grantCount(user.id)).toBe(0);
+    const identity = await prisma.userIdentity.findUniqueOrThrow({
+      where: { providerId_subject: { providerId: provider.id, subject: sub } },
+    });
+    expect(identity.userId).toBe(user.id);
+    const login = await prisma.auditLogEntry.findFirst({
+      where: { action: "LOGIN", entityType: "UserIdentity", userId: user.id },
+    });
+    expect(login?.entityId).toBe(identity.id);
+  });
+
+  it("keeps the password and earlier sessions while the TOTP step is pending", async () => {
+    const domain = await ssoOnlyDomain(provider, false);
+    const user = await createTestUser({
+      email: `user-${generateUniqueId().toLowerCase()}@${domain}`,
+    });
+    const secret = generateTotpSecret();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        totpSecret: encryptTotpSecret(secret),
+        totpEnabled: true,
+        totpEnabledAt: new Date(),
+      },
+    });
+    const before = await submitPassword(user.email, user.plainPassword);
+    const { redirect_url } = (await before.res.json()) as {
+      redirect_url: string;
+    };
+    const verified = await fetch(`${CORE_URL}/oauth/totp/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader(before.jar),
+      },
+      body: JSON.stringify({
+        session_token: new URL(redirect_url).searchParams.get("session"),
+        totp_code: generateTotpCode(secret),
+      }),
+    });
+    absorbCookies(before.jar, verified);
+    const earlier = await exchangeTokens(
+      await approveConsent(
+        before.jar,
+        new URL(
+          ((await verified.json()) as { redirect_url: string }).redirect_url
+        )
+      ),
+      before.verifier
+    );
+
+    await prisma.identityProviderDomain.update({
+      where: { domain },
+      data: { ssoOnly: true },
+    });
+    const { jar, grant, ip } = await toLinkRequired(user);
+    const callback = await forcedLink(provider.slug, grant, jar, ip, {
+      sub: `sub-${randomUUID()}`,
+      email: user.email,
+    });
+    expect(new URL(callback.headers.get("location") ?? "").pathname).toBe(
+      "/login/2fa"
+    );
+
+    expect(await passwordHashOf(user.id)).not.toBeNull();
+    expect((await refresh(earlier.refresh_token)).status).toBe(200);
+  });
+
+  it("drops the pending link with its grant, and the TOTP step with it", async () => {
+    const user = await ssoUser();
+    const secret = generateTotpSecret();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        totpSecret: encryptTotpSecret(secret),
+        totpEnabled: true,
+        totpEnabledAt: new Date(),
+      },
+    });
+    const { jar, grant, ip } = await toLinkRequired(user);
+    const callback = await forcedLink(provider.slug, grant, jar, ip, {
+      sub: `sub-${randomUUID()}`,
+      email: user.email,
+    });
+    const twoFactor = new URL(callback.headers.get("location") ?? "");
+    await prisma.identityLinkGrant.deleteMany({ where: { userId: user.id } });
+
+    const verify = await fetch(`${CORE_URL}/oauth/totp/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader(jar),
+      },
+      body: JSON.stringify({
+        session_token: twoFactor.searchParams.get("session"),
+        totp_code: generateTotpCode(secret),
+      }),
+    });
+    expect(verify.status).toBe(400);
+    expect(((await verify.json()) as { error: string }).error).toBe(
+      "invalid_session"
+    );
+    expect(await passwordHashOf(user.id)).not.toBeNull();
+    expect(
+      await prisma.userIdentity.count({ where: { userId: user.id } })
+    ).toBe(0);
+  });
+
+  it("commits nothing for a user who must first enrol in TOTP", async () => {
+    const user = await ssoUser();
+    await prisma.systemSetting.update({
+      where: { key: "totpPolicy" },
+      data: { value: "required" },
+    });
+    try {
+      const { jar, grant, ip } = await toLinkRequired(user);
+      const callback = await forcedLink(provider.slug, grant, jar, ip, {
+        sub: `sub-${randomUUID()}`,
+        email: user.email,
+      });
+      expect(new URL(callback.headers.get("location") ?? "").pathname).toBe(
+        "/login/2fa/setup"
+      );
+    } finally {
+      await prisma.systemSetting.update({
+        where: { key: "totpPolicy" },
+        data: { value: "optional" },
+      });
+    }
+    expect(await passwordHashOf(user.id)).not.toBeNull();
+    expect(
+      await prisma.userIdentity.count({ where: { userId: user.id } })
+    ).toBe(0);
   });
 
   it("ends the user's earlier sessions, and keeps the one it signs in", async () => {

@@ -293,7 +293,7 @@ export const linkIdentity = async (
   auth: AuditActor,
   userId: string,
   provider: IdentityProvider,
-  identity: NormalizedIdentity
+  identity: Pick<NormalizedIdentity, "subject" | "email">
 ): Promise<{ id: string }> => {
   const email = identity.email === null ? null : normalizeEmail(identity.email);
   const created = await db.userIdentities.create(
