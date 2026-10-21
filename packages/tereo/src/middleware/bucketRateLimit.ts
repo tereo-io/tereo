@@ -2,6 +2,7 @@ import { onBucketInvalidate } from "../utils/cacheBroadcast.js";
 import { getRedisClient, redisKey } from "../utils/redis.js";
 import { Request, Response, NextFunction } from "express";
 import { TooManyRequestsError } from "../utils/errors.js";
+import { getIpIdentifier } from "../utils/rateLimit.js";
 import { BoundedCache } from "../utils/boundedCache.js";
 import { logger } from "../utils/logger.js";
 import db from "../utils/db/index.js";
@@ -88,9 +89,12 @@ export const bucketRateLimit = async (
   const { value, bucketId } = await getConfig(bucketName);
   if (!value || !bucketId) return next();
 
-  const userId =
-    (req as Request & { auth?: { userId?: string } }).auth?.userId ?? "anon";
-  const key = redisKey(`file-service:bucket:${bucketId}:user:${userId}`);
+  // Anonymous callers (public buckets, signed URLs) are counted per address:
+  // one shared key would let a single client exhaust everyone's allowance.
+  const userId = (req as Request & { auth?: { userId?: string } }).auth
+    ?.userId;
+  const caller = userId ? `user:${userId}` : `ip:${getIpIdentifier(req)}`;
+  const key = redisKey(`file-service:bucket:${bucketId}:${caller}`);
 
   const redis = getRedisClient();
   try {
