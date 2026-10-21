@@ -83,4 +83,16 @@ describe("AuthServiceClient introspection cache", () => {
     expect(mockRedis.set).not.toHaveBeenCalled();
     expect(mockRedis.get).not.toHaveBeenCalled();
   });
+
+  it("refuses a maximum above 300 s, or below 0", () => {
+    expect(
+      () => new AuthServiceClient({ introspectionCacheTtlSeconds: 301 })
+    ).toThrow(/between 0 and 300/);
+    expect(
+      () => new AuthServiceClient({ introspectionCacheTtlSeconds: -1 })
+    ).toThrow(/between 0 and 300/);
+    expect(
+      () => new AuthServiceClient({ introspectionCacheTtlSeconds: 300 })
+    ).not.toThrow();
+  });
 });

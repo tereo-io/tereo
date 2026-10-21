@@ -1,5 +1,6 @@
 import { NotificationsClient } from "./clients/notifications.js";
 import type { AuthServiceClientConfig } from "./types/auth.js";
+import { assertTestModeAllowed } from "./utils/testTokens.js";
 import { WebhookServiceClient } from "./clients/webhooks.js";
 import { createHandler, resetHandler } from "./handler.js";
 import { AuditLogServiceClient } from "./clients/audit.js";
@@ -40,8 +41,8 @@ export interface CoreClientOptions {
   /**
    * For an app service's tests: `auth` accepts forged `test-token-…` tokens
    * and stubs user and organization lookups, and `files` answers with stubs.
-   * Default false. Refused in production: `NODE_ENV=production` or
-   * `production: true`.
+   * Default false. Throws unless `NODE_ENV` is `test` or `development`, and
+   * with `production: true`.
    */
   testMode?: boolean;
   /**
@@ -110,14 +111,7 @@ const option = (
  */
 export const createCoreClient = (options: CoreClientOptions): CoreClient => {
   const testMode = options.testMode ?? false;
-  if (
-    testMode &&
-    (process.env.NODE_ENV === "production" || options.production === true)
-  ) {
-    throw new Error(
-      "@tereo-io/sdk: testMode accepts forged tokens and is refused in production (NODE_ENV=production or `production: true`)"
-    );
-  }
+  if (testMode) assertTestModeAllowed(options.production);
   if (
     options.testServiceUserId !== undefined &&
     !UUID_RE.test(options.testServiceUserId)

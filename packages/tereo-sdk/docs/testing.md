@@ -5,9 +5,10 @@ What an app service's tests can lean on, and what the SDK's own tests do.
 ## `testMode`
 
 With `createCoreClient({ testMode: true })` some clients answer without calling core. It is an
-explicit opt-in — `NODE_ENV=test` alone enables nothing — and `createCoreClient` throws when
-`testMode` is combined with `NODE_ENV=production` or `production: true`, since it accepts forged
-tokens.
+explicit opt-in — `NODE_ENV=test` alone enables nothing — and, since it accepts forged tokens,
+`createCoreClient` (and an `AuthServiceClient` constructed with `testMode`) throws unless
+`NODE_ENV` is `test` or `development`. Any other value, or none, is refused, so a staging deploy
+with its own `NODE_ENV` cannot accept test tokens; `production: true` is refused too.
 
 ```ts
 const core = createCoreClient({ service: "product-service", redis, testMode: true });

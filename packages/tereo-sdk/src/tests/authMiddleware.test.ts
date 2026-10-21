@@ -16,14 +16,17 @@ const active = {
   client_id: "client-1",
 };
 
-const authenticate = async (token: string) => {
+const authenticate = async (
+  token: string,
+  client = new AuthServiceClient()
+) => {
   const req = {
     headers: { authorization: `Bearer ${token}` },
     originalUrl: "/",
     method: "GET",
   } as Request;
   const next = vi.fn();
-  await new AuthServiceClient().requireAuth(req, {} as never, next);
+  await client.requireAuth(req, {} as never, next);
   return { req, error: next.mock.calls[0]?.[0] };
 };
 
@@ -86,5 +89,113 @@ describe("introspection failures", () => {
     const { error: passed } = await authenticate("revoked");
     expect(passed).toMatchObject({ statusCode: 401 });
     expect(error).not.toHaveBeenCalled();
+  });
+});
+
+describe("requireAuth client, scope and audience", () => {
+  it("reads clientId, scope and audience from introspection", async () => {
+    tryHandleRequest.mockResolvedValue({
+      data: {
+        ...active,
+        sub: "user-1",
+        user_id: "user-1",
+        client_id: "login-client",
+        scope: "openid  profile product:read",
+        aud: "product-service",
+      },
+    });
+    const { req } = await authenticate("third-party");
+    expect(req.auth).toMatchObject({
+      clientId: "login-client",
+      oauthClientId: "login-client",
+      scope: ["openid", "profile", "product:read"],
+      audience: ["product-service"],
+    });
+  });
+
+  it("gives an empty scope and audience when the token has none", async () => {
+    tryHandleRequest.mockResolvedValue({
+      data: { ...active, sub: "user-1", user_id: "user-1" },
+    });
+    const { req } = await authenticate("bare");
+    expect(req.auth).toMatchObject({ scope: [], audience: [] });
+  });
+
+  it("keeps every audience of a list", async () => {
+    tryHandleRequest.mockResolvedValue({
+      data: { ...active, sub: "u", user_id: "u", aud: ["a", "b"] },
+    });
+    const { req } = await authenticate("multi-aud");
+    expect(req.auth?.audience).toEqual(["a", "b"]);
+  });
+});
+
+describe("requireAuth allowedClients", () => {
+  const client = () =>
+    new AuthServiceClient({ allowedClients: ["client-1", "product-ui"] });
+
+  it("accepts a token issued to an allowed client", async () => {
+    tryHandleRequest.mockResolvedValue({
+      data: { ...active, sub: "u", user_id: "u" },
+    });
+    const { req, error } = await authenticate("allowed", client());
+    expect(error).toBeUndefined();
+    expect(req.auth?.clientId).toBe("client-1");
+  });
+
+  it("refuses with 401 a token issued to any other client", async () => {
+    tryHandleRequest.mockResolvedValue({
+      data: { ...active, sub: "u", user_id: "u", client_id: "third-party" },
+    });
+    const { req, error } = await authenticate("other", client());
+    expect(error).toMatchObject({ statusCode: 401 });
+    expect(req.auth).toBeUndefined();
+  });
+});
+
+describe("requireScope", () => {
+  const run = (scope: string[], ...required: string[]) => {
+    const setHeader = vi.fn();
+    const next = vi.fn();
+    const req = { auth: { scope } } as unknown as Request;
+    let thrown: unknown;
+    try {
+      new AuthServiceClient().requireScope(...required)(
+        req,
+        { setHeader } as never,
+        next
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    return { thrown, next, setHeader };
+  };
+
+  it("passes when the token holds every required scope", () => {
+    const { thrown, next } = run(["openid", "a", "b"], "a", "b");
+    expect(thrown).toBeUndefined();
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("refuses with 403 and an insufficient_scope challenge otherwise", () => {
+    const { thrown, next, setHeader } = run(["a"], "a", "b");
+    expect(thrown).toMatchObject({ statusCode: 403 });
+    expect((thrown as Error).message).toContain("b");
+    expect(next).not.toHaveBeenCalled();
+    expect(setHeader).toHaveBeenCalledWith(
+      "WWW-Authenticate",
+      'Bearer error="insufficient_scope", scope="a b"'
+    );
+  });
+
+  it("refuses with 403 before requireAuth has run", () => {
+    const next = vi.fn();
+    expect(() =>
+      new AuthServiceClient().requireScope("a")(
+        {} as Request,
+        { setHeader: vi.fn() } as never,
+        next
+      )
+    ).toThrow(expect.objectContaining({ statusCode: 403 }));
   });
 });

@@ -83,11 +83,11 @@ One per process — a second call throws until the first client is stopped.
 | `requestHandlerKey` | `REQUEST_HANDLER_KEY` | Encrypts what the request handler stores; 32+ characters |
 | `redis` | — (required) | An ioredis client with `maxRetriesPerRequest: null`. Owned by the caller |
 | `production` | `NODE_ENV === "production"` | Production handlers take priority over others sharing the Redis |
-| `auth` | `{}` | `publicRoutes` and `defaultTestPermissions` for `auth.requireAuth` — see [auth](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/auth.md) |
+| `auth` | `{}` | `publicRoutes`, `allowedClients`, `introspectionCacheTtlSeconds` and `defaultTestPermissions` for `auth.requireAuth` — see [auth](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/auth.md) |
 | `eventTypes` | any type | Event types `webhooks.emit` and `outbox.emit` accept |
 | `outbox` | none | The transactional outbox — see [outbox](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/outbox.md). Without it, reading `core.outbox` throws |
 | `channelPrefix` | none | Core's `REDIS_KEY_PREFIX`, when it sets one: the file cache hears core's invalidations on channels under it |
-| `testMode` | `false` | For an app's tests: accept `test-token-…` tokens and stub `auth` lookups and `files` — see [testing](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/testing.md). Throws with `NODE_ENV=production` or `production: true` |
+| `testMode` | `false` | For an app's tests: accept `test-token-…` tokens and stub `auth` lookups and `files` — see [testing](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/testing.md). Throws unless `NODE_ENV` is `test` or `development`, and with `production: true` |
 
 A missing `url`, `clientId`, `clientSecret` or `requestHandlerKey` (option and env both) throws at
 once, naming the option and its env variable.
@@ -96,7 +96,7 @@ The returned `CoreClient`:
 
 | Member | |
 |--------|---|
-| `auth` | `AuthServiceClient` — token introspection, `requireAuth`/`requirePermission`, user and organization lookups. [docs/auth.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/auth.md) |
+| `auth` | `AuthServiceClient` — token introspection, `requireAuth`/`requirePermission`/`requireScope`, user and organization lookups. [docs/auth.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/auth.md) |
 | `files` | `FileServiceClient` — objects, buckets, permissions, versions, presigned URLs, archives, shares, lifecycle, multipart. [docs/files.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/files.md) |
 | `webhooks` | `WebhookServiceClient` — best-effort event emission; `createWebhookVerifier` for receivers. [docs/webhooks.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/webhooks.md) |
 | `audit` | `AuditLogServiceClient` — best-effort writes and reads of this service's entries. [docs/audit.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/audit.md) |
