@@ -1,7 +1,6 @@
 import { CORE_SERVICE_ID, SYSTEM_USER_ID } from "../../definitions/index.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
-import { emitEndpointEventTx } from "../webhookEndpointEvents.js";
 import { broadcastBucketInvalidate } from "../cacheBroadcast.js";
 import { formatClient, formatRole } from "../transformers.js";
 import { syncProvisionedAccessTx } from "../serviceAccess.js";
@@ -19,6 +18,10 @@ import {
   notifyRolePermissionsChanged,
   notifyRoleStatusChanged,
 } from "../../websocket/emitters/index.js";
+import {
+  emitEndpointEventTx,
+  redactWebhookUrl,
+} from "../webhookEndpointEvents.js";
 import {
   createIntegrationTx,
   emitIntegration,
@@ -1123,7 +1126,7 @@ const applyWebhooks = async (
             entityType: "WebhookEndpoint",
             entityId: endpoint.id,
             metadata: {
-              url: w.url,
+              url: redactWebhookUrl(w.url),
               eventTypes: events,
               provisioningKey,
               ...meta,
@@ -1168,6 +1171,12 @@ const applyWebhooks = async (
           if (restored) {
             const back = await db.webhookEndpoints.restore(existing.id, tx);
             await emitEndpointEventTx(tx, "restored", back ?? written);
+          }
+          if (changes?.url) {
+            changes.url = {
+              old: redactWebhookUrl(String(changes.url.old)),
+              new: redactWebhookUrl(String(changes.url.new)),
+            };
           }
           await logAuditTx(tx, {
             auth: SYSTEM_ACTOR,

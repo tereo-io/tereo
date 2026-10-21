@@ -48,7 +48,7 @@ const WebhookEntry = z
   .object({
     key: Slug,
     url: z.string().max(2048),
-    events: z.array(Text).min(1),
+    events: z.array(Text).min(1).max(100),
     secretFrom: EnvName,
     organizations: z
       .union([z.literal("all"), z.array(z.guid()).min(1)])

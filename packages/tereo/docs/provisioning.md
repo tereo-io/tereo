@@ -321,7 +321,7 @@ the CLI the exit code is non-zero.
   - a custom role's permissions; a system role's (its own service's only); an event type's
     `readPermission` (its own service's or core's).
 - **Webhooks**:
-  - `events` name event types declared in the set or by core, not reserved (`webhook.test`);
+  - `events` (1–100) name event types declared in the set or by core, not reserved (`webhook.test`);
   - the owning service must be able to read each one. A service's account does **not** hold its own
     permissions, so a webhook on the service's own events needs `access.roles` to list a role
     that grants the event's `readPermission`: another service's role, or a requestable core role.
