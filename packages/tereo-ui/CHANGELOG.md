@@ -1,3 +1,31 @@
+## 0.6.0 (2026-10-21)
+
+### 🩹 Fixes
+
+- Enabling two-factor authentication from the account page shows the recovery codes again. The page used to swap the enable button for the regenerate and disable buttons as soon as verification succeeded, which closed the dialog holding the codes before the user could see them. ([#22](https://github.com/tereo-io/tereo/pull/22))
+- Archiving an organization or a role from its own page returns to the list again; the page header now keys its actions by the action rather than its position, so a button whose mutation removes the actions before it is no longer remounted mid-request. File Storage and Audit Log send a user without `file-service.buckets.read` or `audit-logs.read` to their account, as the other sections do, rather than showing an empty page. ([#22](https://github.com/tereo-io/tereo/pull/22))
+- The admin UI uses `@kosmeo-ui/react` 1.0.1. Its bucket, object, permission, share and event-type lists pass a failed load's error on to the list, as the library's own lists do. Pressing Escape in a multi-select inside a dialog (such as a webhook endpoint's event types) now closes only the list, not the dialog and the form in it, and dialogs are announced by their title. ([#22](https://github.com/tereo-io/tereo/pull/22))
+
+### ⚠️  Breaking Changes
+
+- A triage of the file service. Bucket management follows an active grant: a bucket has an owner (`ownerId`, migration `bucket_owner`, backfilled from `createdBy`), who manages it only while holding a grant, and `PUT /v1/files/buckets/:name/owner` (`file-service.admin`) transfers it, emitting `file-service.bucket.owner-changed`. Presigned and archive URLs re-check their signer's access on every use, and a share stops serving once its creator is deactivated (`creator_inactive`). Removing an organization member revokes their grants on its buckets. Signed URLs answer HEAD without spending a capped share's nonce, spend it only once the body is ready, sign their filename, honour conditional requests and write access-log rows. Error responses drop download headers and are `no-store`. HEAD by key honours `versionId` and `thumbnail`; every download follows RFC 9110 preconditions; verified small-blob reads share a byte budget (`FILE_SERVICE_VERIFIED_READ_BUDGET_MB`, `FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS`, `503` when busy); an archive lists unreadable blobs in `MISSING_FILES.txt` instead of aborting. Idempotency records commit with the upload; content-blob refcounts carry a `CHECK (ref_count >= 0)` and orphan cleanup refuses a blob still referenced; staged multipart parts are bound to their upload and part number (migration `files_write_integrity`; parts staged before the deploy still complete); quota counts active multipart reservations and refuses early. Lifecycle `purgeSoftDeletedAfterDays: 0` purges, version expiry counts from when a version was replaced (migration `object_version_noncurrent_since`), and a `bucket-cleanup-reconcile` job releases deleted buckets whose cleanup never ran. Buckets of a service dropped from provisioning become deletable. ([#21](https://github.com/tereo-io/tereo/pull/21))
+
+  Breaking changes:
+
+  - A bucket owner whose grant was revoked no longer manages the bucket and cannot re-grant it; only `file-service.admin` can.
+  - Presigned and archive URLs stop working when their signer is deactivated or loses access; a `?filename=` not covered by the signature is ignored.
+  - Setting `deleteAfter` takes delete access; managing shares on a public bucket takes a grant.
+  - On a public bucket, callers without a grant no longer see deleted objects, non-current versions or `createdBy`.
+  - Weak `If-Match` tags never match; `If-None-Match` with tags is honoured on PUT.
+  - `file-service.objects.bulk-deleted` and `file-service.objects.versions.purged` fire once per batch, with `batchIndex` and no `truncated`.
+  - A missing archive's signed URL is `403`, not `404`; the loser of racing bucket deletes or an update to a deleted bucket gets `404`; `requestCost > maxTokens` is `400`.
+  - Part uploads racing a complete get `409 multipart_complete_in_progress`, after it `400 upload_not_active`; a part that fails its MD5 at complete is `422 part_integrity_mismatch`.
+
+### ❤️ Thank You
+
+- Aaron Leman
+- Cameron Perera
+
 ## 0.5.0 (2026-10-19)
 
 ### ⚠️  Breaking Changes

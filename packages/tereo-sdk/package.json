@@ -1,6 +1,6 @@
 {
   "name": "@tereo-io/sdk",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "description": "One SDK for app services to reach Tereo: auth, files, webhooks and audit over a single @dianemo/core request handler",
   "keywords": [
