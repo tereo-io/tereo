@@ -20,6 +20,7 @@ export interface ConsentSessionData {
   acrValues: string | null;
   prompt: string | null;
   authMethods: string[];
+  provider: string | null;
   userSessionId: string | null;
   expiresAt: Date;
 }
@@ -58,6 +59,7 @@ export const createConsentSession = async (
     acrValues?: string | null;
     prompt?: string | null;
     authMethods?: string[];
+    provider?: string | null;
     userSessionId?: string | null;
     expiresAt: Date;
   },

@@ -164,12 +164,24 @@ describe("roles and permissions at /oauth/userinfo", () => {
     );
   });
 
-  it("are reported to a token carrying a core scope", async () => {
+  it("are cut down to a delegated token's ceiling, without roles", async () => {
     const user = await createTestUser();
-    await grantPermissions(user.id, ["users.read"]);
-    expectAuthorization(
-      await userinfo(await loginToken(thirdParty, user, "openid core:account"))
+    await grantPermissions(user.id, ["users.write"]);
+    const info = await userinfo(
+      await loginToken(thirdParty, user, "openid core:admin.read")
     );
+    expect(info.permissions).toContain("users.read");
+    expect(info.permissions).not.toContain("users.write");
+    expect(info.roles).toEqual([]);
+    // core:admin.read does not reach the account's organizations.
+    expect(info.organizations).toEqual([]);
+
+    const account = await userinfo(
+      await loginToken(thirdParty, user, "openid core:account")
+    );
+    expect(account.permissions).toEqual([]);
+    expect(account.roles).toEqual([]);
+    expect(Array.isArray(account.organizations)).toBe(true);
   });
 });
 
@@ -334,7 +346,7 @@ describe("a third-party token with core scopes", () => {
     );
   });
 
-  it("is introspected by its own confidential client with the user's live permissions", async () => {
+  it("is introspected by its own confidential client with its capped permissions", async () => {
     const confidential = await createTestClient({
       clientType: "confidential",
       scopes: ["openid", "profile", "email", ...ALL_CORE_SCOPES],
@@ -352,7 +364,8 @@ describe("a third-party token with core scopes", () => {
       permissions: string[];
     };
     expect(body.active).toBe(true);
-    expect(body.permissions).toContain("users.write");
+    expect(body.permissions).toContain("users.read");
+    expect(body.permissions).not.toContain("users.write");
   });
 
   it("is not introspected by a public client, which cannot authenticate", async () => {

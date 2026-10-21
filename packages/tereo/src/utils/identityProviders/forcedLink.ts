@@ -36,14 +36,12 @@ export const commitForcedLink = async ({
   identity,
   linkGrantId,
   consume,
-  login,
 }: {
   user: Awaited<ReturnType<typeof db.users.get>>;
   provider: IdentityProvider;
   identity: Pick<NormalizedIdentity, "subject" | "email">;
   linkGrantId: string;
   consume?: (tx: Tx) => Promise<void>;
-  login?: { clientId: string; authMethods: string[] };
 }): Promise<{ id: string }> => {
   const auth = { userId: user.id, email: user.email };
   let linked: { id: string } | undefined;
@@ -86,20 +84,6 @@ export const commitForcedLink = async ({
           entityId: user.id,
           data: { userId: user.id, email: user.email, reason: "sso_only" },
         });
-        if (login) {
-          await logAuditTx(tx, {
-            auth,
-            action: "LOGIN",
-            entityType: "UserIdentity",
-            entityId: linked.id,
-            entityName: user.email,
-            metadata: {
-              provider: provider.slug,
-              auth_methods: login.authMethods,
-              client_id: login.clientId,
-            },
-          });
-        }
         await recordSessionsRevoked(auth, user)(tx, sessionIds, ssoSessionIds);
       }
     );
@@ -125,9 +109,7 @@ export const writeStepAfterSecondFactor = async (
   verification: {
     userId: string;
     pendingLinkId: string | null;
-    firstFactor: string[];
   },
-  clientId: string,
   consume: (tx: Tx) => Promise<void>
 ): Promise<StepWriter> => {
   const { userId, pendingLinkId } = verification;
@@ -150,7 +132,6 @@ export const writeStepAfterSecondFactor = async (
       identity: pending,
       linkGrantId: pending.linkGrantId,
       consume,
-      login: { clientId, authMethods: verification.firstFactor },
     });
   } catch (err) {
     if (err instanceof ForcedLinkRefused) throw sessionGone();

@@ -232,7 +232,7 @@ describe("OAuth Check Permission Endpoints", () => {
       expect(data.error).toBe(OAUTH_ERRORS.INVALID_CLIENT);
     });
 
-    it("should return 404 for non-existent user", async () => {
+    it("should return 403 for non-existent user", async () => {
       const response = await fetch(`${BASE_URL}/oauth/check-permission`, {
         method: "POST",
         headers: {
@@ -248,7 +248,10 @@ describe("OAuth Check Permission Endpoints", () => {
         }),
       });
 
-      expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
+      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(((await response.json()) as { error: string }).error).toBe(
+        "forbidden"
+      );
     });
 
     it("should return 400 with invalid_request error without user_id", async () => {
@@ -428,7 +431,7 @@ describe("OAuth Check Permission Endpoints", () => {
       expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
     });
 
-    it("should return 404 for non-existent user in batch check", async () => {
+    it("should return 403 for non-existent user in batch check", async () => {
       const response = await fetch(`${BASE_URL}/oauth/check-permission/batch`, {
         method: "POST",
         headers: {
@@ -444,7 +447,10 @@ describe("OAuth Check Permission Endpoints", () => {
         }),
       });
 
-      expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
+      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(((await response.json()) as { error: string }).error).toBe(
+        "forbidden"
+      );
     });
   });
 });

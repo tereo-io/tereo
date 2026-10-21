@@ -1,4 +1,3 @@
-import { OAuth2Error, NotFoundError } from "../../../utils/errors.js";
 import { acquireLock, releaseLock } from "../../../utils/redis.js";
 import { validateBody } from "../../../utils/validateReq.js";
 import { ClientRecord } from "../../../utils/db/clients.js";
@@ -11,6 +10,11 @@ import {
   getRefreshTokenFromCookie,
   setAuthCookies,
 } from "../../../utils/cookies.js";
+import {
+  InvalidGrantError,
+  NotFoundError,
+  OAuth2Error,
+} from "../../../utils/errors.js";
 import {
   logAuthCodeValidationFailure,
   logAuthFailure,
@@ -336,7 +340,7 @@ const getResponse = async (
         contended: true,
       };
     }
-    if (error instanceof Error && error.message === "invalid_grant") {
+    if (error instanceof InvalidGrantError) {
       logAuthFailure(
         client.clientId,
         "invalid_grant",
@@ -346,8 +350,7 @@ const getResponse = async (
       return {
         status: "error",
         error: "invalid_grant",
-        error_description:
-          "The provided authorization grant is invalid, expired, or revoked",
+        error_description: error.message,
       };
     }
     throw error;

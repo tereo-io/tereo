@@ -200,6 +200,21 @@ export class OAuth2Error extends AppError {
 }
 
 /**
+ * The token endpoint's `invalid_grant`: a code or refresh token that is
+ * unknown, spent, expired, revoked or not this client's. Deliberately one
+ * description for every cause, so a caller cannot tell them apart.
+ */
+export class InvalidGrantError extends OAuth2Error {
+  constructor() {
+    super(
+      "invalid_grant",
+      "The provided authorization grant is invalid, expired, or revoked"
+    );
+    this.name = "InvalidGrantError";
+  }
+}
+
+/**
  * An AppError, or anything shaped like one — a library error carrying an HTTP
  * status. Prisma errors have a string `code` but no `statusCode`, so they fall
  * through to their own branch below.

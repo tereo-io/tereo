@@ -2,6 +2,7 @@ import { BASE_URL, HTTP_STATUS, createTestUser } from "./utils/test-helpers.js";
 import { generateRandomString, hashFlowToken } from "../../utils/crypto.js";
 import { issueAuthorizationCode } from "../../utils/authorization.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
+import { InvalidGrantError } from "../../utils/errors.js";
 import { handleRefreshToken } from "../../utils/auth.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
@@ -379,7 +380,7 @@ describe("support access at refresh", () => {
     await prisma.userRole.deleteMany({ where: { userId: user.id } });
 
     await expect(refresh(rotated.refresh_token)).rejects.toThrow(
-      "invalid_grant"
+      InvalidGrantError
     );
     expect(
       await prisma.refreshToken.count({

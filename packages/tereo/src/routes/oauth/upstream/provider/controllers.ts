@@ -10,7 +10,6 @@ import { emailDomain, normalizeEmail } from "../../../../utils/email.js";
 import { authFailure } from "../../../../middleware/rateLimit.js";
 import { hashTotpSetupGrant } from "../../../../utils/totp.js";
 import { hashFlowToken } from "../../../../utils/crypto.js";
-import { logAuditTx } from "../../../../utils/outbox.js";
 import { logger } from "../../../../utils/logger.js";
 import type { Request, Response } from "express";
 import db from "../../../../utils/db/index.js";
@@ -400,7 +399,7 @@ const completeLogin = async (
   );
   if (!linked) throw fail("no_account");
 
-  return await continueProviderLogin(req, res, provider, user, linked.id, {
+  return await continueProviderLogin(req, res, provider, user, {
     client,
     request,
     authTime: authTimeOrFail(provider, identity, request, session, fail),
@@ -438,7 +437,6 @@ const continueProviderLogin = async (
   res: Response,
   provider: IdentityProvider,
   user: User,
-  identityId: string,
   {
     client,
     request,
@@ -457,24 +455,7 @@ const continueProviderLogin = async (
 ): Promise<string> => {
   const authMethods = provider.countsAsMfa ? ["fed", "mfa"] : ["fed"];
 
-  // The LOGIN entry issueAuthorizationCode writes cannot name the provider:
-  // the consent, org-select and TOTP steps between here and there keep no
-  // place for it.
-  await db.$transaction((tx) =>
-    logAuditTx(tx, {
-      auth: { userId: user.id, email: user.email },
-      action: "LOGIN",
-      entityType: "UserIdentity",
-      entityId: identityId,
-      entityName: user.email,
-      metadata: {
-        provider: provider.slug,
-        auth_methods: authMethods,
-        client_id: client.clientId,
-      },
-    })
-  );
-
+  // The LOGIN entry is written with the code, once any second factor is in.
   const { redirect_url } = await continueAfterFirstFactor(req, res, {
     user,
     client,
@@ -482,6 +463,7 @@ const continueProviderLogin = async (
     authMethods,
     mfaSatisfied: provider.countsAsMfa,
     authTime,
+    provider: provider.slug,
   });
   return redirect_url;
 };
@@ -646,13 +628,13 @@ const completeForcedLink = async (
       mfaSatisfied: false,
       authTime,
       pendingLinkId: pending.id,
+      provider: provider.slug,
     });
     return redirect_url;
   }
 
-  let linked: { id: string };
   try {
-    linked = await commitForcedLink({
+    await commitForcedLink({
       user,
       provider,
       identity,
@@ -669,7 +651,6 @@ const completeForcedLink = async (
     res,
     provider,
     { ...user, passwordHash: null },
-    linked.id,
     { client, request, authTime }
   );
 };
