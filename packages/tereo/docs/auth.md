@@ -54,7 +54,7 @@ discovery) are per area, each with a read-only variant:
 | `core:files` / `core:files.read`       | `/v1/files`          | `file-service.admin` / the four `file-service.*.read`                                                    |
 | `core:audit` / `core:audit.read`       | `/v1/audit`          | `audit-logs.admin` / `audit-logs.read`                                                                   |
 | `core:webhooks` / `core:webhooks.read` | `/v1/webhooks`       | `webhooks.admin` / `webhooks.read`, `webhooks.event-types.read`                                          |
-| `core:events`                          | `/ws`                | — (the socket only: permission-change pushes, nothing else)                                              |
+| `core:events`                          | `/ws`                | — (the socket only: permission changes and its own session's end, nothing else)                          |
 | `core:organizations`                   | `GET /v1/account/organizations` | `organizations.support-access` ([Support access](#support-access))                            |
 
 `/v1/notifications` has no scope: only core's UI and services reach it.
@@ -928,24 +928,38 @@ Every
 password login gives the browser's SSO session a new token (session fixation); silent and org-switch
 continuations keep it.
 
-A WebSocket is authenticated once, at the handshake. It joins rooms for its user (`user:{id}`),
+A WebSocket is authenticated once, at the handshake, with the token in `auth.token` (or an
+`Authorization` header): a string of at most 8 KiB, else `Invalid access token`. The socket.io CORS
+is not credentialed — no cookie is involved. It joins rooms for its user (`user:{id}`),
 token (`token:{jti}`), session (`session:{refresh token id}`) and, for an organization's token,
-`org:{orgId}` and `user:{id}:org:{orgId}`. Revoking the session or token closes it
+`org:{orgId}` and `user:{id}:org:{orgId}`; a token that reaches the user's account (core's UI, a
+service, or `core:account`) also `user:{id}:account`, and one that reaches core's files
+`user:{id}:files`. Revoking the session or token closes it
 (`notifySessionsRevoked`, `disconnectTokenSockets`), as do deactivating the user, removing them from
-the organization or deactivating it (`disconnectUserSockets`, `disconnectOrganizationSockets`), and
-the token's `exp`. The UI reconnects with a fresh token after a server-side close. The token is
+the organization or deactivating it (`disconnectUserSockets`, `disconnectOrganizationSockets` — the
+sockets close even if ending the sessions then fails), and
+the token's `exp`. Signing out everywhere revokes the families of the sessions it ends, so the
+token of a session a refresh has rotated away, and its socket, go too. The UI reconnects with a fresh
+token after a server-side close. The token is
 checked once more after the socket joins its rooms, so a revocation landing mid-handshake still
-closes it. One user may hold 20 sockets per core process (`Too many connections` beyond that), and
-a client message may be at most 16 KiB.
+closes it, and every `WEBSOCKET_REVALIDATE_INTERVAL_SECONDS` (default 60) each core process checks
+its sockets' tokens in batches and closes those no longer active — whatever closed no socket when it
+happened. One user may hold 20 sockets per core process, counted from the handshake
+(`Too many connections` beyond that), and
+a client message may be at most 16 KiB. A socket may send 10 messages at once and one a second after
+that; more are dropped, and a client that keeps sending well past the rate is disconnected.
 
-Events go to the user's room, after the change commits (`websocket/emitters/`):
+Events go out after the change commits (`websocket/emitters/`). A socket whose token reaches neither
+the user's account nor core's files (`core:events` alone) gets only `auth:permissions:changed` and
+the `auth:session:revoked` of its own session — nothing naming the user's other sessions,
+organizations or buckets:
 
 | Event                       | Payload                                 | Sent when                                                                                                                                                                                                         |
 | --------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth:permissions:changed`  | `{ reason, timestamp }`                 | the user's global roles change, or an admin changes a role they hold (a registry retirement is not notified; the UI sees it on its next token refresh)                                                            |
-| `auth:session:revoked`      | `{ sessionId, timestamp }`              | one of the user's sessions is revoked; its sockets close after                                                                                                                                                    |
-| `auth:organization:changed` | `{ reason, organizationId, timestamp }` | `membership_changed`: added, removed, or member tier changed; `roles_changed`: org-scoped roles set; `org_deactivated`: to every member, after the organization's tokens are revoked and before its sockets close |
-| `files:bucket-access:changed` | `{ bucketName, timestamp }` | a bucket grant was given to or revoked from the user (a member removal included), or the bucket's ownership moved to or from them (see [files.md](files.md)) |
+| `auth:permissions:changed`  | `{ reason, timestamp }`                 | to every socket of the user: their global roles change, or an admin changes a role they hold (a registry retirement is not notified; the UI sees it on its next token refresh)                                    |
+| `auth:session:revoked`      | `{ sessionId, timestamp }`              | to the account room and the session's own sockets: one of the user's sessions is revoked; its sockets close after                                                                                                 |
+| `auth:organization:changed` | `{ reason, organizationId, timestamp }` | to the account room. `membership_changed`: added, removed, or member tier changed; `roles_changed`: org-scoped roles set; `org_deactivated`: to every member, after the organization's tokens are revoked and before its sockets close |
+| `files:bucket-access:changed` | `{ bucketName, timestamp }` | to the files room: a bucket grant was given to or revoked from the user (a member removal included), or the bucket's ownership moved to or from them (see [files.md](files.md)) |
 
 The UI refreshes its token on `auth:permissions:changed` and `auth:organization:changed`; a refresh
 core rejects signs it out.

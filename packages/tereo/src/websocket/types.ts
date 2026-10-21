@@ -13,6 +13,16 @@ export interface AuthenticatedSocketData {
   orgId: string | null;
   /** The client the token was issued to. */
   clientId: string;
+  /**
+   * The token reaches the user's account (full access, or `core:account`):
+   * the socket hears of the user's other sessions and organizations.
+   */
+  accountEvents: boolean;
+  /**
+   * The token reaches core's files (full access, or `core:files*`): the
+   * socket hears of the user's bucket grants.
+   */
+  filesEvents: boolean;
 }
 
 export type AuthenticatedSocket = Socket<

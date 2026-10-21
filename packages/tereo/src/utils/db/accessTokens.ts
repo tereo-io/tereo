@@ -30,6 +30,25 @@ export const create = async (
   await (tx ?? prisma).accessToken.create({ data });
 };
 
+/**
+ * The jtis among `jtis` whose row is live: not revoked, its refresh token (if
+ * any) not revoked, its user active. A deleted client or refresh token takes
+ * the row with it.
+ */
+export const getActiveJtis = async (jtis: string[]): Promise<string[]> => {
+  if (jtis.length === 0) return [];
+  const rows = await prisma.accessToken.findMany({
+    where: {
+      jti: { in: jtis },
+      revokedAt: null,
+      user: { isActive: true },
+      OR: [{ refreshTokenId: null }, { refreshToken: { revokedAt: null } }],
+    },
+    select: { jti: true },
+  });
+  return rows.map((t) => t.jti);
+};
+
 export const revokeByJti = async (
   jti: string,
   clientId: string

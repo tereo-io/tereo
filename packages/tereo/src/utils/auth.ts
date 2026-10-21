@@ -486,11 +486,16 @@ const revokeLostOrganizationGrant = async (token: {
   authCodeId: string | null;
 }) => {
   if (token.authCodeId) return revokeFamily(token.userId, token.authCodeId);
-  await db.$transaction(async (tx) => {
+  const jtis = await db.$transaction(async (tx) => {
     await db.users.lockForSessionEnd(tx, { userIds: [token.userId] });
-    await db.accessTokens.revokeByRefreshTokenIds([token.id], tx);
+    const revoked = await db.accessTokens.revokeByRefreshTokenIds(
+      [token.id],
+      tx
+    );
     await db.refreshTokens.revokeByIds([token.id], tx);
+    return revoked;
   });
+  disconnectTokenSockets(jtis);
 };
 
 /** The requested subset of the granted scopes; all of them when none named. */
