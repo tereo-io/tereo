@@ -3,6 +3,7 @@ import { OrgMemberRole } from "../../../../../../../../prisma/generated/client/i
 import { assertNotIntegrationAccount } from "../../../../../../../utils/integrations.js";
 import { revokeOrganizationGrantsTx } from "../../../../../../../utils/bucketGrants.js";
 import { formatOrganizationMember } from "../../../../../../../utils/transformers.js";
+import { recordSessionsRevoked } from "../../../../../../../utils/sessionEvents.js";
 import { endOrganizationSessions } from "../../../../../../../utils/sessions.js";
 import { MemberUserIdParamSchema, UpdateMemberRoleSchema } from "./schemas.js";
 import type { Prisma } from "../../../../../../../utils/db/prisma.js";
@@ -100,7 +101,12 @@ export const removeMember = async (req: Request, res: Response) => {
 
   // Tokens and SSO sessions bound to this organization end with the
   // membership.
-  await endOrganizationSessions(userId, orgId);
+  await endOrganizationSessions(
+    userId,
+    orgId,
+    recordSessionsRevoked(auth, await db.users.get(userId))
+  );
+
   notifyOrgMembershipChanged(userId, orgId);
   for (const bucketName of revokedBuckets) {
     notifyBucketAccessChanged([userId], bucketName);

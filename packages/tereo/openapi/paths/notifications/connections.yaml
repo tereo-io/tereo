@@ -316,7 +316,7 @@
       provider or the connection refuses. An invalid `to` is `400`. Works on a disabled connection.
       Nothing is recorded as a notification.
 
-      An audit log entry is created for this action.
+      An audit log entry is created for this action, before the message is sent.
 
       **Required permission:** `notifications.admin`
     operationId: testNotificationConnection

@@ -522,6 +522,9 @@ describe("Admin Clients Endpoints", () => {
       });
       expect(JSON.stringify(entry)).not.toContain(secret);
       expect(JSON.stringify(entry)).not.toContain(row.clientSecret);
+      expect(entry.changes).toEqual({
+        clientType: { old: "public", new: "confidential" },
+      });
 
       const introspect = (password: string) =>
         fetch(`${BASE_URL}/oauth/introspect`, {
@@ -734,6 +737,22 @@ describe("Admin Clients Endpoints", () => {
       expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
       const data = (await response.json()) as ErrorResponse;
       expect(data.error).toBe("forbidden");
+    });
+
+    it("lists only the clients they own", async () => {
+      const owner = await createTestUser();
+      const ownerToken = await getTestPrincipalToken({
+        userId: owner.id,
+        permissions: ["clients.read"],
+      });
+      const own = await createTestClient({ ownerId: owner.id });
+
+      const response = await fetch(`${BASE_URL}/v1/admin/clients?limit=200`, {
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      });
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      const data = (await response.json()) as ClientsListResponse;
+      expect(data.data?.map((c) => c.id)).toEqual([own.id]);
     });
 
     it("still gets 400 invalid_owner from an admin moving ownership to a non-human", async () => {

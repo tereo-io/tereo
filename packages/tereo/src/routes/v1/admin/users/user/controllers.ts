@@ -133,10 +133,7 @@ export const updateUser = async (req: Request, res: Response) => {
       await authorize(tx);
       return await update(tx);
     });
-    await endDeactivatedUserSessions(
-      id,
-      body.password ? recordSessionsRevoked(auth, existing) : undefined
-    );
+    await endDeactivatedUserSessions(id, recordSessionsRevoked(auth, existing));
   } else if (body.password) {
     // A password reset signs the user out everywhere, in the transaction
     // that sets the password. An admin resetting their own keeps the session

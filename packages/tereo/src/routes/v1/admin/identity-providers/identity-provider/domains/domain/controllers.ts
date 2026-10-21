@@ -14,12 +14,14 @@ import {
 } from "../../../../../../../utils/validateReq.js";
 import {
   computeChanges,
+  emitTx,
   logAuditTx,
 } from "../../../../../../../utils/outbox.js";
 import {
   assertMayChangeSsoOnly,
   assertProviderActive,
   changesSsoOnly,
+  emitDomainTx,
   endSessionsLinkedElsewhere,
 } from "../utils.js";
 
@@ -105,15 +107,20 @@ export const updateDomain = async (req: Request, res: Response) => {
       changes: computeChanges(formatDomain(existing), formatDomain(updated)),
       metadata: { providerId },
     });
+    await emitDomainTx(
+      tx,
+      "auth.identity-provider.domain-updated",
+      providerId,
+      updated
+    );
     // Newly SSO-only, or SSO-only at a new domain: its users' identities at
     // other providers stop working.
-    const newlyClosed =
-      updated.ssoOnly &&
-      (!current.ssoOnly || updated.domain !== current.domain);
-    return newlyClosed ? updated.domain : null;
+    return (
+      updated.ssoOnly && (!current.ssoOnly || updated.domain !== current.domain)
+    );
   });
 
-  if (closes) await endSessionsLinkedElsewhere(auth, closes, providerId);
+  if (closes) await endSessionsLinkedElsewhere(auth, providerId, domainId);
 
   res.json(
     formatDomain(await db.identityProviders.getDomain(providerId, domainId))
@@ -142,6 +149,19 @@ export const deleteDomain = async (req: Request, res: Response) => {
       entityId: domainId,
       entityName: existing.domain,
       metadata: { providerId },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.identity-provider.domain-deleted",
+      entityType: "IdentityProviderDomain",
+      entityId: domainId,
+      data: {
+        providerId,
+        id: domainId,
+        domain: current.domain,
+        organizationId: current.organizationId,
+        ssoOnly: current.ssoOnly,
+      },
     });
   });
 

@@ -1,6 +1,7 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { formatIntegration } from "../../../../../utils/transformers.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
+import { assertMayTakeOverAccount } from "../../users/user/guards.js";
 import { emitTx, logAuditTx } from "../../../../../utils/outbox.js";
 import { assertMayChangeAudience } from "../../clients/utils.js";
 import { validateUser } from "../../../../../utils/auth.js";
@@ -101,6 +102,7 @@ export const regenerateSecret = async (req: Request, res: Response) => {
 
   const { clientId, previousSecretExpiresAt } = await db.$transaction(
     async (tx) => {
+      await assertMayTakeOverAccount(auth, integration.accountUserId, tx);
       // Locked: two regenerations at once would each keep the secret they
       // read as the previous one, and the first one's new secret would be lost.
       const [client] = await tx.$queryRaw<
@@ -166,7 +168,9 @@ export const revokePreviousSecret = async (req: Request, res: Response) => {
   const integration = integrationRef(await getRow(req));
 
   const updated = await db.$transaction(async (tx) => {
+    await assertMayTakeOverAccount(auth, integration.accountUserId, tx);
     await revokePreviousSecretTx(tx, integration.clientRowId);
+
     await logAuditTx(tx, {
       auth,
       action: "UPDATE",

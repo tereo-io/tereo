@@ -132,7 +132,8 @@
       409 `sso_required` (the user's email domain is SSO-only for another
       provider, whose sign-in is then the only way in).
 
-      An audit log entry is created (`entityType` `IdentityInvite`).
+      An audit log entry is created (`entityType` `IdentityInvite`) and an
+      `auth.user.identity-invite-created` webhook event is emitted.
     operationId: postAdminUserIdentityInvites
     security:
       - BearerAuth: [users.write]
@@ -184,7 +185,8 @@
     summary: Withdraw an invite
     description: |
       Removes the user's unclaimed invite for the provider. `404` when there is
-      none. An audit log entry is created.
+      none. An audit log entry is created and an
+      `auth.user.identity-invite-withdrawn` webhook event is emitted.
     operationId: deleteAdminUserIdentityInvite
     security:
       - BearerAuth: [users.write]
@@ -303,6 +305,83 @@ auth.user.identity-unlinked:
                       provider:
                         { type: string, description: The provider's slug }
                       email: { type: [string, "null"] }
+    responses:
+      "2XX":
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.user.identity-invite-created:
+  post:
+    tags:
+      - Admin - User Identities
+    summary: Identity invite created
+    description: Fired when an admin invites a user to link an identity at a provider, or renews the invite.
+    operationId: webhookUserIdentityInviteCreated
+    security: []
+    parameters:
+      - $ref: "../../../components/parameters.yaml#/WebhookIdHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookEventHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookTimestampHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookSignatureHeader"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent"
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.identity-invite-created
+                  entityType:
+                    const: IdentityInvite
+                  data:
+                    type: object
+                    required: [userId, email, providerId, provider, expiresAt]
+                    properties:
+                      userId: { type: string, format: uuid }
+                      email: { type: string }
+                      providerId: { type: string, format: uuid }
+                      provider:
+                        { type: string, description: The provider's slug }
+                      expiresAt: { type: string, format: date-time }
+    responses:
+      "2XX":
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.user.identity-invite-withdrawn:
+  post:
+    tags:
+      - Admin - User Identities
+    summary: Identity invite withdrawn
+    description: Fired when an admin withdraws a user's identity invite.
+    operationId: webhookUserIdentityInviteWithdrawn
+    security: []
+    parameters:
+      - $ref: "../../../components/parameters.yaml#/WebhookIdHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookEventHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookTimestampHeader"
+      - $ref: "../../../components/parameters.yaml#/WebhookSignatureHeader"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent"
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.identity-invite-withdrawn
+                  entityType:
+                    const: IdentityInvite
+                  data:
+                    type: object
+                    required: [userId, email, providerId]
+                    properties:
+                      userId: { type: string, format: uuid }
+                      email: { type: string }
+                      providerId: { type: string, format: uuid }
     responses:
       "2XX":
         description: Any 2xx response acknowledges the delivery; anything else is retried.

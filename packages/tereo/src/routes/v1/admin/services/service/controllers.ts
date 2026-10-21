@@ -1,10 +1,14 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
+import { disconnectTokenSockets } from "../../../../../websocket/emitters/index.js";
 import { prisma, type Prisma } from "../../../../../utils/db/prisma.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { CORE_SERVICE_ID } from "../../../../../definitions/index.js";
+import { assertMayTakeOverAccount } from "../../users/user/guards.js";
 import { formatService } from "../../../../../utils/transformers.js";
 import { emitTx, logAuditTx } from "../../../../../utils/outbox.js";
+import { updateServiceTx } from "../../../../../utils/services.js";
 import { validateUser } from "../../../../../utils/auth.js";
+import { logger } from "../../../../../utils/logger.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
 import env from "../../../../../env.js";
@@ -19,15 +23,12 @@ import {
   validateParams,
 } from "../../../../../utils/validateReq.js";
 import {
-  revokeServiceTokens,
-  updateServiceTx,
-} from "../../../../../utils/services.js";
-import {
   revokePreviousSecretTx,
   rotatedSecretFields,
 } from "../../../../../utils/clients.js";
 import {
   ForbiddenError,
+  InternalServerError,
   ManagedByProvisioningError,
   NotFoundError,
 } from "../../../../../utils/errors.js";
@@ -58,7 +59,11 @@ const getAppService = async (req: Request, tx?: Tx) => {
   }
   const service = await getServiceRow(id, tx);
   if (!service.client?.serviceAccountUser) {
-    throw new Error(`Service ${service.slug} has no client or service account`);
+    logger.error(
+      { serviceId: service.id, slug: service.slug },
+      "Service has no client or service account; its rows are inconsistent"
+    );
+    throw new InternalServerError();
   }
   return {
     ...service,
@@ -148,11 +153,24 @@ export const updateService = async (req: Request, res: Response) => {
   const body = validateBody(UpdateServiceSchema, req);
   const existing = await getEditableAppService(req);
 
-  const updated = await db.$transaction((tx) =>
-    updateServiceTx(tx, existing, body, auth)
-  );
+  const { updated, revokedJtis } = await db.$transaction(async (tx) => {
+    const revokedJtis =
+      body.isActive === false
+        ? await db.accessTokens.revokeByClientId(existing.client.id, tx)
+        : [];
+    const updated = await updateServiceTx(
+      tx,
+      existing,
+      body,
+      auth,
+      revokedJtis.length > 0
+        ? { accessTokensRevoked: revokedJtis.length }
+        : undefined
+    );
+    return { updated, revokedJtis };
+  });
 
-  if (body.isActive === false) await revokeServiceTokens(existing.client.id);
+  disconnectTokenSockets(revokedJtis);
   res.json(formatService(updated));
 };
 
@@ -167,6 +185,7 @@ export const regenerateSecret = async (req: Request, res: Response) => {
 
   const { clientId, previousSecretExpiresAt } = await db.$transaction(
     async (tx) => {
+      await assertMayTakeOverAccount(auth, service.accountUserId, tx);
       // Locked: two regenerations at once would each keep the secret they
       // read as the previous one, and the first one's new secret would be lost.
       const [client] = await tx.$queryRaw<
@@ -233,6 +252,7 @@ export const revokePreviousSecret = async (req: Request, res: Response) => {
   const service = await getAppService(req);
 
   const updated = await db.$transaction(async (tx) => {
+    await assertMayTakeOverAccount(auth, service.accountUserId, tx);
     await revokePreviousSecretTx(tx, service.client.id);
     await logAuditTx(tx, {
       auth,
@@ -278,19 +298,27 @@ export const approveAccess = async (req: Request, res: Response) => {
 };
 
 /**
- * Take access away. Its tokens are revoked, so the next call it makes
- * fetches a token without what was revoked.
+ * Take access away. Its tokens are revoked with it, so the next call it
+ * makes fetches a token without what was revoked.
  */
 export const revokeAccess = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { ids } = validateBody(AccessDecisionSchema, req);
   const service = await getAppService(req);
 
-  const revoked = await db.$transaction(async (tx) =>
-    revokeAccessTx(tx, auth, service, await accessRows(tx, service.id, ids))
-  );
+  const { revoked, revokedJtis } = await db.$transaction(async (tx) => {
+    const rows = await accessRows(tx, service.id, ids);
+    // Revoked first, so the decision's audit entries can count them.
+    const revokedJtis = rows.some((r) => r.status !== "revoked")
+      ? await db.accessTokens.revokeByClientId(service.client.id, tx)
+      : [];
+    const revoked = await revokeAccessTx(tx, auth, service, rows, {
+      accessTokensRevoked: revokedJtis.length,
+    });
+    return { revoked, revokedJtis };
+  });
 
-  if (revoked.length > 0) await revokeServiceTokens(service.client.id);
+  disconnectTokenSockets(revokedJtis);
   res.json({
     revoked: revoked.map((r) => ({ id: r.id, kind: r.kind, target: r.target })),
   });

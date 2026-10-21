@@ -383,6 +383,13 @@ describe("provisioned access", () => {
     const revoked = await decide(service.id, "revoke", [access[0].id]);
     expect(revoked.status).toBe(200);
     expect((await emit(token, eventType)).status).toBe(401);
+    const entry = await prisma.auditLogEntry.findFirstOrThrow({
+      where: {
+        entityId: service.id,
+        metadata: { path: ["action"], equals: "access_revoked" },
+      },
+    });
+    expect(entry.metadata).toMatchObject({ accessTokensRevoked: 1 });
     token = await tokenFor(service);
     expect((await emit(token, eventType)).status).toBe(403);
 
@@ -1004,6 +1011,46 @@ describe("secrets", () => {
     );
     expect(res.status).toBe(200);
     expect((await api("GET", "/v1/files/buckets", token)).status).toBe(401);
+
+    const entry = await prisma.auditLogEntry.findFirstOrThrow({
+      where: { entityType: "Service", entityId: service.id, action: "UPDATE" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(entry.metadata).toMatchObject({ accessTokensRevoked: 1 });
+  });
+
+  it("refuses a secret change to a caller not holding what the service holds", async () => {
+    const service = await addService();
+    const account = await prisma.user.findFirstOrThrow({
+      where: { oauthClient: { clientId: service.credentials.clientId } },
+    });
+    const publisher = await prisma.role.findFirstOrThrow({
+      where: { name: "webhook_publisher", serviceId: CORE_SERVICE_ID },
+    });
+    await prisma.userRole.create({
+      data: { userId: account.id, roleId: publisher.id },
+    });
+    const writer = await getTestPrincipalToken({
+      permissions: ["services.read", "services.write"],
+    });
+
+    for (const action of ["regenerate-secret", "revoke-previous-secret"]) {
+      const res = await api(
+        "POST",
+        `/v1/admin/services/${service.id}/${action}`,
+        writer
+      );
+      expect(res.status, action).toBe(403);
+      expect(res.body.error_description).toContain("webhooks.emit");
+    }
+    expect((await fetchToken(service.credentials)).status).toBe(200);
+
+    const regenerated = await api(
+      "POST",
+      `/v1/admin/services/${service.id}/regenerate-secret`,
+      adminToken
+    );
+    expect(regenerated.status).toBe(200);
   });
 
   it("keeps a service's client out of /admin/clients", async () => {

@@ -101,7 +101,9 @@ Paths are under `/v1/admin/notifications/connections`.
 - Creates, updates, deletes and tests are audited. Create, update and delete emit
   `notification.connection.created`, `.updated` and `.deleted` (data never includes secrets). An
   update that replaces or clears the secrets records `metadata: { secretsChanged: true }` or
-  `{ secretsCleared: true }`, never the values.
+  `{ secretsCleared: true }`, never the values. A test is audited before its message is sent
+  (`metadata: { operation: "test", to }`), so none goes out unrecorded; its outcome is the response.
+
 - The SMTP host is resolved and pinned to a public address before connecting. If it resolves to a
   private or reserved address the delivery fails with the fixed text "The SMTP host resolves to a
   private or reserved address" (code `host_not_allowed`), never the address itself. A host that does

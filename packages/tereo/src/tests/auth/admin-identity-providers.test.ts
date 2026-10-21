@@ -1,4 +1,6 @@
+import { endSessionsLinkedElsewhere } from "../../routes/v1/admin/identity-providers/identity-provider/domains/utils.js";
 import { openProviderSecret } from "../../utils/identityProviders/clientSecret.js";
+import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
 import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -87,6 +89,9 @@ describe("Admin identity providers", () => {
           "auth.identity-provider.created",
           "auth.identity-provider.deactivated",
           "auth.identity-provider.activated",
+          "auth.identity-provider.domain-created",
+          "auth.identity-provider.domain-updated",
+          "auth.identity-provider.domain-deleted",
         ],
       }
     );
@@ -774,6 +779,15 @@ describe("Admin identity providers", () => {
         `/${provider.id}/domains/${created.id}`
       );
       expect(gone.status).toBe(404);
+
+      const expected = [
+        "auth.identity-provider.domain-created",
+        "auth.identity-provider.domain-updated",
+        "auth.identity-provider.domain-deleted",
+      ];
+      expect((await deliveredEventTypes(created.id, expected)).sort()).toEqual(
+        expected.sort()
+      );
     });
 
     it("keeps fields a domain PATCH does not send", async () => {
@@ -1058,6 +1072,45 @@ describe("Admin identity providers", () => {
           (await call(adminToken, "PATCH", path, { ssoOnly: true })).status
         ).toBe(200);
         expect(await liveSessions(elsewhere.id)).toBe(0);
+      });
+
+      it("ends what is left when run again, and nothing once SSO-only is lifted", async () => {
+        const provider = await newProvider();
+        const other = await newProvider();
+        const name = `ssorerun-${generateUniqueId().toLowerCase()}.com`;
+        const created = await (
+          await postDomain(writeToken, provider.id, { domain: name })
+        ).json();
+        const elsewhere = await signedIn(name, other.id);
+        const setSsoOnly = (ssoOnly: boolean) =>
+          prisma.identityProviderDomain.update({
+            where: { id: created.id },
+            data: { ssoOnly },
+          });
+        // Called here, outside the server: what it emits needs the cache.
+        await ensureDefaultOrganization();
+        const auth = { userId: SYSTEM_USER_ID, email: null };
+        const run = () =>
+          endSessionsLinkedElsewhere(auth, provider.id, created.id);
+        const audits = () =>
+          prisma.auditLogEntry.count({
+            where: { entityType: "User", entityId: elsewhere.id },
+          });
+
+        // Closed with no run after it, as a crash after the commit leaves it.
+        await setSsoOnly(true);
+        await run();
+        expect(await liveSessions(elsewhere.id)).toBe(0);
+        const audited = await audits();
+        expect(audited).toBeGreaterThan(0);
+
+        await run();
+        expect(await audits()).toBe(audited);
+
+        await setSsoOnly(false);
+        const reopened = await signedIn(name, other.id);
+        await run();
+        expect(await liveSessions(reopened.id)).toBeGreaterThan(0);
       });
     });
 

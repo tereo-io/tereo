@@ -1972,6 +1972,12 @@ webhooks:
     $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.deactivated'
   auth.identity-provider.activated:
     $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.activated'
+  auth.identity-provider.domain-created:
+    $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.domain-created'
+  auth.identity-provider.domain-updated:
+    $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.domain-updated'
+  auth.identity-provider.domain-deleted:
+    $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.domain-deleted'
   auth.role.created:
     $ref: './paths/auth/admin/roles.yaml#/auth.role.created'
   auth.role.updated:
@@ -2014,6 +2020,10 @@ webhooks:
     $ref: './paths/auth/admin/user-identities.yaml#/auth.user.identity-linked'
   auth.user.identity-unlinked:
     $ref: './paths/auth/admin/user-identities.yaml#/auth.user.identity-unlinked'
+  auth.user.identity-invite-created:
+    $ref: './paths/auth/admin/user-identities.yaml#/auth.user.identity-invite-created'
+  auth.user.identity-invite-withdrawn:
+    $ref: './paths/auth/admin/user-identities.yaml#/auth.user.identity-invite-withdrawn'
   auth.user.totp-reset:
     $ref: './paths/auth/admin/users.yaml#/auth.user.totp-reset'
   auth.client.created:

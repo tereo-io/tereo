@@ -320,7 +320,8 @@
       caller lacks (as when assigning roles to a user). 404 when the organization
       does not exist or is archived.
 
-      An audit log entry is created for this action.
+      An audit log entry is created for this action. An
+      `auth.identity-provider.domain-created` webhook event is emitted.
     operationId: createAdminIdentityProviderDomain
     security:
       - BearerAuth: [identity-providers.write]
@@ -406,7 +407,8 @@
       ends the sessions of its users who hold an identity at another
       provider, as on create.
 
-      An audit log entry is created for this action.
+      An audit log entry is created for this action. An
+      `auth.identity-provider.domain-updated` webhook event is emitted.
     operationId: updateAdminIdentityProviderDomain
     security:
       - BearerAuth: [identity-providers.write]
@@ -449,8 +451,10 @@
       Releases the domain and its default roles. Users already created through it
       keep their accounts and identities. Deleting an SSO-only domain reopens its
       users to passwords, so it needs `admin` through a global role (403
-      otherwise). An audit log entry is created for this action.
+      otherwise). An audit log entry is created for this action. An
+      `auth.identity-provider.domain-deleted` webhook event is emitted.
     operationId: deleteAdminIdentityProviderDomain
+
     security:
       - BearerAuth: [identity-providers.write]
     parameters:
@@ -620,6 +624,121 @@ auth.identity-provider.activated:
                       id: { type: string, format: uuid }
                       slug: { type: string }
                       displayName: { type: string }
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.identity-provider.domain-created:
+  post:
+    tags:
+      - Admin - Identity Provider Domains
+    summary: Identity provider domain created
+    description: Fired when an email domain is added to an identity provider.
+    operationId: webhookIdentityProviderDomainCreated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.identity-provider.domain-created
+                  entityType:
+                    const: IdentityProviderDomain
+                  data:
+                    description: The provider's id with the domain as the admin API returns it.
+                    allOf:
+                      - type: object
+                        required: [providerId]
+                        properties:
+                          providerId: { type: string, format: uuid }
+                      - $ref: '../../../components/auth/schemas.yaml#/IdentityProviderDomain'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.identity-provider.domain-updated:
+  post:
+    tags:
+      - Admin - Identity Provider Domains
+    summary: Identity provider domain updated
+    description: Fired when a domain changes (domain, organization, default roles, autoAccept or ssoOnly), with the domain as it is now.
+    operationId: webhookIdentityProviderDomainUpdated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.identity-provider.domain-updated
+                  entityType:
+                    const: IdentityProviderDomain
+                  data:
+                    description: The provider's id with the domain as the admin API returns it.
+                    allOf:
+                      - type: object
+                        required: [providerId]
+                        properties:
+                          providerId: { type: string, format: uuid }
+                      - $ref: '../../../components/auth/schemas.yaml#/IdentityProviderDomain'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.identity-provider.domain-deleted:
+  post:
+    tags:
+      - Admin - Identity Provider Domains
+    summary: Identity provider domain deleted
+    description: Fired when a domain is removed from an identity provider.
+    operationId: webhookIdentityProviderDomainDeleted
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.identity-provider.domain-deleted
+                  entityType:
+                    const: IdentityProviderDomain
+                  data:
+                    type: object
+                    required: [providerId, id, domain, organizationId, ssoOnly]
+                    properties:
+                      providerId: { type: string, format: uuid }
+                      id: { type: string, format: uuid }
+                      domain: { type: string }
+                      organizationId: { type: string, format: uuid }
+                      ssoOnly: { type: boolean }
     responses:
       '2XX':
         description: Any 2xx response acknowledges the delivery; anything else is retried.

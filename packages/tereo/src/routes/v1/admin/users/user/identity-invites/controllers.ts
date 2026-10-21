@@ -1,5 +1,6 @@
 import { ssoProviderElsewhere } from "../../../../../../utils/identityProviders/resolve.js";
-import { logAuditTx } from "../../../../../../utils/outbox.js";
+import { getDefaultOrganizationId } from "../../../../../../utils/defaultOrganization.js";
+import { emitTx, logAuditTx } from "../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../utils/auth.js";
 import { CreateIdentityInviteSchema } from "./schemas.js";
 import db from "../../../../../../utils/db/index.js";
@@ -82,6 +83,19 @@ export const createIdentityInvite = async (req: Request, res: Response) => {
       entityName: user.email,
       metadata: {
         userId: id,
+        providerId: provider.id,
+        provider: provider.slug,
+        expiresAt: issued.expiresAt.toISOString(),
+      },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.user.identity-invite-created",
+      entityType: "IdentityInvite",
+      entityId: issued.id,
+      data: {
+        userId: id,
+        email: user.email,
         providerId: provider.id,
         provider: provider.slug,
         expiresAt: issued.expiresAt.toISOString(),

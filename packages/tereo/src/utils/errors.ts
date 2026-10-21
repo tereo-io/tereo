@@ -173,6 +173,25 @@ export class ServiceUnavailableError extends AppError {
   }
 }
 
+/**
+ * A 500 thrown on purpose, for state that should be impossible: the client
+ * gets the generic message, and whatever names the rows goes in the log.
+ */
+export class InternalServerError extends AppError {
+  constructor(message = "An unexpected error occurred") {
+    super(500, "server_error", message);
+    this.name = "InternalServerError";
+  }
+}
+
+/** An upstream service core depends on failed or could not be reached. */
+export class BadGatewayError extends AppError {
+  constructor(code: string, message: string) {
+    super(502, code, message);
+    this.name = "BadGatewayError";
+  }
+}
+
 export class PreconditionFailedError extends AppError {
   constructor(message: string, code = "precondition_failed") {
     super(412, code, message);

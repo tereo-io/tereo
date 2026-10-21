@@ -2,8 +2,9 @@ import type { NotificationConnection } from "../../../../../../../prisma/generat
 import { PermanentSendError } from "../../../../../../utils/notifications/channels/types.js";
 import { getAdapter } from "../../../../../../utils/notifications/channels/index.js";
 import { computeChanges, logAuditTx } from "../../../../../../utils/outbox.js";
-import { prisma, type Prisma } from "../../../../../../utils/db/prisma.js";
+import type { Prisma } from "../../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../../utils/auth.js";
+import { logger } from "../../../../../../utils/logger.js";
 import db from "../../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
 import {
@@ -181,7 +182,7 @@ export const deleteConnection = async (req: Request, res: Response) => {
  * else an error code. Not the library's message, which can quote whatever a
  * non-SMTP service at that host and port answered.
  */
-const describeTestFailure = (err: unknown): string => {
+const describeTestFailure = (err: unknown): string | null => {
   if (err instanceof PermanentSendError) {
     return err.code === "smtp_rejected" ? err.message : err.code;
   }
@@ -194,10 +195,13 @@ const describeTestFailure = (err: unknown): string => {
   if (typeof e?.responseCode === "number" && typeof e.response === "string") {
     return e.response.slice(0, 500);
   }
-  return typeof e?.code === "string" ? e.code : "connection_failed";
+  return typeof e?.code === "string" ? e.code : null;
 };
 
-/** Sends one message through the connection and reports the provider's answer. */
+/**
+ * Sends one message through the connection and reports the provider's
+ * answer. Audited before the send, so no message goes out unrecorded.
+ */
 export const testConnection = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { id } = validateParams(ConnectionIdParamSchema, req);
@@ -205,6 +209,17 @@ export const testConnection = async (req: Request, res: Response) => {
 
   const connection = await db.notificationConnections.get(id);
   const adapter = getAdapter(connection.channel);
+
+  await db.$transaction((tx) =>
+    logAuditTx(tx, {
+      auth,
+      action: "UPDATE",
+      entityType: ENTITY_TYPE,
+      entityId: connection.id,
+      entityName: `${connection.channel}/${connection.slug}`,
+      metadata: { operation: "test", to },
+    })
+  );
 
   let outcome:
     | { ok: true; providerResponse: string | null }
@@ -218,19 +233,15 @@ export const testConnection = async (req: Request, res: Response) => {
     );
     outcome = { ok: true, providerResponse: result.providerResponse };
   } catch (err) {
-    outcome = { ok: false, error: describeTestFailure(err) };
+    const described = describeTestFailure(err);
+    if (described === null) {
+      logger.error(
+        { err, connectionId: connection.id },
+        "Notification connection test failed unexpectedly"
+      );
+    }
+    outcome = { ok: false, error: described ?? "connection_failed" };
   }
-
-  await prisma.$transaction((tx) =>
-    logAuditTx(tx, {
-      auth,
-      action: "UPDATE",
-      entityType: ENTITY_TYPE,
-      entityId: connection.id,
-      entityName: `${connection.channel}/${connection.slug}`,
-      metadata: { operation: "test", to, ok: outcome.ok },
-    })
-  );
 
   res.json(outcome);
 };

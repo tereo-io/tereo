@@ -130,6 +130,28 @@ const authEvents: EventTypeDefinition[] = [
     eventType: "auth.user.identity-unlinked",
     description: "Upstream identity unlinked from a user",
   },
+  {
+    eventType: "auth.identity-provider.domain-created",
+    description: "Email domain added to an identity provider",
+  },
+  {
+    eventType: "auth.identity-provider.domain-updated",
+    description:
+      "Identity provider domain changed (domain, organization, roles, auto-accept or SSO-only)",
+  },
+  {
+    eventType: "auth.identity-provider.domain-deleted",
+    description: "Email domain removed from an identity provider",
+  },
+  {
+    eventType: "auth.user.identity-invite-created",
+    description:
+      "An admin invited a user to link an identity at a provider (or renewed the invite)",
+  },
+  {
+    eventType: "auth.user.identity-invite-withdrawn",
+    description: "An admin withdrew a user's identity invite",
+  },
 ];
 
 const fileEvents: EventTypeDefinition[] = [

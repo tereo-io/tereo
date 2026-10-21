@@ -32,6 +32,7 @@ One condition, one code, in every area:
 | 401 | `unauthorized` / `invalid_token` | Missing, or invalid / expired / revoked, access token |
 | 403 | `forbidden` | Not permitted |
 | 404 | `not_found` | The resource in the **URL** does not exist, or is hidden from the caller |
+| 409 | `slug_taken` / `name_taken` | The slug (organizations, services, integrations, identity providers, notification connections) or name (roles) is already used, archived rows included. An organization's `code` answers `code_taken` |
 | 409 | `conflict` | Already exists, still in use, or another state conflict without its own code |
 | 409 | `resource_archived` | The resource is archived and read-only; restore it first |
 | 409 | `already_archived` | Archive of a resource that is already archived |
@@ -41,6 +42,7 @@ One condition, one code, in every area:
 | 422 | `idempotency_key_conflict` | An idempotency key reused with a different request |
 | 429 | `too_many_requests` | Rate limited; see below |
 | 500 | `server_error` | Unexpected failure |
+
 | 503 | `temporarily_unavailable` | A dependency (Redis) is down; retry after `Retry-After` |
 
 ## Archived resources

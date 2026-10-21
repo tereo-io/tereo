@@ -286,11 +286,13 @@ export const endSession = async (
 /**
  * Signs a user out of one organization: every token issued under it and
  * every SSO session (browser) bound to it, with the token families those
- * browsers obtained. For a user who has just lost their membership.
+ * browsers obtained. For a user who has just lost their membership. `record`
+ * runs in the revoking transaction.
  */
 export const endOrganizationSessions = async (
   userId: string,
-  organizationId: string
+  organizationId: string,
+  record?: RecordRevocation
 ): Promise<void> => {
   const { revoked, loose } = await db.$transaction(async (tx) => {
     await db.users.lockForSessionEnd(tx, { userIds: [userId] });
@@ -321,6 +323,11 @@ export const endOrganizationSessions = async (
       userId,
       organizationId,
       tx
+    );
+    await record?.(
+      tx,
+      [...new Set([...revoked.tokens.map((t) => t.id), ...loose])],
+      revoked.ssoSessionIds
     );
     return { revoked, loose };
   });

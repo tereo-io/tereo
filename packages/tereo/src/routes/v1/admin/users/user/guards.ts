@@ -110,6 +110,26 @@ export const assertMayResetCredentials = async (
 };
 
 /**
+ * Refuses changing the secret of a service's or an integration's client when
+ * its account holds any permission the caller does not: a new secret is
+ * shown to the caller, who could then act as the account. Takes the
+ * account's authority lock, so it runs first in the change's transaction.
+ */
+export const assertMayTakeOverAccount = async (
+  auth: Pick<AuthContext, "userId" | "ceiling">,
+  accountUserId: string,
+  tx: Prisma.TransactionClient
+) => {
+  await db.users.lockAuthority(accountUserId, tx);
+  await assertHoldsTargetPermissions(
+    auth,
+    accountUserId,
+    "change the secret of",
+    tx
+  );
+};
+
+/**
  * Refuses deactivating, removing roles from or ending any session of a user
  * holding any permission the caller does not: `users.write` or `users.delete`
  * must not be enough to lock out or strip an administrator. Acting on yourself

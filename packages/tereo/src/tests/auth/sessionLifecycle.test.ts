@@ -1083,6 +1083,17 @@ describe("Session lifecycle", () => {
       expect((await me(browser.tokens.access_token)).status).toBe(401);
       expect((await refresh(browser.tokens.refresh_token)).status).toBe(400);
       expect((await silentLogin(browser.jar)).loggedOut).toBe(true);
+
+      const entry = await prisma.auditLogEntry.findFirst({
+        where: {
+          entityId: user.id,
+          entityType: "User",
+          metadata: { path: ["action"], equals: "sessions_revoked" },
+        },
+      });
+      expect(entry?.metadata).toMatchObject({
+        sessionIds: [await sessionIdOf(browser.tokens)],
+      });
     });
 
     it("single-session revokes are audited and emit auth.user.sessions-revoked", async () => {
@@ -1185,6 +1196,16 @@ describe("Session lifecycle", () => {
       expect(res.status).toBe(200);
       expect((await refresh(tokens.refresh_token)).status).toBe(400);
       expect((await me(tokens.access_token)).status).toBe(401);
+      const entry = await prisma.auditLogEntry.findFirst({
+        where: {
+          entityId: user.id,
+          entityType: "User",
+          metadata: { path: ["action"], equals: "sessions_revoked" },
+        },
+      });
+      expect(entry?.metadata).toMatchObject({
+        sessionIds: [await sessionIdOf(tokens)],
+      });
 
       // prompt=none answers an inactive user's SSO cookie with login_required.
       const silent = await silentLogin(jar);

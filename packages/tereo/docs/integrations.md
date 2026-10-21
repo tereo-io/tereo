@@ -58,7 +58,9 @@ needs `services.approve` too (`403` otherwise), as for a client's audience.
 Creation (`POST /v1/admin/integrations`, `{ name, slug?, organizationId? }`) returns the
 `clientId` and `clientSecret` once, in `credentials`; the secret has the `tereo_sk_` format of every
 core secret. `POST …/:id/regenerate-secret` returns a new one and keeps the old working for
-`SERVICE_SECRET_OVERLAP_HOURS`; `POST …/:id/revoke-previous-secret` ends the overlap at once. A
+`SERVICE_SECRET_OVERLAP_HOURS`; `POST …/:id/revoke-previous-secret` ends the overlap at once. Both
+need the caller's global permissions to cover every permission the integration's account holds (403
+otherwise), since the new secret acts as the account. A
 provisioned integration takes its secret from the environment variable its `secretFrom` names and
 rotates when that value changes ([provisioning](provisioning.md#rotating-a-secret)).
 

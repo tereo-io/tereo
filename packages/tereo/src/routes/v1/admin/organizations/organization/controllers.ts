@@ -69,7 +69,8 @@ export const updateOrganization = async (req: Request, res: Response) => {
       throw new ConflictError(
         conflict.archivedAt
           ? "An archived organization with this slug already exists"
-          : "Organization with this slug already exists"
+          : "Organization with this slug already exists",
+        "slug_taken"
       );
     }
   }

@@ -213,11 +213,11 @@ for. Core's own login client never asks and refuses a change to either field. Bo
 fields can come from the [provisioning file](provisioning.md), whose clients are read-only here
 (`409 managed_by_provisioning`).
 
-**Listing clients.** `clients.read` is not scoped by organization or owner: `GET /v1/admin/clients`
-and `GET /v1/admin/clients/:id` show every client — services', organizations' and login clients
-alike — with their metadata (name, type, redirect URIs, scopes, grant types, audience, owner,
-organization, service). No secret is ever returned; a client secret is shown once, when it is
-created or regenerated. Grant `clients.read` with that in mind.
+**Listing clients.** With `clients.read`, `GET /v1/admin/clients` lists the clients the caller owns,
+and `GET /v1/admin/clients/:id` reads one of them. With `clients.admin` as well, both show every
+client — services', organizations' and login clients alike — with their metadata (name, type,
+redirect URIs, scopes, grant types, audience, owner, organization, service). No secret is ever
+returned; a client secret is shown once, when it is created or regenerated.
 
 ## Requested authentication class (`acr_values`)
 
@@ -377,7 +377,9 @@ replaces the set (roles the domain already hands out skip the grant check, excep
 moves the domain to another organization: then every role it will hand out there, sent or kept, is
 checked against that organization). Setting `ssoOnly: true` (on create or `PATCH`) is refused with 409
 `provider_inactive` while the provider is deactivated, since its users would have no way in.
-Deleting a custom role removes it from every domain's default roles.
+Deleting a custom role removes it from every domain's default roles. Each create, `PATCH` and delete
+is audited and emits `auth.identity-provider.domain-created`, `-updated` or `-deleted` in its
+transaction.
 
 **`ssoOnly` hands the domain's accounts to the provider.** The next password sign-in of an existing
 user at an SSO-only domain is force-linked to the provider and the password dropped (see _Linking
@@ -394,7 +396,10 @@ every other provider to its users, so right after the change commits core ends a
 person at the domain who holds an identity at another provider (`endUserSessions`, one transaction
 per user), audited and emitted as an admin session revoke (`sessions_revoked`,
 `auth.user.sessions-revoked`). The domain's own provider's users and password users keep theirs; the
-latter are force-linked at their next password sign-in.
+latter are force-linked at their next password sign-in. The run reads the domain as it is when it
+runs: running it again (`endSessionsLinkedElsewhere`) ends only what is left and records nothing
+when nothing was, and it does nothing once the domain is no longer SSO-only. A failure for one user
+is logged and the run goes on to the next.
 
 A domain's `autoAccept` only matches the provider that owns the domain. A user with a matching
 email who already exists is never signed in by it: see _No matching by email_ below.
@@ -439,7 +444,8 @@ provider than the one an SSO-only domain names, for a user at that domain, is re
 `sso_required`, as linking it from the account page is: claiming it could never succeed. Changing a user's email
 withdraws all of their outstanding invites, because an invite is matched by email and must not
 follow the account to an address the issuing admin never saw. Core sends no email: tell the user to
-"Sign in with <provider>".
+"Sign in with <provider>". Issuing and withdrawing an invite are audited and emit
+`auth.user.identity-invite-created` and `auth.user.identity-invite-withdrawn` in the same transaction.
 
 An invite is a new way into the account, so it is held to the same rule as a password reset: the
 caller must hold every permission the user holds (see _TOTP_ below). Issuing is refused for the system user and service accounts, with `provider_inactive`
@@ -667,11 +673,22 @@ strip an administrator, nor `users.delete` sign one out, nor `roles.delete` take
 `admin` role. Acting on yourself is not checked. Removing an org-scoped assignment
 (`DELETE /v1/admin/roles/:id/users/:userId?organizationId=`) is bounded instead as setting a
 member's org roles is: organization authority, and an org `admin` cannot remove an `owner`'s role.
+Setting a member's org roles (`PUT /v1/admin/organizations/:id/members/:userId/roles`) also needs
+the caller to hold, in that organization, every permission of each role it removes
+(`assertCanTakeAway`) — otherwise 403 naming those lacking.
+
+A service's or an integration's secret is a way into its account: `regenerate-secret` and
+`revoke-previous-secret` under `/v1/admin/services/:id` and `/v1/admin/integrations/:id` need the
+caller's global permissions to cover every permission the account holds, in any scope
+(`assertMayTakeOverAccount`) — otherwise 403 naming those lacking.
 
 Changing a role itself takes its permissions from every holder at once, so deleting a role
 (`DELETE /v1/admin/roles/:id`), deactivating it (`PATCH` with `isActive: false`) and dropping
 permissions from it (`PUT /v1/admin/roles/:id/permissions`) need the caller's global permissions to
 cover every permission taken away (`assertCanTakeAway`) — otherwise 403 naming those lacking.
+Each of the three revokes the access tokens of the service clients holding the role in its
+transaction, and its audit entry counts them (`accessTokensRevoked`).
+
 
 ## Organizations: roles, members, activation
 
@@ -814,7 +831,9 @@ returns a user's codes. An admin with
 An admin password reset (`PATCH /v1/admin/users/:id` with `password`) and a TOTP reset both end all of
 the user's sessions and token families, in the transaction that makes the reset
 (`endUserSessions`, recorded as a `sessions_revoked` entry and an `auth.user.sessions-revoked`
-event); an admin resetting their own password keeps the session they act from. Every such sign-out
+event); an admin resetting their own password keeps the session they act from. Deactivating a user
+(all their sessions) and removing a member (their sessions in that organization) are recorded the
+same way, in the transaction that ends them. Every such sign-out
 also revokes the access tokens issued without a refresh token (clients without the `refresh_token`
 grant), all but the caller's own, and closes their sockets. An app service using `@tereo-io/sdk`
 may cache an active introspection for up to its `introspectionCacheTtlSeconds` (60 s by default,

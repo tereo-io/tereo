@@ -48,7 +48,10 @@ export const createServiceTx = async (
   const { slug, name, namespace } = input;
   assertSlugUnreserved(slug);
   if (await tx.service.findUnique({ where: { slug } })) {
-    throw new ConflictError(`A service with slug "${slug}" already exists`);
+    throw new ConflictError(
+      `A service with slug "${slug}" already exists`,
+      "slug_taken"
+    );
   }
   await assertNamespaceAvailable(namespace, tx);
   const email = serviceAccountEmail(slug);

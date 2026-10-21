@@ -36,6 +36,10 @@ export const Dashboard = () => {
   const { user, hasPermission } = useAuth();
   const canReadUsers = hasPermission("users.read");
   const canReadClients = hasPermission("clients.read");
+  // Without clients.admin, core lists only the clients the caller owns.
+  const clientsLabel = hasPermission("clients.admin")
+    ? "OAuth Clients"
+    : "Your OAuth Clients";
 
   const { data: usersData, isLoading: usersLoading } = useUsers();
   const { data: rolesData, isLoading: rolesLoading } = useRoles();
@@ -79,7 +83,8 @@ export const Dashboard = () => {
       iconVariant: "warning",
     },
     {
-      label: "OAuth Clients",
+      label: clientsLabel,
+
       count: countLabel(clientsData),
       icon: faServer,
       link: "/auth-admin/oauth-clients",
