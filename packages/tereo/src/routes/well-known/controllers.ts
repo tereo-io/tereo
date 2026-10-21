@@ -22,10 +22,7 @@ export const handleWellKnownOAuth = async (_req: Request, res: Response) => {
       "refresh_token",
     ],
     token_endpoint_auth_methods_supported: ["client_secret_basic", "none"],
-    introspection_endpoint_auth_methods_supported: [
-      "client_secret_basic",
-      "none",
-    ],
+    introspection_endpoint_auth_methods_supported: ["client_secret_basic"],
     revocation_endpoint_auth_methods_supported: ["client_secret_basic", "none"],
     code_challenge_methods_supported: ["S256"],
     // RFC 9207: every authorization response carries `iss`.
@@ -57,10 +54,7 @@ export const handleOpenIdConfiguration = async (
     subject_types_supported: ["public"],
     id_token_signing_alg_values_supported: ["RS256"],
     token_endpoint_auth_methods_supported: ["client_secret_basic", "none"],
-    introspection_endpoint_auth_methods_supported: [
-      "client_secret_basic",
-      "none",
-    ],
+    introspection_endpoint_auth_methods_supported: ["client_secret_basic"],
     revocation_endpoint_auth_methods_supported: ["client_secret_basic", "none"],
     // Discovery defaults request_uri_parameter_supported to true.
     request_parameter_supported: false,

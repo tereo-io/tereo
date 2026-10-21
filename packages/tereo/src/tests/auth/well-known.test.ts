@@ -16,6 +16,7 @@ interface OIDCConfig {
   end_session_endpoint?: string;
   revocation_endpoint?: string;
   introspection_endpoint?: string;
+  introspection_endpoint_auth_methods_supported?: string[];
   subject_types_supported?: string[];
   id_token_signing_alg_values_supported?: string[];
   acr_values_supported?: string[];
@@ -294,6 +295,18 @@ describe("Well-Known Endpoints", () => {
       expect(oauth.token_endpoint_auth_methods_supported).toEqual(
         oidc.token_endpoint_auth_methods_supported
       );
+    });
+
+    it("advertises only client_secret_basic for introspection, in both documents", async () => {
+      for (const url of [
+        `${BASE_URL}/.well-known/oauth-authorization-server`,
+        `${BASE_URL}/.well-known/openid-configuration`,
+      ]) {
+        const config = (await (await fetch(url)).json()) as OIDCConfig;
+        expect(config.introspection_endpoint_auth_methods_supported).toEqual([
+          "client_secret_basic",
+        ]);
+      }
     });
   });
 

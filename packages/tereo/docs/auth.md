@@ -120,14 +120,17 @@ Outside core's resource routes:
   authorization — are included only for a token that is not `none` above (the UI, a service's
   client, or a core API scope); any other relying party gets the OIDC claims (and `org_id`/`org_name`
   for the token's organization) without them.
-- `/oauth/introspect` answers app services (the token's own client, or a service in its audience).
+- `/oauth/introspect` answers app services (the token's own client, or a service in its audience),
+  and only confidential clients, by HTTP Basic: a public client's `client_id` authenticates nothing,
+  so it is 401 `invalid_client` (discovery lists `client_secret_basic` alone).
   `sub` is the token's own: the user's id, or a client_credentials token's `client_id`. `user_id`
   names the user the token acts as — the user, or the client's service-account user — so an app
   can record either kind as an actor in `auth.users`.
   It reports `permissions` as the user's live permissions, unchanged: core's ceilings govern core's
   API only, and an app enforces its own scopes. An app introspecting a third-party token therefore
   sees the user's permissions, as it would have before; whether it honours that token for its own
-  API is the app's decision, which `scope` and `aud` in the response inform.
+  API is the app's decision, which `scope` and `aud` in the response inform. A client that is not a
+  service's, introspecting its own token whose access is `none`, is not told them, as at userinfo.
 - `/oauth/check-permission` authenticates a confidential client, not a token. A client of an
   organization may only ask about that organization's members, and is answered in it;
   `organization_id`, if given, must be the client's; a non-member and an unknown user get the same 403. An organization-bound
@@ -135,7 +138,10 @@ Outside core's resource routes:
   client of no organization must be a service's (a platform integration is refused): it is
   answered from the user's global roles only and may not name an organization. Any other client — a login client created under
   `/v1/admin/clients` — is refused, so it cannot read any user's global permissions. Every refusal is
-  403, decided before the user is looked up.
+  403, decided before the user is looked up. A deactivated user holds nothing, and neither does any
+  member of an inactive or archived organization in it: every check answers `false`.
+- `/oauth/introspect`, `/oauth/revoke` and `/oauth/check-permission` refuse a deactivated service's
+  or integration's secret (401 `invalid_client`), as `/oauth/token` refuses to mint for it.
 
 ## Access tokens
 
@@ -775,8 +781,8 @@ login step or the consent screen — carries `iss`, the issuer (RFC 9207, built 
 
 `/oauth/authorize` with `prompt=none` answers `login_required` when the SSO session is missing,
 expired, older than `max_age`, or belongs to a deactivated user. With `org_id`, the same cases fall
-through to the password login. A code older than its `max_age` is refused at `/oauth/token` with
-`400 invalid_grant`. For core's own login client (`isFirstPartyClient` in `definitions/`) and for a client with
+through to the password login. `max_age` is enforced there, at authorize: a code always carries a
+login that satisfied it, and `/oauth/token` does not check it again. For core's own login client (`isFirstPartyClient` in `definitions/`) and for a client with
 `consentRequired: false` asking for no `core:*` scope, `prompt=none` or an `org_id` switch with a
 live session skips the consent screen and redirects with the code. Any other client is answered `error=consent_required` (with `state`) at its `redirect_uri`
 for `prompt=none` — consent is not remembered, and a silent request cannot show the consent screen

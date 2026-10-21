@@ -286,7 +286,6 @@ model AccessToken {
 model RefreshToken {
   id             String    @id @default(uuid(7)) @db.Uuid
   tokenHash      String    @unique @map("token_hash") @db.VarChar(255)
-  tokenPrefix    String    @map("token_prefix") @db.VarChar(16)
   clientId       String    @map("client_id") @db.Uuid
   userId         String    @map("user_id") @db.Uuid
   organizationId String?   @map("organization_id") @db.Uuid
@@ -305,7 +304,6 @@ model RefreshToken {
   authCode     AuthorizationCode? @relation(fields: [authCodeId], references: [id], onDelete: Cascade)
   accessTokens AccessToken[]
 
-  @@index([tokenPrefix])
   @@index([authCodeId, revokedAt])
   @@index([revokedAt])
   @@index([organizationId])

@@ -299,29 +299,6 @@ describe("JWT signing key rotation", () => {
     expect((await listKeys(withoutKid)).status).toBe(HTTP_STATUS.UNAUTHORIZED);
   });
 
-  it("switches at once with immediate: true", async () => {
-    const before = Date.now();
-    const response = await fetch(`${BASE_URL}/v1/admin/signing-keys/rotate`, {
-      method: "POST",
-      headers: { ...auth(adminToken), "Content-Type": "application/json" },
-      body: JSON.stringify({ immediate: true }),
-    });
-    expect(response.status).toBe(HTTP_STATUS.OK);
-    const { keys, activatesAt } = (await response.json()) as RotateResponse;
-    immediateKid = keys[0].kid;
-    expect(keys[0]).toMatchObject({ active: true, activatesAt });
-    expect(new Date(activatesAt).getTime()).toBeGreaterThanOrEqual(before);
-    expect(new Date(activatesAt).getTime()).toBeLessThanOrEqual(Date.now());
-    expect(keys.find((k) => k.kid === newKid)!.active).toBe(false);
-
-    const token = await serverToken();
-    expect(getJwtHeader(token).kid).toBe(immediateKid);
-    await refreshSigningKeys();
-    expect(getJwtHeader(localToken()).kid).toBe(immediateKid);
-    // Tokens from the keys before it still verify.
-    expect(verifyAccessToken(adminToken)).not.toBeNull();
-  });
-
   it("drops a retired key once its retention has passed", async () => {
     await refreshSigningKeys();
     expect(verifyAccessToken(adminToken)).not.toBeNull();
@@ -350,7 +327,7 @@ describe("JWT signing key rotation", () => {
       await refreshSigningKeys();
       expect(verifyAccessToken(adminToken)).toBeNull();
       expect(publishedSigningKeys().map((k) => k.kid)).not.toContain(oldKid);
-      expect(currentSigningKey().kid).toBe(immediateKid);
+      expect(currentSigningKey().kid).toBe(newKid);
     } finally {
       for (const row of later) {
         await prisma.secret.update({
@@ -359,5 +336,48 @@ describe("JWT signing key rotation", () => {
         });
       }
     }
+  });
+
+  it("switches at once with immediate: true, and drops every older key", async () => {
+    const newKeyToken = localToken();
+    expect(getJwtHeader(newKeyToken).kid).toBe(newKid);
+    const before = Date.now();
+    const response = await fetch(`${BASE_URL}/v1/admin/signing-keys/rotate`, {
+      method: "POST",
+      headers: { ...auth(adminToken), "Content-Type": "application/json" },
+      body: JSON.stringify({ immediate: true }),
+    });
+    expect(response.status).toBe(HTTP_STATUS.OK);
+    const { keys, activatesAt } = (await response.json()) as RotateResponse;
+    immediateKid = keys[0].kid;
+    expect(keys).toEqual([
+      expect.objectContaining({ kid: immediateKid, active: true, activatesAt }),
+    ]);
+    expect(new Date(activatesAt).getTime()).toBeGreaterThanOrEqual(before);
+    expect(new Date(activatesAt).getTime()).toBeLessThanOrEqual(Date.now());
+
+    const token = await serverToken();
+    expect(getJwtHeader(token).kid).toBe(immediateKid);
+    await refreshSigningKeys();
+    expect(getJwtHeader(localToken()).kid).toBe(immediateKid);
+
+    // Tokens from the keys before it are refused at once, here and by the
+    // server, and their keys leave the JWKS.
+    expect(verifyAccessToken(adminToken)).toBeNull();
+    expect(verifyAccessToken(newKeyToken)).toBeNull();
+    expect((await listKeys(adminToken)).status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    expect((await fetchJwks()).keys.map((k) => k.kid)).toEqual([immediateKid]);
+    const rows = await prisma.secret.findMany({
+      where: { name: { startsWith: JWT_KEY_PREFIX } },
+    });
+    expect(rows).toHaveLength(1);
+
+    const audit = await prisma.auditLogEntry.findFirstOrThrow({
+      where: { entityType: "SigningKey", entityId: immediateKid },
+    });
+    expect(audit.metadata).toMatchObject({
+      retiredKid: newKid,
+      retiredKidExpiresAt: activatesAt,
+    });
   });
 });

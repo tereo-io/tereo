@@ -99,7 +99,7 @@ notes as a range; a value outside its range stops core at startup with the varia
 |----------|-------|
 | `CORE_KEK` | Base64, 32 bytes (`openssl rand -base64 32`). Key-encryption key: AES-256-GCM over every value in `core.secrets`. **Required in production** — core refuses to start without it. Outside production, when unset, a fixed development KEK is used (public, protects nothing) and a warning is logged. Keep it outside the database; losing it makes the stored keys unreadable. See [Key encryption](#key-encryption) |
 | `CORE_KEK_PREVIOUS` | Base64, 32 bytes. Only while rotating the KEK: rows still under it are re-encrypted under `CORE_KEK` on start. Needs `CORE_KEK`. See [Rotating the KEK](#rotating-the-kek) |
-| `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` | Base64-encoded PEM, both or neither. When set, the only signing key: stored versions are ignored and `/v1/admin/signing-keys/rotate` refuses. See [JWT signing keys](#jwt-signing-keys) |
+| `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` | Base64-encoded PEM, both or neither: an RSA key pair of at least 2048 bits (core refuses to start otherwise). When set, the only signing key: stored versions are ignored and `/v1/admin/signing-keys/rotate` refuses. See [JWT signing keys](#jwt-signing-keys) |
 | `JWT_KEY_ID` | The kid of an env-supplied key pair; defaults to its JWK thumbprint. Generated keys always use their thumbprint |
 | `AUTH_CODE_HMAC_KEY` | Base64, 32 bytes. Binds authorization codes to their client and keys the hash they are looked up by |
 | `TOTP_ENCRYPTION_KEY` | 64 hex characters |
@@ -167,8 +167,13 @@ Rotate with `POST /v1/admin/signing-keys/rotate` (`settings.write`); `GET /v1/ad
 keys (`settings.read`). A new key is published in the JWKS at once and starts signing 150 seconds later
 (`activatesAt` in the response): two of the per-minute refreshes every core process runs, plus a
 margin, so every process and every app service that refetches the JWKS knows the key before a token
-carries its `kid`. The previous key signs until then. `{ "immediate": true }` activates the new key at
-once, for a compromised key. The rotation is audited and emits `core.signing-key.rotated` (the new
+carries its `kid`. The previous key signs until then. `{ "immediate": true }`, for a compromised key,
+activates the new key at once and deletes every older version, a pending one included: tokens they
+signed, ID tokens sent as `id_token_hint` included, are refused from that moment, they leave the
+JWKS, and signed-in users get tokens from the new key on their next refresh (their refresh tokens are
+opaque, not signed). The rotating process broadcasts the change over Redis so every other process
+re-reads its keys at once; without Redis they do so at their next per-minute refresh, or on the first
+token carrying the new `kid`. The rotation is audited and emits `core.signing-key.rotated` (the new
 `kid` and its `activatesAt`, and the retired `kid` with its expiry; no key material), so app services
 caching the JWKS can refetch it. A key pair supplied in env is the only key and is rotated by changing
 env (no overlap).

@@ -88,7 +88,8 @@ export const clientAuthenticationFailed = (res: Response): OAuth2Error => {
  * The client a token-endpoint-style request comes from: a confidential
  * client by HTTP Basic (`client_secret_basic`), a public client by the
  * `client_id` it sends. A `client_id` beside Basic credentials must name the
- * same client.
+ * same client. A confidential client of a deactivated service or integration
+ * fails as a wrong secret does.
  */
 export const authenticateClient = async (
   req: Request,
@@ -110,6 +111,12 @@ export const authenticateClient = async (
     !basicAuth ||
     !client.clientSecret ||
     !(await verifyClientSecretLimited(req, client, basicAuth.clientSecret))
+  ) {
+    throw clientAuthenticationFailed(res);
+  }
+  if (
+    client.serviceAccountUser?.isActive === false ||
+    (await db.services.getByClientId(client.id))?.isActive === false
   ) {
     throw clientAuthenticationFailed(res);
   }
@@ -294,7 +301,7 @@ const maySelectGrantOrganization = async (grant: {
 };
 
 /** False for an inactive, archived or missing organization. */
-const isActiveOrganization = async (id: string): Promise<boolean> => {
+export const isActiveOrganization = async (id: string): Promise<boolean> => {
   const org = await db.organizations.get(id).catch((err) => {
     if (err instanceof NotFoundError) return null;
     throw err;

@@ -14,10 +14,11 @@ export const listSigningKeys = async (_req: Request, res: Response) => {
 };
 
 /**
- * A new JWT signing key is published at once and signs from `activatesAt`
- * (at once with `immediate`); the previous one signs until then, and keeps
- * verifying, and stays in the JWKS, until tokens it signed have expired.
- * Audited, and `core.signing-key.rotated` is emitted.
+ * A new JWT signing key is published at once and signs from `activatesAt`;
+ * the previous one signs until then, and keeps verifying, and stays in the
+ * JWKS, until tokens it signed have expired. With `immediate` the new key
+ * signs at once and every older one is deleted. Audited, and
+ * `core.signing-key.rotated` is emitted.
  */
 export const rotateSigningKeys = async (req: Request, res: Response) => {
   const auth = validateUser(req);

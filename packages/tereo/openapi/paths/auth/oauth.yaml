@@ -475,9 +475,7 @@
       - 400 `invalid_grant` — missing `code_verifier`, a bad, expired, used or
         revoked code or refresh token, a concurrent request for the same one, a
         code or refresh token whose user is inactive, an authorization code
-        whose authentication is older than the `max_age` it was requested with
-        (re-authentication required), an authorization code whose SSO
-        session has ended (logout, or a sign-out of other sessions) since it
+        whose SSO session has ended (logout, or a sign-out of other sessions) since it
         was issued, or a code or refresh token issued for an organization the
         user has since left or that has since been deactivated (such a refresh
         token is revoked). A refresh or code exchange in flight when the
@@ -510,12 +508,13 @@
       inactive user) clears both cookies in that 400 response, so the browser
       stops retrying it. A refresh that only lost the race to a concurrent
       one with the same token ("is being processed", or a token rotated in
-      the last 30 seconds) leaves them.
+      the last 5 seconds whose successor is still unused) leaves them.
 
-      Replaying a rotated refresh token within 30 seconds of its rotation
-      (two tabs refreshing at once) is `invalid_grant` that leaves the token
-      family and the cookies alone; later, it is treated as theft and the
-      whole family is revoked. A token revoked by logout or `/oauth/revoke`
+      Replaying a rotated refresh token within 5 seconds of its rotation,
+      while the token that replaced it has not been used yet (two tabs
+      refreshing at once), is `invalid_grant` that leaves the token family
+      and the cookies alone; later, or once the successor has been used, it
+      is treated as theft and the whole family is revoked. A token revoked by logout or `/oauth/revoke`
       is plain `invalid_grant`.
 
       Refresh tokens rotate on every use, but a token family has an absolute
@@ -598,11 +597,16 @@
 
       `permissions` are the user's live permissions, whatever client the
       token was issued to: the ceilings of core API scopes limit what a token
-      may do in core's own API, not what an app is told about its user.
+      may do in core's own API, not what an app is told about its user. They
+      are omitted when a client that is not a service's introspects its own
+      token and that token has no core access (not issued to core's UI or a
+      service's client, and no core API scope), as `/oauth/userinfo` omits
+      them.
 
-      Confidential clients authenticate with HTTP Basic; a public client sends
-      its `client_id` in the body. A missing or unknown client or failed
-      authentication is 401 `invalid_client` with `WWW-Authenticate: Basic`;
+      Only a confidential client may introspect, authenticated with HTTP
+      Basic. A missing or unknown client, a public client (which has no
+      secret), failed authentication, or the client of a deactivated service
+      or integration is 401 `invalid_client` with `WWW-Authenticate: Basic`;
       a body `client_id` that differs from the Basic one is 400
       `invalid_request`; repeated wrong secrets are 429 `too_many_requests`,
       counted with `/oauth/token`'s (see there). `token_type_hint` is only a
@@ -610,7 +614,6 @@
     operationId: postIntrospect
     security:
       - ClientCredentials: []
-      - {}
     requestBody:
       required: true
       content:
@@ -665,8 +668,9 @@
       sent as `token`, it revokes nothing.
 
       Confidential clients authenticate with HTTP Basic; a public client sends
-      its `client_id` in the body. A missing or unknown `client_id` or failed
-      authentication is 401 `invalid_client` with `WWW-Authenticate: Basic`;
+      its `client_id` in the body. A missing or unknown `client_id`, failed
+      authentication or the client of a deactivated service or integration is
+      401 `invalid_client` with `WWW-Authenticate: Basic`;
       a body `client_id` that differs from the Basic one is 400
       `invalid_request`; repeated wrong secrets are 429 `too_many_requests`,
       counted with `/oauth/token`'s (see there). `token_type_hint` is only a
@@ -1127,8 +1131,9 @@
       Permissions are hierarchical (`admin` ⊃ `delete` ⊃ `write` ⊃ `read`).
 
       Requires HTTP Basic credentials of a confidential client: missing or
-      wrong credentials, an unknown client or a public client are 401
-      `invalid_client` with `WWW-Authenticate: Basic`.
+      wrong credentials, an unknown client, a public client or the client of
+      a deactivated service or integration are 401 `invalid_client` with
+      `WWW-Authenticate: Basic`.
 
       A client of an organization may only ask about that organization's
       members, and is answered with their permissions in it; an
@@ -1140,6 +1145,10 @@
       `/v1/admin/clients` — is refused. Each refusal is 403 `forbidden`,
       decided before the user is looked up. The client is authenticated
       before the body is validated.
+
+      A deactivated user, or a member of an inactive or archived
+      organization asked about in it, holds no permission: `granted` is
+      `false`.
     operationId: postCheckPermission
     security:
       - ClientCredentials: []

@@ -359,38 +359,44 @@ describe("OAuth Token Endpoint", () => {
       expect(payload.nonce).toBe(nonce);
     });
 
-    it("should return refresh_token when offline_access scope is requested", async () => {
-      const codeVerifier = generateCodeVerifier();
-      const codeChallenge = generateCodeChallenge(codeVerifier);
+    it("should return a refresh_token to a client with the refresh_token grant, offline_access or not", async () => {
+      expect(testClient.grantTypes).toContain("refresh_token");
+      const exchange = async (client: typeof testClient, scope: string) => {
+        const codeVerifier = generateCodeVerifier();
+        const code = await getAuthorizationCode(
+          client,
+          testUser,
+          generateCodeChallenge(codeVerifier),
+          scope
+        );
+        expect(code).not.toBeNull();
+        const response = await fetch(`${BASE_URL}/oauth/token`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: client.redirectUris[0],
+            client_id: client.clientId,
+            code_verifier: codeVerifier,
+          }),
+        });
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        return (await response.json()) as TokenResponse;
+      };
 
-      // Request with offline_access scope
-      const code = await getAuthorizationCode(
-        testClient,
-        testUser,
-        codeChallenge,
-        "openid offline_access"
-      );
+      for (const scope of ["openid", "openid offline_access"]) {
+        const data = await exchange(testClient, scope);
+        expect(typeof data.refresh_token).toBe("string");
+        expect(data.refresh_token!.length).toBeGreaterThan(0);
+      }
 
-      expect(code).not.toBeNull();
-
-      const response = await fetch(`${BASE_URL}/oauth/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "authorization_code",
-          code,
-          redirect_uri: testClient.redirectUris[0],
-          client_id: testClient.clientId,
-          code_verifier: codeVerifier,
-        }),
+      // The grant type decides, not the scope.
+      const codeOnly = await createTestClient({
+        grantTypes: ["authorization_code"],
       });
-
-      const data = (await response.json()) as TokenResponse;
-
-      expect(response.status).toBe(HTTP_STATUS.OK);
-      expect(data.refresh_token).toBeDefined();
-      expect(typeof data.refresh_token).toBe("string");
-      expect(data.refresh_token!.length).toBeGreaterThan(0);
+      const data = await exchange(codeOnly, "openid offline_access");
+      expect(data.refresh_token).toBeUndefined();
     });
 
     it("should reject invalid authorization code with 400 and invalid_grant error", async () => {
@@ -634,6 +640,48 @@ describe("OAuth Token Endpoint", () => {
         });
         expect(row).not.toBeNull();
       }
+    });
+
+    it("should refuse a refresh token presented by another client, without spending it", async () => {
+      const codeVerifier = generateCodeVerifier();
+      const code = await getAuthorizationCode(
+        testClient,
+        testUser,
+        generateCodeChallenge(codeVerifier),
+        "openid"
+      );
+      const tokenResponse = await fetch(`${BASE_URL}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: testClient.redirectUris[0],
+          client_id: testClient.clientId,
+          code_verifier: codeVerifier,
+        }),
+      });
+      const { refresh_token } = (await tokenResponse.json()) as TokenResponse;
+      expect(refresh_token).toBeDefined();
+      const refresh = (clientId: string) =>
+        fetch(`${BASE_URL}/oauth/token`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            grant_type: "refresh_token",
+            refresh_token,
+            client_id: clientId,
+          }),
+        });
+
+      const other = await createTestClient();
+      const refused = await refresh(other.clientId);
+      expect(refused.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(((await refused.json()) as TokenResponse).error).toBe(
+        "invalid_grant"
+      );
+
+      expect((await refresh(testClient.clientId)).status).toBe(HTTP_STATUS.OK);
     });
 
     it("should reject invalid refresh_token with 400 and invalid_grant error", async () => {
