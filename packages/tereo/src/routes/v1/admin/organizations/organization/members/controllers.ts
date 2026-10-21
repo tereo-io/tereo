@@ -55,6 +55,8 @@ export const addMember = async (req: Request, res: Response) => {
   }
 
   const member = await db.$transaction(async (tx) => {
+    // An owner or admin tier is authority a credential reset checks for.
+    await db.users.lockAuthority(user.id, tx);
     const created = await db.organizations.addMember(
       params.id,
       body.userId,

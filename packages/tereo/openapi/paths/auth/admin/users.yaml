@@ -181,11 +181,12 @@
       changing it to one already in use, in any case, returns
       `409 conflict`.
 
-      Setting a `password`, changing the `email`, or deactivating another
-      user needs a caller holding
+      Setting a `password`, changing the `email`, deactivating another
+      user, or reactivating a deactivated one needs a caller holding
       every permission the user holds, from global roles or roles in any
       organization (`403`, naming the permissions the caller lacks,
-      otherwise). The caller's permissions count from global roles only,
+      otherwise), and `organizations.write` when the user is an `owner` or
+      `admin` member of any organization (`403` otherwise). The caller's permissions count from global roles only,
       capped by a delegated token's scopes: no core API scope reaches
       `admin`, so a third-party client's `core:admin` token cannot reset an
       administrator. A password reset ends all of the
@@ -481,7 +482,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing users.delete permission, or the user holds permissions the caller does not
+        description: Forbidden - missing users.delete permission, or the user holds permissions the caller does not (or is an organization owner or admin and the caller lacks organizations.write)
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: User not found, or no active session with this id for the user
@@ -615,8 +616,9 @@
       token families end in the same transaction.
 
       Only a caller holding every permission the user holds (from global
-      roles or roles in any organization) may reset it (`403`, naming the
-      permissions the caller lacks, otherwise); the caller's permissions count
+      roles or roles in any organization), and `organizations.write` when the
+      user is an `owner` or `admin` member of any organization, may reset it
+      (`403`, naming what the caller lacks, otherwise); the caller's permissions count
       from global roles only, capped by a delegated token's scopes. The
       system user (`400 system_user`) and a service's service-account user
       (`403`) are refused, as on `PATCH /v1/admin/users/{id}`.

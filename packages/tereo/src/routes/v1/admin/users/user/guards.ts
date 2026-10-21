@@ -9,6 +9,8 @@ import {
   ForbiddenError,
 } from "../../../../../utils/errors.js";
 
+const MANAGES_ORGS = "organizations.write";
+
 /** Core's system user is seed-managed; the admin API cannot change it. */
 export const assertNotSystemUser = (id: string) => {
   if (id === SYSTEM_USER_ID) {
@@ -39,13 +41,20 @@ export const assertNotServiceAccount = async (user: {
 };
 
 /**
- * Refuses acting on a user holding any permission the caller does not. The
+ * Refuses acting on a user holding any authority the caller does not. The
  * target's permissions count from every scope (global roles and roles in any
  * organization), deactivated roles included: one can be reactivated, so a
- * suspended admin role still protects its holder. The caller's count from global roles only, since an
- * org-scoped role does not reach beyond its organization while the target's
- * account does — and capped by a delegated token's scopes, so a third-party
- * client cannot act on an account its scopes do not cover.
+ * suspended admin role still protects its holder. The caller's count from
+ * global roles only, since an org-scoped role does not reach beyond its
+ * organization while the target's account does — and capped by a delegated
+ * token's scopes, so a third-party client cannot act on an account its scopes
+ * do not cover.
+ *
+ * An `owner` or `admin` membership is authority no permission names: acting
+ * as the target manages that organization. The global equivalent is
+ * `organizations.write`, which `requireOrgRole` lets manage any
+ * organization's owners and admins, so a target holding such a membership
+ * anywhere needs it.
  */
 const assertHoldsTargetPermissions = async (
   auth: Pick<AuthContext, "userId" | "ceiling">,
@@ -58,7 +67,11 @@ const assertHoldsTargetPermissions = async (
     tx,
     { includeInactiveRoles: true }
   );
-  if (targetPermissions.length === 0) return;
+  const managesOrgs = await db.organizations.hasManagingMembership(
+    targetId,
+    tx
+  );
+  if (targetPermissions.length === 0 && !managesOrgs) return;
   const callerPermissions = await globalGrantablePermissions(auth, tx);
   const lacking = targetPermissions.filter(
     (p) => !hasPermission(callerPermissions, p)
@@ -66,6 +79,11 @@ const assertHoldsTargetPermissions = async (
   if (lacking.length > 0) {
     throw new ForbiddenError(
       `You cannot ${action} a user holding permissions you do not: ${lacking.join(", ")}`
+    );
+  }
+  if (managesOrgs && !hasPermission(callerPermissions, MANAGES_ORGS)) {
+    throw new ForbiddenError(
+      `You cannot ${action} an organization owner or admin without ${MANAGES_ORGS}`
     );
   }
 };
@@ -111,4 +129,18 @@ export const assertMayDisempower = async (
   if (targetId === auth.userId) return;
   await db.users.lockAuthority(targetId, tx);
   await assertHoldsTargetPermissions(auth, targetId, action, tx);
+};
+
+/**
+ * Refuses reactivating a user holding any authority the caller does not: the
+ * account comes back with all of it, as though granted. Takes the target's
+ * authority lock, as assertMayResetCredentials does.
+ */
+export const assertMayReactivate = async (
+  auth: Pick<AuthContext, "userId" | "ceiling">,
+  targetId: string,
+  tx: Prisma.TransactionClient
+) => {
+  await db.users.lockAuthority(targetId, tx);
+  await assertHoldsTargetPermissions(auth, targetId, "reactivate", tx);
 };

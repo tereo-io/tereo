@@ -127,6 +127,8 @@ export const updateMemberRole = async (req: Request, res: Response) => {
   await db.organizations.get(orgId);
 
   const member = await db.$transaction(async (tx) => {
+    // An owner or admin tier is authority a credential reset checks for.
+    await db.users.lockAuthority(userId, tx);
     await lockOrgOwners(tx, orgId);
     const { previousRole, member: updated } =
       await db.organizations.updateMemberRole(

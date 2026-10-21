@@ -59,8 +59,9 @@
       Unlinking changes how the account is entered, so the credential-reset
       guard applies, as for identity invites: the caller must hold every
       permission the user holds, from global roles or roles in any
-      organization (`403`, naming the permissions the caller lacks,
-      otherwise). The caller's own permissions count from global roles only,
+      organization, and `organizations.write` when the user is an `owner` or
+      `admin` member of any organization (`403`, naming what the caller
+      lacks, otherwise). The caller's own permissions count from global roles only,
       capped by a delegated token's scopes.
 
       An audit log entry is created (the admin as actor) and an
@@ -118,8 +119,9 @@
 
       An invite is a new way into the account, so the credential-reset guard
       applies: the caller must hold every permission the user holds, from
-      global roles or roles in any organization (`403`, naming the
-      permissions the caller lacks, otherwise). The caller's own permissions
+      global roles or roles in any organization, and `organizations.write`
+      when the user is an `owner` or `admin` member of any organization
+      (`403`, naming what the caller lacks, otherwise). The caller's own permissions
       count from global roles only, capped by a delegated token's scopes. The
       system user (`400 system_user`) and service accounts (`403`) are
       refused.

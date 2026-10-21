@@ -222,6 +222,21 @@ export const getMembership = async (
   });
 };
 
+/**
+ * Whether the user is an `owner` or `admin` member of any organization,
+ * inactive or archived ones included: they can be brought back.
+ */
+export const hasManagingMembership = async (
+  userId: string,
+  tx?: Prisma.TransactionClient
+): Promise<boolean> => {
+  const row = await (tx ?? prisma).organizationMember.findFirst({
+    where: { userId, memberRole: { in: ["owner", "admin"] } },
+    select: { id: true },
+  });
+  return row !== null;
+};
+
 export const getUserOrganizations = async (userId: string) => {
   // Archived ⇒ inactive, so excluding archived orgs changes nothing for
   // current callers (they all filter isActive) — it just guarantees a future

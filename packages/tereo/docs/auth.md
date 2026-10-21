@@ -754,12 +754,18 @@ org-assignable permissions), counting deactivated roles too, since an admin can 
 cut down to their token's scope ceiling for a delegated token. The caller's org-scoped roles do not
 count, since the account reaches beyond that organization. Otherwise 403, naming the permissions the
 caller lacks: `users.write` alone resets only users who hold no more than `users.write`, and no
-third-party client's token (no core API scope reaches `admin`) resets an administrator. The system user and a service's account are refused, as on the other
-admin user routes.
+third-party client's token (no core API scope reaches `admin`) resets an administrator. An `owner`
+or `admin` membership in any organization (inactive and archived ones included) is authority no
+permission names, so it needs the caller to hold `organizations.write`, the global permission that
+manages any organization's owners and admins (`requireOrgRole`): otherwise 403 naming
+`organizations.write`. The same rule covers deactivating, ending sessions of and removing roles from
+another user (`assertMayDisempower`), and reactivating a deactivated user (`assertMayReactivate`),
+whose account comes back with all it holds. The system user and a service's account are refused, as
+on the other admin user routes.
 
 This check and `assertMayDisempower` run inside the change's transaction, under a per-user advisory lock
 (`db.users.lockAuthority`) that every admin change to the user's roles — global or in an organization,
-membership removal included — takes too, first: a role granted to the user concurrently is either
+membership additions, tier changes and removals included — takes too, first: a role granted to the user concurrently is either
 committed before the check sees it, or waits until the reset or removal has committed. Editing a
 role's permissions or restoring a role does not take it, so a role the user already holds can still
 gain permissions while the check runs.

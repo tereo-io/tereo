@@ -39,6 +39,7 @@ import {
 } from "./schemas.js";
 import {
   assertMayDisempower,
+  assertMayReactivate,
   assertMayResetCredentials,
   assertNotServiceAccount,
   assertNotSystemUser,
@@ -60,6 +61,7 @@ export const updateUser = async (req: Request, res: Response) => {
   await assertNotServiceAccount(existing);
 
   const deactivating = body.isActive === false && existing.isActive;
+  const reactivating = body.isActive === true && !existing.isActive;
   if (deactivating && id === auth.userId) {
     throw new BadRequestError(
       "self_deactivation",
@@ -80,6 +82,7 @@ export const updateUser = async (req: Request, res: Response) => {
       await assertMayResetCredentials(auth, id, tx);
     }
     if (deactivating) await assertMayDisempower(auth, id, "deactivate", tx);
+    if (reactivating) await assertMayReactivate(auth, id, tx);
   };
 
   const update = async (tx: Prisma.TransactionClient) => {
