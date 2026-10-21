@@ -3,14 +3,17 @@ import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
+import axios from "axios";
 import {
   createAppServiceAccount,
   TEST_SERVICE_ID,
 } from "../utils/testService.js";
 import {
+  BASE_URL,
   getTestAccessToken,
   removeBuckets,
   uploadTestObject,
+  uploadTestObjectAndGetId,
   waitFor,
 } from "./utils/test-helpers.js";
 import {
@@ -23,6 +26,7 @@ import {
 // to the service's own endpoints.
 
 const EVENT = "file-service.object.created";
+const SHARE_EVENT = "file-service.share.created";
 
 describe("events of a bucket outside any organization", () => {
   const bucketName = `test-bucket-app-${randomUUID().slice(0, 8)}`;
@@ -40,7 +44,7 @@ describe("events of a bucket outside any organization", () => {
     const { endpoint } = await db.webhookEndpoints.create({
       ...data,
       url: `https://example.com/app-bucket/${label}`,
-      eventTypes: [EVENT],
+      eventTypes: [EVENT, SHARE_EVENT],
     });
     endpointIds[label] = endpoint.id;
   };
@@ -138,5 +142,45 @@ describe("events of a bucket outside any organization", () => {
     });
     expect(await deliveriesTo("otherService", objectKey)).toHaveLength(0);
     expect(await deliveriesTo("organization", objectKey)).toHaveLength(0);
+  });
+
+  it("include share events", async () => {
+    const token = await getTestAccessToken();
+    const objectKey = `${randomUUID()}.txt`;
+    const objectId = await uploadTestObjectAndGetId(
+      token,
+      bucketName,
+      objectKey,
+      {
+        buffer: Buffer.from("app bucket share"),
+        filename: objectKey,
+        contentType: "text/plain",
+      }
+    );
+    const created = await axios.post(
+      `${BASE_URL}/buckets/${bucketName}/shares`,
+      { kind: "OBJECT", objectId },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const shareId = created.data.id as string;
+    const shareDeliveries = (label: string) =>
+      prisma.webhookDelivery.findMany({
+        where: {
+          webhookEndpointId: endpointIds[label],
+          eventType: SHARE_EVENT,
+          payload: { path: ["entityId"], equals: shareId },
+        },
+      });
+
+    await waitFor(
+      async () => (await shareDeliveries("allOrganizations")).length > 0,
+      10_000
+    );
+    const [delivery] = await shareDeliveries("allOrganizations");
+    expect(delivery.payload).toMatchObject({
+      organizationId: null,
+      data: { bucketName, objectId },
+    });
+    expect(await shareDeliveries("organization")).toHaveLength(0);
   });
 });

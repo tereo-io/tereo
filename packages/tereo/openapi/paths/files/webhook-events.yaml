@@ -1340,7 +1340,8 @@ file-service.share.created:
     description: |-
       Fired by `POST /v1/files/buckets/{name}/shares`. `entityId` is the share id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesShareCreated
     security: []
     parameters:
@@ -1404,7 +1405,8 @@ file-service.share.updated:
     description: |-
       Fired by `PATCH /v1/files/buckets/{name}/shares/by-id/{id}`. `entityId` is the share id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesShareUpdated
     security: []
     parameters:
@@ -1454,7 +1456,8 @@ file-service.share.revoked:
     description: |-
       Fired by `DELETE /v1/files/buckets/{name}/shares/by-id/{id}` (soft revoke). `entityId` is the share id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesShareRevoked
     security: []
     parameters:
@@ -1504,7 +1507,8 @@ file-service.share.accessed:
     description: |-
       Fired when a share link hands out a download URL (`GET /v1/files/shared/{token}` redirecting to the file, or a successful `POST /v1/files/shared/{token}/unlock`). Only emitted when `FILE_SERVICE_EMIT_SHARE_ACCESS_EVENTS` is enabled (off by default; noisy). `entityId` is the share id.
 
-      Only emitted for buckets that belong to an organization.
+      For a bucket outside any organization (one an app service declares), `organizationId` is null
+      and the event goes only to endpoints of all organizations and to endpoints the bucket's service owns.
     operationId: webhookFilesShareAccessed
     security: []
     parameters:

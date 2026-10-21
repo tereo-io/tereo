@@ -183,7 +183,7 @@ AuditLogEntryFields:
       description: Human-readable entity name (omit it rather than sending `null`)
     changes:
       type: object
-      description: Field-level changes
+      description: Field-level changes, at most 64 KiB as JSON
       additionalProperties:
         type: object
         properties:
@@ -193,7 +193,7 @@ AuditLogEntryFields:
             description: New value
     metadata:
       type: object
-      description: Additional context
+      description: Additional context, at most 64 KiB as JSON
       additionalProperties: true
     ipAddress:
       type: [string, 'null']

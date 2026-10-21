@@ -1,3 +1,3 @@
 import { z } from "zod";
 
-export const ArchiveIdSchema = z.guid();
+export const signedArchiveParamsSchema = z.object({ id: z.guid() });

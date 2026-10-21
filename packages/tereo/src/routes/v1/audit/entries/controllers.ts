@@ -6,13 +6,11 @@ import { callerService } from "../../../../utils/callerService.js";
 import { validateUser } from "../../../../middleware/auth.js";
 import { escapeLike } from "../../../../utils/db/like.js";
 import { prisma } from "../../../../utils/db/prisma.js";
-import { hasNul } from "../../../../utils/pgInput.js";
 import db from "../../../../utils/db/index.js";
 import { Request, Response } from "express";
 import {
   BadRequestError,
   UnprocessableEntityError,
-  ValidationError,
 } from "../../../../utils/errors.js";
 import {
   applyCursorToWhere,
@@ -23,6 +21,8 @@ import {
   createBatchSchema,
   facetsQuerySchema,
   listQuerySchema,
+  listSearchQuerySchema,
+  metadataFiltersQuerySchema,
   FACETS_DEFAULT_DAYS,
   SEARCH_MAX_DAYS,
 } from "./schemas.js";
@@ -161,12 +161,16 @@ export const createBatch = async (req: Request, res: Response) => {
 };
 
 export const list = async (req: Request, res: Response) => {
-  if (Array.isArray(req.query["filter[q]"])) {
-    throw new ValidationError("filter[q] takes a single value");
-  }
+  validateQuery(listSearchQuerySchema, req);
   const query = validateQuery(listQuerySchema, req);
-  const metadataConditions = parseMetadataFilters(
-    req.query as Record<string, unknown>
+  const metadataConditions = validateQuery(metadataFiltersQuerySchema, req).map(
+    ({ key, operator, value }) => ({
+      // Prisma's string_contains is a LIKE that leaves `_` and `%` as wildcards.
+      metadata:
+        operator === "contains"
+          ? { path: [key], string_contains: escapeLike(value) }
+          : { path: [key], equals: value },
+    })
   );
 
   // filter[organizationId] was already applied by resolveAuditOrganizationId.
@@ -263,42 +267,3 @@ export const facets = async (req: Request, res: Response) => {
     )
   );
 };
-
-/**
- * Parse metadata[key_operator]=value query params into Prisma JSON path conditions.
- * Supports `equals` and `contains` (maps to Prisma `string_contains`). Any other
- * `metadata[...]` param is refused rather than silently widening the result.
- */
-function parseMetadataFilters(
-  query: Record<string, unknown>
-): Record<string, unknown>[] {
-  const conditions: Record<string, unknown>[] = [];
-  const metadataRegex = /^metadata\[(.+?)_(equals|contains)\]$/;
-
-  for (const [key, rawValue] of Object.entries(query)) {
-    if (!key.startsWith("metadata[")) continue;
-    const match = key.match(metadataRegex);
-    if (!match) {
-      throw new ValidationError(
-        `${key}: metadata filters take the form metadata[<key>_equals] or metadata[<key>_contains]`
-      );
-    }
-    if (typeof rawValue !== "string") {
-      throw new ValidationError(`${key} takes a single value`);
-    }
-    const [, metaKey, operator] = match;
-    if (hasNul(metaKey) || hasNul(rawValue)) {
-      throw new ValidationError(`${key} must not contain a NUL character`);
-    }
-    if (rawValue === "") continue;
-    // Prisma's string_contains is a LIKE that leaves `_` and `%` as wildcards.
-    conditions.push({
-      metadata:
-        operator === "contains"
-          ? { path: [metaKey], string_contains: escapeLike(rawValue) }
-          : { path: [metaKey], equals: rawValue },
-    });
-  }
-
-  return conditions;
-}

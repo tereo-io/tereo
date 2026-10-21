@@ -59,6 +59,31 @@ describe("Audit input Postgres cannot take", () => {
       "a repeated metadata filter",
       "/entries?metadata[k_equals]=x&metadata[k_equals]=y",
     ],
+    [
+      "a metadata filter key over 100 characters",
+      `/entries?metadata[${"k".repeat(101)}_equals]=x`,
+    ],
+    [
+      "a metadata filter value over 500 characters",
+      `/entries?metadata[k_equals]=${"v".repeat(501)}`,
+    ],
+    [
+      "more than 20 metadata filters",
+      `/entries?${Array.from({ length: 21 }, (_, i) => `metadata[k${i}_equals]=x`).join("&")}`,
+    ],
+    ["a repeated filter[q]", "/entries?filter[q]=a&filter[q]=b"],
+    [
+      "a filter value over 500 characters",
+      `/entries?filter[entityName]=${"n".repeat(501)}`,
+    ],
+    [
+      "a repeated filter[organizationId]",
+      `/entries?filter[organizationId]=${ORG_1}&filter[organizationId]=${ORG_1}`,
+    ],
+    [
+      "a filter[organizationId] that is not an id",
+      "/entries?filter[organizationId]=nope",
+    ],
   ])("refuses %s with a 400", async (_label, path) => {
     const res = await get(path);
     expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
@@ -78,6 +103,26 @@ describe("Audit input Postgres cannot take", () => {
     );
     expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
     expect(res.data.error).toBe("invalid_request");
+  });
+
+  it.each([
+    ["metadata", { metadata: { big: "x".repeat(64 * 1024) } }],
+    ["changes", { changes: { big: { new: "x".repeat(64 * 1024) } } }],
+  ])("refuses %s over 64 KiB as JSON with a 400", async (_label, override) => {
+    const res = await axios.post(
+      `${BASE_URL}/entries`,
+      { ...entry, ...override },
+      cfg()
+    );
+    expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    expect(res.data.error).toBe("invalid_request");
+  });
+
+  it("still reads metadata filters and filter[organizationId]=none", async () => {
+    const ok = await get(
+      `/entries?metadata[k_equals]=x&metadata[j_contains]=&filter[organizationId]=${ORG_1}`
+    );
+    expect(ok.status).toBe(HTTP_STATUS.OK);
   });
 
   it("refuses a NUL in a batch entry, writing nothing", async () => {

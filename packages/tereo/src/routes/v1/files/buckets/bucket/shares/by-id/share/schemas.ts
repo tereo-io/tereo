@@ -1,8 +1,9 @@
+import { bucketNameSchema } from "../../../../schemas.js";
 import { z } from "zod";
 
 export const shareIdParamSchema = z.object({
-  name: z.string(),
-  id: z.string().uuid(),
+  name: bucketNameSchema.shape.name,
+  id: z.guid(),
 });
 
 export const updateShareBodySchema = z

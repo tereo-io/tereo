@@ -111,8 +111,11 @@ type, or that adds a `file-service.*` event type, is `403` for anyone else
 (`assertMayRedirectFileEvents` in `src/utils/webhookAccess.ts`). Retries follow the same rule
 (above).
 
-**Endpoint events.** Every endpoint change is emitted in its transaction:
-`webhook.endpoint.created`, `.updated` (only when the PATCH changed something; `data.changedFields`),
+**Endpoint events.** Every endpoint change is emitted in its transaction — through the API, by
+provisioning (create, change, restore, secret rotation and the archive of a dropped entry) and by
+the delivery worker's auto-disable (`.updated`, `changedFields: ["status"]`,
+`reason: "auto-disabled"`):
+`webhook.endpoint.created`, `.updated` (only when something changed; `data.changedFields`),
 `.archived`, `.restored`, `.deleted`, `.secret-rotated` (`data.previousSecretExpiresAt`) and
 `.previous-secret-revoked`, each read with `webhooks.read`. The payload is the endpoint without its
 signing secret or custom header values (`customHeaderNames` only), and its `url` keeps origin and
@@ -164,6 +167,8 @@ case-insensitive.
 | `GET /v1/webhooks/webhooks` | `status` (`equals`, `in`), `url` (`contains`), `description` (`contains`), `eventType` (`equals`, `contains` — endpoints subscribed to a matching event type), `archived` (`true` / `false`; takes precedence over the older `includeArchived`) |
 | `GET /v1/webhooks/webhooks/:id/deliveries` | `status` (`equals`, `in`), `eventType` (`equals`), `createdAt_gte` / `createdAt_lte` (ISO 8601; the bulk retry's `createdAfter` / `createdBefore` window) |
 | `GET /v1/webhooks/event-types` | `source` (`equals`), `eventType` (`contains`), `retired` (`true` / `false`; omitted lists both) |
+
+An endpoint subscribes to at most 100 event types (create and PATCH).
 
 Event types carry `serviceName`, the declaring service's name, beside `source` (its slug) and
 `serviceId`. They have no `id`: the name (`eventType`) is the primary key and the key for lists.
@@ -263,7 +268,9 @@ row alone. `POST /v1/webhooks/events` takes the same path directly:
 
 validate the event type (registered, not retired) → find ACTIVE, unarchived endpoints of the
 organization subscribed to it → create a `WebhookDelivery` per endpoint in one transaction → enqueue
-a BullMQ job per delivery → `202 { deliveriesCreated: N }`. Each event emitted over HTTP writes an
+a BullMQ job per delivery → `202 { deliveriesCreated: N }`. Over HTTP an event's `entityId` is at
+most 500 characters and its `data` at most 256 KiB as JSON (`400` otherwise); core's own events,
+read back from the outbox, are not held to either. Each event emitted over HTTP writes an
 audit entry under the caller (`WebhookEvent`: event type, entity, `deliveriesCreated`, the
 idempotency key and recipients, never the data) in the transaction that writes its deliveries; a
 replay answered from a cached idempotency result writes none. Core's own events write no such

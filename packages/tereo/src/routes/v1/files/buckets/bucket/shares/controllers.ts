@@ -1,5 +1,4 @@
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
-import { logAuditTx, emitTx } from "../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { hashPassword } from "../../../../../../utils/password.js";
 import { toUserRef } from "../../../../../../utils/refs.js";
@@ -21,6 +20,11 @@ import {
   validateParams,
   validateQuery,
 } from "../../../../../../utils/validateReq.js";
+import {
+  bucketEventScope,
+  emitTx,
+  logAuditTx,
+} from "../../../../../../utils/outbox.js";
 import {
   BadRequestError,
   ConflictError,
@@ -318,20 +322,18 @@ export const createShare = async (req: Request, res: Response) => {
       },
     });
 
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.share.created",
-        organizationId: bucket.organizationId,
-        entityType: "share",
-        entityId: created.id,
-        data: {
-          bucketName: bucket.name,
-          kind: created.kind,
-          objectId: created.objectId,
-          archiveRequestId: created.archiveRequestId,
-        },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.share.created",
+      ...bucketEventScope(bucket),
+      entityType: "share",
+      entityId: created.id,
+      data: {
+        bucketName: bucket.name,
+        kind: created.kind,
+        objectId: created.objectId,
+        archiveRequestId: created.archiveRequestId,
+      },
+    });
 
     return created;
   });

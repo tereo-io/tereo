@@ -233,8 +233,9 @@ CreateWebhookEndpointRequest:
         type: string
         maxLength: 100
       minItems: 1
+      maxItems: 100
       description: |
-        Event types to subscribe to (at least one). Each must be registered and
+        Event types to subscribe to (at least one, at most 100). Each must be registered and
         not retired, or the request fails with `400 invalid_event_type`.
         `webhook.test` is reserved for the test action (`400 reserved_event_type`).
       examples:
@@ -292,8 +293,9 @@ UpdateWebhookEndpointRequest:
         type: string
         maxLength: 100
       minItems: 1
+      maxItems: 100
       description: |
-        Replaces the subscriptions. Each must be registered and not retired
+        Replaces the subscriptions (at most 100). Each must be registered and not retired
         (`400 invalid_event_type`), and none may be `webhook.test`
         (`400 reserved_event_type`).
       examples:
@@ -642,11 +644,12 @@ EmitEventRequest:
       type: string
       description: The unique identifier of the entity
       minLength: 1
+      maxLength: 500
       examples:
         - "ord-12345"
     data:
       type: object
-      description: Event payload data
+      description: Event payload data, at most 256 KiB as JSON (`400` otherwise)
       additionalProperties: true
       examples:
         - { "orderNumber": "ORD-001", "status": "CONFIRMED" }

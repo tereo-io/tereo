@@ -13,6 +13,7 @@ export const updateWebhookEndpointSchema = z.object({
   eventTypes: z
     .array(pgText().max(100))
     .min(1, "At least one event type is required")
+    .max(100, "At most 100 event types")
     .optional(),
   status: z.enum(["ACTIVE", "PAUSED"]).optional(),
   customHeaders: customHeadersSchema.nullish(),

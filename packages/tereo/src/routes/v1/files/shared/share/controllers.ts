@@ -4,9 +4,7 @@ import { contentDisposition } from "../../buckets/bucket/objects/utils.js";
 import { sign as presignSign } from "../../../../../utils/presigning.js";
 import { setAccessLog } from "../../../../../middleware/accessLog.js";
 import { SYSTEM_USER_ID } from "../../../../../definitions/index.js";
-import { logAuditTx, emitTx } from "../../../../../utils/outbox.js";
 import { ipRateLimitKey } from "../../../../../utils/rateLimit.js";
-import { tokenParamSchema, unlockBodySchema } from "./schemas.js";
 import { verifyPassword } from "../../../../../utils/password.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { clientIp } from "../../../../../utils/requestId.js";
@@ -22,11 +20,22 @@ import {
   validateParams,
 } from "../../../../../utils/validateReq.js";
 import {
+  bucketEventScope,
+  emitTx,
+  logAuditTx,
+} from "../../../../../utils/outbox.js";
+import {
   NotFoundError,
+  nullIfNotFound,
   TooManyRequestsError,
   UnauthorizedError,
   ValidationError,
 } from "../../../../../utils/errors.js";
+import {
+  shareFilenameParamSchema,
+  tokenParamSchema,
+  unlockBodySchema,
+} from "./schemas.js";
 
 interface LoadedShare {
   id: string;
@@ -34,6 +43,7 @@ interface LoadedShare {
   bucketId: number;
   bucketName: string;
   organizationId: string | null;
+  serviceId: string | null;
   kind: "OBJECT" | "ARCHIVE";
   objectId: string | null;
   objectKey: string | null;
@@ -63,15 +73,10 @@ async function loadShareForDownload(
     return null;
   }
 
-  // db.buckets.get throws NotFoundError when the bucket is soft-deleted or
-  // missing; we translate to "not found" to keep the public endpoint from
-  // leaking state.
-  let bucket;
-  try {
-    bucket = await db.buckets.get(share.bucketId);
-  } catch {
-    return null;
-  }
+  // A soft-deleted or missing bucket is "not found" like any unserveable
+  // share, so the public endpoint leaks nothing.
+  const bucket = await nullIfNotFound(db.buckets.get(share.bucketId));
+  if (!bucket) return null;
 
   // Kind-aware target resolution. Rejecting soft-deleted objects / pinned
   // versions here is what stops a tombstoned target from consuming the
@@ -103,6 +108,7 @@ async function loadShareForDownload(
     bucketId: share.bucketId,
     bucketName: bucket.name,
     organizationId: bucket.organizationId,
+    serviceId: bucket.serviceId,
     kind: share.kind,
     objectId: share.objectId,
     objectKey,
@@ -233,10 +239,10 @@ async function logShareAccessTx(
     },
   });
 
-  if (env.FILE_SERVICE_EMIT_SHARE_ACCESS_EVENTS && share.organizationId) {
+  if (env.FILE_SERVICE_EMIT_SHARE_ACCESS_EVENTS) {
     await emitTx(tx, {
       eventType: "file-service.share.accessed",
-      organizationId: share.organizationId,
+      ...bucketEventScope(share),
       entityType: "share",
       entityId: share.id,
       data: {
@@ -274,11 +280,8 @@ export const getShareViaToken = async (req: Request, res: Response) => {
       // Forward the cosmetic filename suffix so /shared/<token>/report.pdf
       // stays pretty across the redirect; the UI ignores the segment but it
       // keeps the URL in the address bar consistent with what was shared.
-      const filenameParam = req.params.filename;
-      const filenameSuffix =
-        typeof filenameParam === "string" && filenameParam.length > 0
-          ? `/${encodeURIComponent(filenameParam)}`
-          : "";
+      const { filename } = validateParams(shareFilenameParamSchema, req);
+      const filenameSuffix = filename ? `/${encodeURIComponent(filename)}` : "";
       res.redirect(
         302,
         `${uiBase.replace(/\/+$/, "")}/shared/${tokenSafe}${filenameSuffix}`

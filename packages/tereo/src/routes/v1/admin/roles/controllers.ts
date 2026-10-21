@@ -61,8 +61,9 @@ export const listRoles = async (req: Request, res: Response) => {
 
   const where = applyCursorToWhere(query);
 
-  const { includeArchived, includeRetired } = listRolesExtraQuerySchema.parse(
-    req.query
+  const { includeArchived, includeRetired } = validateQuery(
+    listRolesExtraQuerySchema,
+    req
   );
 
   const result = await db.roles.getPaginated({

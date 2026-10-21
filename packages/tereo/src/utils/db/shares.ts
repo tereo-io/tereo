@@ -238,7 +238,7 @@ export const getActiveByCreator = async (
     select: {
       id: true,
       kind: true,
-      bucket: { select: { name: true, organizationId: true } },
+      bucket: { select: { name: true, organizationId: true, serviceId: true } },
     },
     orderBy: { createdAt: "asc" },
   });

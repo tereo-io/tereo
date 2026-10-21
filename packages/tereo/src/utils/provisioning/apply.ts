@@ -1,6 +1,7 @@
 import { CORE_SERVICE_ID, SYSTEM_USER_ID } from "../../definitions/index.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
+import { emitEndpointEventTx } from "../webhookEndpointEvents.js";
 import { broadcastBucketInvalidate } from "../cacheBroadcast.js";
 import { formatClient, formatRole } from "../transformers.js";
 import { syncProvisionedAccessTx } from "../serviceAccess.js";
@@ -1128,6 +1129,7 @@ const applyWebhooks = async (
               ...meta,
             },
           });
+          await emitEndpointEventTx(tx, "created", endpoint);
           result.created.push(entry);
           continue;
         }
@@ -1149,7 +1151,7 @@ const applyWebhooks = async (
         );
         const restored = existing.archivedAt !== null;
         if (changes || restored) {
-          await db.webhookEndpoints.update(
+          const written = await db.webhookEndpoints.update(
             existing.id,
             {
               url: w.url,
@@ -1158,7 +1160,15 @@ const applyWebhooks = async (
             },
             tx
           );
-          if (restored) await db.webhookEndpoints.restore(existing.id, tx);
+          if (changes) {
+            await emitEndpointEventTx(tx, "updated", written, {
+              changedFields: Object.keys(changes),
+            });
+          }
+          if (restored) {
+            const back = await db.webhookEndpoints.restore(existing.id, tx);
+            await emitEndpointEventTx(tx, "restored", back ?? written);
+          }
           await logAuditTx(tx, {
             auth: SYSTEM_ACTOR,
             organizationId,
@@ -1174,12 +1184,15 @@ const applyWebhooks = async (
         if (rotates) {
           const previousSecretExpiresAt =
             overlapMs > 0 ? new Date(now.getTime() + overlapMs) : null;
-          await db.webhookEndpoints.rotateSecret(
+          const rotated = await db.webhookEndpoints.rotateSecret(
             existing.id,
             previousSecretExpiresAt,
             tx,
             w.secretPlain
           );
+          await emitEndpointEventTx(tx, "secret-rotated", rotated.endpoint, {
+            previousSecretExpiresAt,
+          });
           await logAuditTx(tx, {
             auth: SYSTEM_ACTOR,
             organizationId,
@@ -1219,7 +1232,8 @@ const applyWebhooks = async (
   );
   for (const endpoint of dropped) {
     const owner = endpoint.ownerService?.slug;
-    await db.webhookEndpoints.archive(endpoint.id, tx);
+    const archived = await db.webhookEndpoints.archive(endpoint.id, tx);
+    if (archived) await emitEndpointEventTx(tx, "archived", archived);
     await logAuditTx(tx, {
       auth: SYSTEM_ACTOR,
       organizationId: endpoint.organizationId,

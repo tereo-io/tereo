@@ -1,7 +1,12 @@
 import type { ShareKind } from "../../prisma/generated/client/index.js";
-import { emitTx, logAuditTx, type AuditLogInput } from "./outbox.js";
 import type { Prisma } from "./db/prisma.js";
 import db from "./db/index.js";
+import {
+  bucketEventScope,
+  emitTx,
+  logAuditTx,
+  type AuditLogInput,
+} from "./outbox.js";
 
 type Tx = Prisma.TransactionClient;
 type Actor = AuditLogInput["auth"];
@@ -9,7 +14,11 @@ type Actor = AuditLogInput["auth"];
 export interface RevocableShare {
   id: string;
   kind: ShareKind;
-  bucket: { name: string; organizationId: string | null };
+  bucket: {
+    name: string;
+    organizationId: string | null;
+    serviceId: string | null;
+  };
 }
 
 /**
@@ -38,15 +47,13 @@ export const revokeShareTx = async (
     },
   });
 
-  if (bucket.organizationId) {
-    await emitTx(tx, {
-      eventType: "file-service.share.revoked",
-      organizationId: bucket.organizationId,
-      entityType: "share",
-      entityId: share.id,
-      data: { bucketName: bucket.name, kind: share.kind },
-    });
-  }
+  await emitTx(tx, {
+    eventType: "file-service.share.revoked",
+    ...bucketEventScope(bucket),
+    entityType: "share",
+    entityId: share.id,
+    data: { bucketName: bucket.name, kind: share.kind },
+  });
   return true;
 };
 

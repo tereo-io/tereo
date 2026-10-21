@@ -8,6 +8,9 @@ import {
   pgText as text,
 } from "../../../../utils/pgInput.js";
 
+/** The largest `changes` or `metadata` one entry may carry, as JSON. */
+export const MAX_ENTRY_JSON_BYTES = 64 * 1024;
+
 const entryFieldsSchema = z.object({
   source: text().min(1).max(100),
   // Any 8-4-4-4-12 id, as Postgres' uuid type takes it (see the webhooks'
@@ -23,9 +26,13 @@ const entryFieldsSchema = z.object({
     z.record(
       z.string(),
       z.object({ old: z.unknown().optional(), new: z.unknown().optional() })
-    )
+    ),
+    MAX_ENTRY_JSON_BYTES
   ).optional(),
-  metadata: json(z.record(z.string(), z.unknown())).optional(),
+  metadata: json(
+    z.record(z.string(), z.unknown()),
+    MAX_ENTRY_JSON_BYTES
+  ).optional(),
   ipAddress: z
     .string()
     .max(45)
@@ -52,8 +59,8 @@ export const createBatchSchema = z.object({
 export const entryFilters = {
   source: { operators: ["equals", "in"], schema: text() },
   organizationId: { operators: ["equals"], schema: z.string() },
-  userId: { operators: ["equals"], schema: z.string().uuid() },
-  writerUserId: { operators: ["equals"], schema: z.string().uuid() },
+  userId: { operators: ["equals"], schema: z.guid() },
+  writerUserId: { operators: ["equals"], schema: z.guid() },
   // Written lower-cased, but rows from before that may not be, so the filter
   // ignores case rather than rewriting the partitioned table. Prisma's
   // case-insensitive equals is an ILIKE, hence the escaped value.
@@ -115,3 +122,69 @@ export const listQuerySchema = createCursorQuerySchema({
   defaultLimit: 50,
   maxLimit: 200,
 });
+
+// The cursor schema reads a repeated key as a compound filter; a search takes
+// one query.
+export const listSearchQuerySchema = z.object({
+  "filter[q]": z.string().optional(),
+});
+
+export const MAX_METADATA_FILTERS = 20;
+
+const METADATA_FILTER_PARAM = /^metadata\[(.+?)_(equals|contains)\]$/;
+
+const metadataFilterSchema = z.object({
+  key: text().min(1).max(100),
+  operator: z.enum(["equals", "contains"]),
+  value: text().max(500),
+});
+
+export type MetadataFilter = z.infer<typeof metadataFilterSchema>;
+
+/**
+ * `metadata[<key>_equals]` / `metadata[<key>_contains]`. Any other
+ * `metadata[...]` param is refused rather than silently widening the result;
+ * an empty value is no filter.
+ */
+export const metadataFiltersQuerySchema = z
+  .record(z.string(), z.unknown())
+  .transform((query, ctx): MetadataFilter[] => {
+    const filters: MetadataFilter[] = [];
+    for (const [param, value] of Object.entries(query)) {
+      if (!param.startsWith("metadata[")) continue;
+      const match = param.match(METADATA_FILTER_PARAM);
+      if (!match) {
+        ctx.addIssue({
+          code: "custom",
+          path: [param],
+          message:
+            "metadata filters take the form metadata[<key>_equals] or metadata[<key>_contains]",
+        });
+        continue;
+      }
+      const parsed = metadataFilterSchema.safeParse({
+        key: match[1],
+        operator: match[2],
+        value,
+      });
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({
+            code: "custom",
+            path: [param],
+            message: `${issue.path.join(".")} ${issue.message}`,
+          });
+        }
+        continue;
+      }
+      if (parsed.data.value !== "") filters.push(parsed.data);
+    }
+    if (filters.length > MAX_METADATA_FILTERS) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["metadata"],
+        message: `At most ${MAX_METADATA_FILTERS} metadata filters`,
+      });
+    }
+    return filters;
+  });

@@ -224,7 +224,9 @@ export const findExpired = async (
       id: true,
       filename: true,
       expiresAt: true,
-      bucket: { select: { id: true, name: true, organizationId: true } },
+      bucket: {
+        select: { id: true, name: true, organizationId: true, serviceId: true },
+      },
       shares: {
         select: { id: true, kind: true, revokedAt: true, expiresAt: true },
       },

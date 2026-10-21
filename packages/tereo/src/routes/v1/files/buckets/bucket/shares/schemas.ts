@@ -11,8 +11,8 @@ const commonShareFields = {
 
 export const createObjectShareBodySchema = z.object({
   kind: z.literal("OBJECT"),
-  objectId: z.string().uuid(),
-  versionId: z.string().uuid().optional(),
+  objectId: z.guid(),
+  versionId: z.guid().optional(),
   ...commonShareFields,
 });
 
@@ -41,7 +41,7 @@ export const listSharesQuerySchema = createCursorQuerySchema({
       operators: ["equals", "in"],
       schema: z.enum(["OBJECT", "ARCHIVE"]),
     },
-    objectId: { operators: ["equals"], schema: z.string().uuid() },
+    objectId: { operators: ["equals"], schema: z.guid() },
     createdByUserId: { operators: ["equals"], schema: z.guid() },
     revokedAt: {
       operators: ["equals", "gt", "gte", "lt", "lte"],

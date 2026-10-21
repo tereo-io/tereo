@@ -1,8 +1,8 @@
-import { BadRequestError, ForbiddenError } from "../../../../utils/errors.js";
+import { signedObjectParamsSchema, signedQuerySchema } from "./schemas.js";
 import { validateQuery } from "../../../../utils/validateReq.js";
+import { ForbiddenError } from "../../../../utils/errors.js";
 import type { Prisma } from "../../../../utils/db/prisma.js";
 import { prisma } from "../../../../utils/db/prisma.js";
-import { signedQuerySchema } from "./schemas.js";
 import { pipeline as pipelineCb } from "stream";
 import db from "../../../../utils/db/index.js";
 import { Request, Response } from "express";
@@ -27,18 +27,14 @@ export const MIME_SNIFF_BYTES = 4 * 1024;
 
 export const pipeline = promisify(pipelineCb);
 
-export function extractId(req: Request): string {
-  const raw = req.params.id;
-  if (typeof raw !== "string") {
-    throw new BadRequestError("invalid_request", "Missing object id");
-  }
-  return raw;
-}
-
-export function extractBucketName(req: Request): string {
-  const raw = req.params.bucket;
-  if (Array.isArray(raw)) return raw[0];
-  return raw;
+/** The bucket and object id of an object URL; malformed is a wrong signature. */
+export function signedObjectParams(req: Request): {
+  bucket: string;
+  id: string;
+} {
+  const parsed = signedObjectParamsSchema.safeParse(req.params);
+  if (!parsed.success) throw new ForbiddenError("Invalid signature");
+  return parsed.data;
 }
 
 /** Checks the URL's signature over `bucket`, `id` and `operation`. */
@@ -56,7 +52,7 @@ export function verifySignedQuery(
 
 /** `?disposition=attachment` only ever strengthens the default disposition. */
 export const forcesAttachment = (req: Request): boolean =>
-  req.query.disposition === "attachment";
+  validateQuery(signedQuerySchema, req).disposition === "attachment";
 
 /**
  * For a URL minted from a share: refuses it once the share no longer serves

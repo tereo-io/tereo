@@ -3,8 +3,8 @@ import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { SYSTEM_USER_ID } from "../../../../../../definitions/index.js";
 import { logAuditTx } from "../../../../../../utils/outbox.js";
 import { logger } from "../../../../../../utils/logger.js";
+import { signedArchiveParamsSchema } from "./schemas.js";
 import db from "../../../../../../utils/db/index.js";
-import { ArchiveIdSchema } from "./schemas.js";
 import { Request, Response } from "express";
 import env from "../../../../../../env.js";
 import {
@@ -15,22 +15,16 @@ import {
   BadRequestError,
   ForbiddenError,
   NotFoundError,
+  nullIfNotFound,
   AppError,
   sendError,
 } from "../../../../../../utils/errors.js";
 import {
-  extractId,
   assertShareServeable,
   assertSignerMayAccess,
   auditAndSpendShareUrl,
   verifySignedQuery,
 } from "../../utils.js";
-
-const orNull = <T>(lookup: Promise<T>): Promise<T | null> =>
-  lookup.catch((err) => {
-    if (err instanceof NotFoundError) return null;
-    throw err;
-  });
 
 /**
  * The archive behind a signed URL, once the signature verifies. The HMAC
@@ -39,14 +33,13 @@ const orNull = <T>(lookup: Promise<T>): Promise<T | null> =>
  * exactly like a wrong signature, so the URL is no oracle for archive ids.
  */
 const resolveSignedArchive = async (req: Request) => {
-  const id = extractId(req);
+  const params = signedArchiveParamsSchema.safeParse(req.params);
   // A malformed id can't name any archive, so its 404 says nothing about one.
-  if (!ArchiveIdSchema.safeParse(id).success) {
-    throw new NotFoundError("Archive not found");
-  }
-  const archive = await orNull(db.archives.get(id));
+  if (!params.success) throw new NotFoundError("Archive not found");
+  const { id } = params.data;
+  const archive = await nullIfNotFound(db.archives.get(id));
   const bucket = archive
-    ? await orNull(db.buckets.get(archive.bucketId))
+    ? await nullIfNotFound(db.buckets.get(archive.bucketId))
     : null;
   const verified = verifySignedQuery(req, {
     // An unmatchable name: the signature check fails as for a wrong signature.

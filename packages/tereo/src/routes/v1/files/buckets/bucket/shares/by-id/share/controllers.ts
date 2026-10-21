@@ -25,6 +25,7 @@ import {
   NotFoundError,
 } from "../../../../../../../../utils/errors.js";
 import {
+  bucketEventScope,
   logAuditTx,
   computeChanges,
   emitTx,
@@ -187,15 +188,13 @@ export const updateShare = async (req: Request, res: Response) => {
       },
     });
 
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.share.updated",
-        organizationId: bucket.organizationId,
-        entityType: "share",
-        entityId: next.id,
-        data: { bucketName: bucket.name, kind: next.kind },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.share.updated",
+      ...bucketEventScope(bucket),
+      entityType: "share",
+      entityId: next.id,
+      data: { bucketName: bucket.name, kind: next.kind },
+    });
 
     return next;
   });

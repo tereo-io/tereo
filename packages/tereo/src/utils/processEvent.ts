@@ -7,6 +7,7 @@ import type { DeliveryRef } from "./db/webhookDeliveries.js";
 import { createRecipientCheck } from "./webhookAccess.js";
 import { canonicalJson } from "./uploadIdempotency.js";
 import { getRedisClient, redisKey } from "./redis.js";
+import { pgJson, pgText } from "./pgInput.js";
 import type { Prisma } from "./db/prisma.js";
 import { prisma } from "./db/prisma.js";
 import { logger } from "./logger.js";
@@ -30,6 +31,10 @@ type Tx = Prisma.TransactionClient;
 const outboxEventSchema = emitEventSchema.extend({
   organizationId: z.guid().nullable(),
   serviceId: z.guid().nullable().optional(),
+  // The HTTP caps bound what a caller may send; core's own events (a bulk
+  // delete's keys) may be larger, and refusing one would dead-letter it.
+  entityId: pgText().min(1),
+  data: pgJson(z.record(z.string(), z.unknown())),
 });
 type FanoutInput = z.infer<typeof outboxEventSchema>;
 

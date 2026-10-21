@@ -35,8 +35,7 @@ import {
 import {
   MIME_SNIFF_BYTES,
   pipeline,
-  extractId,
-  extractBucketName,
+  signedObjectParams,
   assertShareServeable,
   assertSignerMayAccess,
   auditAndSpendShareUrl,
@@ -45,11 +44,11 @@ import {
 } from "../../../../utils.js";
 
 const resolveSignedDownload = async (req: Request, res: Response) => {
-  const id = extractId(req);
+  const { bucket: bucketName, id } = signedObjectParams(req);
   const verified = verifiedSignedUrl(res);
   const share = await assertShareServeable(verified);
 
-  const bucket = await db.buckets.getByName(extractBucketName(req));
+  const bucket = await db.buckets.getByName(bucketName);
   if (!share && verified.by) {
     await assertSignerMayAccess(verified.by, bucket, "read");
   }
@@ -144,8 +143,7 @@ export const downloadViaSignedUrl = async (req: Request, res: Response) => {
 };
 
 export const uploadViaSignedUrl = async (req: Request, res: Response) => {
-  const id = extractId(req);
-  const bucketName = extractBucketName(req);
+  const { bucket: bucketName, id } = signedObjectParams(req);
   const verified = verifiedSignedUrl(res);
   // Shares are download-only by design — a `share` binding on a write URL is
   // categorically invalid and means a tampered (or forged) URL slipped past

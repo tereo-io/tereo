@@ -1,5 +1,5 @@
-import type { Prisma } from "../../../../utils/db/prisma.js";
-import { emitTx } from "../../../../utils/outbox.js";
+import type { Prisma } from "./db/prisma.js";
+import { emitTx } from "./outbox.js";
 
 export type WebhookEndpointEvent =
   | "created"

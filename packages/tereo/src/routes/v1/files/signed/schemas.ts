@@ -1,3 +1,4 @@
+import { bucketNameSchema } from "../buckets/schemas.js";
 import { z } from "zod";
 
 // Shapes past "a string" are left to `presigning.verify`, which answers any
@@ -18,6 +19,13 @@ export const signedQuerySchema = z.object({
   version: optional,
   filename: z.string().max(255).optional(),
   disposition: z.string().optional(),
+});
+
+// A malformed id or bucket name names nothing a URL could be signed for, so
+// `signedObjectParams` answers it as a wrong signature.
+export const signedObjectParamsSchema = z.object({
+  bucket: bucketNameSchema.shape.name,
+  id: z.guid(),
 });
 
 export type SignedQuery = z.infer<typeof signedQuerySchema>;

@@ -6,13 +6,16 @@ import { formatWebhookEndpoint } from "../../../../utils/transformers.js";
 import { assertMaySubscribe } from "../../../../utils/webhookAccess.js";
 import { webhookScope } from "../../../../utils/webhookOwnership.js";
 import { PERMISSIONS } from "../../../../definitions/permissions.js";
-import { emitEndpointEventTx, redactWebhookUrl } from "./events.js";
 import { hasPermission } from "../../../../utils/permissions.js";
 import { validateUser } from "../../../../middleware/auth.js";
 import { BadRequestError } from "../../../../utils/errors.js";
 import { logAuditTx } from "../../../../utils/outbox.js";
 import db from "../../../../utils/db/index.js";
 import { Request, Response } from "express";
+import {
+  emitEndpointEventTx,
+  redactWebhookUrl,
+} from "../../../../utils/webhookEndpointEvents.js";
 import {
   applyCursorToWhere,
   buildCursorPageResponse,
@@ -33,7 +36,10 @@ export const listWebhookEndpoints = async (req: Request, res: Response) => {
     req
   );
 
-  const archivedFiltered = !!req.query["filter[archived]"];
+  // filter[archived] lands in `where.AND` as an `archivedAt` clause.
+  const archivedFiltered = (
+    (query.where?.AND as Record<string, unknown>[] | undefined) ?? []
+  ).some((clause) => "archivedAt" in clause);
   // As getVisibleEndpoint shows them: an integration's own; otherwise the
   // organization's, with owned endpoints sent every organization's events
   // and integrations' endpoints only for webhooks.admin.

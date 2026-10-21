@@ -504,9 +504,11 @@
       description: |
         Cosmetic filename segment (the share's `urlFilename`, or the default
         the share URL carries). Ignored when resolving the share; kept on
-        the browser redirect to the unlock page.
+        the browser redirect to the unlock page, where one over 255
+        characters is a `400`.
       schema:
         type: string
+        maxLength: 255
   head:
     tags:
       - Files - Shares

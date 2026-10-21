@@ -1,10 +1,12 @@
-import { ForbiddenError, ValidationError } from "../utils/errors.js";
+import { validateHeaders, validateQuery } from "../utils/validateReq.js";
 import { PERMISSIONS } from "../definitions/permissions.js";
 import { Request, Response, NextFunction } from "express";
 import { callerService } from "../utils/callerService.js";
 import { hasPermission } from "../utils/permissions.js";
+import { ForbiddenError } from "../utils/errors.js";
 import type { AuthContext } from "./auth.js";
 import db from "../utils/db/index.js";
+import { z } from "zod";
 
 declare global {
   namespace Express {
@@ -23,8 +25,11 @@ export interface AuditSourceScope {
   writerUserId: string;
 }
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// `z.guid()`, not `z.uuid()`: any hex UUID is a valid organization id to
+// Postgres, including ones without an RFC 9562 variant.
+const organizationIdHeadersSchema = z.object({
+  "x-organization-id": z.guid("must be an organization id"),
+});
 
 /**
  * Webhook routes: the organization is the token's `org_id`. A `webhooks.admin`
@@ -36,15 +41,13 @@ export const resolveWebhookOrganizationId = async (
   _res: Response,
   next: NextFunction
 ) => {
-  const header = req.headers["x-organization-id"];
-  const requested = typeof header === "string" ? header : undefined;
   if (
-    requested &&
+    req.headers["x-organization-id"] &&
     hasPermission(req.auth?.permissions ?? [], PERMISSIONS.WEBHOOKS.ADMIN)
   ) {
-    if (!UUID_RE.test(requested)) {
-      throw new ValidationError("X-Organization-ID must be an organization id");
-    }
+    const requested = validateHeaders(organizationIdHeadersSchema, req)[
+      "x-organization-id"
+    ];
     await db.organizations.getAny(requested);
     req.organizationId = requested;
     return next();
@@ -63,22 +66,24 @@ export const resolveWebhookOrganizationId = async (
 
 const AUDIT_SYSTEM_WIDE_FILTER = "none";
 
+/** An organization id, `null` for `none` (system-wide), `undefined` for none given. */
+const auditOrganizationQuerySchema = z.object({
+  "filter[organizationId]": z
+    .union(
+      [
+        z.literal("").transform(() => undefined),
+        z.literal(AUDIT_SYSTEM_WIDE_FILTER).transform(() => null),
+        z.guid(),
+      ],
+      `must be an organization id or "${AUDIT_SYSTEM_WIDE_FILTER}"`
+    )
+    .optional(),
+});
+
 const parseAuditOrganizationFilter = (
   req: Request
-): string | null | undefined => {
-  const raw = req.query["filter[organizationId]"];
-  if (raw === undefined || raw === "") return undefined;
-  if (typeof raw !== "string") {
-    throw new ValidationError("filter[organizationId] takes a single value");
-  }
-  if (raw === AUDIT_SYSTEM_WIDE_FILTER) return null;
-  if (!UUID_RE.test(raw)) {
-    throw new ValidationError(
-      `filter[organizationId] must be an organization id or "${AUDIT_SYSTEM_WIDE_FILTER}"`
-    );
-  }
-  return raw;
-};
+): string | null | undefined =>
+  validateQuery(auditOrganizationQuerySchema, req)["filter[organizationId]"];
 
 /**
  * The scope of an app service reading the audit log with a token without an

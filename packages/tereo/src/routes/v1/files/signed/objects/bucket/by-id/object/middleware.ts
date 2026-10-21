@@ -1,9 +1,5 @@
+import { signedObjectParams, verifySignedQuery } from "../../../../utils.js";
 import { NextFunction, Request, Response } from "express";
-import {
-  extractId,
-  extractBucketName,
-  verifySignedQuery,
-} from "../../../../utils.js";
 
 /**
  * Checks an object URL's signature for `operation` before anything else runs
@@ -14,8 +10,7 @@ export const verifySignedObjectUrl =
   (operation: "read" | "write") =>
   (req: Request, res: Response, next: NextFunction) => {
     res.locals.signedUrl = verifySignedQuery(req, {
-      bucket: extractBucketName(req),
-      id: extractId(req),
+      ...signedObjectParams(req),
       operation,
     });
     next();

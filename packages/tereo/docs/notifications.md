@@ -60,7 +60,9 @@ Sent over SMTP with nodemailer.
   `sender_access`, never returned). Access lost in between fails the delivery permanently with
   `attachment_forbidden`; core's own sends read every bucket. As in the files API, a public
   bucket's history is not public: at accept, a version that is no longer current takes a grant on
-  the bucket (or `file-service.admin`), and is `attachment_not_found` without one.
+  the bucket (or `file-service.admin`), and is `attachment_not_found` without one. At send the
+  same holds for a version no longer current by then: without the grant, the delivery fails with
+  `attachment_forbidden`.
 - An address named twice is sent to once, at the most visible `as` (`to` over `cc` over `bcc`).
   One email is one delivery.
 - `Message-ID` is `<delivery id>@<from domain>`.

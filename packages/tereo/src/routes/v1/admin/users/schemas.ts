@@ -32,7 +32,7 @@ export const ListUsersQuerySchema = createCursorQuerySchema({
     // A page of users by id, for resolving the actors a response names.
     id: {
       operators: ["equals", "in"],
-      schema: z.string().uuid(),
+      schema: z.guid(),
       maxInValues: MAX_USER_IDS_PER_LOOKUP,
     },
     // Stored emails are lower case.

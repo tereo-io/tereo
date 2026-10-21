@@ -68,8 +68,9 @@ export const listOrganizations = async (req: Request, res: Response) => {
 
   const where = applyCursorToWhere(query);
 
-  const { includeArchived } = listOrganizationsExtraQuerySchema.parse(
-    req.query
+  const { includeArchived } = validateQuery(
+    listOrganizationsExtraQuerySchema,
+    req
   );
 
   const result = await db.organizations.getPaginated({

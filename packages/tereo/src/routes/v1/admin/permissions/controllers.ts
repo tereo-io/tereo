@@ -18,7 +18,10 @@ export const listPermissions = async (req: Request, res: Response) => {
 
   const where = applyCursorToWhere(query);
 
-  const { includeRetired } = listPermissionsExtraQuerySchema.parse(req.query);
+  const { includeRetired } = validateQuery(
+    listPermissionsExtraQuerySchema,
+    req
+  );
 
   const result = await db.permissions.getPaginated({
     take: query.limit,

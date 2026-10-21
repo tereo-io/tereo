@@ -2,11 +2,11 @@ import type { ObjectWithCurrent } from "../../../../../../utils/db/objects.js";
 import { noteAccessLogError } from "../../../../../../middleware/accessLog.js";
 import { normalizeContentType } from "../../../../../../utils/contentType.js";
 import { isThumbnailSource } from "../../../../../../utils/thumbnails.js";
+import { validateHeaders } from "../../../../../../utils/validateReq.js";
 import type { AuthContext } from "../../../../../../middleware/auth.js";
 import { fileTypeFromBuffer, fileTypeFromFile } from "file-type";
 import type { UserRef } from "../../../../../../utils/refs.js";
 import { logger } from "../../../../../../utils/logger.js";
-import { metadataSchema, tagsSchema } from "./schemas.js";
 import { Request, Response } from "express";
 import { finished } from "stream";
 import fs from "fs/promises";
@@ -37,6 +37,11 @@ import {
   enqueueOrphanBlobCleanupSafe,
   enqueueThumbnailGeneration,
 } from "../../../../../../jobs/index.js";
+import {
+  metadataSchema,
+  objectFieldHeadersSchema,
+  tagsSchema,
+} from "./schemas.js";
 
 // Maximum metadata header size (100KB)
 const MAX_METADATA_HEADER_SIZE = 100 * 1024;
@@ -290,10 +295,10 @@ export const setContentDisposition = (
 const DOWNLOAD_CSP = "sandbox; default-src 'none'";
 
 export const handleMetadata = (req: Request) => {
-  const metadataHeader = req.headers["x-metadata"] as string | undefined;
+  const metadataHeader = validateHeaders(objectFieldHeadersSchema, req)[
+    "x-metadata"
+  ];
   if (!metadataHeader) return;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let metadata: Record<string, any> | undefined;
   if (Buffer.byteLength(metadataHeader, "utf8") > MAX_METADATA_HEADER_SIZE) {
     throw new BadRequestError(
       "x_metadata_header_too_large",
@@ -301,6 +306,7 @@ export const handleMetadata = (req: Request) => {
     );
   }
 
+  let metadata: unknown;
   try {
     metadata = JSON.parse(metadataHeader);
   } catch {
@@ -315,7 +321,7 @@ export const handleMetadata = (req: Request) => {
     );
   }
 
-  return metadata;
+  return validationResult.data;
 };
 
 export const getBucket = async (name: string, auth: AuthContext) => {
@@ -401,7 +407,7 @@ const parseJsonTags = (raw: string): unknown => {
  * body's `tagsSchema`.
  */
 export const extractTagsFromRequest = (req: Request): string[] | undefined => {
-  const raw = req.headers["x-tags"] as string | undefined;
+  const raw = validateHeaders(objectFieldHeadersSchema, req)["x-tags"];
   if (!raw) return undefined;
   if (Buffer.byteLength(raw, "utf8") > 10 * 1024) {
     throw new BadRequestError(

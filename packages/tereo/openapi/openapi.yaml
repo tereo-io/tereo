@@ -569,7 +569,10 @@ info:
     ```
 
     Each endpoint documents its supported filter fields and operators in the endpoint
-    description; a field or operator it does not list is a `400 invalid_request`.
+    description; a field or operator it does not list is a `400 invalid_request`. A filter value
+    is at most 500 characters (an object-key filter 1024), an `in` filter lists at most 100
+    values, and one field may be filtered at most 20 times in a request; beyond that is a `400
+    invalid_request`.
 
     ### Sorting
 

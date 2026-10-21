@@ -6,11 +6,14 @@ import { formatWebhookEndpoint } from "../../../../../utils/transformers.js";
 import { logAuditTx, computeChanges } from "../../../../../utils/outbox.js";
 import { webhookScope } from "../../../../../utils/webhookOwnership.js";
 import { TEST_EVENT_TYPE } from "../../../../../definitions/index.js";
-import { emitEndpointEventTx, redactWebhookUrl } from "../events.js";
 import { validateUser } from "../../../../../middleware/auth.js";
 import db from "../../../../../utils/db/index.js";
 import { Request, Response } from "express";
 import env from "../../../../../env.js";
+import {
+  emitEndpointEventTx,
+  redactWebhookUrl,
+} from "../../../../../utils/webhookEndpointEvents.js";
 import {
   maskCustomHeaders,
   resolveMaskedHeaders,

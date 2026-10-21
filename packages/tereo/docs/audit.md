@@ -127,7 +127,10 @@ on top-level metadata keys. Entity history takes `source`, `userId`, `writerUser
 `filter[createdAt_gte]` / `filter[createdAt_lte]` or as `filter[createdAt]` + `filter[createdAt_op]`
 (repeated for both bounds), in any mix and order; the bounds combine
 (`src/utils/parseQueryString.ts`). A `metadata[...]` param of another form, or repeated, is a
-`400` rather than ignored.
+`400` rather than ignored; a metadata key is at most 100 characters, its value at most 500, and a
+request takes at most 20 metadata filters. Every list's filter values share the bounds in the
+OpenAPI spec's *Filtering* section (500 characters, 100 `in` values, 20 per field). A written
+entry's `changes` and `metadata` are each at most 64 KiB as JSON.
 
 Postgres can store neither a NUL character in text nor a `\u0000` escape in `jsonb`, so the
 schemas (`src/routes/v1/audit/entries/schemas.ts`) refuse one — in a written entry's strings,

@@ -70,6 +70,13 @@ export class NotFoundError extends AppError {
   }
 }
 
+/** `lookup`'s result, or null when it throws `NotFoundError`; anything else is rethrown. */
+export const nullIfNotFound = <T>(lookup: Promise<T>): Promise<T | null> =>
+  lookup.catch((err) => {
+    if (err instanceof NotFoundError) return null;
+    throw err;
+  });
+
 export class ConflictError extends AppError {
   constructor(message: string, code = "conflict") {
     super(409, code, message);

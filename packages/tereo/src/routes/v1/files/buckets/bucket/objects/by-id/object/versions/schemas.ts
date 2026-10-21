@@ -1,10 +1,11 @@
 import { createCursorQuerySchema } from "../../../../../../../../../utils/parseQueryString.js";
+import { bucketNameSchema } from "../../../../../schemas.js";
 import { z } from "zod";
 
 /** For `GET /versions` (list) — no versionId in the URL. */
 export const byIdListVersionsParamsSchema = z.object({
-  name: z.string(),
-  id: z.string().uuid("id must be a UUID"),
+  name: bucketNameSchema.shape.name,
+  id: z.guid("id must be a UUID"),
 });
 
 export const listVersionsQuerySchema = createCursorQuerySchema({

@@ -70,7 +70,8 @@ export const createWebhookEndpointSchema = z.object({
   description: pgText().max(500).optional(),
   eventTypes: z
     .array(pgText().max(100))
-    .min(1, "At least one event type is required"),
+    .min(1, "At least one event type is required")
+    .max(100, "At most 100 event types"),
   customHeaders: customHeadersSchema.optional(),
 });
 
