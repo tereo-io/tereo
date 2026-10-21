@@ -1,3 +1,4 @@
+import { expectAuthorizeErrorRedirect } from "./utils/authorizeErrors.js";
 import { FIXTURE_USER_IDS } from "../utils/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { getRedisClient } from "../../utils/redis.js";
@@ -209,9 +210,9 @@ describe("Authorization request validation", () => {
 
   it("refuses a code_challenge that is not an S256 digest", async () => {
     const tooLong = await authorize({ code_challenge: "a".repeat(44) });
-    expect(tooLong.status).toBe(400);
+    expectAuthorizeErrorRedirect(tooLong, REDIRECT_URI, "invalid_request");
     const notBase64url = await authorize({ code_challenge: "+".repeat(43) });
-    expect(notBase64url.status).toBe(400);
+    expectAuthorizeErrorRedirect(notBase64url, REDIRECT_URI, "invalid_request");
   });
 
   it("accepts an RFC-variant-0 org_id", async () => {

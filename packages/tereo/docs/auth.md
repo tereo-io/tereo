@@ -197,7 +197,7 @@ of services its tokens may name: each must be an existing service other than cor
 `consentRequired` (default `true`) says whether a user approves the app on the consent screen after
 signing in. With `false`, the consent step is skipped everywhere a consent session would be made:
 silent authorize, org switch, and after a password login (and its TOTP step) or the org picker —
-but only for a request with no `core:*` scope. A request for any core scope always shows the
+but only for a request with no `core:*` scope and without `prompt=consent`. A request for any core scope always shows the
 consent screen (and `prompt=none` gets `consent_required`), since those scopes act in core's API as
 the user. Core's own login client always skips it, so the admin UI shows no consent screen after a
 password login. The user still signs in, and the client still gets only the scopes it is registered
@@ -769,14 +769,21 @@ Every lifetime is absolute — using a session never extends it:
 Every redirect to a client's `redirect_uri` — the code, or an error from `/oauth/authorize`, the
 login step or the consent screen — carries `iss`, the issuer (RFC 9207, built by
 `authorizationResponseUrl` in `utils/authorization.ts`), and discovery advertises
-`authorization_response_iss_parameter_supported`.
+`authorization_response_iss_parameter_supported`. `/oauth/authorize` answers JSON 400
+`invalid_request` only until `client_id` and `redirect_uri` check out (an unknown client, an
+unregistered redirect URI); after, every error goes to the redirect URI with `state` (RFC 6749
+§4.1.2.1): `unsupported_response_type`, `unauthorized_client`, or `invalid_request` for any other
+invalid parameter, such as a missing `state` or PKCE challenge or a `max_age` above 2147483647.
 
 `/oauth/authorize` with `prompt=none` answers `login_required` when the SSO session is missing,
-expired, older than `max_age`, or belongs to a deactivated user. With `org_id`, the same cases fall
+expired, older than `max_age`, or belongs to a deactivated user. With `org_id` it issues the code
+for that organization when the user may select it (`maySelectOrganization`, as the org switch
+below), and answers `login_required` for one they may not. With `org_id`, the same cases fall
 through to the password login. A code older than its `max_age` is refused at `/oauth/token` with
 `400 invalid_grant`. For core's own login client (`isFirstPartyClient` in `definitions/`) and for a client with
 `consentRequired: false` asking for no `core:*` scope, `prompt=none` or an `org_id` switch with a
-live session skips the consent screen and redirects with the code. Any other client is answered `error=consent_required` (with `state`) at its `redirect_uri`
+live session skips the consent screen and redirects with the code — unless the request says
+`prompt=consent`, which shows the screen to every client but core's own. Any other client is answered `error=consent_required` (with `state`) at its `redirect_uri`
 for `prompt=none` — consent is not remembered, and a silent request cannot show the consent screen
 (OIDC Core 3.1.2.6) — and sent to `{UI}/consent` for an `org_id` switch. `prompt=login` goes to the password
 login without touching the SSO session (any site can send a browser there); the login, once it
@@ -836,7 +843,11 @@ The login-flow pages (consent, org-select, 2FA) get the authorize request's para
 session token, only so that "Back to sign in" restarts `/oauth/authorize` for the client that began
 the login. Core never reads them back.
 
-`/oauth/end-session` with a valid `id_token_hint` logs this browser out at once. Without one, it
+`/oauth/end-session` with a valid `id_token_hint` logs this browser out at once, then redirects to
+`post_logout_redirect_uri` or, for a navigation without one, to where the user signs in to the
+client again (`clientSignInUrl`: the UI's root for core's own client, else the origin of its first
+web redirect URI); the admin UI's own fetch gets JSON. A hint expired beyond
+`ID_TOKEN_HINT_GRACE_SECONDS` vouches for nothing and is treated as none. Without one, it
 ends nothing: it sets a one-time `tereo_logout_confirm_{client_id}` cookie and redirects to
 `{UI}/logout`, whose confirm button posts the same token to `/oauth/end-session/confirm`. Only that
 post, carrying the cookie (SameSite keeps it off cross-site posts), ends the session — so a
@@ -892,6 +903,9 @@ Where core knowingly departs from OAuth 2.0 / OpenID Connect:
 - **`offline_access` is not required for a refresh token.** One is issued to every client with the
   `refresh_token` grant type.
 - **`state` is required** on `/oauth/authorize`, as is PKCE with `S256` (`plain` is refused).
+- **`prompt=consent` is ignored for core's own login client**, `tereo-ui`, which has no consent
+  screen: it acts in core as the user with the user's full rights, and the user is signing in to
+  core itself. Every other client is shown the screen.
 - **`prompt=select_account`** is accepted and ignored (a browser holds one account per client), so
   discovery does not advertise it. `prompt` is a space-separated list; `none` with any other value is
   `400 invalid_request`.

@@ -70,7 +70,7 @@ export const handlePostAuthOrgSelection = async (
 
   if (orgId !== null || activeOrgs.length === 0) {
     // 0 orgs (platform admin) or 1 org (auto-select)
-    if (skipsConsent(client, scopes)) {
+    if (skipsConsent(client, scopes, prompt)) {
       // Nothing is written for the user to continue, but the step that led
       // here (a TOTP verification) is still spent: one code, one login.
       await writeStep(async () => undefined);

@@ -99,7 +99,7 @@ describe("refresh_token grant ID token", () => {
       })}`,
       { redirect: "manual" }
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(302);
     expect(
       await prisma.userSession.count({ where: { id: claims.sid as string } })
     ).toBe(0);

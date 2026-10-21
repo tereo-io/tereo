@@ -130,7 +130,7 @@ export const orgSelectSubmitHandler = async (req: Request, res: Response) => {
     }
   };
 
-  if (skipsConsent(client, session.scopes)) {
+  if (skipsConsent(client, session.scopes, session.prompt)) {
     const redirectUrl = await issueAuthorizationCode(
       req,
       res,

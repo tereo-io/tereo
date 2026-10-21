@@ -1,3 +1,4 @@
+import { expectAuthorizeErrorRedirect } from "./utils/authorizeErrors.js";
 import { hashAuthorizationCode } from "../../utils/crypto.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
@@ -196,8 +197,12 @@ describe("OAuth Security Tests", () => {
         redirect: "manual",
       });
 
-      // Server should reject plain method
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expectAuthorizeErrorRedirect(
+        response,
+        redirectUri,
+        "invalid_request",
+        state
+      );
     });
   });
 

@@ -777,7 +777,7 @@ describe("Session lifecycle", () => {
       await expectStillSignedIn(laptop);
     });
 
-    it("refuses a hint expired past the grace period", async () => {
+    it("asks to confirm for a hint expired past the grace period", async () => {
       const user = await createUser();
       const laptop = await login(user);
       const { sid } = decodeJwt(laptop.tokens.id_token!) as { sid?: string };
@@ -790,8 +790,10 @@ describe("Session lifecycle", () => {
       }).token;
 
       const res = await endSession(new Map(), { id_token_hint: stale });
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as Err).error).toBe("invalid_request");
+      expect(res.status).toBe(302);
+      expect(new URL(res.headers.get("location") ?? "").pathname).toMatch(
+        /\/logout$/
+      );
       await expectStillSignedIn(laptop);
     });
 

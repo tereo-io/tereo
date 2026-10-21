@@ -52,4 +52,22 @@ describe("skipsConsent", () => {
     ).toBe(false);
     expect(skipsConsent(client(true), ["openid"])).toBe(false);
   });
+
+  it("never skips for prompt=consent, except for core's own client", () => {
+    expect(skipsConsent(client(false), ["openid"], "consent")).toBe(false);
+    expect(skipsConsent(client(false), ["openid"], "login consent")).toBe(
+      false
+    );
+    expect(
+      skipsConsent(
+        {
+          clientId: LOGIN_CLIENT.clientId,
+          consentRequired: true,
+          trustedCoreScopes: [],
+        },
+        ["openid"],
+        "consent"
+      )
+    ).toBe(true);
+  });
 });
