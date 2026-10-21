@@ -1,5 +1,8 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
-import { notifyUserRolesChanged } from "../../../../../websocket/emitters/index.js";
+import {
+  disconnectTokenSockets,
+  notifyUserRolesChanged,
+} from "../../../../../websocket/emitters/index.js";
 import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
 import { formatUser } from "../../../../../utils/transformers.js";
@@ -196,7 +199,7 @@ export const setUserRoles = async (req: Request, res: Response) => {
   // A service's roles are what an admin approved for it (/admin/services).
   await assertNotServiceAccount(targetUser);
 
-  const userRoles = await db.$transaction(async (tx) => {
+  const { userRoles, revokedJtis } = await db.$transaction(async (tx) => {
     // A grant races a credential reset's check of what the user holds.
     await db.users.lockAuthority(id, tx);
     // Read in the transaction, and only the roles new as of this read are
@@ -238,6 +241,11 @@ export const setUserRoles = async (req: Request, res: Response) => {
       );
     }
     const result = await db.roles.setUserRoles(id, roleIds, tx, new Set(added));
+    // Permissions are read live, so a token from a password-only login would
+    // carry the new role; revoked, its refresh meets the step-up.
+    const revokedJtis = roles.some((r) => r.requires2fa)
+      ? await db.accessTokens.revokeWithoutMfa({ id }, tx)
+      : [];
     await logAuditTx(tx, {
       auth,
       action: "UPDATE",
@@ -247,6 +255,9 @@ export const setUserRoles = async (req: Request, res: Response) => {
       metadata: {
         action: "roles_changed",
         roleIds: roleIds,
+        ...(revokedJtis.length > 0 && {
+          accessTokensRevoked: revokedJtis.length,
+        }),
       },
     });
     await emitTx(tx, {
@@ -256,9 +267,10 @@ export const setUserRoles = async (req: Request, res: Response) => {
       entityId: id,
       data: { userId: id, email: targetUser.email, roleIds: roleIds },
     });
-    return result;
+    return { userRoles: result, revokedJtis };
   });
 
+  disconnectTokenSockets(revokedJtis);
   notifyUserRolesChanged(id);
 
   res.json({

@@ -39,6 +39,14 @@
       an empty body returns `400 invalid_request`. Returns the settings after
       the change.
 
+      Relaxing `totpPolicy` (`required` to anything, `optional` to
+      `disabled`) needs `admin` through a global role (`403` otherwise):
+      `disabled` overrides every role's `requires2fa`. Tightening it revokes
+      the live access tokens from logins without a second factor of the
+      people it newly applies to (everyone for `required`; holders of a role
+      with `requires2fa` for `optional`), so their next refresh meets the
+      2FA step-up.
+
       An audit log entry is created for this action.
       An `auth.settings.updated` webhook event is emitted.
     operationId: patchAdminSettings
@@ -70,7 +78,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing settings.write permission
+        description: Forbidden - missing settings.write permission, or a relaxed totpPolicy without a global admin
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':

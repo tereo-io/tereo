@@ -308,7 +308,9 @@
       count), otherwise `403` naming the permissions. Roles the user keeps
       are not checked. Removing any role from another user needs the caller
       to hold every permission that user holds, in any scope (`403`
-      otherwise).
+      otherwise). Adding a role with `requires2fa` revokes the user's access
+      tokens from logins without a second factor, so their next refresh
+      meets the 2FA step-up.
 
       An audit log entry is created for this action.
       An `auth.user.roles-changed` webhook event is emitted.

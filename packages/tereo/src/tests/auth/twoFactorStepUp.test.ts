@@ -1,6 +1,9 @@
 import { generateTotpSecret, encryptTotpSecret } from "../../utils/totp.js";
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { ensureTestOrganization } from "../utils/principals.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../utils/principals.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
@@ -75,9 +78,9 @@ const post = async (jar: CookieJar, path: string, body: object) => {
 
 /**
  * A login through to consent, with a TOTP code when one is asked for. The
- * jar keeps the SSO session; returns the code exchange's refresh token.
+ * jar keeps the SSO session; returns the code exchange's tokens.
  */
-const signIn = async (
+const signInForTokens = async (
   jar: CookieJar,
   user: { email: string; plainPassword: string; secret?: string }
 ) => {
@@ -118,10 +121,40 @@ const signIn = async (
     }),
   });
   expect(res.status).toBe(HTTP_STATUS.OK);
-  const { refresh_token } = (await res.json()) as { refresh_token: string };
-  expect(refresh_token).toBeTruthy();
-  return refresh_token;
+  const tokens = (await res.json()) as {
+    access_token: string;
+    refresh_token: string;
+  };
+  expect(tokens.refresh_token).toBeTruthy();
+  return tokens;
 };
+
+const signIn = async (
+  jar: CookieJar,
+  user: { email: string; plainPassword: string; secret?: string }
+) => (await signInForTokens(jar, user)).refresh_token;
+
+const userinfoStatus = async (accessToken: string) =>
+  (
+    await fetch(`${BASE_URL}/oauth/userinfo`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+  ).status;
+
+const adminCall = (
+  token: string,
+  method: string,
+  path: string,
+  body: unknown
+) =>
+  fetch(`${BASE_URL}/v1/admin${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
 
 /** GET /oauth/authorize with the SSO cookie; returns where it redirects. */
 const continueSession = async (
@@ -264,5 +297,117 @@ describe("2FA required after a password-only sign-in", () => {
       body: JSON.stringify({ grant_type: "client_credentials" }),
     });
     expect(res.status).toBe(HTTP_STATUS.OK);
+  });
+});
+
+describe("revoking password-only access tokens when 2FA becomes required", () => {
+  it("revokes them when the policy becomes required, sparing logins with 2FA", async () => {
+    const password = await signInForTokens(new Map(), await createTestUser());
+    const withTotp = await signInForTokens(new Map(), await createTotpUser());
+    expect(await userinfoStatus(password.access_token)).toBe(HTTP_STATUS.OK);
+
+    const admin = await getTestPrincipalToken({ permissions: ["admin"] });
+    const res = await adminCall(admin, "PATCH", "/settings", {
+      totpPolicy: "required",
+    });
+    expect(res.status).toBe(HTTP_STATUS.OK);
+
+    expect(await userinfoStatus(password.access_token)).toBe(
+      HTTP_STATUS.UNAUTHORIZED
+    );
+    expect(await userinfoStatus(withTotp.access_token)).toBe(HTTP_STATUS.OK);
+    expect((await refresh(password.refresh_token)).status).toBe(
+      HTTP_STATUS.BAD_REQUEST
+    );
+  });
+
+  it("revokes only holders of a role requiring 2FA when the policy leaves disabled", async () => {
+    await setPolicy("disabled");
+    const holder = await createUserWithRole();
+    const holderTokens = await signInForTokens(new Map(), holder.user);
+    const other = await signInForTokens(new Map(), await createTestUser());
+    await holder.require2fa();
+
+    const admin = await getTestPrincipalToken({ permissions: ["admin"] });
+    const res = await adminCall(admin, "PATCH", "/settings", {
+      totpPolicy: "optional",
+    });
+    expect(res.status).toBe(HTTP_STATUS.OK);
+
+    expect(await userinfoStatus(holderTokens.access_token)).toBe(
+      HTTP_STATUS.UNAUTHORIZED
+    );
+    expect(await userinfoStatus(other.access_token)).toBe(HTTP_STATUS.OK);
+  });
+
+  it("revokes a holder's when their role comes to require 2FA", async () => {
+    const role = await createTestRole();
+    const user = await createTestUser();
+    await prisma.userRole.create({ data: { userId: user.id, roleId: role.id } });
+    const tokens = await signInForTokens(new Map(), user);
+    const rolesWriter = await getTestPrincipalToken({
+      permissions: ["roles.write"],
+    });
+
+    const renamed = await adminCall(rolesWriter, "PATCH", `/roles/${role.id}`, {
+      displayName: "Still optional",
+    });
+    expect(renamed.status).toBe(HTTP_STATUS.OK);
+    expect(await userinfoStatus(tokens.access_token)).toBe(HTTP_STATUS.OK);
+
+    const res = await adminCall(rolesWriter, "PATCH", `/roles/${role.id}`, {
+      requires2fa: true,
+    });
+    expect(res.status).toBe(HTTP_STATUS.OK);
+    expect(await userinfoStatus(tokens.access_token)).toBe(
+      HTTP_STATUS.UNAUTHORIZED
+    );
+    expect((await refresh(tokens.refresh_token)).status).toBe(
+      HTTP_STATUS.BAD_REQUEST
+    );
+  });
+
+  it("revokes a user's when they are given a role requiring 2FA, globally or in an organization", async () => {
+    const usersWriter = await getTestPrincipalToken({
+      permissions: ["users.write", "organizations.write"],
+    });
+    const plainRole = await createTestRole();
+    const strictRole = await createTestRole();
+    await prisma.role.update({
+      where: { id: strictRole.id },
+      data: { requires2fa: true },
+    });
+
+    const user = await createTestUser();
+    const tokens = await signInForTokens(new Map(), user);
+    const plain = await adminCall(usersWriter, "PUT", `/users/${user.id}/roles`, {
+      roleIds: [plainRole.id],
+    });
+    expect(plain.status).toBe(HTTP_STATUS.OK);
+    expect(await userinfoStatus(tokens.access_token)).toBe(HTTP_STATUS.OK);
+    const strict = await adminCall(
+      usersWriter,
+      "PUT",
+      `/users/${user.id}/roles`,
+      { roleIds: [plainRole.id, strictRole.id] }
+    );
+    expect(strict.status).toBe(HTTP_STATUS.OK);
+    expect(await userinfoStatus(tokens.access_token)).toBe(
+      HTTP_STATUS.UNAUTHORIZED
+    );
+
+    const member = await createTestUser();
+    const orgId = await joinOrg(member.id);
+    const memberTokens = await signInForTokens(new Map(), member);
+    const inOrg = await adminCall(
+      usersWriter,
+      "PUT",
+      `/organizations/${orgId}/members/${member.id}/roles`,
+      { roleIds: [strictRole.id] }
+    );
+    expect(inOrg.status).toBe(HTTP_STATUS.OK);
+    expect(await userinfoStatus(memberTokens.access_token)).toBe(
+      HTTP_STATUS.UNAUTHORIZED
+    );
   });
 });
