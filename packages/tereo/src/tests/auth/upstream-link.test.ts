@@ -464,6 +464,26 @@ describe("unlinking", () => {
     expect(res.status).toBe(204);
   });
 
+  it("counts no identity at a deactivated provider as another way in", async () => {
+    const { user, token } = await passwordless();
+    const second = await createProvider();
+    const identity = await prisma.userIdentity.create({
+      data: { userId: user.id, providerId: provider.id, subject: subject() },
+    });
+    await prisma.userIdentity.create({
+      data: { userId: user.id, providerId: second.id, subject: subject() },
+    });
+    await prisma.identityProvider.update({
+      where: { id: second.id },
+      data: { isActive: false },
+    });
+    const res = await account(token, "DELETE", `/identities/${identity.id}`);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "last_sign_in_method"
+    );
+  });
+
   it("refuses with 409 sso_required under an SSO-only domain for that provider", async () => {
     const domain = `sso-${generateUniqueId().toLowerCase()}.test`;
     const user = await createTestUser({ email: `someone@${domain}` });

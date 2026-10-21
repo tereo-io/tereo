@@ -441,8 +441,9 @@ provider, among the codes below), and at `/login?error=session_expired` when the
 already gone (a link session with no user lands on `/account?error=session_expired`).
 
 `DELETE /v1/account/identities/{id}` unlinks, under the same two rules. It is refused with 409
-`last_sign_in_method` when the user has no password and it is their only identity, and with 409
-`sso_required` when their email's domain is `ssoOnly` for that provider. An admin can unlink with
+`last_sign_in_method` when the user has no password and no other identity at an active provider (one
+at a deactivated provider is no way in), and with 409 `sso_required` when their email's domain is
+`ssoOnly` for that provider. An admin can unlink with
 `DELETE /v1/admin/users/{id}/identities/{identityId}`, with the same 409s but no recent-login rule.
 
 For an `ssoOnly` domain, the password check runs first and unchanged, so nothing reveals whether an
@@ -506,7 +507,7 @@ authorize parameters (so the user can retry) and `error=<code>`. They never redi
 | Code                                     | Meaning                                                                                                                                                                                                                                      |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `upstream_cancelled`                     | The provider returned `access_denied`: the user declined or cancelled                                                                                                                                                                        |
-| `upstream_failed`                        | The provider returned an error, or the code exchange or ID token validation failed (logged with the cause)                                                                                                                                   |
+| `upstream_failed`                        | The provider returned an error, or the code exchange or ID token validation failed (logged with the cause), or sent a response over 1 MiB or a `sub` over 255 characters                                                                     |
 | `session_expired`                        | No or mismatched `upstream_auth` cookie, or an unknown, used or expired round trip (10 minutes), or no authorize session cookie at start; for a link grant, a missing cookie, a used or expired grant, or another provider than the domain's |
 | `provider_inactive`                      | The provider was deactivated before or during the flow                                                                                                                                                                                       |
 | `no_account`                             | No linked identity, no invite, and no auto-accept domain of this provider (also: no email claim, or the domain's organization is archived or inactive)                                                                                       |

@@ -119,7 +119,19 @@ const configOrFail = async (
 const text = (value: unknown): string | null =>
   typeof value === "string" && value !== "" ? value : null;
 
-const toIdentity = (claims: client.IDToken): NormalizedIdentity => {
+// UserIdentity.subject's column width.
+const SUBJECT_MAX_LENGTH = 255;
+
+const toIdentity = (
+  provider: IdentityProvider,
+  claims: client.IDToken
+): NormalizedIdentity => {
+  if (claims.sub.length > SUBJECT_MAX_LENGTH) {
+    throw new UpstreamAuthError(
+      "upstream_failed",
+      `Identity provider ${provider.slug} sent a subject longer than ${SUBJECT_MAX_LENGTH} characters`
+    );
+  }
   // A claim that isn't one well-formed address ("a@evil.com, b@corp.com")
   // counts as none: it would be matched by its last domain, provisioned as
   // the account's email and later expand into several mail recipients.
@@ -202,7 +214,7 @@ const complete = async (
       `Identity provider ${provider.slug} returned no id_token`
     );
   }
-  return toIdentity(claims);
+  return toIdentity(provider, claims);
 };
 
 const invalidConfig = (message: string) =>

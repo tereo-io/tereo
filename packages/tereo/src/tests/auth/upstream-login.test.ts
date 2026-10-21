@@ -510,6 +510,20 @@ describe("sign-in through a provider", () => {
     expectLoginFailure(callback, "upstream_failed", true);
   });
 
+  it("refuses a token response over 1 MiB as upstream_failed", async () => {
+    const { claims } = await linkedUser(provider);
+    fake.tamper({ oversizeTokenResponse: true });
+    const { callback } = await loginFlow(fake, provider, { claims });
+    expectLoginFailure(callback, "upstream_failed", true);
+  });
+
+  it("refuses a subject longer than 255 characters as upstream_failed", async () => {
+    const { callback } = await loginFlow(fake, provider, {
+      claims: { sub: "s".repeat(256) },
+    });
+    expectLoginFailure(callback, "upstream_failed", true);
+  });
+
   it("maps access_denied at the provider to upstream_cancelled", async () => {
     fake.tamper({ error: "access_denied" });
     const { callback } = await loginFlow(fake, provider);
