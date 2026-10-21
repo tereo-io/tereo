@@ -1,26 +1,26 @@
 .t-error-page-icon {
-  color: var(--danger-color);
+  color: var(--k-danger-color);
 }
 
 .t-error-page-details {
   width: 100%;
-  color: var(--text-color-secondary);
+  color: var(--k-text-color-secondary);
 }
 
 .t-error-page-details summary {
   cursor: pointer;
-  font-size: var(--text-size-sm);
+  font-size: var(--k-text-size-sm);
   padding: 0.25rem 0;
 }
 
 .t-error-page-details pre {
   margin: 0.5rem 0 0;
   padding: 0.75rem;
-  background-color: var(--background-color-dark);
-  border: 1px solid var(--border-color);
+  background-color: var(--k-background-color-dark);
+  border: 1px solid var(--k-border-color);
   border-radius: 0.375rem;
-  color: var(--text-color);
-  font-size: var(--text-size-sm);
+  color: var(--k-text-color);
+  font-size: var(--k-text-size-sm);
   line-height: 1.4;
   overflow-x: auto;
   white-space: pre-wrap;

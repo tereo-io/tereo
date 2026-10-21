@@ -2,13 +2,13 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  color: var(--text-color-secondary);
-  font-size: var(--text-size-sm);
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
 }
 
 .t-login-divider::before,
 .t-login-divider::after {
   content: "";
   flex: 1;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--k-border-color);
 }

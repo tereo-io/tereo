@@ -2,6 +2,6 @@
 .t-bucket-detail-tabs-header {
   display: flex;
   gap: 0.5rem;
-  border-bottom: 2px solid var(--border-color);
+  border-bottom: 2px solid var(--k-border-color);
   margin-bottom: 1rem;
 }

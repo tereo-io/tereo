@@ -3,7 +3,7 @@
   height: calc(100% + 2rem);
   overflow: auto;
   margin: -1rem;
-  background-color: var(--background-color);
+  background-color: var(--k-background-color);
 }
 
 /* Redoc sizes its sticky menu to the viewport; the top bar (3rem) takes the
@@ -13,19 +13,19 @@
 }
 
 .t-api-docs[data-redoc-theme="dark"] {
-  background-color: var(--background-color);
-  color: var(--text-color);
+  background-color: var(--k-background-color);
+  color: var(--k-text-color);
 }
 
 /* Redoc internals don't fully honor theme prop — override directly */
 .t-api-docs[data-redoc-theme="dark"] input {
-  background-color: var(--background-color);
-  color: var(--text-color);
-  border-color: var(--border-color);
+  background-color: var(--k-background-color);
+  color: var(--k-text-color);
+  border-color: var(--k-border-color);
 }
 
 .t-api-docs[data-redoc-theme="dark"] input::placeholder {
-  color: var(--text-color-secondary);
+  color: var(--k-text-color-secondary);
 }
 
 /* Tables — header + rows + borders */
@@ -34,15 +34,15 @@
 }
 
 .t-api-docs[data-redoc-theme="dark"] table thead th {
-  background-color: var(--overlay-dark-weak) !important;
-  color: var(--text-color) !important;
-  border-color: var(--border-color) !important;
+  background-color: var(--k-overlay-dark-weak) !important;
+  color: var(--k-text-color) !important;
+  border-color: var(--k-border-color) !important;
 }
 
 .t-api-docs[data-redoc-theme="dark"] table tbody td {
   background-color: transparent !important;
-  color: var(--text-color) !important;
-  border-color: var(--border-color) !important;
+  color: var(--k-text-color) !important;
+  border-color: var(--k-border-color) !important;
 }
 
 .t-api-docs[data-redoc-theme="dark"] table thead tr,
@@ -52,7 +52,7 @@
 }
 
 .t-api-docs[data-redoc-theme="dark"] table tbody tr:nth-of-type(odd) td {
-  background-color: var(--overlay-dark-weak) !important;
+  background-color: var(--k-overlay-dark-weak) !important;
 }
 
 /* Kill Redoc's opacity-based zebra striping that fades odd rows */
@@ -68,14 +68,14 @@
 .t-api-docs[data-redoc-theme="dark"] [class*="Tabs"] > ul,
 .t-api-docs[data-redoc-theme="dark"] [class*="Tab"] {
   background-color: transparent;
-  color: var(--text-color);
+  color: var(--k-text-color);
 }
 
 /* Webhook / status pill backgrounds */
 .t-api-docs[data-redoc-theme="dark"] [class*="Badge"],
 .t-api-docs[data-redoc-theme="dark"] [class*="badge"] {
-  background-color: var(--background-color-light);
-  color: var(--text-color);
+  background-color: var(--k-background-color-light);
+  color: var(--k-text-color);
 }
 
 /* Catch-all: any white bg residue inside docs container */
@@ -84,7 +84,7 @@
   [style*="background-color: rgb(255, 255, 255)"],
 .t-api-docs[data-redoc-theme="dark"] [style*="background: white"],
 .t-api-docs[data-redoc-theme="dark"] [style*="background-color: white"] {
-  background-color: var(--background-color) !important;
+  background-color: var(--k-background-color) !important;
 }
 
 /* Force all heading elements readable */
@@ -94,7 +94,7 @@
 .t-api-docs[data-redoc-theme="dark"] h4,
 .t-api-docs[data-redoc-theme="dark"] h5,
 .t-api-docs[data-redoc-theme="dark"] h6 {
-  color: var(--text-color) !important;
+  color: var(--k-text-color) !important;
   opacity: 1 !important;
 }
 
@@ -112,14 +112,14 @@
 .t-api-docs[data-redoc-theme="dark"] [class*="DropdownLabel"],
 .t-api-docs[data-redoc-theme="dark"] caption,
 .t-api-docs[data-redoc-theme="dark"] th {
-  color: var(--text-color-secondary) !important;
+  color: var(--k-text-color-secondary) !important;
 }
 
 /* Sample panel meta (Content type, Copy/Expand/Collapse, application/json) */
 .t-api-docs[data-redoc-theme="dark"] [class*="DropdownLabel"],
 .t-api-docs[data-redoc-theme="dark"] [class*="SampleControls"] button,
 .t-api-docs[data-redoc-theme="dark"] [class*="OptionsList"] {
-  color: var(--text-color-secondary) !important;
+  color: var(--k-text-color-secondary) !important;
 }
 
 /* Force readable text on all redoc paragraphs / spans in dim states */
@@ -131,35 +131,35 @@
 
 /* Server name labels (Local development server / Production server) — Redoc forces dark color */
 .t-api-docs[data-redoc-theme="dark"] p {
-  color: var(--text-color) !important;
+  color: var(--k-text-color) !important;
 }
 
 /* SVG chevrons / carets — Redoc default fill = black, invisible on dark bg.
    Colored response/method chevrons keep their hue via higher-specificity class rules. */
 .t-api-docs[data-redoc-theme="dark"] svg polygon {
-  fill: var(--text-color);
+  fill: var(--k-text-color);
 }
 
 /* React-tabs (Payload / Response sample tabs) — selected tab bg = light, invisible */
 .t-api-docs[data-redoc-theme="dark"] .react-tabs__tab {
-  color: var(--text-color-secondary) !important;
+  color: var(--k-text-color-secondary) !important;
   background-color: transparent !important;
 }
 
 .t-api-docs[data-redoc-theme="dark"] .react-tabs__tab--selected {
-  background-color: var(--background-color-light) !important;
-  color: var(--text-color) !important;
-  border-color: var(--border-color) !important;
+  background-color: var(--k-background-color-light) !important;
+  color: var(--k-text-color) !important;
+  border-color: var(--k-border-color) !important;
 }
 
 .t-api-docs[data-redoc-theme="dark"] .react-tabs__tab:hover {
-  background-color: var(--overlay-dark-weak) !important;
+  background-color: var(--k-overlay-dark-weak) !important;
 }
 
 /* Inline <code> (markdown) — Redoc default red too dim on dark bg */
 .t-api-docs[data-redoc-theme="dark"] code {
-  color: var(--danger-color) !important;
-  background-color: var(--overlay-dark-weak);
+  color: var(--k-danger-color) !important;
+  background-color: var(--k-overlay-dark-weak);
   padding: 0.1em 0.35em;
   border-radius: 3px;
 }

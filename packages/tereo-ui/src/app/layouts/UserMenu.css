@@ -6,8 +6,8 @@
   width: 2rem;
   height: 2rem;
   border-radius: 50%;
-  border: 2px solid var(--overlay-light-medium);
-  background-color: var(--overlay-light-weak);
+  border: 2px solid var(--k-overlay-light-medium);
+  background-color: var(--k-overlay-light-weak);
   cursor: pointer;
   padding: 0;
   display: flex;
@@ -20,7 +20,7 @@
 }
 
 .t-avatar-btn:hover {
-  border-color: var(--text-color-light);
+  border-color: var(--k-text-color-light);
 }
 
 .t-avatar-img {
@@ -33,7 +33,7 @@
 }
 
 .t-avatar-icon {
-  color: var(--text-color-light);
+  color: var(--k-text-color-light);
   font-size: 0.9rem;
 }
 
@@ -41,12 +41,12 @@
   position: absolute;
   top: calc(100% + 0.5rem);
   right: 0;
-  background-color: var(--background-color);
+  background-color: var(--k-background-color);
   border-radius: 0.5rem;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--k-border-color);
   box-shadow:
-    0 0.5rem 1.5rem var(--shadow-color-hover),
-    0 0.25rem 0.5rem var(--shadow-color);
+    0 0.5rem 1.5rem var(--k-shadow-color-hover),
+    0 0.25rem 0.5rem var(--k-shadow-color);
   min-width: 15rem;
   z-index: 200;
   opacity: 0;
@@ -66,18 +66,18 @@
 
 .t-user-menu-header {
   padding: 0.875rem 1rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--k-border-color);
 }
 
 .t-user-menu-name {
   font-weight: 600;
   font-size: 0.875rem;
-  color: var(--text-color);
+  color: var(--k-text-color);
 }
 
 .t-user-menu-email {
   font-size: 0.75rem;
-  color: var(--text-color-secondary);
+  color: var(--k-text-color-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -85,7 +85,7 @@
 
 .t-user-menu-section {
   padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--k-border-color);
 }
 
 .t-user-menu-item {
@@ -94,7 +94,7 @@
   gap: 0.5rem;
   padding: 0.5rem 1rem;
   font-size: 0.875rem;
-  color: var(--text-color);
+  color: var(--k-text-color);
   text-decoration: none;
   cursor: pointer;
   background: none;
@@ -105,10 +105,10 @@
 }
 
 .t-user-menu-item:hover {
-  background-color: var(--background-color-hover);
+  background-color: var(--k-background-color-hover);
 }
 
 .t-user-menu-item svg {
   width: 1rem;
-  color: var(--text-color-secondary);
+  color: var(--k-text-color-secondary);
 }

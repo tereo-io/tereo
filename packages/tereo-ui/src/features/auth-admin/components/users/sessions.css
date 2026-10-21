@@ -37,10 +37,10 @@
 }
 
 .t-session-current .v-bordered-section {
-  border-color: var(--primary-color);
+  border-color: var(--k-primary-color);
   background-color: color-mix(
     in srgb,
-    var(--primary-color) 5%,
-    var(--background-color)
+    var(--k-primary-color) 5%,
+    var(--k-background-color)
   );
 }

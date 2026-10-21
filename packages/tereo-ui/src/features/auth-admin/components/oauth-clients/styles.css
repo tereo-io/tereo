@@ -20,7 +20,7 @@
 
 .t-uri-list li {
   padding: 0.25rem 0;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--k-border-color);
   word-break: break-all;
 }
 

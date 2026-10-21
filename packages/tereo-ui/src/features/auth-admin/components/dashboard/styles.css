@@ -6,7 +6,7 @@
 }
 
 .t-recent-list li {
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--k-border-color);
 }
 
 .t-recent-list li:last-child {
@@ -24,7 +24,7 @@
 }
 
 .t-recent-list a:hover {
-  background-color: var(--background-color);
+  background-color: var(--k-background-color);
   margin: 0 -1rem;
   padding-left: 1rem;
   padding-right: 1rem;
@@ -32,16 +32,16 @@
 
 .t-recent-name {
   font-weight: 500;
-  color: var(--text-color);
+  color: var(--k-text-color);
 }
 
 .t-view-all {
   display: block;
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--k-border-color);
   text-align: center;
-  color: var(--primary-color);
+  color: var(--k-primary-color);
   text-decoration: none;
   font-weight: 500;
 }

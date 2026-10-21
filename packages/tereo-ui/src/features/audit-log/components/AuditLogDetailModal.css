@@ -19,11 +19,11 @@
 }
 
 .t-audit-old {
-  color: var(--danger-color);
+  color: var(--k-danger-color);
 }
 
 .t-audit-new {
-  color: var(--success-color);
+  color: var(--k-success-color);
 }
 
 .t-audit-inline-actions {
