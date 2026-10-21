@@ -83,6 +83,27 @@ export const getByNameWithService = async (name: string) => {
   return bucket;
 };
 
+/**
+ * The live bucket as `getByNameWithService` returns it, read under the row
+ * lock `lockForWrite` and `setOwner` take, so no other write to the bucket
+ * lands between this read and the caller's commit.
+ */
+export const getForUpdate = async (
+  id: number,
+  tx: Prisma.TransactionClient
+) => {
+  const [locked] = await tx.$queryRaw<{ id: number }[]>`
+    SELECT "id" FROM "files"."buckets"
+    WHERE "id" = ${id} AND "deleted_at" IS NULL
+    FOR NO KEY UPDATE
+  `;
+  if (!locked) throw new NotFoundError("Bucket not found");
+  return await tx.bucket.findUniqueOrThrow({
+    where: { id },
+    include: withRefs,
+  });
+};
+
 export const getPaginated = async (
   options: GetPaginatedOptions & { organizationId?: string }
 ) => {

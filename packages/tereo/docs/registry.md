@@ -100,7 +100,9 @@ changing the description, and revoking the service's own grant. Transferring its
 (`PUT /buckets/:name/owner`) is refused the same way: its owner is the service's account.
 Everything else an admin sets is kept — the declaration never re-applies it. Bucket responses
 carry `createdBy`, `ownerId` (both the service's account user), `serviceId`,
-`serviceName`, `missingSince` and `retiredAt`.
+`serviceName`, `missingSince` and `retiredAt`. A declared bucket belongs to no organization, so its
+webhook events carry `organizationId: null` and go only to endpoints of all organizations and to
+the service's own endpoints ([files](files.md#webhook-events)).
 
 A declared bucket can be deleted, like any other, once it is no longer declared:
 
@@ -166,6 +168,11 @@ that changes its declaration a new `version`, so the stored version tells which 
 | Bucket | Read-only: uploads, copies, multipart and new versions get `409 bucket_retired`. Reads, downloads, shares and deletes still work, and the bucket itself can now be deleted. No data is touched |
 
 Nothing is deleted. Re-declaring an item brings it back, unless an admin deleted the bucket.
+
+The transaction that retires items also writes an audit entry for each, by the system user
+(`ARCHIVE` on `Permission`, `Role`, `bucket` or `EventType`, `metadata: { reason: "retired",
+serviceId, missingSince }`), and emits `file-service.bucket.updated` with `data.retired: true` for
+each retired bucket.
 
 ## Provisioned services
 

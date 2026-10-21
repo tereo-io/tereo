@@ -3,7 +3,6 @@ import { broadcastBucketInvalidate } from "../../../../../../utils/cacheBroadcas
 import { assertOwnerTransferable } from "../../../../../../utils/bucketAccess.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { canActInOrganization } from "../../../../../../utils/users.js";
-import { emitTx, logAuditTx } from "../../../../../../utils/outbox.js";
 import { BadRequestError } from "../../../../../../utils/errors.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { grantTx } from "../../../../../../utils/bucketGrants.js";
@@ -16,6 +15,11 @@ import {
   validateBody,
   validateParams,
 } from "../../../../../../utils/validateReq.js";
+import {
+  bucketEventScope,
+  emitTx,
+  logAuditTx,
+} from "../../../../../../utils/outbox.js";
 
 /**
  * Transfer a bucket's ownership (`file-service.admin` only)
@@ -86,19 +90,17 @@ export const transferBucketOwnership = async (req: Request, res: Response) => {
           metadata: { bucketName: next.name },
         });
 
-        if (next.organizationId) {
-          await emitTx(tx, {
-            eventType: "file-service.bucket.owner-changed",
-            organizationId: next.organizationId,
-            entityType: "bucket",
-            entityId: String(next.id),
-            data: {
-              bucketName: next.name,
-              ownerId: next.ownerId,
-              previousOwnerId,
-            },
-          });
-        }
+        await emitTx(tx, {
+          eventType: "file-service.bucket.owner-changed",
+          ...bucketEventScope(next),
+          entityType: "bucket",
+          entityId: String(next.id),
+          data: {
+            bucketName: next.name,
+            ownerId: next.ownerId,
+            previousOwnerId,
+          },
+        });
       }
 
       return { updated: next, previousOwnerId, granted };

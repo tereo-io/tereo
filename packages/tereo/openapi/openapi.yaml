@@ -2096,6 +2096,20 @@ webhooks:
     $ref: './paths/files/webhook-events.yaml#/file-service.share.accessed'
   webhook.test:
     $ref: './paths/webhooks/webhooks.yaml#/webhook.test'
+  webhook.endpoint.created:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.created'
+  webhook.endpoint.updated:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.updated'
+  webhook.endpoint.archived:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.archived'
+  webhook.endpoint.restored:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.restored'
+  webhook.endpoint.deleted:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.deleted'
+  webhook.endpoint.secret-rotated:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.secret-rotated'
+  webhook.endpoint.previous-secret-revoked:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.previous-secret-revoked'
   notification.connection.created:
     $ref: './paths/notifications/connections.yaml#/notification.connection.created'
   notification.connection.updated:

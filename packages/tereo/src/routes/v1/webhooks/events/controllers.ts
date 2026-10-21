@@ -89,7 +89,7 @@ export const emitEvent = async (req: Request, res: Response) => {
   await assertEmitScope(auth, [body.organizationId]);
   await assertOrganizationsExist([body.organizationId]);
   await assertMayEmit(auth, [body.eventType]);
-  const processResult = await emitWithIdempotency(body, auth.userId);
+  const processResult = await emitWithIdempotency(body, auth);
   res.status(202).json({ deliveriesCreated: processResult.deliveriesCreated });
 };
 
@@ -102,6 +102,6 @@ export const batchEmitEvents = async (req: Request, res: Response) => {
   await assertEmitScope(auth, organizationIds);
   await assertOrganizationsExist(organizationIds);
   await assertMayEmit(auth, eventTypes);
-  const results = await emitBatchWithIdempotency(body.events, auth.userId);
+  const results = await emitBatchWithIdempotency(body.events, auth);
   res.status(202).json({ results });
 };

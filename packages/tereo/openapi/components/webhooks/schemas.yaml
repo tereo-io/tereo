@@ -888,3 +888,77 @@ DeliveryStats:
     - successRate
     - averageAttempts
     - last24Hours
+
+WebhookEndpointEventData:
+  type: object
+  description: |
+    The endpoint a `webhook.endpoint.*` event is about. No signing secret and
+    no custom header values; `url` keeps only origin and path.
+  properties:
+    id:
+      type: string
+      format: uuid
+    organizationId:
+      type:
+        - string
+        - "null"
+      format: uuid
+      description: Null for an endpoint of all organizations.
+    ownerServiceId:
+      type:
+        - string
+        - "null"
+      format: uuid
+    url:
+      type: string
+      description: The endpoint's URL without query string or user-info.
+      examples:
+        - "https://example.com/hooks/tereo"
+    description:
+      type:
+        - string
+        - "null"
+    status:
+      $ref: '#/WebhookEndpointStatus'
+    eventTypes:
+      type: array
+      items:
+        type: string
+    customHeaderNames:
+      type: array
+      items:
+        type: string
+      description: Names of the endpoint's custom headers, sorted; never their values.
+    provisioned:
+      type: boolean
+    createdBy:
+      type: string
+      format: uuid
+    archivedAt:
+      type:
+        - string
+        - "null"
+      format: date-time
+    changedFields:
+      type: array
+      items:
+        type: string
+      description: On `webhook.endpoint.updated`, the fields the update changed.
+    previousSecretExpiresAt:
+      type:
+        - string
+        - "null"
+      format: date-time
+      description: On `webhook.endpoint.secret-rotated`, when the replaced secret stops signing (null without an overlap).
+  required:
+    - id
+    - organizationId
+    - ownerServiceId
+    - url
+    - description
+    - status
+    - eventTypes
+    - customHeaderNames
+    - provisioned
+    - createdBy
+    - archivedAt

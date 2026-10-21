@@ -6,6 +6,7 @@ import { formatWebhookEndpoint } from "../../../../../utils/transformers.js";
 import { logAuditTx, computeChanges } from "../../../../../utils/outbox.js";
 import { webhookScope } from "../../../../../utils/webhookOwnership.js";
 import { TEST_EVENT_TYPE } from "../../../../../definitions/index.js";
+import { emitEndpointEventTx, redactWebhookUrl } from "../events.js";
 import { validateUser } from "../../../../../middleware/auth.js";
 import db from "../../../../../utils/db/index.js";
 import { Request, Response } from "express";
@@ -15,6 +16,7 @@ import {
   resolveMaskedHeaders,
 } from "../../../../../utils/webhookHeaders.js";
 import {
+  assertMayRedirectFileEvents,
   assertMaySubscribe,
   assertNotManagedByIntegration,
   assertNotProvisioned,
@@ -127,6 +129,16 @@ export const updateWebhookEndpoint = async (req: Request, res: Response) => {
     const customHeaders = body.customHeaders
       ? resolveMaskedHeaders(body.customHeaders, current.customHeaders)
       : body.customHeaders;
+    assertMayRedirectFileEvents(auth, current, {
+      redirects:
+        (body.url !== undefined && body.url !== current.url) ||
+        (customHeaders !== undefined &&
+          computeChanges(
+            { customHeaders: current.customHeaders },
+            { customHeaders }
+          ) !== undefined),
+      eventTypes: body.eventTypes,
+    });
     const result = await db.webhookEndpoints.update(
       id,
       { ...body, customHeaders },
@@ -143,6 +155,12 @@ export const updateWebhookEndpoint = async (req: Request, res: Response) => {
         new: maskCustomHeaders(changes.customHeaders.new),
       };
     }
+    if (changes?.url) {
+      changes.url = {
+        old: redactWebhookUrl(String(changes.url.old)),
+        new: redactWebhookUrl(String(changes.url.new)),
+      };
+    }
     await logAuditTx(tx, {
       auth,
       organizationId,
@@ -151,6 +169,11 @@ export const updateWebhookEndpoint = async (req: Request, res: Response) => {
       entityId: id,
       changes,
     });
+    if (changes) {
+      await emitEndpointEventTx(tx, "updated", result, {
+        changedFields: Object.keys(changes),
+      });
+    }
     return result;
   });
 
@@ -179,6 +202,7 @@ export const archiveWebhookEndpoint = async (req: Request, res: Response) => {
       entityType: "WebhookEndpoint",
       entityId: id,
     });
+    await emitEndpointEventTx(tx, "archived", result);
     return result;
   });
 
@@ -207,6 +231,7 @@ export const restoreWebhookEndpoint = async (req: Request, res: Response) => {
       entityType: "WebhookEndpoint",
       entityId: id,
     });
+    await emitEndpointEventTx(tx, "restored", result);
     return result;
   });
 
@@ -240,8 +265,9 @@ export const deleteWebhookEndpoint = async (req: Request, res: Response) => {
       action: "DELETE",
       entityType: "WebhookEndpoint",
       entityId: id,
-      metadata: { url: existing.url },
+      metadata: { url: redactWebhookUrl(existing.url) },
     });
+    await emitEndpointEventTx(tx, "deleted", existing);
   });
 
   res.status(204).send();
@@ -276,6 +302,9 @@ export const rotateSecret = async (req: Request, res: Response) => {
       entityId: id,
       metadata: { action: "rotate-secret", previousSecretExpiresAt },
     });
+    await emitEndpointEventTx(tx, "secret-rotated", result.endpoint, {
+      previousSecretExpiresAt,
+    });
     return result;
   });
 
@@ -306,6 +335,7 @@ export const revokePreviousSecret = async (req: Request, res: Response) => {
       entityId: id,
       metadata: { action: "revoke-previous-secret" },
     });
+    await emitEndpointEventTx(tx, "previous-secret-revoked", result);
     return result;
   });
 

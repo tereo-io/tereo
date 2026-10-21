@@ -154,7 +154,13 @@ export function computeChanges(
 // ===========================================================================
 
 export interface EmitTxInput {
-  organizationId: string;
+  /**
+   * Null for a resource outside any organization (an app service's declared
+   * bucket): sent only to endpoints of all organizations and to `serviceId`'s.
+   */
+  organizationId: string | null;
+  /** The service whose resource this is; used only without an organization. */
+  serviceId?: string | null;
   eventType: string;
   entityType: string;
   entityId: string;
@@ -162,6 +168,15 @@ export interface EmitTxInput {
   /** Slugs of services or integrations: sent only to endpoints they own. */
   recipients?: string[];
 }
+
+/** Where a bucket's events go: its organization, or its service's endpoints. */
+export const bucketEventScope = (bucket: {
+  organizationId: string | null;
+  serviceId: string | null;
+}): Pick<EmitTxInput, "organizationId" | "serviceId"> =>
+  bucket.organizationId
+    ? { organizationId: bucket.organizationId }
+    : { organizationId: null, serviceId: bucket.serviceId };
 
 const KNOWN_EVENT_TYPES = new Set(EVENT_TYPES.map((e) => e.eventType));
 

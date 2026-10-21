@@ -1,7 +1,6 @@
 import { getAccessibleBucket } from "../../../../../../utils/bucketAccess.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { initiateBodySchema, initiateParamsSchema } from "./schemas.js";
-import { logAuditTx, emitTx } from "../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { assertMultipartFits, assertStagingFits } from "./utils.js";
 import { assertObjectKeyNotReserved } from "../objects/utils.js";
@@ -12,6 +11,11 @@ import {
   validateBody,
   validateParams,
 } from "../../../../../../utils/validateReq.js";
+import {
+  bucketEventScope,
+  logAuditTx,
+  emitTx,
+} from "../../../../../../utils/outbox.js";
 
 export const initiateMultipart = async (req: Request, res: Response) => {
   const auth = validateUser(req);
@@ -56,20 +60,18 @@ export const initiateMultipart = async (req: Request, res: Response) => {
       },
     });
 
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.multipart.initiated",
-        organizationId: bucket.organizationId,
-        entityType: "multipartUpload",
-        entityId: u.id,
-        data: {
-          bucketName: bucket.name,
-          objectKey: u.objectKey,
-          contentType: u.contentType,
-          expiresAt: u.expiresAt,
-        },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.multipart.initiated",
+      ...bucketEventScope(bucket),
+      entityType: "multipartUpload",
+      entityId: u.id,
+      data: {
+        bucketName: bucket.name,
+        objectKey: u.objectKey,
+        contentType: u.contentType,
+        expiresAt: u.expiresAt,
+      },
+    });
 
     return u;
   });

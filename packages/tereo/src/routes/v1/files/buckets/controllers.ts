@@ -5,12 +5,16 @@ import { assertBucketNameUnreserved } from "../../../../utils/registry.js";
 import { createBucketSchema, listBucketsQuerySchema } from "./schemas.js";
 import { setAccessLog } from "../../../../middleware/accessLog.js";
 import { hasPermission } from "../../../../utils/permissions.js";
-import { emitTx, logAuditTx } from "../../../../utils/outbox.js";
 import { BadRequestError } from "../../../../utils/errors.js";
 import { validateUser } from "../../../../middleware/auth.js";
 import { serializeBucket } from "./bucket/controllers.js";
 import db from "../../../../utils/db/index.js";
 import { Request, Response } from "express";
+import {
+  bucketEventScope,
+  emitTx,
+  logAuditTx,
+} from "../../../../utils/outbox.js";
 import {
   applyCursorToWhere,
   buildCursorWhere,
@@ -118,19 +122,17 @@ export const createBucket = async (req: Request, res: Response) => {
       },
     });
 
-    if (created.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.bucket.created",
-        organizationId: created.organizationId,
-        entityType: "bucket",
-        entityId: String(created.id),
-        data: {
-          bucketName: created.name,
-          policy: created.policy,
-          versioningEnabled: created.versioningEnabled,
-        },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.bucket.created",
+      ...bucketEventScope(created),
+      entityType: "bucket",
+      entityId: String(created.id),
+      data: {
+        bucketName: created.name,
+        policy: created.policy,
+        versioningEnabled: created.versioningEnabled,
+      },
+    });
 
     // The creator's object access is an ordinary grant: listed with the
     // others, and revocable like them. Managing the bucket as its owner
@@ -163,22 +165,20 @@ export const createBucket = async (req: Request, res: Response) => {
       },
     });
 
-    if (created.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.permission.granted",
-        organizationId: created.organizationId,
-        entityType: "bucketPermission",
-        entityId: String(grant.id),
-        data: {
-          bucketName: created.name,
-          userId: grant.userId,
-          canRead: grant.canRead,
-          canWrite: grant.canWrite,
-          canDelete: grant.canDelete,
-          grantedBy: grant.grantedBy,
-        },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.permission.granted",
+      ...bucketEventScope(created),
+      entityType: "bucketPermission",
+      entityId: String(grant.id),
+      data: {
+        bucketName: created.name,
+        userId: grant.userId,
+        canRead: grant.canRead,
+        canWrite: grant.canWrite,
+        canDelete: grant.canDelete,
+        grantedBy: grant.grantedBy,
+      },
+    });
 
     return created;
   });

@@ -1,9 +1,9 @@
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { PERMISSION_CATALOG } from "../definitions/permissions.js";
+import { bucketEventScope, emitTx, logAuditTx } from "./outbox.js";
 import { broadcastBucketInvalidate } from "./cacheBroadcast.js";
 import { compareSemver, SEMVER_PATTERN } from "./semver.js";
 import type { Declaration } from "../definitions/index.js";
-import { emitTx, logAuditTx } from "./outbox.js";
 import { ROLES } from "../definitions/roles.js";
 import type { Prisma } from "./db/prisma.js";
 import { prisma } from "./db/prisma.js";
@@ -846,6 +846,15 @@ const applyEventTypes = async (
 // Retirement
 // ---------------------------------------------------------------------------
 
+interface RetiredItem {
+  entityType: string;
+  id: string;
+  name: string;
+  serviceId: string | null;
+  organizationId?: string | null;
+  missingSince: Date | null;
+}
+
 /**
  * Retire every item missing from its declaration for longer than the grace
  * period. Run hourly by the worker; `now` is a parameter for tests.
@@ -856,21 +865,76 @@ export const retireMissing = async (now = new Date()) => {
   );
   const where = { missingSince: { lte: cutoff }, retiredAt: null };
   const data = { retiredAt: now };
+  const retiredSelect = {
+    id: true,
+    name: true,
+    serviceId: true,
+    missingSince: true,
+  } as const;
   const { counts, retiredBuckets } = await prisma.$transaction(async (tx) => {
-    const permissions = await tx.permission.updateMany({ where, data });
-    const roles = await tx.role.updateMany({ where, data });
+    const permissions = await tx.permission.updateManyAndReturn({
+      where,
+      data,
+      select: retiredSelect,
+    });
+    const roles = await tx.role.updateManyAndReturn({
+      where,
+      data,
+      select: retiredSelect,
+    });
     const buckets = await tx.bucket.updateManyAndReturn({
       where,
       data,
-      select: { name: true },
+      select: { ...retiredSelect, organizationId: true },
     });
-    const eventTypes = await tx.eventType.updateMany({ where, data });
+    const eventTypes = await tx.eventType.updateManyAndReturn({
+      where,
+      data,
+      select: { eventType: true, serviceId: true, missingSince: true },
+    });
+
+    const retired: RetiredItem[] = [
+      ...permissions.map((p) => ({ ...p, entityType: "Permission" })),
+      ...roles.map((r) => ({ ...r, entityType: "Role" })),
+      ...buckets.map((b) => ({ ...b, id: String(b.id), entityType: "bucket" })),
+      ...eventTypes.map((e) => ({
+        ...e,
+        id: e.eventType,
+        name: e.eventType,
+        entityType: "EventType",
+      })),
+    ];
+    for (const item of retired) {
+      await logAuditTx(tx, {
+        auth: { userId: SYSTEM_USER_ID, email: null },
+        organizationId: item.organizationId,
+        action: "ARCHIVE",
+        entityType: item.entityType,
+        entityId: item.id,
+        entityName: item.name,
+        metadata: {
+          reason: "retired",
+          serviceId: item.serviceId,
+          missingSince: item.missingSince,
+        },
+      });
+    }
+    for (const bucket of buckets) {
+      await emitTx(tx, {
+        eventType: "file-service.bucket.updated",
+        ...bucketEventScope(bucket),
+        entityType: "bucket",
+        entityId: String(bucket.id),
+        data: { bucketName: bucket.name, retired: true },
+      });
+    }
+
     return {
       counts: {
-        permissions: permissions.count,
-        roles: roles.count,
+        permissions: permissions.length,
+        roles: roles.length,
         buckets: buckets.length,
-        eventTypes: eventTypes.count,
+        eventTypes: eventTypes.length,
       },
       retiredBuckets: buckets.map((b) => b.name),
     };

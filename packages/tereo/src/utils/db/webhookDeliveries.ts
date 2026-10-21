@@ -24,6 +24,8 @@ export interface BulkRetryFilters {
   createdAfter?: Date;
   createdBefore?: Date;
   eventType?: string;
+  /** Leave `file-service.*` deliveries alone. */
+  excludeFileEvents?: boolean;
   limit: number;
 }
 
@@ -208,6 +210,8 @@ export const bulkResetForRetry = async (
     conditions.push(Prisma.sql`"created_at" <= ${filters.createdBefore}`);
   if (filters.eventType)
     conditions.push(Prisma.sql`"event_type" = ${filters.eventType}`);
+  if (filters.excludeFileEvents)
+    conditions.push(Prisma.sql`"event_type" NOT LIKE 'file-service.%'`);
 
   return await db.$queryRaw<DeliveryCursor[]>`
     UPDATE "webhooks"."webhook_deliveries" d
