@@ -9,12 +9,12 @@
 .t-setup-step h2 {
   font-size: 1.125rem;
   font-weight: 600;
-  color: var(--text-color);
+  color: var(--k-text-color);
   margin: 0 0 1rem;
 }
 
 .t-setup-step p {
-  color: var(--text-color-secondary);
+  color: var(--k-text-color-secondary);
   margin: 0 0 1rem;
   line-height: 1.6;
 }
@@ -25,7 +25,7 @@
 }
 
 .t-setup-step li {
-  color: var(--text-color-secondary);
+  color: var(--k-text-color-secondary);
   margin-bottom: 0.25rem;
 }
 
@@ -35,19 +35,19 @@
   justify-content: center;
   margin: 1.5rem 0;
   padding: 1rem;
-  background: var(--background-color-light);
+  background: var(--k-background-color-light);
   border-radius: 8px;
 }
 
 .t-manual-entry {
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--k-border-color);
 }
 
 .t-manual-entry p {
   font-size: 0.875rem;
-  color: var(--text-color-secondary);
+  color: var(--k-text-color-secondary);
   margin-bottom: 0.5rem;
 }
 

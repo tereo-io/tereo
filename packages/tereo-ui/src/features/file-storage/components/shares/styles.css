@@ -18,5 +18,5 @@
 .t-share-hint {
   margin: 0;
   font-size: 0.85em;
-  color: var(--text-color-secondary);
+  color: var(--k-text-color-secondary);
 }

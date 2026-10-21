@@ -2,8 +2,8 @@
   display: flex;
   align-items: center;
   height: 3rem;
-  background-color: var(--primary-color);
-  color: var(--text-color-light);
+  background-color: var(--k-primary-color);
+  color: var(--k-text-color-light);
   padding: 0 1rem;
   flex-shrink: 0;
 }
@@ -38,7 +38,7 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
-  color: var(--text-color-light);
+  color: var(--k-text-color-light);
   text-decoration: none;
   font-size: 0.875rem;
   font-weight: 500;
@@ -49,13 +49,13 @@
 }
 
 .t-topbar-link:hover {
-  background-color: var(--overlay-light-weak);
-  color: var(--text-color-light);
+  background-color: var(--k-overlay-light-weak);
+  color: var(--k-text-color-light);
 }
 
 .t-topbar-link.active {
-  border-bottom-color: var(--text-color-light);
-  background-color: var(--overlay-light-weak);
+  border-bottom-color: var(--k-text-color-light);
+  background-color: var(--k-overlay-light-weak);
 }
 
 .t-topbar-link svg {

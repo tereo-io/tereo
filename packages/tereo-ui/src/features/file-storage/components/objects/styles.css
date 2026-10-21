@@ -34,7 +34,7 @@
   height: 100%;
   object-fit: cover;
   border-radius: 0.25rem;
-  background: var(--background-color-dark);
+  background: var(--k-background-color-dark);
 }
 
 .t-object-preview-body {
@@ -74,7 +74,7 @@
 
 .t-folder-summary-icon {
   font-size: 1.25rem;
-  color: var(--secondary-color);
+  color: var(--k-secondary-color);
   flex-shrink: 0;
 }
 
@@ -108,10 +108,10 @@
 .t-folder-tree-picker {
   max-height: 14rem;
   overflow-y: auto;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--k-border-color);
   border-radius: 0.375rem;
   padding: 0.25rem;
-  background: var(--background-color-light);
+  background: var(--k-background-color-light);
 }
 
 .t-folder-tree-node {
@@ -128,7 +128,7 @@
 }
 
 .t-folder-tree-row-selected {
-  background: var(--primary-color-background-light);
+  background: var(--k-primary-color-background-light);
 }
 
 .t-folder-tree-name {
@@ -162,7 +162,7 @@
 }
 
 .t-folder-tree-pending-icon {
-  color: var(--text-color);
+  color: var(--k-text-color);
   opacity: 0.6;
   width: 1rem;
   flex-shrink: 0;
@@ -170,6 +170,6 @@
 
 .t-folder-tree-pending-error {
   font-size: 0.8125rem;
-  color: var(--danger-color);
+  color: var(--k-danger-color);
   margin-left: 1.5rem;
 }

@@ -12,6 +12,6 @@
 }
 
 .t-system-icon {
-  color: var(--text-color-secondary);
+  color: var(--k-text-color-secondary);
   font-size: 0.75rem;
 }
