@@ -46,6 +46,7 @@ const fakeReq = (name: string) =>
     params: { name },
     headers: { origin: ORIGIN },
     method: "GET",
+    ip: "203.0.113.1",
   }) as unknown as Request;
 
 const corsConfig = (origin: string) => ({
@@ -141,6 +142,41 @@ describe("bucket CORS and rate-limit config caches", () => {
           ({ id: bucketId, rateLimitConfig: oneRequestLimit }) as never
       );
       expect(await refusedOfThree(name)).toBe(2);
+    });
+  });
+
+  describe("a name with no bucket", () => {
+    it("is remembered for seconds, not as a bucket without CORS", async () => {
+      const name = `missing-cors-${Date.now()}`;
+      const spy = vi
+        .spyOn(db.buckets, "checkByName")
+        .mockResolvedValue(null as never);
+
+      await bucketCors(fakeReq(name), fakeRes().res, () => {});
+      await bucketCors(fakeReq(name), fakeRes().res, () => {});
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      // The bucket is created; past the short TTL its config is read.
+      spy.mockResolvedValue({ id: 1, corsConfig: corsConfig(ORIGIN) } as never);
+      const later = Date.now() + 6_000;
+      vi.spyOn(Date, "now").mockReturnValue(later);
+      const { res, headers } = fakeRes();
+      await bucketCors(fakeReq(name), res, () => {});
+      expect(headers["access-control-allow-origin"]).toBe(ORIGIN);
+    });
+
+    it("is forgotten on the bucket's invalidation", async () => {
+      const name = `missing-cors-inv-${Date.now()}`;
+      const spy = vi
+        .spyOn(db.buckets, "checkByName")
+        .mockResolvedValue(null as never);
+      await bucketCors(fakeReq(name), fakeRes().res, () => {});
+
+      spy.mockResolvedValue({ id: 1, corsConfig: corsConfig(ORIGIN) } as never);
+      await invalidate(name);
+      const { res, headers } = fakeRes();
+      await bucketCors(fakeReq(name), res, () => {});
+      expect(headers["access-control-allow-origin"]).toBe(ORIGIN);
     });
   });
 

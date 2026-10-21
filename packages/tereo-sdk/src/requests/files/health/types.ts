@@ -7,8 +7,6 @@ export interface FileServiceHealth {
   status: "ok" | "degraded";
   /** Service name — always `"tereo"`. */
   service: string;
-  /** Core's package version. */
-  version: string;
   /** ISO timestamp when the health check ran. */
   timestamp: string;
   /** Present, as `"fail"`, only when the database check failed. */

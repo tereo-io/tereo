@@ -1,8 +1,9 @@
+import { rateLimitHealth } from "../../middleware/rateLimit.js";
 import { getHealth } from "./controllers.js";
 import { Router } from "express";
 
 const healthRouter = Router();
 
-healthRouter.get("/", getHealth);
+healthRouter.get("/", rateLimitHealth, getHealth);
 
 export default healthRouter;

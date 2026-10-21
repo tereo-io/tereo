@@ -18,8 +18,9 @@ const router = Router();
 
 router.use(rateLimitGeneral);
 
-// Core's credential cookies are scoped to /oauth, so every cookie-
-// authenticated state change is under this router.
+// Every cookie-authenticated state change is under this router. The
+// credential cookies alone don't confine them to it: a `__Host-` cookie
+// (utils/cookies.ts) has path `/`, so the browser sends it to every path.
 router.use(requireAllowedOriginForCookies);
 
 router.use(noStore);

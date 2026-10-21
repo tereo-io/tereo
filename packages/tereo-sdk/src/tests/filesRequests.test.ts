@@ -197,7 +197,6 @@ describe("getHealth", () => {
   const degraded = {
     status: "degraded",
     service: "tereo",
-    version: "1",
     timestamp: "t",
     db: "fail",
   };

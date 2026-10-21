@@ -1,7 +1,6 @@
 import { HTTP_STATUS } from "./files/utils/test-helpers.js";
 import { CORE_URL } from "./utils/coreUrl.js";
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
 import axios from "axios";
 
 const BASE_URL = CORE_URL;
@@ -18,14 +17,32 @@ describe("Health Endpoint", () => {
       const data = response.data;
       expect(data.status).toBe("ok");
       expect(data.service).toBe("tereo");
-      // Read from package.json, not npm_package_version, which only npm sets.
-      const pkg = JSON.parse(
-        readFileSync(new URL("../../package.json", import.meta.url), "utf8")
-      ) as { version: string };
-      expect(pkg.version).not.toBe("0.0.0");
-      expect(data.version).toBe(pkg.version);
       expect(data.timestamp).toBeDefined();
       expect(typeof data.timestamp).toBe("string");
+    });
+
+    it("names no version", async () => {
+      const response = await axios.get(`${BASE_URL}/health`, {
+        validateStatus: () => true,
+      });
+      expect(response.data).not.toHaveProperty("version");
+    });
+
+    it("is rate-limited per address", async () => {
+      // The default TRUST_PROXY (loopback) honours X-Forwarded-For; a proxied
+      // caller gets the external tier, 300 a second.
+      const get = (ip: string) =>
+        axios.get(`${BASE_URL}/health`, {
+          headers: { "X-Forwarded-For": ip },
+          validateStatus: () => true,
+        });
+      const statuses = (
+        await Promise.all(
+          Array.from({ length: 400 }, () => get("198.51.100.20"))
+        )
+      ).map((r) => r.status);
+      expect(statuses).toContain(429);
+      expect((await get("198.51.100.21")).status).toBe(HTTP_STATUS.OK);
     });
 
     it("should not require authentication", async () => {

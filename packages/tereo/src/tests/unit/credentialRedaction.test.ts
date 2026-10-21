@@ -60,6 +60,13 @@ describe("credentials kept out of spans", () => {
     expect(redactUrl(`/files/shared/${SECRET}/report.pdf`)).toBe(
       "/files/shared/:token/report.pdf"
     );
+    // Express routes case-insensitively.
+    expect(redactUrl(`/v1/files/SHARED/${SECRET}`)).toBe(
+      "/v1/files/SHARED/:token"
+    );
+    expect(redactUrl(`/v1/Files/Shared/${SECRET}/a.pdf`)).toBe(
+      "/v1/Files/Shared/:token/a.pdf"
+    );
     expect(redactUrl(`https://core.example/login/2fa?session=${SECRET}`)).toBe(
       "https://core.example/login/2fa"
     );

@@ -426,8 +426,10 @@ info:
     `/v1/files/buckets/{name}/objects`, `/multipart` and `/archives` routes and on presigned
     (`/v1/files/signed/objects/**`) traffic.
 
-    #### Unprotected Endpoints
-    - **Health check** (`/health`): No rate limiting
+    #### Health Checks and Preflights
+    `GET /health` and the CORS preflights (`OPTIONS`) of bucket object, multipart and archive
+    routes each have a per-address limit of their own, at the same rates as the limit before
+    authentication.
 
     ### Rate Limit Headers
 

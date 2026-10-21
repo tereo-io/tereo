@@ -40,6 +40,22 @@ export async function probeDependencies(): Promise<DependencyHealth> {
   return { dbOk, redisOk };
 }
 
+const PROBE_CACHE_MS = 1_000;
+let lastProbe: { startedAt: number; result: Promise<DependencyHealth> } | null =
+  null;
+
+/**
+ * `probeDependencies`, its result shared for a second after the probe starts,
+ * so a burst of /health requests pings Postgres and Redis once.
+ */
+export function probeDependenciesCached(): Promise<DependencyHealth> {
+  const now = Date.now();
+  if (!lastProbe || now - lastProbe.startedAt >= PROBE_CACHE_MS) {
+    lastProbe = { startedAt: now, result: probeDependencies() };
+  }
+  return lastProbe.result;
+}
+
 export interface WorkerHealthReport {
   status: "ok" | "degraded";
   service: string;

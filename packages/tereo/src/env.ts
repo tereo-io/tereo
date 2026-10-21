@@ -291,6 +291,18 @@ const EnvFields = z
     // split them so each can be scaled on its own.
     ROLE: z.enum(["all", "api", "worker"]).default("all"),
     PORT: int(1, 65535, 4001),
+    // Caps the HTTP server's open connections (WebSockets included); past
+    // it, new ones are closed at once. Unset, unlimited.
+    HTTP_MAX_CONNECTIONS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(1_000_000)
+      .optional(),
+    // On SIGTERM, how long in-flight requests and running jobs get, side by
+    // side, before they are cut off. Keep it a few seconds under the
+    // orchestrator's grace period (after any preStop delay).
+    SHUTDOWN_TIMEOUT_SECONDS: int(1, 3600, 25),
     // ROLE=worker serves no API; it answers GET /health on this port instead.
     WORKER_HEALTH_PORT: int(0, 65535, 4002),
     // Externally reachable base URL of this service. Defaults derived from it:
@@ -466,6 +478,9 @@ const EnvFields = z
     // Grace window between a share becoming unserveable (revoked/expired), or
     // an archive request expiring, and the sweep hard-deleting the row.
     FILE_SERVICE_SHARE_RETENTION_DAYS: int(0, 3650, 30),
+    // How long a `files.access_logs` row is kept before the daily sweep
+    // deletes it.
+    ACCESS_LOG_RETENTION_DAYS: int(1, 3650, 90),
     FILE_SERVICE_SWEEP_TIME_BOX_SECONDS: int(1, HOUR, 60),
     FILE_SERVICE_SWEEP_HEARTBEAT_SECONDS: int(1, HOUR, 5),
     FILE_SERVICE_DISK_RECONCILIATION_MAX_FILES_PER_SHARD: int(

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
+import { randomUUID } from "node:crypto";
 import FormData from "form-data";
 import axios from "axios";
 import {
@@ -444,6 +445,48 @@ describe("Access Logging", () => {
       );
 
       expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    });
+
+    it("writes no row for a request refused before a controller runs", async () => {
+      const missing = randomUUID();
+      const bad = randomUUID();
+      const noToken = await axios.get(`${BASE_URL}/buckets`, {
+        headers: { "X-Request-ID": missing },
+        validateStatus: () => true,
+      });
+      expect(noToken.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+      const badToken = await axios.get(`${BASE_URL}/buckets`, {
+        headers: { "X-Request-ID": bad, Authorization: "Bearer nope" },
+        validateStatus: () => true,
+      });
+      expect(badToken.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+
+      // A row written later than this one would have been written by now.
+      const logged = randomUUID();
+      await axios.get(`${BASE_URL}/buckets/missing-${randomUUID()}`, {
+        headers: {
+          "X-Request-ID": logged,
+          Authorization: `Bearer ${testToken}`,
+        },
+        validateStatus: () => true,
+      });
+      await waitForAccessLog({ requestId: logged });
+      expect(
+        await prisma.accessLog.count({
+          where: { requestId: { in: [missing, bad] } },
+        })
+      ).toBe(0);
+    });
+
+    it("still logs a signed URL refused before its controller", async () => {
+      const requestId = randomUUID();
+      const response = await axios.get(
+        `${BASE_URL}/signed/objects/${testBucket.name}/by-id/${randomUUID()}?sig=bad&exp=1`,
+        { headers: { "X-Request-ID": requestId }, validateStatus: () => true }
+      );
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      const [row] = await waitForAccessLog({ requestId });
+      expect(row.statusCode).toBe(response.status);
     });
 
     it("should log 400 errors with error message", async () => {

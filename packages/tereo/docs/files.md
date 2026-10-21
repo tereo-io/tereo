@@ -389,7 +389,7 @@ Emitted with `emitTx` on mutations. Event types are declared in `src/definitions
 | `Share` | DB-backed revocable download link (kind OBJECT|ARCHIVE), optional password/TTL/cap |
 | `BucketLifecyclePolicy` | Per-bucket retention rules |
 | `BucketPermission` | Per-user per-bucket grants |
-| `AccessLog` | Permanent per-request access audit |
+| `AccessLog` | Per-request access audit, kept `ACCESS_LOG_RETENTION_DAYS` (default 90) by a daily sweep. A 401 or 429 refused before any controller (a missing or bad token, a rate limit) writes none; signed URLs and share links log theirs |
 | `IdempotencyRecord` | 24h replay cache for upload idempotency keys (scope + key unique, expiresAt indexed) |
 
 Tables live in the `files` schema. Bucket/Object use soft deletion; BucketPermission uses `revokedAt`. A bucket name is unique among live buckets only (the partial index `buckets_live_name_key`), so deleting a bucket frees its name for a new one, which shares nothing with it: objects, grants and shares belong to the bucket's id.
@@ -428,6 +428,7 @@ The files-specific ones, from `src/env.ts`; core's shared settings (`DATABASE_UR
 | `FILE_SERVICE_EMIT_SHARE_ACCESS_EVENTS` | Emit `file-service.share.accessed` per download (default false; noisy) |
 | `FILE_SERVICE_SHARE_UI_BASE_URL` | Where browsers opening a password-protected share are redirected for the unlock page (`{ui}/shared/:token`). Defaults to `UI_BASE_URL` |
 | `FILE_SERVICE_SHARE_RETENTION_DAYS` | Days between a share becoming unserveable and the share sweep deleting it, and between an archive request expiring and the archive sweep deleting it (default 30) |
+| `ACCESS_LOG_RETENTION_DAYS` | Days an access-log row is kept before the daily sweep deletes it (default 90) |
 | `FILE_SERVICE_SWEEP_TIME_BOX_SECONDS` / `_HEARTBEAT_SECONDS` | Sweep job time box and heartbeat (default 60 / 5) |
 | `FILE_SERVICE_DISK_RECONCILIATION_MAX_FILES_PER_SHARD` | Default 10000 — files one weekly run checks per top-level shard; a run stops at it and the next resumes there (cursor in Redis), starting the shard over once it is finished |
 
