@@ -535,7 +535,10 @@
       refreshing at once), is `invalid_grant` that leaves the token family
       and the cookies alone; later, or once the successor has been used, it
       is treated as theft and the whole family is revoked. A token revoked by logout or `/oauth/revoke`
-      is plain `invalid_grant`.
+      is plain `invalid_grant`. A replayed authorization code revokes its
+      family too. Either reuse writes an audit entry as core (`User`,
+      `UPDATE`, `metadata.action` `token_reuse_detected`) and, when anything
+      was revoked, an `auth.user.sessions-revoked` webhook event.
 
       Refresh tokens rotate on every use, but a token family has an absolute
       lifetime: `JWT_REFRESH_TOKEN_TTL` from the authorization-code exchange. A
@@ -615,13 +618,13 @@
       client may introspect its own tokens, and tokens whose audience includes
       the slug of the service it belongs to.
 
-      `permissions` are the user's live permissions, whatever client the
-      token was issued to: the ceilings of core API scopes limit what a token
-      may do in core's own API, not what an app is told about its user. They
-      are omitted when a client that is not a service's introspects its own
-      token and that token has no core access (not issued to core's UI or a
-      service's client, and no core API scope), as `/oauth/userinfo` omits
-      them.
+      `permissions` are the user's live permissions. For a token delegated
+      to a third-party client by core API scopes they are cut down to those
+      scopes' ceilings, as core's own API cuts them, so an app is told no
+      more than the token may do in core. They are omitted when a client
+      that is not a service's introspects its own token and that token has
+      no core access (not issued to core's UI or a service's client, and no
+      core API scope), as `/oauth/userinfo` omits them.
 
       Only a confidential client may introspect, authenticated with HTTP
       Basic. A missing or unknown client, a public client (which has no
@@ -687,6 +690,11 @@
       was issued to the calling client. An ID token is not an access token:
       sent as `token`, it revokes nothing.
 
+      A revoke that ends something is the user's logout, recorded in its
+      transaction: a `LOGOUT` audit entry (entity `User`; `metadata.method`
+      `revoke`) and, for a refresh token, an `auth.user.sessions-revoked`
+      webhook event. A token already revoked records nothing.
+
       Confidential clients authenticate with HTTP Basic; a public client sends
       its `client_id` in the body. A missing or unknown `client_id`, failed
       authentication or the client of a deactivated service or integration is
@@ -741,6 +749,10 @@
       `organizations` — core's authorization — are returned only when the
       token was issued to core's UI or to a service's client, or carries a
       core API scope (`core:*`); for any other client all three are omitted.
+      A token delegated to a third-party client by core API scopes gets its
+      `permissions` cut down to those scopes' ceilings, `roles` empty, and
+      `organizations` only with `core:account` or `core:organizations`
+      (otherwise empty).
       `org_id` and `org_name` are the token's organization; they are omitted
       when that organization has since been archived or deleted.
 
@@ -866,7 +878,9 @@
       `metadata` `{ client_id, sids, sessionIds, method: "id_token_hint" }` —
       `sids` the SSO sessions ended, `sessionIds` every refresh token revoked
       with them (the cookie's token family and every sibling family obtained
-      through those SSO sessions).
+      through those SSO sessions) — and an `auth.user.sessions-revoked`
+      webhook event. A user of whom nothing was still live (a stale cookie,
+      a repeated logout) gets neither.
 
       `id_token_hint` is verified: it must carry core's signature and issuer
       and must not be an access token. An expired hint is accepted (per
@@ -1169,7 +1183,7 @@
       `organization_id`, if given, must be the client's. A user who is not a
       member, or does not exist, is the same 403. A client of no organization
       must be a service's: it is answered from the user's global roles only,
-      may not name an organization, and gets 404 `not_found` for an unknown
+      may not name an organization, and gets 403 `forbidden` for an unknown
       user. Any other client — a login client created under
       `/v1/admin/clients` — is refused. Each refusal is 403 `forbidden`,
       decided before the user is looked up. The client is authenticated
@@ -1207,8 +1221,6 @@
         $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
       '403':
         $ref: '../../components/auth/responses.yaml#/CheckPermissionForbiddenResponse'
-      '404':
-        $ref: '../../components/responses.yaml#/NotFoundResponse'
       '429':
         $ref: '../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -1250,8 +1262,6 @@
         $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
       '403':
         $ref: '../../components/auth/responses.yaml#/CheckPermissionForbiddenResponse'
-      '404':
-        $ref: '../../components/responses.yaml#/NotFoundResponse'
       '429':
         $ref: '../../components/responses.yaml#/RateLimitResponse'
       '500':

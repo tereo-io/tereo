@@ -1065,7 +1065,7 @@ auth.user.sessions-revoked:
     tags:
       - Account - Sessions
     summary: User sessions revoked
-    description: Fired when sessions of a user are revoked through `DELETE /v1/account/sessions`, `DELETE /v1/account/sessions/{sessionId}`, `DELETE /v1/admin/users/{id}/sessions`, `DELETE /v1/admin/users/{id}/sessions/all`, an admin password reset (`PATCH /v1/admin/users/{id}` with `password`) or `POST /v1/admin/users/{id}/totp/reset` — not when no session was revoked and no SSO session ended. The other sessions a user's own password or TOTP change ends, and those a deactivation without a password reset ends, emit no event.
+    description: Fired when sessions of a user are revoked through `DELETE /v1/account/sessions`, `DELETE /v1/account/sessions/{sessionId}`, `DELETE /v1/admin/users/{id}/sessions`, `DELETE /v1/admin/users/{id}/sessions/all`, an admin password reset (`PATCH /v1/admin/users/{id}` with `password`) or `POST /v1/admin/users/{id}/totp/reset`; on a refresh-token revoke at `POST /oauth/revoke`, a logout at `/oauth/end-session` (or its confirm), a replayed authorization code or refresh token (its family revoked by core), and a password login in a browser still holding another user's SSO session (for that user) — not when no session was revoked and no SSO session ended. The other sessions a user's own password or TOTP change ends, and those a deactivation without a password reset ends, emit no event.
     operationId: webhookUserSessionsRevoked
     security: []
     parameters:

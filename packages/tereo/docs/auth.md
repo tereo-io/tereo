@@ -112,6 +112,18 @@ does a silent re-issue (`prompt=none`) in the organization the SSO session alrea
 switching into their own organization write neither; nor does someone whose permission was removed
 before the code was issued.
 
+### Sign-in audit
+
+A login writes one `LOGIN` entry (`User`), when its code is issued, so after any second factor: a
+first factor alone, or a TOTP step abandoned, writes none. Its metadata has `client_id`, `sid` (the
+SSO session) and `auth_methods`, plus `provider` (the identity provider's slug) for a provider
+login — carried through the TOTP, org-select and consent steps (`provider` on their rows). A grant
+approved on the consent page also writes it, continued SSO session or not, with `consent: true`,
+`fresh_login` and the `scopes` approved; a silent re-issue without consent writes nothing. A
+password login in a browser that still holds another user's SSO session ends that session and its
+token families, recorded for that user as a revoke by core (`UPDATE`, actor the system user,
+`metadata.action` `sessions_revoked`) with an `auth.user.sessions-revoked` event.
+
 Outside core's resource routes:
 
 - `/oauth/userinfo` is the OIDC endpoint every relying party uses: any active user access token
@@ -119,24 +131,31 @@ Outside core's resource routes:
   `profile`/`email` claims by scope. `roles`, `permissions` and `organizations` — core's
   authorization — are included only for a token that is not `none` above (the UI, a service's
   client, or a core API scope); any other relying party gets the OIDC claims (and `org_id`/`org_name`
-  for the token's organization) without them.
+  for the token's organization) without them. A `delegated` token is told what `requireAuth` would
+  let it use: `permissions` cut down to its scopes' ceilings, `roles` empty (a role is not capped;
+  its permissions are), and `organizations` only with `core:account` or `core:organizations`, the
+  scopes that list them at `/v1/account/organizations` (otherwise empty).
 - `/oauth/introspect` answers app services (the token's own client, or a service in its audience),
   and only confidential clients, by HTTP Basic: a public client's `client_id` authenticates nothing,
   so it is 401 `invalid_client` (discovery lists `client_secret_basic` alone).
   `sub` is the token's own: the user's id, or a client_credentials token's `client_id`. `user_id`
   names the user the token acts as — the user, or the client's service-account user — so an app
   can record either kind as an actor in `auth.users`.
-  It reports `permissions` as the user's live permissions, unchanged: core's ceilings govern core's
-  API only, and an app enforces its own scopes. An app introspecting a third-party token therefore
-  sees the user's permissions, as it would have before; whether it honours that token for its own
-  API is the app's decision, which `scope` and `aud` in the response inform. A client that is not a
-  service's, introspecting its own token whose access is `none`, is not told them, as at userinfo.
+  It reports `permissions` as the user's live permissions — for a `delegated` token (a third-party
+  client's, with core API scopes) cut down to its scopes' ceilings as `requireAuth` cuts them, so an
+  app is never told more than core itself would let that token do. A third-party token without core
+  scopes (`none`) is reported to a service in its audience with the user's live permissions: core's
+  ceilings come from core API scopes, and an app enforces its own; whether it honours that token for
+  its own API is the app's decision, which `scope` and `aud` in the response inform. A client that is
+  not a service's, introspecting its own token whose access is `none`, is not told them, as at
+  userinfo.
 - `/oauth/check-permission` authenticates a confidential client, not a token. A client of an
   organization may only ask about that organization's members, and is answered in it;
   `organization_id`, if given, must be the client's; a non-member and an unknown user get the same 403. An organization-bound
   [integration](integrations.md) is such a client, answered for its organization's members. A
   client of no organization must be a service's (a platform integration is refused): it is
-  answered from the user's global roles only and may not name an organization. Any other client — a login client created under
+  answered from the user's global roles only and may not name an organization; an unknown user is a
+  403 like every other refusal. Any other client — a login client created under
   `/v1/admin/clients` — is refused, so it cannot read any user's global permissions. Every refusal is
   403, decided before the user is looked up. A deactivated user holds nothing, and neither does any
   member of an inactive or archived organization in it: every check answers `false`.
@@ -174,9 +193,22 @@ happens depends on how it was revoked:
 - **Otherwise** (rotated earlier, or its successor spent) — reuse (OAuth 2.0 Security BCP): the whole family, refresh tokens and their
   access tokens, is revoked and `refresh_token_reuse` is logged.
 
+A replayed authorization code revokes its family the same way (`auth_code_reuse`). Either reuse is
+also recorded in the revoking transaction, as core's: an audit entry (`User`, action `UPDATE`, actor
+the system user, `metadata.action` `token_reuse_detected`, with `credential`
+(`authorization_code` or `refresh_token`), `clientId`, `authCodeId`, the revoked `sessionIds` and
+the `revokedAccessTokens` / `revokedRefreshTokens` counts) — written even when the family was
+already dead, since the replay is the finding — and, when anything was revoked, an
+`auth.user.sessions-revoked` event.
+
 Revoking a refresh token at `/oauth/revoke` ends its whole family, a successor rotated from it
 included, and the SSO session it was issued under (`endSession`), under the same session-end lock
-a refresh takes, so a refresh racing the revocation cannot leave a live successor.
+a refresh takes, so a refresh racing the revocation cannot leave a live successor. It is the user's
+logout: a `LOGOUT` audit entry (`metadata.action` `sessions_revoked`, `method` `revoke`, the
+`sessionIds` and `ssoSessionIds` ended) and an `auth.user.sessions-revoked` event, in that
+transaction; a token already revoked, with nothing else to end, records nothing. Revoking an access
+token revokes it and writes a `LOGOUT` entry (`metadata.action` `token_revoked`, `tokenType`
+`access_token`, `jti`, `clientId`) in one transaction, again only when it was live.
 
 A refresh token issued under an organization is refused (`invalid_grant`) and its family revoked once
 the user is no longer a member or the organization is inactive or archived. Deactivating an
@@ -498,7 +530,8 @@ When a second factor is due (by the usual rules: the user's TOTP, the instance p
 `acr_values`, and the provider not `countsAsMfa`), a password and the provider account alone change
 nothing: the callback records the vouched-for identity as a pending link (`auth.pending_identity_links`)
 held by the TOTP step, and that transaction runs only when the TOTP or recovery code passes, in the
-one that consumes the step (the `LOGIN` entry then names the new identity, `amr` `["fed","otp"]`).
+one that consumes the step (the login's `LOGIN` entry, written with the code, records the provider
+and `amr` `["fed","otp"]`).
 The pending link belongs to the grant: a password change, a sign-out everywhere or the grant's
 expiry removes it and its TOTP step (400 `invalid_session`). A user who must first enrol goes to 2FA
 setup with nothing changed, and after enrolling signs in again through the password and the
@@ -964,6 +997,11 @@ ends nothing: it sets a one-time `tereo_logout_confirm_{client_id}` cookie and r
 `{UI}/logout`, whose confirm button posts the same token to `/oauth/end-session/confirm`. Only that
 post, carrying the cookie (SameSite keeps it off cross-site posts), ends the session — so a
 cross-site link cannot log anyone out.
+
+Each user signed out writes a `LOGOUT` entry (`client_id`, the `sids` ended, the `sessionIds`
+revoked, `method` `id_token_hint` or `confirm`) and an `auth.user.sessions-revoked` event in the
+revoking transaction — none for a user of whom nothing was still live (a stale cookie, a repeated
+logout).
 
 The hourly `auth-cleanup` job (`jobs/authCleanup.ts`) deletes SSO, consent, org-selection and TOTP
 sessions and TOTP setup grants once expired, and access tokens, refresh tokens and authorization
