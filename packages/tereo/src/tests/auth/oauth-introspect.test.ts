@@ -282,8 +282,7 @@ describe("OAuth Introspect Endpoint", () => {
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
         headers: testClientHeaders(),
-        body: JSON.stringify({
-        }),
+        body: JSON.stringify({}),
       });
 
       expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);

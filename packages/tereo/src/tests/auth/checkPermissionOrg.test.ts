@@ -176,7 +176,10 @@ describe("a deactivated user or an inactive organization", () => {
 
   it("holds nothing once the user is deactivated", async () => {
     const { client, user } = await grantedMember();
-    await prisma.user.update({ where: { id: user }, data: { isActive: false } });
+    await prisma.user.update({
+      where: { id: user },
+      data: { isActive: false },
+    });
     expect(await granted(await check(client, { user_id: user }))).toBe(false);
     expect(await granted(await check(serviceClient, { user_id: user }))).toBe(
       false

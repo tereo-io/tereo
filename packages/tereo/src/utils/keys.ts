@@ -1,7 +1,3 @@
-import {
-  broadcastSigningKeysChanged,
-  onSigningKeysChanged,
-} from "./cacheBroadcast.js";
 import { hasMasterKey, setMasterKey } from "./masterKeys.js";
 import { ID_TOKEN_HINT_GRACE_SECONDS } from "./tokens.js";
 import { prisma, type Prisma } from "./db/prisma.js";
@@ -9,6 +5,10 @@ import { ConflictError } from "./errors.js";
 import { logger } from "./logger.js";
 import jwt from "jsonwebtoken";
 import env from "../env.js";
+import {
+  broadcastSigningKeysChanged,
+  onSigningKeysChanged,
+} from "./cacheBroadcast.js";
 import {
   type KeyEncryptionKey,
   openSecret,

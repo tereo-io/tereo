@@ -272,7 +272,9 @@ describe("OAuth Security Tests", () => {
       expect(((await refresh.json()) as TokenResponse).error).toBe(
         OAUTH_ERRORS.INVALID_GRANT
       );
-      const { jti } = decodeJwt(first.access_token!) as { jti: string };
+      const { jti } = JSON.parse(
+        Buffer.from(first.access_token!.split(".")[1], "base64url").toString()
+      ) as { jti: string };
       const accessRow = await prisma.accessToken.findUniqueOrThrow({
         where: { jti },
       });

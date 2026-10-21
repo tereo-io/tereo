@@ -341,7 +341,11 @@ describe("a third-party token with core scopes", () => {
     });
     const user = await createTestUser();
     await grantPermissions(user.id, ["users.write"]);
-    const token = await loginToken(confidential, user, "openid core:admin.read");
+    const token = await loginToken(
+      confidential,
+      user,
+      "openid core:admin.read"
+    );
     const res = await introspect(confidential, token);
     const body = (await res.json()) as {
       active: boolean;

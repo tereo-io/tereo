@@ -3,15 +3,15 @@ import { logTokenIntrospected } from "../../../utils/audit.js";
 import { checkAccessToken } from "../../../utils/sessions.js";
 import { verifyAccessToken } from "../../../utils/tokens.js";
 import { validateBody } from "../../../utils/validateReq.js";
-import {
-  authenticateClient,
-  clientAuthenticationFailed,
-} from "../../../utils/auth.js";
 import { buildUserClaims } from "../../../utils/claims.js";
 import { NotFoundError } from "../../../utils/errors.js";
 import { IntrospectRequestSchema } from "./schemas.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
+import {
+  authenticateClient,
+  clientAuthenticationFailed,
+} from "../../../utils/auth.js";
 
 export const introspectHandler = async (req: Request, res: Response) => {
   const body = validateBody(IntrospectRequestSchema, req);

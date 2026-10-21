@@ -1,6 +1,6 @@
-import { makeServiceOf } from "../utils/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { confirmLogout } from "../utils/browserLogin.js";
+import { makeServiceOf } from "../utils/testService.js";
 import { hashFlowToken } from "../../utils/crypto.js";
 import { prisma } from "../../utils/db/prisma.js";
 import env from "../../env.js";

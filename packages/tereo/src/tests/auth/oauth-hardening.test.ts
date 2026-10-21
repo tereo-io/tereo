@@ -1,6 +1,6 @@
-import { makeServiceOf } from "../utils/testService.js";
 import { FIXTURE_USER_IDS } from "../utils/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { makeServiceOf } from "../utils/testService.js";
 import { getRedisClient } from "../../utils/redis.js";
 import { prisma } from "../../utils/db/prisma.js";
 import jwt from "jsonwebtoken";

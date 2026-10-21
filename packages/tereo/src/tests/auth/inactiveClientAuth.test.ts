@@ -26,7 +26,10 @@ const basic = (client: Client) =>
 const post = (client: Client, path: string, body: Record<string, unknown>) =>
   fetch(`${BASE_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: basic(client) },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: basic(client),
+    },
     body: JSON.stringify(body),
   });
 
@@ -65,9 +68,9 @@ describe.each([
     userId = (await createTestUser()).id;
 
     // Before deactivation, every endpoint accepts the secret.
-    expect(
-      (await post(client, "/oauth/introspect", { token })).status
-    ).toBe(HTTP_STATUS.OK);
+    expect((await post(client, "/oauth/introspect", { token })).status).toBe(
+      HTTP_STATUS.OK
+    );
 
     await prisma.service.update({
       where: { clientId: client.id },
@@ -80,7 +83,9 @@ describe.each([
   });
 
   it("is refused at /oauth/introspect", async () => {
-    await expectInvalidClient(await post(client, "/oauth/introspect", { token }));
+    await expectInvalidClient(
+      await post(client, "/oauth/introspect", { token })
+    );
   });
 
   it("is refused at /oauth/check-permission", async () => {

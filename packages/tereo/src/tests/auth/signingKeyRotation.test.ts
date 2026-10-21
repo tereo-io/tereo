@@ -365,9 +365,7 @@ describe("JWT signing key rotation", () => {
     // server, and their keys leave the JWKS.
     expect(verifyAccessToken(adminToken)).toBeNull();
     expect(verifyAccessToken(newKeyToken)).toBeNull();
-    expect((await listKeys(adminToken)).status).toBe(
-      HTTP_STATUS.UNAUTHORIZED
-    );
+    expect((await listKeys(adminToken)).status).toBe(HTTP_STATUS.UNAUTHORIZED);
     expect((await fetchJwks()).keys.map((k) => k.kid)).toEqual([immediateKid]);
     const rows = await prisma.secret.findMany({
       where: { name: { startsWith: JWT_KEY_PREFIX } },

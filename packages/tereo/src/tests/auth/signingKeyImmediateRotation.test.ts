@@ -4,6 +4,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getTestPrincipalToken } from "../utils/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../webhooks/utils/test-helpers.js";
+import {
   closeCacheBroadcast,
   startCacheSubscriber,
 } from "../../utils/cacheBroadcast.js";
@@ -13,11 +18,6 @@ import {
   getJwtHeader,
   HTTP_STATUS,
 } from "./utils/test-helpers.js";
-import {
-  createTestWebhookEndpoint,
-  getCoreEventSubscriberToken,
-  waitFor,
-} from "../webhooks/utils/test-helpers.js";
 
 /**
  * An immediate rotation (for a compromised key) while an earlier rotation is
