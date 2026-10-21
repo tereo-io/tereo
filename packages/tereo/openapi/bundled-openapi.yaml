@@ -382,9 +382,15 @@ info:
       passwords still count toward the account's delay, and are capped at 5 per 900 seconds
       per cookie. The cookie is bound to the account and its current password: it does nothing
       for another email, and a password change or reset voids it
-    - **Login 2FA** (`/oauth/totp/verify`, `/oauth/totp/recovery`, `/oauth/totp/setup/verify`):
-      5 attempts per 300 seconds per user, across logins — a new login with the password does
-      not reset it
+    - **Login 2FA** (`/oauth/totp/verify`, `/oauth/totp/recovery`): per user, across logins — a
+      new login with the password does not reset it. 5 attempts in 24 hours, then a delay
+      before each further attempt that starts at 1 second and doubles with each, up to one
+      hour. Nothing clears the count: a right code gives back only its own attempt, and each
+      attempt counts for 24 hours. A known-device browser (as for login passwords) is let
+      through the delay, capped at 5 attempts per hour per cookie. Repeated failures are
+      audited
+    - **2FA setup at login** (`/oauth/totp/setup/verify`): 5 wrong codes per user per 300
+      seconds; a right code clears the count
     - **Wrong codes on `/v1/account/totp/*`** (enable, disable, regenerate backup codes): 5 per user
       per 300 seconds
     - **Wrong current password on `POST /v1/account/password`**: 5 per user per 300 seconds
@@ -1149,7 +1155,10 @@ paths:
 
         A user session never outlives its original expiry (`USER_SESSION_TTL`,
         7 days by default, from the password login): continuing it with
-        `prompt=none` or `org_id` does not extend it.
+        `prompt=none` or `org_id` does not extend it. One that has issued no
+        code for `USER_SESSION_IDLE_TTL` (3 days by default) counts as expired
+        here too: `prompt=none` answers `login_required` and `org_id` falls
+        through to the login page.
 
         The consent redirects set the `tereo_consent_session_{client_id}`
         cookie. Every redirect to a login-flow page (consent, org-select, 2FA)
@@ -2786,15 +2795,19 @@ paths:
 
         400 `invalid_session` (unknown session, missing or mismatched cookie),
         `session_expired`, `totp_not_configured`; 401 `invalid_code` for a wrong
-        code. Five attempts per user in five minutes — across this endpoint,
-        `/oauth/totp/recovery` and `/oauth/totp/setup/verify`, and across
-        logins, so signing in again with the password does not reset it — lock
-        the user out with 429 for the rest of the window. A right code clears
-        the count.
+        code. Attempts are counted per user, across this endpoint and
+        `/oauth/totp/recovery` and across logins, so signing in again with the
+        password does not reset them: five in 24 hours, then 429 with
+        `Retry-After` until a delay after the last attempt passes, starting at
+        1 second and doubling with each attempt up to an hour. A right code
+        gives back only its own attempt; each counts for 24 hours. A browser
+        holding the user's known-device cookie is let through the delay (at most
+        five attempts an hour per cookie). From the fifth attempt in the window,
+        each failure is audited (User, `metadata.action: totp_failures`).
 
         A code is accepted once: a code from the same 30-second step as one
         already accepted for this user, or an earlier step, is 401
-        `invalid_code` and counts toward the lockout. That includes the code
+        `invalid_code` and counts as a failed attempt. That includes the code
         that completed TOTP setup.
 
         The 2FA session is single-use too: of two concurrent requests with a
@@ -2856,7 +2869,7 @@ paths:
       description: |
         Use a recovery code instead of TOTP during 2FA.
         Recovery codes are automatically transformed to uppercase and dashes are removed.
-        Session, cookie, errors and lockout as for `POST /oauth/totp/verify`,
+        Session, cookie, errors and attempt limits as for `POST /oauth/totp/verify`,
         plus 400 `no_recovery_codes` when the user has none left. The code and
         the 2FA session are consumed atomically: a code or session already used
         by a concurrent request is 400 `invalid_session`.
@@ -2967,11 +2980,14 @@ paths:
       description: |
         Verify and complete TOTP setup during OAuth flow. Refused with 403
         `totp_disabled` while the system 2FA policy is `disabled`, including for
-        a setup started before the change. 400 `invalid_setup_token` or
-        `setup_expired` for the setup session, 401 `invalid_code` for a wrong
-        code. Attempts count toward the user's lockout shared with
-        `POST /oauth/totp/verify` (five per user in five minutes, then 429 for
-        the rest of the window). The code that completes setup is spent: it
+        a setup started before the change. 400 `invalid_setup_token` (also for
+        a setup begun from `POST /v1/account/totp/setup`, which only
+        `/v1/account/totp/setup/verify` completes) or `setup_expired` for the
+        setup session, 401 `invalid_code` for a wrong
+        code. Five wrong codes per user in five minutes, then 429 for the rest
+        of the window; a right code clears the count. The one setting up holds
+        the secret, so this is apart from the 2FA step's backoff. The code that
+        completes setup is spent: it
         is refused at the 2FA step that follows, which needs the next one.
 
         An audit log entry is created for this action. An
@@ -4057,7 +4073,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TotpSetupVerifyResponse'
         '400':
-          description: Bad request - invalid body (`invalid_request`), or an unknown (`invalid_setup_token`) or expired (`setup_expired`) setup token
+          description: Bad request - invalid body (`invalid_request`), or an unknown setup token or one begun at login (`invalid_setup_token`), or an expired one (`setup_expired`)
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
