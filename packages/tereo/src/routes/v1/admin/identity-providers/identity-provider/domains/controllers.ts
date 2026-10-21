@@ -7,7 +7,7 @@ import { logAuditTx } from "../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../utils/auth.js";
 import { IdentityProviderIdParamSchema } from "../schemas.js";
 import db from "../../../../../../utils/db/index.js";
-import { assertProviderActive } from "./utils.js";
+import { assertMayChangeSsoOnly, assertProviderActive } from "./utils.js";
 import { CreateDomainSchema } from "./schemas.js";
 import type { Request, Response } from "express";
 import {
@@ -41,7 +41,10 @@ export const createDomain = async (req: Request, res: Response) => {
   );
 
   const created = await db.$transaction(async (tx) => {
-    if (body.ssoOnly) await assertProviderActive(providerId, tx);
+    if (body.ssoOnly) {
+      await assertProviderActive(providerId, tx);
+      await assertMayChangeSsoOnly(auth, tx);
+    }
     const domain = await mapUniqueViolation(
       () =>
         db.identityProviders.createDomain(

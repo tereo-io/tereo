@@ -371,6 +371,16 @@ checked against that organization). Setting `ssoOnly: true` (on create or `PATCH
 `provider_inactive` while the provider is deactivated, since its users would have no way in.
 Deleting a custom role removes it from every domain's default roles.
 
+**`ssoOnly` hands the domain's accounts to the provider.** The next password sign-in of an existing
+user at an SSO-only domain is force-linked to the provider and the password dropped (see _Linking
+from the account page and SSO-only domains_), so whoever controls the provider's issuer and client
+gets those accounts. `identity-providers.write` bounds nothing about those accounts, so only a
+caller holding `admin` through a global role may make a domain SSO-only (on create or `PATCH`),
+change the `domain` of an SSO-only one, turn `ssoOnly` off or delete an SSO-only domain (the last
+two reopen the accounts to passwords), or change the `issuer` or `clientId` of a provider that has
+an SSO-only domain; 403 otherwise. The checks run under the provider's row lock, which every domain
+write takes.
+
 A domain's `autoAccept` only matches the provider that owns the domain. A user with a matching
 email who already exists is never signed in by it: see _No matching by email_ below.
 
