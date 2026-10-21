@@ -39,6 +39,8 @@ export const UserMenu = () => {
       <LoadingOverlay show={isLoggingOut} message="Signing out..." />
       <button
         className="t-avatar-btn"
+        aria-label="User menu"
+        aria-expanded={isOpen}
         onClick={() => setIsOpen(!isOpen)}
         onMouseDown={(e) => e.preventDefault()}
       >

@@ -1,0 +1,6 @@
+# Playwright output
+test-results/
+playwright-report/
+blob-report/
+# Per-run state: signed-in admin, core's log, its blob storage, the UI build
+.e2e-state/

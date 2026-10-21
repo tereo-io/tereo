@@ -3,7 +3,14 @@ import { UploadTrackerProvider } from "@/features/file-storage";
 import { Navigate, type RouteObject } from "react-router-dom";
 import { SectionLayout } from "../layouts/SectionLayout";
 import { UploadTracker } from "@/features/file-storage";
+import { RequireAuth } from "@/features/auth";
 import { namedLazy } from "./lazy";
+
+const canRead = (element: React.ReactNode) => (
+  <RequireAuth requiredPermission="file-service.buckets.read">
+    {element}
+  </RequireAuth>
+);
 
 const fileStorageElement = (
   <UploadTrackerProvider>
@@ -24,16 +31,21 @@ export const fileStorageRoute: RouteObject = {
     {
       path: "buckets",
       handle: { title: "Buckets" },
-      element: namedLazy(
-        () => import("@/features/file-storage/components/buckets/BucketList"),
-        "BucketList"
+      element: canRead(
+        namedLazy(
+          () => import("@/features/file-storage/components/buckets/BucketList"),
+          "BucketList"
+        )
       ),
     },
     {
       path: "buckets/:bucketName",
-      element: namedLazy(
-        () => import("@/features/file-storage/components/buckets/BucketDetail"),
-        "BucketDetail"
+      element: canRead(
+        namedLazy(
+          () =>
+            import("@/features/file-storage/components/buckets/BucketDetail"),
+          "BucketDetail"
+        )
       ),
     },
   ],

@@ -64,6 +64,7 @@ const useInfiniteShares = (bucketName: string): UseInfiniteReturn<Share> => {
     hasMore,
     isLoading: query.isLoading,
     isReloading: query.isRefetching && allData.length > 0,
+    error: query.error,
     total: 0,
     onQueryChange,
     reload,

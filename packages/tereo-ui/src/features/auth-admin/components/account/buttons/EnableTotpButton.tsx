@@ -19,7 +19,11 @@ import {
 
 const ACCOUNT_PATH = "/account";
 
-const EnableTotpButton = () => {
+interface EnableTotpButtonProps {
+  onOpenChange?: (open: boolean) => void;
+}
+
+const EnableTotpButton = ({ onOpenChange }: EnableTotpButtonProps) => {
   const [show, setShow] = useState(false);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +36,7 @@ const EnableTotpButton = () => {
 
   const start = () => {
     setShow(true);
+    onOpenChange?.(true);
     initiate.mutate(undefined, {
       onError: (err) => {
         // Core enrolls a second factor only on a login under 10 minutes old.
@@ -52,6 +57,7 @@ const EnableTotpButton = () => {
   const close = () => {
     if (!canClose) return;
     setShow(false);
+    onOpenChange?.(false);
     setCode("");
     setError(null);
     setRecoveryCodes(null);

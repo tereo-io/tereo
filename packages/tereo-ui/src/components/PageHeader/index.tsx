@@ -33,11 +33,15 @@ export const PageHeader = ({
   badges,
   actions,
 }: PageHeaderProps) => {
+  // Keyed by the action, not its position: when a mutation removes another
+  // action (archiving drops Edit), a positional key remounts the button that
+  // ran it, and TanStack Query skips the mutate() callbacks of an unmounted
+  // observer, such as navigating away on success.
   const renderedActions = actions?.length
     ? actions.map((action, index) =>
         isActionObject(action) ? (
           <Button
-            key={index}
+            key={action.label}
             variant={action.variant || "secondary"}
             onClick={action.onClick}
             disabled={action.disabled}
@@ -46,7 +50,13 @@ export const PageHeader = ({
             {action.label}
           </Button>
         ) : (
-          <span key={index}>{action}</span>
+          <span
+            key={
+              isValidElement(action) && action.key != null ? action.key : index
+            }
+          >
+            {action}
+          </span>
         )
       )
     : undefined;

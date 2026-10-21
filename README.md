@@ -122,6 +122,7 @@ Redis db 1, so stop `npm run dev` first. From the repo root:
 npm run test:local -w tereo                  # against your local Postgres and Redis
 docker/test/run.sh                                     # or: throwaway Docker stacks, one per shard
 npx nx run @tereo-io/sdk:test                    # the SDK's own tests
+npm run e2e                                            # browser workflows: UI + core on :4501 (packages/tereo-e2e)
 ```
 
 **Before committing**, run what CI runs ([docs/code-style.md](docs/code-style.md)):
