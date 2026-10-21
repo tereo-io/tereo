@@ -1,5 +1,5 @@
-import { RECOVERY_CODE_PARAMS } from "./password.js";
 import { hashFlowToken, hashPassword, verifyPassword } from "./crypto.js";
+import { RECOVERY_CODE_PARAMS } from "./password.js";
 import { getTotpPolicy } from "./db/settings.js";
 import { OAuth2Error } from "./errors.js";
 import env from "../env.js";

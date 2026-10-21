@@ -1,6 +1,6 @@
+import { describe, it, expect, beforeAll } from "vitest";
 import { randomBytes, scryptSync } from "node:crypto";
 import { prisma } from "../../utils/db/prisma.js";
-import { describe, it, expect, beforeAll } from "vitest";
 import {
   createTestClient,
   createTestUser,

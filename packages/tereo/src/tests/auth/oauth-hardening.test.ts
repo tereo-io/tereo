@@ -587,7 +587,7 @@ describe("TOTP setup during login", () => {
       });
     const failures = async () => {
       const redis = getRedisClient();
-      const keys = await redis.keys("rl:totp:fail:*");
+      const keys = await redis.keys("rl:totp:setup:fail:*");
       const values = await Promise.all(keys.map((k) => redis.get(k)));
       return values.map(Number).reduce((sum, n) => sum + n, 0);
     };

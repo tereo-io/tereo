@@ -2,8 +2,8 @@ import { UpdateUserInput } from "../../routes/v1/admin/users/user/schemas.js";
 import { CreateUserInput } from "../../routes/v1/admin/users/schemas.js";
 import { Prisma } from "../../../prisma/generated/client/index.js";
 import { BadRequestError, NotFoundError } from "../errors.js";
-import { normalizeEmail } from "../email.js";
 import { hashPassword, needsRehash } from "../crypto.js";
+import { normalizeEmail } from "../email.js";
 import { prisma } from "./prisma.js";
 
 /**

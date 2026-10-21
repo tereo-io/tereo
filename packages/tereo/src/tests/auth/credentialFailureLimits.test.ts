@@ -171,6 +171,96 @@ describe("credential failure limits", () => {
     await expectTooMany(res);
   });
 
+  it("hands no fresh guesses after the owner's correct code", async () => {
+    const user = await createTestUser();
+    const secret = await enableTotp(user.id);
+
+    const attacker = new Map<string, string>();
+    const attackerSession = await startLogin(user, attacker);
+    for (let i = 0; i < MAX_FAILURES; i++) {
+      const res = await submitTotp(
+        attacker,
+        attackerSession,
+        wrongCode(secret)
+      );
+      expect(res.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    }
+
+    // The owner logs in once the first delay has passed.
+    await sleep(1100);
+    const owner = new Map<string, string>();
+    const ownerSession = await startLogin(user, owner);
+    const ok = await submitTotp(owner, ownerSession, generateTotpCode(secret));
+    expect(ok.status).toBe(HTTP_STATUS.OK);
+
+    // The count stands: one more guess, and the delay has doubled.
+    const next = new Map<string, string>();
+    const nextSession = await startLogin(user, next);
+    const guess = await submitTotp(next, nextSession, wrongCode(secret));
+    expect(guess.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    const retryAfter = await expectTooMany(
+      await submitTotp(next, nextSession, wrongCode(secret))
+    );
+    expect(retryAfter).toBe(2);
+  });
+
+  it("lets the owner's known device through a delay an attacker holds", async () => {
+    const user = await createTestUser();
+    const secret = await enableTotp(user.id);
+
+    // The owner has logged in from this browser before.
+    const owner = new Map<string, string>();
+    const firstSession = await startLogin(user, owner);
+    const first = await submitTotp(
+      owner,
+      firstSession,
+      generateTotpCode(secret)
+    );
+    expect(first.status).toBe(HTTP_STATUS.OK);
+    absorbCookies(owner, first);
+    expect(owner.has("tereo_known_device")).toBe(true);
+
+    const attacker = new Map<string, string>();
+    const attackerSession = await startLogin(user, attacker);
+    for (let i = 0; i < MAX_FAILURES; i++) {
+      await submitTotp(attacker, attackerSession, wrongCode(secret));
+    }
+    await expectTooMany(
+      await submitTotp(attacker, attackerSession, wrongCode(secret))
+    );
+
+    const ownerSession = await startLogin(user, owner);
+    const res = await submitTotp(
+      owner,
+      ownerSession,
+      generateTotpCode(secret, 1)
+    );
+    expect(res.status).toBe(HTTP_STATUS.OK);
+  });
+
+  it("audits repeated login 2FA failures", async () => {
+    const user = await createTestUser();
+    const secret = await enableTotp(user.id);
+    const jar = new Map<string, string>();
+    const session = await startLogin(user, jar);
+    for (let i = 0; i < MAX_FAILURES; i++) {
+      await submitTotp(jar, session, wrongCode(secret));
+    }
+
+    const entries = await prisma.auditLogEntry.findMany({
+      where: { entityType: "User", entityId: user.id },
+    });
+    const failures = entries.filter(
+      (e) =>
+        (e.metadata as { action?: string } | null)?.action === "totp_failures"
+    );
+    expect(failures).toHaveLength(1);
+    expect(failures[0].metadata).toMatchObject({
+      method: "totp",
+      recentFailures: MAX_FAILURES,
+    });
+  });
+
   it("locks POST /account/password after repeated wrong current passwords", async () => {
     const user = await createTestUser();
     const token = await getAccessTokenForUser(user, client);
