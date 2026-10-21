@@ -2,12 +2,12 @@ import { getDefaultOrganizationId } from "../../../../../../utils/defaultOrganiz
 import { assertOrgAssignableRoles } from "../../../../../../utils/orgRoleAssignment.js";
 import { formatDomain } from "../../../../../../utils/identityProviders/format.js";
 import { mapUniqueViolation } from "../../../../../../utils/prismaErrors.js";
+import { assertMayChangeSsoOnly, assertProviderActive } from "./utils.js";
 import { ConflictError } from "../../../../../../utils/errors.js";
 import { logAuditTx } from "../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../utils/auth.js";
 import { IdentityProviderIdParamSchema } from "../schemas.js";
 import db from "../../../../../../utils/db/index.js";
-import { assertMayChangeSsoOnly, assertProviderActive } from "./utils.js";
 import { CreateDomainSchema } from "./schemas.js";
 import type { Request, Response } from "express";
 import {

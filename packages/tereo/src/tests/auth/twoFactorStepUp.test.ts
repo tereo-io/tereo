@@ -1,9 +1,5 @@
 import { generateTotpSecret, encryptTotpSecret } from "../../utils/totp.js";
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import {
-  ensureTestOrganization,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
@@ -20,6 +16,10 @@ import {
   createTestUser,
   generateTotpCode,
 } from "./utils/test-helpers.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../utils/principals.js";
 
 /**
  * 2FA made required after a password-only sign-in (a role the user holds
@@ -343,7 +343,9 @@ describe("revoking password-only access tokens when 2FA becomes required", () =>
   it("revokes a holder's when their role comes to require 2FA", async () => {
     const role = await createTestRole();
     const user = await createTestUser();
-    await prisma.userRole.create({ data: { userId: user.id, roleId: role.id } });
+    await prisma.userRole.create({
+      data: { userId: user.id, roleId: role.id },
+    });
     const tokens = await signInForTokens(new Map(), user);
     const rolesWriter = await getTestPrincipalToken({
       permissions: ["roles.write"],
@@ -380,9 +382,14 @@ describe("revoking password-only access tokens when 2FA becomes required", () =>
 
     const user = await createTestUser();
     const tokens = await signInForTokens(new Map(), user);
-    const plain = await adminCall(usersWriter, "PUT", `/users/${user.id}/roles`, {
-      roleIds: [plainRole.id],
-    });
+    const plain = await adminCall(
+      usersWriter,
+      "PUT",
+      `/users/${user.id}/roles`,
+      {
+        roleIds: [plainRole.id],
+      }
+    );
     expect(plain.status).toBe(HTTP_STATUS.OK);
     expect(await userinfoStatus(tokens.access_token)).toBe(HTTP_STATUS.OK);
     const strict = await adminCall(

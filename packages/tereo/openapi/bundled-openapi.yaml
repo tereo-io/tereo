@@ -769,13 +769,14 @@ info:
 
     Writes follow the same rule. Without `audit-logs.admin`, a token with an `org_id` writes
     only entries for that organization: another organization, or a system-wide entry, is
-    `403`, and one such entry refuses a whole batch. A service account's token without an
-    `org_id` — an app service's client, which writes for every tenant of its app — may write
-    for any organization; a person's token without one may not write.
+    `403`, and one such entry refuses a whole batch. An app service's token without an
+    `org_id` — its client writes for every tenant of its app — may write for any
+    organization; anyone else's token without one (a person's, an integration's) may not write.
 
-    An app service's client writes only entries whose `source` is its slug (`403` otherwise),
-    so its reads above hold exactly what it wrote. No service or integration may take the slug
-    `tereo`, the source of core's own entries.
+    An app service's client writes only entries whose `source` is its slug (`422
+    source_mismatch` otherwise), so its reads above hold exactly what it wrote. No service or
+    integration may take the slug `tereo`, the source of core's own entries, and no other writer
+    may use `tereo`, `core` or an app service's slug as `source` (`422 source_reserved`).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -4463,11 +4464,12 @@ paths:
         changing it to one already in use, in any case, returns
         `409 conflict`.
 
-        Setting a `password`, changing the `email`, or deactivating another
-        user needs a caller holding
+        Setting a `password`, changing the `email`, deactivating another
+        user, or reactivating a deactivated one needs a caller holding
         every permission the user holds, from global roles or roles in any
         organization (`403`, naming the permissions the caller lacks,
-        otherwise). The caller's permissions count from global roles only,
+        otherwise), and `organizations.write` when the user is an `owner` or
+        `admin` member of any organization (`403` otherwise). The caller's permissions count from global roles only,
         capped by a delegated token's scopes: no core API scope reaches
         `admin`, so a third-party client's `core:admin` token cannot reset an
         administrator. A password reset ends all of the
@@ -4591,7 +4593,9 @@ paths:
         count), otherwise `403` naming the permissions. Roles the user keeps
         are not checked. Removing any role from another user needs the caller
         to hold every permission that user holds, in any scope (`403`
-        otherwise).
+        otherwise). Adding a role with `requires2fa` revokes the user's access
+        tokens from logins without a second factor, so their next refresh
+        meets the 2FA step-up.
 
         An audit log entry is created for this action.
         An `auth.user.roles-changed` webhook event is emitted.
@@ -4769,7 +4773,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing users.delete permission, or the user holds permissions the caller does not
+          description: Forbidden - missing users.delete permission, or the user holds permissions the caller does not (or is an organization owner or admin and the caller lacks organizations.write)
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: User not found, or no active session with this id for the user
@@ -4953,8 +4957,9 @@ paths:
         Unlinking changes how the account is entered, so the credential-reset
         guard applies, as for identity invites: the caller must hold every
         permission the user holds, from global roles or roles in any
-        organization (`403`, naming the permissions the caller lacks,
-        otherwise). The caller's own permissions count from global roles only,
+        organization, and `organizations.write` when the user is an `owner` or
+        `admin` member of any organization (`403`, naming what the caller
+        lacks, otherwise). The caller's own permissions count from global roles only,
         capped by a delegated token's scopes.
 
         An audit log entry is created (the admin as actor) and an
@@ -5012,8 +5017,9 @@ paths:
 
         An invite is a new way into the account, so the credential-reset guard
         applies: the caller must hold every permission the user holds, from
-        global roles or roles in any organization (`403`, naming the
-        permissions the caller lacks, otherwise). The caller's own permissions
+        global roles or roles in any organization, and `organizations.write`
+        when the user is an `owner` or `admin` member of any organization
+        (`403`, naming what the caller lacks, otherwise). The caller's own permissions
         count from global roles only, capped by a delegated token's scopes. The
         system user (`400 system_user`) and service accounts (`403`) are
         refused.
@@ -5124,8 +5130,9 @@ paths:
         token families end in the same transaction.
 
         Only a caller holding every permission the user holds (from global
-        roles or roles in any organization) may reset it (`403`, naming the
-        permissions the caller lacks, otherwise); the caller's permissions count
+        roles or roles in any organization), and `organizations.write` when the
+        user is an `owner` or `admin` member of any organization, may reset it
+        (`403`, naming what the caller lacks, otherwise); the caller's permissions count
         from global roles only, capped by a delegated token's scopes. The
         system user (`400 system_user`) and a service's service-account user
         (`403`) are refused, as on `PATCH /v1/admin/users/{id}`.
@@ -5683,7 +5690,12 @@ paths:
         the service clients holding it. People's tokens are not revoked:
         permissions are read on every request, so they lose the role at once.
         Deactivating a role that grants `admin` is refused when it would leave
-        no active administrator (`409 conflict`).
+        no active administrator (`409 conflict`). Reactivating a role that
+        grants `admin` while an integration's account holds it is refused
+        (`403 role_not_allowed_for_integration`). Turning `requires2fa` on, or
+        reactivating a role that has it, revokes its holders' access tokens
+        from logins without a second factor, so their next refresh meets the
+        2FA step-up.
 
         An audit log entry is created for this action.
         An `auth.role.updated` webhook event is emitted.
@@ -6006,7 +6018,9 @@ paths:
         a retired permission may stay on the role but cannot be newly added.
         A repeated id counts once. Archived roles are refused with
         `409 resource_archived`. Dropping `admin` from a role is refused when
-        it would leave no active administrator (`409 conflict`).
+        it would leave no active administrator (`409 conflict`). Keeping or
+        adding `admin` on a role an integration's account holds is refused
+        (`403 role_not_allowed_for_integration`): integrations never hold it.
 
         Only grant what you hold: each permission not already on the role
         must be one the caller holds through a global role (`admin` holds
@@ -6997,6 +7011,10 @@ paths:
         check, so a member without the required role may see `409` rather
         than `403`. A caller who is neither gets `403`.
 
+        Adding a role with `requires2fa` revokes the member's access tokens
+        from logins without a second factor, so their next refresh meets the
+        2FA step-up.
+
         An audit log entry is created for this action.
         An `auth.organization.member-roles-changed` webhook event is emitted.
 
@@ -7290,7 +7308,10 @@ paths:
         the provider (409 `provider_has_invites`): withdraw the invites first.
         Turning `countsAsMfa` on needs a caller holding `admin` through a global role
         (403 otherwise), and so does changing `issuer` or `clientId` while it stays
-        on; turning it off does not. Other errors are those of create.
+        on; turning it off does not. Changing `issuer` or `clientId` of a provider
+        with an SSO-only domain needs global `admin` too (403 otherwise): its
+        password users are force-linked to whoever the provider vouches for.
+        Other errors are those of create.
 
         An audit log entry is created for this action.
         An `auth.identity-provider.updated` webhook event is emitted.
@@ -7451,7 +7472,9 @@ paths:
         `roleIds`; `ssoOnly` refuses password sign-in for the domain's users. The two
         are independent. `domain` is lowercased and a leading `@` dropped.
         `ssoOnly: true` is refused with 409 `provider_inactive` while the provider
-        is deactivated, since the domain's users would have no way to sign in.
+        is deactivated, since the domain's users would have no way to sign in, and
+        with 403 unless the caller holds `admin` through a global role: a password
+        sign-in at an SSO-only domain is force-linked to the provider.
 
         `roleIds` must be roles that may be assigned within an organization: 400
         `unknown_role` for an unknown, archived or retired role, 400
@@ -7539,7 +7562,8 @@ paths:
         to another `organizationId` grants its roles (those sent, or else its current
         ones) in that organization, so all of them are checked there. Errors are those
         of adding a domain, including 409 `provider_inactive` for `ssoOnly: true` on a
-        deactivated provider.
+        deactivated provider. Turning `ssoOnly` on or off, or changing the `domain` of
+        an SSO-only domain, needs `admin` through a global role (403 otherwise).
 
         An audit log entry is created for this action.
       operationId: updateAdminIdentityProviderDomain
@@ -7582,8 +7606,9 @@ paths:
       summary: Remove a domain
       description: |
         Releases the domain and its default roles. Users already created through it
-        keep their accounts and identities. An audit log entry is created for this
-        action.
+        keep their accounts and identities. Deleting an SSO-only domain reopens its
+        users to passwords, so it needs `admin` through a global role (403
+        otherwise). An audit log entry is created for this action.
       operationId: deleteAdminIdentityProviderDomain
       security:
         - BearerAuth:
@@ -7985,6 +8010,9 @@ paths:
         integration's tokens: each appears in its tokens' `aud`. Each must be a
         service other than core (`422 invalid_audience`); an integration cannot
         be an audience. Its tokens are revoked when the audience changes.
+        Naming a service lets it read the integration's tokens, so the caller
+        needs `services.approve` too (`403` otherwise), as for a client's
+        audience.
 
         An audit log entry is created and a `core.integration.updated` webhook
         event is emitted when the audience changes.
@@ -8020,7 +8048,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing integrations.write permission
+          description: Forbidden - missing integrations.write or services.approve permission
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: No integration with this id
@@ -8565,6 +8593,14 @@ paths:
         an empty body returns `400 invalid_request`. Returns the settings after
         the change.
 
+        Relaxing `totpPolicy` (`required` to anything, `optional` to
+        `disabled`) needs `admin` through a global role (`403` otherwise):
+        `disabled` overrides every role's `requires2fa`. Tightening it revokes
+        the live access tokens from logins without a second factor of the
+        people it newly applies to (everyone for `required`; holders of a role
+        with `requires2fa` for `optional`), so their next refresh meets the
+        2FA step-up.
+
         An audit log entry is created for this action.
         An `auth.settings.updated` webhook event is emitted.
       operationId: patchAdminSettings
@@ -8597,7 +8633,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing settings.write permission
+          description: Forbidden - missing settings.write permission, or a relaxed totpPolicy without a global admin
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -13404,9 +13440,9 @@ paths:
           event types.
 
         **Organization:** a token with an `org_id` may emit only into that
-        organization; a service account's token without one, or a
-        `webhooks.admin` caller, into any; a person's token without one, into
-        none (`403`). This is checked after the body and the reserved type and
+        organization; an app service's token without one, or a
+        `webhooks.admin` caller, into any; anyone else's token without one (a
+        person's, an integration's), into none (`403`). This is checked after the body and the reserved type and
         before `organizationId` is looked up, so a refused caller learns nothing
         about which organizations exist. `organizationId` must be a UUID (`400`
         otherwise) naming an existing organization — an archived one counts —
@@ -13670,16 +13706,18 @@ paths:
 
         **Organization:** a caller without `audit-logs.admin` whose token has an `org_id` may
         write only for that organization; another `organizationId`, or none (a system-wide entry),
-        is `403 forbidden`. A service account's token without an `org_id` — an app service's
-        client — may write for any organization or none; a person's token without one may not
-        write at all (`403`). `audit-logs.admin` may write for any organization or none. The
+        is `403 forbidden`. An app service's client's token without an `org_id` may write for
+        any organization or none; anyone else's token without one (a person's, an
+        integration's) may not write at all (`403`). `audit-logs.admin` may write for any organization or none. The
         check runs before `unknown_organization`, so a refused caller learns nothing about which
         organizations exist.
 
         **Source:** an app service's client writes only under its own slug: an entry whose
         `source` is anything else is `422 source_mismatch`, and nothing is written. Its reads are
         scoped to that slug (see `GET /v1/audit/entries`). No service may take the slug `tereo`,
-        the source of core's own entries. Other callers' `source` is as they report it.
+        the source of core's own entries. Every other caller's `source` is as they report it,
+        except that `tereo`, `core` and every app service's slug are reserved for their owner:
+        `422 source_reserved`.
 
         **Idempotency:** with an `idempotencyKey`, a repeat of the same request (same body,
         `idempotencyKey` aside) from the same caller within 24 hours returns the first response
@@ -13692,7 +13730,7 @@ paths:
 
         **Errors (`400`):** `invalid_request` (validation), `unknown_user`, `unknown_organization`.
 
-        **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`.
+        **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`, `source_reserved`.
 
         **Required permission:** `audit-logs.write`
       operationId: createEntry
@@ -13864,6 +13902,8 @@ paths:
         `POST /v1/audit/entries`; one entry the caller may not write refuses the whole batch with
         `403 forbidden`, and nothing is written. An app service's client may write only entries
         whose `source` is its slug; one other refuses the whole batch with `422 source_mismatch`.
+        Anyone else's entry under a reserved source (`tereo`, `core`, an app service's slug)
+        refuses the whole batch with `422 source_reserved`.
 
         **Idempotency:** one optional `idempotencyKey` covers the whole batch (per-entry keys are
         rejected); it behaves as for single entries — a different body is
@@ -13873,7 +13913,7 @@ paths:
         **Errors (`400`):** `invalid_request` (validation, including any unknown field on an
         entry), `unknown_user`, `unknown_organization`.
 
-        **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`.
+        **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`, `source_reserved`.
 
         **Required permission:** `audit-logs.write`
       operationId: createBatch
@@ -20251,7 +20291,9 @@ components:
         progress). Use a new key, or retry with the original body.
 
         `source_mismatch`: an app service's client sent an entry whose `source` is not its own
-        slug, which the message names. Nothing is written; retrying the same body never succeeds.
+        slug, which the message names. `source_reserved`: another caller sent an entry whose
+        `source` is core's (`tereo`, `core`) or an app service's slug, which the message names.
+        Nothing is written; retrying the same body never succeeds.
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -20269,6 +20311,7 @@ components:
                 enum:
                   - idempotency_key_conflict
                   - source_mismatch
+                  - source_reserved
               error_description:
                 type: string
                 examples:
@@ -20436,7 +20479,7 @@ components:
     NotificationsSendForbiddenResponse:
       description: |
         `forbidden`: the caller lacks `notifications.send`, or names an `organizationId` outside its
-        token's organization (only `notifications.admin` and a service account's token without an
+        token's organization (only `notifications.admin` and an app service's token without an
         organization may name any). `attachment_forbidden`: the caller cannot
         read an attachment's bucket (a missing bucket answers the same). `insufficient_scope`: the
         token is delegated; only core's UI and services may send.
@@ -27480,8 +27523,8 @@ components:
           description: |
             Scopes the notification's audit entry and events; omitted or null, the token's
             organization, or the default organization for a token without one. A token with an organization may name only that one; a person's token
-            without one may name none. `notifications.admin` and a service account's token without
-            an organization may name any.
+            without one may name none, nor may an integration's. `notifications.admin` and an app
+            service's token without an organization may name any.
           type:
             - string
             - 'null'

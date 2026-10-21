@@ -1,8 +1,4 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
-import {
-  disconnectTokenSockets,
-  notifyUserRolesChanged,
-} from "../../../../../websocket/emitters/index.js";
 import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
 import { formatUser } from "../../../../../utils/transformers.js";
@@ -10,6 +6,10 @@ import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
+import {
+  disconnectTokenSockets,
+  notifyUserRolesChanged,
+} from "../../../../../websocket/emitters/index.js";
 import {
   validateBody,
   validateParams,

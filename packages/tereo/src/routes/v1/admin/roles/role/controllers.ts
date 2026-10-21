@@ -122,12 +122,14 @@ export const updateRole = async (req: Request, res: Response) => {
     if (body.isActive === false && existing.isActive) {
       await assertAdminRemains((a) => a.roleId !== params.id, tx);
     }
-    if (body.isActive === true && !existing.isActive) {
-      await db.roles.lockRoles([params.id], "update", tx);
-      const current = await db.roles.get(params.id, tx);
-      if (db.roles.grantedPermissionNames([current]).includes("admin")) {
-        await refuseAdminForIntegrations(params.id, tx);
-      }
+    // A role gains `admin` only under its lock, and only while no
+    // integration holds it, so the role read above settles whether to check.
+    if (
+      body.isActive === true &&
+      !existing.isActive &&
+      db.roles.grantedPermissionNames([existing]).includes("admin")
+    ) {
+      await refuseAdminForIntegrations(params.id, tx);
     }
     await db.roles.update(params.id, body, tx);
     const updated = await db.roles.get(params.id, tx);

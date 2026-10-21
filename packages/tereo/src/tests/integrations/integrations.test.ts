@@ -374,8 +374,7 @@ describe("roles", () => {
     expect(res.status).toBe(403);
     expect(res.body.error).toBe("role_not_allowed_for_integration");
     expect(
-      (await prisma.role.findUniqueOrThrow({ where: { id: roleId } }))
-        .isActive
+      (await prisma.role.findUniqueOrThrow({ where: { id: roleId } })).isActive
     ).toBe(false);
   });
 
@@ -452,7 +451,9 @@ describe("other admin routes", () => {
   });
 
   it("names an integration that tries to emit an event", async () => {
-    const created = await createIntegration();
+    // Org-bound: a platform integration's token has no organization to emit
+    // for, which is refused before the emit permission is checked.
+    const created = await createIntegration({ organizationId: orgId });
     const granter = await getTestPrincipalToken({
       permissions: ["integrations.write", "webhooks.emit"],
     });

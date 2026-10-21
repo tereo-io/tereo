@@ -9,6 +9,10 @@ import { MemberUserIdParamSchema } from "../schemas.js";
 import { SetMemberRolesSchema } from "./schemas.js";
 import type { Request, Response } from "express";
 import {
+  disconnectTokenSockets,
+  notifyOrgRolesChanged,
+} from "../../../../../../../../websocket/emitters/index.js";
+import {
   lockOrgOwners,
   requireOrgRole,
 } from "../../../../../../../../utils/orgRoleAuth.js";
@@ -16,10 +20,6 @@ import {
   validateBody,
   validateParams,
 } from "../../../../../../../../utils/validateReq.js";
-import {
-  disconnectTokenSockets,
-  notifyOrgRolesChanged,
-} from "../../../../../../../../websocket/emitters/index.js";
 import {
   ForbiddenError,
   NotFoundError,

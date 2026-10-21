@@ -2,10 +2,6 @@ import { openProviderSecret } from "../../utils/identityProviders/clientSecret.j
 import { createTestRole, generateUniqueId } from "./utils/test-helpers.js";
 import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
 import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
-import {
-  DEFAULT_ORGANIZATION_ID,
-  SYSTEM_USER_ID,
-} from "../../definitions/index.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mapUniqueViolation } from "../../utils/prismaErrors.js";
 import { ensurePermission } from "../utils/testService.js";
@@ -17,6 +13,10 @@ import {
   getCoreEventSubscriberToken,
   waitFor,
 } from "../webhooks/utils/test-helpers.js";
+import {
+  DEFAULT_ORGANIZATION_ID,
+  SYSTEM_USER_ID,
+} from "../../definitions/index.js";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,

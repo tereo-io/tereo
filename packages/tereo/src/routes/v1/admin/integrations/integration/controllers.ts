@@ -1,8 +1,8 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { formatIntegration } from "../../../../../utils/transformers.js";
-import { assertMayChangeAudience } from "../../clients/utils.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { emitTx, logAuditTx } from "../../../../../utils/outbox.js";
+import { assertMayChangeAudience } from "../../clients/utils.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";

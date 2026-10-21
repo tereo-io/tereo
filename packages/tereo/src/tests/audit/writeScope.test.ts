@@ -5,18 +5,18 @@ import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
 import {
+  cleanup as cleanupIntegrations,
+  createIntegration,
+  grant,
+  integrationToken,
+} from "../webhooks/utils/integrations.js";
+import {
   BASE_URL,
   HTTP_STATUS,
   getTestAccessToken,
   cleanupTestEntities,
   generateUniqueId,
 } from "./utils/test-helpers.js";
-import {
-  cleanup as cleanupIntegrations,
-  createIntegration,
-  grant,
-  integrationToken,
-} from "../webhooks/utils/integrations.js";
 
 const ORG_1 = "00000000-0000-7002-8000-000000000001";
 const ORG_2 = "00000000-0000-7002-8000-000000000002";

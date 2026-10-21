@@ -287,17 +287,17 @@ describe("Admin Settings Endpoints", () => {
         }
         expect(await storedPolicy()).toBe("required");
         // Not a relaxation: the policy it sends is the one in force.
-        expect(
-          (await patch(writer, { totpPolicy: "required" })).status
-        ).toBe(HTTP_STATUS.OK);
+        expect((await patch(writer, { totpPolicy: "required" })).status).toBe(
+          HTTP_STATUS.OK
+        );
         expect(
           (await patch(writer, { totpRecoveryCodeCount: 10 })).status
         ).toBe(HTTP_STATUS.OK);
 
         await setPolicy("optional");
-        expect(
-          (await patch(writer, { totpPolicy: "disabled" })).status
-        ).toBe(HTTP_STATUS.FORBIDDEN);
+        expect((await patch(writer, { totpPolicy: "disabled" })).status).toBe(
+          HTTP_STATUS.FORBIDDEN
+        );
         expect(await storedPolicy()).toBe("optional");
 
         const admin = await getTestPrincipalToken({ permissions: ["admin"] });

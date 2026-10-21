@@ -5,11 +5,6 @@ import { mapUniqueViolation } from "../../../../../../../utils/prismaErrors.js";
 import { ConflictError } from "../../../../../../../utils/errors.js";
 import { validateUser } from "../../../../../../../utils/auth.js";
 import db from "../../../../../../../utils/db/index.js";
-import {
-  assertMayChangeSsoOnly,
-  assertProviderActive,
-  changesSsoOnly,
-} from "../utils.js";
 import { UpdateDomainSchema } from "../schemas.js";
 import { DomainIdParamSchema } from "./schemas.js";
 import type { Request, Response } from "express";
@@ -21,6 +16,11 @@ import {
   computeChanges,
   logAuditTx,
 } from "../../../../../../../utils/outbox.js";
+import {
+  assertMayChangeSsoOnly,
+  assertProviderActive,
+  changesSsoOnly,
+} from "../utils.js";
 
 export const getDomain = async (req: Request, res: Response) => {
   const { id, domainId } = validateParams(DomainIdParamSchema, req);
