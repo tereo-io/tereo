@@ -603,6 +603,8 @@ model UserSession {
   authMethods    String[] @default([]) @map("auth_methods")
   acrValue       String?  @map("acr_value") @db.VarChar(100)
   expiresAt      DateTime @map("expires_at")
+  // When it last issued a code; USER_SESSION_IDLE_TTL counts from here.
+  lastUsedAt     DateTime @default(now()) @map("last_used_at")
   createdAt      DateTime @default(now()) @map("created_at")
 
   user               User                @relation(fields: [userId], references: [id], onDelete: Restrict)
@@ -612,6 +614,7 @@ model UserSession {
 
   @@index([organizationId])
   @@index([expiresAt])
+  @@index([lastUsedAt])
   @@index([userId, expiresAt])
   @@map("user_sessions")
   @@schema("auth")

@@ -2,8 +2,9 @@ import { writeStepAfterSecondFactor } from "../../../utils/identityProviders/for
 import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js";
 import { handlePostAuthOrgSelection } from "../../../utils/orgSelection.js";
 import { recordSessionsRevoked } from "../../../utils/sessionEvents.js";
+import { totpSetupFailure } from "../../../middleware/rateLimit.js";
+import { beginTotpAttempt } from "../../../utils/totpAttempts.js";
 import { issueKnownDevice } from "../../../utils/knownDevice.js";
-import { totpFailure } from "../../../middleware/rateLimit.js";
 import { logAuditTx, emitTx } from "../../../utils/outbox.js";
 import { endUserSessions } from "../../../utils/sessions.js";
 import { validateBody } from "../../../utils/validateReq.js";
@@ -66,7 +67,8 @@ export const totpVerifyHandler = async (req: Request, res: Response) => {
     );
   }
 
-  await totpFailure.check(req, verification.userId);
+  const user = await db.users.get(verification.userId);
+  const attempt = await beginTotpAttempt(req, user, "totp");
 
   const encryptedSecret = await db.totp.getUserTotpSecret(verification.userId);
   if (!encryptedSecret) {
@@ -84,13 +86,7 @@ export const totpVerifyHandler = async (req: Request, res: Response) => {
     step === null ||
     !(await db.totp.claimTotpWindow(verification.userId, step))
   ) {
-    logger.warn(
-      {
-        userId: verification.userId,
-        ip: req.ip,
-      },
-      "TOTP verification failed"
-    );
+    await attempt.failed();
     throw new OAuth2Error(
       "invalid_code",
       "Invalid verification code. Please try again.",
@@ -98,7 +94,7 @@ export const totpVerifyHandler = async (req: Request, res: Response) => {
     );
   }
 
-  await totpFailure.reset(req, verification.userId);
+  await attempt.succeeded();
 
   // One code, one login: a concurrent request with the same session loses.
   // The session is consumed where the next step is written, so a password
@@ -177,7 +173,8 @@ export const totpRecoveryHandler = async (req: Request, res: Response) => {
     );
   }
 
-  await totpFailure.check(req, verification.userId);
+  const user = await db.users.get(verification.userId);
+  const attempt = await beginTotpAttempt(req, user, "recovery");
 
   const recoveryCodes = await db.totp.getUnusedRecoveryCodes(
     verification.userId
@@ -199,13 +196,7 @@ export const totpRecoveryHandler = async (req: Request, res: Response) => {
   }
 
   if (!matchedCode) {
-    logger.warn(
-      {
-        userId: verification.userId,
-        ip: req.ip,
-      },
-      "Recovery code verification failed"
-    );
+    await attempt.failed();
     throw new OAuth2Error(
       "invalid_code",
       "Invalid recovery code. Please try again.",
@@ -262,7 +253,7 @@ export const totpRecoveryHandler = async (req: Request, res: Response) => {
     writeStep
   );
   clearTotpSessionCookie(res, client.clientId);
-  await totpFailure.reset(req, verification.userId);
+  await attempt.succeeded();
   issueKnownDevice(res, await db.users.get(verification.userId));
 
   logger.debug(
@@ -388,7 +379,9 @@ export const totpSetupVerifyHandler = async (req: Request, res: Response) => {
   await assertTotpSetupAllowed();
 
   const setupSession = await db.totp.getSetupSession(body.setup_token);
-  if (!setupSession) {
+  // One begun from the account page belongs to a signed-in token, which only
+  // the account route checks.
+  if (!setupSession || setupSession.clientId === null) {
     throw new OAuth2Error(
       "invalid_setup_token",
       "Invalid or expired setup token. Please start again."
@@ -403,7 +396,7 @@ export const totpSetupVerifyHandler = async (req: Request, res: Response) => {
     );
   }
 
-  await totpFailure.check(req, setupSession.userId);
+  await totpSetupFailure.check(req, setupSession.userId);
 
   const secret = decryptTotpSecret(setupSession.totpSecret);
   const step = verifyTotpCode(secret, body.totp_code);
@@ -414,7 +407,7 @@ export const totpSetupVerifyHandler = async (req: Request, res: Response) => {
       401
     );
   }
-  await totpFailure.reset(req, setupSession.userId);
+  await totpSetupFailure.reset(req, setupSession.userId);
 
   const encryptedSecret = encryptTotpSecret(secret);
 

@@ -464,6 +464,66 @@ describe("Session lifecycle", () => {
       expect(orgSwitch.loggedOut).toBe(true);
     });
 
+    const idleFor = (userId: string, seconds: number) =>
+      prisma.userSession.updateMany({
+        where: { userId },
+        data: { lastUsedAt: new Date(Date.now() - seconds * 1000) },
+      });
+
+    it("forces a fresh login once the SSO session has been idle for USER_SESSION_IDLE_TTL", async () => {
+      const user = await createUser();
+      const { jar } = await login(user);
+      await idleFor(user.id, env.USER_SESSION_IDLE_TTL + 1);
+
+      const idle = jar.get(userSessionCookieName())!;
+      expect((await silentLogin(jar)).loggedOut).toBe(true);
+      jar.set(userSessionCookieName(), idle);
+      expect((await silentLogin(jar, { org_id: user.orgId })).loggedOut).toBe(
+        true
+      );
+    });
+
+    it("keeps an SSO session in use alive, counting idleness from its last code", async () => {
+      const user = await createUser();
+      const { jar } = await login(user);
+      await idleFor(user.id, env.USER_SESSION_IDLE_TTL - 60);
+
+      const result = await silentLogin(jar);
+      expect(result.loggedOut).toBe(false);
+      const [row] = await userSessionRows(user.id);
+      expect(Date.now() - row.lastUsedAt.getTime()).toBeLessThan(60_000);
+    });
+
+    it("still logs out an idle SSO session, revoking what it issued", async () => {
+      const user = await createUser();
+      const { jar, tokens } = await login(user);
+      await idleFor(user.id, env.USER_SESSION_IDLE_TTL + 1);
+
+      const url = new URL(`${BASE_URL}/oauth/end-session`);
+      url.searchParams.set("id_token_hint", tokens.id_token!);
+      url.searchParams.set("post_logout_redirect_uri", POST_LOGOUT_URI);
+      const res = await fetch(url, {
+        redirect: "manual",
+        headers: { Cookie: cookieHeader(jar) },
+      });
+      expect(res.status).toBe(302);
+      expect(await userSessionRows(user.id)).toHaveLength(0);
+      expect((await refresh(tokens.refresh_token)).status).toBe(400);
+    });
+
+    it("takes over an idle SSO session's row at the next password login", async () => {
+      const user = await createUser();
+      const { jar } = await login(user);
+      const [before] = await userSessionRows(user.id);
+      await idleFor(user.id, env.USER_SESSION_IDLE_TTL + 1);
+
+      await login(user, jar);
+      const rows = await userSessionRows(user.id);
+      expect(rows.map((r) => r.id)).toEqual([before.id]);
+      expect(rows[0].tokenHash).not.toBe(before.tokenHash);
+      expect((await silentLogin(jar)).loggedOut).toBe(false);
+    });
+
     it("does not extend the SSO session past its original expiry", async () => {
       const user = await createUser();
       const { jar } = await login(user);

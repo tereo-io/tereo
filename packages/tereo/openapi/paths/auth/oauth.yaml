@@ -49,7 +49,10 @@
 
       A user session never outlives its original expiry (`USER_SESSION_TTL`,
       7 days by default, from the password login): continuing it with
-      `prompt=none` or `org_id` does not extend it.
+      `prompt=none` or `org_id` does not extend it. One that has issued no
+      code for `USER_SESSION_IDLE_TTL` (3 days by default) counts as expired
+      here too: `prompt=none` answers `login_required` and `org_id` falls
+      through to the login page.
 
       The consent redirects set the `tereo_consent_session_{client_id}`
       cookie. Every redirect to a login-flow page (consent, org-select, 2FA)
@@ -1239,15 +1242,19 @@
 
       400 `invalid_session` (unknown session, missing or mismatched cookie),
       `session_expired`, `totp_not_configured`; 401 `invalid_code` for a wrong
-      code. Five attempts per user in five minutes — across this endpoint,
-      `/oauth/totp/recovery` and `/oauth/totp/setup/verify`, and across
-      logins, so signing in again with the password does not reset it — lock
-      the user out with 429 for the rest of the window. A right code clears
-      the count.
+      code. Attempts are counted per user, across this endpoint and
+      `/oauth/totp/recovery` and across logins, so signing in again with the
+      password does not reset them: five in 24 hours, then 429 with
+      `Retry-After` until a delay after the last attempt passes, starting at
+      1 second and doubling with each attempt up to an hour. A right code
+      gives back only its own attempt; each counts for 24 hours. A browser
+      holding the user's known-device cookie is let through the delay (at most
+      five attempts an hour per cookie). From the fifth attempt in the window,
+      each failure is audited (User, `metadata.action: totp_failures`).
 
       A code is accepted once: a code from the same 30-second step as one
       already accepted for this user, or an earlier step, is 401
-      `invalid_code` and counts toward the lockout. That includes the code
+      `invalid_code` and counts as a failed attempt. That includes the code
       that completed TOTP setup.
 
       A 2FA session from an SSO-only user's forced link (see
@@ -1316,7 +1323,7 @@
     description: |
       Use a recovery code instead of TOTP during 2FA.
       Recovery codes are automatically transformed to uppercase and dashes are removed.
-      Session, cookie, errors and lockout as for `POST /oauth/totp/verify`,
+      Session, cookie, errors and attempt limits as for `POST /oauth/totp/verify`,
       plus 400 `no_recovery_codes` when the user has none left. The code and
       the 2FA session are consumed atomically: a code or session already used
       by a concurrent request is 400 `invalid_session`. A forced link's
@@ -1428,11 +1435,14 @@
     description: |
       Verify and complete TOTP setup during OAuth flow. Refused with 403
       `totp_disabled` while the system 2FA policy is `disabled`, including for
-      a setup started before the change. 400 `invalid_setup_token` or
-      `setup_expired` for the setup session, 401 `invalid_code` for a wrong
-      code. Attempts count toward the user's lockout shared with
-      `POST /oauth/totp/verify` (five per user in five minutes, then 429 for
-      the rest of the window). The code that completes setup is spent: it
+      a setup started before the change. 400 `invalid_setup_token` (also for
+      a setup begun from `POST /v1/account/totp/setup`, which only
+      `/v1/account/totp/setup/verify` completes) or `setup_expired` for the
+      setup session, 401 `invalid_code` for a wrong
+      code. Five wrong codes per user in five minutes, then 429 for the rest
+      of the window; a right code clears the count. The one setting up holds
+      the secret, so this is apart from the 2FA step's backoff. The code that
+      completes setup is spent: it
       is refused at the 2FA step that follows, which needs the next one.
 
       An audit log entry is created for this action. An

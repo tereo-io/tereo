@@ -281,6 +281,15 @@ const EnvFields = z
     // Absolute lifetime of the SSO session (prompt=none and org switching
     // without a password), from the login that started it.
     USER_SESSION_TTL: int(1, 365 * DAY, 7 * DAY),
+    // An SSO session that has issued no code for this long is treated as
+    // expired. At most USER_SESSION_TTL; defaults to 3 days, or
+    // USER_SESSION_TTL when that is shorter.
+    USER_SESSION_IDLE_TTL: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(365 * DAY)
+      .optional(),
     AUTHORIZATION_CODE_TTL: int(1, 600, 120),
     // Seconds a login flow (the login, consent and org-select steps, their
     // cookies and sessions) stays usable: a person reads and types, so it
@@ -466,6 +475,16 @@ const EnvFields = z
       });
     }
     refineKeyEnv(val, ctx);
+    if (
+      val.USER_SESSION_IDLE_TTL !== undefined &&
+      val.USER_SESSION_IDLE_TTL > val.USER_SESSION_TTL
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["USER_SESSION_IDLE_TTL"],
+        message: "USER_SESSION_IDLE_TTL must not exceed USER_SESSION_TTL",
+      });
+    }
     if (val.NODE_ENV === "production" && !val.CORS_ALLOWED_ORIGINS) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -534,6 +553,8 @@ const EnvFields = z
       TOTP_ENCRYPTION_KEY: val.TOTP_ENCRYPTION_KEY as string,
       KNOWN_DEVICE_KEY: val.KNOWN_DEVICE_KEY as string,
       TRUST_PROXY: val.TRUST_PROXY || DEFAULT_TRUST_PROXY,
+      USER_SESSION_IDLE_TTL:
+        val.USER_SESSION_IDLE_TTL ?? Math.min(3 * DAY, val.USER_SESSION_TTL),
       COOKIE_SECURE: resolveCookieSecure(val.COOKIE_SECURE, val.NODE_ENV),
       UI_BASE_URL: uiBaseUrl,
       UI_DIST_PATH: path.resolve(val.UI_DIST_PATH),

@@ -743,7 +743,9 @@ in the `tereo_2fa_setup_grant_{client_id}` cookie. `POST /oauth/totp/setup` take
 `setup_grant`; it must match the cookie, it is consumed on use, and the user and OAuth request come
 from it. The setup session it starts is then completed with `POST /oauth/totp/setup/verify`, after
 which the UI restarts `/oauth/authorize` and the user logs in with the new factor. Signed-in users
-enrol from `POST /v1/account/totp/setup`, which acts on the token's user.
+enrol from `POST /v1/account/totp/setup`, which acts on the token's user. Each verify completes only
+its own kind of setup: `/oauth/totp/setup/verify` refuses a setup begun from the account page, and
+`/v1/account/totp/setup/verify` one begun at login, with 400 `invalid_setup_token`.
 
 A TOTP code is accepted once. `auth.users.totp_last_window` holds the 30-second step of the last
 code accepted for the user's secret; every check — the 2FA step at login, both setup verifies, and
@@ -799,13 +801,21 @@ gain permissions while the check runs.
 
 ## Session lifetimes
 
-Every lifetime is absolute — using a session never extends it:
+Every lifetime is absolute — using a session never extends it. The SSO session also has an idle
+limit, `USER_SESSION_IDLE_TTL` (3 days by default, at most `USER_SESSION_TTL`): its `last_used_at` is
+set whenever it issues a code, and one idle longer counts as expired wherever it would be continued
+without a password (`prompt=none`, an `org_id` switch, the code issue that ends either). A refresh
+does not count as use: an app refreshing its tokens keeps its own family alive, not the browser's
+SSO session. An idle session's row stays until its absolute expiry, so a logout still finds it and
+revokes the token families issued under it, and the browser's next password login takes the row over
+(`includeIdle` on the lookups in `utils/db/userSessions.ts`).
 
 | Setting                  | Default        | What it bounds                                                                                                                                     |
 | ------------------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `JWT_ACCESS_TOKEN_TTL`   | 3600 (1 h)     | Access and ID tokens                                                                                                                               |
 | `JWT_REFRESH_TOKEN_TTL`  | 2592000 (30 d) | A refresh-token family, from the code exchange. A rotated token keeps the family's original expiry                                                 |
 | `USER_SESSION_TTL`       | 604800 (7 d)   | The SSO session behind `prompt=none` and org switching (`org_id`). A session continued without a password keeps the expiry of the one it came from |
+| `USER_SESSION_IDLE_TTL`  | 259200 (3 d)   | The same SSO session, since it last issued a code                                                                                                    |
 | `AUTHORIZATION_CODE_TTL` | 120            | Authorization codes                                                                                                                                |
 | `LOGIN_FLOW_TTL`         | 900 (15 min)   | The login, consent and org-select steps: their cookies and sessions, since a person fills them in                                                  |
 
@@ -815,7 +825,7 @@ login step or the consent screen — carries `iss`, the issuer (RFC 9207, built 
 `authorization_response_iss_parameter_supported`.
 
 `/oauth/authorize` with `prompt=none` answers `login_required` when the SSO session is missing,
-expired, older than `max_age`, or belongs to a deactivated user. With `org_id`, the same cases fall
+expired or idle, older than `max_age`, or belongs to a deactivated user. With `org_id`, the same cases fall
 through to the password login. `max_age` is enforced there, at authorize: a code always carries a
 login that satisfied it, and `/oauth/token` does not check it again. For core's own login client (`isFirstPartyClient` in `definitions/`) and for a client with
 `consentRequired: false` asking for no `core:*` scope, `prompt=none` or an `org_id` switch with a
@@ -830,8 +840,11 @@ switch ends with that session, and the code is issued only while the session sti
 under the user's lock that logout takes too; otherwise the client gets `error=login_required`. A
 password change, an admin reset or any other sign-out of every session (`endUserSessions`) also
 deletes the user's login steps already past the password — consent and organization picks, 2FA
-verifications, 2FA setup grants and the setups they began, identity link grants — so a password
-that has just been replaced cannot finish a login it started. A step after the password check is
+verifications, 2FA setup grants, every 2FA setup session (those begun from the account page too),
+identity link grants, provider round trips (an account-page link included) and authorization codes
+not yet exchanged — so a password that has just been replaced cannot finish a login it started, nor
+enrol a factor or link a provider. A sign-out that keeps the caller's browser keeps that browser's
+SSO session, its consent for an org switch and its unexchanged codes. A step after the password check is
 written only while that password is still the user's, holding the user's row as a token issue does
 (`writeStepWhilePasswordIs` in `utils/firstFactor.ts`): a change that committed after the check
 refuses the login as a wrong password would, and one in progress waits for the step and deletes it.
@@ -846,7 +859,15 @@ confidential-client secrets and refresh tokens (256 random bits each): a secret 
 hashing the presented one and comparing in constant time, and a refresh token is looked up by its
 hash, so `/oauth/token`, `/oauth/revoke` and `/oauth/introspect` give an unauthenticated caller no
 slow hash to make core compute. scrypt (`utils/password.ts`) is kept for the low-entropy secrets:
-passwords, recovery codes and share passwords. Every
+passwords, recovery codes and share passwords, stored as `scrypt$N$r$p$salt$key` so each hash names
+its own cost. Passwords (login and share) use N=2^14, r=8, p=5 (OWASP's equivalent of 16 MiB at
+p=1, with five times the CPU); recovery codes, 60 random bits each and all checked at a recovery
+login, stay at p=1. Hashes from before the format (`salt:key`, N=2^14, r=8, p=1) still verify, topped
+up to the current cost so an account on an old hash answers as slowly as an unknown email, and a
+correct login password is stored again at the current parameters — conditionally on the hash read,
+so a concurrent password change wins. Since the known-device cookie covers the password hash, that
+one rehash voids the account's earlier known-device cookies; the login that rehashed gets a new one.
+Every
 password login gives the browser's SSO session a new token (session fixation); silent and org-switch
 continuations keep it.
 
@@ -924,7 +945,8 @@ All in Redis; limiters in `utils/rateLimit.ts`, instances in `middleware/rateLim
 
 - **Before authentication** — `rateLimitPreAuth`, per client IP, mounted ahead of `requireAuth` on `/v1/admin`, `/v1/account`, `/v1/files`, `/v1/audit`, `/v1/webhooks` and `/v1/notifications`, so floods of missing or bad tokens are bounded without verifying them.
 - **General** — `rateLimitGeneral`, after authentication: per user, per IP when anonymous, per OAuth client for internal service accounts.
-- **Credentials** — counted before the credential is checked, atomically, and cleared by a success: login passwords per client and IP (`authFailure`, keyed by the body's `client_id` once that client is found — never by a header the login does not authenticate with, which a caller could vary per request; the key spans every account tried from that address, so a success only gives back its own attempt — clearing the count would let a login to one's own account wipe the failures against everyone else's) and per account (`loginAccountBackoff`: keyed on a hash of the normalised email, so unknown emails behave the same; five attempts, then a delay doubling from 1 s to 15 min — a backoff, not a lockout); provider callbacks per IP once their round trip is consumed (see _Errors_ under _Sign in with an identity provider_); confidential-client secrets at `/oauth/token`, `/oauth/revoke` and `/oauth/introspect` per client and IP (`clientSecretFailure`: 10 wrong secrets per 5 min, keyed with the IP so one address cannot lock a client out for its other callers. Unlike the others it counts only failures — read before the secret is hashed, spent after a wrong one — so any number of concurrent correct secrets from one address, such as pods behind one NAT, pass. Once the count is full every attempt is refused before hashing, the right secret included, until the window expires: a correct secret cannot clear a full count, so a stale-secret pod sharing an address can hold the client off for up to 5 min. Concurrent wrong secrets can overshoot the limit by the burst, acceptable for high-entropy secrets); login 2FA per user; `/v1/account/password` and `/v1/account/totp/*` per user; setup per IP; share unlock per token and IP.
+- **Credentials** — counted before the credential is checked, atomically, and cleared by a success: login passwords per client and IP (`authFailure`, keyed by the body's `client_id` once that client is found — never by a header the login does not authenticate with, which a caller could vary per request; the key spans every account tried from that address, so a success only gives back its own attempt — clearing the count would let a login to one's own account wipe the failures against everyone else's) and per account (`loginAccountBackoff`: keyed on a hash of the normalised email, so unknown emails behave the same; five attempts, then a delay doubling from 1 s to 15 min — a backoff, not a lockout); provider callbacks per IP once their round trip is consumed (see _Errors_ under _Sign in with an identity provider_); confidential-client secrets at `/oauth/token`, `/oauth/revoke` and `/oauth/introspect` per client and IP (`clientSecretFailure`: 10 wrong secrets per 5 min, keyed with the IP so one address cannot lock a client out for its other callers. Unlike the others it counts only failures — read before the secret is hashed, spent after a wrong one — so any number of concurrent correct secrets from one address, such as pods behind one NAT, pass. Once the count is full every attempt is refused before hashing, the right secret included, until the window expires: a correct secret cannot clear a full count, so a stale-secret pod sharing an address can hold the client off for up to 5 min. Concurrent wrong secrets can overshoot the limit by the burst, acceptable for high-entropy secrets); login 2FA setup per user; `/v1/account/password` and `/v1/account/totp/*` per user; setup per IP; share unlock per token and IP.
+- **Login 2FA** — `/oauth/totp/verify` and `/oauth/totp/recovery` share `totpBackoff`, per user, which nothing resets: a sliding 24-hour window (`createWindowedBackoffLimiter`) in which five attempts pass, then each next one waits a delay after the last that doubles from 1 s to an hour. Each attempt is spent before the code is checked; a right code takes back only its own, so the owner signing in hands an attacker who holds the password no fresh guesses, and the attacker gets some forty guesses a day at most. From the fifth attempt in the window every failure writes an audit entry (`User`, action `UPDATE`, `metadata.action` `totp_failures`, with `method` and `recentFailures`). The trade-off is the owner's access while an attacker keeps the delay at its cap: a browser holding the user's known-device cookie (set by a completed login) is let through the delay, its attempts still counting toward it, capped at 5 per hour per cookie (`knownDeviceTotp`); a browser without one competes with the attacker for the next attempt, at most an hour away, so an attacker who spends each one as it opens can keep the owner out until they sign in from a known device or an admin resets the password. A per-2FA-session limit would add nothing, since the password buys a new session. The setup verify (`/oauth/totp/setup/verify`), whose caller holds the secret, keeps a fixed 5 per 300 s per user (`totpSetupFailure`).
 - **Known device** — so that someone holding an account in backoff does not lock its owner out, a completed login (after 2FA when required) sets `tereo_known_device` (`utils/knownDevice.ts`; httpOnly, `SameSite=Lax`, path `/oauth`, 90 days): `<userId>.<issuedAt>.<HMAC>`, keyed with `KNOWN_DEVICE_KEY` and covering the user's password hash, so a password change or admin reset (a freshly salted hash) voids every earlier cookie with no extra column. At the login submit, while the account is delayed (`loginAccountBackoff.isDelayed`), a cookie valid for that same user skips the delay: `authFailure` and the password check still apply, the attempt still counts toward the account (`spendUnblocked`, which lengthens the delay without being refused by it), and `knownDeviceFailure` caps it at 5 wrong passwords per 15 min per cookie, so a stolen cookie is not an unlimited guess. Outside a delay a known device is treated like any browser. The cookie is checked only against the user the email names, so it reveals nothing about other emails; sign-out leaves it, since it is not a session.
 - **Redis down** — credential limiters fail closed with `503 temporarily_unavailable`, except `clientSecretFailure`, which fails open: the secret is still verified, and client authentication (`/oauth/token`, `/oauth/revoke`, `/oauth/introspect`) must not go down with Redis; the general and pre-auth limiters fail open, so an outage does not take the API down. None waits in ioredis's offline queue: each refuses (or passes) at once while the client is not ready.
 - **Tests** run every limiter at its production limits. `tests/setup.ts` clears limiter keys before each test; a test needing several client addresses sends `X-Forwarded-For`, trusted from loopback by the default `TRUST_PROXY`.

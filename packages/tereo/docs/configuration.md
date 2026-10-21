@@ -186,6 +186,7 @@ env (no overlap).
 | `JWT_ACCESS_TOKEN_TTL` | `3600` | Seconds, 1–86400 (24 h) |
 | `JWT_REFRESH_TOKEN_TTL` | `2592000` | Seconds, absolute from the code exchange; at most 31536000 (365 d) |
 | `USER_SESSION_TTL` | `604800` | Seconds, absolute from login; at most 31536000 (365 d) |
+| `USER_SESSION_IDLE_TTL` | `259200`, or `USER_SESSION_TTL` when shorter | Seconds an SSO session may go without issuing a code before it counts as expired; at most `USER_SESSION_TTL` |
 | `AUTHORIZATION_CODE_TTL` | `120` | Seconds, 1–600; authorization codes only |
 | `LOGIN_FLOW_TTL` | `900` | Seconds (1–3600) a login flow stays usable: the login, consent and org-select steps, their cookies and sessions |
 | `UI_BASE_URL` | `PUBLIC_URL` in production, `http://localhost:4000` otherwise | Login, consent and org-select redirects; the login client's `${UI_BASE_URL}/callback`. Must be `https://` in production |

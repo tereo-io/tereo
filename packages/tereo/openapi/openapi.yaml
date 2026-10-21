@@ -389,9 +389,15 @@ info:
       passwords still count toward the account's delay, and are capped at 5 per 900 seconds
       per cookie. The cookie is bound to the account and its current password: it does nothing
       for another email, and a password change or reset voids it
-    - **Login 2FA** (`/oauth/totp/verify`, `/oauth/totp/recovery`, `/oauth/totp/setup/verify`):
-      5 attempts per 300 seconds per user, across logins — a new login with the password does
-      not reset it
+    - **Login 2FA** (`/oauth/totp/verify`, `/oauth/totp/recovery`): per user, across logins — a
+      new login with the password does not reset it. 5 attempts in 24 hours, then a delay
+      before each further attempt that starts at 1 second and doubles with each, up to one
+      hour. Nothing clears the count: a right code gives back only its own attempt, and each
+      attempt counts for 24 hours. A known-device browser (as for login passwords) is let
+      through the delay, capped at 5 attempts per hour per cookie. Repeated failures are
+      audited
+    - **2FA setup at login** (`/oauth/totp/setup/verify`): 5 wrong codes per user per 300
+      seconds; a right code clears the count
     - **Wrong codes on `/v1/account/totp/*`** (enable, disable, regenerate backup codes): 5 per user
       per 300 seconds
     - **Wrong current password on `POST /v1/account/password`**: 5 per user per 300 seconds

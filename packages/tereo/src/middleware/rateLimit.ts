@@ -2,6 +2,7 @@ import { normalizeEmail } from "../utils/email.js";
 import {
   createPreAuthRateLimitMiddleware,
   createRateLimitMiddleware,
+  createWindowedBackoffLimiter,
   createBackoffLimiter,
   createFailureLimiter,
   getIpIdentifier,
@@ -81,11 +82,40 @@ export const knownDeviceFailure = createFailureLimiter({
   getKey: (_req, token) => hashKeyPart(token ?? ""),
 });
 
-// Wrong TOTP and recovery codes at login, per user (the 2FA session's). A
-// session or IP key would let anyone holding the password start a new login,
-// or move to another address, for five more guesses each time.
-export const totpFailure = createFailureLimiter({
-  keyPrefix: "rl:totp:fail",
+// TOTP and recovery codes at the login 2FA step, per user (the 2FA
+// session's): a session or IP key would let anyone holding the password
+// start a new login, or move to another address, for more guesses. Five in a
+// day, then a delay before each next one that doubles from 1 second up to an
+// hour, so the password alone is worth some forty guesses a day. Nothing
+// resets it: a correct code takes back only its own attempt, so the owner's
+// logins hand an attacker no fresh guesses, and each attempt counts for 24
+// hours. The owner's way past a delay an attacker holds is knownDeviceTotp.
+export const totpBackoff = createWindowedBackoffLimiter({
+  keyPrefix: "rl:totp:user",
+  freeAttempts: 5,
+  baseDelaySeconds: 1,
+  maxDelaySeconds: 3600,
+  windowSeconds: 86_400,
+  errorDescription: "Too many failed 2FA attempts. Please try again later.",
+  getKey: (_req, userId) => userId ?? "",
+});
+
+// 2FA attempts from a known-device browser while the user's totpBackoff
+// delays, per cookie: such an attempt is let through the delay, so a stolen
+// cookie with the password must not become an unlimited guess. Its attempts
+// still count toward the user's backoff.
+export const knownDeviceTotp = createFailureLimiter({
+  keyPrefix: "rl:totp:device",
+  points: 5,
+  duration: 3600,
+  errorDescription: "Too many failed 2FA attempts. Please try again later.",
+  getKey: (_req, token) => hashKeyPart(token ?? ""),
+});
+
+// Wrong codes at /oauth/totp/setup/verify, per user. The one setting up holds
+// the secret, so this only bounds noise.
+export const totpSetupFailure = createFailureLimiter({
+  keyPrefix: "rl:totp:setup:fail",
   points: 5,
   duration: 300,
   errorDescription: "Too many failed 2FA attempts. Please try again later.",

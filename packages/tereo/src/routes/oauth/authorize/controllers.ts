@@ -341,9 +341,14 @@ export const authorizePostHandler = async (req: Request, res: Response) => {
   await loginAccountBackoff.reset(req, body.email);
   if (knownDevice) await knownDeviceFailure.reset(req, knownDevice);
 
+  const passwordHash = await db.users.upgradePasswordHash(
+    user.id,
+    user.passwordHash,
+    body.password
+  );
   // A password change may end the user's steps between this check and the
   // next step's row; the step is written only while the password holds.
-  const writeStep = writeStepWhilePasswordIs(user.id, user.passwordHash);
+  const writeStep = writeStepWhilePasswordIs(user.id, passwordHash);
   const linkRequired = await ssoOnlyLinkRequired(
     res,
     user,
@@ -358,7 +363,7 @@ export const authorizePostHandler = async (req: Request, res: Response) => {
 
   res.json(
     await continueAfterFirstFactor(req, res, {
-      user,
+      user: { ...user, passwordHash },
       client,
       request: authorizeRequestParams(body),
       authMethods: ["pwd"],
