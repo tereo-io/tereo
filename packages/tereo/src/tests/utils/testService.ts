@@ -1,5 +1,6 @@
 import { PERMISSION_CATALOG, SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { randomUUID } from "node:crypto";
 
 /**
  * Owner of the permissions, roles and event types tests make directly in the
@@ -55,4 +56,37 @@ export const makeServiceOf = async (clientRowId: string): Promise<string> => {
     },
   });
   return slug;
+};
+
+/**
+ * An app service's account: a confidential client, its service-account user
+ * and the `core.services` row that makes it an app service. A token minted
+ * for `userId` acts as that service. Returns the user id and the slug.
+ */
+export const createAppServiceAccount = async (
+  label: string
+): Promise<{ userId: string; slug: string }> => {
+  const suffix = randomUUID();
+  const client = await prisma.oAuthClient.create({
+    data: {
+      clientId: `${label}-${suffix}`,
+      clientType: "confidential",
+      name: label,
+      redirectUris: [],
+      scopes: [],
+      grantTypes: ["client_credentials"],
+      audience: [],
+      ownerId: SYSTEM_USER_ID,
+    },
+  });
+  const user = await prisma.user.create({
+    data: {
+      email: `${label}-${suffix}@services.example.com`,
+      name: label,
+      passwordHash: "!",
+      userType: "service_account",
+      oauthClientId: client.id,
+    },
+  });
+  return { userId: user.id, slug: await makeServiceOf(client.id) };
 };

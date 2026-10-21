@@ -86,7 +86,7 @@ export const emitEvent = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const body = validateBody(emitEventSchema, req);
   assertNoReservedEventTypes([body.eventType]);
-  assertEmitScope(auth, [body.organizationId]);
+  await assertEmitScope(auth, [body.organizationId]);
   await assertOrganizationsExist([body.organizationId]);
   await assertMayEmit(auth, [body.eventType]);
   const processResult = await emitWithIdempotency(body, auth.userId);
@@ -99,7 +99,7 @@ export const batchEmitEvents = async (req: Request, res: Response) => {
   const eventTypes = body.events.map((e) => e.eventType);
   const organizationIds = body.events.map((e) => e.organizationId);
   assertNoReservedEventTypes(eventTypes);
-  assertEmitScope(auth, organizationIds);
+  await assertEmitScope(auth, organizationIds);
   await assertOrganizationsExist(organizationIds);
   await assertMayEmit(auth, eventTypes);
   const results = await emitBatchWithIdempotency(body.events, auth.userId);

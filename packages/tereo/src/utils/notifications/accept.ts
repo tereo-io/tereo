@@ -370,7 +370,7 @@ export async function validateNotification(
     (sender.auth === "system" ? null : sender.auth.organizationId) ??
     null;
   if (organizationId && sender.auth !== "system") {
-    assertNotificationWriteScope(sender.auth, [organizationId]);
+    await assertNotificationWriteScope(sender.auth, [organizationId]);
   }
   if (
     organizationId &&

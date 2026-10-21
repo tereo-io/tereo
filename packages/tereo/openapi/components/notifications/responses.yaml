@@ -101,7 +101,7 @@ NotificationsSendBadRequestResponse:
 NotificationsSendForbiddenResponse:
   description: |
     `forbidden`: the caller lacks `notifications.send`, or names an `organizationId` outside its
-    token's organization (only `notifications.admin` and a service account's token without an
+    token's organization (only `notifications.admin` and an app service's token without an
     organization may name any). `attachment_forbidden`: the caller cannot
     read an attachment's bucket (a missing bucket answers the same). `insufficient_scope`: the
     token is delegated; only core's UI and services may send.

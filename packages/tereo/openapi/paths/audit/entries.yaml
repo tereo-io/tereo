@@ -13,16 +13,18 @@
 
       **Organization:** a caller without `audit-logs.admin` whose token has an `org_id` may
       write only for that organization; another `organizationId`, or none (a system-wide entry),
-      is `403 forbidden`. A service account's token without an `org_id` — an app service's
-      client — may write for any organization or none; a person's token without one may not
-      write at all (`403`). `audit-logs.admin` may write for any organization or none. The
+      is `403 forbidden`. An app service's client's token without an `org_id` may write for
+      any organization or none; anyone else's token without one (a person's, an
+      integration's) may not write at all (`403`). `audit-logs.admin` may write for any organization or none. The
       check runs before `unknown_organization`, so a refused caller learns nothing about which
       organizations exist.
 
       **Source:** an app service's client writes only under its own slug: an entry whose
       `source` is anything else is `422 source_mismatch`, and nothing is written. Its reads are
       scoped to that slug (see `GET /v1/audit/entries`). No service may take the slug `tereo`,
-      the source of core's own entries. Other callers' `source` is as they report it.
+      the source of core's own entries. Every other caller's `source` is as they report it,
+      except that `tereo`, `core` and every app service's slug are reserved for their owner:
+      `422 source_reserved`.
 
       **Idempotency:** with an `idempotencyKey`, a repeat of the same request (same body,
       `idempotencyKey` aside) from the same caller within 24 hours returns the first response
@@ -35,7 +37,7 @@
 
       **Errors (`400`):** `invalid_request` (validation), `unknown_user`, `unknown_organization`.
 
-      **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`.
+      **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`, `source_reserved`.
 
       **Required permission:** `audit-logs.write`
     operationId: createEntry
@@ -209,6 +211,8 @@
       `POST /v1/audit/entries`; one entry the caller may not write refuses the whole batch with
       `403 forbidden`, and nothing is written. An app service's client may write only entries
       whose `source` is its slug; one other refuses the whole batch with `422 source_mismatch`.
+      Anyone else's entry under a reserved source (`tereo`, `core`, an app service's slug)
+      refuses the whole batch with `422 source_reserved`.
 
       **Idempotency:** one optional `idempotencyKey` covers the whole batch (per-entry keys are
       rejected); it behaves as for single entries — a different body is
@@ -218,7 +222,7 @@
       **Errors (`400`):** `invalid_request` (validation, including any unknown field on an
       entry), `unknown_user`, `unknown_organization`.
 
-      **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`.
+      **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`, `source_reserved`.
 
       **Required permission:** `audit-logs.write`
     operationId: createBatch

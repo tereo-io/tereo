@@ -1,5 +1,4 @@
 import { ForbiddenError, ValidationError } from "../utils/errors.js";
-import { UserType } from "../../prisma/generated/client/index.js";
 import { PERMISSIONS } from "../definitions/permissions.js";
 import { Request, Response, NextFunction } from "express";
 import { callerService } from "../utils/callerService.js";
@@ -149,6 +148,11 @@ export const resolveAuditOrganizationId = async (
   );
 };
 
+type WriteScopeAuth = Pick<
+  AuthContext,
+  "permissions" | "organizationId" | "oauthClientId"
+>;
+
 /**
  * Writes on behalf of organizations — audit entries, emitted events: the
  * organizations a caller may write for.
@@ -156,25 +160,26 @@ export const resolveAuditOrganizationId = async (
  * - `adminPermission`: any organization, or none (system-wide).
  * - A token with an `org_id`: only that organization. A system-wide write is
  *   outside it, so an organization must be given.
- * - A service account's token without an `org_id` — an app service's client,
- *   which writes for every tenant of its app: any organization, or none.
- * - A person's token without an `org_id`: nothing.
+ * - An app service's token without an `org_id` — its client writes for every
+ *   tenant of its app: any organization, or none.
+ * - Anyone else's token without an `org_id` (a person's, an integration's,
+ *   another client's account): nothing.
  *
  * One disallowed organization refuses the whole request, so a batch stays
  * all-or-nothing. Callers check this before checking that the organizations
  * exist, so a refused caller can't probe which do.
  */
-const assertOrganizationWriteScope = (
-  auth: Pick<AuthContext, "permissions" | "organizationId" | "userType">,
+const assertOrganizationWriteScope = async (
+  auth: WriteScopeAuth,
   organizationIds: (string | null | undefined)[],
   adminPermission: string,
   refusal: string
-): void => {
+): Promise<void> => {
   if (hasPermission(auth.permissions, adminPermission)) return;
 
   const tokenOrgId = auth.organizationId;
   if (!tokenOrgId) {
-    if (auth.userType === UserType.service_account) return;
+    if (await callerService(auth)) return;
     throw new ForbiddenError(
       "Organization context required. Token must include an org_id."
     );
@@ -187,9 +192,9 @@ const assertOrganizationWriteScope = (
 
 /** Audit writes: see `assertOrganizationWriteScope`; the admin is `audit-logs.admin`. */
 export const assertAuditWriteScope = (
-  auth: Pick<AuthContext, "permissions" | "organizationId" | "userType">,
+  auth: WriteScopeAuth,
   organizationIds: (string | null | undefined)[]
-): void =>
+): Promise<void> =>
   assertOrganizationWriteScope(
     auth,
     organizationIds,
@@ -199,9 +204,9 @@ export const assertAuditWriteScope = (
 
 /** Event emission: see `assertOrganizationWriteScope`; the admin is `webhooks.admin`. */
 export const assertEmitScope = (
-  auth: Pick<AuthContext, "permissions" | "organizationId" | "userType">,
+  auth: WriteScopeAuth,
   organizationIds: string[]
-): void =>
+): Promise<void> =>
   assertOrganizationWriteScope(
     auth,
     organizationIds,
@@ -211,9 +216,9 @@ export const assertEmitScope = (
 
 /** Notification sends: see `assertOrganizationWriteScope`; the admin is `notifications.admin`. */
 export const assertNotificationWriteScope = (
-  auth: Pick<AuthContext, "permissions" | "organizationId" | "userType">,
+  auth: WriteScopeAuth,
   organizationIds: (string | null | undefined)[]
-): void =>
+): Promise<void> =>
   assertOrganizationWriteScope(
     auth,
     organizationIds,
