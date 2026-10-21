@@ -39,7 +39,16 @@ type Tx = Prisma.TransactionClient;
 // ===========================================================================
 
 export interface AuditLogInput {
-  auth: { userId: string; email: string | null };
+  /**
+   * The actor. A request's `AuthContext` also carries the token's client and,
+   * for a token delegated to a third-party client, its ceiling.
+   */
+  auth: {
+    userId: string;
+    email: string | null;
+    clientId?: string;
+    ceiling?: string[];
+  };
   organizationId?: string | null;
   action:
     | "CREATE"
@@ -76,13 +85,23 @@ export async function logAuditTx(tx: Tx, input: AuditLogInput): Promise<void> {
       entityId: input.entityId,
       entityName: input.entityName,
       changes: input.changes as Prisma.InputJsonValue | undefined,
-      metadata: input.metadata as Prisma.InputJsonValue | undefined,
+      metadata: auditMetadata(input) as Prisma.InputJsonValue | undefined,
       ipAddress: ip === "unknown" ? null : ip,
       correlationId: input.correlationId ?? getRequestId(),
       writerUserId: SYSTEM_USER_ID,
     },
   });
 }
+
+// A delegated token acts for its user through a third-party client, which
+// the entry names: the user alone would read as the user's own doing.
+const auditMetadata = ({
+  auth,
+  metadata,
+}: AuditLogInput): Record<string, unknown> | undefined =>
+  auth.ceiling && auth.clientId
+    ? { clientId: auth.clientId, ...metadata }
+    : metadata;
 
 /**
  * Deep equality comparison for computing field-level diffs.

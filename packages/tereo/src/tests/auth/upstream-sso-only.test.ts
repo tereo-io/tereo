@@ -681,10 +681,16 @@ describe("the forced link", () => {
       where: { providerId_subject: { providerId: provider.id, subject: sub } },
     });
     expect(identity.userId).toBe(user.id);
-    const login = await prisma.auditLogEntry.findFirst({
-      where: { action: "LOGIN", entityType: "UserIdentity", userId: user.id },
+    // One sign-in, written with the code: none for the link itself.
+    const logins = await prisma.auditLogEntry.findMany({
+      where: { action: "LOGIN", userId: user.id },
     });
-    expect(login?.entityId).toBe(identity.id);
+    expect(logins).toHaveLength(1);
+    expect(logins[0]).toMatchObject({ entityType: "User", entityId: user.id });
+    expect(logins[0].metadata).toMatchObject({
+      provider: provider.slug,
+      auth_methods: ["fed", "otp"],
+    });
   });
 
   it("keeps the password and earlier sessions while the TOTP step is pending", async () => {

@@ -154,7 +154,7 @@ beforeAll(async () => {
 
 describe("LOGIN audit", () => {
   it("records a fresh sign-in once, with the client and the SSO session", async () => {
-    const { user, jar, id_token } = await signIn();
+    const { user, id_token } = await signIn();
     const { sid } = decodeJwt(id_token) as unknown as { sid: string };
 
     const [login, ...more] = await entriesOf(user.id, "LOGIN");
@@ -170,16 +170,33 @@ describe("LOGIN audit", () => {
       client_id: client.clientId,
       sid,
       auth_methods: ["pwd"],
+      fresh_login: true,
+      consent: true,
+      scopes: ["openid", "core:account"],
     });
-
-    // A silent continuation is not a sign-in.
-    const { approved } = await silentApproval(jar, user.id);
-    expect(approved.status).toBe(200);
-    expect(await entriesOf(user.id, "LOGIN")).toHaveLength(1);
 
     // Signing in again with the password is a new login.
     await signIn(user);
     expect(await entriesOf(user.id, "LOGIN")).toHaveLength(2);
+  });
+
+  it("records a consent approved on a continued SSO session", async () => {
+    const { user, jar, id_token } = await signIn();
+    const { sid } = decodeJwt(id_token) as unknown as { sid: string };
+
+    const { approved } = await silentApproval(jar, user.id);
+    expect(approved.status).toBe(200);
+    const [, consented, ...more] = await entriesOf(user.id, "LOGIN");
+    expect(more).toHaveLength(0);
+    expect(consented).toMatchObject({ entityType: "User", entityId: user.id });
+    expect(consented.metadata).toEqual({
+      client_id: client.clientId,
+      sid,
+      auth_methods: ["pwd"],
+      fresh_login: false,
+      consent: true,
+      scopes: ["openid"],
+    });
   });
 
   it("is listed by the audit API's action filter", async () => {
@@ -299,6 +316,8 @@ describe("LOGOUT audit", () => {
     const [logout, ...more] = await entriesOf(user.id, "LOGOUT");
     expect(more).toHaveLength(0);
     expect(logout.metadata).toEqual({
+      // The token is a third-party client's, delegated by core:account.
+      clientId: client.clientId,
       action: "sessions_revoked",
       sessionIds: [requested, sibling],
       ssoSessionIds: [sid],

@@ -18,6 +18,7 @@ export interface OrgSelectionSessionData {
   acrValues: string | null;
   prompt: string | null;
   authMethods: string[];
+  provider: string | null;
   expiresAt: Date;
 }
 
@@ -40,6 +41,7 @@ export const create = async (
     acrValues?: string | null;
     prompt?: string | null;
     authMethods?: string[];
+    provider?: string | null;
     expiresAt: Date;
   },
   tx?: Prisma.TransactionClient

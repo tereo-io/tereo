@@ -39,7 +39,8 @@ export const handlePostAuthOrgSelection = async (
   prompt: string | null,
   authMethods: string[],
   orgHint?: string,
-  writeStep: StepWriter = db.loginFlows.writeStep
+  writeStep: StepWriter = db.loginFlows.writeStep,
+  provider: string | null = null
 ): Promise<{ redirect_url: string }> => {
   const restart = authorizeRestartParams({
     clientId: client.clientId,
@@ -92,6 +93,7 @@ export const handlePostAuthOrgSelection = async (
             maxAge,
             acrValues,
             authMethods,
+            provider,
           },
           orgId
         )
@@ -119,6 +121,7 @@ export const handlePostAuthOrgSelection = async (
           acrValues,
           prompt,
           authMethods,
+          provider,
         },
         tx
       )
@@ -154,6 +157,7 @@ export const handlePostAuthOrgSelection = async (
         acrValues,
         prompt,
         authMethods,
+        provider,
         expiresAt: new Date(Date.now() + env.LOGIN_FLOW_TTL * 1000),
       },
       tx

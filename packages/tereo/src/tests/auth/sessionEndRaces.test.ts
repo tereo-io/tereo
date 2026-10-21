@@ -1,3 +1,4 @@
+import { InvalidGrantError } from "../../utils/errors.js";
 import { handleRefreshToken } from "../../utils/auth.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { browserLogin } from "../utils/browserLogin.js";
@@ -99,7 +100,7 @@ describe("ending sessions while tokens are being issued", () => {
           client_id: client.clientId,
           refresh_token: tokens.refresh_token,
         })
-      ).rejects.toThrow("invalid_grant");
+      ).rejects.toThrow(InvalidGrantError);
     } finally {
       (db as { authorizationCode: typeof codes }).authorizationCode = codes;
     }

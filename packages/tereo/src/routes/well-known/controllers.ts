@@ -2,6 +2,7 @@ import { publishedSigningKeys } from "../../utils/keys.js";
 import { CORE_SCOPES } from "../../definitions/index.js";
 import { OAuth2Error } from "../../utils/errors.js";
 import { type Request, Response } from "express";
+import { logger } from "../../utils/logger.js";
 import { createPublicKey } from "crypto";
 import env from "../../env.js";
 
@@ -110,7 +111,8 @@ export const handleWellKnownJwks = async (_req: Request, res: Response) => {
     }));
 
     res.json({ keys });
-  } catch {
+  } catch (err) {
+    logger.error({ err }, "Failed to generate JWKS");
     throw new OAuth2Error("server_error", "Failed to generate JWKS", 500);
   }
 };

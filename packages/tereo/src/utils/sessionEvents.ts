@@ -7,14 +7,18 @@ import { emitTx, logAuditTx } from "./outbox.js";
  * revoking transaction: an audit entry naming who revoked them and an
  * `auth.user.sessions-revoked` event, each listing every refresh token
  * revoked and SSO session ended. Nothing when none were revoked. A user
- * revoking their own (`self`, the account API) is a LOGOUT; an admin's
- * revoke is an UPDATE of that user.
+ * revoking their own (`self`) is a LOGOUT, its `method` the way they did it
+ * (`account`, the account API, unless named); an admin's revoke is an UPDATE
+ * of that user.
  */
 export const recordSessionsRevoked =
   (
     auth: { userId: string; email: string | null },
     user: { id: string; email: string },
-    { self = false }: { self?: boolean } = {}
+    {
+      self = false,
+      method = "account",
+    }: { self?: boolean; method?: string } = {}
   ): RecordRevocation =>
   async (tx, sessionIds, ssoSessionIds) => {
     if (sessionIds.length === 0 && ssoSessionIds.length === 0) return;
@@ -28,7 +32,7 @@ export const recordSessionsRevoked =
         action: "sessions_revoked",
         sessionIds,
         ssoSessionIds,
-        ...(self && { method: "account" }),
+        ...(self && { method }),
       },
     });
     await emitTx(tx, {

@@ -164,6 +164,7 @@ export const orgSelectSubmitHandler = async (req: Request, res: Response) => {
         acrValues: session.acrValues,
         prompt: session.prompt,
         authMethods: session.authMethods,
+        provider: session.provider,
       },
       tx
     )

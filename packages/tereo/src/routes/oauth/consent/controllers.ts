@@ -1,6 +1,6 @@
 import { validateBody, validateQuery } from "../../../utils/validateReq.js";
+import { NotFoundError, OAuth2Error } from "../../../utils/errors.js";
 import { ConsentGetSchema, ConsentSubmitSchema } from "./schemas.js";
-import { OAuth2Error } from "../../../utils/errors.js";
 import { logger } from "../../../utils/logger.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
@@ -16,22 +16,26 @@ import {
 export const consentGetHandler = async (req: Request, res: Response) => {
   const query = validateQuery(ConsentGetSchema, req);
 
-  try {
-    const details = await db.consent.getConsentDetails(query.session);
-    // The token travels in the page URL; the user's details go only to the
-    // browser that holds its cookie.
-    if (getConsentSessionFromCookie(req, details.clientId) !== query.session) {
-      throw new Error("Consent session cookie missing or mismatched");
-    }
-    res.json(details);
-  } catch (error) {
-    logger.warn({ err: error }, "Failed to get consent details");
-    throw new OAuth2Error(
-      "invalid_session",
-      "Invalid or expired consent session."
-    );
+  const details = await db.consent
+    .getConsentDetails(query.session)
+    .catch((err) => {
+      if (err instanceof NotFoundError) {
+        logger.warn({ err }, "Consent session not found");
+        throw invalidConsentSession();
+      }
+      throw err;
+    });
+  // The token travels in the page URL; the user's details go only to the
+  // browser that holds its cookie.
+  if (getConsentSessionFromCookie(req, details.clientId) !== query.session) {
+    logger.warn("Consent session cookie missing or mismatched");
+    throw invalidConsentSession();
   }
+  res.json(details);
 };
+
+const invalidConsentSession = () =>
+  new OAuth2Error("invalid_session", "Invalid or expired consent session.");
 
 export const consentPostHandler = async (req: Request, res: Response) => {
   const body = validateBody(ConsentSubmitSchema, req);
@@ -92,7 +96,7 @@ export const consentPostHandler = async (req: Request, res: Response) => {
     req,
     res,
     client,
-    session,
+    { ...session, consented: true },
     async (tx) => {
       if (!(await db.consent.consumeConsentSession(session.id, tx))) {
         throw consentSessionGone();

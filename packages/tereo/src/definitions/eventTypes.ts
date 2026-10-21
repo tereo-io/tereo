@@ -53,7 +53,8 @@ const authEvents: EventTypeDefinition[] = [
   },
   {
     eventType: "auth.user.sessions-revoked",
-    description: "Sessions of a user revoked, by the user or an admin",
+    description:
+      "Sessions of a user revoked: by the user, an admin, or core on a replayed token",
   },
   {
     eventType: "auth.user.recovery-codes-regenerated",

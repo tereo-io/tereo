@@ -52,6 +52,8 @@ export interface FirstFactorContinuation {
   mfaSatisfied: boolean;
   /** When the first factor was presented, if not now: a provider's `auth_time`. */
   authTime?: Date;
+  /** The identity provider that was the first factor, by slug. */
+  provider?: string;
   /** Held by a TOTP step, which commits it (`utils/identityProviders/forcedLink.ts`). */
   pendingLinkId?: string;
   /** Writes the step the login goes on to; by default on its own. */
@@ -94,6 +96,7 @@ export const continueAfterFirstFactor = async (
     mfaSatisfied,
     authTime = new Date(),
     pendingLinkId,
+    provider,
     writeStep = db.loginFlows.writeStep,
   }: FirstFactorContinuation
 ): Promise<{ redirect_url: string }> => {
@@ -197,6 +200,7 @@ export const continueAfterFirstFactor = async (
             prompt: request.prompt,
             firstFactor: authMethods,
             pendingLinkId,
+            provider,
           },
           tx
         )
@@ -233,6 +237,7 @@ export const continueAfterFirstFactor = async (
     request.prompt,
     authMethods,
     undefined,
-    writeStep
+    writeStep,
+    provider ?? null
   );
 };

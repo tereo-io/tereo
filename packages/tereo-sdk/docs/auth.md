@@ -44,9 +44,11 @@ none), `organizationId`, `organizationName`, and the deprecated `oauthClientId` 
 `client_id` again, or null. Core's own `AuthContext.oauthClientId` is something else (a
 service-account user's own client, not the token's), so read `clientId`.
 
-**Third-party tokens.** `permissions` are the user's live permissions whichever client the token
-was issued to: core's scope ceilings govern core's API only. A login client of another app whose
-audience includes this service can therefore present a token that passes `requirePermission`. To
+**Third-party tokens.** `permissions` are the user's live permissions, except for a token delegated
+to a third-party client by core API scopes (`core:*`), whose permissions core cuts down to those
+scopes' ceilings, as its own API does. A third-party token without core scopes carries the user's
+live permissions: a login client of another app whose audience includes this service can therefore
+present a token that passes `requirePermission`. To
 limit what such a token may do, accept only known clients with `allowedClients`, or require the
 scopes this service defines with `requireScope`.
 

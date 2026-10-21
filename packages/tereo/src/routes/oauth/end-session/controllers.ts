@@ -1,3 +1,4 @@
+import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js";
 import { validateBody, validateQuery } from "../../../utils/validateReq.js";
 import { clientSignInUrl, uiUrl } from "../../../utils/authorization.js";
 import { NotFoundError, OAuth2Error } from "../../../utils/errors.js";
@@ -5,8 +6,8 @@ import type { ClientRecord } from "../../../utils/db/clients.js";
 import { generateRandomString } from "../../../utils/crypto.js";
 import { endBrowserSessions } from "../../../utils/sessions.js";
 import type { IdTokenPayload } from "../../../utils/tokens.js";
+import { emitTx, logAuditTx } from "../../../utils/outbox.js";
 import { verifyIdTokenHint } from "../../../utils/tokens.js";
-import { logAuditTx } from "../../../utils/outbox.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
 import { timingSafeEqual } from "crypto";
@@ -248,21 +249,34 @@ const endThisBrowser = async (
     async (tx, revoked) => {
       const ended = new Set(revoked.ssoSessionIds);
       for (const user of users) {
+        // The SSO sessions ended, and every refresh token revoked with them:
+        // the cookie's family and its siblings in this browser.
+        const sids = [...signingOut.get(user.id)!].filter((sid) =>
+          ended.has(sid)
+        );
+        const sessionIds = revoked.tokens
+          .filter((t) => t.userId === user.id)
+          .map((t) => t.id);
+        // Already signed out (a stale cookie, a repeated logout).
+        if (sids.length === 0 && sessionIds.length === 0) continue;
         await logAuditTx(tx, {
           auth: { userId: user.id, email: user.email },
           action: "LOGOUT",
           entityType: "User",
           entityId: user.id,
           entityName: user.email,
-          metadata: {
-            client_id: client.clientId,
-            // The SSO sessions ended, and every refresh token revoked with
-            // them: the cookie's family and its siblings in this browser.
-            sids: [...signingOut.get(user.id)!].filter((sid) => ended.has(sid)),
-            sessionIds: revoked.tokens
-              .filter((t) => t.userId === user.id)
-              .map((t) => t.id),
-            method,
+          metadata: { client_id: client.clientId, sids, sessionIds, method },
+        });
+        await emitTx(tx, {
+          organizationId: getDefaultOrganizationId(),
+          eventType: "auth.user.sessions-revoked",
+          entityType: "User",
+          entityId: user.id,
+          data: {
+            userId: user.id,
+            email: user.email,
+            sessionIds,
+            ssoSessionIds: sids,
           },
         });
       }

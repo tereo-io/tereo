@@ -1,6 +1,7 @@
 import { generateAuthorizationCode, generateRandomString } from "./crypto.js";
+import { LOGIN_CLIENT, SYSTEM_USER_ID } from "../definitions/index.js";
 import { maySelectOrganization } from "./supportAccess.js";
-import { LOGIN_CLIENT } from "../definitions/index.js";
+import { recordSessionsRevoked } from "./sessionEvents.js";
 import type { Request, Response } from "express";
 import { emitTx, logAuditTx } from "./outbox.js";
 import type { Prisma } from "./db/prisma.js";
@@ -20,6 +21,7 @@ import {
 
 const ACR_PWD = "urn:auth-service:pwd";
 const ACR_MFA = "urn:auth-service:mfa";
+const SYSTEM_ACTOR = { userId: SYSTEM_USER_ID, email: null };
 
 /**
  * An authorization response for the client: its redirect URI with `params`
@@ -91,11 +93,15 @@ export interface ApprovedAuthorization {
    * switch) continues; null after a login with credentials.
    */
   userSessionId: string | null;
+  /** The identity provider a fresh login's first factor came from, by slug. */
+  provider?: string | null;
+  /** Approved on the consent page, for the audit entry. */
+  consented?: boolean;
 }
 
 type LoginFlow = Omit<
   ApprovedAuthorization,
-  "organizationId" | "userSessionId"
+  "organizationId" | "userSessionId" | "consented"
 >;
 
 /** The approval of a flow whose user just signed in with credentials. */
@@ -116,6 +122,7 @@ export const grantAfterLogin = (
   acrValues: flow.acrValues,
   authMethods: flow.authMethods,
   userSessionId: null,
+  provider: flow.provider ?? null,
 });
 
 /**
@@ -232,6 +239,14 @@ export const issueAuthorizationCode = async (
         userSessionIds: [replaced.id],
         authCodeIds: [],
       });
+      await recordSessionsRevoked(
+        SYSTEM_ACTOR,
+        await db.users.get(replaced.userId, tx)
+      )(
+        tx,
+        revokedOther.tokens.map((t) => t.id),
+        revokedOther.ssoSessionIds
+      );
     } else if (replaced) {
       await db.userSessions.deleteUserSessionsByIds([replaced.id], tx);
     }
@@ -270,7 +285,9 @@ export const issueAuthorizationCode = async (
       (await maySelectOrganization(grant.userId, grant.organizationId, tx))
         .support;
     const user =
-      freshLogin || support ? await db.users.get(grant.userId, tx) : null;
+      freshLogin || support || grant.consented
+        ? await db.users.get(grant.userId, tx)
+        : null;
 
     if (support && user && grant.organizationId) {
       await logAuditTx(tx, {
@@ -298,7 +315,9 @@ export const issueAuthorizationCode = async (
       });
     }
 
-    if (freshLogin && user) {
+    // A grant approved on a continued SSO session is a sign-in to that
+    // client, though no credentials were presented.
+    if ((freshLogin || grant.consented) && user) {
       await logAuditTx(tx, {
         auth: { userId: user.id, email: user.email },
         organizationId: grant.organizationId,
@@ -310,6 +329,12 @@ export const issueAuthorizationCode = async (
           client_id: client.clientId,
           sid: session.id,
           auth_methods: authMethods,
+          ...(freshLogin && grant.provider && { provider: grant.provider }),
+          ...(grant.consented && {
+            fresh_login: freshLogin,
+            consent: true,
+            scopes: grant.scopes,
+          }),
         },
       });
     }

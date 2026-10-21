@@ -51,19 +51,21 @@ export const getActiveJtis = async (jtis: string[]): Promise<string[]> => {
 
 export const revokeByJti = async (
   jti: string,
-  clientId: string
-): Promise<string | null> => {
+  clientId: string,
+  tx?: Prisma.TransactionClient
+): Promise<{ jti: string; userId: string } | null> => {
+  const db = tx ?? prisma;
   const now = new Date();
-  const token = await prisma.accessToken.findFirst({
+  const token = await db.accessToken.findFirst({
     where: { jti, clientId, revokedAt: null, expiresAt: { gt: now } },
-    select: { jti: true },
+    select: { jti: true, userId: true },
   });
   if (!token) return null;
-  await prisma.accessToken.updateMany({
+  const { count } = await db.accessToken.updateMany({
     where: { jti, clientId, revokedAt: null, expiresAt: { gt: now } },
     data: { revokedAt: now },
   });
-  return token.jti;
+  return count > 0 ? token : null;
 };
 
 export const revokeByAuthCodeId = async (

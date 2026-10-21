@@ -482,6 +482,8 @@ model TotpVerification {
   acrValues           String?  @map("acr_values") @db.VarChar(512)
   prompt              String?  @db.VarChar(50)
   firstFactor         String[] @default(["pwd"]) @map("first_factor")
+  // The identity provider the login's first factor came from, by slug.
+  provider            String?  @db.VarChar(50)
   // A forced link that commits only once this step passes; gone with it.
   pendingLinkId       String?  @map("pending_link_id") @db.Uuid
   expiresAt           DateTime @map("expires_at")
@@ -573,6 +575,8 @@ model ConsentSession {
   acrValues           String?  @map("acr_values") @db.VarChar(512)
   prompt              String?  @db.VarChar(50)
   authMethods         String[] @default([]) @map("auth_methods")
+  // The identity provider the login's first factor came from, by slug.
+  provider            String?  @db.VarChar(50)
   // The SSO session an org switch continues, without a password; null after
   // a login with credentials. The step ends with that session.
   userSessionId       String?  @map("user_session_id") @db.Uuid
@@ -637,6 +641,8 @@ model OrgSelectionSession {
   acrValues           String?  @map("acr_values") @db.VarChar(512)
   prompt              String?  @db.VarChar(50)
   authMethods         String[] @default([]) @map("auth_methods")
+  // The identity provider the login's first factor came from, by slug.
+  provider            String?  @db.VarChar(50)
   expiresAt           DateTime @map("expires_at")
   createdAt           DateTime @default(now()) @map("created_at")
 

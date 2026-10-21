@@ -110,6 +110,13 @@ by source and writer, so they hold exactly what it wrote. Core's own entries hav
 (`CORE_SOURCE`); `tereo` and `core` are reserved slugs (`CORE_RESERVED_SLUGS`), refused at
 provisioning and by the admin API, so no service can pass for core.
 
+### Delegated callers
+
+An entry core writes for a request made with a token delegated to a third-party client (one with
+core API scopes, `ceiling` set on the request's `AuthContext`) carries that client's `client_id` as
+`metadata.clientId` (`logAuditTx`), so a change made through the client does not read as the user's
+own doing in core's UI. Metadata the entry sets itself wins.
+
 ## Filters and search
 
 The list takes `filter[field]` / `filter[field_op]` on `source`, `userId`, `writerUserId`,
