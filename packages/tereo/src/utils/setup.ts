@@ -88,7 +88,7 @@ export const announceSetupIfPending = async (): Promise<void> => {
   const token = await issueSetupToken();
   const url = `${env.UI_BASE_URL}/setup`;
   logger.warn(
-    { setupUrl: url, setupToken: token },
+    { setupUrl: url },
     `Core is not set up. Complete setup at ${url} with this token: ${token}`
   );
 };

@@ -24,8 +24,8 @@ src/
 
 ## Who may call core's API
 
-Core's own resource routes — `/v1/account`, `/v1/admin`, `/v1/files`, `/audit`, `/webhooks` and
-the `/ws` socket — admit a bearer token by the client it was issued to (`utils/coreAccess.ts`,
+Core's own resource routes — `/v1/account`, `/v1/admin`, `/v1/files`, `/v1/audit`, `/v1/webhooks`,
+`/v1/notifications` and the `/ws` socket — admit a bearer token by the client it was issued to (`utils/coreAccess.ts`,
 applied in `requireAuth` from what `checkAccessToken` resolves, so the socket and every router
 agree):
 
@@ -56,6 +56,8 @@ discovery) are per area, each with a read-only variant:
 | `core:webhooks` / `core:webhooks.read` | `/v1/webhooks`       | `webhooks.admin` / `webhooks.read`, `webhooks.event-types.read`                                          |
 | `core:events`                          | `/ws`                | — (the socket only: permission-change pushes, nothing else)                                              |
 | `core:organizations`                   | `GET /v1/account/organizations` | `organizations.support-access` ([Support access](#support-access))                            |
+
+`/v1/notifications` has no scope: only core's UI and services reach it.
 
 A ceiling caps, it never grants: the token holds
 a permission only if the user holds it _and_ a ceiling covers it. A user's organization member role
@@ -733,8 +735,8 @@ the user's sessions and token families, in the transaction that makes the reset
 event); an admin resetting their own password keeps the session they act from. Every such sign-out
 also revokes the access tokens issued without a refresh token (clients without the `refresh_token`
 grant), all but the caller's own, and closes their sockets. An app service using `@tereo-io/sdk`
-may cache an active introspection for up to 60 s (its `introspectionCacheTtlSeconds`), so it can
-keep accepting a signed-out or revoked token that long. Either reset, an
+may cache an active introspection for up to its `introspectionCacheTtlSeconds` (60 s by default,
+at most 300 s), so it can keep accepting a signed-out or revoked token that long. Either reset, an
 email change, an identity invite or an admin identity unlink
 (`DELETE /v1/admin/users/:id/identities/:identityId`) hands the caller the account or changes how it
 is entered, so it may not reach beyond what the caller holds (`assertMayResetCredentials`): every permission the user holds — through global roles
@@ -838,8 +840,10 @@ The login-flow pages (consent, org-select, 2FA) get the authorize request's para
 session token, only so that "Back to sign in" restarts `/oauth/authorize` for the client that began
 the login. Core never reads them back.
 
-`/oauth/end-session` with a valid `id_token_hint` logs this browser out at once. Without one, it
-ends nothing: it sets a one-time `tereo_logout_confirm_{client_id}` cookie and redirects to
+`/oauth/end-session` with a valid `id_token_hint` logs this browser out at once, unless the browser
+is signed in to that client as a different user than the hint's `sub` (`signedInAsOther`): any
+site can hold an ID token of its own user, so that browser is asked to confirm as below. Without a
+hint, it ends nothing: it sets a one-time `tereo_logout_confirm_{client_id}` cookie and redirects to
 `{UI}/logout`, whose confirm button posts the same token to `/oauth/end-session/confirm`. Only that
 post, carrying the cookie (SameSite keeps it off cross-site posts), ends the session — so a
 cross-site link cannot log anyone out.
@@ -877,11 +881,11 @@ All in Redis; limiters in `utils/rateLimit.ts`, instances in `middleware/rateLim
 
 "Per IP" means per `getIpIdentifier` (`ipRateLimitKey`): an IPv4 address as is, an IPv4-mapped IPv6 address as its IPv4 address, and any other IPv6 address as its /64, since one host is often given a whole /64 to rotate through. The share unlock window (`utils/shareUnlockLimiter.ts`) still keys by the full address.
 
-- **Before authentication** — `rateLimitPreAuth`, per client IP, mounted ahead of `requireAuth` on `/v1/admin`, `/v1/account`, `/v1/files`, `/audit` and `/webhooks`, so floods of missing or bad tokens are bounded without verifying them.
+- **Before authentication** — `rateLimitPreAuth`, per client IP, mounted ahead of `requireAuth` on `/v1/admin`, `/v1/account`, `/v1/files`, `/v1/audit`, `/v1/webhooks` and `/v1/notifications`, so floods of missing or bad tokens are bounded without verifying them.
 - **General** — `rateLimitGeneral`, after authentication: per user, per IP when anonymous, per OAuth client for internal service accounts.
 - **Credentials** — counted before the credential is checked, atomically, and cleared by a success: login passwords per client and IP (`authFailure`, keyed by the body's `client_id` once that client is found — never by a header the login does not authenticate with, which a caller could vary per request; the key spans every account tried from that address, so a success only gives back its own attempt — clearing the count would let a login to one's own account wipe the failures against everyone else's) and per account (`loginAccountBackoff`: keyed on a hash of the normalised email, so unknown emails behave the same; five attempts, then a delay doubling from 1 s to 15 min — a backoff, not a lockout); provider callbacks per IP once their round trip is consumed (see _Errors_ under _Sign in with an identity provider_); confidential-client secrets at `/oauth/token`, `/oauth/revoke` and `/oauth/introspect` per client and IP (`clientSecretFailure`: 10 wrong secrets per 5 min, keyed with the IP so one address cannot lock a client out for its other callers. Unlike the others it counts only failures — read before the secret is hashed, spent after a wrong one — so any number of concurrent correct secrets from one address, such as pods behind one NAT, pass. Once the count is full every attempt is refused before hashing, the right secret included, until the window expires: a correct secret cannot clear a full count, so a stale-secret pod sharing an address can hold the client off for up to 5 min. Concurrent wrong secrets can overshoot the limit by the burst, acceptable for high-entropy secrets); login 2FA per user; `/v1/account/password` and `/v1/account/totp/*` per user; setup per IP; share unlock per token and IP.
 - **Known device** — so that someone holding an account in backoff does not lock its owner out, a completed login (after 2FA when required) sets `tereo_known_device` (`utils/knownDevice.ts`; httpOnly, `SameSite=Lax`, path `/oauth`, 90 days): `<userId>.<issuedAt>.<HMAC>`, keyed with `KNOWN_DEVICE_KEY` and covering the user's password hash, so a password change or admin reset (a freshly salted hash) voids every earlier cookie with no extra column. At the login submit, while the account is delayed (`loginAccountBackoff.isDelayed`), a cookie valid for that same user skips the delay: `authFailure` and the password check still apply, the attempt still counts toward the account (`spendUnblocked`, which lengthens the delay without being refused by it), and `knownDeviceFailure` caps it at 5 wrong passwords per 15 min per cookie, so a stolen cookie is not an unlimited guess. Outside a delay a known device is treated like any browser. The cookie is checked only against the user the email names, so it reveals nothing about other emails; sign-out leaves it, since it is not a session.
-- **Redis down** — credential limiters fail closed with `503 temporarily_unavailable`; the general and pre-auth limiters fail open, so an outage does not take the API down. None waits in ioredis's offline queue: each refuses (or passes) at once while the client is not ready.
+- **Redis down** — credential limiters fail closed with `503 temporarily_unavailable`, except `clientSecretFailure`, which fails open: the secret is still verified, and client authentication (`/oauth/token`, `/oauth/revoke`, `/oauth/introspect`) must not go down with Redis; the general and pre-auth limiters fail open, so an outage does not take the API down. None waits in ioredis's offline queue: each refuses (or passes) at once while the client is not ready.
 - **Tests** run every limiter at its production limits. `tests/setup.ts` clears limiter keys before each test; a test needing several client addresses sends `X-Forwarded-For`, trusted from loopback by the default `TRUST_PROXY`.
 
 `authLog` (`utils/audit.ts`) logs failures and code/refresh-token reuse at `warn`, successes at `info`, and per-request and introspection lines at `debug`.

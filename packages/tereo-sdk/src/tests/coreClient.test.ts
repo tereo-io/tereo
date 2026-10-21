@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { safeCacheGet, safeCacheSet } from "../utils/cache.js";
 import { startFileServiceCache } from "../utils/fileCache.js";
 import { failUnlessRefused } from "../templates/core.js";
+import { AuthServiceClient } from "../clients/auth.js";
 import { createCoreClient } from "../coreClient.js";
 import type { AxiosError } from "axios";
 import {
@@ -252,14 +253,29 @@ describe("testMode", () => {
     await core.stop();
   });
 
-  it("is refused in production", () => {
-    process.env.NODE_ENV = "production";
-    expect(() => createCoreClient({ ...options, testMode: true })).toThrow(
-      /testMode .* refused in production/
-    );
+  it("is refused unless NODE_ENV is test or development", () => {
+    for (const env of ["production", "staging", "", undefined]) {
+      if (env === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = env;
+      expect(() => createCoreClient({ ...options, testMode: true })).toThrow(
+        /testMode .* only with NODE_ENV=test or development/
+      );
+    }
+    process.env.NODE_ENV = "development";
+    const core = createCoreClient({ ...options, testMode: true });
+    void core.stop();
+  });
+
+  it("is refused with production: true, whatever NODE_ENV says", () => {
     process.env.NODE_ENV = "test";
     expect(() =>
       createCoreClient({ ...options, testMode: true, production: true })
-    ).toThrow(/refused in production/);
+    ).toThrow(/production: true/);
+  });
+
+  it("is refused by an AuthServiceClient made directly, outside test", () => {
+    process.env.NODE_ENV = "staging";
+    expect(() => new AuthServiceClient({}, true)).toThrow(/testMode/);
+    expect(() => new AuthServiceClient({}, false)).not.toThrow();
   });
 });

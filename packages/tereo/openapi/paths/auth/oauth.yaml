@@ -4,7 +4,9 @@
       - OAuth2/OIDC - Authorization
     summary: OAuth2 authorization endpoint (GET)
     description: |
-      Initiates the OAuth2 authorization flow. Always answers with a 302:
+      Initiates the OAuth2 authorization flow. Once `client_id` and
+      `redirect_uri` are valid it always answers with a 302 (the JSON errors
+      before that point are listed below):
 
       - `prompt=none`: with a live user session (the
         `tereo_user_session_{client_id}` cookie) for an active user, for core's

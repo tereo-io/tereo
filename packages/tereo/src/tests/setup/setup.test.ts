@@ -251,6 +251,21 @@ describe("First-boot setup", () => {
     ]);
   });
 
+  it("logs a generated token once, in the message, and it completes setup", async () => {
+    const warn = vi.spyOn(logger, "warn");
+    await announceSetupIfPending();
+    const calls = [...warn.mock.calls] as unknown as [object, string][];
+    warn.mockRestore();
+    expect(calls).toHaveLength(1);
+    const [fields, message] = calls[0];
+    const token = message.split("with this token: ")[1];
+    expect(token).toBeTruthy();
+    expect(JSON.stringify(fields)).not.toContain(token);
+
+    const response = await request(setupBody(token));
+    expect(response.status).toBe(HTTP_STATUS.CREATED);
+  });
+
   describe("with SETUP_TOKEN", () => {
     const TOKEN = "deploy-supplied-setup-token-0123456789";
     const original = env.SETUP_TOKEN;

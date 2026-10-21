@@ -110,8 +110,9 @@ info:
 
     4. **Receive authorization code** via redirect:
        ```
-       https://app.example.com/callback?code=AUTHORIZATION_CODE&state=RANDOM_STATE_STRING
+       https://app.example.com/callback?code=AUTHORIZATION_CODE&state=RANDOM_STATE_STRING&iss=https%3A%2F%2Fcore.example.com
        ```
+       Check that `iss` is core's issuer (RFC 9207) before redeeming the code.
 
     5. **Exchange authorization code for tokens**:
        ```bash
@@ -136,7 +137,7 @@ info:
          "access_token": "eyJhbGc...",
          "token_type": "Bearer",
          "expires_in": 3600,
-         "refresh_token": "eyJhbGc...",
+         "refresh_token": "9f2c4e7a1b...",
          "id_token": "eyJhbGc...",
          "scope": "openid profile email"
        }
@@ -198,10 +199,14 @@ info:
       "access_token": "eyJhbGc...",
       "token_type": "Bearer",
       "expires_in": 3600,
-      "refresh_token": "eyJhbGc...",
+      "refresh_token": "5d81b0c3e6...",
+      "id_token": "eyJhbGc...",
       "scope": "openid profile email"
     }
     ```
+
+    The refresh token is opaque (not a JWT) and replaced on every refresh. `id_token` is
+    returned when the scope includes `openid`.
 
     ### 4. Making Authenticated API Calls
 
@@ -360,7 +365,7 @@ info:
     - A batch write (e.g. `POST /v1/audit/entries/batch`) counts as one request
 
     #### Per-Address Limit Before Authentication
-    On `/v1/admin`, `/v1/account`, `/v1/files`, `/v1/audit` and `/v1/webhooks`, a cheaper limit
+    On `/v1/admin`, `/v1/account`, `/v1/files`, `/v1/audit`, `/v1/webhooks` and `/v1/notifications`, a cheaper limit
     runs before the token is checked, so floods of missing or invalid tokens are bounded too:
     300 requests/second per client IP (1000 for a direct connection from an internal network
     address). Passing it adds no headers; past it, the same `429 too_many_requests` as the
@@ -369,7 +374,9 @@ info:
     #### Authentication Failure Rate Limiting
     Credential attempts have additional strict limits to prevent brute force attacks. Each
     attempt is counted before the credential is checked, so concurrent attempts cannot exceed
-    the limit; a correct credential clears the count:
+    the limit. A correct credential clears the count, except for login passwords per client ID
+    and IP address, where a success only gives back its own attempt (the count spans every
+    account tried from that address):
     - **Login passwords** (`POST /oauth/authorize`): 5 attempts per 300 seconds per client ID
       and IP address. In addition, per account (the submitted email, whether or not an account
       has it): 5 attempts, then a delay before each further attempt that starts at 1 second and
@@ -401,7 +408,8 @@ info:
     `/v1/account/password`, `/v1/account/totp/*`, setup and share unlock) refuse attempts with
     `503 temporarily_unavailable` (with `Retry-After`) rather than allow
     unlimited guesses. The general and per-address limits let requests through, so the rest
-    of the API stays up.
+    of the API stays up, and so does the client-secret limit at `/oauth/token`, `/oauth/revoke`
+    and `/oauth/introspect`: the secret is still verified.
 
     #### Per-Bucket Rate Limits (Files)
     Buckets with a `rateLimitConfig` additionally get a per-bucket token bucket on their
