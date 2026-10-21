@@ -2,10 +2,6 @@ import { Prisma } from "../../../prisma/generated/client/index.js";
 import { hashFlowToken } from "../crypto.js";
 import { prisma } from "./prisma.js";
 
-// token_prefix is a NOT NULL column that nothing reads: tokens are looked up
-// by their SHA-256.
-const TOKEN_PREFIX_LENGTH = 16;
-
 interface CreateRefreshTokenData {
   token: string;
   clientId: string;
@@ -28,12 +24,10 @@ export const create = async (
   tx?: Prisma.TransactionClient
 ) => {
   const tokenHash = hashFlowToken(data.token);
-  const tokenPrefix = data.token.substring(0, TOKEN_PREFIX_LENGTH);
 
   const refreshToken = await (tx ?? prisma).refreshToken.create({
     data: {
       tokenHash,
-      tokenPrefix,
       clientId: data.clientId,
       userId: data.userId,
       organizationId: data.organizationId ?? null,

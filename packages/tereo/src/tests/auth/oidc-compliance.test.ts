@@ -1170,7 +1170,6 @@ describe("OIDC Compliance", () => {
       await prisma.refreshToken.create({
         data: {
           tokenHash: randomBytes(32).toString("hex"),
-          tokenPrefix: randomBytes(4).toString("hex"),
           clientId: TEST_CLIENT_DB_ID,
           userId: victimId,
           authCodeId: code.id,
