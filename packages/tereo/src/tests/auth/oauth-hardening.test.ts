@@ -1,3 +1,4 @@
+import { makeServiceOf } from "../utils/testService.js";
 import { FIXTURE_USER_IDS } from "../utils/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { getRedisClient } from "../../utils/redis.js";
@@ -750,10 +751,11 @@ describe("Token types", () => {
     });
     expect(account.status).toBe(401);
 
-    const introspected = await postForm("/oauth/introspect", {
-      client_id: publicClient.clientId,
-      token: id_token,
-    });
+    const introspected = await postForm(
+      "/oauth/introspect",
+      { token: id_token },
+      { Authorization: basic(ccClient) }
+    );
     expect(introspected.status).toBe(200);
     expect(await json(introspected)).toEqual({ active: false });
   });
@@ -771,8 +773,14 @@ describe("Introspection permissions", () => {
       data: { userId: holder.id, roleId: role.id },
     });
 
+    // Introspected by a service in the login client's audience.
+    const service = await createTestClient({ clientType: "confidential" });
+    const login = await createTestClient({
+      redirectUris: [REDIRECT_URI],
+      audience: [await makeServiceOf(service.id)],
+    });
     const { code, verifier } = await browserLogin({
-      clientId: publicClient.clientId,
+      clientId: login.clientId,
       redirectUri: REDIRECT_URI,
       scope: SCOPE,
       email: holder.email,
@@ -780,7 +788,7 @@ describe("Introspection permissions", () => {
     });
     const exchanged = await postForm("/oauth/token", {
       grant_type: "authorization_code",
-      client_id: publicClient.clientId,
+      client_id: login.clientId,
       code,
       redirect_uri: REDIRECT_URI,
       code_verifier: verifier,
@@ -790,10 +798,11 @@ describe("Introspection permissions", () => {
     };
     const introspect = async () =>
       (await json(
-        await postForm("/oauth/introspect", {
-          client_id: publicClient.clientId,
-          token: access_token,
-        })
+        await postForm(
+          "/oauth/introspect",
+          { token: access_token },
+          { Authorization: basic(service) }
+        )
       )) as { active: boolean; permissions: string[] };
 
     expect((await introspect()).permissions).toContain(permission.name);
@@ -806,10 +815,11 @@ describe("Introspection permissions", () => {
   });
 
   it("answers inactive for a token longer than 2048 characters, rather than refusing it", async () => {
-    const res = await postForm("/oauth/introspect", {
-      client_id: publicClient.clientId,
-      token: `eyJ.${"a".repeat(3000)}.sig`,
-    });
+    const res = await postForm(
+      "/oauth/introspect",
+      { token: `eyJ.${"a".repeat(3000)}.sig` },
+      { Authorization: basic(ccClient) }
+    );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ active: false });
   });

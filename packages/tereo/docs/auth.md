@@ -118,14 +118,17 @@ Outside core's resource routes:
   authorization — are included only for a token that is not `none` above (the UI, a service's
   client, or a core API scope); any other relying party gets the OIDC claims (and `org_id`/`org_name`
   for the token's organization) without them.
-- `/oauth/introspect` answers app services (the token's own client, or a service in its audience).
+- `/oauth/introspect` answers app services (the token's own client, or a service in its audience),
+  and only confidential clients, by HTTP Basic: a public client's `client_id` authenticates nothing,
+  so it is 401 `invalid_client` (discovery lists `client_secret_basic` alone).
   `sub` is the token's own: the user's id, or a client_credentials token's `client_id`. `user_id`
   names the user the token acts as — the user, or the client's service-account user — so an app
   can record either kind as an actor in `auth.users`.
   It reports `permissions` as the user's live permissions, unchanged: core's ceilings govern core's
   API only, and an app enforces its own scopes. An app introspecting a third-party token therefore
   sees the user's permissions, as it would have before; whether it honours that token for its own
-  API is the app's decision, which `scope` and `aud` in the response inform.
+  API is the app's decision, which `scope` and `aud` in the response inform. A client that is not a
+  service's, introspecting its own token whose access is `none`, is not told them, as at userinfo.
 - `/oauth/check-permission` authenticates a confidential client, not a token. A client of an
   organization may only ask about that organization's members, and is answered in it;
   `organization_id`, if given, must be the client's; a non-member and an unknown user get the same 403. An organization-bound

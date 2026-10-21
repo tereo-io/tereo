@@ -596,11 +596,16 @@
 
       `permissions` are the user's live permissions, whatever client the
       token was issued to: the ceilings of core API scopes limit what a token
-      may do in core's own API, not what an app is told about its user.
+      may do in core's own API, not what an app is told about its user. They
+      are omitted when a client that is not a service's introspects its own
+      token and that token has no core access (not issued to core's UI or a
+      service's client, and no core API scope), as `/oauth/userinfo` omits
+      them.
 
-      Confidential clients authenticate with HTTP Basic; a public client sends
-      its `client_id` in the body. A missing or unknown client or failed
-      authentication is 401 `invalid_client` with `WWW-Authenticate: Basic`;
+      Only a confidential client may introspect, authenticated with HTTP
+      Basic. A missing or unknown client, a public client (which has no
+      secret), failed authentication, or the client of a deactivated service
+      or integration is 401 `invalid_client` with `WWW-Authenticate: Basic`;
       a body `client_id` that differs from the Basic one is 400
       `invalid_request`; repeated wrong secrets are 429 `too_many_requests`,
       counted with `/oauth/token`'s (see there). `token_type_hint` is only a
@@ -608,7 +613,6 @@
     operationId: postIntrospect
     security:
       - ClientCredentials: []
-      - {}
     requestBody:
       required: true
       content:

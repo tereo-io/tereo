@@ -380,20 +380,10 @@ describe("OAuth Revoke Endpoint", () => {
 
       expect(response.status).toBe(HTTP_STATUS.OK);
 
-      // Verify via introspection that token is inactive
-      const introspectResponse = await fetch(`${BASE_URL}/oauth/introspect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: tokens.access_token,
-          client_id: testClient.clientId,
-        }),
+      const userinfo = await fetch(`${BASE_URL}/oauth/userinfo`, {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
       });
-
-      const introspectData = (await introspectResponse.json()) as {
-        active: boolean;
-      };
-      expect(introspectData.active).toBe(false);
+      expect(userinfo.status).toBe(HTTP_STATUS.UNAUTHORIZED);
     });
   });
 });

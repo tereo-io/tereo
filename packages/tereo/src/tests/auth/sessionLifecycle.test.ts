@@ -1,3 +1,4 @@
+import { makeServiceOf } from "../utils/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { confirmLogout } from "../utils/browserLogin.js";
 import { hashFlowToken } from "../../utils/crypto.js";
@@ -56,6 +57,7 @@ interface TestUser {
 }
 
 let client: Awaited<ReturnType<typeof createTestClient>>;
+let introspector: Awaited<ReturnType<typeof createTestClient>>;
 
 const absorb = (jar: Jar, res: Response) => {
   for (const cookie of res.headers.getSetCookie()) {
@@ -274,9 +276,12 @@ const userSessionRows = (userId: string) =>
   prisma.userSession.findMany({ where: { userId } });
 
 beforeAll(async () => {
+  // A service in the login client's audience introspects its tokens.
+  introspector = await createTestClient({ clientType: "confidential" });
   client = await createTestClient({
     redirectUris: [REDIRECT_URI],
     postLogoutRedirectUris: [POST_LOGOUT_URI],
+    audience: [await makeServiceOf(introspector.id)],
   });
 });
 
@@ -541,19 +546,26 @@ describe("Session lifecycle", () => {
     it("introspection agrees with requireAuth after rotation", async () => {
       const user = await createUser();
       const { tokens } = await login(user);
-      expect((await refresh(tokens.refresh_token)).status).toBe(200);
+      const rotated = await refresh(tokens.refresh_token);
+      expect(rotated.status).toBe(200);
       expect((await me(tokens.access_token)).status).not.toBe(200);
 
-      const res = await fetch(`${BASE_URL}/oauth/introspect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          token: tokens.access_token,
-          client_id: client.clientId,
-        }),
-      });
-      const body = (await res.json()) as { active: boolean };
-      expect(body.active).toBe(false);
+      const introspect = async (token: string) => {
+        const res = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${Buffer.from(
+              `${introspector.clientId}:${introspector.plainSecret}`
+            ).toString("base64")}`,
+          },
+          body: new URLSearchParams({ token }),
+        });
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { active: boolean }).active;
+      };
+      expect(await introspect(tokens.access_token)).toBe(false);
+      expect(await introspect(rotated.body.access_token!)).toBe(true);
     });
   });
 

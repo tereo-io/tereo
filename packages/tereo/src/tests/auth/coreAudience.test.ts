@@ -35,6 +35,26 @@ const ALL_CORE_SCOPES = [
 const grantPermissions = (userId: string, permissions: string[]) =>
   getTestPrincipalToken({ userId, permissions });
 
+const basic = (client: Client) =>
+  `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString(
+    "base64"
+  )}`;
+
+const introspect = async (client: Client, token: string) => {
+  const res = await fetch(`${BASE_URL}/oauth/introspect`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      ...(client.plainSecret && { Authorization: basic(client) }),
+    },
+    body: new URLSearchParams({
+      token,
+      ...(!client.plainSecret && { client_id: client.clientId }),
+    }),
+  });
+  return res;
+};
+
 /** A user access token from the browser login and code exchange. */
 const loginToken = async (client: Client, user: User, scope: string) => {
   const redirectUri = client.redirectUris[0];
@@ -47,7 +67,10 @@ const loginToken = async (client: Client, user: User, scope: string) => {
   });
   const res = await fetch(`${BASE_URL}/oauth/token`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(client.plainSecret && { Authorization: basic(client) }),
+    },
     body: JSON.stringify({
       grant_type: "authorization_code",
       code,
@@ -311,18 +334,68 @@ describe("a third-party token with core scopes", () => {
     );
   });
 
-  it("is introspected by its own client with the user's live permissions", async () => {
+  it("is introspected by its own confidential client with the user's live permissions", async () => {
+    const confidential = await createTestClient({
+      clientType: "confidential",
+      scopes: ["openid", "profile", "email", ...ALL_CORE_SCOPES],
+    });
     const user = await createTestUser();
     await grantPermissions(user.id, ["users.write"]);
-    const token = await loginToken(thirdParty, user, "openid core:admin.read");
-    const res = await fetch(`${BASE_URL}/oauth/introspect`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ token, client_id: thirdParty.clientId }),
-    });
+    const token = await loginToken(confidential, user, "openid core:admin.read");
+    const res = await introspect(confidential, token);
     const body = (await res.json()) as {
       active: boolean;
       permissions: string[];
+    };
+    expect(body.active).toBe(true);
+    expect(body.permissions).toContain("users.write");
+  });
+
+  it("is not introspected by a public client, which cannot authenticate", async () => {
+    const user = await createTestUser();
+    const token = await loginToken(thirdParty, user, "openid core:admin.read");
+    const res = await introspect(thirdParty, token);
+    expect(res.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    expect(await errorOf(res)).toBe("invalid_client");
+  });
+});
+
+describe("introspecting a third-party token without core scopes", () => {
+  it("tells its own client the user's claims, not core's permissions", async () => {
+    const confidential = await createTestClient({
+      clientType: "confidential",
+      scopes: ["openid", "profile", "email"],
+    });
+    const user = await createTestUser();
+    await grantPermissions(user.id, ["users.write"]);
+    const token = await loginToken(confidential, user, "openid email");
+    const body = (await (await introspect(confidential, token)).json()) as {
+      active: boolean;
+      email?: string;
+      permissions?: string[];
+    };
+    expect(body.active).toBe(true);
+    expect(body.email).toBe(user.email);
+    expect(body).not.toHaveProperty("permissions");
+  });
+
+  it("tells a service in its audience the user's live permissions", async () => {
+    const service = await createTestClient({
+      clientType: "confidential",
+      scopes: [],
+    });
+    const slug = await makeServiceOf(service.id);
+    const login = await createTestClient({ scopes: ["openid"] });
+    await prisma.oAuthClient.update({
+      where: { id: login.id },
+      data: { audience: [slug] },
+    });
+    const user = await createTestUser();
+    await grantPermissions(user.id, ["users.write"]);
+    const token = await loginToken(login, user, "openid");
+    const body = (await (await introspect(service, token)).json()) as {
+      active: boolean;
+      permissions?: string[];
     };
     expect(body.active).toBe(true);
     expect(body.permissions).toContain("users.write");
