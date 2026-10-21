@@ -184,7 +184,9 @@ export const issueAuthorizationCode = async (
     // password login gives it a new token, so a token planted or leaked
     // before it is worth nothing after (session fixation).
     const current = cookieToken
-      ? await db.userSessions.getUserSessionByToken(cookieToken, tx)
+      ? await db.userSessions.getUserSessionByToken(cookieToken, tx, {
+          includeIdle: true,
+        })
       : null;
     const reuse =
       current &&

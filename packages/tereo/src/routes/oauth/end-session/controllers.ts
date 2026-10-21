@@ -148,7 +148,11 @@ const signedInAsOther = async (
 ): Promise<boolean> => {
   const ssoToken = getUserSessionFromCookie(req, client.clientId);
   if (ssoToken) {
-    const session = await db.userSessions.getUserSessionByToken(ssoToken);
+    const session = await db.userSessions.getUserSessionByToken(
+      ssoToken,
+      undefined,
+      { includeIdle: true }
+    );
     if (session && session.userId !== userId) return true;
   }
   const refreshTokenValue = getRefreshTokenFromCookie(req, client.clientId);
@@ -192,7 +196,11 @@ const endThisBrowser = async (
 
   const ssoToken = getUserSessionFromCookie(req, client.clientId);
   if (ssoToken) {
-    const session = await db.userSessions.getUserSessionByToken(ssoToken);
+    const session = await db.userSessions.getUserSessionByToken(
+      ssoToken,
+      undefined,
+      { includeIdle: true }
+    );
     if (session) {
       userSessionIds.add(session.id);
       signOut(session.userId, session.id);
@@ -200,7 +208,11 @@ const endThisBrowser = async (
   }
 
   if (hint?.sid) {
-    const session = await db.userSessions.getUserSessionById(hint.sid);
+    const session = await db.userSessions.getUserSessionById(
+      hint.sid,
+      undefined,
+      { includeIdle: true }
+    );
     if (session && session.userId === hint.sub) {
       userSessionIds.add(session.id);
       signOut(session.userId, session.id);

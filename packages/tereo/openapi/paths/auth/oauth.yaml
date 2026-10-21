@@ -47,7 +47,10 @@
 
       A user session never outlives its original expiry (`USER_SESSION_TTL`,
       7 days by default, from the password login): continuing it with
-      `prompt=none` or `org_id` does not extend it.
+      `prompt=none` or `org_id` does not extend it. One that has issued no
+      code for `USER_SESSION_IDLE_TTL` (3 days by default) counts as expired
+      here too: `prompt=none` answers `login_required` and `org_id` falls
+      through to the login page.
 
       The consent redirects set the `tereo_consent_session_{client_id}`
       cookie. Every redirect to a login-flow page (consent, org-select, 2FA)

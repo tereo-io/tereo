@@ -758,13 +758,21 @@ gain permissions while the check runs.
 
 ## Session lifetimes
 
-Every lifetime is absolute — using a session never extends it:
+Every lifetime is absolute — using a session never extends it. The SSO session also has an idle
+limit, `USER_SESSION_IDLE_TTL` (3 days by default, at most `USER_SESSION_TTL`): its `last_used_at` is
+set whenever it issues a code, and one idle longer counts as expired wherever it would be continued
+without a password (`prompt=none`, an `org_id` switch, the code issue that ends either). A refresh
+does not count as use: an app refreshing its tokens keeps its own family alive, not the browser's
+SSO session. An idle session's row stays until its absolute expiry, so a logout still finds it and
+revokes the token families issued under it, and the browser's next password login takes the row over
+(`includeIdle` on the lookups in `utils/db/userSessions.ts`).
 
 | Setting                  | Default        | What it bounds                                                                                                                                     |
 | ------------------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `JWT_ACCESS_TOKEN_TTL`   | 3600 (1 h)     | Access and ID tokens                                                                                                                               |
 | `JWT_REFRESH_TOKEN_TTL`  | 2592000 (30 d) | A refresh-token family, from the code exchange. A rotated token keeps the family's original expiry                                                 |
 | `USER_SESSION_TTL`       | 604800 (7 d)   | The SSO session behind `prompt=none` and org switching (`org_id`). A session continued without a password keeps the expiry of the one it came from |
+| `USER_SESSION_IDLE_TTL`  | 259200 (3 d)   | The same SSO session, since it last issued a code                                                                                                    |
 | `AUTHORIZATION_CODE_TTL` | 120            | Authorization codes                                                                                                                                |
 | `LOGIN_FLOW_TTL`         | 900 (15 min)   | The login, consent and org-select steps: their cookies and sessions, since a person fills them in                                                  |
 
@@ -774,7 +782,7 @@ login step or the consent screen — carries `iss`, the issuer (RFC 9207, built 
 `authorization_response_iss_parameter_supported`.
 
 `/oauth/authorize` with `prompt=none` answers `login_required` when the SSO session is missing,
-expired, older than `max_age`, or belongs to a deactivated user. With `org_id`, the same cases fall
+expired or idle, older than `max_age`, or belongs to a deactivated user. With `org_id`, the same cases fall
 through to the password login. A code older than its `max_age` is refused at `/oauth/token` with
 `400 invalid_grant`. For core's own login client (`isFirstPartyClient` in `definitions/`) and for a client with
 `consentRequired: false` asking for no `core:*` scope, `prompt=none` or an `org_id` switch with a

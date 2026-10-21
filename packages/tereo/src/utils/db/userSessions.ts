@@ -1,6 +1,7 @@
 import { Prisma } from "../../../prisma/generated/client/index.js";
 import { hashFlowToken } from "../crypto.js";
 import { prisma } from "./prisma.js";
+import env from "../../env.js";
 
 export interface UserSessionData {
   id: string;
@@ -11,6 +12,7 @@ export interface UserSessionData {
   authMethods: string[];
   acrValue: string | null;
   expiresAt: Date;
+  lastUsedAt: Date;
   createdAt: Date;
 }
 
@@ -25,10 +27,28 @@ interface UserSessionInput {
   expiresAt: Date;
 }
 
+// Every write is a code being issued under the session: its use.
 const toRow = ({ sessionToken, ...data }: UserSessionInput) => ({
   ...data,
   tokenHash: hashFlowToken(sessionToken),
+  lastUsedAt: new Date(),
 });
+
+const idleCutoff = () =>
+  new Date(Date.now() - env.USER_SESSION_IDLE_TTL * 1000);
+
+export interface SessionLookup {
+  /**
+   * Find a session idle past USER_SESSION_IDLE_TTL too: for a logout, which
+   * must still reach the token families issued under it, and for a password
+   * login, which takes the browser's row over. Every other lookup treats such
+   * a session as gone; the row stays until its absolute expiry.
+   */
+  includeIdle?: boolean;
+}
+
+const notIdle = ({ includeIdle }: SessionLookup) =>
+  includeIdle ? {} : { lastUsedAt: { gt: idleCutoff() } };
 
 export const createUserSession = async (
   data: UserSessionInput,
@@ -50,9 +70,12 @@ export const updateUserSession = async (
 
 export const getUserSessionById = async (
   id: string,
-  tx?: Prisma.TransactionClient
+  tx?: Prisma.TransactionClient,
+  lookup: SessionLookup = {}
 ): Promise<UserSessionData | null> => {
-  return await (tx ?? prisma).userSession.findUnique({ where: { id } });
+  return await (tx ?? prisma).userSession.findUnique({
+    where: { id, ...notIdle(lookup) },
+  });
 };
 
 /** The SSO session the refresh token's family was issued under, if any. */
@@ -68,10 +91,11 @@ export const getIdByRefreshTokenId = async (
 
 export const getUserSessionByToken = async (
   sessionToken: string,
-  tx?: Prisma.TransactionClient
+  tx?: Prisma.TransactionClient,
+  lookup: SessionLookup = {}
 ): Promise<UserSessionData | null> => {
   return await (tx ?? prisma).userSession.findUnique({
-    where: { tokenHash: hashFlowToken(sessionToken) },
+    where: { tokenHash: hashFlowToken(sessionToken), ...notIdle(lookup) },
   });
 };
 
