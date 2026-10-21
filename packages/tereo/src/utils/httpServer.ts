@@ -1,4 +1,58 @@
+import type { RequestHandler } from "express";
+import { AppError, sendError } from "./errors.js";
 import type { Server } from "node:http";
+
+/**
+ * How long a client has to send a whole request. Node's `requestTimeout` is
+ * one value for the whole server, so it is set to the upload routes' limit
+ * and `requestDeadline` holds every other route to the shorter one.
+ */
+export const REQUEST_TIMEOUT_MS = 60_000;
+export const UPLOAD_REQUEST_TIMEOUT_MS = 10 * 60_000;
+
+// Routes whose body is a file. Express matches paths case-insensitively.
+const UPLOAD_ROUTES: [method: string, path: RegExp][] = [
+  ["PUT", /^\/v1\/files\/buckets\/[^/]+\/objects\/.+$/i],
+  ["PUT", /^\/v1\/files\/buckets\/[^/]+\/multipart\/[^/]+\/parts\/[^/]+$/i],
+  ["PUT", /^\/v1\/files\/signed\/.+$/i],
+  ["POST", /^\/v1\/account\/photo\/?$/i],
+];
+
+export const isUploadRequest = (method: string, path: string): boolean =>
+  UPLOAD_ROUTES.some(([m, pattern]) => m === method && pattern.test(path));
+
+/**
+ * Answers `408 request_timeout` and closes the connection when a request's
+ * body has not fully arrived `timeoutMs` after its headers, unless `isExempt`
+ * (the upload routes, which `server.requestTimeout` bounds instead).
+ */
+export function requestDeadline(
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+  isExempt: (method: string, path: string) => boolean = isUploadRequest
+): RequestHandler {
+  return (req, res, next) => {
+    if (req.complete || isExempt(req.method, req.path)) return next();
+    const timer = setTimeout(() => {
+      if (req.complete) return;
+      if (res.headersSent) {
+        req.socket.destroy();
+        return;
+      }
+      res.setHeader("Connection", "close");
+      res.once("finish", () => req.socket.destroy());
+      sendError(
+        res,
+        new AppError(408, "request_timeout", "Request not received in time")
+      );
+    }, timeoutMs);
+    timer.unref();
+    const clear = () => clearTimeout(timer);
+    req.once("end", clear);
+    res.once("finish", clear);
+    res.once("close", clear);
+    next();
+  };
+}
 
 /**
  * Keep the server's idle keep-alive window LONGER than its in-cluster

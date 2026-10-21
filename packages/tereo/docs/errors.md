@@ -32,6 +32,7 @@ One condition, one code, in every area:
 | 401 | `unauthorized` / `invalid_token` | Missing, or invalid / expired / revoked, access token |
 | 403 | `forbidden` | Not permitted |
 | 404 | `not_found` | The resource in the **URL** does not exist, or is hidden from the caller |
+| 408 | `request_timeout` | The request's body did not arrive in time; the connection is closed. See [configuration.md](configuration.md#http-limits) |
 | 409 | `conflict` | Already exists, still in use, or another state conflict without its own code |
 | 409 | `resource_archived` | The resource is archived and read-only; restore it first |
 | 409 | `already_archived` | Archive of a resource that is already archived |

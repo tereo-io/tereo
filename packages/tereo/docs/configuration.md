@@ -57,6 +57,18 @@ closing or stopped; `workers.total` counts them and `workers.stopped` names the 
 are not running. The image's `HEALTHCHECK` probes `PORT` or `WORKER_HEALTH_PORT` according to
 `ROLE`; point a Kubernetes probe at the same port.
 
+## HTTP limits
+
+Once its headers are in, a client has 60 seconds to send the rest of a request; past that it gets
+`408 request_timeout` and the connection is closed. The upload routes — an object `PUT`, a multipart
+part `PUT`, a presigned `PUT` and `POST /v1/account/photo` — get 10 minutes instead (the server's
+`requestTimeout`). Request headers must arrive within 66 seconds and fit in 200 KiB, and an idle
+keep-alive connection is closed after 65 seconds. `HTTP_MAX_CONNECTIONS` caps open connections.
+
+These bound what one slow client can hold, not a flood of them: run core behind a reverse proxy or
+load balancer that buffers requests (and, ideally, limits connections per client) rather than
+exposing it directly.
+
 ## The Docker image
 
 Releases are published as `ghcr.io/tereo-io/tereo:<version>`, for amd64 and arm64; `<major>.<minor>`
@@ -79,6 +91,7 @@ notes as a range; a value outside its range stops core at startup with the varia
 | `LOG_LEVEL` | `info` | `fatal` … `trace`, or `silent` |
 | `ROLE` | `all` | See [Process roles](#process-roles) |
 | `PORT` | `4001` | 1–65535 |
+| `HTTP_MAX_CONNECTIONS` | unlimited | 1–1000000. The most connections the HTTP server holds open at once, WebSockets included; past it, a new connection is closed at once. See [HTTP limits](#http-limits) |
 | `WORKER_HEALTH_PORT` | `4002` | 0–65535. `ROLE=worker` only: its `/health` listener. See [Health checks](#health-checks) |
 | `PUBLIC_URL` | `http://localhost:4001` outside production | Required in production, and `https://` there |
 | `DATABASE_URL` | — | Required. Sessions run with `timezone=UTC` whatever the server default; an `options` parameter in the URL replaces that |

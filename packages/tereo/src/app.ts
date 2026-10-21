@@ -3,6 +3,7 @@ import { errorHandler, NotFoundError } from "./utils/errors.js";
 import { authRequestLog } from "./middleware/authRequestLog.js";
 import { rateLimitPreflight } from "./middleware/rateLimit.js";
 import { bucketCors } from "./middleware/bucketCors.js";
+import { requestDeadline } from "./utils/httpServer.js";
 import { apiCors } from "./middleware/apiCors.js";
 import routes from "./routes/index.js";
 import express from "express";
@@ -28,6 +29,7 @@ const trustProxy = /^\d+$/.test(env.TRUST_PROXY)
 app.set("trust proxy", trustProxy);
 
 app.use(createRequestIdMiddleware());
+app.use(requestDeadline());
 
 // Also the admin UI's policy, served from the root: its scripts are files (no
 // inline script), it styles inline, previews images from blob: URLs, and

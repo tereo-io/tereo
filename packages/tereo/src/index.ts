@@ -1,6 +1,10 @@
 import "./preload.js";
 import { ensureBlobDirectory, ensureTempDirectory } from "./utils/storage.js";
-import { closeHttpServer, tuneServerKeepAlive } from "./utils/httpServer.js";
+import {
+  closeHttpServer,
+  tuneServerKeepAlive,
+  UPLOAD_REQUEST_TIMEOUT_MS,
+} from "./utils/httpServer.js";
 import { ProvisioningError, provision } from "./utils/provisioning/index.js";
 import { closeRedisEmitter } from "./websocket/emitters/redisEmitter.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
@@ -108,8 +112,12 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
       // Uploads carry large headers (metadata, tags) and long bodies: raise
       // the header cap, and bound total request time so a stuck upload can't
       // hold a socket forever. Large files go through multipart instead.
+      // Other routes get a shorter limit from `requestDeadline` (app.ts).
       server = createServer({ maxHeaderSize: 200 * 1024 }, app);
-      server.requestTimeout = 10 * 60 * 1000;
+      server.requestTimeout = UPLOAD_REQUEST_TIMEOUT_MS;
+      if (env.HTTP_MAX_CONNECTIONS !== undefined) {
+        server.maxConnections = env.HTTP_MAX_CONNECTIONS;
+      }
       tuneServerKeepAlive(server);
       await initializeWebSocket(server);
 

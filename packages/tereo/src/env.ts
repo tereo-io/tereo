@@ -291,6 +291,9 @@ const EnvFields = z
     // split them so each can be scaled on its own.
     ROLE: z.enum(["all", "api", "worker"]).default("all"),
     PORT: int(1, 65535, 4001),
+    // Caps the HTTP server's open connections (WebSockets included); past
+    // it, new ones are closed at once. Unset, unlimited.
+    HTTP_MAX_CONNECTIONS: z.coerce.number().int().min(1).max(1_000_000).optional(),
     // ROLE=worker serves no API; it answers GET /health on this port instead.
     WORKER_HEALTH_PORT: int(0, 65535, 4002),
     // Externally reachable base URL of this service. Defaults derived from it:
