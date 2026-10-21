@@ -1730,6 +1730,7 @@ paths:
         | `identity_in_use` | Forced link: the provider account is linked to another user |
         | `already_linked` | Forced link: the user linked this provider meanwhile |
         | `account_mismatch` | Forced link: the provider account's verified email is not the user's |
+        | `sso_required` | The user's email domain is `ssoOnly` for another provider, the only way in for its users: an identity linked here signs no one in, and an invite here is not claimed. The redirect adds `provider=<slug>`, the domain's provider |
         | `too_many_attempts` | Too many failed callbacks from this address (below) |
 
         Callbacks whose round trip is found count toward the failure limiter
@@ -3627,8 +3628,10 @@ paths:
         The response sets the `tereo_upstream_auth` cookie, carrying the
         round trip's `state`, and answers `{ "redirect_url": ... }`: the UI
         navigates the browser to it. A 404 means the slug is unknown or the
-        provider deactivated; 502 carries the provider failure code
-        (`upstream_failed`) when its discovery could not be reached.
+        provider deactivated; 409 `sso_required` means the user's email domain
+        is `ssoOnly` for another provider, the only one they may use; 502
+        carries the provider failure code (`upstream_failed`) when its
+        discovery could not be reached.
 
         The provider then returns the browser to
         `GET /oauth/upstream/{slug}/callback`, which links the account and
@@ -3639,8 +3642,9 @@ paths:
           `upstream_failed`, `provider_inactive`, `account_inactive`,
           `identity_in_use` (that provider account is linked to another user),
           `already_linked` (the user already has this provider, or this exact
-          account) or `too_many_attempts` (too many failed callbacks from this
-          address);
+          account), `sso_required` (the user's domain turned `ssoOnly` for
+          another provider meanwhile) or `too_many_attempts` (too many failed
+          callbacks from this address);
         - `/login?error=session_expired` when the round trip is gone: no or
           mismatched cookie, or the session expired (10 minutes) or was
           already used.
@@ -3684,6 +3688,19 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: The provider is unknown or deactivated
+        '409':
+          description: The user's email domain is `ssoOnly` for another provider (`sso_required`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum:
+                      - sso_required
+                  error_description:
+                    type: string
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':

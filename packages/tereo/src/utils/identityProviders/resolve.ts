@@ -16,7 +16,11 @@ export type AuditActor = AuditLogInput["auth"];
 export type ResolveFailure =
   "no_account" | "account_exists" | "email_unverified";
 
-export type Resolution = { userId: string } | { error: ResolveFailure };
+export type Resolution =
+  | { userId: string }
+  | { error: ResolveFailure }
+  /** The user's domain is SSO-only for `provider`, the only way in. */
+  | { error: "sso_required"; provider: IdentityProvider };
 
 const GOOGLE_ISSUER = "https://accounts.google.com";
 // Google is the authority for its own consumer domains, which carry no `hd`.
@@ -51,6 +55,21 @@ export const emailTrusted = (
     identity.hostedDomain === null &&
     GOOGLE_CONSUMER_DOMAINS.has(domain)
   );
+};
+
+/**
+ * The provider an SSO-only domain requires of `email`, when it is not
+ * `providerId`: no other provider signs such a user in or links to them.
+ */
+export const ssoProviderElsewhere = async (
+  email: string,
+  providerId: string,
+  tx?: Tx
+): Promise<IdentityProvider | null> => {
+  const domain = await db.identityProviders.findDomain(emailDomain(email), tx);
+  return domain?.ssoOnly && domain.providerId !== providerId
+    ? domain.provider
+    : null;
 };
 
 const clip = (value: string | null): string | null =>
@@ -99,6 +118,9 @@ const signInLinked = async (
     identity.subject
   );
   if (!linked) return null;
+  const user = await db.users.get(linked.userId);
+  const required = await ssoProviderElsewhere(user.email, provider.id);
+  if (required) return { error: "sso_required", provider: required };
   await db.userIdentities.touchLogin(
     linked.id,
     identity.email === null ? null : normalizeEmail(identity.email)
@@ -121,6 +143,8 @@ const resolveOnce = async (
     if (!emailTrusted(provider, identity, email, "invite")) {
       return { error: "email_unverified" };
     }
+    const required = await ssoProviderElsewhere(invite.user.email, provider.id);
+    if (required) return { error: "sso_required", provider: required };
     // One account per provider per user: the invite is not this subject's to claim.
     if (
       await db.userIdentities.getForUserAtProvider(invite.userId, provider.id)

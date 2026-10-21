@@ -382,6 +382,52 @@ describe("linking from the account page", () => {
     expect(res.status).toBe(404);
   });
 
+  it("refuses a provider other than an SSO-only domain's, at the start and at the callback", async () => {
+    const domain = `sso-${generateUniqueId().toLowerCase()}.test`;
+    const user = await createTestUser({ email: `someone@${domain}` });
+    const token = await freshToken(user);
+    const owner = await createProvider();
+    const row = await prisma.identityProviderDomain.create({
+      data: {
+        providerId: owner.id,
+        domain,
+        organizationId: DEFAULT_ORGANIZATION_ID,
+        ssoOnly: false,
+        createdBy: user.id,
+      },
+    });
+
+    const start = await account(token, "POST", "/identities", {
+      provider: provider.slug,
+    });
+    expect(start.status).toBe(200);
+    const jar: CookieJar = new Map();
+    absorbCookies(jar, start);
+    const { redirect_url } = (await start.json()) as { redirect_url: string };
+    await prisma.identityProviderDomain.update({
+      where: { id: row.id },
+      data: { ssoOnly: true },
+    });
+    fake.nextIdentity({ sub: subject() });
+    const atProvider = await fetch(redirect_url, { redirect: "manual" });
+    const callback = await fetch(atProvider.headers.get("location") ?? "", {
+      redirect: "manual",
+      headers: { Cookie: cookieHeader(jar) },
+    });
+    expectAccountRedirect(callback, { error: "sso_required" });
+    expect(
+      await prisma.userIdentity.count({ where: { userId: user.id } })
+    ).toBe(0);
+
+    const again = await account(token, "POST", "/identities", {
+      provider: provider.slug,
+    });
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toBe(
+      "sso_required"
+    );
+  });
+
   it("refuses a subject linked to another user with identity_in_use", async () => {
     const other = await createTestUser();
     const sub = subject();

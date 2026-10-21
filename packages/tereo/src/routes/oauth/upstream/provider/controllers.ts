@@ -29,6 +29,7 @@ import {
   emailTrusted,
   linkIdentity,
   resolveLoginIdentity,
+  ssoProviderElsewhere,
 } from "../../../../utils/identityProviders/resolve.js";
 import {
   upstreamAuthTime,
@@ -81,6 +82,7 @@ type UpstreamLoginError =
   | "already_linked"
   | "account_mismatch"
   | "upstream_reauth_failed"
+  | "sso_required"
   | "too_many_attempts";
 
 /** Ends a callback on the UI's login page; `restart` is the authorize request to retry. */
@@ -103,6 +105,7 @@ type UpstreamLinkError =
   | "account_inactive"
   | "identity_in_use"
   | "already_linked"
+  | "sso_required"
   | "too_many_attempts";
 
 /** Ends a link callback on the UI's account page, where linking began. */
@@ -371,7 +374,16 @@ const completeLogin = async (
   );
 
   const resolution = await resolveLoginIdentity(provider, identity);
-  if ("error" in resolution) throw fail(resolution.error);
+  if ("error" in resolution) {
+    if (resolution.error === "sso_required") {
+      // Names the provider to sign in with, as the password POST does.
+      throw new LoginFailure("sso_required", {
+        ...restart,
+        provider: resolution.provider.slug,
+      });
+    }
+    throw fail(resolution.error);
+  }
 
   const user = await db.users.get(resolution.userId);
   if (!user.isActive || user.userType !== "human") {
@@ -492,6 +504,9 @@ const completeLink = async (
   const user = await db.users.get(session.userId);
   if (!user.isActive || user.userType !== "human") {
     throw new LinkFailure("account_inactive");
+  }
+  if (await ssoProviderElsewhere(user.email, provider.id)) {
+    throw new LinkFailure("sso_required");
   }
   const holder = await db.userIdentities.getByProviderSubject(
     provider.id,

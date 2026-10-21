@@ -359,7 +359,7 @@ to **one organization** and a set of **default roles** in it, and has two indepe
 | Flag         | Effect                                                                                                                                                                                                      |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `autoAccept` | A first sign-in with a verified email at this domain **creates the user**: no password, name from the claims, `member` of the domain's organization, the default roles assigned there, the identity linked. |
-| `ssoOnly`    | Password sign-in is refused for users at this domain.                                                                                                                                                       |
+| `ssoOnly`    | The domain's provider is the only way in: password sign-in, and sign-in or linking through any other provider, is refused for its users.                                                                    |
 
 They combine freely: "staff must use Google, and nobody joins automatically" is `ssoOnly` without
 `autoAccept`. Default roles must be roles assignable within an organization, and the admin setting
@@ -387,7 +387,8 @@ never carry `hd`, cannot be auto-accepted: those users can arrive only by **invi
 A provider identity (the pair of provider and the provider's stable `sub`) is **never matched to an
 existing account by email**. A first sign-in lands in exactly one of three ways, tried in order:
 
-1. The identity is already linked: it signs in that user.
+1. The identity is already linked: it signs in that user, unless the user's email domain is SSO-only
+   for another provider (below).
 2. An unexpired **invite** exists for that provider, the invited user's email equals the provider's
    verified email (and `hd`, for Google): the invite is claimed, once, and the identity linked.
 3. The email's domain is an `autoAccept` domain of this provider and no account has that email: a new
@@ -466,6 +467,15 @@ and emits `auth.user.password-changed` with `reason: "sso_only"`; the login then
 provider login (`amr` `["fed"]`). A failure lands on `/login` with the authorize parameters and
 leaves the grant usable until it expires.
 
+**No other provider.** An SSO-only domain's provider is the only way in for the domain's users.
+A callback at any other provider that would sign one of them in, through an identity linked earlier
+or by claiming an invite, ends on `/login?error=sso_required&provider=<slug>` naming the domain's
+provider, and leaves the invite unclaimed. Linking another provider from the account page is refused
+with 409 `sso_required` at `POST /v1/account/identities`, and at the callback
+(`/account?error=sso_required`) when the domain turned SSO-only during the round trip. Identities
+already linked at other providers stay (listed, and the user may unlink them), but sign no one in
+while the domain is SSO-only; turning SSO-only off makes them usable again.
+
 A user whose email at the provider differs from their email in core cannot complete the forced link
 (`account_mismatch`), and an invite does not help, because claiming one also requires the
 provider's verified email to equal the user's. The way through is to change the user's email in
@@ -530,7 +540,7 @@ authorize parameters (so the user can retry) and `error=<code>`. They never redi
 | `account_inactive`                       | The user is deactivated, or is a service account                                                                                                                                                                                             |
 | `account_mismatch`                       | Forced link: the provider account's verified email is not the user's                                                                                                                                                                         |
 | `identity_in_use`, `already_linked`      | Linking, on `/account?error=`, or an SSO-only user's forced link on `/login`: the provider account belongs to another user, or the user already has this provider (or this account)                                                          |
-| `sso_required`                           | Password sign-in for an SSO-only domain whose provider the user has linked (403 JSON from the password POST, with `provider`); also 409 from account and admin unlink of the provider an SSO-only domain requires                            |
+| `sso_required`                           | Password sign-in for an SSO-only domain whose provider the user linked (403 JSON, with `provider`); a callback at another provider (`&provider=`); 409 on unlinking the domain's provider or linking another                                 |
 | `reauth_required`, `last_sign_in_method` | JSON from the account API: linking or unlinking without a login under 10 minutes old (403), or unlinking the only way in (409)                                                                                                               |
 | `too_many_attempts`                      | Too many failed callbacks from this address (below); on `/account?error=` for a link                                                                                                                                                         |
 

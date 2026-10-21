@@ -1,10 +1,10 @@
 import { absorbCookies, cookieHeader, newPkce } from "../utils/browserLogin.js";
 import { encryptTotpSecret, generateTotpSecret } from "../../utils/totp.js";
+import { UPSTREAM_COOKIE, upstreamLogin } from "../utils/upstreamLogin.js";
 import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
 import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getTestPrincipalToken } from "../utils/principals.js";
-import { UPSTREAM_COOKIE } from "../utils/upstreamLogin.js";
 import type { CookieJar } from "../utils/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { CORE_URL } from "../utils/coreUrl.js";
@@ -329,6 +329,75 @@ describe("password login on an SSO-only domain", () => {
       where: { id: user.id },
     });
     expect(stored.passwordHash).not.toBeNull();
+  });
+});
+
+describe("sign-in through another provider on an SSO-only domain", () => {
+  const throughOther = (claims: { sub: string; email?: string }) =>
+    upstreamLogin({
+      provider: fake,
+      slug: other.slug,
+      clientId: client.clientId,
+      redirectUri: REDIRECT_URI,
+      scope: SCOPE,
+      claims: { email_verified: true, ...claims },
+      ip: freshIp(),
+    });
+
+  it("refuses a user linked there with sso_required, naming the domain's provider", async () => {
+    const user = await ssoUser();
+    const sub = `sub-${randomUUID()}`;
+    const identity = await prisma.userIdentity.create({
+      data: { userId: user.id, providerId: other.id, subject: sub },
+    });
+    const { callback, location } = await throughOther({ sub });
+    expectLoginError(callback, "sso_required");
+    expect(location.searchParams.get("provider")).toBe(provider.slug);
+    const after = await prisma.userIdentity.findUniqueOrThrow({
+      where: { id: identity.id },
+    });
+    expect(after.lastLoginAt).toBeNull();
+  });
+
+  it("refuses to claim an invite there, leaving it unclaimed", async () => {
+    const user = await ssoUser();
+    await prisma.identityInvite.create({
+      data: {
+        userId: user.id,
+        providerId: other.id,
+        createdBy: SYSTEM_USER_ID,
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+    const { callback } = await throughOther({
+      sub: `sub-${randomUUID()}`,
+      email: user.email,
+    });
+    expectLoginError(callback, "sso_required");
+    expect(
+      await prisma.userIdentity.count({ where: { userId: user.id } })
+    ).toBe(0);
+    expect(
+      await prisma.identityInvite.count({ where: { userId: user.id } })
+    ).toBe(1);
+  });
+
+  it("still signs in through the domain's own provider", async () => {
+    const user = await ssoUser();
+    const sub = `sub-${randomUUID()}`;
+    await prisma.userIdentity.create({
+      data: { userId: user.id, providerId: provider.id, subject: sub },
+    });
+    const { location } = await upstreamLogin({
+      provider: fake,
+      slug: provider.slug,
+      clientId: client.clientId,
+      redirectUri: REDIRECT_URI,
+      scope: SCOPE,
+      claims: { sub },
+      ip: freshIp(),
+    });
+    expect(location.pathname).toBe("/consent");
   });
 });
 

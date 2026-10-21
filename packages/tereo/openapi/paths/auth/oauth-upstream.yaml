@@ -271,6 +271,7 @@
       | `identity_in_use` | Forced link: the provider account is linked to another user |
       | `already_linked` | Forced link: the user linked this provider meanwhile |
       | `account_mismatch` | Forced link: the provider account's verified email is not the user's |
+      | `sso_required` | The user's email domain is `ssoOnly` for another provider, the only way in for its users: an identity linked here signs no one in, and an invite here is not claimed. The redirect adds `provider=<slug>`, the domain's provider |
       | `too_many_attempts` | Too many failed callbacks from this address (below) |
 
       Callbacks whose round trip is found count toward the failure limiter
