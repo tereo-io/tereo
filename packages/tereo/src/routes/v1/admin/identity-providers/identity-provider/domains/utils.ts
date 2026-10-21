@@ -1,6 +1,8 @@
 import type { Prisma } from "../../../../../../../prisma/generated/client/index.js";
+import { recordSessionsRevoked } from "../../../../../../utils/sessionEvents.js";
 import type { AuthContext } from "../../../../../../middleware/auth.js";
 import { assertGlobalAdmin } from "../../../../../../utils/grants.js";
+import { endUserSessions } from "../../../../../../utils/sessions.js";
 import { ConflictError } from "../../../../../../utils/errors.js";
 import db from "../../../../../../utils/db/index.js";
 
@@ -47,3 +49,23 @@ export const assertMayChangeSsoOnly = (
     "Only an administrator (global admin) can make a domain SSO-only, move an SSO-only domain or lift SSO-only",
     tx
   );
+
+/**
+ * Once a domain is SSO-only its provider is its users' only way in, so a
+ * session from an identity at another provider must not outlive the change.
+ * Run after the domain's change commits; each user's sessions end, audited
+ * and emitted, in their own transaction.
+ */
+export const endSessionsLinkedElsewhere = async (
+  auth: { userId: string; email: string | null },
+  domain: string,
+  providerId: string
+) => {
+  const users = await db.userIdentities.usersAtDomainLinkedElsewhere(
+    domain,
+    providerId
+  );
+  for (const user of users) {
+    await endUserSessions(user.id, null, recordSessionsRevoked(auth, user));
+  }
+};

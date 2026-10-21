@@ -158,3 +158,18 @@ export const cleanupExpiredInvites = async (): Promise<number> => {
   });
   return count;
 };
+
+/** People whose email is at `domain` and who hold an identity at another provider than `providerId`. */
+export const usersAtDomainLinkedElsewhere = async (
+  domain: string,
+  providerId: string
+) => {
+  return await prisma.user.findMany({
+    where: {
+      email: { endsWith: `@${domain}` },
+      userType: "human",
+      identities: { some: { providerId: { not: providerId } } },
+    },
+    select: { id: true, email: true },
+  });
+};

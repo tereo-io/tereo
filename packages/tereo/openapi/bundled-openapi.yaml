@@ -5093,7 +5093,9 @@ paths:
 
         Errors: 400 `unknown_provider` (no provider has that id),
         400 `provider_inactive` (the provider is deactivated), 409
-        `already_linked` (the user already has an identity at the provider).
+        `already_linked` (the user already has an identity at the provider),
+        409 `sso_required` (the user's email domain is SSO-only for another
+        provider, whose sign-in is then the only way in).
 
         An audit log entry is created (`entityType` `IdentityInvite`).
       operationId: postAdminUserIdentityInvites
@@ -5135,7 +5137,7 @@ paths:
           description: No such user
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The user is already linked to the provider (`already_linked`)
+          description: The user is already linked to the provider (`already_linked`), or their domain is SSO-only for another provider (`sso_required`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7541,7 +7543,10 @@ paths:
         `ssoOnly: true` is refused with 409 `provider_inactive` while the provider
         is deactivated, since the domain's users would have no way to sign in, and
         with 403 unless the caller holds `admin` through a global role: a password
-        sign-in at an SSO-only domain is force-linked to the provider.
+        sign-in at an SSO-only domain is force-linked to the provider. Creating
+        a domain SSO-only ends, right after, every session of its users who
+        hold an identity at another provider (audited and emitted as
+        `auth.user.sessions-revoked`).
 
         `roleIds` must be roles that may be assigned within an organization: 400
         `unknown_role` for an unknown, archived or retired role, 400
@@ -7631,6 +7636,9 @@ paths:
         of adding a domain, including 409 `provider_inactive` for `ssoOnly: true` on a
         deactivated provider. Turning `ssoOnly` on or off, or changing the `domain` of
         an SSO-only domain, needs `admin` through a global role (403 otherwise).
+        A change that makes the domain SSO-only (or renames an SSO-only one)
+        ends the sessions of its users who hold an identity at another
+        provider, as on create.
 
         An audit log entry is created for this action.
       operationId: updateAdminIdentityProviderDomain

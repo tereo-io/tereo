@@ -20,6 +20,7 @@ import {
   assertMayChangeSsoOnly,
   assertProviderActive,
   changesSsoOnly,
+  endSessionsLinkedElsewhere,
 } from "../utils.js";
 
 export const getDomain = async (req: Request, res: Response) => {
@@ -60,7 +61,7 @@ export const updateDomain = async (req: Request, res: Response) => {
     );
   }
 
-  await db.$transaction(async (tx) => {
+  const closes = await db.$transaction(async (tx) => {
     // Every domain write takes the provider's lock, so the row read under it
     // holds until this one is written.
     await db.identityProviders.lockForUpdate(providerId, tx);
@@ -104,7 +105,15 @@ export const updateDomain = async (req: Request, res: Response) => {
       changes: computeChanges(formatDomain(existing), formatDomain(updated)),
       metadata: { providerId },
     });
+    // Newly SSO-only, or SSO-only at a new domain: its users' identities at
+    // other providers stop working.
+    const newlyClosed =
+      updated.ssoOnly &&
+      (!current.ssoOnly || updated.domain !== current.domain);
+    return newlyClosed ? updated.domain : null;
   });
+
+  if (closes) await endSessionsLinkedElsewhere(auth, closes, providerId);
 
   res.json(
     formatDomain(await db.identityProviders.getDomain(providerId, domainId))

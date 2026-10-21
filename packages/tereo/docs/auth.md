@@ -389,6 +389,13 @@ two reopen the accounts to passwords), or change the `issuer` or `clientId` of a
 an SSO-only domain; 403 otherwise. The checks run under the provider's row lock, which every domain
 write takes.
 
+A domain becoming SSO-only (created with it, `PATCH`ed to it, or an SSO-only domain renamed) closes
+every other provider to its users, so right after the change commits core ends all sessions of each
+person at the domain who holds an identity at another provider (`endUserSessions`, one transaction
+per user), audited and emitted as an admin session revoke (`sessions_revoked`,
+`auth.user.sessions-revoked`). The domain's own provider's users and password users keep theirs; the
+latter are force-linked at their next password sign-in.
+
 A domain's `autoAccept` only matches the provider that owns the domain. A user with a matching
 email who already exists is never signed in by it: see _No matching by email_ below.
 
@@ -427,7 +434,9 @@ whose verified email matches the user's claims the invite, once. Invites last 7 
 for the same provider replaces the old one and restarts the 7 days, and one is removed when the user
 links that provider another way. `GET /v1/admin/users/{id}/identities` lists the user's identities and
 outstanding invites (an expired one is listed until the hourly cleanup removes it; check
-`expiresAt`), and `DELETE …/identity-invites/{providerId}` withdraws one. Changing a user's email
+`expiresAt`), and `DELETE …/identity-invites/{providerId}` withdraws one. An invite at another
+provider than the one an SSO-only domain names, for a user at that domain, is refused with 409
+`sso_required`, as linking it from the account page is: claiming it could never succeed. Changing a user's email
 withdraws all of their outstanding invites, because an invite is matched by email and must not
 follow the account to an address the issuing admin never saw. Core sends no email: tell the user to
 "Sign in with <provider>".
