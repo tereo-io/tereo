@@ -243,8 +243,8 @@ LinkForbiddenResponse:
 
 IdentityConflictResponse:
   description: |
-    Conflict. `last_sign_in_method`: the user has no password and this is
-    their only linked identity. `sso_required`: the user's email domain is
+    Conflict. `last_sign_in_method`: the user has no password and no other
+    linked identity at an active provider. `sso_required`: the user's email domain is
     `ssoOnly` for this identity's provider.
   headers:
     X-RateLimit-Limit:

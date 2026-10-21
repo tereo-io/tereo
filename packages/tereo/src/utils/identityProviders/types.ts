@@ -15,7 +15,15 @@ export interface IdentityProviderInput {
   scopes: string[];
 }
 
-export interface UpstreamAuthStart {
+/** What the core request demands of the login, passed on to the provider. */
+export interface UpstreamReauth {
+  /** Sent as `prompt=login`. */
+  promptLogin: boolean;
+  /** Sent as `max_age`. */
+  maxAge: number | null;
+}
+
+export interface UpstreamAuthStart extends UpstreamReauth {
   state: string;
   nonce: string;
   codeVerifier: string;
@@ -40,6 +48,8 @@ export interface NormalizedIdentity {
   lastName: string | null;
   /** Google's `hd`: the Workspace domain, absent for consumer accounts. */
   hostedDomain: string | null;
+  /** When the user last authenticated at the provider (`auth_time`), if it said. */
+  authTime: Date | null;
 }
 
 export interface ProviderAdapter {

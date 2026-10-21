@@ -486,6 +486,19 @@ A provider login records its method in the session's `authMethods`, which become
 `urn:auth-service:mfa` for a `countsAsMfa` login and session reuse, `max_age` and `acr_values` need
 no other rule.
 
+**Re-authentication and `auth_time`.** A provider login's `auth_time` is the provider's own
+(the ID token's `auth_time` claim), not the moment core's callback ran, so a silent sign-in on an old
+session at the provider does not pass for a fresh login. When the authorize request carries
+`prompt=login` or `max_age`, core sends them on to the provider (`max_age=0` also as `prompt=login`,
+which it means), and checks the answer against them, counting from the start of the round trip with
+30 seconds for clock skew: an `auth_time` older than `max_age` allows, or from before the round trip
+under `prompt=login`, ends the callback on `/login?error=upstream_reauth_failed`. A provider that
+sends no `auth_time` is taken to have just asked when `prompt=login` was sent, and is refused under a
+`max_age` without it (OIDC requires the claim whenever `max_age` was asked). Without either, a
+missing claim reads as now. This is what makes the account page's `max_age=0` re-sign-in, and an
+app's `prompt=login`, ask the user again at the provider. After a TOTP step the login's `auth_time`
+is that step's.
+
 **`countsAsMfa` is a trust decision.** Turning it on says "this provider enforces its own MFA", and
 core then treats the login as multi-factor **everywhere**: the instance policy, roles with
 `requires_2fa`, and apps that ask for `acr_values=urn:auth-service:mfa`. Core cannot see what the
@@ -508,6 +521,7 @@ authorize parameters (so the user can retry) and `error=<code>`. They never redi
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `upstream_cancelled`                     | The provider returned `access_denied`: the user declined or cancelled                                                                                                                                                                        |
 | `upstream_failed`                        | The provider returned an error, or the code exchange or ID token validation failed (logged with the cause), or sent a response over 1 MiB or a `sub` over 255 characters                                                                     |
+| `upstream_reauth_failed`                 | The request asked for `prompt=login` or `max_age`, and the provider's `auth_time` is too old, or missing under `max_age` alone                                                                                                               |
 | `session_expired`                        | No or mismatched `upstream_auth` cookie, or an unknown, used or expired round trip (10 minutes), or no authorize session cookie at start; for a link grant, a missing cookie, a used or expired grant, or another provider than the domain's |
 | `provider_inactive`                      | The provider was deactivated before or during the flow                                                                                                                                                                                       |
 | `no_account`                             | No linked identity, no invite, and no auto-accept domain of this provider (also: no email claim, or the domain's organization is archived or inactive)                                                                                       |

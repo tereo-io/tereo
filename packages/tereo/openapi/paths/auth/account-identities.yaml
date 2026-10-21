@@ -139,8 +139,8 @@
 
       Refused with 409 when it would lock the user out:
 
-      - `last_sign_in_method`: the user has no password and this is their only
-        identity;
+      - `last_sign_in_method`: the user has no password and no other identity
+        at an active provider;
       - `sso_required`: the user's email domain is `ssoOnly` for this
         identity's provider.
 

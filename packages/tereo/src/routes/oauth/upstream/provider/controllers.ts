@@ -31,6 +31,10 @@ import {
   resolveLoginIdentity,
 } from "../../../../utils/identityProviders/resolve.js";
 import {
+  upstreamAuthTime,
+  upstreamReauth,
+} from "../../../../utils/identityProviders/reauth.js";
+import {
   adapterFor,
   upstreamCallbackUrl,
 } from "../../../../utils/identityProviders/index.js";
@@ -76,6 +80,7 @@ type UpstreamLoginError =
   | "identity_in_use"
   | "already_linked"
   | "account_mismatch"
+  | "upstream_reauth_failed"
   | "too_many_attempts";
 
 /** Ends a callback on the UI's login page; `restart` is the authorize request to retry. */
@@ -141,7 +146,7 @@ export const upstreamStart = async (req: Request, res: Response) => {
 
   let trip: UpstreamRoundTrip;
   try {
-    trip = await beginUpstreamAuth(provider);
+    trip = await beginUpstreamAuth(provider, upstreamReauth(request));
   } catch (err) {
     if (!(err instanceof UpstreamAuthError)) throw err;
     logger.warn({ err, provider: provider.slug }, "Upstream sign-in failed");
@@ -225,7 +230,7 @@ const startForcedLink = async (req: Request, res: Response) => {
 
   let trip: UpstreamRoundTrip;
   try {
-    trip = await beginUpstreamAuth(provider);
+    trip = await beginUpstreamAuth(provider, upstreamReauth(request));
   } catch (err) {
     if (!(err instanceof UpstreamAuthError)) throw err;
     logger.warn({ err, provider: provider.slug }, "Upstream sign-in failed");
@@ -381,7 +386,33 @@ const completeLogin = async (
   return await continueProviderLogin(req, res, provider, user, linked.id, {
     client,
     request,
+    authTime: authTimeOrFail(provider, identity, request, session, fail),
   });
+};
+
+/** The provider's `auth_time`, unless it falls short of the request's re-authentication. */
+const authTimeOrFail = (
+  provider: IdentityProvider,
+  identity: NormalizedIdentity,
+  request: AuthorizeRequestParams,
+  session: UpstreamAuthSession,
+  fail: (code: UpstreamLoginError) => Error
+): Date => {
+  const reauth = upstreamReauth(request);
+  const authTime = upstreamAuthTime(identity, reauth, session.createdAt);
+  if (!authTime) {
+    logger.warn(
+      {
+        provider: provider.slug,
+        authTime: identity.authTime,
+        maxAge: reauth.maxAge,
+        promptLogin: reauth.promptLogin,
+      },
+      "Upstream sign-in did not re-authenticate as requested"
+    );
+    throw fail("upstream_reauth_failed");
+  }
+  return authTime;
 };
 
 /** The provider was the first factor: on to TOTP, organization and consent. */
@@ -394,6 +425,7 @@ const continueProviderLogin = async (
   {
     client,
     request,
+    authTime,
   }: {
     client: {
       id: string;
@@ -403,6 +435,7 @@ const continueProviderLogin = async (
       trustedCoreScopes: string[];
     };
     request: AuthorizeRequestParams;
+    authTime: Date;
   }
 ): Promise<string> => {
   const authMethods = provider.countsAsMfa ? ["fed", "mfa"] : ["fed"];
@@ -431,6 +464,7 @@ const continueProviderLogin = async (
     request,
     authMethods,
     mfaSatisfied: provider.countsAsMfa,
+    authTime,
   });
   return redirect_url;
 };
@@ -562,6 +596,7 @@ const completeForcedLink = async (
   if (!emailTrusted(provider, identity, user.email, "domain")) {
     throw fail("email_unverified");
   }
+  const authTime = authTimeOrFail(provider, identity, request, session, fail);
 
   const auth = { userId: user.id, email: user.email };
   let linked: { id: string } | undefined;
@@ -624,7 +659,7 @@ const completeForcedLink = async (
     provider,
     { ...user, passwordHash: null },
     linked!.id,
-    { client, request }
+    { client, request, authTime }
   );
 };
 

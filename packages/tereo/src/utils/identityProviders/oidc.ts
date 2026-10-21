@@ -144,6 +144,10 @@ const toIdentity = (
     firstName: text(claims.given_name),
     lastName: text(claims.family_name),
     hostedDomain: text(claims.hd),
+    authTime:
+      typeof claims.auth_time === "number" && Number.isFinite(claims.auth_time)
+        ? new Date(claims.auth_time * 1000)
+        : null,
   };
 };
 
@@ -162,6 +166,8 @@ const authorizationUrl = async (
       session.codeVerifier
     ),
     code_challenge_method: "S256",
+    ...(session.promptLogin && { prompt: "login" }),
+    ...(session.maxAge !== null && { max_age: String(session.maxAge) }),
   });
 };
 

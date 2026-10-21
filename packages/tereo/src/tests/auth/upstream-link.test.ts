@@ -1,9 +1,9 @@
 import { absorbCookies, cookieHeader, newPkce } from "../utils/browserLogin.js";
+import { UPSTREAM_COOKIE, upstreamLogin } from "../utils/upstreamLogin.js";
 import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
 import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getTestPrincipalToken } from "../utils/principals.js";
-import { UPSTREAM_COOKIE } from "../utils/upstreamLogin.js";
 import type { CookieJar } from "../utils/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { CORE_URL } from "../utils/coreUrl.js";
@@ -307,6 +307,49 @@ describe("linking from the account page", () => {
     expect(((await res.json()) as { error: string }).error).toBe(
       "reauth_required"
     );
+  });
+
+  it("makes a provider login on an old session there sign in again before linking", async () => {
+    const user = await createTestUser();
+    const sub = subject();
+    await prisma.userIdentity.create({
+      data: { userId: user.id, providerId: provider.id, subject: sub },
+    });
+    const second = await createProvider();
+    const providerToken = async (
+      authTime: number,
+      maxAge?: number
+    ): Promise<string> => {
+      const { params, verifier, location } = await upstreamLogin({
+        provider: fake,
+        slug: provider.slug,
+        clientId: LOGIN_CLIENT.clientId,
+        redirectUri: UI_REDIRECT_URI,
+        scope: "openid profile email",
+        claims: { sub, email: user.email, auth_time: authTime },
+        maxAge,
+      });
+      expect(location.origin + location.pathname).toBe(UI_REDIRECT_URI);
+      expect(location.searchParams.get("state")).toBe(params.state);
+      return await exchangeUiCode(location.searchParams.get("code")!, verifier);
+    };
+    const now = Math.floor(Date.now() / 1000);
+
+    const silent = await providerToken(now - 3600);
+    const refused = await account(silent, "POST", "/identities", {
+      provider: second.slug,
+    });
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "reauth_required"
+    );
+
+    const again = await providerToken(now, 0);
+    expect(fake.lastAuthorizeQuery()?.get("prompt")).toBe("login");
+    const started = await account(again, "POST", "/identities", {
+      provider: second.slug,
+    });
+    expect(started.status).toBe(200);
   });
 
   it("refuses a token that carries no auth_time", async () => {

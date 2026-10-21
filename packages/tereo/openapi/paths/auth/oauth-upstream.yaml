@@ -42,7 +42,9 @@
       (valid for 10 minutes), sets the `tereo_upstream_auth` cookie
       carrying the `state`, and redirects to the provider's authorization
       endpoint, with the callback URL `${PUBLIC_URL}/oauth/upstream/{slug}/callback`
-      as its `redirect_uri`.
+      as its `redirect_uri`. The request's `prompt=login` and `max_age` are
+      sent on to the provider (`max_age=0` also as `prompt=login`), and the
+      callback holds the provider's `auth_time` to them.
 
       Redirect targets:
 
@@ -238,8 +240,9 @@
       continues exactly as after a password: the TOTP step unless the provider
       `countsAsMfa`, organization selection, consent, and the code. The login's
       `amr` is `["fed"]`, `["fed","mfa"]` for a `countsAsMfa` provider (or
-      `["fed","otp"]` once the user passes TOTP). A `LOGIN` audit entry names
-      the provider.
+      `["fed","otp"]` once the user passes TOTP), and its `auth_time` is the
+      provider's ID token `auth_time` (now when it sends none). A `LOGIN`
+      audit entry names the provider.
 
       Redirect targets:
 
@@ -257,7 +260,8 @@
       | Code | Meaning |
       |------|---------|
       | `upstream_cancelled` | The provider returned `access_denied` |
-      | `upstream_failed` | The provider returned an error, or the code exchange or ID token validation failed |
+      | `upstream_failed` | The provider returned an error, or the code exchange or ID token validation failed; also a provider response over 1 MiB or a `sub` over 255 characters |
+      | `upstream_reauth_failed` | The authorize request asked for `prompt=login` or `max_age`, and the provider's `auth_time` is older than they allow (counted from the round trip's start, with 30 seconds for clock skew), or missing under a `max_age` sent without `prompt=login` |
       | `session_expired` | No or mismatched `upstream_auth` cookie, or an unknown, used or expired round trip; for a forced link, a link grant used or expired meanwhile |
       | `provider_inactive` | The provider was deactivated |
       | `no_account` | No linked identity, no invite, no auto-accept domain of this provider; also no email claim, or the domain's organization is archived or inactive |
