@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { processShareSweepTick } from "../../jobs/shareSweep.js";
+import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import axios from "axios";
 import {
@@ -32,6 +33,11 @@ interface ShareResponse {
   object: { id: string; objectKey: string } | null;
   archiveRequest: { filename: string } | null;
 }
+
+const unlockFailures = (shareId: string) =>
+  prisma.auditLogEntry.findMany({
+    where: { entityType: "shareUnlockFailure", entityId: shareId },
+  });
 
 describe("Shares", () => {
   let token: string;
@@ -263,6 +269,8 @@ describe("Shares", () => {
       );
       expect(unlockRes.status).toBe(HTTP_STATUS.UNAUTHORIZED);
       expect(unlockRes.data.error).toBe("invalid_password");
+      // One wrong password is a typo, not worth an audit entry.
+      expect(await unlockFailures(share.id)).toHaveLength(0);
     });
 
     it("refuses unlock attempts past the limit with the shared 429", async () => {
@@ -284,6 +292,16 @@ describe("Shares", () => {
       expect(limited.headers["retry-after"]).toBe(
         String(limited.data.retry_after)
       );
+
+      // Audited once, by the wrong password that used up the window.
+      const failures = await unlockFailures(share.id);
+      expect(failures).toHaveLength(1);
+      expect(failures[0].userId).toBe(SYSTEM_USER_ID);
+      expect(failures[0].metadata).toMatchObject({
+        reason: "unlock_attempts_exhausted",
+        attemptsInWindow: 5,
+      });
+      expect(JSON.stringify(failures[0].metadata)).not.toContain("wrong");
     });
   });
 
@@ -317,6 +335,14 @@ describe("Shares", () => {
       // An address that has already tried waits out the delay, even with
       // the right password.
       expect((await unlockFrom(100, "right")).status).toBe(429);
+      // Only the wrong password verified during the delay is audited.
+      const failures = await unlockFailures(share.id);
+      expect(failures.map((f) => f.metadata)).toEqual([
+        expect.objectContaining({
+          reason: "invalid_password_during_backoff",
+          ipAddress: "198.51.100.100",
+        }),
+      ]);
 
       // The delay after ten failures is one second.
       await new Promise((resolve) => setTimeout(resolve, 1100));
@@ -740,6 +766,16 @@ describe("Shares", () => {
         where: { id: share.id },
       });
       expect(row.expiresAt?.getTime()).toBe(createdAt.getTime() + MAX_MS);
+      const backfills = await prisma.auditLogEntry.findMany({
+        where: {
+          entityType: "shareExpiryBackfill",
+          entityId: String(bucket.id),
+        },
+      });
+      const entry = backfills.find((e) =>
+        JSON.stringify(e.metadata).includes(share.id)
+      );
+      expect(entry).toMatchObject({ action: "UPDATE", userId: SYSTEM_USER_ID });
       const res = await axios.get(share.url, {
         maxRedirects: 0,
         validateStatus: () => true,

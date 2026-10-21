@@ -395,14 +395,21 @@ export const probeShareViaToken = async (req: Request, res: Response) => {
 
 /**
  * The password half of an unlock, behind `shareUnlockBackoff` (see
- * `unlockShare`). Returns on a correct password; throws 401 or 429 otherwise.
+ * `unlockShare`). Returns on a correct password; throws 401 or 429 otherwise,
+ * calling `onWrongPassword` first for every wrong password it verified.
  */
 const checkSharePassword = async (
   req: Request,
   token: string,
   passwordHash: string,
   password: string,
-  { firstFromAddress }: { firstFromAddress: boolean }
+  {
+    firstFromAddress,
+    onWrongPassword,
+  }: {
+    firstFromAddress: boolean;
+    onWrongPassword: (duringBackoff: boolean) => Promise<void>;
+  }
 ): Promise<void> => {
   try {
     // Spent before the password is checked, atomically, so concurrent wrong
@@ -414,12 +421,40 @@ const checkSharePassword = async (
     // it; a right one resets it.
     await shareUnlockBackoff.spendUnblocked(req, token);
     if (await verifyPassword(passwordHash, password)) return;
+    await onWrongPassword(true);
     throw err;
   }
   if (!(await verifyPassword(passwordHash, password))) {
+    await onWrongPassword(false);
     throw new UnauthorizedError("Incorrect password.", "invalid_password");
   }
 };
+
+/**
+ * Records a failed unlock in the audit log, as the system user and without
+ * the password.
+ */
+const logUnlockFailure = async (
+  share: LoadedShare,
+  req: Request,
+  metadata: { reason: string; attemptsInWindow: number }
+) =>
+  await db.$transaction((tx) =>
+    logAuditTx(tx, {
+      auth: { userId: SYSTEM_USER_ID, email: null },
+      organizationId: share.organizationId ?? undefined,
+      action: "CREATE",
+      entityType: "shareUnlockFailure",
+      entityId: share.id,
+      metadata: {
+        bucketName: share.bucketName,
+        kind: share.kind,
+        ...metadata,
+        userAgent: req.headers["user-agent"] ?? null,
+        ipAddress: clientIp(req),
+      },
+    })
+  );
 
 /**
  * POST /shared/:token/unlock (no auth).
@@ -469,6 +504,20 @@ export const unlockShare = async (req: Request, res: Response) => {
   if (share.passwordHash) {
     await checkSharePassword(req, token, share.passwordHash, password, {
       firstFromAddress: attempt.first,
+      // Not every wrong password: only the one that uses up the address's
+      // window, and one verified while the share's backoff runs (an address's
+      // first, so each costs a guesser a fresh address). A typo stays out of
+      // the log, and a guesser can't turn guesses into audit rows one-to-one.
+      onWrongPassword: async (duringBackoff) => {
+        if (!duringBackoff && attempt.remaining > 0) return;
+        await logUnlockFailure(share, req, {
+          reason: duringBackoff
+            ? "invalid_password_during_backoff"
+            : "unlock_attempts_exhausted",
+          attemptsInWindow:
+            env.FILE_SERVICE_SHARE_UNLOCK_MAX_ATTEMPTS - attempt.remaining,
+        });
+      },
     });
   }
 

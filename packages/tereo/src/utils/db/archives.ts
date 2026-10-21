@@ -208,26 +208,44 @@ export const loadSnapshotForStreaming = async (
 };
 
 /**
- * Hard-delete archive requests that expired more than `retentionGraceMs` ago.
- * Archives are streamed on demand, so the row (and its snapshot, which
- * cascades) is all there is. Shares pointing at the archive cascade too; they
- * have answered 404 since the archive expired, and the share sweep would drop
- * them on the same grace.
+ * Archive requests that expired more than `retentionGraceMs` ago, with their
+ * buckets and the shares pointing at them, for the archive sweep.
  */
-export const deleteExpired = async (
+export const findExpired = async (
   retentionGraceMs: number,
-  now: Date = new Date(),
-  limit = 500
-): Promise<number> => {
+  now: Date,
+  limit: number,
+  tx: Prisma.TransactionClient
+) => {
   const cutoff = new Date(now.getTime() - retentionGraceMs);
-  const expired = await prisma.archiveRequest.findMany({
+  return await tx.archiveRequest.findMany({
     where: { expiresAt: { lt: cutoff } },
-    select: { id: true },
+    select: {
+      id: true,
+      filename: true,
+      expiresAt: true,
+      bucket: { select: { id: true, name: true, organizationId: true } },
+      shares: {
+        select: { id: true, kind: true, revokedAt: true, expiresAt: true },
+      },
+    },
+    orderBy: { expiresAt: "asc" },
     take: limit,
   });
-  if (expired.length === 0) return 0;
-  const result = await prisma.archiveRequest.deleteMany({
-    where: { id: { in: expired.map((r) => r.id) } },
+};
+
+/**
+ * Hard-delete archive requests. Archives are streamed on demand, so the row
+ * (and its snapshot, which cascades) is all there is; shares pointing at them
+ * cascade too.
+ */
+export const deleteMany = async (
+  ids: string[],
+  tx: Prisma.TransactionClient
+): Promise<number> => {
+  if (ids.length === 0) return 0;
+  const { count } = await tx.archiveRequest.deleteMany({
+    where: { id: { in: ids } },
   });
-  return result.count;
+  return count;
 };

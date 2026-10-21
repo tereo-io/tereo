@@ -7,4 +7,14 @@ export const userIdParamSchema = z.object({
   userId: z.guid(),
 });
 
+export const revokePermissionQuerySchema = z.object({
+  // Strict parse: z.coerce.boolean() would treat "false" as true.
+  revokeShares: z
+    .enum(["true", "false"])
+    .optional()
+    .default("false")
+    .transform((v) => v === "true"),
+});
+
 export type UserIdParams = z.infer<typeof userIdParamSchema>;
+export type RevokePermissionQuery = z.infer<typeof revokePermissionQuerySchema>;
