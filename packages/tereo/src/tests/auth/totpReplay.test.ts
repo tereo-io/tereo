@@ -164,7 +164,10 @@ describe("TOTP replay on /account/totp", () => {
         body: JSON.stringify({ totpCode: code }),
       }
     );
-    expect(regenerate.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    expect(regenerate.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    expect(((await regenerate.json()) as { error: string }).error).toBe(
+      "invalid_code"
+    );
 
     const disable = (totpCode: string) =>
       fetch(`${BASE_URL}/v1/account/totp`, {
@@ -172,7 +175,7 @@ describe("TOTP replay on /account/totp", () => {
         headers,
         body: JSON.stringify({ totpCode }),
       });
-    expect((await disable(code)).status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    expect((await disable(code)).status).toBe(HTTP_STATUS.BAD_REQUEST);
     expect(
       (await prisma.user.findUniqueOrThrow({ where: { id: user.id } }))
         .totpEnabled
@@ -207,6 +210,6 @@ describe("TOTP replay on /account/totp", () => {
       headers,
       body: JSON.stringify({ totpCode: next }),
     });
-    expect(disable.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    expect(disable.status).toBe(HTTP_STATUS.BAD_REQUEST);
   });
 });

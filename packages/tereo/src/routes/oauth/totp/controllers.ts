@@ -329,8 +329,8 @@ export const totpSetupInitiateHandler = async (req: Request, res: Response) => {
   const setupToken = generateTotpSetupToken();
   const expiresAt = new Date(Date.now() + env.TOTP_SETUP_TTL * 1000);
 
-  await writeStep((tx) =>
-    db.totp.createSetupSession(
+  await writeStep(async (tx) => {
+    await db.totp.createSetupSession(
       {
         userId: user.id,
         setupToken,
@@ -348,8 +348,16 @@ export const totpSetupInitiateHandler = async (req: Request, res: Response) => {
         prompt: grant.prompt,
       },
       tx
-    )
-  );
+    );
+    await logAuditTx(tx, {
+      auth: { userId: user.id, email: user.email },
+      action: "UPDATE",
+      entityType: "User",
+      entityId: user.id,
+      entityName: user.email,
+      metadata: { action: "totp_setup_started", clientId: client.clientId },
+    });
+  });
   clearTotpSetupGrantCookie(res, client.clientId);
 
   const qrCodeUri = generateTotpUri({

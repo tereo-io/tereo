@@ -1418,7 +1418,8 @@
       and a user who already has TOTP with 400 `totp_already_enabled`.
 
       Refused with 403 `totp_disabled` while the system 2FA policy is
-      `disabled`.
+      `disabled`. An audit log entry is created (`metadata.action`
+      `totp_setup_started`, with the `clientId`).
     operationId: postTotpSetup
     security: []
     requestBody:

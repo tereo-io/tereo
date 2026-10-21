@@ -423,6 +423,15 @@ describe("Account Endpoints", () => {
       expect(data.qrCodeUri).toContain("otpauth://");
       expect(data.setupToken).toBeDefined();
       expect(typeof data.setupToken).toBe("string");
+
+      const entry = await prisma.auditLogEntry.findFirst({
+        where: {
+          entityType: "User",
+          entityId: totpUser.id,
+          metadata: { path: ["action"], equals: "totp_setup_started" },
+        },
+      });
+      expect(entry).toMatchObject({ action: "UPDATE", userId: totpUser.id });
     });
 
     it("should reject request without auth token", async () => {
@@ -552,8 +561,18 @@ describe("Account Endpoints", () => {
       expect(data.error).toBe("invalid_request");
     });
 
-    it("sets and removes the photo with an audit entry for each", async () => {
+    it("sets and removes the photo with an audit entry and auth.user.updated for each", async () => {
+      const endpoint = await createTestWebhookEndpoint(
+        await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+        { eventTypes: ["auth.user.updated"] }
+      );
       const photoUser = await createTestUser();
+      const where = {
+        webhookEndpointId: endpoint.id,
+        eventType: "auth.user.updated",
+        payload: { path: ["entityId"], equals: photoUser.id },
+      };
+      const updates = () => prisma.webhookDelivery.count({ where });
       const token = await getAccessTokenForUser(photoUser, testClient);
       const form = new FormData();
       form.append(
@@ -582,6 +601,14 @@ describe("Account Endpoints", () => {
       expect(changed?.metadata).toMatchObject({
         photoObjectId: stored.photoObjectId,
       });
+      await waitFor(async () => (await updates()) === 1, 10_000);
+      const delivery = await prisma.webhookDelivery.findFirstOrThrow({
+        where,
+      });
+      expect(delivery.payload).toMatchObject({
+        entityType: "User",
+        data: { id: photoUser.id, email: photoUser.email },
+      });
 
       const remove = await fetch(`${BASE_URL}/v1/account/photo`, {
         method: "DELETE",
@@ -600,6 +627,7 @@ describe("Account Endpoints", () => {
         },
       });
       expect(removed).not.toBeNull();
+      await waitFor(async () => (await updates()) === 2, 10_000);
     });
 
     it("leaves exactly one photo after concurrent uploads of different types", async () => {
@@ -779,17 +807,13 @@ describe("Account Endpoints", () => {
       expect(response.status).toBe(HTTP_STATUS.OK);
 
       const entry = await prisma.auditLogEntry.findFirst({
-        // The user's sign-in has its own LOGIN entry.
         where: {
           entityId: totpUser.id,
           entityType: "User",
-          action: { not: "LOGIN" },
+          metadata: { path: ["action"], equals: "totp_enabled" },
         },
       });
-      expect(entry).toMatchObject({
-        action: "UPDATE",
-        metadata: expect.objectContaining({ action: "totp_enabled" }),
-      });
+      expect(entry).toMatchObject({ action: "UPDATE" });
 
       const where = {
         webhookEndpointId: endpoint.id,
@@ -1140,7 +1164,7 @@ describe("Account Endpoints", () => {
 
       for (let i = 0; i < MAX_FAILURES; i++) {
         const response = await disable(headers, wrongCode(secret));
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
       }
 
       await expectLockedOut(await disable(headers, generateTotpCode(secret)));
@@ -1163,7 +1187,7 @@ describe("Account Endpoints", () => {
                 headers,
                 body: JSON.stringify({ totpCode: wrongCode(secret) }),
               });
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
       }
 
       await expectLockedOut(
@@ -1197,7 +1221,7 @@ describe("Account Endpoints", () => {
 
       for (let i = 0; i < MAX_FAILURES; i++) {
         const response = await verify(wrongCode(setup.secret!));
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
       }
 
       await expectLockedOut(await verify(generateTotpCode(setup.secret!)));
@@ -1236,7 +1260,7 @@ describe("Account Endpoints", () => {
 
       for (let i = 0; i < MAX_FAILURES - 1; i++) {
         expect((await regenerate(wrongCode(secret))).status).toBe(
-          HTTP_STATUS.UNAUTHORIZED
+          HTTP_STATUS.BAD_REQUEST
         );
       }
       expect((await regenerate(generateTotpCode(secret))).status).toBe(
@@ -1244,7 +1268,7 @@ describe("Account Endpoints", () => {
       );
       for (let i = 0; i < MAX_FAILURES - 1; i++) {
         expect((await regenerate(wrongCode(secret))).status).toBe(
-          HTTP_STATUS.UNAUTHORIZED
+          HTTP_STATUS.BAD_REQUEST
         );
       }
       expect((await disable(headers, generateTotpCode(secret, 1))).status).toBe(
