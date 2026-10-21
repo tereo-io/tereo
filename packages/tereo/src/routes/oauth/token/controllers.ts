@@ -5,6 +5,7 @@ import { ClientRecord } from "../../../utils/db/clients.js";
 import { hashFlowToken } from "../../../utils/crypto.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
+import env from "../../../env.js";
 import {
   clearAuthCookies,
   getRefreshTokenFromCookie,
@@ -135,7 +136,14 @@ export const tokenHandler = async (req: Request, res: Response) => {
 
   const responseMode = getRefreshTokenResponseMode(body);
   if (responseMode === "cookie" && response.refresh_token) {
-    setAuthCookies(res, response.refresh_token, client.clientId);
+    const stored = await db.refreshTokens.get(response.refresh_token);
+    setAuthCookies(
+      res,
+      response.refresh_token,
+      client.clientId,
+      stored?.expiresAt ??
+        new Date(Date.now() + env.JWT_REFRESH_TOKEN_TTL * 1000)
+    );
     res.json({
       access_token: response.access_token,
       ...(response.id_token && { id_token: response.id_token }),

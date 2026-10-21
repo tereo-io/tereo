@@ -204,7 +204,7 @@ the `outbox` skill.
 ## App Wiring
 
 - `app.ts` order: `trust proxy` → `createRequestIdMiddleware()` → `helmet()` → bucket CORS
-  preflights → `cors()` → `authRequestLog` → `routes` (`routes/index.ts`) → catch-all
+  preflights → `apiCors` (credentialed CORS on the API only) → `authRequestLog` → `routes` (`routes/index.ts`) → catch-all
   `NotFoundError` → `errorHandler`.
 - `routes/index.ts`: `/.well-known`, `/health` (DB + Redis probe, 503 `degraded` on failure),
   `/oauth`, `/v1` (`routes/v1/index.ts`: `/files`, `/webhooks`, `/audit`, `/account`,

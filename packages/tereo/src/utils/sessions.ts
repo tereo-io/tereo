@@ -171,9 +171,10 @@ export interface RevokedBrowserSessions {
 
 /**
  * Ends the SSO sessions and revokes every token family issued under them,
- * plus the families named directly. The caller holds the users' lock.
+ * plus the families named directly. The caller holds the users' lock
+ * (`db.users.lockForSessionEnd`) and, after commit, calls `notifyRevoked`.
  */
-const revokeBrowserSessions = async (
+export const revokeBrowserSessions = async (
   tx: Prisma.TransactionClient,
   { userSessionIds, authCodeIds }: BrowserSessions
 ): Promise<RevokedBrowserSessions> => {
@@ -200,7 +201,7 @@ interface BrowserSessions {
   authCodeIds: string[];
 }
 
-const notifyRevoked = (
+export const notifyRevoked = (
   { tokens, jtis }: Pick<RevokedBrowserSessions, "tokens" | "jtis">,
   also: { id: string; userId: string }[] = []
 ) => {

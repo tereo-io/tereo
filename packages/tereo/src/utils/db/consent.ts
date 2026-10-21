@@ -116,6 +116,17 @@ export const getConsentDetails = async (
   };
 };
 
+/** Deletes the session; false when another request already consumed it. */
+export const consumeConsentSession = async (
+  id: string,
+  tx?: Prisma.TransactionClient
+): Promise<boolean> => {
+  const { count } = await (tx ?? prisma).consentSession.deleteMany({
+    where: { id },
+  });
+  return count === 1;
+};
+
 export const deleteConsentSession = async (id: string): Promise<void> => {
   await prisma.consentSession.delete({ where: { id } });
 };

@@ -13,7 +13,9 @@ export const authRequestLog = (
   next: NextFunction
 ) => {
   const path = requestPath(req.originalUrl);
-  if (!path.startsWith("/oauth") && !path.startsWith("/v1/admin")) {
+  // Express routes `/OAuth/token` like `/oauth/token`, so it is logged too.
+  const lower = path.toLowerCase();
+  if (!lower.startsWith("/oauth") && !lower.startsWith("/v1/admin")) {
     return next();
   }
   const startTime = Date.now();

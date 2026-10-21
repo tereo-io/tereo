@@ -1,3 +1,4 @@
+import { expectAuthorizeErrorRedirect } from "./utils/authorizeErrors.js";
 import { createHash, generateKeyPairSync, randomBytes } from "crypto";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { currentSigningKey } from "../../utils/keys.js";
@@ -360,7 +361,12 @@ describe("OIDC Compliance", () => {
 
       const response = await fetch(url.toString(), { redirect: "manual" });
 
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expectAuthorizeErrorRedirect(
+        response,
+        TEST_REDIRECT_URI,
+        "invalid_request",
+        "test-state"
+      );
     });
   });
 
@@ -431,25 +437,63 @@ describe("OIDC Compliance", () => {
       expect(location).toContain("prompt=login");
     });
 
-    it("should accept prompt=consent and pass to login URL", async () => {
-      const codeVerifier = generateCodeVerifier();
-      const codeChallenge = generateCodeChallenge(codeVerifier);
+    it("shows the consent screen for prompt=consent to a client that otherwise skips it", async () => {
+      const loginTo = async (prompt?: string) => {
+        const pkce = newPkce();
+        const params = {
+          response_type: "code",
+          client_id: TEST_CLIENT_ID,
+          redirect_uri: TEST_REDIRECT_URI,
+          state: pkce.state,
+          scope: "openid",
+          code_challenge: pkce.challenge,
+          code_challenge_method: "S256",
+          ...(prompt && { prompt }),
+        };
+        const jar: CookieJar = new Map();
+        const start = await fetch(
+          `${BASE_URL}/oauth/authorize?${new URLSearchParams(params)}`,
+          { redirect: "manual" }
+        );
+        absorbCookies(jar, start);
+        const login = new URL(start.headers.get("location") ?? "");
+        expect(login.pathname).toMatch(/\/login$/);
+        expect(login.searchParams.get("prompt") || null).toBe(prompt ?? null);
+        const submit = await fetch(`${BASE_URL}/oauth/authorize`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Cookie: cookieHeader(jar),
+          },
+          body: JSON.stringify({
+            ...params,
+            email: TEST_USER_EMAIL,
+            password: TEST_USER_PASSWORD,
+          }),
+        });
+        expect(submit.status).toBe(HTTP_STATUS.OK);
+        const { redirect_url } = (await submit.json()) as {
+          redirect_url: string;
+        };
+        return new URL(redirect_url);
+      };
 
-      const url = new URL(`${BASE_URL}/oauth/authorize`);
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("client_id", TEST_CLIENT_ID);
-      url.searchParams.set("redirect_uri", TEST_REDIRECT_URI);
-      url.searchParams.set("state", "test-state");
-      url.searchParams.set("scope", "openid");
-      url.searchParams.set("code_challenge", codeChallenge);
-      url.searchParams.set("code_challenge_method", "S256");
-      url.searchParams.set("prompt", "consent");
-
-      const response = await fetch(url.toString(), { redirect: "manual" });
-
-      expect(response.status).toBe(HTTP_STATUS.FOUND);
-      const location = response.headers.get("location") || "";
-      expect(location).toContain("prompt=consent");
+      await prisma.oAuthClient.update({
+        where: { id: TEST_CLIENT_DB_ID },
+        data: { consentRequired: false },
+      });
+      try {
+        expect((await loginTo()).searchParams.has("code")).toBe(true);
+        const consent = await loginTo("consent");
+        expect(consent.pathname).toMatch(/\/consent$/);
+        expect(consent.searchParams.has("code")).toBe(false);
+        expect(consent.searchParams.get("session")).toBeTruthy();
+      } finally {
+        await prisma.oAuthClient.update({
+          where: { id: TEST_CLIENT_DB_ID },
+          data: { consentRequired: true },
+        });
+      }
     });
 
     it("should accept prompt=select_account and pass to login URL", async () => {
@@ -499,14 +543,22 @@ describe("OIDC Compliance", () => {
 
     it("should reject prompt=none combined with another value", async () => {
       const response = await authorizeWithPrompt("none login");
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      const data = (await response.json()) as { error?: string };
-      expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
+      expectAuthorizeErrorRedirect(
+        response,
+        TEST_REDIRECT_URI,
+        "invalid_request",
+        "test-state"
+      );
     });
 
     it("should reject an unknown prompt value", async () => {
       const response = await authorizeWithPrompt("login bogus");
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expectAuthorizeErrorRedirect(
+        response,
+        TEST_REDIRECT_URI,
+        "invalid_request",
+        "test-state"
+      );
     });
 
     it("should return login_required for prompt=none without session", async () => {
@@ -568,7 +620,12 @@ describe("OIDC Compliance", () => {
 
       const response = await fetch(url.toString(), { redirect: "manual" });
 
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expectAuthorizeErrorRedirect(
+        response,
+        TEST_REDIRECT_URI,
+        "invalid_request",
+        "test-state"
+      );
     });
 
     it("should reject uppercase prompt value (case-sensitive)", async () => {
@@ -587,7 +644,12 @@ describe("OIDC Compliance", () => {
 
       const response = await fetch(url.toString(), { redirect: "manual" });
 
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expectAuthorizeErrorRedirect(
+        response,
+        TEST_REDIRECT_URI,
+        "invalid_request",
+        "test-state"
+      );
     });
   });
 
@@ -793,10 +855,13 @@ describe("OIDC Compliance", () => {
 
       const response = await fetch(url.toString(), { redirect: "manual" });
 
-      // OIDC Core Section 5.5: invalid claims parameter should return invalid_request error
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      const data = (await response.json()) as { error: string };
-      expect(data.error).toBe("invalid_request");
+      // OIDC Core 5.5: an invalid claims parameter is invalid_request.
+      expectAuthorizeErrorRedirect(
+        response,
+        TEST_REDIRECT_URI,
+        "invalid_request",
+        "test-state"
+      );
     });
   });
 
@@ -840,9 +905,12 @@ describe("OIDC Compliance", () => {
 
       const response = await fetch(url.toString(), { redirect: "manual" });
 
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      const data = (await response.json()) as { error: string };
-      expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
+      expectAuthorizeErrorRedirect(
+        response,
+        TEST_REDIRECT_URI,
+        "invalid_request",
+        "test-state"
+      );
     });
 
     it("should reject response_mode=form_post, which it does not advertise", async () => {
@@ -864,9 +932,12 @@ describe("OIDC Compliance", () => {
 
       const response = await fetch(url.toString(), { redirect: "manual" });
 
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      const data = (await response.json()) as { error: string };
-      expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
+      expectAuthorizeErrorRedirect(
+        response,
+        TEST_REDIRECT_URI,
+        "invalid_request",
+        "test-state"
+      );
     });
 
     it("should reject invalid response_mode with invalid_request error", async () => {
@@ -885,10 +956,12 @@ describe("OIDC Compliance", () => {
 
       const response = await fetch(url.toString(), { redirect: "manual" });
 
-      // Invalid response_mode must be rejected per OAuth 2.0 Multiple Response Types spec
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      const data = (await response.json()) as { error: string };
-      expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
+      expectAuthorizeErrorRedirect(
+        response,
+        TEST_REDIRECT_URI,
+        "invalid_request",
+        "test-state"
+      );
     });
   });
 
@@ -1136,11 +1209,14 @@ describe("OIDC Compliance", () => {
   describe("End Session - id_token_hint verification and redirect", () => {
     let victimId = "";
 
+    // Posted as the admin UI does, which gets JSON rather than a redirect.
     const endSession = (query: Record<string, string>) =>
-      fetch(
-        `${BASE_URL}/oauth/end-session?${new URLSearchParams(query).toString()}`,
-        { redirect: "manual" }
-      );
+      fetch(`${BASE_URL}/oauth/end-session`, {
+        method: "POST",
+        redirect: "manual",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(query),
+      });
 
     /** An SSO session with a token family issued under it; returns its id. */
     const giveVictimASession = async () => {
@@ -1329,7 +1405,7 @@ describe("OIDC Compliance", () => {
       }
     });
 
-    it("rejects a hint expired past the grace period", async () => {
+    it("asks to confirm for a hint expired past the grace period", async () => {
       const sessionId = await giveVictimASession();
       const before = await victimState();
       const { token } = generateIdToken({
@@ -1339,11 +1415,32 @@ describe("OIDC Compliance", () => {
         expiresIn: -(ID_TOKEN_HINT_GRACE_SECONDS + 60),
       });
 
-      await expectRejected(
-        await endSession({ id_token_hint: token }),
-        "Invalid id_token_hint"
-      );
+      const response = await endSession({ id_token_hint: token });
+      expect(response.status).toBe(HTTP_STATUS.FOUND);
+      const page = new URL(response.headers.get("location") ?? "");
+      expect(page.pathname).toMatch(/\/logout$/);
+      expect(page.searchParams.get("client_id")).toBe(TEST_CLIENT_ID);
       expect(await victimState()).toEqual(before);
+    });
+
+    it("redirects a navigation with a hint and no post_logout_redirect_uri to the client's sign-in", async () => {
+      const sessionId = await giveVictimASession();
+      const before = await victimState();
+      const { token } = generateIdToken({
+        subject: victimId,
+        clientId: TEST_CLIENT_ID,
+        sessionId,
+      });
+
+      const response = await fetch(
+        `${BASE_URL}/oauth/end-session?${new URLSearchParams({ id_token_hint: token })}`,
+        { redirect: "manual" }
+      );
+      expect(response.status).toBe(HTTP_STATUS.FOUND);
+      expect(response.headers.get("location")).toBe(
+        `${new URL(TEST_REDIRECT_URI).origin}/`
+      );
+      expect((await victimState()).sessions).toBe(before.sessions - 1);
     });
 
     it("ends nothing for a hint without sid and no cookies", async () => {

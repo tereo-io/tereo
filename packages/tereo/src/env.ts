@@ -18,13 +18,14 @@ function readSecret(envVar: string, decode = false): string | undefined {
   return value;
 }
 
-const corsOrigins = z
-  .string()
-  .transform((val) => (val === "*" ? "*" : val.split(",").map((s) => s.trim())))
-  .refine(
-    (val) => process.env.NODE_ENV !== "production" || val !== "*",
-    "CORS_ALLOWED_ORIGINS must be explicitly configured in production (cannot use '*')"
-  );
+const corsOrigins = z.string().transform((val) =>
+  val === "*"
+    ? ("*" as const)
+    : val
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+);
 
 // Keys are optional here: `loadKeys()` (utils/keys.ts) fills any that env
 // leaves unset from `core.secrets`, generating them on first start.
@@ -145,6 +146,60 @@ export const checkUiBaseUrl = (
   return protocol === "https:"
     ? undefined
     : "UI_BASE_URL must be an https:// URL in production";
+};
+
+/**
+ * Why `ISSUER` is unusable, or undefined if it is fine. It is compared
+ * exactly by every client (the `iss` claim, discovery, RFC 9207's `iss`), so
+ * it is a URL without query or fragment, https in production.
+ */
+export const checkIssuer = (
+  value: string | undefined,
+  nodeEnv: string | undefined
+): string | undefined => {
+  if (value === undefined) return undefined;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return "ISSUER must be a URL";
+  }
+  if (url.search || url.hash || value.includes("#") || value.includes("?")) {
+    return "ISSUER must not have a query or fragment";
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return "ISSUER must be an http(s) URL";
+  }
+  return nodeEnv === "production" && url.protocol !== "https:"
+    ? "ISSUER must be an https:// URL in production"
+    : undefined;
+};
+
+/**
+ * Why `CORS_ALLOWED_ORIGINS` is unusable, or undefined if it is fine. The
+ * listed origins are sent credentialed CORS headers, so in production an
+ * http one (which anyone on its network can impersonate) is refused, except
+ * on loopback.
+ */
+export const checkCorsOrigins = (
+  value: string[] | "*" | undefined,
+  nodeEnv: string | undefined
+): string | undefined => {
+  if (nodeEnv !== "production" || value === undefined) return undefined;
+  if (value === "*") {
+    return "CORS_ALLOWED_ORIGINS must be explicitly configured in production (cannot use '*')";
+  }
+  const insecure = value.filter((origin) => {
+    try {
+      const url = new URL(origin);
+      return url.protocol !== "https:" && !LOOPBACK_HOSTS.has(url.hostname);
+    } catch {
+      return true;
+    }
+  });
+  return insecure.length > 0
+    ? `CORS_ALLOWED_ORIGINS must list https:// origins in production: ${insecure.join(", ")}`
+    : undefined;
 };
 
 /**
@@ -296,6 +351,7 @@ const EnvFields = z
     // is longer than an authorization code, which a client redeems at once.
     LOGIN_FLOW_TTL: int(1, HOUR, 900),
     // Changing the issuer invalidates every outstanding token (`iss` claim).
+    // Defaults to PUBLIC_URL; a trailing slash is dropped (checkIssuer).
     ISSUER: z.string().optional(),
     // Where the admin UI is reached: consent, login and org-select redirects,
     // the login client's redirect URI (`${UI_BASE_URL}/callback`) and the
@@ -492,6 +548,22 @@ const EnvFields = z
         message: "CORS_ALLOWED_ORIGINS is required in production",
       });
     }
+    const corsIssue = checkCorsOrigins(val.CORS_ALLOWED_ORIGINS, val.NODE_ENV);
+    if (corsIssue) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["CORS_ALLOWED_ORIGINS"],
+        message: corsIssue,
+      });
+    }
+    const issuerIssue = checkIssuer(val.ISSUER, val.NODE_ENV);
+    if (issuerIssue) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["ISSUER"],
+        message: issuerIssue,
+      });
+    }
     const trustProxyIssue = checkTrustProxy(val.TRUST_PROXY, val.NODE_ENV);
     if (trustProxyIssue) {
       ctx.addIssue({
@@ -546,6 +618,7 @@ const EnvFields = z
     const resolved = {
       ...val,
       ...SIGNING_KEYS,
+      PUBLIC_URL: publicUrl,
       // Always set once loadKeys() has run; nothing reads them before.
       JWT_PRIVATE_KEY: val.JWT_PRIVATE_KEY as string,
       JWT_PUBLIC_KEY: val.JWT_PUBLIC_KEY as string,
@@ -562,7 +635,7 @@ const EnvFields = z
         new URL(uiBaseUrl).origin,
       ],
       SERVICE_NAME: "tereo" as const,
-      ISSUER: val.ISSUER ?? publicUrl,
+      ISSUER: val.ISSUER?.replace(/\/+$/, "") ?? publicUrl,
       FILE_SERVICE_PUBLIC_BASE_URL:
         val.FILE_SERVICE_PUBLIC_BASE_URL ?? `${publicUrl}/v1/files`,
       FILE_SERVICE_SHARE_UI_BASE_URL:

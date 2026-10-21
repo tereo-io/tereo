@@ -100,7 +100,8 @@ describe("session end racing a silent authorize", () => {
         await prisma.userSession.count({ where: { userId: user.id } })
       );
     }
-    expect(statuses, "end-session statuses").toEqual(Array(ROUNDS).fill(200));
+    // A navigation with a hint ends at the client's sign-in page.
+    expect(statuses, "end-session statuses").toEqual(Array(ROUNDS).fill(302));
     expect(leftovers, "SSO sessions left after logout").toEqual(
       Array(ROUNDS).fill(0)
     );

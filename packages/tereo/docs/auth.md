@@ -205,7 +205,7 @@ of services its tokens may name: each must be an existing service other than cor
 `consentRequired` (default `true`) says whether a user approves the app on the consent screen after
 signing in. With `false`, the consent step is skipped everywhere a consent session would be made:
 silent authorize, org switch, and after a password login (and its TOTP step) or the org picker —
-but only for a request with no `core:*` scope. A request for any core scope always shows the
+but only for a request with no `core:*` scope and without `prompt=consent`. A request for any core scope always shows the
 consent screen (and `prompt=none` gets `consent_required`), since those scopes act in core's API as
 the user. Core's own login client always skips it, so the admin UI shows no consent screen after a
 password login. The user still signs in, and the client still gets only the scopes it is registered
@@ -867,18 +867,26 @@ revokes the token families issued under it, and the browser's next password logi
 Every redirect to a client's `redirect_uri` — the code, or an error from `/oauth/authorize`, the
 login step or the consent screen — carries `iss`, the issuer (RFC 9207, built by
 `authorizationResponseUrl` in `utils/authorization.ts`), and discovery advertises
-`authorization_response_iss_parameter_supported`.
+`authorization_response_iss_parameter_supported`. `/oauth/authorize` answers JSON 400
+`invalid_request` only until `client_id` and `redirect_uri` check out (an unknown client, an
+unregistered redirect URI); after, every error goes to the redirect URI with `state` (RFC 6749
+§4.1.2.1): `unsupported_response_type`, `unauthorized_client`, or `invalid_request` for any other
+invalid parameter, such as a missing `state` or PKCE challenge or a `max_age` above 2147483647.
 
 `/oauth/authorize` with `prompt=none` answers `login_required` when the SSO session is missing,
-expired or idle, older than `max_age`, or belongs to a deactivated user. With `org_id`, the same cases fall
+expired or idle, older than `max_age`, or belongs to a deactivated user. With `org_id` it issues the code
+for that organization when the user may select it (`maySelectOrganization`, as the org switch
+below), and answers `login_required` for one they may not. With `org_id`, the same cases fall
 through to the password login. `max_age` is enforced there, at authorize: a code always carries a
 login that satisfied it, and `/oauth/token` does not check it again. For core's own login client (`isFirstPartyClient` in `definitions/`) and for a client with
 `consentRequired: false` asking for no `core:*` scope, `prompt=none` or an `org_id` switch with a
-live session skips the consent screen and redirects with the code. Any other client is answered `error=consent_required` (with `state`) at its `redirect_uri`
+live session skips the consent screen and redirects with the code — unless the request says
+`prompt=consent`, which shows the screen to every client but core's own. Any other client is answered `error=consent_required` (with `state`) at its `redirect_uri`
 for `prompt=none` — consent is not remembered, and a silent request cannot show the consent screen
 (OIDC Core 3.1.2.6) — and sent to `{UI}/consent` for an `org_id` switch. `prompt=login` goes to the password
 login without touching the SSO session (any site can send a browser there); the login, once it
-succeeds, continues that session or, for another user, replaces it.
+succeeds, continues that session or, for another user, replaces it — ending the other user's
+session as a logout of this browser would, with every token family issued under it.
 
 A request let in by the SSO session alone stays tied to it: the consent screen of an `org_id`
 switch ends with that session, and the code is issued only while the session still exists, checked
@@ -896,7 +904,9 @@ refuses the login as a wrong password would, and one in progress waits for the s
 The 2FA step (`/oauth/totp/verify`, `/oauth/totp/recovery`) and 2FA setup (`/oauth/totp/setup`)
 likewise consume their row in the transaction that writes the next step, under the same lock
 (`writeStepConsuming` in `utils/db/loginFlows.ts`), so the row a sign-out deleted cannot be followed
-by a step it missed.
+by a step it missed. The consent and org-select submits consume theirs in the transaction that
+issues the code (`consumeStep` of `issueAuthorizationCode`) or writes the consent step, after the
+user's lock; a step already gone is `invalid_session`.
 
 The SSO cookie and the 2FA setup token are random tokens stored only as their SHA-256
 (`hashFlowToken`, in the db layer), as the consent, org-select and 2FA flow tokens are. So are
@@ -915,11 +925,6 @@ one rehash voids the account's earlier known-device cookies; the login that reha
 Every
 password login gives the browser's SSO session a new token (session fixation); silent and org-switch
 continuations keep it.
-
-A POST under `/oauth` carrying core's credential cookies must come from core, the UI or
-`CORS_ALLOWED_ORIGINS` (`middleware/originCheck.ts`: `Sec-Fetch-Site`, else `Origin`; neither
-header passes). SameSite=Lax keeps the cookies off cross-site posts, not off same-site ones from
-another port or subdomain.
 
 A WebSocket is authenticated once, at the handshake. It joins rooms for its user (`user:{id}`),
 token (`token:{jti}`), session (`session:{refresh token id}`) and, for an organization's token,
@@ -949,8 +954,13 @@ the login. Core never reads them back.
 
 `/oauth/end-session` with a valid `id_token_hint` logs this browser out at once, unless the browser
 is signed in to that client as a different user than the hint's `sub` (`signedInAsOther`): any
-site can hold an ID token of its own user, so that browser is asked to confirm as below. Without a
-hint, it ends nothing: it sets a one-time `tereo_logout_confirm_{client_id}` cookie and redirects to
+site can hold an ID token of its own user, so that browser is asked to confirm as below. It then
+redirects to
+`post_logout_redirect_uri` or, for a navigation without one, to where the user signs in to the
+client again (`clientSignInUrl`: the UI's root for core's own client, else the origin of its first
+web redirect URI); the admin UI's own fetch gets JSON. A hint expired beyond
+`ID_TOKEN_HINT_GRACE_SECONDS` vouches for nothing and is treated as none. Without one, it
+ends nothing: it sets a one-time `tereo_logout_confirm_{client_id}` cookie and redirects to
 `{UI}/logout`, whose confirm button posts the same token to `/oauth/end-session/confirm`. Only that
 post, carrying the cookie (SameSite keeps it off cross-site posts), ends the session — so a
 cross-site link cannot log anyone out.
@@ -961,6 +971,36 @@ codes seven days past expiry (`AUTH_TOKEN_GRACE_MS`). Refresh tokens are deleted
 revocation: a revoked token is kept for the rest of its family's life so that replaying it still
 revokes the family. A code is deleted only once no token of its family remains, since deleting it
 cascades to them.
+
+## Browser cookies
+
+Core's cookies are per client (`{name}_{client_id}`): the refresh token (`trt_`, with
+`refresh_token_response_mode=cookie`), the SSO session, each login step's session and the sign-out
+confirmation; the known-device and identity-provider round-trip cookies are per browser. All are
+httpOnly and `SameSite=Lax`. When they are Secure and `COOKIE_DOMAIN` is unset they are `__Host-`
+cookies (`__Host-trt_{client_id}`, path `/`, no Domain), which the browser refuses from another host
+or over http, so a sibling subdomain cannot plant or shadow them; otherwise (development over http,
+or `COOKIE_DOMAIN` set) they are unprefixed and scoped to `/oauth`. Only `/oauth` handlers read
+them; `/v1` authenticates by bearer token alone. The session indicator `tsi_{client_id}`, which
+carries nothing and which the UI reads, is never prefixed. The refresh cookie lives as long as its
+token family, not a fresh `JWT_REFRESH_TOKEN_TTL`. A cookie whose value is not a string (cookie-parser
+turns a `j:` value into JSON) counts as missing.
+
+**Origin binding.** SameSite=Lax keeps the cookies off cross-site posts, not off same-site ones from
+another port or subdomain, and those carry every client's cookies. So a POST (or other unsafe
+method) under `/oauth` that uses a client's cookie must come from core's own origin
+(`PUBLIC_URL`), the UI's (`UI_BASE_URL`, which hosts every client's login pages), or an origin of
+one of that client's registered redirect URIs — for core's own client `tereo-ui`, its callbacks
+under `UI_BASE_URL`. `middleware/originCheck.ts` decides from `Sec-Fetch-Site` (`same-origin`
+passes; anything but `same-site` uses no cookie) and `Origin`; a request with neither header is not
+from a browser page and passes. The cookie getters in `utils/cookies.ts` refuse the rest with
+`403 access_denied` when a handler reads them: refresh and revoke by cookie, the login submit,
+consent, org selection, the 2FA steps, identity linking and the sign-out confirmation alike. A
+request that authenticates otherwise (a secret, a code, a token in the body) is not affected by the
+other clients' cookies it carries. `CORS_ALLOWED_ORIGINS` is only the CORS list: being on it lets a
+page read core's API responses, not use another client's session. Credentialed CORS headers are not
+sent on `GET /oauth/authorize`, which is navigated to (a fetch following its redirect could read
+the code from the response URL), nor on the UI's pages.
 
 ## Deviations from the specs
 
@@ -975,6 +1015,9 @@ Where core knowingly departs from OAuth 2.0 / OpenID Connect:
 - **`offline_access` is not required for a refresh token.** One is issued to every client with the
   `refresh_token` grant type.
 - **`state` is required** on `/oauth/authorize`, as is PKCE with `S256` (`plain` is refused).
+- **`prompt=consent` is ignored for core's own login client**, `tereo-ui`, which has no consent
+  screen: it acts in core as the user with the user's full rights, and the user is signing in to
+  core itself. Every other client is shown the screen.
 - **`prompt=select_account`** is accepted and ignored (a browser holds one account per client), so
   discovery does not advertise it. `prompt` is a space-separated list; `none` with any other value is
   `400 invalid_request`.
@@ -992,7 +1035,7 @@ All in Redis; limiters in `utils/rateLimit.ts`, instances in `middleware/rateLim
 - **General** — `rateLimitGeneral`, after authentication: per user, per IP when anonymous, per OAuth client for internal service accounts.
 - **Credentials** — counted before the credential is checked, atomically, and cleared by a success: login passwords per client and IP (`authFailure`, keyed by the body's `client_id` once that client is found — never by a header the login does not authenticate with, which a caller could vary per request; the key spans every account tried from that address, so a success only gives back its own attempt — clearing the count would let a login to one's own account wipe the failures against everyone else's) and per account (`loginAccountBackoff`: keyed on a hash of the normalised email, so unknown emails behave the same; five attempts, then a delay doubling from 1 s to 15 min — a backoff, not a lockout); provider callbacks per IP once their round trip is consumed (see _Errors_ under _Sign in with an identity provider_); confidential-client secrets at `/oauth/token`, `/oauth/revoke` and `/oauth/introspect` per client and IP (`clientSecretFailure`: 10 wrong secrets per 5 min, keyed with the IP so one address cannot lock a client out for its other callers. Unlike the others it counts only failures — read before the secret is hashed, spent after a wrong one — so any number of concurrent correct secrets from one address, such as pods behind one NAT, pass. Once the count is full every attempt is refused before hashing, the right secret included, until the window expires: a correct secret cannot clear a full count, so a stale-secret pod sharing an address can hold the client off for up to 5 min. Concurrent wrong secrets can overshoot the limit by the burst, acceptable for high-entropy secrets); login 2FA setup per user; `/v1/account/password` and `/v1/account/totp/*` per user; setup per IP; share unlock per token and IP.
 - **Login 2FA** — `/oauth/totp/verify` and `/oauth/totp/recovery` share `totpBackoff`, per user, which nothing resets: a sliding 24-hour window (`createWindowedBackoffLimiter`) in which five attempts pass, then each next one waits a delay after the last that doubles from 1 s to an hour. Each attempt is spent before the code is checked; a right code takes back only its own, so the owner signing in hands an attacker who holds the password no fresh guesses, and the attacker gets some forty guesses a day at most. From the fifth attempt in the window every failure writes an audit entry (`User`, action `UPDATE`, `metadata.action` `totp_failures`, with `method` and `recentFailures`). The trade-off is the owner's access while an attacker keeps the delay at its cap: a browser holding the user's known-device cookie (set by a completed login) is let through the delay, its attempts still counting toward it, capped at 5 per hour per cookie (`knownDeviceTotp`); a browser without one competes with the attacker for the next attempt, at most an hour away, so an attacker who spends each one as it opens can keep the owner out until they sign in from a known device or an admin resets the password. A per-2FA-session limit would add nothing, since the password buys a new session. The setup verify (`/oauth/totp/setup/verify`), whose caller holds the secret, keeps a fixed 5 per 300 s per user (`totpSetupFailure`).
-- **Known device** — so that someone holding an account in backoff does not lock its owner out, a completed login (after 2FA when required) sets `tereo_known_device` (`utils/knownDevice.ts`; httpOnly, `SameSite=Lax`, path `/oauth`, 90 days): `<userId>.<issuedAt>.<HMAC>`, keyed with `KNOWN_DEVICE_KEY` and covering the user's password hash, so a password change or admin reset (a freshly salted hash) voids every earlier cookie with no extra column. At the login submit, while the account is delayed (`loginAccountBackoff.isDelayed`), a cookie valid for that same user skips the delay: `authFailure` and the password check still apply, the attempt still counts toward the account (`spendUnblocked`, which lengthens the delay without being refused by it), and `knownDeviceFailure` caps it at 5 wrong passwords per 15 min per cookie, so a stolen cookie is not an unlimited guess. Outside a delay a known device is treated like any browser. The cookie is checked only against the user the email names, so it reveals nothing about other emails; sign-out leaves it, since it is not a session.
+- **Known device** — so that someone holding an account in backoff does not lock its owner out, a completed login (after 2FA when required) sets `tereo_known_device` (`utils/knownDevice.ts`; httpOnly, `SameSite=Lax`, path `/oauth` or a `__Host-` cookie as in [Browser cookies](#browser-cookies), 90 days): `<userId>.<issuedAt>.<HMAC>`, keyed with `KNOWN_DEVICE_KEY` and covering the user's password hash, so a password change or admin reset (a freshly salted hash) voids every earlier cookie with no extra column. At the login submit, while the account is delayed (`loginAccountBackoff.isDelayed`), a cookie valid for that same user skips the delay: `authFailure` and the password check still apply, the attempt still counts toward the account (`spendUnblocked`, which lengthens the delay without being refused by it), and `knownDeviceFailure` caps it at 5 wrong passwords per 15 min per cookie, so a stolen cookie is not an unlimited guess. Outside a delay a known device is treated like any browser. The cookie is checked only against the user the email names, so it reveals nothing about other emails; sign-out leaves it, since it is not a session.
 - **Redis down** — credential limiters fail closed with `503 temporarily_unavailable`, except `clientSecretFailure`, which fails open: the secret is still verified, and client authentication (`/oauth/token`, `/oauth/revoke`, `/oauth/introspect`) must not go down with Redis; the general and pre-auth limiters fail open, so an outage does not take the API down. None waits in ioredis's offline queue: each refuses (or passes) at once while the client is not ready.
 - **Tests** run every limiter at its production limits. `tests/setup.ts` clears limiter keys before each test; a test needing several client addresses sends `X-Forwarded-For`, trusted from loopback by the default `TRUST_PROXY`.
 

@@ -1,3 +1,4 @@
+import { expectAuthorizeErrorRedirect } from "./utils/authorizeErrors.js";
 import { hashAuthorizationCode } from "../../utils/crypto.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
@@ -182,7 +183,7 @@ describe("OAuth Security Tests", () => {
       // A well-formed 43-character challenge, so only the method is at fault.
       const codeChallenge = generateCodeChallenge(generateCodeVerifier());
       expect(codeChallenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
-      const authorize = (method: string) => {
+      const authorize = (method: string, state: string) => {
         const authorizeUrl = new URL(`${BASE_URL}/oauth/authorize`);
         authorizeUrl.searchParams.set("response_type", "code");
         authorizeUrl.searchParams.set("client_id", testClient.clientId);
@@ -190,7 +191,7 @@ describe("OAuth Security Tests", () => {
           "redirect_uri",
           testClient.redirectUris[0]
         );
-        authorizeUrl.searchParams.set("state", generateUniqueId());
+        authorizeUrl.searchParams.set("state", state);
         authorizeUrl.searchParams.set("scope", "openid");
         authorizeUrl.searchParams.set("code_challenge", codeChallenge);
         authorizeUrl.searchParams.set("code_challenge_method", method);
@@ -200,13 +201,24 @@ describe("OAuth Security Tests", () => {
         });
       };
 
-      const plain = await authorize("plain");
-      expect(plain.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      const body = (await plain.json()) as { error_description?: string };
-      expect(body.error_description).toContain("code_challenge_method");
-      // The same request with S256 is accepted.
-      expect((await authorize("S256")).status).not.toBe(
-        HTTP_STATUS.BAD_REQUEST
+      const state = generateUniqueId();
+      const plain = await authorize("plain", state);
+      const params = expectAuthorizeErrorRedirect(
+        plain,
+        testClient.redirectUris[0],
+        "invalid_request",
+        state
+      );
+      expect(params.get("error_description")).toContain(
+        "code_challenge_method"
+      );
+      // The same request with S256 is not refused.
+      const s256 = await authorize("S256", generateUniqueId());
+      expect(
+        new URL(s256.headers.get("location") ?? "", BASE_URL).searchParams.get(
+          "error"
+        )
+      ).toBeNull(
       );
     });
   });

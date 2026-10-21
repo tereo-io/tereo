@@ -280,21 +280,25 @@ info:
 
     ### Cookie-Authenticated Requests
 
-    The browser's login state lives in cookies scoped to `/oauth`: the refresh token
-    (`trt_{client_id}`, cookie mode) and the `tereo_*` SSO and login-flow sessions. They
-    are `SameSite=Lax`, so a cross-site page cannot send them with a POST — but a same-site one
-    (another port or subdomain) can. Every POST (or other unsafe method) under `/oauth` that
-    carries one of them is therefore checked:
+    The browser's login state lives in per-client cookies: the refresh token
+    (`trt_{client_id}`, cookie mode) and the `tereo_*_{client_id}` SSO and login-flow sessions.
+    When Secure and `COOKIE_DOMAIN` is unset they are `__Host-` cookies (`__Host-trt_{client_id}`,
+    path `/`); otherwise unprefixed and scoped to `/oauth`. Only `/oauth` reads them. They are
+    `SameSite=Lax`, so a cross-site page cannot send them with a POST — but a same-site one
+    (another port or subdomain) can, along with every other client's. So a POST (or other unsafe
+    method) under `/oauth` that uses client X's cookie must come from:
 
-    - with `Sec-Fetch-Site`, it must be `same-origin`, or `same-site` with an allowed `Origin`;
-    - without it, `Origin`, when sent, must be allowed;
-    - a request with neither header is not from a browser page and passes.
+    - core's own origin (`Sec-Fetch-Site: same-origin`, or `Origin` = `PUBLIC_URL`'s), or the
+      UI's (`UI_BASE_URL`, which hosts every client's login pages);
+    - or, with `Sec-Fetch-Site: same-site` (or no `Sec-Fetch-Site`), an `Origin` of one of X's
+      registered redirect URIs.
 
-    Allowed origins are core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) and
-    `CORS_ALLOWED_ORIGINS` (any, when that is `*`). A refused request is 403 `access_denied`. This
-    covers the login, consent, org-select and 2FA submits, `POST /oauth/token` and
-    `POST /oauth/revoke` with the refresh cookie, and the sign-out confirmation. A request without
-    these cookies (a client authenticating with a secret, a code or a bearer token) is not checked.
+    A request with neither header is not from a browser page and passes. Any other is 403
+    `access_denied` once the endpoint reads the cookie: the login, consent, org-select and 2FA
+    submits, `POST /oauth/token` and `POST /oauth/revoke` with the refresh cookie, and the
+    sign-out confirmation. `CORS_ALLOWED_ORIGINS` does not widen this; it is only the CORS list.
+    A request that uses none of these cookies (a client authenticating with a secret, a code or a
+    bearer token) is not affected by the ones it carries.
 
     ### OpenID Connect Discovery
 
@@ -1136,7 +1140,10 @@ paths:
           `redirect_uri` with `error=login_required` (or `error=invalid_scope`),
           `error_description` and `state`. A request whose `acr_values` demands
           `urn:auth-service:mfa` over a session whose login had no second factor
-          gets `error=interaction_required` instead.
+          gets `error=interaction_required` instead. With `org_id`, the code is
+          for that organization when the user may select it (a membership, or
+          support access) and the consent rules above allow it; another
+          organization is `error=login_required`.
         - `org_id` (without `prompt=login`) with a live user session for an
           active user who is a member of that active organization (or, for any
           active organization, holds `organizations.support-access` through a
@@ -1144,8 +1151,10 @@ paths:
           valid scopes: to `{UI}/consent?session=…` for
           that organization, skipping login — or, for core's own login client,
           straight to `redirect_uri` with `code` and `state`, as with
-          `prompt=none`. This is the one continuation without a password that
-          shows a third-party client the consent screen. An inactive user (session cookie cleared), a too-old
+          `prompt=none` (and a client with `consentRequired: false` that asks
+          no untrusted `core:*` scope, unless `prompt=consent`). This is the one
+          continuation without a password that shows a third-party client the
+          consent screen. An inactive user (session cookie cleared), a too-old
           login, or a login without a second factor when `acr_values` demands
           one falls through to the login page below.
         - otherwise to `{UI}/login` with the OAuth request parameters, setting the
@@ -1178,10 +1187,18 @@ paths:
         `code_challenge_method`, and `nonce`, `max_age`, `acr_values`, `prompt`
         when given) beside the session token, so the page's "Back to sign in" can
         restart `/oauth/authorize` for the client that began the login. They are
-        never read back from the URL: each step uses its stored session. Errors before a redirect is possible are returned as JSON: 400
-        `invalid_request` (validation, unregistered `redirect_uri`, unknown
-        `client_id` — never redirected, since the redirect URI can't be trusted),
-        400 `unauthorized_client` (client lacks the authorization_code grant).
+        never read back from the URL: each step uses its stored session.
+
+        Errors (RFC 6749 section 4.1.2.1): until `client_id` and `redirect_uri`
+        check out — a missing or malformed one, an unknown `client_id`, a
+        `redirect_uri` the client has not registered — the answer is JSON 400
+        `invalid_request`, never a redirect, since the redirect URI cannot be
+        trusted. After, every error goes to `redirect_uri` with `state` (when
+        the request's is usable) and `iss`: `unsupported_response_type` for a
+        `response_type` other than `code`, `unauthorized_client` for a client
+        without the authorization_code grant, and `invalid_request` for any
+        other invalid parameter (a missing `state` or PKCE challenge, `plain`,
+        an unknown `prompt`, an out-of-range `max_age`, …).
 
         `claims`, `login_hint` and `ui_locales` are validated but not used.
       operationId: getAuthorize
@@ -1250,6 +1267,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 2147483647
         - name: acr_values
           in: query
           description: |
@@ -1267,7 +1285,10 @@ paths:
           description: |
             A space-separated list of `none`, `login`, `consent` and
             `select_account` (accepted, ignored). `none` cannot be combined with
-            another value: that, or an unknown value, is 400 `invalid_request`.
+            another value: that, or an unknown value, is `invalid_request` at
+            `redirect_uri`. `consent` shows the consent screen even to a client
+            that would skip it (`consentRequired: false`), except core's own
+            login client, which has none.
           schema:
             type: string
             maxLength: 64
@@ -2390,7 +2411,7 @@ paths:
         confirmation page, `{UI}/logout?client_id=…&confirm_token=…` (with
         `post_logout_redirect_uri` and `state` when given), setting the
         `tereo_logout_confirm_{client_id}` cookie (httpOnly, SameSite=Lax,
-        `/oauth`, 10 minutes) to the same random token. Only `POST
+        `/oauth` — or `__Host-`, path `/` — 10 minutes) to the same random token. Only `POST
         /oauth/end-session/confirm`, sent with both, ends the session. With a
         valid `id_token_hint` the session ends at once, as below — unless the
         browser's `tereo_user_session_{client_id}` or `trt_{client_id}`
@@ -2434,9 +2455,11 @@ paths:
 
         `id_token_hint` is verified: it must carry core's signature and issuer
         and must not be an access token. An expired hint is accepted (per
-        RP-Initiated Logout) only within `ID_TOKEN_HINT_GRACE_SECONDS` (3600
-        seconds) of its `exp`; one expired longer ago is 400 `invalid_request`
-        ("Invalid id_token_hint"). Its `aud` must be a known client ("Invalid
+        RP-Initiated Logout) within `ID_TOKEN_HINT_GRACE_SECONDS` (3600
+        seconds) of its `exp`; one expired longer ago still names its client
+        but is otherwise treated as no hint — the confirmation page. A hint
+        that does not verify is 400 `invalid_request` ("Invalid
+        id_token_hint"). Its `aud` must be a known client ("Invalid
         id_token_hint: unknown audience") and must match `client_id` when both
         are given. An unknown `client_id` is 400 `invalid_request` ("Invalid
         client_id").
@@ -2445,7 +2468,11 @@ paths:
         `id_token_hint`) and must exactly match one of that client's
         `postLogoutRedirectUris` (a `javascript:`, `data:`, `vbscript:`,
         `blob:` or `file:` URI is refused even if registered); with a hint the response is then a 302 to it
-        (with `state`), otherwise 200 `{ success: true }`. There is no redirect to an
+        (with `state`). Without one, a navigation (a GET, or a POST with
+        `Sec-Fetch-Mode: navigate`) is a 302 to where the user signs in to the
+        client again — the UI's root for core's own client, else the origin of
+        its first web redirect URI — and a fetch (the admin UI's sign-out) is
+        200 `{ success: true }`. There is no redirect to an
         unregistered URI. Every validation failure above, a redirect URI
         without a client, and an unregistered `post_logout_redirect_uri` are 400
         `invalid_request`.
@@ -2480,7 +2507,7 @@ paths:
             maxLength: 64
       responses:
         '200':
-          description: Logout successful (with a valid id_token_hint and no post_logout_redirect_uri)
+          description: Never for a GET, which is a navigation; see POST
           headers:
             Set-Cookie:
               description: Clears the client's SSO and login-flow session cookies and its `trt_{client_id}` and `tsi_{client_id}` cookies
@@ -2503,12 +2530,13 @@ paths:
                     type: boolean
         '302':
           description: |
-            With a valid id_token_hint and a post_logout_redirect_uri: logged out,
-            redirect to it. Without a hint: nothing ended, redirect to the UI's
-            sign-out confirmation page.
+            With a valid id_token_hint: logged out, redirected to
+            post_logout_redirect_uri, or without one to the client's sign-in.
+            Without a usable hint: nothing ended, redirect to the UI's sign-out
+            confirmation page.
           headers:
             Location:
-              description: '`post_logout_redirect_uri` with `state` when given; without a hint, `{UI}/logout?client_id=…&confirm_token=…` (with `post_logout_redirect_uri` and `state` when given)'
+              description: '`post_logout_redirect_uri` with `state` when given, else the client''s sign-in URL; without a usable hint, `{UI}/logout?client_id=…&confirm_token=…` (with `post_logout_redirect_uri` and `state` when given)'
               schema:
                 type: string
                 format: uri
@@ -2534,7 +2562,9 @@ paths:
       summary: End session endpoint (POST)
       description: |
         `GET /oauth/end-session` with the parameters in the body (JSON or
-        form-encoded); same behaviour and responses.
+        form-encoded); same behaviour and responses, except that with a valid
+        hint and no `post_logout_redirect_uri` a fetch (no
+        `Sec-Fetch-Mode: navigate`) gets 200 `{ success: true }`.
       operationId: postEndSession
       security: []
       requestBody:
@@ -20660,12 +20690,10 @@ components:
                 type: string
     CrossOriginRefusedResponse:
       description: |
-        Forbidden (`access_denied`) - the request carries core's credential
-        cookies but comes from a page that may not act on them: `Sec-Fetch-Site`
-        is neither `same-origin` nor `same-site` with an allowed `Origin`, or,
-        without `Sec-Fetch-Site`, `Origin` is not allowed. Allowed origins are
-        core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) and
-        `CORS_ALLOWED_ORIGINS`. See "Cookie-Authenticated Requests".
+        Forbidden (`access_denied`) - the request uses a client's credential
+        cookie but comes from a page that may not act for that client: neither
+        core (`PUBLIC_URL`), the UI (`UI_BASE_URL`) nor an origin of the
+        client's redirect URIs. See "Cookie-Authenticated Requests".
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -20686,7 +20714,7 @@ components:
                 type: string
           example:
             error: access_denied
-            error_description: 'Cross-origin request refused: this origin may not act on the browser''s session'
+            error_description: 'Cross-origin request refused: this origin may not act on this client''s session'
     CheckPermissionForbiddenResponse:
       description: |
         Forbidden - `forbidden` when the client may not ask about this user or

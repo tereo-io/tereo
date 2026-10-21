@@ -1,6 +1,5 @@
 import { AppError, NotFoundError, OAuth2Error } from "../../../utils/errors.js";
 import { validateBody, validateQuery } from "../../../utils/validateReq.js";
-import { authorizeRequestParams, getClientForAuthorize } from "./utils.js";
 import { maySelectOrganization } from "../../../utils/supportAccess.js";
 import { UserType } from "../../../../prisma/generated/client/index.js";
 import type { AuthorizeRequest, AuthorizeSubmit } from "./schemas.js";
@@ -51,26 +50,46 @@ import {
 import {
   AuthorizeRequestSchema,
   AuthorizeSubmitSchema,
+  AuthorizeTargetSchema,
   hasPrompt,
 } from "./schemas.js";
+import {
+  authorizeRequestParams,
+  getClientForAuthorize,
+  invalidAuthorizeRequestUrl,
+} from "./utils.js";
 
 // Checked against when the email matches no one who may log in, so an
 // unknown email costs the same scrypt as a wrong password.
 const UNKNOWN_USER_HASH = hashPassword(generateRandomString(32));
 
 export const authorizeGetHandler = async (req: Request, res: Response) => {
-  const query = validateQuery(AuthorizeRequestSchema, req);
-
-  const client = await getClientForAuthorize(query.client_id);
-  if (!client.grantTypes.includes("authorization_code")) {
-    throw new OAuth2Error(
-      "unauthorized_client",
-      "Client not authorized for authorization code grant"
-    );
+  // RFC 6749 section 4.1.2.1: errors go back to the caller until the client
+  // and redirect URI check out, and to the redirect URI after.
+  const target = validateQuery(AuthorizeTargetSchema, req);
+  const client = await getClientForAuthorize(target.client_id);
+  if (!client.redirectUris.includes(target.redirect_uri)) {
+    throw new OAuth2Error("invalid_request", "Invalid redirect URI");
   }
 
-  if (!client.redirectUris.includes(query.redirect_uri)) {
-    throw new OAuth2Error("invalid_request", "Invalid redirect URI");
+  const parsed = AuthorizeRequestSchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.redirect(
+      invalidAuthorizeRequestUrl(target.redirect_uri, req.query, parsed.error)
+    );
+    return;
+  }
+  const query = parsed.data;
+
+  if (!client.grantTypes.includes("authorization_code")) {
+    res.redirect(
+      authorizationResponseUrl(query.redirect_uri, {
+        error: "unauthorized_client",
+        error_description: "Client not authorized for authorization code grant",
+        state: query.state,
+      })
+    );
+    return;
   }
 
   // Handle prompt=none - check for existing session
@@ -152,9 +171,26 @@ export const authorizeGetHandler = async (req: Request, res: Response) => {
       return;
     }
 
+    // An org_id the user may select (a membership, or support access) is
+    // taken, as the org switch below would; another needs a login.
+    if (
+      query.org_id &&
+      query.org_id !== userSession.organizationId &&
+      !(await maySelectOrganization(userSession.userId, query.org_id)).allowed
+    ) {
+      res.redirect(
+        authorizationResponseUrl(query.redirect_uri, {
+          error: "login_required",
+          error_description: "The user may not select this organization",
+          state: query.state,
+        })
+      );
+      return;
+    }
+
     const authorization = {
       userId: userSession.userId,
-      organizationId: userSession.organizationId,
+      organizationId: query.org_id ?? userSession.organizationId,
       redirectUri: query.redirect_uri,
       scopes: requestedScopes,
       state: query.state || null,
@@ -170,7 +206,7 @@ export const authorizeGetHandler = async (req: Request, res: Response) => {
 
     // A client that needs approval needs the consent screen, which a silent
     // request cannot show (OIDC Core 3.1.2.6).
-    if (!skipsConsent(client, authorization.scopes)) {
+    if (!skipsConsent(client, authorization.scopes, query.prompt)) {
       res.redirect(
         authorizationResponseUrl(query.redirect_uri, {
           error: "consent_required",
@@ -239,7 +275,7 @@ export const authorizeGetHandler = async (req: Request, res: Response) => {
             userSessionId: userSession.id,
           };
 
-          if (skipsConsent(client, authorization.scopes)) {
+          if (skipsConsent(client, authorization.scopes, query.prompt)) {
             res.redirect(
               await issueAuthorizationCode(req, res, client, authorization)
             );

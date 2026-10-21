@@ -58,8 +58,11 @@ export const get = async (
 };
 
 /** Deletes the session; false when another request already consumed it. */
-export const consume = async (id: string): Promise<boolean> => {
-  const { count } = await prisma.orgSelectionSession.deleteMany({
+export const consume = async (
+  id: string,
+  tx?: Prisma.TransactionClient
+): Promise<boolean> => {
+  const { count } = await (tx ?? prisma).orgSelectionSession.deleteMany({
     where: { id },
   });
   return count === 1;

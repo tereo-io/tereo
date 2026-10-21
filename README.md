@@ -179,7 +179,7 @@ Elsewhere, run the published image, `ghcr.io/tereo-io/tereo` (amd64 and arm64), 
 |----------|-------|
 | `DATABASE_URL`, `REDIS_URL` | Postgres and Redis (or `REDIS_SENTINELS` + `REDIS_MASTER_NAME`) |
 | `PUBLIC_URL` | Core's public `https://` URL, not localhost. The admin UI is served at `PUBLIC_URL`, core's API under `${PUBLIC_URL}/v1` |
-| `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call core; `*` is refused |
+| `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call core's API with credentials; `*` and non-loopback `http://` origins are refused |
 | `TRUST_PROXY` | The proxies in front of core (`1`, a CIDR list), or `false` when there are none; `true` is refused |
 | `CORE_KEK` | `openssl rand -base64 32`. Encrypts the keys core stores; keep it in a secret manager — the stored keys cannot be read without it |
 
