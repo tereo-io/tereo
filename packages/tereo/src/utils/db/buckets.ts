@@ -16,6 +16,7 @@ export interface CreateBucketInput {
   policy: BucketPolicy;
   storageQuotaBytes?: bigint;
   createdBy: string;
+  ownerId: string;
   organizationId?: string;
 }
 
@@ -41,6 +42,7 @@ export interface GetPaginatedOptions {
 const withRefs = {
   service: serviceRefSelect,
   creator: userRefSelect,
+  owner: userRefSelect,
   organization: orgRefSelect,
 } satisfies Prisma.BucketInclude;
 
@@ -93,15 +95,11 @@ export const getPaginated = async (
     isAdmin,
   } = options;
 
-  // Admins see every bucket — org isolation and the ownership/grant filter are both bypassed.
+  // Admins see every bucket — org isolation and the grant filter are both
+  // bypassed. An owner without an active grant no longer sees theirs.
   const and: Prisma.BucketWhereInput[] = [];
   if (!isAdmin) {
-    and.push({
-      OR: [
-        { createdBy: userId },
-        { permissions: { some: { userId, revokedAt: null } } },
-      ],
-    });
+    and.push({ permissions: { some: { userId, revokedAt: null } } });
     // Matches the access check: an organization's bucket is only for callers
     // in that organization, so a caller without one sees org-less buckets.
     and.push(
@@ -160,8 +158,9 @@ export const update = async (
   // Prisma distinguishes "undefined" (don't update) from "null" (set to null);
   // pass through the exact shape so consumers can clear corsConfig / rateLimitConfig.
   const { corsConfig, rateLimitConfig, ...rest } = data;
-  return await client.bucket.update({
-    where: { id },
+  // Conditional, so an update racing the bucket's delete can't write to it.
+  const { count } = await client.bucket.updateMany({
+    where: { id, deletedAt: null },
     data: {
       ...rest,
       ...(corsConfig !== undefined
@@ -175,8 +174,32 @@ export const update = async (
         : {}),
       updatedAt: new Date(),
     },
+  });
+  if (count === 0) throw new NotFoundError("Bucket not found");
+  return await client.bucket.findUniqueOrThrow({
+    where: { id },
     include: withRefs,
   });
+};
+
+/** Set the owner under the bucket's row lock; returns the one it replaced. */
+export const setOwner = async (
+  id: number,
+  ownerId: string,
+  tx: Prisma.TransactionClient
+) => {
+  const [locked] = await tx.$queryRaw<{ owner_id: string }[]>`
+    SELECT "owner_id" FROM "files"."buckets"
+    WHERE "id" = ${id} AND "deleted_at" IS NULL
+    FOR NO KEY UPDATE
+  `;
+  if (!locked) throw new NotFoundError("Bucket not found");
+  const bucket = await tx.bucket.update({
+    where: { id },
+    data: { ownerId, updatedAt: new Date() },
+    include: withRefs,
+  });
+  return { bucket, previousOwnerId: locked.owner_id };
 };
 
 /**
@@ -245,15 +268,52 @@ export const getLiveUsageBytes = async (id: number): Promise<bigint> => {
 };
 
 /**
+ * Deleted buckets, deleted at least `minAgeSeconds` ago, that still have live
+ * versions holding blob refs — what `releaseBucketBlobRefsBatch` would
+ * release. By id, after `afterId`.
+ */
+export const listDeletedHoldingRefs = async (
+  minAgeSeconds: number,
+  limit: number,
+  afterId = 0
+): Promise<{ id: number; deletedBy: string | null }[]> => {
+  return await prisma.$queryRaw<{ id: number; deletedBy: string | null }[]>`
+    SELECT b."id", b."deleted_by" AS "deletedBy"
+    FROM "files"."buckets" b
+    WHERE b."deleted_at" IS NOT NULL
+      AND b."deleted_at" < NOW() - (${minAgeSeconds}::int || ' seconds')::interval
+      AND b."id" > ${afterId}::int
+      AND EXISTS (
+        SELECT 1
+        FROM "files"."objects" o
+        INNER JOIN "files"."object_versions" ov ON ov."object_id" = o."id"
+        WHERE o."bucket_id" = b."id"
+          AND ov."deleted_at" IS NULL
+          AND ov."is_delete_marker" = false
+          AND ov."content_blob_hash" IS NOT NULL
+      )
+    ORDER BY b."id" ASC
+    LIMIT ${limit}
+  `;
+};
+
+/**
  * Atomically reserve quota for an upload.
- * Increments current_usage_bytes only if the result does not exceed storage_quota_bytes.
+ * Increments current_usage_bytes only if the result, with the `expectedSize`s
+ * active multipart uploads hold against the quota, does not exceed
+ * storage_quota_bytes. `completingUploadId` is the multipart upload this
+ * write completes, whose own reservation the write takes up.
  * Throws InsufficientStorageError if the quota would be exceeded.
  */
 export const reserveQuota = async (
   id: number,
   sizeBytes: bigint,
-  tx: Prisma.TransactionClient
+  tx: Prisma.TransactionClient,
+  completingUploadId?: string
 ): Promise<void> => {
+  // The lock multipart initiates take, so neither this write nor an initiate
+  // counts the quota without the other's bytes.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`files:multipart:${id}`}, 0))`;
   const result = await tx.$queryRaw<{ count: bigint }[]>`
     UPDATE "files"."buckets"
     SET "current_usage_bytes" = "current_usage_bytes" + ${sizeBytes}::bigint
@@ -261,12 +321,77 @@ export const reserveQuota = async (
       AND "deleted_at" IS NULL
       AND (
         "storage_quota_bytes" IS NULL
-        OR "current_usage_bytes" + ${sizeBytes}::bigint <= "storage_quota_bytes"
+        OR "current_usage_bytes" + ${sizeBytes}::bigint + (
+          SELECT COALESCE(SUM(mu."expected_size"), 0)
+          FROM "files"."multipart_uploads" mu
+          WHERE mu."bucket_id" = ${id}
+            AND mu."completed_at" IS NULL
+            AND mu."aborted_at" IS NULL
+            AND mu."expires_at" > NOW()
+            AND mu."id" IS DISTINCT FROM ${completingUploadId ?? null}::uuid
+        ) <= "storage_quota_bytes"
       )
     RETURNING 1 AS count
   `;
 
   if (result.length === 0) {
+    throw new InsufficientStorageError("Storage quota exceeded");
+  }
+};
+
+/**
+ * Refuse, before its body is read, an upload of `declaredBytes` to
+ * `objectKey` that `reserveQuota` would refuse once it was stored. In a
+ * bucket without versioning an overwrite frees the current version's bytes,
+ * so those count as room. A request body is a little larger than the file it
+ * carries, so this can only err towards refusing at the quota's very edge.
+ */
+export const assertUploadMayFit = async (
+  id: number,
+  objectKey: string,
+  declaredBytes: bigint
+): Promise<void> => {
+  const rows = await prisma.$queryRaw<
+    {
+      quota: bigint | null;
+      usage: bigint;
+      versioning_enabled: boolean;
+      reserved: bigint;
+      replaced: bigint;
+    }[]
+  >`
+    SELECT
+      b."storage_quota_bytes" AS "quota",
+      b."current_usage_bytes" AS "usage",
+      b."versioning_enabled",
+      (
+        SELECT COALESCE(SUM(mu."expected_size"), 0)
+        FROM "files"."multipart_uploads" mu
+        WHERE mu."bucket_id" = b."id"
+          AND mu."completed_at" IS NULL
+          AND mu."aborted_at" IS NULL
+          AND mu."expires_at" > NOW()
+      )::bigint AS "reserved",
+      COALESCE((
+        SELECT cb."size_bytes"
+        FROM "files"."objects" o
+        JOIN "files"."object_versions" ov
+          ON ov."object_id" = o."id"
+          AND ov."is_current" = true
+          AND ov."deleted_at" IS NULL
+        JOIN "files"."content_blobs" cb ON cb."hash" = ov."content_blob_hash"
+        WHERE o."bucket_id" = b."id"
+          AND o."object_key" = ${objectKey}
+          AND o."deleted_at" IS NULL
+        LIMIT 1
+      ), 0)::bigint AS "replaced"
+    FROM "files"."buckets" b
+    WHERE b."id" = ${id}
+  `;
+  const row = rows[0];
+  if (!row || row.quota === null) return;
+  const freed = row.versioning_enabled ? 0n : row.replaced;
+  if (row.usage + row.reserved + declaredBytes - freed > row.quota) {
     throw new InsufficientStorageError("Storage quota exceeded");
   }
 };

@@ -412,7 +412,7 @@ async function processLifecycleSweepPolicy(
       const c = current ?? cursor;
       // Advance stages when disabled or exhausted.
       if (c.kind === "expireObjects") {
-        if (!policy!.expireObjectsAfterDays) {
+        if (policy!.expireObjectsAfterDays == null) {
           return {
             cursor: { kind: "expireVersions", lastId: MIN_UUID },
             hasMore: true,
@@ -438,7 +438,7 @@ async function processLifecycleSweepPolicy(
         };
       }
       if (c.kind === "expireVersions") {
-        if (!policy!.expireVersionsAfterDays) {
+        if (policy!.expireVersionsAfterDays == null) {
           return {
             cursor: { kind: "purgeSoftDeleted", lastId: MIN_UUID },
             hasMore: true,
@@ -465,7 +465,7 @@ async function processLifecycleSweepPolicy(
         };
       }
       if (c.kind === "purgeSoftDeleted") {
-        if (!policy!.purgeSoftDeletedAfterDays) {
+        if (policy!.purgeSoftDeletedAfterDays == null) {
           return {
             cursor: { kind: "done", lastId: MIN_UUID },
             hasMore: false,

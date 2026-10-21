@@ -32,6 +32,9 @@ export const metadataSchema = z
     message: "Metadata cannot have more than 100 keys",
   });
 
+/** An object's tags, from a JSON body's `tags` or the `X-Tags` header. */
+export const tagsSchema = z.array(z.string().min(1).max(128)).max(50);
+
 /** A content type as `normalizeContentType` stores it. */
 export const contentTypeSchema = z
   .string()
@@ -54,11 +57,11 @@ export const listObjectsQuerySchema = createCursorQuerySchema({
   filters: {
     objectKey: {
       operators: ["contains", "startsWith", "equals"],
-      schema: z.string(),
+      schema: z.string().max(1024),
     },
     contentType: {
       operators: ["contains", "equals"],
-      schema: z.string(),
+      schema: z.string().max(255),
     },
   },
   sortFields: {

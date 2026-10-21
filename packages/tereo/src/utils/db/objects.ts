@@ -41,12 +41,13 @@ export interface UpsertWithBlobInput {
    */
   stagedPath: string;
   /**
-   * `If-Match` / `If-None-Match: *`, checked again under the object's row
-   * lock so a write committed after the caller's early check can't slip past
-   * them.
+   * `If-Match` (strong tags or `*`) / `If-None-Match` (opaque tags, or
+   * `*`), checked under the object's row lock so a write committed after the
+   * caller's early check can't slip past them.
    */
   preconditions?: {
     ifMatch: string[] | null;
+    ifNoneMatch?: string[] | null;
     ifNoneMatchWildcard: boolean;
   };
   /**
@@ -462,6 +463,7 @@ export const upsertWithBlob = async (
     }
     const { versioningEnabled } = bucketRow;
     const releasedBlobHashes: string[] = [];
+    const completingUploadId = data.markMultipartCompleted?.uploadId;
 
     if (data.preconditions?.ifNoneMatchWildcard && existingRow) {
       throw new PreconditionFailedError(
@@ -469,7 +471,8 @@ export const upsertWithBlob = async (
       );
     }
     const ifMatch = data.preconditions?.ifMatch;
-    if (ifMatch) {
+    const ifNoneMatch = data.preconditions?.ifNoneMatch;
+    if (ifMatch || ifNoneMatch?.length) {
       const current = existingRow
         ? await tx.objectVersion.findFirst({
             where: {
@@ -481,10 +484,14 @@ export const upsertWithBlob = async (
           })
         : null;
       if (
-        !current?.etag ||
-        !(ifMatch.includes("*") || ifMatch.includes(current.etag))
+        ifMatch &&
+        (!current?.etag ||
+          !(ifMatch.includes("*") || ifMatch.includes(current.etag)))
       ) {
         throw new PreconditionFailedError("ETag mismatch (If-Match)");
+      }
+      if (current?.etag && ifNoneMatch?.includes(current.etag)) {
+        throw new PreconditionFailedError("ETag matches (If-None-Match)");
       }
     }
 
@@ -542,11 +549,16 @@ export const upsertWithBlob = async (
       //  - Versioning ON: prior blob is retained on disk (it now backs a
       //    historical version), so the bucket grows by the full new size.
       if (versioningEnabled) {
-        await reserveQuota(data.bucketId, data.sizeBytes, tx);
+        await reserveQuota(
+          data.bucketId,
+          data.sizeBytes,
+          tx,
+          completingUploadId
+        );
       } else {
         const sizeDelta = data.sizeBytes - priorSize;
         if (sizeDelta > 0n) {
-          await reserveQuota(data.bucketId, sizeDelta, tx);
+          await reserveQuota(data.bucketId, sizeDelta, tx, completingUploadId);
         } else if (sizeDelta < 0n) {
           await decrementUsage(data.bucketId, -sizeDelta, tx);
         }
@@ -557,7 +569,7 @@ export const upsertWithBlob = async (
         if (priorCurrent) {
           await tx.objectVersion.update({
             where: { id: priorCurrent.id },
-            data: { isCurrent: false },
+            data: { isCurrent: false, noncurrentSince: new Date() },
           });
         }
       } else {
@@ -622,7 +634,7 @@ export const upsertWithBlob = async (
       };
     }
 
-    await reserveQuota(data.bucketId, data.sizeBytes, tx);
+    await reserveQuota(data.bucketId, data.sizeBytes, tx, completingUploadId);
 
     const created = await createIdentity(
       {
@@ -731,7 +743,7 @@ const removeLockedObject = async (
     if (current) {
       await tx.objectVersion.update({
         where: { id: current.id },
-        data: { isCurrent: false },
+        data: { isCurrent: false, noncurrentSince: new Date() },
       });
     }
     await objectVersions.create(
@@ -1677,12 +1689,14 @@ export const softDeleteBucket = async (
   bucketId: number,
   deletedBy: string,
   tx?: Prisma.TransactionClient
-): Promise<void> => {
+): Promise<boolean> => {
   const client = tx ?? prisma;
-  await client.bucket.update({
-    where: { id: bucketId },
+  // False when a concurrent delete got there first.
+  const { count } = await client.bucket.updateMany({
+    where: { id: bucketId, deletedAt: null },
     data: { deletedAt: new Date(), deletedBy },
   });
+  return count > 0;
 };
 
 /**
@@ -1706,8 +1720,8 @@ export const softDeleteBucket = async (
  * shorter than `batchSize` with `hasMore` set means the remaining versions
  * are row-locked by another writer.
  *
- * Note: this must run AFTER the bucket has already been soft-deleted by
- * `softDeleteBucket` so no new uploads can add references behind our back.
+ * Releases nothing in a bucket `softDeleteBucket` has not deleted: until
+ * then, uploads can still add references behind its back.
  */
 export const releaseBucketBlobRefsBatch = async (
   bucketId: number,
@@ -1724,7 +1738,9 @@ export const releaseBucketBlobRefsBatch = async (
       SELECT ov."id", ov."content_blob_hash"
       FROM "files"."object_versions" ov
       INNER JOIN "files"."objects" o ON o."id" = ov."object_id"
+      INNER JOIN "files"."buckets" b ON b."id" = o."bucket_id"
       WHERE o."bucket_id" = ${bucketId}
+        AND b."deleted_at" IS NOT NULL
         AND ov."deleted_at" IS NULL
         AND ov."is_delete_marker" = false
         AND ov."content_blob_hash" IS NOT NULL
@@ -1741,7 +1757,9 @@ export const releaseBucketBlobRefsBatch = async (
           SELECT 1
           FROM "files"."object_versions" ov
           INNER JOIN "files"."objects" o ON o."id" = ov."object_id"
+          INNER JOIN "files"."buckets" b ON b."id" = o."bucket_id"
           WHERE o."bucket_id" = ${bucketId}
+            AND b."deleted_at" IS NOT NULL
             AND ov."deleted_at" IS NULL
             AND ov."is_delete_marker" = false
             AND ov."content_blob_hash" IS NOT NULL

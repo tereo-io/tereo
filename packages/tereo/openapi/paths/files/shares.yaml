@@ -30,8 +30,8 @@
 
       **Required permissions:**
       - System: `file-service.shares.write`
-      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-        bucket in the caller's organization, nor for `file-service.admin`)
+      - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+        bucket too (neither needed for `file-service.admin`)
 
       An audit log entry is created and, for a bucket in an organization, a
       `file-service.share.created` webhook event is emitted.
@@ -90,8 +90,8 @@
 
       **Required permissions:**
       - System: `file-service.shares.read`
-      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-        bucket in the caller's organization, nor for `file-service.admin`)
+      - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+        bucket too (neither needed for `file-service.admin`)
 
       **Filter fields and operators:**
       - `kind`: `equals`, `in` (`OBJECT`, `ARCHIVE`)
@@ -150,8 +150,8 @@
     description: |
       **Required permissions:**
       - System: `file-service.shares.read`
-      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-        bucket in the caller's organization, nor for `file-service.admin`)
+      - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+        bucket too (neither needed for `file-service.admin`)
 
       A share of another bucket returns 404.
     operationId: getShare
@@ -207,8 +207,8 @@
 
       **Required permissions:**
       - System: `file-service.shares.write`
-      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-        bucket in the caller's organization, nor for `file-service.admin`); a caller who did not create the share also
+      - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+        bucket too (neither needed for `file-service.admin`); a caller who did not create the share also
         needs `file-service.objects.write` AND bucket-level `canWrite`
 
       An audit log entry is created and, for a bucket in an organization, a
@@ -267,8 +267,8 @@
 
       **Required permissions:**
       - System: `file-service.shares.delete`
-      - `file-service.objects.read` AND bucket-level `canRead` (neither needed on a public
-        bucket in the caller's organization, nor for `file-service.admin`); a caller who did not create the share also
+      - `file-service.objects.read` AND an active bucket-level `canRead` grant, on a public
+        bucket too (neither needed for `file-service.admin`); a caller who did not create the share also
         needs `file-service.objects.delete` AND bucket-level `canDelete`
 
       An audit log entry is created and, for a bucket in an organization, a
@@ -314,7 +314,7 @@
       |---|---|
       | No password | `200` with the file's details in headers |
       | Password required | `401`, no details (unlock to learn more) |
-      | Not serveable (missing / revoked / expired / exhausted) | `404` |
+      | Not serveable (missing / revoked / expired / exhausted, or its creator deactivated) | `404` |
 
       The detail headers are listed in `Access-Control-Expose-Headers` so a
       cross-origin `fetch(url, { method: "HEAD" })` can read them.
@@ -397,7 +397,7 @@
       |---|---|---|
       | No password | `302` → short-TTL presigned download URL | `302` → short-TTL presigned download URL |
       | Password required | `302` → `${FILE_SERVICE_SHARE_UI_BASE_URL}/shared/{token}` (the UI's unlock page; the base defaults to `UI_BASE_URL`) | `401 { requiresPassword: true }` |
-      | Not serveable (missing / revoked / expired / exhausted) | `404` | `404` |
+      | Not serveable (missing / revoked / expired / exhausted, or its creator deactivated) | `404` | `404` |
 
       A `302` to the download URL counts one download against `maxDownloads`
       and writes a `shareAccess` audit entry (plus a
@@ -409,10 +409,13 @@
       redirected to while it is valid. Archive downloads serve no ranges.
 
       For a share with `maxDownloads` the presigned URL (here or from
-      `/unlock`) is **single-use**: its first request spends it, a `HEAD` or
-      `Range` request included, and any later request gets the same `403` as an
-      expired or tampered URL. Fetch a capped share's content in one request.
-      Uncapped shares' URLs stay replayable until they expire.
+      `/unlock`) is **single-use**: the first `GET` that starts sending the
+      content spends it, a `Range` one included, and any later request gets
+      the same `403` as an expired or tampered URL. A `HEAD`, or a `GET` that
+      fails first (`404`, `416`, …), leaves it unspent. Fetch a capped share's
+      content in one request. Uncapped shares' URLs stay replayable until they
+      expire. A capped share's URL is recorded in Redis: while Redis is
+      unreachable, minting one here answers `503` without counting a download.
 
       Every unserveable state returns the same `404` — the endpoint is not
       a validity oracle.
@@ -469,6 +472,9 @@
         $ref: '../../components/responses.yaml#/NotFoundResponse'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+        description: '`temporarily_unavailable` - a capped share''s single-use URL cannot be recorded because Redis is unreachable; no download is counted. Retry after `Retry-After`.'
 
 /files/shared/{token}/{filename}:
   description: |
@@ -561,6 +567,9 @@
         $ref: '../../components/responses.yaml#/NotFoundResponse'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+        description: '`temporarily_unavailable` - a capped share''s single-use URL cannot be recorded because Redis is unreachable; no download is counted. Retry after `Retry-After`.'
 
 /files/shared/{token}/unlock:
   post:
@@ -582,7 +591,8 @@
       lock the recipients out, an address's first attempt in its
       `(token, ip)` window is still checked during the delay: the correct
       password unlocks, a wrong one gets the same `429`. A share without a
-      password also answers with a URL. An unserveable share returns `404`
+      password also answers with a URL, and needs no `password` in the body
+      (`{}` will do); a password share without one is `400`. An unserveable share returns `404`
       without counting an attempt. The limiter fails closed: while Redis is
       unreachable an attempt is refused with `503 temporarily_unavailable`
       and `Retry-After`, rather than going uncounted.
@@ -599,14 +609,14 @@
           maxLength: 64
           pattern: '^[A-Za-z0-9_-]{3,64}$'
     requestBody:
-      required: true
+      required: false
       content:
         application/json:
           schema:
             $ref: '../../components/files/schemas.yaml#/UnlockShareRequest'
     responses:
       '200':
-        description: Unlock succeeded. Navigate to `url` to download.
+        description: Unlock succeeded. Navigate to `url` to download (single-use for a share with `maxDownloads`, as on `GET /v1/files/shared/{token}`).
         headers:
           X-RateLimit-Limit:
             $ref: '../../components/headers.yaml#/X-RateLimit-Limit'

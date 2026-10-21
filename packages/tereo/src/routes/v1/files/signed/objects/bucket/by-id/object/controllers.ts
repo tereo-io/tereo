@@ -1,7 +1,10 @@
+import { answerReadPreconditions } from "../../../../../../../../utils/conditionalRequests.js";
+import { broadcastObjectInvalidate } from "../../../../../../../../utils/cacheBroadcast.js";
 import { emitObjectWrittenTx } from "../../../../../buckets/bucket/objects/events.js";
 import { assertBucketWritable } from "../../../../../../../../utils/bucketAccess.js";
 import { createEncryptStream } from "../../../../../../../../utils/encryption.js";
 import { parseContentType } from "../../../../../../../../utils/contentType.js";
+import { setAccessLog } from "../../../../../../../../middleware/accessLog.js";
 import { SYSTEM_USER_ID } from "../../../../../../../../definitions/index.js";
 import { logAuditTx } from "../../../../../../../../utils/outbox.js";
 import db from "../../../../../../../../utils/db/index.js";
@@ -34,19 +37,24 @@ import {
   pipeline,
   extractId,
   extractBucketName,
-  ensureShareStillServeable,
+  assertShareServeable,
+  assertSignerMayAccess,
+  forcesAttachment,
+  spendShareUrl,
   verifiedSignedUrl,
 } from "../../../../utils.js";
 
-export const downloadViaSignedUrl = async (req: Request, res: Response) => {
+const resolveSignedDownload = async (req: Request, res: Response) => {
   const id = extractId(req);
-  const bucketName = extractBucketName(req);
   const verified = verifiedSignedUrl(res);
-  await ensureShareStillServeable(verified);
+  const share = await assertShareServeable(verified);
 
-  const bucket = await db.buckets.getByName(bucketName);
+  const bucket = await db.buckets.getByName(extractBucketName(req));
+  if (!share && verified.by) {
+    await assertSignerMayAccess(verified.by, bucket, "read");
+  }
   // Signature binds the id, so a rename between signing and download still
-  // resolves to the same object. The current version's bytes are streamed,
+  // resolves to the same object. The current version's bytes are served,
   // unless the URL pins one (a share of a specific version).
   const object = await db.objects.getById(bucket.id, id);
   const current = verified.version
@@ -55,65 +63,87 @@ export const downloadViaSignedUrl = async (req: Request, res: Response) => {
   if (!current || !current.contentBlob || current.isDeleteMarker) {
     throw new NotFoundError("Object has no current content");
   }
-  const blob = current.contentBlob;
+  const contentType = current.contentType ?? "application/octet-stream";
+  const etag = current.etag ?? "";
+  const lastModified = verified.version ? current.createdAt : object.updatedAt;
 
-  // Presigned downloads authenticate by HMAC, not userId. Record via audit log
-  // so we have a trail of who signed the URL (keyVersion) and what it pointed
-  // at. The caller is the signed URL's issuer (best-effort anonymous). No DB
-  // write occurs on read; the audit row goes through the outbox in a tiny tx.
-  await db.$transaction(async (tx) => {
-    await logAuditTx(tx, {
-      auth: { userId: verified.by ?? SYSTEM_USER_ID, email: null },
-      organizationId: bucket.organizationId ?? undefined,
-      action: "CREATE",
-      entityType: "presignedDownload",
-      entityId: String(object.id),
-      entityName: object.objectKey,
-      metadata: {
-        bucketName: bucket.name,
-        objectKey: object.objectKey,
-        objectId: id,
-        versionId: current.id,
-        keyVersion: verified.keyVersion,
-      },
-    });
-  });
-
-  res.setHeader(
-    "Content-Type",
-    current.contentType ?? "application/octet-stream"
-  );
-  res.setHeader("ETag", `"${current.etag ?? ""}"`);
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("ETag", `"${etag}"`);
+  res.setHeader("Last-Modified", lastModified.toUTCString());
   res.setHeader("Cache-Control", "private, max-age=60");
-  // Parity with the authenticated download paths: never let the browser sniff a
-  // content type other than the one we declare.
   res.setHeader("X-Content-Type-Options", "nosniff");
-
-  // Disposition default is content-type driven (setContentDisposition): unsafe
-  // types like text/html, text/javascript, and image/svg+xml are always served
-  // as attachments so a signed link to user-uploaded content can't execute
-  // script in our origin. The `?disposition`/`?filename` query params are a
-  // presentation-only hint NOT in the HMAC canonical, so a caller can flip them
-  // without invalidating the signature — this is the intended affordance for
-  // share links forcing attachment on otherwise-inline types.
-  //
-  // Trust boundary: treat both values as fully untrusted user input.
-  //  - `disposition`: only the literal string `"attachment"` is honored, and it
-  //    can only *strengthen* the default (force attachment). It can never
-  //    request `inline`, so a tampered URL can't weaken disposition.
-  //  - `filename`: sanitized inside setContentDisposition (control chars,
-  //    double-quote, backslash → `_`) to prevent header injection; emitted as
-  //    an ASCII `filename=` and the real name in RFC 5987 `filename*=`.
-  const forceAttachment = req.query.disposition === "attachment";
+  // Unsafe types (text/html, image/svg+xml, …) are always attachments, so a
+  // signed link to uploaded content can't run script in our origin.
+  // `?disposition=attachment` is unsigned but can only force attachment; a
+  // filename is honored only when the signature binds it.
   setContentDisposition(res, {
-    contentType: current.contentType ?? "application/octet-stream",
+    contentType,
     objectKey: object.objectKey,
-    filenameOverride:
-      typeof req.query.filename === "string" ? req.query.filename : null,
-    forceAttachment,
+    filenameOverride: verified.filename,
+    forceAttachment: forcesAttachment(req),
   });
 
-  await sendBlobBody(req, res, blob, { etag: current.etag ?? "" });
+  return {
+    verified,
+    share,
+    bucket,
+    object,
+    current,
+    blob: current.contentBlob,
+    etag,
+    lastModified,
+  };
+};
+
+export const probeViaSignedUrl = async (req: Request, res: Response) => {
+  const { blob, etag, lastModified } = await resolveSignedDownload(req, res);
+  if (answerReadPreconditions(req, res, { etag, lastModified })) return;
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Content-Length", blob.sizeBytes.toString());
+  res.status(200).end();
+};
+
+export const downloadViaSignedUrl = async (req: Request, res: Response) => {
+  const { verified, share, bucket, object, current, blob, etag, lastModified } =
+    await resolveSignedDownload(req, res);
+  // A 304 sends no body, so it spends no nonce and writes no audit row.
+  if (answerReadPreconditions(req, res, { etag, lastModified })) return;
+
+  setAccessLog(res, {
+    bucketId: bucket.id,
+    objectId: object.id,
+    operation: "PRESIGNED_DOWNLOAD",
+  });
+
+  await sendBlobBody(
+    req,
+    res,
+    blob,
+    { etag, lastModified },
+    {
+      // In one transaction with the nonce, so a URL already spent leaves no
+      // audit row, and one that is spent always has its row.
+      beforeBody: () =>
+        db.$transaction(async (tx) => {
+          await logAuditTx(tx, {
+            auth: { userId: verified.by ?? SYSTEM_USER_ID, email: null },
+            organizationId: bucket.organizationId ?? undefined,
+            action: "CREATE",
+            entityType: "presignedDownload",
+            entityId: String(object.id),
+            entityName: object.objectKey,
+            metadata: {
+              bucketName: bucket.name,
+              objectKey: object.objectKey,
+              objectId: object.id,
+              versionId: current.id,
+              keyVersion: verified.keyVersion,
+            },
+          });
+          await spendShareUrl(verified, share);
+        }),
+    }
+  );
 };
 
 export const uploadViaSignedUrl = async (req: Request, res: Response) => {
@@ -128,6 +158,7 @@ export const uploadViaSignedUrl = async (req: Request, res: Response) => {
   }
 
   const bucket = await db.buckets.getByName(bucketName);
+  if (verified.by) await assertSignerMayAccess(verified.by, bucket, "write");
   assertBucketWritable(bucket);
   // Fails fast before the body streams; the write itself goes by id, so a
   // rename meanwhile lands it under the object's new key.
@@ -257,7 +288,13 @@ export const uploadViaSignedUrl = async (req: Request, res: Response) => {
     contentType,
     result.releasedBlobHashes
   );
+  await broadcastObjectInvalidate(bucket.name, result.object.objectKey);
 
+  setAccessLog(res, {
+    bucketId: bucket.id,
+    objectId: result.object.id,
+    operation: "PRESIGNED_UPLOAD",
+  });
   res.setHeader("ETag", `"${result.body.etag}"`);
   res.status(result.type === "updated" ? 200 : 201).json(result.body);
 };

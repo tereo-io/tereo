@@ -1,5 +1,6 @@
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { PERMISSION_CATALOG } from "../definitions/permissions.js";
+import { broadcastBucketInvalidate } from "./cacheBroadcast.js";
 import { compareSemver, SEMVER_PATTERN } from "./semver.js";
 import type { Declaration } from "../definitions/index.js";
 import { emitTx, logAuditTx } from "./outbox.js";
@@ -59,6 +60,8 @@ export const systemRoleItem = z.object({
   permissions: z.array(z.string().min(1).max(200)).max(1000).default([]),
 });
 
+const MAX_STORAGE_QUOTA = BigInt(1024 * 1024 * 1024 * 1024);
+
 export const bucketItem = z.object({
   bucketName: z
     .string()
@@ -70,7 +73,18 @@ export const bucketItem = z.object({
     ),
   description: z.string().max(500).optional(),
   policy: z.enum(["public", "private"]).default("private"),
-  storageQuotaBytes: z.number().int().positive().optional(),
+  // The API's limit, which a JSON number holds exactly; a digit string too.
+  storageQuotaBytes: z
+    .union([
+      z.number().int().positive().max(Number(MAX_STORAGE_QUOTA)),
+      z
+        .string()
+        .regex(/^\d+$/, "an integer")
+        .refine((v) => BigInt(v) > 0n && BigInt(v) <= MAX_STORAGE_QUOTA, {
+          message: "Storage quota must be positive and at most 1 TB",
+        }),
+    ])
+    .optional(),
 });
 
 export const eventTypeItem = z.object({
@@ -459,14 +473,17 @@ export const registerDeclaration = async (
     return { applied: true, changed: false };
   }
 
-  return prisma.$transaction(
-    async (tx) => {
+  const { result, bucketNames } = await prisma.$transaction(
+    async (tx): Promise<{ result: RegisterResult; bucketNames: string[] }> => {
       await lockRegistries(tx, [service.id]);
       const locked = await tx.service.findUniqueOrThrow({
         where: { id: service.id },
       });
       if (isOlder(locked.declarationVersion)) {
-        return ignored(locked.declarationVersion);
+        return {
+          result: ignored(locked.declarationVersion),
+          bucketNames: [],
+        };
       }
       if (locked.declarationHash === hash) {
         if (locked.declarationVersion !== version) {
@@ -475,10 +492,10 @@ export const registerDeclaration = async (
             data: { declarationVersion: version },
           });
         }
-        return { applied: true, changed: false };
+        return { result: { applied: true, changed: false }, bucketNames: [] };
       }
 
-      const { summary } = await applyDeclarationTx(
+      const { summary, bucketNames } = await applyDeclarationTx(
         tx,
         service,
         declaration,
@@ -489,10 +506,14 @@ export const registerDeclaration = async (
         { service: service.slug, version, hash, ...summary },
         "Registered declaration"
       );
-      return { applied: true, changed: true };
+      return { result: { applied: true, changed: true }, bucketNames };
     },
     { timeout: 30_000 }
   );
+  for (const name of new Set(bucketNames)) {
+    await broadcastBucketInvalidate(name);
+  }
+  return result;
 };
 
 interface ApplySummary {
@@ -521,7 +542,12 @@ export const applyDeclarationTx = async (
   actor: { userId: string; email: string | null },
   now: Date,
   meta: Record<string, unknown> = {}
-): Promise<{ changed: boolean; summary: ApplySummaryByKind }> => {
+): Promise<{
+  changed: boolean;
+  summary: ApplySummaryByKind;
+  /** Buckets written, for `broadcastBucketInvalidate` after commit. */
+  bucketNames: string[];
+}> => {
   const { version } = declaration;
   const hash = declarationHash(declaration);
   const stored = await tx.service.findUniqueOrThrow({
@@ -535,6 +561,7 @@ export const applyDeclarationTx = async (
     const none = { declared: 0, missing: 0 };
     return {
       changed: false,
+      bucketNames: [],
       summary: {
         permissions: none,
         systemRoles: none,
@@ -557,10 +584,11 @@ export const applyDeclarationTx = async (
     );
   }
 
+  const bucketNames: string[] = [];
   const summary = {
     permissions: await applyPermissions(tx, service, declaration, now),
     systemRoles: await applyRoles(tx, service, declaration, now),
-    buckets: await applyBuckets(tx, service, declaration, now),
+    buckets: await applyBuckets(tx, service, declaration, now, bucketNames),
     eventTypes: await applyEventTypes(tx, service, declaration, now),
   };
 
@@ -587,7 +615,7 @@ export const applyDeclarationTx = async (
     entityId: service.id,
     data: { slug: service.slug, version, hash, ...summary },
   });
-  return { changed: true, summary };
+  return { changed: true, summary, bucketNames };
 };
 
 /** Declared items clear `missing_since`/`retired_at`; the rest start missing. */
@@ -695,7 +723,8 @@ const applyBuckets = async (
   tx: Tx,
   service: RegistryService,
   d: ParsedDeclaration,
-  now: Date
+  now: Date,
+  touched: string[]
 ): Promise<ApplySummary> => {
   const names = d.buckets.map((b) => b.bucketName);
   const existing = await tx.bucket.findMany({
@@ -729,6 +758,7 @@ const applyBuckets = async (
                 : BigInt(b.storageQuotaBytes),
             serviceId: service.id,
             createdBy: userId!,
+            ownerId: userId!,
           },
         });
     // Core reaches its buckets in-process; an app service gets a grant on
@@ -753,7 +783,7 @@ const applyBuckets = async (
       });
     }
   }
-  const { count } = await tx.bucket.updateMany({
+  const dropped = await tx.bucket.updateManyAndReturn({
     where: {
       serviceId: service.id,
       name: { notIn: names },
@@ -761,8 +791,10 @@ const applyBuckets = async (
       retiredAt: null,
     },
     data: { missingSince: now },
+    select: { name: true },
   });
-  return { declared: names.length, missing: count };
+  touched.push(...names, ...dropped.map((b) => b.name));
+  return { declared: names.length, missing: dropped.length };
 };
 
 const applyEventTypes = async (
@@ -824,20 +856,30 @@ export const retireMissing = async (now = new Date()) => {
   );
   const where = { missingSince: { lte: cutoff }, retiredAt: null };
   const data = { retiredAt: now };
-  const [permissions, roles, buckets, eventTypes] = await prisma.$transaction([
-    prisma.permission.updateMany({ where, data }),
-    prisma.role.updateMany({ where, data }),
-    prisma.bucket.updateMany({ where, data }),
-    prisma.eventType.updateMany({ where, data }),
-  ]);
-  const result = {
-    permissions: permissions.count,
-    roles: roles.count,
-    buckets: buckets.count,
-    eventTypes: eventTypes.count,
-  };
-  if (Object.values(result).some((n) => n > 0)) {
-    logger.info(result, "Retired items missing from their declarations");
+  const { counts, retiredBuckets } = await prisma.$transaction(async (tx) => {
+    const permissions = await tx.permission.updateMany({ where, data });
+    const roles = await tx.role.updateMany({ where, data });
+    const buckets = await tx.bucket.updateManyAndReturn({
+      where,
+      data,
+      select: { name: true },
+    });
+    const eventTypes = await tx.eventType.updateMany({ where, data });
+    return {
+      counts: {
+        permissions: permissions.count,
+        roles: roles.count,
+        buckets: buckets.length,
+        eventTypes: eventTypes.count,
+      },
+      retiredBuckets: buckets.map((b) => b.name),
+    };
+  });
+  if (Object.values(counts).some((n) => n > 0)) {
+    logger.info(counts, "Retired items missing from their declarations");
   }
-  return result;
+  for (const name of new Set(retiredBuckets)) {
+    await broadcastBucketInvalidate(name);
+  }
+  return { ...counts, retiredBuckets };
 };

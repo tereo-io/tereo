@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getTestPrincipalToken } from "../utils/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
+import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
 import {
@@ -758,6 +759,74 @@ describe("Bucket Management", () => {
       );
 
       expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    });
+  });
+
+  describe("bucket races and limits", () => {
+    const auth = () => ({
+      headers: { Authorization: `Bearer ${testToken}` },
+      validateStatus: () => true,
+    });
+
+    it("refuses a rate limit whose requestCost exceeds maxTokens", async () => {
+      const bucket = await createTestBucket(testToken);
+      const res = await axios.put(
+        `${BASE_URL}/buckets/${bucket.name}`,
+        {
+          rateLimitConfig: { tokensPerSecond: 1, maxTokens: 2, requestCost: 3 },
+        },
+        auth()
+      );
+      expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      const equal = await axios.put(
+        `${BASE_URL}/buckets/${bucket.name}`,
+        {
+          rateLimitConfig: { tokensPerSecond: 1, maxTokens: 2, requestCost: 2 },
+        },
+        auth()
+      );
+      expect(equal.status).toBe(HTTP_STATUS.OK);
+    });
+
+    it("deletes once when two deletes race: one audit entry, the other 404", async () => {
+      const bucket = await createTestBucket(testToken);
+      const statuses = (
+        await Promise.all(
+          [0, 1, 2].map(() =>
+            axios.delete(`${BASE_URL}/buckets/${bucket.name}`, auth())
+          )
+        )
+      )
+        .map((r) => r.status)
+        .sort();
+      expect(statuses).toEqual([
+        HTTP_STATUS.NO_CONTENT,
+        HTTP_STATUS.NOT_FOUND,
+        HTTP_STATUS.NOT_FOUND,
+      ]);
+      const entries = await prisma.auditLogEntry.count({
+        where: {
+          entityType: "bucket",
+          entityId: String(bucket.id),
+          action: "DELETE",
+        },
+      });
+      expect(entries).toBe(1);
+    });
+
+    it("does not update a bucket deleted since it was read", async () => {
+      const bucket = await createTestBucket(testToken);
+      await prisma.bucket.update({
+        where: { id: bucket.id },
+        data: { deletedAt: new Date() },
+      });
+      await expect(
+        db.buckets.update(bucket.id, { description: "after delete" })
+      ).rejects.toMatchObject({ statusCode: 404 });
+      const row = await prisma.bucket.findUniqueOrThrow({
+        where: { id: bucket.id },
+      });
+      expect(row.description).not.toBe("after delete");
     });
   });
 });

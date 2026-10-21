@@ -1,20 +1,26 @@
+import { isClaimHeld } from "../../../../../../../../../utils/uploadIdempotency.js";
 import { setAccessLog } from "../../../../../../../../../middleware/accessLog.js";
-import { PayloadTooLargeError } from "../../../../../../../../../utils/errors.js";
 import { validateParams } from "../../../../../../../../../utils/validateReq.js";
+import { assertMultipartFits, multipartCompleteClaim } from "../../../utils.js";
 import { validateUser } from "../../../../../../../../../middleware/auth.js";
 import { stagePart } from "../../../../../../../../../utils/storage.js";
 import { logger } from "../../../../../../../../../utils/logger.js";
 import db from "../../../../../../../../../utils/db/index.js";
-import { assertMultipartFits } from "../../../utils.js";
 import env from "../../../../../../../../../env.js";
 import { partParamsSchema } from "./schemas.js";
 import { Request, Response } from "express";
 import fs from "fs/promises";
+import path from "path";
 import {
   assertUploadInBucket,
   getAccessibleBucket,
   validateMultipartOwnership,
 } from "../../../../../../../../../utils/bucketAccess.js";
+import {
+  AppError,
+  ConflictError,
+  PayloadTooLargeError,
+} from "../../../../../../../../../utils/errors.js";
 
 export const uploadPart = async (req: Request, res: Response) => {
   const auth = validateUser(req);
@@ -74,15 +80,32 @@ export const uploadPart = async (req: Request, res: Response) => {
         etag: staged.etag,
         fsPath: staged.fsPath,
       },
-      (otherParts) =>
-        assertMultipartFits(
-          upload,
-          bucket,
-          otherParts + BigInt(staged.sizeBytes)
-        )
+      {
+        // The complete reads the parts while it assembles them; a part
+        // replaced under it would unlink a file it is reading.
+        assertNotCompleting: async () => {
+          if (await isClaimHeld(multipartCompleteClaim(params.uploadId))) {
+            throw new ConflictError(
+              "This multipart upload is being completed; its parts can no longer change",
+              "multipart_complete_in_progress"
+            );
+          }
+        },
+        assertFits: (otherParts) =>
+          assertMultipartFits(
+            upload,
+            bucket,
+            otherParts + BigInt(staged.sizeBytes)
+          ),
+      }
     ));
   } catch (err) {
     await fs.unlink(staged.fsPath).catch(() => {});
+    // Staging recreated the dir of an upload finalized meanwhile; rmdir
+    // leaves it if another part is still in it.
+    if (err instanceof AppError && err.code === "upload_not_active") {
+      await fs.rmdir(path.dirname(staged.fsPath)).catch(() => {});
+    }
     throw err;
   }
 

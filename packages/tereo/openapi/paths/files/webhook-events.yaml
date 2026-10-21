@@ -98,6 +98,60 @@ file-service.bucket.updated:
       2XX:
         description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
 
+file-service.bucket.owner-changed:
+  post:
+    tags:
+      - Files - Buckets
+    summary: Bucket ownership transferred
+    description: |-
+      Fired by `PUT /v1/files/buckets/{name}/owner` when the owner changes. `entityId` is the bucket's integer id.
+
+      A new owner who held no active grant also gets one, emitted as `file-service.permission.granted`.
+
+      Only emitted for buckets that belong to an organization.
+    operationId: webhookFilesBucketOwnerChanged
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum:
+                      - file-service.bucket.owner-changed
+                  entityType:
+                    type: string
+                    enum:
+                      - bucket
+                  data:
+                    type: object
+                    properties:
+                      bucketName:
+                        type: string
+                      ownerId:
+                        type: string
+                        format: uuid
+                      previousOwnerId:
+                        type: string
+                        format: uuid
+                    required:
+                      - bucketName
+                      - ownerId
+                      - previousOwnerId
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+
 file-service.bucket.deleted:
   post:
     tags:
@@ -222,7 +276,7 @@ file-service.object.updated:
       - Files - Objects
     summary: Object updated
     description: |-
-      Fired when an upload (authenticated, presigned or multipart) overwrites an existing object, and on every `PATCH /v1/files/buckets/{name}/objects/by-id/{id}` (rename, metadata, tags, content type or `deleteAfter`). `entityId` is the object id.
+      Fired when an upload (authenticated, presigned or multipart) overwrites an existing object, on every `PATCH /v1/files/buckets/{name}/objects/by-id/{id}` (rename, metadata, tags, content type or `deleteAfter`), and when a version restore undeletes a deleted object (alongside `file-service.object.version.restored`). `entityId` is the object id.
 
       The `data` shape depends on the path that fired it.
 
@@ -321,6 +375,45 @@ file-service.object.updated:
                           - objectId
                           - renamed
                           - branchedVersion
+                      - type: object
+                        description: '`POST /v1/files/buckets/{name}/objects/by-id/{id}/versions/{versionId}/restore` that undeleted the object — its restored content.'
+                        properties:
+                          bucketName:
+                            type: string
+                          objectKey:
+                            type: string
+                          objectId:
+                            type: string
+                            format: uuid
+                          contentType:
+                            type: string
+                          sizeBytes:
+                            type: string
+                            pattern: ^[0-9]+$
+                            description: Plaintext size in bytes, as a decimal string.
+                          etag:
+                            type: string
+                          tags:
+                            type: array
+                            items:
+                              type: string
+                          via:
+                            type: string
+                            enum:
+                              - restore
+                          restoredFromVersionId:
+                            type: string
+                            format: uuid
+                        required:
+                          - bucketName
+                          - objectKey
+                          - objectId
+                          - contentType
+                          - sizeBytes
+                          - etag
+                          - tags
+                          - via
+                          - restoredFromVersionId
     responses:
       2XX:
         description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
@@ -386,7 +479,7 @@ file-service.objects.bulk-deleted:
       - Files - Objects
     summary: Objects bulk-deleted
     description: |-
-      Fired once per `POST /v1/files/buckets/{name}/objects/bulk-delete`; no per-object events are emitted. `entityId` is the bucket's integer id.
+      Fired once per committed batch of up to 100 objects of a `POST /v1/files/buckets/{name}/objects/bulk-delete`, in the batch's transaction, so a request that stops part-way still reports every delete that committed; no per-object events are emitted. `batchIndex` counts a request's batches from 0. Whether the request stopped at its cap is in its response (`truncated`), not in the events. `entityId` is the bucket's integer id.
 
       Only emitted for buckets that belong to an organization.
     operationId: webhookFilesObjectsBulkDeleted
@@ -446,17 +539,19 @@ file-service.objects.bulk-deleted:
                               - kind
                               - ids
                         description: The request's selector.
+                      batchIndex:
+                        type: integer
+                        minimum: 0
+                        description: The batch's position in its request, from 0.
                       deletedCount:
                         type: integer
-                      truncated:
-                        type: boolean
-                        description: True when the per-request cap stopped the delete early.
+                        description: Objects deleted in this batch.
                       versionedTombstone:
                         type: boolean
                       objects:
                         type: array
                         maxItems: 100
-                        description: The first 100 deleted objects; use `deletedCount` for the total.
+                        description: The objects deleted in this batch.
                         items:
                           type: object
                           properties:
@@ -471,8 +566,8 @@ file-service.objects.bulk-deleted:
                     required:
                       - bucketName
                       - filter
+                      - batchIndex
                       - deletedCount
-                      - truncated
                       - versionedTombstone
                       - objects
     responses:
@@ -677,7 +772,7 @@ file-service.objects.versions.purged:
       - Files - Objects
     summary: Non-current versions purged
     description: |-
-      Fired once per `POST /v1/files/buckets/{name}/objects/purge-non-current-versions`. `entityId` is the bucket's integer id.
+      Fired once per committed batch of up to 100 versions of a `POST /v1/files/buckets/{name}/objects/purge-non-current-versions`, in the batch's transaction, as `file-service.objects.bulk-deleted`. `batchIndex` counts a request's batches from 0; whether the request stopped at its cap is in its response (`truncated`). `entityId` is the bucket's integer id.
 
       Only emitted for buckets that belong to an organization.
     operationId: webhookFilesObjectsVersionsPurged
@@ -709,19 +804,30 @@ file-service.objects.versions.purged:
                     properties:
                       bucketName:
                         type: string
+                      batchIndex:
+                        type: integer
+                        minimum: 0
+                        description: The batch's position in its request, from 0.
                       purgedCount:
                         type: integer
+                        description: Versions purged in this batch.
                       bytesFreed:
                         type: string
                         pattern: ^[0-9]+$
-                        description: Bytes released, as a decimal string.
-                      truncated:
-                        type: boolean
+                        description: Bytes this batch released, as a decimal string.
+                      versionIds:
+                        type: array
+                        maxItems: 100
+                        items:
+                          type: string
+                          format: uuid
+                        description: The versions purged in this batch.
                     required:
                       - bucketName
+                      - batchIndex
                       - purgedCount
                       - bytesFreed
-                      - truncated
+                      - versionIds
     responses:
       2XX:
         description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
@@ -732,7 +838,7 @@ file-service.permission.granted:
       - Files - Permissions
     summary: Bucket permission granted
     description: |-
-      Fired by `POST /v1/files/buckets/{name}/permissions`, including re-granting a previously revoked permission, and by `POST /v1/files/buckets` for the creator's own grant (`canRead`, `canWrite` and `canDelete` all true, `grantedBy` the creator). `entityId` is the permission's integer id.
+      Fired by `POST /v1/files/buckets/{name}/permissions`, including re-granting a previously revoked permission, by `POST /v1/files/buckets` for the creator's own grant (`canRead`, `canWrite` and `canDelete` all true, `grantedBy` the creator), and by `PUT /v1/files/buckets/{name}/owner` for a new owner without an active grant (all three true, `grantedBy` the admin). `entityId` is the permission's integer id.
 
       Only emitted for buckets that belong to an organization.
     operationId: webhookFilesPermissionGranted
@@ -794,7 +900,7 @@ file-service.permission.revoked:
       - Files - Permissions
     summary: Bucket permission revoked
     description: |-
-      Fired by `DELETE /v1/files/buckets/{name}/permissions/{userId}`. `entityId` is the permission's integer id.
+      Fired by `DELETE /v1/files/buckets/{name}/permissions/{userId}`, and by `DELETE /v1/admin/organizations/{id}/members/{userId}` for each grant the removed member held on the organization's buckets. `entityId` is the permission's integer id.
 
       Only emitted for buckets that belong to an organization.
     operationId: webhookFilesPermissionRevoked

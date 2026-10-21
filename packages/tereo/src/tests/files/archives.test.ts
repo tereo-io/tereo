@@ -355,6 +355,42 @@ describe("Archive stream builder", () => {
     expect(entries["lazy/7.txt"].toString()).toBe(contents[7]);
   });
 
+  it("lists a missing or unverifiable blob in MISSING_FILES.txt and carries on", async () => {
+    const [first, gone, forged, ...rest] = objects.slice(0, 6);
+    const { stream, finalized } = buildArchiveStream({
+      objects: [
+        first,
+        {
+          ...gone,
+          contentBlob: {
+            ...gone.contentBlob,
+            fsPath: `${gone.contentBlob.fsPath}.deleted`,
+          },
+        },
+        // Decrypting under another hash fails the GCM tag.
+        {
+          ...forged,
+          contentBlob: { ...forged.contentBlob, hash: "ab".repeat(32) },
+        },
+        ...rest,
+      ],
+      format: "zip",
+    });
+
+    const entries = await readArchiveEntries(stream);
+    await finalized;
+    expect(Object.keys(entries).sort()).toEqual(
+      [first, ...rest]
+        .map((o) => o.objectKey)
+        .concat("MISSING_FILES.txt")
+        .sort()
+    );
+    const manifest = entries["MISSING_FILES.txt"].toString();
+    expect(manifest).toContain(`${gone.objectKey}\tcontent file is missing`);
+    expect(manifest).toContain(forged.objectKey);
+    expect(manifest).not.toContain(gone.contentBlob.fsPath);
+  });
+
   it("closes the entry it is reading and rejects when aborted", async () => {
     const before = openFiles();
     const { stream, finalized, abort } = buildArchiveStream({

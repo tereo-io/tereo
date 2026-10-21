@@ -50,11 +50,18 @@ const corsConfigSchema = z
     }
   );
 
-const rateLimitConfigSchema = z.object({
-  tokensPerSecond: z.coerce.number().positive().max(10_000),
-  maxTokens: z.coerce.number().int().positive().max(100_000),
-  requestCost: z.coerce.number().positive().default(1),
-});
+const rateLimitConfigSchema = z
+  .object({
+    tokensPerSecond: z.coerce.number().positive().max(10_000),
+    maxTokens: z.coerce.number().int().positive().max(100_000),
+    requestCost: z.coerce.number().positive().default(1),
+  })
+  .refine((cfg) => cfg.requestCost <= cfg.maxTokens, {
+    // The bucket never holds more than maxTokens, so a dearer request is
+    // refused forever.
+    path: ["requestCost"],
+    message: "requestCost cannot exceed maxTokens",
+  });
 
 export const updateBucketSchema = z.object({
   description: z.string().max(500).optional(),

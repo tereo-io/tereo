@@ -12,6 +12,7 @@ import { createReadStream } from "fs";
 import { createHash } from "crypto";
 import {
   canonicalJson,
+  hasStoredResult,
   requireIdempotencyKey,
   withIdempotency,
 } from "../../../../../../../utils/uploadIdempotency.js";
@@ -24,36 +25,32 @@ import {
   saveBlobStream,
 } from "../../../../../../../utils/storage.js";
 import {
-  PreconditionFailedError,
   BadRequestError,
   NotFoundError,
 } from "../../../../../../../utils/errors.js";
 import {
   assertObjectKeyNotReserved,
   cleanupMulterTempFile,
-  downloadCacheControl,
   extractTagsFromRequest,
   getBucket,
   handleMetadata,
   parseEtagPreconditions,
+  prepareDownload,
   queueObjectWriteFollowUps,
+  seesBucketHistory,
   sendBlobBody,
   serializeObject,
-  setContentDisposition,
   standardizeObjectKey,
   validateMimeType,
 } from "../utils.js";
 
-function etagMatches(provided: string[] | null, actual: string): boolean {
-  if (!provided) return false;
-  if (provided.includes("*")) return true;
-  return provided.includes(actual);
-}
+const putObjectScope = (userId: string, bucketId: number) =>
+  `user:${userId}:bucket:${bucketId}:put-object`;
 
 /**
  * Runs before the multipart body is read, so a request that would be refused
- * anyway (no Idempotency-Key, bad key, no write access) never has its file
- * staged to disk.
+ * anyway (no Idempotency-Key, bad key, no write access, a declared length the
+ * quota has no room for) never has its file staged to disk.
  */
 export const authorizeUpload = async (
   req: Request,
@@ -63,10 +60,27 @@ export const authorizeUpload = async (
   const auth = validateUser(req);
   standardizeObjectKey(req);
   const params = validateParams(objectParamsSchema, req);
-  requireIdempotencyKey(req.header("Idempotency-Key"));
-  res.locals.uploadBucket = await getBucket(params.name, auth);
+  const idempotencyKey = requireIdempotencyKey(req.header("Idempotency-Key"));
+  const bucket = await getBucket(params.name, auth);
+  res.locals.uploadBucket = bucket;
   // After the access check, so a caller without access learns nothing.
   assertObjectKeyNotReserved(params.objectKey);
+  const declared = Number(req.headers["content-length"]);
+  // A retry of an upload that filled the bucket gets its stored response.
+  if (
+    Number.isSafeInteger(declared) &&
+    declared > 0 &&
+    !(await hasStoredResult(
+      putObjectScope(auth.userId, bucket.id),
+      idempotencyKey
+    ))
+  ) {
+    await db.buckets.assertUploadMayFit(
+      bucket.id,
+      params.objectKey,
+      BigInt(declared)
+    );
+  }
   next();
 };
 
@@ -125,14 +139,14 @@ const storeUpload = async (req: Request, res: Response) => {
 
   // A replay or refusal never reaches the write, which places or drops the
   // staged file; the `finally` below drops it then.
-  const idem = await withIdempotency(
+  const idem = await withIdempotency<ReturnType<typeof serializeObject>>(
     {
-      scope: `user:${auth.userId}:bucket:${bucket.id}:put-object`,
+      scope: putObjectScope(auth.userId, bucket.id),
       key: idempotencyKey,
       requestHash,
       userId: auth.userId,
     },
-    async () => {
+    async (persist) => {
       let result;
       try {
         // Wrap upsertWithBlob + audit/webhook outbox in a single transaction
@@ -152,10 +166,7 @@ const storeUpload = async (req: Request, res: Response) => {
               tags,
               createdBy: auth.userId,
               stagedPath: saved.stagedPath,
-              preconditions: {
-                ifMatch: preconditions.ifMatch,
-                ifNoneMatchWildcard: preconditions.ifNoneMatchWildcard,
-              },
+              preconditions,
             },
             saved.fsPath,
             saved.keyMaterial,
@@ -181,6 +192,11 @@ const storeUpload = async (req: Request, res: Response) => {
           });
 
           await emitObjectWrittenTx(tx, bucket, upsert, "direct");
+
+          await persist(tx, {
+            status: upsert.type === "updated" ? 200 : 201,
+            body: serialized,
+          });
 
           return { ...upsert, body: serialized };
         });
@@ -220,10 +236,11 @@ const storeUpload = async (req: Request, res: Response) => {
 };
 
 /**
- * Download an object (or a specific version / thumbnail) from a bucket.
- * GET /buckets/:name/objects/*objectKey
+ * What a download by key serves: the current version, the one `?versionId=`
+ * names, or a thumbnail of it. A version no longer current is not served to
+ * a caller who does not see the bucket's history (`seesBucketHistory`).
  */
-export const downloadObject = async (req: Request, res: Response) => {
+const resolveKeyDownload = async (req: Request) => {
   standardizeObjectKey(req);
   const params = validateParams(objectParamsSchema, req);
   const query = validateQuery(downloadQuerySchema, req);
@@ -241,116 +258,98 @@ export const downloadObject = async (req: Request, res: Response) => {
     object = thumb;
   }
 
-  let activeVersion = object.versions[0];
-  if (!activeVersion) throw new NotFoundError("Object has no current version");
+  let version = object.versions[0];
+  if (!version) throw new NotFoundError("Object has no current version");
+  let lastModified = object.updatedAt;
 
-  // Specific version override.
   if (query.versionId) {
-    const version = await db.objectVersions.getByVersionId(
+    const pinned = await db.objectVersions.getByVersionId(
       object.id,
       query.versionId
     );
-    if (!version.contentBlob) {
+    if (!pinned.isCurrent && !(await seesBucketHistory(req, bucket))) {
+      throw new NotFoundError("Version not found");
+    }
+    if (!pinned.contentBlob) {
       throw new NotFoundError(
         "Requested version has no content (delete marker)"
       );
     }
-    activeVersion = version;
+    version = pinned;
+    lastModified = pinned.createdAt;
   }
 
-  if (!activeVersion.contentBlob || activeVersion.isDeleteMarker) {
+  if (!version.contentBlob || version.isDeleteMarker) {
     throw new NotFoundError("Object has no retrievable content");
   }
-  const contentBlob = activeVersion.contentBlob;
-  const etag = activeVersion.etag ?? "";
+  return {
+    bucket,
+    parent,
+    object,
+    version,
+    contentBlob: version.contentBlob,
+    lastModified,
+    pinnedVersion: !!query.versionId && !query.thumbnail,
+  };
+};
 
-  const preconditions = parseEtagPreconditions(req);
-  if (
-    preconditions.ifNoneMatch &&
-    etagMatches(preconditions.ifNoneMatch, etag)
-  ) {
-    res.status(304).end();
-    return;
-  }
-  if (preconditions.ifMatch && !etagMatches(preconditions.ifMatch, etag)) {
-    throw new PreconditionFailedError("ETag mismatch (If-Match)");
-  }
+/**
+ * The headers of a download by key; true when its preconditions ended the
+ * response.
+ */
+const prepareKeyDownload = (
+  req: Request,
+  res: Response,
+  target: Awaited<ReturnType<typeof resolveKeyDownload>>
+) => {
+  const handled = prepareDownload(req, res, {
+    bucket: target.bucket,
+    pinnedVersion: target.pinnedVersion,
+    objectKey: target.object.objectKey,
+    contentType: target.version.contentType,
+    etag: target.version.etag ?? "",
+    lastModified: target.lastModified,
+  });
+  // The parent's id: a thumbnail is not addressable by its own.
+  res.setHeader("X-Object-Id", target.parent.id);
+  return handled;
+};
+
+/**
+ * Download an object (or a specific version / thumbnail) from a bucket.
+ * GET /buckets/:name/objects/*objectKey
+ */
+export const downloadObject = async (req: Request, res: Response) => {
+  const target = await resolveKeyDownload(req);
+  if (prepareKeyDownload(req, res, target)) return;
 
   setAccessLog(res, {
-    bucketId: bucket.id,
-    objectId: object.id,
+    bucketId: target.bucket.id,
+    objectId: target.object.id,
     operation: "DOWNLOAD_OBJECT",
   });
 
-  res.setHeader(
-    "Content-Type",
-    activeVersion.contentType ?? "application/octet-stream"
-  );
-  res.setHeader("ETag", `"${etag}"`);
-  res.setHeader("Last-Modified", object.updatedAt.toUTCString());
-  res.setHeader(
-    "Cache-Control",
-    downloadCacheControl(bucket, !!query.versionId && !query.thumbnail)
-  );
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  // The parent's id: a thumbnail is not addressable by its own.
-  res.setHeader("X-Object-Id", parent.id);
-  setContentDisposition(res, {
-    contentType: activeVersion.contentType ?? "application/octet-stream",
-    objectKey: object.objectKey,
-  });
-
-  await sendBlobBody(req, res, contentBlob, {
-    etag,
-    lastModified: object.updatedAt,
+  await sendBlobBody(req, res, target.contentBlob, {
+    etag: target.version.etag ?? "",
+    lastModified: target.lastModified,
   });
 };
 
 /**
- * Get object metadata.
+ * The headers `GET` would send, without the body.
  * HEAD /buckets/:name/objects/*objectKey
  */
 export const getObjectMetadata = async (req: Request, res: Response) => {
-  standardizeObjectKey(req);
-  const params = validateParams(objectParamsSchema, req);
-
-  const bucket = await getReadableBucket(req, params.name);
-
-  const object = await db.objects.getByKey(bucket.id, params.objectKey);
-  const current = object.versions[0];
-  if (!current || !current.contentBlob) {
-    throw new NotFoundError("Object has no current content");
-  }
-
-  const etag = current.etag ?? "";
-  const preconditions = parseEtagPreconditions(req);
-  if (
-    preconditions.ifNoneMatch &&
-    etagMatches(preconditions.ifNoneMatch, etag)
-  ) {
-    res.status(304).end();
-    return;
-  }
-  if (preconditions.ifMatch && !etagMatches(preconditions.ifMatch, etag)) {
-    res.status(412).end();
-    return;
-  }
+  const target = await resolveKeyDownload(req);
+  if (prepareKeyDownload(req, res, target)) return;
 
   setAccessLog(res, {
-    bucketId: bucket.id,
-    objectId: object.id,
+    bucketId: target.bucket.id,
+    objectId: target.object.id,
     operation: "GET_OBJECT_METADATA",
   });
 
-  res.setHeader(
-    "Content-Type",
-    current.contentType ?? "application/octet-stream"
-  );
-  res.setHeader("Content-Length", current.contentBlob.sizeBytes.toString());
   res.setHeader("Accept-Ranges", "bytes");
-  res.setHeader("ETag", `"${etag}"`);
-  res.setHeader("Last-Modified", object.updatedAt.toUTCString());
-  res.setHeader("X-Object-Id", object.id);
-
+  res.setHeader("Content-Length", target.contentBlob.sizeBytes.toString());
   res.status(200).end();
 };

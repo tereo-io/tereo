@@ -72,7 +72,7 @@ describe("downloads with non-Latin-1 filenames", () => {
     expect(encodedName(res.headers["content-disposition"])).toBe(CYRILLIC);
   });
 
-  it("serves a signed download with an emoji ?filename=", async () => {
+  it("ignores a ?filename= added to a signed URL", async () => {
     const presign = await axios.post<{ url: string }>(
       `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${objectId}/presign`,
       { operation: "read", expiresInSeconds: 60 },
@@ -82,7 +82,7 @@ describe("downloads with non-Latin-1 filenames", () => {
     url.searchParams.set("filename", EMOJI);
     const res = await axios.get(url.toString(), { validateStatus: () => true });
     expect(res.status).toBe(HTTP_STATUS.OK);
-    expect(encodedName(res.headers["content-disposition"])).toBe(EMOJI);
+    expect(encodedName(res.headers["content-disposition"])).toBe("report.pdf");
   });
 
   it.each([CYRILLIC, EMOJI])(

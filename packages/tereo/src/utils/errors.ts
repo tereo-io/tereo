@@ -349,10 +349,27 @@ const errorResponse = (err: Error): ErrorResponse => {
   };
 };
 
+// Set by a download before its body fails; on the error they would describe
+// the JSON body as the file (a 416 passes its own `Content-Range`).
+const REPRESENTATION_HEADERS = [
+  "Content-Disposition",
+  "Content-Range",
+  "ETag",
+  "Last-Modified",
+];
+
 const writeError = (
   res: Response,
   { status, code, message, details, headers }: ErrorResponse
 ): void => {
+  if (res.headersSent) {
+    // The status line is out: only a reset tells the client the body is cut.
+    res.destroy();
+    return;
+  }
+  for (const name of REPRESENTATION_HEADERS) res.removeHeader(name);
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
   for (const [name, value] of Object.entries(headers ?? {})) {
     res.setHeader(name, value);
   }

@@ -1,3 +1,4 @@
+import { broadcastBucketInvalidate } from "../../../../utils/cacheBroadcast.js";
 import { BucketPolicy } from "../../../../../prisma/generated/client/index.js";
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
 import { assertBucketNameUnreserved } from "../../../../utils/registry.js";
@@ -98,6 +99,7 @@ export const createBucket = async (req: Request, res: Response) => {
         policy: body.policy as BucketPolicy,
         storageQuotaBytes: body.storageQuotaBytes || undefined,
         createdBy: auth.userId,
+        ownerId: auth.userId,
         organizationId: auth.organizationId ?? undefined,
       },
       tx
@@ -131,7 +133,8 @@ export const createBucket = async (req: Request, res: Response) => {
     }
 
     // The creator's object access is an ordinary grant: listed with the
-    // others, and revocable like them.
+    // others, and revocable like them. Managing the bucket as its owner
+    // needs it too.
     const grant = await db.bucketPermissions.create(
       {
         bucketId: created.id,
@@ -181,6 +184,10 @@ export const createBucket = async (req: Request, res: Response) => {
   });
 
   setAccessLog(res, { bucketId: bucket.id, operation: "CREATE_BUCKET" });
+
+  // A cache may hold the name's earlier answer: not found, or a deleted
+  // bucket of the same name.
+  await broadcastBucketInvalidate(bucket.name);
 
   res.status(201).json(serializeBucket(bucket));
 };

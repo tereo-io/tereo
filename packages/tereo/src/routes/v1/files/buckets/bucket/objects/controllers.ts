@@ -2,9 +2,7 @@ import { broadcastObjectInvalidate } from "../../../../../../utils/cacheBroadcas
 import { enqueueOrphanBlobCleanupSafe } from "../../../../../../jobs/index.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { logAuditTx, emitTx } from "../../../../../../utils/outbox.js";
-import { serializeDeletedObject, serializeObject } from "./utils.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
-import { BadRequestError } from "../../../../../../utils/errors.js";
 import { withUserRefs } from "../../../../../../utils/users.js";
 import db from "../../../../../../utils/db/index.js";
 import { bucketNameSchema } from "../../schemas.js";
@@ -20,6 +18,10 @@ import {
   validateQuery,
 } from "../../../../../../utils/validateReq.js";
 import {
+  BadRequestError,
+  ForbiddenError,
+} from "../../../../../../utils/errors.js";
+import {
   applyCursorToWhere,
   decodeListCursor,
   encodeListCursor,
@@ -30,6 +32,11 @@ import {
   listObjectsQuerySchema,
   listPrefixesQuerySchema,
 } from "./schemas.js";
+import {
+  seesBucketHistory,
+  serializeDeletedObject,
+  serializeObject,
+} from "./utils.js";
 
 /**
  * List objects in a bucket
@@ -46,6 +53,12 @@ export const listObjects = async (req: Request, res: Response) => {
   const { deleted } = validateQuery(listObjectsExtraQuerySchema, req);
 
   if (deleted) {
+    if (!(await seesBucketHistory(req, bucket))) {
+      validateUser(req);
+      throw new ForbiddenError(
+        "Listing deleted objects takes read access to the bucket"
+      );
+    }
     // A deleted object's current version is its delete marker: no content
     // to size.
     if (query.sort === "sizeBytes") {
@@ -239,11 +252,10 @@ export const listObjectPrefixes = async (req: Request, res: Response) => {
  * Per-object semantics match `DELETE /buckets/:name/objects/by-id/:id`: in a
  * versioned bucket a delete-marker is inserted; in a non-versioned bucket the
  * current version row is dropped and its blob's refcount decremented. One
- * audit entry is written per batch of up to 100 objects, and one webhook
- * event for the whole request (emitting per-object events would flood webhook
- * consumers on large folder deletes);
- * cache invalidation is broadcast per key so SDK consumers drop their cached
- * rows promptly.
+ * audit entry and one webhook event are written per batch of up to 100
+ * objects, in the batch's transaction (per-object events would flood webhook
+ * consumers on large folder deletes); cache invalidation is broadcast per key
+ * so SDK consumers drop their cached rows promptly.
  */
 export const bulkDeleteObjects = async (req: Request, res: Response) => {
   const auth = validateUser(req);
@@ -259,16 +271,16 @@ export const bulkDeleteObjects = async (req: Request, res: Response) => {
 
   const entityName =
     filter.kind === "prefix" ? filter.prefix : `${bucket.name} ids`;
-  let versionedTombstone = bucket.versioningEnabled;
-  // One audit entry per batch, in the batch's transaction: a request stopped
-  // part-way leaves an entry for every delete that committed.
+  let batchIndex = 0;
+  // An audit entry and an event per batch, in the batch's transaction: a
+  // request stopped part-way leaves both for every delete that committed.
   const result = await db.objects.removeObjectsBulk(
     bucket.id,
     filter,
     auth.userId,
     {
       onBatch: async (tx, batch) => {
-        versionedTombstone = batch.versioningEnabled;
+        const index = batchIndex++;
         await logAuditTx(tx, {
           auth,
           organizationId: bucket.organizationId ?? undefined,
@@ -284,6 +296,22 @@ export const bulkDeleteObjects = async (req: Request, res: Response) => {
             versionedTombstone: batch.versioningEnabled,
           },
         });
+        if (bucket.organizationId) {
+          await emitTx(tx, {
+            eventType: "file-service.objects.bulk-deleted",
+            organizationId: bucket.organizationId,
+            entityType: "bucket",
+            entityId: String(bucket.id),
+            data: {
+              bucketName: bucket.name,
+              filter,
+              batchIndex: index,
+              deletedCount: batch.deleted.length,
+              versionedTombstone: batch.versioningEnabled,
+              objects: batch.deleted,
+            },
+          });
+        }
       },
     }
   );
@@ -300,30 +328,6 @@ export const bulkDeleteObjects = async (req: Request, res: Response) => {
   const uniqueReleased = Array.from(new Set(result.releasedBlobHashes));
   for (const hash of uniqueReleased) {
     enqueueOrphanBlobCleanupSafe(hash);
-  }
-
-  // The one summary event per request goes out after the batches.
-  if (bucket.organizationId) {
-    const organizationId = bucket.organizationId;
-    await db.$transaction(async (tx) => {
-      await emitTx(tx, {
-        eventType: "file-service.objects.bulk-deleted",
-        organizationId,
-        entityType: "bucket",
-        entityId: String(bucket.id),
-        data: {
-          bucketName: bucket.name,
-          filter,
-          deletedCount: result.deletedObjects.length,
-          truncated: result.truncated,
-          versionedTombstone,
-          // Cap the embedded object list so a 10K delete doesn't produce a
-          // multi-MB webhook payload. Consumers who need the full list can
-          // read the per-batch audit entries.
-          objects: result.deletedObjects.slice(0, 100),
-        },
-      });
-    });
   }
 
   // Per-key cache invalidation so SDK consumers drop their cached rows.
@@ -348,8 +352,8 @@ export const bulkDeleteObjects = async (req: Request, res: Response) => {
  * cap is hit the response sets `truncated: true` and the UI should re-invoke.
  *
  * The current version of every object is untouched, so callers who only ever
- * read the latest content see no change. One audit entry per batch and one
- * webhook event per request, matching the `bulk-delete` shape.
+ * read the latest content see no change. One audit entry and one webhook
+ * event per batch, matching `bulk-delete`.
  */
 export const purgeNonCurrentVersions = async (req: Request, res: Response) => {
   const auth = validateUser(req);
@@ -357,13 +361,16 @@ export const purgeNonCurrentVersions = async (req: Request, res: Response) => {
 
   const bucket = await getAccessibleBucket(auth, name, "delete");
 
-  // One audit entry per batch, in the batch's transaction, as bulk delete.
+  let batchIndex = 0;
+  // An audit entry and an event per batch, in the batch's transaction, as
+  // bulk delete.
   const result = await db.objectVersions.purgeNonCurrentBulk(
     bucket.id,
     auth.userId,
     bucket.versioningEnabled,
     {
       onBatch: async (tx, batch) => {
+        const index = batchIndex++;
         await logAuditTx(tx, {
           auth,
           organizationId: bucket.organizationId ?? undefined,
@@ -378,6 +385,21 @@ export const purgeNonCurrentVersions = async (req: Request, res: Response) => {
             versionIds: batch.versionIds,
           },
         });
+        if (bucket.organizationId) {
+          await emitTx(tx, {
+            eventType: "file-service.objects.versions.purged",
+            organizationId: bucket.organizationId,
+            entityType: "bucket",
+            entityId: String(bucket.id),
+            data: {
+              bucketName: bucket.name,
+              batchIndex: index,
+              purgedCount: batch.versionIds.length,
+              bytesFreed: batch.bytesFreed.toString(),
+              versionIds: batch.versionIds,
+            },
+          });
+        }
       },
     }
   );
@@ -394,25 +416,6 @@ export const purgeNonCurrentVersions = async (req: Request, res: Response) => {
   const uniqueReleased = Array.from(new Set(result.releasedBlobHashes));
   for (const hash of uniqueReleased) {
     enqueueOrphanBlobCleanupSafe(hash);
-  }
-
-  // The one summary event per request goes out after the batches.
-  if (bucket.organizationId) {
-    const organizationId = bucket.organizationId;
-    await db.$transaction(async (tx) => {
-      await emitTx(tx, {
-        eventType: "file-service.objects.versions.purged",
-        organizationId,
-        entityType: "bucket",
-        entityId: String(bucket.id),
-        data: {
-          bucketName: bucket.name,
-          purgedCount: result.purgedCount,
-          bytesFreed: result.bytesFreed.toString(),
-          truncated: result.truncated,
-        },
-      });
-    });
   }
 
   res.json({

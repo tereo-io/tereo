@@ -23,6 +23,7 @@ const { mockRedis, mockRequests } = vi.hoisted(() => {
       files: {
         getBucket: vi.fn(),
         updateBucket: vi.fn(),
+        transferBucketOwnership: vi.fn(),
         patchObject: vi.fn(),
         deleteObject: vi.fn(),
       },
@@ -86,6 +87,25 @@ describe("FileServiceClient", () => {
     });
     const client = new FileServiceClient();
     await client.updateBucket("b1", { policy: "public" });
+    expect(mockRedis.store.has("file-sdk:v1:bucket:b1")).toBe(false);
+  });
+
+  it("transferBucketOwnership sends the user and invalidates bucket cache", async () => {
+    mockRedis.store.set(
+      "file-sdk:v1:bucket:b1",
+      JSON.stringify({ name: "b1" })
+    );
+    mockRequests.files.transferBucketOwnership.mockResolvedValueOnce({
+      name: "b1",
+      ownerId: "u2",
+    });
+    const client = new FileServiceClient();
+    const bucket = await client.transferBucketOwnership("b1", "u2");
+    expect(mockRequests.files.transferBucketOwnership).toHaveBeenCalledWith(
+      "b1",
+      "u2"
+    );
+    expect(bucket.ownerId).toBe("u2");
     expect(mockRedis.store.has("file-sdk:v1:bucket:b1")).toBe(false);
   });
 

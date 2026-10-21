@@ -29,7 +29,8 @@ export interface BucketProvisioning {
   description?: string;
   /** Default `"private"`. */
   policy?: "public" | "private";
-  storageQuotaBytes?: number;
+  /** At most 1 TiB (2^40 bytes), as on the bucket API; a digit string works too. */
+  storageQuotaBytes?: number | string;
 }
 
 export interface EventTypeProvisioning {

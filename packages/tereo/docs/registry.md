@@ -81,7 +81,8 @@ A service's document carries its declaration (`permissions`, `systemRoles`, `buc
   organization; an org-scoped role grants nothing else ([auth.md](auth.md#organizations-roles-members-activation)).
 - **What is updated.** Permissions: display text and `orgAssignable`. Event types: display text and
   `readPermission`. System roles: display text and permissions. Buckets: the description; policy and
-  quota are set only when the bucket is created. The service gets a read/write/delete grant on each,
+  quota are set only when the bucket is created. `storageQuotaBytes` is limited as on the bucket API
+  (at most 1 TiB, 2^40 bytes) and may be a number or a digit string. The service gets a read/write/delete grant on each,
   restored whenever a changed declaration is applied (admins can't revoke the grant anyway).
 
 ## Declared buckets
@@ -91,13 +92,25 @@ The declaring service owns a bucket's name and existence; admins tune the rest.
 | Who | May |
 |-----|-----|
 | `file-service.admin` (or anything that includes it) | Change policy, quota, versioning, thumbnails, CORS and rate limit; grant and revoke other users' access |
-| The service (the bucket's creator) | The same, through its own token |
-| Anyone | Not delete it, retired or not: `409 bucket_declared` |
+| The service (the bucket's creator and owner) | The same, through its own token, while it holds its grant |
+| Anyone | Not delete it while it is declared: `409 bucket_declared` |
 
 Two edits are refused with `409 bucket_declared` because the next apply would undo them:
-changing the description, and revoking the service's own grant. Everything else an admin sets is
-kept — the declaration never re-applies it. Bucket responses carry `createdBy`, `serviceId`,
+changing the description, and revoking the service's own grant. Transferring its ownership
+(`PUT /buckets/:name/owner`) is refused the same way: its owner is the service's account.
+Everything else an admin sets is kept — the declaration never re-applies it. Bucket responses
+carry `createdBy`, `ownerId` (both the service's account user), `serviceId`,
 `serviceName`, `missingSince` and `retiredAt`.
+
+A declared bucket can be deleted, like any other, once it is no longer declared:
+
+- **Dropped from its service's declaration.** It is retired after the grace period
+  ([retirement](#retirement)); from then on `DELETE /v1/files/buckets/{name}` deletes it.
+- **Its service dropped from the provisioning documents.** The service is deactivated after the
+  grace period ([provisioned services](#provisioned-services)), and its buckets are marked missing
+  then, to be retired one grace period later. From the deactivation on, the buckets can be deleted.
+
+Deleting one is final: should the service declare the name again, it gets a new, empty bucket.
 
 ## Access
 
@@ -150,9 +163,9 @@ that changes its declaration a new `version`, so the stored version tells which 
 | Permission | Grants nothing. Stays on custom roles, flagged `retired` |
 | System role | Grants nothing; cannot be assigned or requested |
 | Event type | New events are refused (`400 event_type_retired`); endpoints still subscribed list it in `retiredEventTypes`; new subscriptions are refused |
-| Bucket | Read-only: uploads, copies, multipart and new versions get `409 bucket_retired`. Reads, downloads, shares and deletes still work. No data is touched |
+| Bucket | Read-only: uploads, copies, multipart and new versions get `409 bucket_retired`. Reads, downloads, shares and deletes still work, and the bucket itself can now be deleted. No data is touched |
 
-Nothing is deleted. Re-declaring an item brings it back.
+Nothing is deleted. Re-declaring an item brings it back, unless an admin deleted the bucket.
 
 ## Provisioned services
 
@@ -161,6 +174,8 @@ A provisioned service is read-only through the admin API: rename, deactivate and
 environment variable its document names. `access/approve`, `access/revoke` and
 `revoke-previous-secret` still work. A service dropped from the documents is deactivated after
 `REGISTRY_RETIREMENT_GRACE_HOURS`, and reactivated if it returns ([provisioning](provisioning.md#removing-an-entry)).
+Its buckets are marked missing at the deactivation and can be deleted from then on
+([declared buckets](#declared-buckets)); a return declares them again.
 
 ## Core
 

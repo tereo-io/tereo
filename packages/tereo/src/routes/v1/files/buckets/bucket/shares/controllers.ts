@@ -2,7 +2,6 @@ import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { logAuditTx, emitTx } from "../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { hashPassword } from "../../../../../../utils/password.js";
-import { prisma } from "../../../../../../utils/db/prisma.js";
 import { toUserRef } from "../../../../../../utils/refs.js";
 import db from "../../../../../../utils/db/index.js";
 import { bucketNameSchema } from "../../schemas.js";
@@ -15,7 +14,7 @@ import {
 } from "../../../../../../../prisma/generated/client/index.js";
 import {
   canWriteBucket,
-  getAccessibleBucket,
+  getGrantedBucket,
 } from "../../../../../../utils/bucketAccess.js";
 import {
   validateBody,
@@ -25,7 +24,6 @@ import {
 import {
   BadRequestError,
   ConflictError,
-  NotFoundError,
 } from "../../../../../../utils/errors.js";
 import {
   applyCursorToWhere,
@@ -98,8 +96,9 @@ function deriveDefaultUrlFilename(share: ShareWithTargets): string | null {
 
 function shareStatus(
   share: ShareWithTargets
-): "active" | "revoked" | "expired" | "exhausted" {
+): "active" | "revoked" | "creator_inactive" | "expired" | "exhausted" {
   if (share.revokedAt) return "revoked";
+  if (share.creator && !share.creator.isActive) return "creator_inactive";
   if (share.expiresAt && share.expiresAt.getTime() < Date.now())
     return "expired";
   if (
@@ -205,7 +204,7 @@ export const createShare = async (req: Request, res: Response) => {
   const { name } = validateParams(bucketNameSchema, req);
   const body = validateBody(createShareBodySchema, req);
 
-  const bucket = await getAccessibleBucket(auth, name, "read");
+  const bucket = await getGrantedBucket(auth, name, "read");
 
   const expiresAt = validateShareTtl(body.expiresAt);
 
@@ -360,19 +359,10 @@ async function prepareObjectShare(
   const object = await db.objects.getById(bucket.id, body.objectId);
 
   if (body.versionId) {
-    const version = await prisma.objectVersion.findFirst({
-      where: {
-        id: body.versionId,
-        objectId: object.id,
-        deletedAt: null,
-      },
-      select: { id: true, isDeleteMarker: true },
-    });
-    if (!version) {
-      throw new NotFoundError(
-        "Version not found or does not belong to this object"
-      );
-    }
+    const version = await db.objectVersions.getByVersionId(
+      object.id,
+      body.versionId
+    );
     // A delete marker has no content, so its link could only ever 404.
     if (version.isDeleteMarker) {
       throw new BadRequestError(
@@ -474,7 +464,7 @@ export const listShares = async (req: Request, res: Response) => {
   const { name } = validateParams(bucketNameSchema, req);
   const query = validateQuery(listSharesQuerySchema, req);
 
-  const bucket = await getAccessibleBucket(auth, name, "read");
+  const bucket = await getGrantedBucket(auth, name, "read");
   setAccessLog(res, { bucketId: bucket.id, operation: "LIST_SHARES" });
 
   const where = applyCursorToWhere(query) as Prisma.ShareWhereInput;

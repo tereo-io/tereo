@@ -1,3 +1,4 @@
+import { enqueueOrphanBlobCleanup } from "../jobs/orphanBlobCleanup.js";
 import type { EncryptedBlobKeyMaterial } from "./encryption.js";
 import { openBlobStream, saveBlobBuffer } from "./storage.js";
 import sharp, { type Metadata } from "sharp";
@@ -126,6 +127,7 @@ export async function generateThumbnails(
       const thumbKey = `.thumbnails/${input.parentObjectId}/${size}`;
 
       let stored: boolean;
+      let freedHash: string | null = null;
       try {
         stored = await db.$transaction(async (tx) => {
           // The parent's row first, as a delete or overwrite takes it: one
@@ -182,8 +184,11 @@ export async function generateThumbnails(
           );
 
           if (existing) {
-            if (prior?.contentBlobHash) {
-              await db.contentBlobs.decRef(prior.contentBlobHash, tx);
+            if (
+              prior?.contentBlobHash &&
+              (await db.contentBlobs.decRef(prior.contentBlobHash, tx)) === 0
+            ) {
+              freedHash = prior.contentBlobHash;
             }
             if (prior) {
               await db.objectVersions.hardDelete(prior.id, tx);
@@ -238,6 +243,15 @@ export async function generateThumbnails(
           "Thumbnail job: parent deleted or replaced; skipping"
         );
         return;
+      }
+      // A no-op when the blob is referenced again (the same thumbnail bytes).
+      if (freedHash) {
+        await enqueueOrphanBlobCleanup(freedHash).catch((err: unknown) =>
+          logger.warn(
+            { hash: freedHash, err },
+            "Failed to enqueue orphan cleanup for a replaced thumbnail"
+          )
+        );
       }
     } catch (err) {
       logger.warn(

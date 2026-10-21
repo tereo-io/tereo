@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getOrphanBlobCleanupQueue } from "../../jobs/queues.js";
+import { getBlobPath } from "../../utils/storage.js";
 import { prisma } from "../../utils/db/prisma.js";
+import db from "../../utils/db/index.js";
+import env from "../../env.js";
+import fs from "fs/promises";
 import {
   enqueueOrphanBlobCleanup,
   processOrphanBlobCleanup,
@@ -133,5 +137,42 @@ describe("orphanBlobCleanup worker", () => {
     });
     await enqueueOrphanBlobCleanup(hash);
     expect(await jobsFor(hash)).toHaveLength(0);
+  });
+
+  it("repairs the count of a blob a live version references instead of deleting it", async () => {
+    const hash = await orphanedBlob("drifted.txt");
+    const pastGrace = new Date(
+      Date.now() - (env.FILE_SERVICE_ORPHAN_BLOB_GRACE_SECONDS + 60) * 1000
+    );
+    await prisma.contentBlob.update({
+      where: { hash },
+      data: { orphanedAt: pastGrace },
+    });
+
+    await processOrphanBlobCleanup(hash);
+
+    expect(
+      await prisma.contentBlob.findUnique({ where: { hash } })
+    ).toMatchObject({ refCount: 1, orphanedAt: null });
+    await expect(fs.access(getBlobPath(hash))).resolves.toBeUndefined();
+    expect(
+      await prisma.objectVersion.count({ where: { contentBlobHash: hash } })
+    ).toBe(1);
+  });
+
+  it("refuses a reference count below zero", async () => {
+    const hash = await orphanedBlob("negative.txt");
+    await expect(
+      prisma.contentBlob.update({ where: { hash }, data: { refCount: -1 } })
+    ).rejects.toThrow();
+    await expect(
+      prisma.$transaction((tx) => db.contentBlobs.decRef(hash, tx))
+    ).rejects.toThrow(/content_blobs_ref_count_nonnegative/);
+    await expect(
+      prisma.$transaction((tx) => db.contentBlobs.decRefMany([hash], tx))
+    ).rejects.toThrow(/content_blobs_ref_count_nonnegative/);
+    expect(
+      await prisma.contentBlob.findUnique({ where: { hash } })
+    ).toMatchObject({ refCount: 0 });
   });
 });

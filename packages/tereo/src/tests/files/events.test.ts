@@ -29,6 +29,7 @@ const ORG_ID = FIXTURE_ORGANIZATION_IDS[0];
 const EVENT_TYPES = [
   "file-service.bucket.created",
   "file-service.bucket.updated",
+  "file-service.bucket.owner-changed",
   "file-service.object.created",
   "file-service.object.updated",
   "file-service.object.version.created",
@@ -225,6 +226,33 @@ describe("file-service webhook events", () => {
     });
   });
 
+  it("emits bucket.owner-changed on a transfer", async () => {
+    const bucket = await createTestBucket(token);
+    const next = randomUUID();
+    await ensureTestMembership(next, ORG_ID);
+
+    const res = await axios.put(
+      `${BASE_URL}/buckets/${bucket.name}/owner`,
+      { userId: next },
+      { headers: auth() }
+    );
+    expect(res.status).toBe(HTTP_STATUS.OK);
+
+    const [payload] = await delivered(
+      "file-service.bucket.owner-changed",
+      String(bucket.id)
+    );
+    expect(payload).toMatchObject({
+      organizationId: ORG_ID,
+      entityType: "bucket",
+      data: {
+        bucketName: bucket.name,
+        ownerId: next,
+        previousOwnerId: bucket.createdBy,
+      },
+    });
+  });
+
   it("emits object.version.created for each write to a versioned bucket", async () => {
     const bucket = await createTestBucket(token);
     await enableVersioning(bucket.name);
@@ -315,6 +343,44 @@ describe("file-service webhook events", () => {
       },
     });
     expect(count).toBe(0);
+  });
+
+  it("emits object.updated when a version restore undeletes the object", async () => {
+    const bucket = await createTestBucket(token);
+    await enableVersioning(bucket.name);
+    const obj = await uploadTestObject(
+      token,
+      bucket.name,
+      "undeleted.txt",
+      createTestFile(`restore-${randomUUID()}`, "undeleted.txt")
+    );
+    const original = await prisma.objectVersion.findFirstOrThrow({
+      where: { objectId: obj.id, isCurrent: true },
+    });
+    const del = await axios.delete(
+      `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}`,
+      { headers: auth() }
+    );
+    expect(del.status).toBe(HTTP_STATUS.NO_CONTENT);
+    const restore = await axios.post(
+      `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}/versions/${original.id}/restore`,
+      {},
+      { headers: auth() }
+    );
+    expect(restore.status).toBe(HTTP_STATUS.CREATED);
+
+    const [payload] = await delivered("file-service.object.updated", obj.id);
+    expect(payload).toMatchObject({
+      entityType: "object",
+      data: {
+        bucketName: bucket.name,
+        objectKey: "undeleted.txt",
+        objectId: obj.id,
+        etag: original.etag,
+        via: "restore",
+        restoredFromVersionId: original.id,
+      },
+    });
   });
 
   it("emits permission.granted and permission.revoked", async () => {

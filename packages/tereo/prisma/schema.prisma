@@ -116,6 +116,7 @@ model User {
 
   // Actor columns in files and audit. Users are deactivated, never deleted.
   bucketsCreated            Bucket[]            @relation("BucketCreator")
+  bucketsOwned              Bucket[]            @relation("BucketOwner")
   bucketsDeleted            Bucket[]            @relation("BucketDeleter")
   objectsCreated            Object[]            @relation("ObjectCreator")
   objectsDeleted            Object[]            @relation("ObjectDeleter")
@@ -848,6 +849,9 @@ model Bucket {
   createdAt         DateTime     @default(now()) @map("created_at")
   updatedAt         DateTime     @updatedAt @map("updated_at")
   createdBy         String       @map("created_by") @db.Uuid
+  // Who manages the bucket (with an active grant); starts as the creator and
+  // changes only by an admin's transfer. `createdBy` stays the creator.
+  ownerId           String       @map("owner_id") @db.Uuid
   deletedAt         DateTime?    @map("deleted_at")
   deletedBy         String?      @map("deleted_by") @db.Uuid
   organizationId    String?      @map("organization_id") @db.Uuid
@@ -864,12 +868,14 @@ model Bucket {
   shares           Share[]
   lifecyclePolicy  BucketLifecyclePolicy?
   creator          User                   @relation("BucketCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  owner            User                   @relation("BucketOwner", fields: [ownerId], references: [id], onDelete: Restrict)
   deleter          User?                  @relation("BucketDeleter", fields: [deletedBy], references: [id], onDelete: Restrict)
   organization     Organization?          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   service          Service?               @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 
   @@index([policy])
   @@index([serviceId])
+  @@index([ownerId])
   @@index([createdAt])
   @@index([deletedAt])
   @@index([organizationId])
@@ -881,6 +887,7 @@ model ContentBlob {
   hash             String    @id @db.VarChar(64)
   sizeBytes        BigInt    @map("size_bytes")
   fsPath           String    @map("fs_path") @db.VarChar(1024)
+  // CHECK (ref_count >= 0) in raw SQL: a release counted twice fails loudly.
   refCount         Int       @default(0) @map("ref_count")
   wrappedDek       Bytes     @map("wrapped_dek")
   iv               Bytes
@@ -964,6 +971,8 @@ model ObjectVersion {
   tags                  String[]  @default([])
   isCurrent             Boolean   @default(false) @map("is_current")
   isDeleteMarker        Boolean   @default(false) @map("is_delete_marker")
+  // When a newer version replaced this one; null while it is current.
+  noncurrentSince       DateTime? @map("noncurrent_since")
   restoredFromVersionId String?   @map("restored_from_version_id") @db.Uuid
   createdAt             DateTime  @default(now()) @map("created_at")
   createdBy             String    @map("created_by") @db.Uuid
@@ -1031,6 +1040,9 @@ model MultipartPart {
   etag       String   @db.VarChar(64)
   fsPath     String   @map("fs_path") @db.VarChar(1024)
   uploadedAt DateTime @default(now()) @map("uploaded_at")
+  // Encrypted with AAD `${uploadId}|${partNumber}`; false for parts staged
+  // before parts were bound, which decrypt without AAD.
+  aadBound   Boolean  @default(false) @map("aad_bound")
 
   upload MultipartUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
 

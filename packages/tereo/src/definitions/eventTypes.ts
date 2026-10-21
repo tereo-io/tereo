@@ -136,6 +136,10 @@ const fileEvents: EventTypeDefinition[] = [
   { eventType: "file-service.bucket.created", description: "Bucket created" },
   { eventType: "file-service.bucket.updated", description: "Bucket updated" },
   {
+    eventType: "file-service.bucket.owner-changed",
+    description: "Bucket ownership transferred to another user",
+  },
+  {
     eventType: "file-service.bucket.deleted",
     description: "Bucket soft-deleted",
   },

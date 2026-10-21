@@ -147,7 +147,7 @@ export const unmarkAllCurrent = async (
 ) => {
   await tx.objectVersion.updateMany({
     where: { objectId, isCurrent: true },
-    data: { isCurrent: false },
+    data: { isCurrent: false, noncurrentSince: new Date() },
   });
 };
 
@@ -248,7 +248,7 @@ export const branchCurrentWithMetadata = async (
   await reserveQuota(bucketId, current.contentBlob?.sizeBytes ?? 0n, tx);
   await tx.objectVersion.update({
     where: { id: current.id },
-    data: { isCurrent: false },
+    data: { isCurrent: false, noncurrentSince: new Date() },
   });
   await contentBlobs.incRef(current.contentBlobHash, tx);
   return await tx.objectVersion.create({

@@ -1,6 +1,8 @@
 import { ForbiddenError, NotFoundError, ConflictError } from "./errors.js";
 import { validateUser, type AuthContext } from "../middleware/auth.js";
 import { hasPermission } from "./permissions.js";
+import { lockRegistries } from "./registry.js";
+import type { Prisma } from "./db/prisma.js";
 import type { Request } from "express";
 import db from "./db/index.js";
 
@@ -68,6 +70,25 @@ export const getAccessibleBucket = async (
 };
 
 /**
+ * `getAccessibleBucket` without the public-bucket shortcut: managing shares
+ * takes a grant (or `file-service.admin`) even where anyone may download.
+ */
+export const getGrantedBucket = async (
+  auth: AuthContext,
+  bucketName: string,
+  operation: "read" | "write" | "delete"
+) => {
+  if (
+    !(await checkBucketAccess(auth, bucketName, operation, {
+      publicReads: false,
+    }))
+  ) {
+    throw new ForbiddenError(`Insufficient permissions to ${operation} bucket`);
+  }
+  return await db.buckets.getByName(bucketName);
+};
+
+/**
  * For the read routes admitted without a token: a public bucket is served to
  * anyone. Otherwise — private or missing alike — the caller needs a token
  * (401) and then read access (403).
@@ -85,6 +106,18 @@ export const getReadableBucket = async (req: Request, bucketName: string) => {
 export const isBucketReader = async (req: Request, bucketName: string) =>
   !!req.auth && (await checkBucketAccess(req.auth, bucketName, "read"));
 
+/**
+ * Whether the caller could read the bucket were it private — false for
+ * everyone served only because it is public, a member without a grant
+ * included. A public bucket's history (deleted objects, replaced versions)
+ * is shown only behind this.
+ */
+export const holdsBucketReadAccess = async (req: Request, bucketName: string) =>
+  !!req.auth &&
+  (await checkBucketAccess(req.auth, bucketName, "read", {
+    publicReads: false,
+  }));
+
 /** The part of a caller that bucket access depends on. */
 export type BucketAccessor = Pick<
   AuthContext,
@@ -96,13 +129,14 @@ export const canReadBucket = (auth: BucketAccessor, bucketName: string) =>
   checkBucketAccess(auth, bucketName, "read");
 
 /** Whether `auth` holds write access to the bucket; false for a missing one. */
-export const canWriteBucket = (auth: AuthContext, bucketName: string) =>
+export const canWriteBucket = (auth: BucketAccessor, bucketName: string) =>
   checkBucketAccess(auth, bucketName, "write");
 
 const checkBucketAccess = async (
   auth: BucketAccessor,
   bucketName: string,
-  operation: "read" | "write" | "delete"
+  operation: "read" | "write" | "delete",
+  { publicReads = true }: { publicReads?: boolean } = {}
 ): Promise<boolean> => {
   if (hasPermission(auth.permissions, "file-service.admin")) return true;
 
@@ -114,7 +148,9 @@ const checkBucketAccess = async (
     return false;
   }
 
-  if (bucket.policy === "public" && operation === "read") return true;
+  if (publicReads && bucket.policy === "public" && operation === "read") {
+    return true;
+  }
   if (!hasPermission(auth.permissions, `file-service.objects.${operation}`)) {
     return false;
   }
@@ -164,8 +200,10 @@ export const assertUploadInBucket = (
 };
 
 /**
- * Settings, grants and deletion: the bucket's creator, or a `file-service.admin`
- * holder on any bucket. What a declaration owns is guarded separately
+ * Settings, grants and deletion: a `file-service.admin` holder on any bucket,
+ * or the bucket's owner while they hold an active grant on it — so an owner
+ * whose grant was revoked can't grant it back. Reading the settings takes any
+ * active grant. What a declaration owns is guarded separately
  * (`assertBucketDeletable`, `assertDeclaredFieldsUnchanged`).
  */
 export const validateBucketManagement = async (
@@ -205,18 +243,14 @@ const checkBucketManagement = async (
     return false;
   }
 
-  // Reading a bucket's settings follows the bucket list: the ones the caller
-  // created or holds an active grant on.
-  if (operation === "read") {
-    if (bucket.createdBy === auth.userId) return true;
-    const grant = await db.bucketPermissions.getByBucketAndUser(
-      bucket.id,
-      auth.userId
-    );
-    return !!grant && !grant.revokedAt;
-  }
+  const grant = await db.bucketPermissions.getByBucketAndUser(
+    bucket.id,
+    auth.userId
+  );
+  if (!grant || grant.revokedAt) return false;
 
-  return bucket.createdBy === auth.userId;
+  // Reading a bucket's settings follows the bucket list: any active grant.
+  return operation === "read" || bucket.ownerId === auth.userId;
 };
 
 const declaredConflict = (bucketName: string, what: string) =>
@@ -225,14 +259,27 @@ const declaredConflict = (bucketName: string, what: string) =>
     "bucket_declared"
   );
 
-/** A declared bucket exists for as long as its service declares it. */
-export const assertBucketDeletable = (bucket: {
-  name: string;
-  serviceId: string | null;
-}) => {
-  if (bucket.serviceId) {
-    throw declaredConflict(bucket.name, "its existence: it cannot be deleted");
-  }
+/**
+ * A declared bucket exists for as long as its service declares it: it can be
+ * deleted once retired, or once its service is deactivated. Checked under the
+ * service's registry lock, so a declaration applied at the same moment can't
+ * bring it back between the check and the delete. In the delete's transaction.
+ */
+export const assertBucketDeletable = async (
+  bucket: { id: number; name: string; serviceId: string | null },
+  tx: Prisma.TransactionClient
+) => {
+  if (!bucket.serviceId) return;
+  await lockRegistries(tx, [bucket.serviceId]);
+  const row = await tx.bucket.findUnique({
+    where: { id: bucket.id },
+    select: { retiredAt: true, service: { select: { isActive: true } } },
+  });
+  if (row && (row.retiredAt || row.service?.isActive === false)) return;
+  throw declaredConflict(
+    bucket.name,
+    "its existence: it cannot be deleted while declared"
+  );
 };
 
 /**
@@ -257,10 +304,20 @@ export const assertDeclaredFieldsUnchanged = (
 };
 
 export const assertNotDeclaringServiceGrant = (
-  bucket: { name: string; serviceId: string | null; createdBy: string },
+  bucket: { name: string; serviceId: string | null; ownerId: string },
   grantUserId: string
 ) => {
-  if (bucket.serviceId && grantUserId === bucket.createdBy) {
+  if (bucket.serviceId && grantUserId === bucket.ownerId) {
     throw declaredConflict(bucket.name, "its own grant on it");
+  }
+};
+
+/** A declared bucket's owner is its service's account, set by the declaration. */
+export const assertOwnerTransferable = (bucket: {
+  name: string;
+  serviceId: string | null;
+}) => {
+  if (bucket.serviceId) {
+    throw declaredConflict(bucket.name, "its ownership");
   }
 };

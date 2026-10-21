@@ -48,6 +48,10 @@ export const listObjectsParams = (
   const params: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(options)) {
     if (value === undefined) continue;
+    if (name === "deleted") {
+      params.deleted = String(value);
+      continue;
+    }
     const [field, op] = name.split(":");
     if (!op) {
       params[name] = value;

@@ -11,6 +11,7 @@ import { Request, Response } from "express";
 import {
   getAccessibleBucket,
   getReadableBucket,
+  validateBucketPermission,
 } from "../../../../../../../../utils/bucketAccess.js";
 import {
   validateBody,
@@ -120,6 +121,11 @@ export const patchObject = async (req: Request, res: Response) => {
   const body = validateBody(patchObjectBodySchema, req);
   // Access first, so a caller without it learns nothing about the key.
   const bucket = await getAccessibleBucket(auth, params.name, "write");
+  // A set `deleteAfter` has the lifecycle sweep delete the object later, so it
+  // takes delete access; clearing it needs only write.
+  if (body.deleteAfter) {
+    await validateBucketPermission(auth, params.name, "delete");
+  }
   if (body.objectKey !== undefined) {
     assertObjectKeyNotReserved(body.objectKey);
   }

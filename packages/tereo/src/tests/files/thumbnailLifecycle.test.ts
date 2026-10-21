@@ -1,10 +1,10 @@
-import { getThumbnailGenerationQueue } from "../../jobs/queues.js";
+import { getBlobPath, saveBlobBuffer } from "../../utils/storage.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SYSTEM_USER_ID } from "../../definitions/systemUser.js";
 import { generateThumbnails } from "../../utils/thumbnails.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { randomBytes, randomInt } from "crypto";
 import db from "../../utils/db/index.js";
-import { randomInt } from "crypto";
 import axios from "axios";
 import sharp from "sharp";
 import {
@@ -17,6 +17,10 @@ import {
   uploadTestObject,
   waitFor,
 } from "./utils/test-helpers.js";
+import {
+  getOrphanBlobCleanupQueue,
+  getThumbnailGenerationQueue,
+} from "../../jobs/queues.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -405,5 +409,47 @@ describe("thumbnails follow their parent", () => {
       createdBy: SYSTEM_USER_ID,
     });
     expect(await thumbnailsOf(parent.id)).toEqual([]);
+  });
+
+  it("queue cleanup of the blob a regenerated thumbnail releases", async () => {
+    const bucket = await createTestBucket(token);
+    const { parent, thumbs } = await imageWithThumbnails(bucket.name, "r.png");
+
+    // Give one thumbnail other bytes than generating it again will produce.
+    const version = thumbs[0].versions[0];
+    const saved = await saveBlobBuffer(randomBytes(64));
+    await prisma.$transaction(async (tx) => {
+      await db.contentBlobs.attach(
+        {
+          hash: saved.hash,
+          sizeBytes: BigInt(saved.sizeBytes),
+          fsPath: getBlobPath(saved.hash),
+          wrappedDek: saved.keyMaterial.wrappedDek,
+          iv: saved.keyMaterial.iv,
+          masterKeyVersion: saved.keyMaterial.masterKeyVersion,
+          stagedPath: saved.stagedPath,
+        },
+        tx
+      );
+      await db.contentBlobs.incRef(saved.hash, tx);
+      await db.contentBlobs.decRef(version.contentBlobHash!, tx);
+      await tx.objectVersion.update({
+        where: { id: version.id },
+        data: { contentBlobHash: saved.hash },
+      });
+    });
+
+    await generate(parent.id);
+
+    expect(await refCounts([saved.hash])).toEqual([0]);
+    const jobs = (
+      await getOrphanBlobCleanupQueue().getJobs(
+        ["wait", "delayed", "active", "completed", "failed"],
+        0,
+        -1
+      )
+    ).filter((job) => job.data.hash === saved.hash);
+    expect(jobs).toHaveLength(1);
+    for (const job of jobs) await job.remove();
   });
 });

@@ -25,6 +25,7 @@ import {
   NotFoundError,
   TooManyRequestsError,
   UnauthorizedError,
+  ValidationError,
 } from "../../../../../utils/errors.js";
 
 interface LoadedShare {
@@ -53,7 +54,7 @@ async function loadShareForDownload(
 ): Promise<LoadedShare | null> {
   const share = await db.shares.getByTokenRaw(token);
   if (!share) return null;
-  if (share.revokedAt) return null;
+  if (share.revokedAt || !share.creator.isActive) return null;
   if (share.expiresAt && share.expiresAt.getTime() < Date.now()) return null;
   if (
     share.maxDownloads !== null &&
@@ -119,15 +120,13 @@ async function loadShareForDownload(
 }
 
 /**
- * Append cosmetic `disposition=attachment` + `filename` query params so the
- * signed-object handler emits `Content-Disposition: attachment`. Not in the
- * HMAC canonical — these are hints, not auth-bearing. Without them, browsers
- * inline images / PDFs / videos, which is the wrong default for share links.
+ * Without `disposition=attachment` browsers inline images / PDFs / videos,
+ * the wrong default for share links. It is unsigned: it can only force
+ * attachment, never weaken it.
  */
-function withAttachmentHints(url: string, filename: string | null): string {
+function withAttachmentHint(url: string): string {
   const u = new URL(url);
   u.searchParams.set("disposition", "attachment");
-  if (filename) u.searchParams.set("filename", filename);
   return u.toString();
 }
 
@@ -143,7 +142,7 @@ function shareDownloadFilename(share: LoadedShare): string | null {
 
 /**
  * A capped share's URL is single-use: its nonce is stored here and spent by
- * the signed route's first request (`utils/shareUrlNonces.ts`).
+ * the first GET the signed route serves (`utils/shareUrlNonces.ts`).
  */
 async function mintSignedUrlFor(
   share: LoadedShare
@@ -186,16 +185,17 @@ function signFor(share: LoadedShare): {
       // pre-minted URL would otherwise stay live for the full TTL.
       share: share.id,
       version: share.versionId ?? undefined,
+      // Without one, the download is named after the object's key anyway.
+      filename: share.urlFilename ?? undefined,
     });
     return {
-      url: withAttachmentHints(signed.url, shareDownloadFilename(share)),
+      url: withAttachmentHint(signed.url),
       expiresAt: signed.expiresAt,
       nonce: signed.nonce,
     };
   }
   if (share.kind === "ARCHIVE" && share.archiveRequestId) {
-    // Archive downloads already set Content-Disposition: attachment server-
-    // side (see routes/v1/files/signed/objects/bucket/by-id/object/controllers.ts), so no hint needed.
+    // Archive downloads always set Content-Disposition: attachment.
     const signed = presignSign({
       bucket: share.bucketName,
       id: share.archiveRequestId,
@@ -308,6 +308,7 @@ export const getShareViaToken = async (req: Request, res: Response) => {
 
   setAccessLog(res, {
     bucketId: share.bucketId,
+    objectId: share.objectId ?? undefined,
     operation: "DOWNLOAD_SHARE",
   });
 
@@ -342,8 +343,10 @@ export const probeShareViaToken = async (req: Request, res: Response) => {
 
   res.setHeader("Cache-Control", "private, no-store");
   if (share.passwordHash) {
-    res.status(401).end();
-    return;
+    throw new UnauthorizedError(
+      "This share is password-protected.",
+      "password_required"
+    );
   }
 
   res.setHeader(
@@ -448,6 +451,10 @@ export const unlockShare = async (req: Request, res: Response) => {
   if (!share) {
     throw new NotFoundError("Share not found");
   }
+  const password = body?.password ?? "";
+  if (share.passwordHash && !password) {
+    throw new ValidationError("Invalid request body. password: Required");
+  }
 
   const attempt = await recordUnlockAttempt(token, ip);
   if (!attempt.allowed) {
@@ -460,7 +467,7 @@ export const unlockShare = async (req: Request, res: Response) => {
   // A share without a password falls through to the success path, so
   // clients that POST speculatively still get a URL back.
   if (share.passwordHash) {
-    await checkSharePassword(req, token, share.passwordHash, body.password, {
+    await checkSharePassword(req, token, share.passwordHash, password, {
       firstFromAddress: attempt.first,
     });
   }
@@ -481,7 +488,8 @@ export const unlockShare = async (req: Request, res: Response) => {
 
   setAccessLog(res, {
     bucketId: share.bucketId,
-    operation: "DOWNLOAD_SHARE",
+    objectId: share.objectId ?? undefined,
+    operation: "UNLOCK_SHARE",
   });
 
   res.json({

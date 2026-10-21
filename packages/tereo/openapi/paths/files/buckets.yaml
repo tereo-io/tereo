@@ -80,12 +80,14 @@
       - Name must start and end with alphanumeric character
       - Maximum storage quota: 1 TB (1099511627776 bytes)
 
-      The caller becomes the bucket's creator: they manage its settings and
-      grants. In the same transaction they are also granted full object
-      access (`canRead`, `canWrite`, `canDelete`) — an ordinary grant, listed
-      under `GET /v1/files/buckets/{name}/permissions` and revocable like any
-      other; once revoked, the creator still manages the bucket but needs a
-      grant again to read or write its objects.
+      The caller becomes the bucket's creator (`createdBy`) and its owner
+      (`ownerId`): the owner manages its settings and grants while holding an
+      active grant on it. In the same transaction they are granted full
+      object access (`canRead`, `canWrite`, `canDelete`) — an ordinary grant,
+      listed under `GET /v1/files/buckets/{name}/permissions` and revocable
+      like any other; once an admin revokes it, the owner neither manages the
+      bucket nor reaches its objects until a `file-service.admin` holder
+      grants it again.
 
       Audit log entries are created for the bucket and for the grant and, for
       a bucket in an organization, `file-service.bucket.created` and
@@ -138,7 +140,7 @@
       is included for versioning-enabled buckets.
 
       **Required permissions:**
-      - System: `file-service.buckets.read` AND (`file-service.admin`, or bucket creator or an active bucket grant, from the bucket's organization)
+      - System: `file-service.buckets.read` AND (`file-service.admin`, or an active bucket grant, from the bucket's organization)
     operationId: getBucket
     security:
       - BearerAuth: [file-service.buckets.read]
@@ -181,7 +183,7 @@
       Updates bucket properties.
 
       **Required permissions:**
-      - System: `file-service.buckets.write` AND (bucket creator or `file-service.admin`)
+      - System: `file-service.buckets.write` AND (`file-service.admin`, or the bucket's owner holding an active bucket grant, from the bucket's organization)
 
       **Updatable fields:**
       - description
@@ -230,7 +232,7 @@
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing file-service.buckets.write permission, not the bucket's creator (or `file-service.admin`), or no such bucket
+        description: Forbidden - missing file-service.buckets.write permission, not the bucket's owner with an active grant (or `file-service.admin`), or no such bucket
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket
@@ -249,10 +251,11 @@
       Deletes a bucket and all its contents (soft delete).
 
       **Required permissions:**
-      - System: `file-service.buckets.delete` AND (bucket creator or `file-service.admin`)
+      - System: `file-service.buckets.delete` AND (`file-service.admin`, or the bucket's owner holding an active bucket grant, from the bucket's organization)
 
       A bucket a service declared (`serviceId` set) exists for as long as the service declares it:
-      no one can delete it (`409 bucket_declared`), retired or not.
+      no one can delete it (`409 bucket_declared`) until it is retired or its service is
+      deactivated.
 
       **Warning:** This operation will delete all objects in the bucket. This action cannot be undone.
 
@@ -273,13 +276,83 @@
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing file-service.buckets.delete permission, not the bucket's creator (or `file-service.admin`), or no such bucket
+        description: Forbidden - missing file-service.buckets.delete permission, not the bucket's owner with an active grant (or `file-service.admin`), or no such bucket
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
-        description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket
+        description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket. Also the answer to the loser of two deletes racing
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`bucket_declared` - a declared bucket cannot be deleted'
+        description: '`bucket_declared` - a bucket its active service still declares cannot be deleted'
+      '429':
+        $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/files/buckets/{name}/owner:
+  put:
+    tags:
+      - Files - Buckets
+    summary: Transfer bucket ownership
+    description: |
+      Makes another user the bucket's owner, who manages it while holding an
+      active grant on it. `createdBy` is unchanged.
+
+      **Required permissions:**
+      - System: `file-service.admin`
+
+      **Notes:**
+      - The user must exist (`400 unknown_user`), be active (`400 user_inactive`)
+        and, for a bucket in an organization, be able to act in it
+        (`400 user_not_in_organization`)
+      - A new owner without an active grant gets a full one (`canRead`,
+        `canWrite`, `canDelete`), reviving a revoked one; an active grant is
+        kept as it is
+      - The previous owner keeps their grant, so their object access, but no
+        longer manages the bucket
+      - A declared bucket's owner is its service's account: `409 bucket_declared`
+
+      When the owner changes, an audit log entry is created (`changes.ownerId`)
+      and, for a bucket in an organization, a `file-service.bucket.owner-changed`
+      webhook event is emitted.
+    operationId: transferBucketOwnership
+    security:
+      - BearerAuth: [file-service.admin]
+    parameters:
+      - $ref: '../../components/files/parameters.yaml#/BucketNameParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              userId:
+                type: string
+                format: uuid
+                description: The new owner
+            required:
+              - userId
+    responses:
+      '200':
+        description: The bucket, with its new owner
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/files/schemas.yaml#/Bucket'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`invalid_request`, `unknown_user`, `user_inactive` or `user_not_in_organization`'
+      '401':
+        $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing `file-service.admin`
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+        description: Bucket not found
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_declared` - a declared bucket belongs to its service'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -299,8 +372,8 @@
       scopes' ceiling, so a `core:files.read` token reports `canWrite` and
       `canDelete` as `false` whatever the grant. `canRead` is also `true` on a
       public bucket. Every field is a boolean — `false` without an active
-      grant. Being the bucket's creator adds nothing: the creator's access is
-      the grant made at create time, and is gone once revoked. `canWrite` is
+      grant. Being the bucket's creator or owner adds nothing: their access is
+      their grant, and is gone once revoked. `canWrite` is
       `false` for everyone, admins included, on a retired bucket, which is
       read-only.
 

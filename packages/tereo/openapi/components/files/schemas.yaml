@@ -72,6 +72,9 @@ RateLimitConfig:
       minimum: 1
       maximum: 100000
     requestCost:
+      description: |
+        Tokens each request takes. At most `maxTokens` (`400` otherwise): a
+        request costing more than the bucket can hold would never be admitted.
       type: number
       exclusiveMinimum: 0
       default: 1
@@ -178,6 +181,16 @@ Bucket:
     creator:
       description: The user `createdBy` names.
       $ref: '../schemas.yaml#/UserRef'
+    ownerId:
+      description: |
+        User id of the owner, who manages the bucket while holding an active
+        grant on it. Starts as `createdBy`; changes only by
+        `PUT /v1/files/buckets/{name}/owner` (`file-service.admin`).
+      type: string
+      format: uuid
+    owner:
+      description: The user `ownerId` names.
+      $ref: '../schemas.yaml#/UserRef'
     serviceId:
       description: |
         The service that declared the bucket in its provisioning document; null for a bucket a
@@ -231,6 +244,8 @@ Bucket:
     - organization
     - createdBy
     - creator
+    - ownerId
+    - owner
     - serviceId
     - serviceName
     - service
@@ -386,8 +401,8 @@ BucketPermissions:
     caller's active grant flag (`false` without one) AND the matching role
     permission (`file-service.objects.read` / `.write` / `.delete`, cut to a
     delegated token's ceiling), and `canRead` is also `true` on a public
-    bucket. Being the bucket's creator adds nothing beyond the grant made at
-    create time. Never `null`.
+    bucket. Being the bucket's creator or owner adds nothing beyond their
+    grant. Never `null`.
   properties:
     canRead:
       description: Whether the current user can read from this bucket
@@ -874,7 +889,7 @@ PatchObjectRequest:
       description: |
         Per-object expiry overriding the bucket's lifecycle policy (ISO 8601).
         `null` clears it; omit to leave it unchanged. Later uploads to the
-        object's key keep it.
+        object's key keep it. Setting it takes delete access to the bucket.
       type: [string, 'null']
       format: date-time
 
@@ -936,8 +951,8 @@ ObjectVersion:
       type: string
       format: date-time
     createdBy:
-      description: User ID that wrote this version.
-      type: string
+      description: User ID that wrote this version; null, like the email and name, for a caller a public bucket is served to only because it is public.
+      type: [string, 'null']
       format: uuid
       examples:
         - "019dd4c2-e0b3-778e-b8db-a52e61927416"
@@ -1325,8 +1340,12 @@ LifecyclePolicy:
         - 30
     expireVersionsAfterDays:
       description: |
-        Hard-delete non-current versions whose `createdAt` is older than N
-        days. `null` disables the rule. Only meaningful on buckets with
+        Hard-delete versions that have been non-current for more than N
+        days — counted from when a newer version replaced them (an overwrite,
+        delete marker, restore or branching PATCH), as S3's `NoncurrentDays`
+        counts it, not from their own `createdAt`. A year-old file
+        overwritten today keeps its old version for N more days. `null`
+        disables the rule. Only meaningful on buckets with
         `versioningEnabled=true`.
       type: [integer, 'null']
       minimum: 1
@@ -1648,10 +1667,12 @@ ShareKind:
 
 ShareStatus:
   type: string
-  enum: [active, revoked, expired, exhausted]
+  enum: [active, revoked, creator_inactive, expired, exhausted]
   description: |
-    Derived field — the server computes this from (revokedAt, expiresAt,
-    downloadCount, maxDownloads) so clients do not have to re-derive it.
+    Derived field — the server computes this from (revokedAt, the creator's
+    activation, expiresAt, downloadCount, maxDownloads) so clients do not have
+    to re-derive it. `creator_inactive`: the share's creator is deactivated,
+    so it no longer serves.
 
 ShareTargetObject:
   type: object
@@ -1963,12 +1984,12 @@ PasswordRequiredResponse:
 
 UnlockShareRequest:
   type: object
-  required: [password]
   properties:
     password:
       type: string
       minLength: 1
       maxLength: 128
+      description: The share's password. Required for a password share; may be left out otherwise.
 
 UnlockShareResponse:
   type: object
