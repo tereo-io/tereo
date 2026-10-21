@@ -513,6 +513,23 @@ describe("connections admin API", () => {
       expect(res.body.error).toContain("550");
     });
 
+    it("audits a send whatever its outcome", async () => {
+      smtpCode = 550;
+      const c = await create({ settings: settings(smtp.port) });
+      const res = await api("POST", `/connections/${c.id}/test`, adminToken, {
+        to: "dest@example.com",
+      });
+      expect(res.body.ok).toBe(false);
+      const entry = await prisma.auditLogEntry.findFirstOrThrow({
+        where: { entityType: "NotificationConnection", entityId: c.id },
+        orderBy: { createdAt: "desc" },
+      });
+      expect(entry.metadata).toEqual({
+        operation: "test",
+        to: "dest@example.com",
+      });
+    });
+
     it("reports a code, not what a non-SMTP service answered", async () => {
       const banner = createServer((socket) =>
         socket.end("SSH-2.0-OpenSSH_9.6 secret-build-banner\r\n")

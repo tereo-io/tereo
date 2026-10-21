@@ -182,6 +182,9 @@ describe("Admin Roles Endpoints", () => {
       });
 
       expect(response.status).toBe(HTTP_STATUS.CONFLICT);
+      expect(((await response.json()) as ErrorResponse).error).toBe(
+        "name_taken"
+      );
     });
 
     it("should reject request from non-admin", async () => {
@@ -1357,6 +1360,87 @@ describe("Admin Roles Endpoints", () => {
       expect(await listRoles((await refresh()).access_token)).toBe(
         HTTP_STATUS.FORBIDDEN
       );
+    });
+  });
+
+  describe("a service client's tokens after the role changes", () => {
+    /** A client_credentials client holding a role, with one live token. */
+    const clientHolding = async () => {
+      const client = await createTestClient({
+        clientType: "confidential",
+        grantTypes: ["client_credentials"],
+      });
+      const account = await prisma.user.findFirstOrThrow({
+        where: { oauthClientId: client.id },
+      });
+      const role = await createTestRole();
+      await prisma.userRole.create({
+        data: { userId: account.id, roleId: role.id },
+      });
+      const token = await prisma.accessToken.create({
+        data: {
+          jti: crypto.randomUUID(),
+          clientId: client.id,
+          userId: account.id,
+          scopes: [],
+          expiresAt: new Date(Date.now() + 3600_000),
+        },
+      });
+      const revoked = async () =>
+        (
+          await prisma.accessToken.findUniqueOrThrow({
+            where: { id: token.id },
+          })
+        ).revokedAt !== null;
+      return { role, revoked };
+    };
+
+    const send = (method: string, path: string, body?: unknown) =>
+      fetch(`${BASE_URL}/v1/admin/roles/${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+
+    const auditedRevocations = async (
+      roleId: string,
+      action: "UPDATE" | "DELETE"
+    ) => {
+      const entry = await prisma.auditLogEntry.findFirstOrThrow({
+        where: { entityType: "Role", entityId: roleId, action },
+        orderBy: { createdAt: "desc" },
+      });
+      return (entry.metadata as { accessTokensRevoked?: number })
+        .accessTokensRevoked;
+    };
+
+    it("are revoked, and counted, when the role is deactivated", async () => {
+      const { role, revoked } = await clientHolding();
+      const res = await send("PATCH", role.id, { isActive: false });
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      expect(await revoked()).toBe(true);
+      expect(await auditedRevocations(role.id, "UPDATE")).toBe(1);
+    });
+
+    it("are revoked, and counted, when its permissions change", async () => {
+      const { role, revoked } = await clientHolding();
+      const res = await send("PUT", `${role.id}/permissions`, {
+        permissionIds: [],
+      });
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      expect(await revoked()).toBe(true);
+      expect(await auditedRevocations(role.id, "UPDATE")).toBe(1);
+    });
+
+    it("are revoked, and counted, when the role is deleted", async () => {
+      const { role, revoked } = await clientHolding();
+      const res = await send("DELETE", role.id);
+      expect(res.status).toBe(HTTP_STATUS.NO_CONTENT);
+      expect(await revoked()).toBe(true);
+      expect(await auditedRevocations(role.id, "DELETE")).toBe(1);
     });
   });
 });

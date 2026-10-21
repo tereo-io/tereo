@@ -42,11 +42,12 @@ POST /v1/admin/services
 | `GET /v1/admin/services` | `services.read` | List |
 | `GET /v1/admin/services/access` | `services.read` | Access rows across every service, each with its `service` (`id`, `slug`, `name`). Filter `status`, `kind`, `serviceId`, `target` (`?filter[status]=approved`); sort `requestedAt` (default, newest first) or `id` |
 | `GET /v1/admin/services/:id` | `services.read` | One service with everything it declared (retired included), its access, and `settings` |
-| `PATCH /v1/admin/services/:id` `{ name?, isActive? }` | `services.write` | Rename; deactivate (its tokens stop at once) or reactivate |
-| `POST /v1/admin/services/:id/regenerate-secret` | `services.write` | New secret, shown once. The old one keeps working for `SERVICE_SECRET_OVERLAP_HOURS` (24) |
-| `POST /v1/admin/services/:id/revoke-previous-secret` | `services.write` | End that overlap now. The secret is retired: provisioning never accepts it again |
+| `PATCH /v1/admin/services/:id` `{ name?, isActive? }` | `services.write` | Rename; deactivate (its tokens are revoked in the same transaction, counted in the audit entry's `accessTokensRevoked`) or reactivate |
+| `POST /v1/admin/services/:id/regenerate-secret` | `services.write`, and every permission the service's account holds | New secret, shown once. The old one keeps working for `SERVICE_SECRET_OVERLAP_HOURS` (24) |
+| `POST /v1/admin/services/:id/revoke-previous-secret` | `services.write`, and every permission the service's account holds | End that overlap now. The secret is retired: provisioning never accepts it again |
 | `POST /v1/admin/services/:id/access/approve` `{ ids }` | `services.approve` | Grant access rows, such as one an admin revoked |
-| `POST /v1/admin/services/:id/access/revoke` `{ ids }` | `services.approve` | Take them away; the service's tokens are revoked |
+| `POST /v1/admin/services/:id/access/revoke` `{ ids }` | `services.approve` | Take them away; the service's tokens are revoked in the same transaction (`accessTokensRevoked` in the audit entry) |
+
 
 Services are never deleted. Core's own row is not managed through this API.
 

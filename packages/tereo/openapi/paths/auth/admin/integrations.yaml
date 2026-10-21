@@ -65,8 +65,9 @@
       there. Without one it is a **platform** integration: no `org_id`, global
       roles. The organization is fixed at creation.
 
-      `slug` defaults to the name, lowercased and hyphenated. Returns `409` when
-      the slug is taken by a service or another integration, and
+      `slug` defaults to the name, lowercased and hyphenated. Returns
+      `409 slug_taken` when the slug is taken by a service or another
+      integration, and
       `400 unknown_organization` when the organization does not exist.
 
       An audit log entry is created for this action.
@@ -216,6 +217,9 @@
       `SERVICE_SECRET_OVERLAP_HOURS`, as for services. A provisioned
       integration is `409 managed_by_provisioning`: its secret comes from the
       provisioning documents.
+      The caller's global permissions must cover every permission the
+      integration's account holds (`403` naming those lacking): the secret
+      acts as the account.
 
       An audit log entry is created for this action.
       A `core.integration.secret-regenerated` webhook event is emitted.
@@ -265,6 +269,9 @@
       Ends the secret overlap now: only the current secret works from here on.
       Allowed on a provisioned integration too: the provisioning documents
       cannot end an overlap, and a leaked old secret must not wait it out.
+      The caller's global permissions must cover every permission the
+      integration's account holds (`403` naming those lacking): the secret
+      acts as the account.
 
       An audit log entry is created for this action.
       A `core.integration.previous-secret-revoked` webhook event is emitted.

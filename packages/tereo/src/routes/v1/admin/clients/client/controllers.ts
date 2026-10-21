@@ -190,10 +190,11 @@ export const updateClient = async (req: Request, res: Response) => {
       entityType: "OAuthClient",
       entityId: updated.id,
       entityName: updated.name,
-      // Never the secret's hash; a generated secret is noted in metadata.
+      // The API's view, never the secret hashes; a generated secret is
+      // noted in metadata.
       changes: computeChanges(
-        withoutSecret(existingClient),
-        withoutSecret(updated)
+        formatClient(existingClient),
+        formatClient(updated)
       ),
       ...(secret && { metadata: { action: "secret_generated" } }),
     });
@@ -211,11 +212,6 @@ export const updateClient = async (req: Request, res: Response) => {
   res.json(
     secret ? formatClient(full, true, secret.plainSecret) : formatClient(full)
   );
-};
-
-const withoutSecret = (client: object): Record<string, unknown> => {
-  const { clientSecret: _secret, ...rest } = client as Record<string, unknown>;
-  return rest;
 };
 
 export const deleteClient = async (req: Request, res: Response) => {

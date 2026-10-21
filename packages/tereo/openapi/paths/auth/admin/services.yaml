@@ -59,8 +59,8 @@
 
       `slug` defaults to the name, lowercased and hyphenated (cut to 64
       characters, without a trailing hyphen); `namespace`
-      defaults to the slug without a trailing `-service`. Returns `409` when
-      the slug is taken or the namespace overlaps another service's or a
+      defaults to the slug without a trailing `-service`. Returns
+      `409 slug_taken` when the slug is taken, `409` when the namespace overlaps another service's or a
       reserved one, and `400 invalid_name` when no slug is given and the
       name has no letters to derive one from.
 
@@ -213,7 +213,8 @@
     description: |
       Renames, deactivates or reactivates a service. The name is copied to
       its OAuth client; `isActive` is copied to its service-account user.
-      Deactivating revokes all of the service's outstanding tokens. Core's
+      Deactivating revokes all of the service's outstanding tokens in the
+      same transaction (`accessTokensRevoked` in the audit entry). Core's
       own row cannot be changed (`403`). A provisioned service is refused
       with `409 managed_by_provisioning`: its name and secret come from the
       provisioning documents.
@@ -276,6 +277,9 @@
       Core's own row cannot be changed (`403`). A provisioned service is
       refused with `409 managed_by_provisioning`: rotate its secret in the
       deployment's environment instead.
+      The caller's global permissions must cover every permission the
+      service's account holds (`403` naming those lacking): the secret acts
+      as the account.
 
       An audit log entry is created for this action.
       A `core.service.secret-regenerated` webhook event is emitted.
@@ -325,6 +329,9 @@
       on. Core's own row cannot be changed (`403`). Allowed on a provisioned
       service too: the provisioning documents cannot end an overlap, and a leaked
       old secret must not wait it out.
+      The caller's global permissions must cover every permission the
+      service's account holds (`403` naming those lacking): the secret acts
+      as the account.
 
       An audit log entry is created for this action.
       A `core.service.previous-secret-revoked` webhook event is emitted.
@@ -439,7 +446,9 @@
       Takes access away: the role is removed from the service-account user,
       or the audience from its client. Rows already revoked are skipped.
       When anything was revoked, all of the service's outstanding tokens are
-      revoked too, so its next call fetches a token without that access.
+      revoked too, in the same transaction (the audit entry's
+      `accessTokensRevoked` counts them), so its next call fetches a token
+      without that access.
       All ids must belong to this service (`404` otherwise). Core's own row
       cannot be changed (`403`).
 

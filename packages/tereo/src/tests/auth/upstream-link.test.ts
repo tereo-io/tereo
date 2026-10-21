@@ -382,6 +382,23 @@ describe("linking from the account page", () => {
     expect(res.status).toBe(404);
   });
 
+  it("answers 502 upstream_failed when the provider cannot be reached", async () => {
+    const user = await createTestUser();
+    const token = await freshToken(user);
+    const unreachable = await createProvider();
+    await prisma.identityProvider.update({
+      where: { id: unreachable.id },
+      data: { issuer: "http://127.0.0.1:1" },
+    });
+    const res = await account(token, "POST", "/identities", {
+      provider: unreachable.slug,
+    });
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "upstream_failed"
+    );
+  });
+
   it("refuses a provider other than an SSO-only domain's, at the start and at the callback", async () => {
     const domain = `sso-${generateUniqueId().toLowerCase()}.test`;
     const user = await createTestUser({ email: `someone@${domain}` });

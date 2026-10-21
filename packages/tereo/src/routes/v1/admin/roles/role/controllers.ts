@@ -113,7 +113,8 @@ export const updateRole = async (req: Request, res: Response) => {
       throw new ConflictError(
         conflict.archivedAt
           ? "An archived role with this name already exists"
-          : "Role with this name already exists"
+          : "Role with this name already exists",
+        "name_taken"
       );
     }
   }
@@ -139,12 +140,20 @@ export const updateRole = async (req: Request, res: Response) => {
       updated.isActive &&
       updated.requires2fa &&
       !(existing.isActive && existing.requires2fa);
-    const revokedJtis = gains2fa
-      ? await db.accessTokens.revokeWithoutMfa(
-          { userRoles: { some: { roleId: params.id } } },
-          tx
-        )
-      : [];
+    const revokedJtis = [
+      ...(gains2fa
+        ? await db.accessTokens.revokeWithoutMfa(
+            { userRoles: { some: { roleId: params.id } } },
+            tx
+          )
+        : []),
+      ...(body.isActive === false && existing.isActive
+        ? await revokeClientTokensTx(
+            await db.roles.getUserIdsByRoleId(params.id, tx),
+            tx
+          )
+        : []),
+    ];
     await logAuditTx(tx, {
       auth,
       action: "UPDATE",
@@ -170,7 +179,6 @@ export const updateRole = async (req: Request, res: Response) => {
 
   if (body.isActive !== undefined && body.isActive !== existing.isActive) {
     await notifyRoleStatusChanged(params.id);
-    if (!body.isActive) await handleRevokeTokens(params.id);
   }
 
   res.json(formatRole(role));
@@ -191,7 +199,8 @@ export const duplicateRole = async (req: Request, res: Response) => {
     throw new ConflictError(
       existing.archivedAt
         ? "An archived role with this name already exists"
-        : "Role with this name already exists"
+        : "Role with this name already exists",
+      "name_taken"
     );
   }
   const granted = source.rolePermissions.filter(
@@ -322,11 +331,11 @@ export const deleteRole = async (req: Request, res: Response) => {
     db.roles.grantedPermissionNames([existing])
   );
 
-  // Read before the delete: assignments cascade away with the row.
-  const affectedUserIds = await db.roles.getUserIdsByRoleId(params.id);
-
-  await db.$transaction(async (tx) => {
+  const { affectedUserIds, revokedJtis } = await db.$transaction(async (tx) => {
     await assertAdminRemains((a) => a.roleId !== params.id, tx);
+    // Read before the delete: assignments cascade away with the row.
+    const affectedUserIds = await db.roles.getUserIdsByRoleId(params.id, tx);
+    const revokedJtis = await revokeClientTokensTx(affectedUserIds, tx);
     await db.roles.remove(params.id, tx);
     await logAuditTx(tx, {
       auth,
@@ -336,6 +345,9 @@ export const deleteRole = async (req: Request, res: Response) => {
       entityName: existing.name,
       metadata: {
         affectedUsers: affectedUserIds.length,
+        ...(revokedJtis.length > 0 && {
+          accessTokensRevoked: revokedJtis.length,
+        }),
       },
     });
     await emitTx(tx, {
@@ -345,9 +357,10 @@ export const deleteRole = async (req: Request, res: Response) => {
       entityId: existing.id,
       data: { id: existing.id, name: existing.name },
     });
+    return { affectedUserIds, revokedJtis };
   });
 
-  await revokeClientTokens(affectedUserIds);
+  disconnectTokenSockets(revokedJtis);
   notifyRoleDeleted(affectedUserIds.map((u) => u.userId));
 
   res.status(204).send();
@@ -398,7 +411,7 @@ export const setRolePermissions = async (req: Request, res: Response) => {
     );
   }
 
-  const role = await db.$transaction(async (tx) => {
+  const { role, revokedJtis } = await db.$transaction(async (tx) => {
     await assertOrgAssignableWhileAssignedInOrg(
       tx,
       params.id,
@@ -418,6 +431,10 @@ export const setRolePermissions = async (req: Request, res: Response) => {
       body.permissionIds,
       tx
     );
+    const revokedJtis = await revokeClientTokensTx(
+      await db.roles.getUserIdsByRoleId(params.id, tx),
+      tx
+    );
     await logAuditTx(tx, {
       auth,
       action: "UPDATE",
@@ -427,6 +444,9 @@ export const setRolePermissions = async (req: Request, res: Response) => {
       metadata: {
         action: "permissions_changed",
         permissionIds: body.permissionIds,
+        ...(revokedJtis.length > 0 && {
+          accessTokensRevoked: revokedJtis.length,
+        }),
       },
     });
     await emitTx(tx, {
@@ -440,11 +460,11 @@ export const setRolePermissions = async (req: Request, res: Response) => {
         permissionIds: body.permissionIds,
       },
     });
-    return updated;
+    return { role: updated, revokedJtis };
   });
 
+  disconnectTokenSockets(revokedJtis);
   await notifyRolePermissionsChanged(params.id);
-  await handleRevokeTokens(params.id);
 
   res.json(formatRole(role));
 };
@@ -488,15 +508,10 @@ const assertOrgAssignableWhileAssignedInOrg = async (
   );
 };
 
-const handleRevokeTokens = async (roleId: string) => {
-  const affectedUserIds = await db.roles.getUserIdsByRoleId(roleId);
-  await revokeClientTokens(affectedUserIds);
-  return affectedUserIds;
-};
-
 /**
- * Revokes the access tokens of service clients holding the role. A human's
- * tokens are left alone: nothing that decides their access is fixed at issue.
+ * Revokes the access tokens of service clients holding the role, returning
+ * their jtis. A human's tokens are left alone: nothing that decides their
+ * access is fixed at issue.
  * requireAuth, userinfo and check-permission read permissions from the
  * database on every call, and a refresh mints the next access token with the
  * permissions current then. Revoking the access token would not end the
@@ -504,15 +519,18 @@ const handleRevokeTokens = async (roleId: string) => {
  * copy is the token's `permissions` claim, which only introspection returns;
  * that is for introspection to answer live, not for revocation to chase.
  */
-const revokeClientTokens = async (
-  affectedUserIds: { user: { oauthClientId: string | null } }[]
-) => {
+const revokeClientTokensTx = async (
+  affectedUserIds: { user: { oauthClientId: string | null } }[],
+  tx: Prisma.TransactionClient
+): Promise<string[]> => {
   const clientIds = new Set(
     affectedUserIds.flatMap((u) =>
       u.user.oauthClientId ? [u.user.oauthClientId] : []
     )
   );
+  const jtis: string[] = [];
   for (const clientId of clientIds) {
-    await db.accessTokens.revokeByClientId(clientId);
+    jtis.push(...(await db.accessTokens.revokeByClientId(clientId, tx)));
   }
+  return jtis;
 };

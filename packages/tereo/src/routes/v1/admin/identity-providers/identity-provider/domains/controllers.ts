@@ -16,6 +16,7 @@ import {
 import {
   assertMayChangeSsoOnly,
   assertProviderActive,
+  emitDomainTx,
   endSessionsLinkedElsewhere,
 } from "./utils.js";
 
@@ -81,11 +82,17 @@ export const createDomain = async (req: Request, res: Response) => {
         roleIds: body.roleIds,
       },
     });
+    await emitDomainTx(
+      tx,
+      "auth.identity-provider.domain-created",
+      providerId,
+      await db.identityProviders.getDomain(providerId, domain.id, tx)
+    );
     return domain;
   });
 
   if (created.ssoOnly) {
-    await endSessionsLinkedElsewhere(auth, created.domain, providerId);
+    await endSessionsLinkedElsewhere(auth, providerId, created.id);
   }
 
   res

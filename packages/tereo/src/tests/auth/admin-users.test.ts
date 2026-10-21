@@ -1611,6 +1611,37 @@ describe("Provider-only users, identities and invites", () => {
     expect(second.status).toBe(HTTP_STATUS.NOT_FOUND);
   });
 
+  it("emits an event when an invite is created and when it is withdrawn", async () => {
+    const eventTypes = [
+      "auth.user.identity-invite-created",
+      "auth.user.identity-invite-withdrawn",
+    ];
+    const endpoint = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      { eventTypes }
+    );
+    const user = await createUser();
+    await admin("POST", `/${user.id}/identity-invites`, {
+      providerId: provider.id,
+    });
+    const withdrawn = await admin(
+      "DELETE",
+      `/${user.id}/identity-invites/${provider.id}`
+    );
+    expect(withdrawn.status).toBe(HTTP_STATUS.NO_CONTENT);
+
+    const where = {
+      webhookEndpointId: endpoint.id,
+      payload: { path: ["data", "userId"], equals: user.id },
+    };
+    await waitFor(
+      async () => (await prisma.webhookDelivery.count({ where })) === 2,
+      10_000
+    );
+    const deliveries = await prisma.webhookDelivery.findMany({ where });
+    expect(deliveries.map((d) => d.eventType).sort()).toEqual(eventTypes);
+  });
+
   it("withdraws a user's invites when an admin changes their email", async () => {
     const user = await createUser();
     await admin("POST", `/${user.id}/identity-invites`, {

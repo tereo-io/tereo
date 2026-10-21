@@ -6,7 +6,8 @@
     description: |
       Returns a paginated list of OAuth clients with filtering and sorting —
       login clients and services' clients alike (a service's client has
-      `service` set).
+      `service` set). Without `clients.admin`, only the clients the caller
+      owns are listed, as only those can be read one by one.
 
       **Filter operators:**
       - name: `contains`, `equals`

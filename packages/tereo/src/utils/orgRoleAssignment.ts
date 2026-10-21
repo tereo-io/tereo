@@ -71,7 +71,7 @@ export const assertOrgAssignableRoles = async (
  * token's organization only: a role the caller has in another organization
  * must not let them grant in this one.
  */
-const callerPermissionsIn = async (
+export const callerPermissionsIn = async (
   auth: Pick<
     AuthContext,
     "userId" | "permissions" | "ceiling" | "organizationId"

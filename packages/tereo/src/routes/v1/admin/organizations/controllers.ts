@@ -25,7 +25,8 @@ export const createOrganization = async (req: Request, res: Response) => {
     throw new ConflictError(
       existing.archivedAt
         ? "An archived organization with this slug already exists"
-        : "Organization with this slug already exists"
+        : "Organization with this slug already exists",
+      "slug_taken"
     );
   }
   const codeTaken = await db.organizations.getByCodeAny(body.code);
@@ -33,7 +34,8 @@ export const createOrganization = async (req: Request, res: Response) => {
     throw new ConflictError(
       codeTaken.archivedAt
         ? "An archived organization with this code already exists"
-        : "Organization with this code already exists"
+        : "Organization with this code already exists",
+      "code_taken"
     );
   }
 

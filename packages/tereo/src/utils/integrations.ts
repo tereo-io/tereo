@@ -8,11 +8,13 @@ import type { IntegrationRow } from "./db/services.js";
 import { CORE_SERVICE } from "../definitions/index.js";
 import { prisma, type Prisma } from "./db/prisma.js";
 import { emitTx, logAuditTx } from "./outbox.js";
+import { logger } from "./logger.js";
 import db from "./db/index.js";
 import {
   BadRequestError,
   ConflictError,
   ForbiddenError,
+  InternalServerError,
   NotFoundError,
   RoleNotAllowedForIntegrationError,
   UnprocessableEntityError,
@@ -55,9 +57,11 @@ export interface IntegrationRef {
 export const integrationRef = (row: IntegrationRow): IntegrationRef => {
   const accountUserId = row.client?.serviceAccountUser?.id;
   if (!row.client || !accountUserId) {
-    throw new Error(
-      `Integration ${row.slug} has no client or service account; its rows are inconsistent`
+    logger.error(
+      { integrationId: row.id, slug: row.slug },
+      "Integration has no client or service account; its rows are inconsistent"
     );
+    throw new InternalServerError();
   }
   return {
     id: row.id,
@@ -106,7 +110,8 @@ export const createIntegrationTx = async (
   assertSlugUnreserved(slug);
   if (await tx.service.findUnique({ where: { slug } })) {
     throw new ConflictError(
-      `A service or integration with slug "${slug}" already exists`
+      `A service or integration with slug "${slug}" already exists`,
+      "slug_taken"
     );
   }
   const email = serviceAccountEmail(slug);

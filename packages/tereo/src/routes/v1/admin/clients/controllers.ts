@@ -2,6 +2,7 @@ import { getDefaultOrganizationId } from "../../../../utils/defaultOrganization.
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
 import { CreateClientSchema, ListClientsQuerySchema } from "./schemas.js";
 import { formatClient } from "../../../../utils/transformers.js";
+import { hasPermission } from "../../../../utils/permissions.js";
 import { emitTx, logAuditTx } from "../../../../utils/outbox.js";
 import { validateUser } from "../../../../utils/auth.js";
 import type { Request, Response } from "express";
@@ -80,10 +81,17 @@ export const createClient = async (req: Request, res: Response) => {
   res.status(201).json(formatClient(created, !isPublic, plainSecret));
 };
 
+/** All clients for a clients.admin; anyone else sees the ones they own. */
 export const listClients = async (req: Request, res: Response) => {
+  const auth = validateUser(req);
   const query = validateQuery(ListClientsQuerySchema, req);
 
-  const where = applyCursorToWhere(query);
+  const where = applyCursorToWhere(
+    query,
+    hasPermission(auth.permissions, "clients.admin")
+      ? {}
+      : { ownerId: auth.userId }
+  );
 
   const result = await db.clients.getPaginated({
     take: query.limit,

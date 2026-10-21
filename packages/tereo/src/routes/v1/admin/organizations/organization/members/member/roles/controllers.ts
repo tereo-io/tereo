@@ -1,7 +1,7 @@
 import { getDefaultOrganizationId } from "../../../../../../../../utils/defaultOrganization.js";
-import { assertOrgAssignableRoles } from "../../../../../../../../utils/orgRoleAssignment.js";
 import { assertNotIntegrationAccount } from "../../../../../../../../utils/integrations.js";
 import { emitTx, logAuditTx } from "../../../../../../../../utils/outbox.js";
+import { assertCanTakeAway } from "../../../../../../../../utils/grants.js";
 import { validateUser } from "../../../../../../../../utils/auth.js";
 import db from "../../../../../../../../utils/db/index.js";
 import { OrgIdParamSchema } from "../../../../schemas.js";
@@ -12,6 +12,10 @@ import {
   disconnectTokenSockets,
   notifyOrgRolesChanged,
 } from "../../../../../../../../websocket/emitters/index.js";
+import {
+  assertOrgAssignableRoles,
+  callerPermissionsIn,
+} from "../../../../../../../../utils/orgRoleAssignment.js";
 import {
   lockOrgOwners,
   requireOrgRole,
@@ -81,13 +85,18 @@ export const setMemberOrgRoles = async (req: Request, res: Response) => {
     // Read in the transaction, and only the roles new as of this read are
     // created: a held role removed concurrently is not put back unchecked.
     // A held role stays whatever its state (archived, retired).
-    const held = new Set(
-      (await db.organizations.getMemberRoles(orgId, userId, tx)).map(
-        (ur) => ur.roleId
-      )
-    );
+    const heldRoles = await db.organizations.getMemberRoles(orgId, userId, tx);
+    const held = new Set(heldRoles.map((ur) => ur.roleId));
     const added = roleIds.filter((roleId) => !held.has(roleId));
     await assertOrgAssignableRoles(auth, orgId, added, new Set(), tx);
+    const removed = heldRoles.filter((ur) => !roleIds.includes(ur.roleId));
+    if (removed.length > 0) {
+      assertCanTakeAway(
+        await callerPermissionsIn(auth, orgId, tx),
+        db.roles.grantedPermissionNames(removed.map((ur) => ur.role))
+      );
+    }
+
     const result = await db.organizations.setMemberRoles(
       orgId,
       userId,
