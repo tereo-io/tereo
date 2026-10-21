@@ -110,8 +110,9 @@ info:
 
     4. **Receive authorization code** via redirect:
        ```
-       https://app.example.com/callback?code=AUTHORIZATION_CODE&state=RANDOM_STATE_STRING
+       https://app.example.com/callback?code=AUTHORIZATION_CODE&state=RANDOM_STATE_STRING&iss=https%3A%2F%2Fcore.example.com
        ```
+       Check that `iss` is core's issuer (RFC 9207) before redeeming the code.
 
     5. **Exchange authorization code for tokens**:
        ```bash
@@ -136,7 +137,7 @@ info:
          "access_token": "eyJhbGc...",
          "token_type": "Bearer",
          "expires_in": 3600,
-         "refresh_token": "eyJhbGc...",
+         "refresh_token": "9f2c4e7a1b...",
          "id_token": "eyJhbGc...",
          "scope": "openid profile email"
        }
@@ -198,10 +199,14 @@ info:
       "access_token": "eyJhbGc...",
       "token_type": "Bearer",
       "expires_in": 3600,
-      "refresh_token": "eyJhbGc...",
+      "refresh_token": "5d81b0c3e6...",
+      "id_token": "eyJhbGc...",
       "scope": "openid profile email"
     }
     ```
+
+    The refresh token is opaque (not a JWT) and replaced on every refresh. `id_token` is
+    returned when the scope includes `openid`.
 
     ### 4. Making Authenticated API Calls
 
@@ -275,21 +280,25 @@ info:
 
     ### Cookie-Authenticated Requests
 
-    The browser's login state lives in cookies scoped to `/oauth`: the refresh token
-    (`trt_{client_id}`, cookie mode) and the `tereo_*` SSO and login-flow sessions. They
-    are `SameSite=Lax`, so a cross-site page cannot send them with a POST — but a same-site one
-    (another port or subdomain) can. Every POST (or other unsafe method) under `/oauth` that
-    carries one of them is therefore checked:
+    The browser's login state lives in per-client cookies: the refresh token
+    (`trt_{client_id}`, cookie mode) and the `tereo_*_{client_id}` SSO and login-flow sessions.
+    When Secure and `COOKIE_DOMAIN` is unset they are `__Host-` cookies (`__Host-trt_{client_id}`,
+    path `/`); otherwise unprefixed and scoped to `/oauth`. Only `/oauth` reads them. They are
+    `SameSite=Lax`, so a cross-site page cannot send them with a POST — but a same-site one
+    (another port or subdomain) can, along with every other client's. So a POST (or other unsafe
+    method) under `/oauth` that uses client X's cookie must come from:
 
-    - with `Sec-Fetch-Site`, it must be `same-origin`, or `same-site` with an allowed `Origin`;
-    - without it, `Origin`, when sent, must be allowed;
-    - a request with neither header is not from a browser page and passes.
+    - core's own origin (`Sec-Fetch-Site: same-origin`, or `Origin` = `PUBLIC_URL`'s), or the
+      UI's (`UI_BASE_URL`, which hosts every client's login pages);
+    - or, with `Sec-Fetch-Site: same-site` (or no `Sec-Fetch-Site`), an `Origin` of one of X's
+      registered redirect URIs.
 
-    Allowed origins are core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) and
-    `CORS_ALLOWED_ORIGINS` (any, when that is `*`). A refused request is 403 `access_denied`. This
-    covers the login, consent, org-select and 2FA submits, `POST /oauth/token` and
-    `POST /oauth/revoke` with the refresh cookie, and the sign-out confirmation. A request without
-    these cookies (a client authenticating with a secret, a code or a bearer token) is not checked.
+    A request with neither header is not from a browser page and passes. Any other is 403
+    `access_denied` once the endpoint reads the cookie: the login, consent, org-select and 2FA
+    submits, `POST /oauth/token` and `POST /oauth/revoke` with the refresh cookie, and the
+    sign-out confirmation. `CORS_ALLOWED_ORIGINS` does not widen this; it is only the CORS list.
+    A request that uses none of these cookies (a client authenticating with a secret, a code or a
+    bearer token) is not affected by the ones it carries.
 
     ### OpenID Connect Discovery
 
@@ -360,7 +369,7 @@ info:
     - A batch write (e.g. `POST /v1/audit/entries/batch`) counts as one request
 
     #### Per-Address Limit Before Authentication
-    On `/v1/admin`, `/v1/account`, `/v1/files`, `/v1/audit` and `/v1/webhooks`, a cheaper limit
+    On `/v1/admin`, `/v1/account`, `/v1/files`, `/v1/audit`, `/v1/webhooks` and `/v1/notifications`, a cheaper limit
     runs before the token is checked, so floods of missing or invalid tokens are bounded too:
     300 requests/second per client IP (1000 for a direct connection from an internal network
     address). Passing it adds no headers; past it, the same `429 too_many_requests` as the
@@ -369,7 +378,9 @@ info:
     #### Authentication Failure Rate Limiting
     Credential attempts have additional strict limits to prevent brute force attacks. Each
     attempt is counted before the credential is checked, so concurrent attempts cannot exceed
-    the limit; a correct credential clears the count:
+    the limit. A correct credential clears the count, except for login passwords per client ID
+    and IP address, where a success only gives back its own attempt (the count spans every
+    account tried from that address):
     - **Login passwords** (`POST /oauth/authorize`): 5 attempts per 300 seconds per client ID
       and IP address. In addition, per account (the submitted email, whether or not an account
       has it): 5 attempts, then a delay before each further attempt that starts at 1 second and
@@ -382,9 +393,15 @@ info:
       passwords still count toward the account's delay, and are capped at 5 per 900 seconds
       per cookie. The cookie is bound to the account and its current password: it does nothing
       for another email, and a password change or reset voids it
-    - **Login 2FA** (`/oauth/totp/verify`, `/oauth/totp/recovery`, `/oauth/totp/setup/verify`):
-      5 attempts per 300 seconds per user, across logins — a new login with the password does
-      not reset it
+    - **Login 2FA** (`/oauth/totp/verify`, `/oauth/totp/recovery`): per user, across logins — a
+      new login with the password does not reset it. 5 attempts in 24 hours, then a delay
+      before each further attempt that starts at 1 second and doubles with each, up to one
+      hour. Nothing clears the count: a right code gives back only its own attempt, and each
+      attempt counts for 24 hours. A known-device browser (as for login passwords) is let
+      through the delay, capped at 5 attempts per hour per cookie. Repeated failures are
+      audited
+    - **2FA setup at login** (`/oauth/totp/setup/verify`): 5 wrong codes per user per 300
+      seconds; a right code clears the count
     - **Wrong codes on `/v1/account/totp/*`** (enable, disable, regenerate backup codes): 5 per user
       per 300 seconds
     - **Wrong current password on `POST /v1/account/password`**: 5 per user per 300 seconds
@@ -401,7 +418,8 @@ info:
     `/v1/account/password`, `/v1/account/totp/*`, setup and share unlock) refuse attempts with
     `503 temporarily_unavailable` (with `Retry-After`) rather than allow
     unlimited guesses. The general and per-address limits let requests through, so the rest
-    of the API stays up.
+    of the API stays up, and so does the client-secret limit at `/oauth/token`, `/oauth/revoke`
+    and `/oauth/introspect`: the secret is still verified.
 
     #### Per-Bucket Rate Limits (Files)
     Buckets with a `rateLimitConfig` additionally get a per-bucket token bucket on their
@@ -769,13 +787,14 @@ info:
 
     Writes follow the same rule. Without `audit-logs.admin`, a token with an `org_id` writes
     only entries for that organization: another organization, or a system-wide entry, is
-    `403`, and one such entry refuses a whole batch. A service account's token without an
-    `org_id` — an app service's client, which writes for every tenant of its app — may write
-    for any organization; a person's token without one may not write.
+    `403`, and one such entry refuses a whole batch. An app service's token without an
+    `org_id` — its client writes for every tenant of its app — may write for any
+    organization; anyone else's token without one (a person's, an integration's) may not write.
 
-    An app service's client writes only entries whose `source` is its slug (`403` otherwise),
-    so its reads above hold exactly what it wrote. No service or integration may take the slug
-    `tereo`, the source of core's own entries.
+    An app service's client writes only entries whose `source` is its slug (`422
+    source_mismatch` otherwise), so its reads above hold exactly what it wrote. No service or
+    integration may take the slug `tereo`, the source of core's own entries, and no other writer
+    may use `tereo`, `core` or an app service's slug as `source` (`422 source_reserved`).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0

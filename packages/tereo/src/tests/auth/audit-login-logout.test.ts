@@ -136,10 +136,16 @@ const refreshTokenIds = async (userId: string) =>
     .map((t) => t.id)
     .sort();
 
+// Posted as the admin UI does, which gets JSON rather than a redirect.
 const endSession = (jar: CookieJar, params: Record<string, string>) =>
-  fetch(`${BASE_URL}/oauth/end-session?${new URLSearchParams(params)}`, {
+  fetch(`${BASE_URL}/oauth/end-session`, {
+    method: "POST",
     redirect: "manual",
-    headers: { Cookie: cookieHeader(jar) },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Cookie: cookieHeader(jar),
+    },
+    body: new URLSearchParams(params),
   });
 
 beforeAll(async () => {

@@ -44,8 +44,12 @@ export const unlinkIdentity = async (
     // Two unlinks at once must not both find another way in.
     await db.users.lockForSignInChange(userId, tx);
     const user = await db.users.get(userId, tx);
-    const remaining = await db.userIdentities.countForUser(userId, tx);
-    if (user.passwordHash === null && remaining <= 1) {
+    const others = await db.userIdentities.countUsableForUser(
+      userId,
+      identity.id,
+      tx
+    );
+    if (user.passwordHash === null && others === 0) {
       throw new ConflictError(
         "This is the account's only way to sign in",
         "last_sign_in_method"

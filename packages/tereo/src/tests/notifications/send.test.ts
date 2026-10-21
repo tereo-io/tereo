@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { ensureDailyPartitions } from "../../utils/partitions.js";
+import { createAppServiceAccount } from "../utils/testService.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { waitFor } from "../webhooks/utils/test-helpers.js";
 import { prisma } from "../../utils/db/prisma.js";
@@ -557,16 +558,8 @@ describe("POST /v1/notifications", () => {
         organizationId: null,
         permissions: ["notifications.send"],
       });
-      const serviceUserId = randomUUID();
-      await prisma.user.create({
-        data: {
-          id: serviceUserId,
-          email: `notif-scope-svc-${rand()}@services.example.com`,
-          name: "Notification scope service",
-          passwordHash: "!",
-          userType: "service_account",
-        },
-      });
+      const { userId: serviceUserId } =
+        await createAppServiceAccount("notif-scope-svc");
       serviceToken = await getTestPrincipalToken({
         userId: serviceUserId,
         organizationId: null,
@@ -604,7 +597,7 @@ describe("POST /v1/notifications", () => {
       );
     });
 
-    it("lets a service account's token without one name any organization", async () => {
+    it("lets an app service's token without one name any organization", async () => {
       const res = await send(message({ organizationId: orgB }), serviceToken);
       expect(res.status, JSON.stringify(res.body)).toBe(202);
     });

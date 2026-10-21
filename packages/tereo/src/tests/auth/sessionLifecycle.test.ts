@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { confirmLogout } from "../utils/browserLogin.js";
+import { makeServiceOf } from "../utils/testService.js";
 import { hashFlowToken } from "../../utils/crypto.js";
 import { prisma } from "../../utils/db/prisma.js";
 import env from "../../env.js";
@@ -56,6 +57,7 @@ interface TestUser {
 }
 
 let client: Awaited<ReturnType<typeof createTestClient>>;
+let introspector: Awaited<ReturnType<typeof createTestClient>>;
 
 const absorb = (jar: Jar, res: Response) => {
   for (const cookie of res.headers.getSetCookie()) {
@@ -274,9 +276,12 @@ const userSessionRows = (userId: string) =>
   prisma.userSession.findMany({ where: { userId } });
 
 beforeAll(async () => {
+  // A service in the login client's audience introspects its tokens.
+  introspector = await createTestClient({ clientType: "confidential" });
   client = await createTestClient({
     redirectUris: [REDIRECT_URI],
     postLogoutRedirectUris: [POST_LOGOUT_URI],
+    audience: [await makeServiceOf(introspector.id)],
   });
 });
 
@@ -459,6 +464,66 @@ describe("Session lifecycle", () => {
       expect(orgSwitch.loggedOut).toBe(true);
     });
 
+    const idleFor = (userId: string, seconds: number) =>
+      prisma.userSession.updateMany({
+        where: { userId },
+        data: { lastUsedAt: new Date(Date.now() - seconds * 1000) },
+      });
+
+    it("forces a fresh login once the SSO session has been idle for USER_SESSION_IDLE_TTL", async () => {
+      const user = await createUser();
+      const { jar } = await login(user);
+      await idleFor(user.id, env.USER_SESSION_IDLE_TTL + 1);
+
+      const idle = jar.get(userSessionCookieName())!;
+      expect((await silentLogin(jar)).loggedOut).toBe(true);
+      jar.set(userSessionCookieName(), idle);
+      expect((await silentLogin(jar, { org_id: user.orgId })).loggedOut).toBe(
+        true
+      );
+    });
+
+    it("keeps an SSO session in use alive, counting idleness from its last code", async () => {
+      const user = await createUser();
+      const { jar } = await login(user);
+      await idleFor(user.id, env.USER_SESSION_IDLE_TTL - 60);
+
+      const result = await silentLogin(jar);
+      expect(result.loggedOut).toBe(false);
+      const [row] = await userSessionRows(user.id);
+      expect(Date.now() - row.lastUsedAt.getTime()).toBeLessThan(60_000);
+    });
+
+    it("still logs out an idle SSO session, revoking what it issued", async () => {
+      const user = await createUser();
+      const { jar, tokens } = await login(user);
+      await idleFor(user.id, env.USER_SESSION_IDLE_TTL + 1);
+
+      const url = new URL(`${BASE_URL}/oauth/end-session`);
+      url.searchParams.set("id_token_hint", tokens.id_token!);
+      url.searchParams.set("post_logout_redirect_uri", POST_LOGOUT_URI);
+      const res = await fetch(url, {
+        redirect: "manual",
+        headers: { Cookie: cookieHeader(jar) },
+      });
+      expect(res.status).toBe(302);
+      expect(await userSessionRows(user.id)).toHaveLength(0);
+      expect((await refresh(tokens.refresh_token)).status).toBe(400);
+    });
+
+    it("takes over an idle SSO session's row at the next password login", async () => {
+      const user = await createUser();
+      const { jar } = await login(user);
+      const [before] = await userSessionRows(user.id);
+      await idleFor(user.id, env.USER_SESSION_IDLE_TTL + 1);
+
+      await login(user, jar);
+      const rows = await userSessionRows(user.id);
+      expect(rows.map((r) => r.id)).toEqual([before.id]);
+      expect(rows[0].tokenHash).not.toBe(before.tokenHash);
+      expect((await silentLogin(jar)).loggedOut).toBe(false);
+    });
+
     it("does not extend the SSO session past its original expiry", async () => {
       const user = await createUser();
       const { jar } = await login(user);
@@ -541,19 +606,26 @@ describe("Session lifecycle", () => {
     it("introspection agrees with requireAuth after rotation", async () => {
       const user = await createUser();
       const { tokens } = await login(user);
-      expect((await refresh(tokens.refresh_token)).status).toBe(200);
+      const rotated = await refresh(tokens.refresh_token);
+      expect(rotated.status).toBe(200);
       expect((await me(tokens.access_token)).status).not.toBe(200);
 
-      const res = await fetch(`${BASE_URL}/oauth/introspect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          token: tokens.access_token,
-          client_id: client.clientId,
-        }),
-      });
-      const body = (await res.json()) as { active: boolean };
-      expect(body.active).toBe(false);
+      const introspect = async (token: string) => {
+        const res = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${Buffer.from(
+              `${introspector.clientId}:${introspector.plainSecret}`
+            ).toString("base64")}`,
+          },
+          body: new URLSearchParams({ token }),
+        });
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { active: boolean }).active;
+      };
+      expect(await introspect(tokens.access_token)).toBe(false);
+      expect(await introspect(rotated.body.access_token!)).toBe(true);
     });
   });
 
@@ -777,7 +849,7 @@ describe("Session lifecycle", () => {
       await expectStillSignedIn(laptop);
     });
 
-    it("refuses a hint expired past the grace period", async () => {
+    it("asks to confirm for a hint expired past the grace period", async () => {
       const user = await createUser();
       const laptop = await login(user);
       const { sid } = decodeJwt(laptop.tokens.id_token!) as { sid?: string };
@@ -790,8 +862,10 @@ describe("Session lifecycle", () => {
       }).token;
 
       const res = await endSession(new Map(), { id_token_hint: stale });
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as Err).error).toBe("invalid_request");
+      expect(res.status).toBe(302);
+      expect(new URL(res.headers.get("location") ?? "").pathname).toMatch(
+        /\/logout$/
+      );
       await expectStillSignedIn(laptop);
     });
 
@@ -1277,7 +1351,7 @@ describe("Session lifecycle", () => {
     it("a completed prompt=login as another user ends the previous user's SSO session", async () => {
       const first = await createUser();
       const second = await createUser();
-      const { jar } = await login(first);
+      const { jar, tokens } = await login(first);
 
       const { code, verifier } = await loginToCode(second, jar, {
         prompt: "login",
@@ -1286,6 +1360,15 @@ describe("Session lifecycle", () => {
 
       expect(await userSessionRows(first.id)).toHaveLength(0);
       expect(await userSessionRows(second.id)).toHaveLength(1);
+      // Its token families end with it, as at a logout of this browser.
+      const family = await prisma.refreshToken.findUnique({
+        where: { tokenHash: hashFlowToken(tokens.refresh_token) },
+      });
+      expect(family?.revokedAt).not.toBeNull();
+      const access = await fetch(`${BASE_URL}/v1/account/me`, {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
+      expect(access.status).toBe(401);
     });
 
     it("max_age on a password login is satisfied by the fresh auth_time", async () => {

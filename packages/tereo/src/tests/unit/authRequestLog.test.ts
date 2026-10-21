@@ -60,4 +60,21 @@ describe("authRequestLog", () => {
       "/v1/admin/users",
     ]);
   });
+
+  it("logs a request whose path differs only in case", async () => {
+    const info = vi.spyOn(logger, "info");
+    const debug = vi.spyOn(logger, "debug");
+    const { url, close } = await serve();
+    try {
+      await fetch(`${url}/OAuth/token`, { method: "POST" });
+      await fetch(`${url}/V1/Admin/users`);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally {
+      await close();
+    }
+    expect([...loggedPaths(info), ...loggedPaths(debug)].sort()).toEqual([
+      "/OAuth/token",
+      "/V1/Admin/users",
+    ]);
+  });
 });

@@ -36,7 +36,6 @@ const refreshToken = (
   prisma.refreshToken.create({
     data: {
       tokenHash: unique(),
-      tokenPrefix: unique().slice(0, 16),
       clientId,
       userId,
       scopes: [],

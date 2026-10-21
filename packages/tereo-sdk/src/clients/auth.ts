@@ -1,8 +1,8 @@
 import type { ActiveIntrospectionResponse } from "../requests/auth/oauth/types.js";
+import { assertTestModeAllowed, parseTestToken } from "../utils/testTokens.js";
 import { setAuthSpanAttrs, setRequiredPermission } from "../utils/otel.js";
 import type { Request, Response, NextFunction } from "express";
 import { getOriginalStatus, requests } from "../handler.js";
-import { parseTestToken } from "../utils/testTokens.js";
 import { hasPermission } from "../utils/permissions.js";
 import { logger } from "../utils/logger.js";
 import crypto from "crypto";
@@ -53,6 +53,7 @@ declare global {
  */
 const AUTH_CACHE_PREFIX = buildCachePrefix("auth-sdk");
 const INTROSPECT_CACHE_TTL_SECONDS = 60;
+const MAX_INTROSPECT_CACHE_TTL_SECONDS = 300;
 
 /**
  * How long an active introspection may be cached: never past the token's
@@ -74,6 +75,7 @@ export class AuthServiceClient {
   private readonly defaultTestPermissions: string[];
   private readonly publicRoutes: PublicRouteConfig[];
   private readonly introspectionCacheTtlSeconds: number;
+  private readonly allowedClients: ReadonlySet<string> | null;
 
   /**
    * `testMode` accepts forged test tokens and answers user and organization
@@ -84,10 +86,20 @@ export class AuthServiceClient {
     private readonly testMode = false,
     private readonly testServiceUserId?: string
   ) {
+    if (testMode) assertTestModeAllowed();
+    const ttl =
+      config.introspectionCacheTtlSeconds ?? INTROSPECT_CACHE_TTL_SECONDS;
+    if (!(ttl >= 0 && ttl <= MAX_INTROSPECT_CACHE_TTL_SECONDS)) {
+      throw new Error(
+        `@tereo-io/sdk: introspectionCacheTtlSeconds must be between 0 and ${MAX_INTROSPECT_CACHE_TTL_SECONDS}`
+      );
+    }
     this.defaultTestPermissions = config.defaultTestPermissions ?? [];
     this.publicRoutes = config.publicRoutes ?? [];
-    this.introspectionCacheTtlSeconds =
-      config.introspectionCacheTtlSeconds ?? INTROSPECT_CACHE_TTL_SECONDS;
+    this.introspectionCacheTtlSeconds = ttl;
+    this.allowedClients = config.allowedClients
+      ? new Set(config.allowedClients)
+      : null;
   }
 
   /**
@@ -377,6 +389,12 @@ export class AuthServiceClient {
         throw new UnauthorizedError("Invalid or expired token");
       }
 
+      if (this.allowedClients && !this.allowedClients.has(res.client_id)) {
+        throw new UnauthorizedError(
+          "Tokens issued to this client are not accepted here"
+        );
+      }
+
       req.auth = {
         userId: res.user_id,
         email: res.email || null,
@@ -384,6 +402,9 @@ export class AuthServiceClient {
         userType: tokenUserType(res),
         permissions: res.permissions || [],
         currentSessionId: res.sid || null,
+        clientId: res.client_id,
+        scope: res.scope ? res.scope.split(" ").filter(Boolean) : [],
+        audience: res.aud === undefined ? [] : [res.aud].flat(),
         oauthClientId: res.client_id || null,
         organizationId: res.org_id || null,
         organizationName: res.org_name || null,
@@ -415,6 +436,28 @@ export class AuthServiceClient {
         );
       }
 
+      next();
+    };
+
+  /**
+   * Express middleware that requires the token to carry every one of
+   * `scopes`, after `requireAuth`. Permissions are the user's whatever client
+   * the token was issued to; scopes are what the user granted that client.
+   */
+  requireScope =
+    (...scopes: string[]) =>
+    (req: Request, res: Response, next: NextFunction) => {
+      const user = this.validateUser(req);
+      const missing = scopes.filter((s) => !user.scope.includes(s));
+      if (missing.length > 0) {
+        res.setHeader(
+          "WWW-Authenticate",
+          `Bearer error="insufficient_scope", scope="${scopes.join(" ")}"`
+        );
+        throw new ForbiddenError(
+          `This token lacks the required scope: ${missing.join(" ")}`
+        );
+      }
       next();
     };
 

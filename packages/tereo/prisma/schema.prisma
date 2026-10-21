@@ -286,7 +286,6 @@ model AccessToken {
 model RefreshToken {
   id             String    @id @default(uuid(7)) @db.Uuid
   tokenHash      String    @unique @map("token_hash") @db.VarChar(255)
-  tokenPrefix    String    @map("token_prefix") @db.VarChar(16)
   clientId       String    @map("client_id") @db.Uuid
   userId         String    @map("user_id") @db.Uuid
   organizationId String?   @map("organization_id") @db.Uuid
@@ -305,7 +304,6 @@ model RefreshToken {
   authCode     AuthorizationCode? @relation(fields: [authCodeId], references: [id], onDelete: Cascade)
   accessTokens AccessToken[]
 
-  @@index([tokenPrefix])
   @@index([authCodeId, revokedAt])
   @@index([revokedAt])
   @@index([organizationId])
@@ -484,14 +482,18 @@ model TotpVerification {
   acrValues           String?  @map("acr_values") @db.VarChar(512)
   prompt              String?  @db.VarChar(50)
   firstFactor         String[] @default(["pwd"]) @map("first_factor")
+  // A forced link that commits only once this step passes; gone with it.
+  pendingLinkId       String?  @map("pending_link_id") @db.Uuid
   expiresAt           DateTime @map("expires_at")
   createdAt           DateTime @default(now()) @map("created_at")
 
-  user   User        @relation(fields: [userId], references: [id], onDelete: Restrict)
-  client OAuthClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  client      OAuthClient          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pendingLink PendingIdentityLink? @relation(fields: [pendingLinkId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
+  @@index([pendingLinkId])
   @@map("totp_verifications")
   @@schema("auth")
 }
@@ -601,6 +603,8 @@ model UserSession {
   authMethods    String[] @default([]) @map("auth_methods")
   acrValue       String?  @map("acr_value") @db.VarChar(100)
   expiresAt      DateTime @map("expires_at")
+  // When it last issued a code; USER_SESSION_IDLE_TTL counts from here.
+  lastUsedAt     DateTime @default(now()) @map("last_used_at")
   createdAt      DateTime @default(now()) @map("created_at")
 
   user               User                @relation(fields: [userId], references: [id], onDelete: Restrict)
@@ -610,6 +614,7 @@ model UserSession {
 
   @@index([organizationId])
   @@index([expiresAt])
+  @@index([lastUsedAt])
   @@index([userId, expiresAt])
   @@map("user_sessions")
   @@schema("auth")
@@ -685,6 +690,7 @@ model IdentityProvider {
   identities           UserIdentity[]
   invites              IdentityInvite[]
   upstreamAuthSessions UpstreamAuthSession[]
+  pendingIdentityLinks PendingIdentityLink[]
 
   @@map("identity_providers")
   @@schema("auth")
@@ -822,10 +828,31 @@ model IdentityLinkGrant {
   user                 User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
   client               OAuthClient           @relation(fields: [clientId], references: [id], onDelete: Cascade)
   upstreamAuthSessions UpstreamAuthSession[]
+  pendingLinks         PendingIdentityLink[]
 
   @@index([userId])
   @@index([expiresAt])
   @@map("identity_link_grants")
+  @@schema("auth")
+}
+
+// The identity a forced link's provider vouched for, held until the user's
+// second factor passes; it goes with the grant.
+model PendingIdentityLink {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  linkGrantId String   @map("link_grant_id") @db.Uuid
+  providerId  String   @map("provider_id") @db.Uuid
+  subject     String   @db.VarChar(255)
+  email       String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  linkGrant         IdentityLinkGrant  @relation(fields: [linkGrantId], references: [id], onDelete: Cascade)
+  provider          IdentityProvider   @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  totpVerifications TotpVerification[]
+
+  @@index([linkGrantId])
+  @@index([providerId])
+  @@map("pending_identity_links")
   @@schema("auth")
 }
 

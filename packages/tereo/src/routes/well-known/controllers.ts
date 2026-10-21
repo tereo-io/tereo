@@ -5,10 +5,11 @@ import { type Request, Response } from "express";
 import { createPublicKey } from "crypto";
 import env from "../../env.js";
 
+// The issuer is an identifier; the endpoints are where core is reached.
 export const handleWellKnownOAuth = async (_req: Request, res: Response) => {
-  const baseUrl = env.ISSUER;
+  const baseUrl = env.PUBLIC_URL;
   res.json({
-    issuer: baseUrl,
+    issuer: env.ISSUER,
     authorization_endpoint: `${baseUrl}/oauth/authorize`,
     token_endpoint: `${baseUrl}/oauth/token`,
     introspection_endpoint: `${baseUrl}/oauth/introspect`,
@@ -22,10 +23,7 @@ export const handleWellKnownOAuth = async (_req: Request, res: Response) => {
       "refresh_token",
     ],
     token_endpoint_auth_methods_supported: ["client_secret_basic", "none"],
-    introspection_endpoint_auth_methods_supported: [
-      "client_secret_basic",
-      "none",
-    ],
+    introspection_endpoint_auth_methods_supported: ["client_secret_basic"],
     revocation_endpoint_auth_methods_supported: ["client_secret_basic", "none"],
     code_challenge_methods_supported: ["S256"],
     // RFC 9207: every authorization response carries `iss`.
@@ -37,9 +35,9 @@ export const handleOpenIdConfiguration = async (
   _req: Request,
   res: Response
 ) => {
-  const baseUrl = env.ISSUER;
+  const baseUrl = env.PUBLIC_URL;
   res.json({
-    issuer: baseUrl,
+    issuer: env.ISSUER,
     authorization_endpoint: `${baseUrl}/oauth/authorize`,
     token_endpoint: `${baseUrl}/oauth/token`,
     userinfo_endpoint: `${baseUrl}/oauth/userinfo`,
@@ -57,10 +55,7 @@ export const handleOpenIdConfiguration = async (
     subject_types_supported: ["public"],
     id_token_signing_alg_values_supported: ["RS256"],
     token_endpoint_auth_methods_supported: ["client_secret_basic", "none"],
-    introspection_endpoint_auth_methods_supported: [
-      "client_secret_basic",
-      "none",
-    ],
+    introspection_endpoint_auth_methods_supported: ["client_secret_basic"],
     revocation_endpoint_auth_methods_supported: ["client_secret_basic", "none"],
     // Discovery defaults request_uri_parameter_supported to true.
     request_parameter_supported: false,

@@ -60,6 +60,60 @@ describe("production env", () => {
     );
   });
 
+  it.each([
+    ["not a url", "ISSUER must be a URL"],
+    ["http://core.example.com", "https:// URL in production"],
+    ["https://core.example.com?x=1", "query or fragment"],
+    ["https://core.example.com#x", "query or fragment"],
+  ])("refuses ISSUER=%s", (value, message) => {
+    const result = EnvSchema.safeParse({ ...production, ISSUER: value });
+    expect(result.success).toBe(false);
+    expect(
+      result.error?.issues.find((i) => i.path.join(".") === "ISSUER")?.message
+    ).toContain(message);
+  });
+
+  it("drops a trailing slash from ISSUER", () => {
+    const parsed = EnvSchema.parse({
+      ...production,
+      ISSUER: "https://id.example.com/",
+    });
+    expect(parsed.ISSUER).toBe("https://id.example.com");
+    expect(
+      EnvSchema.parse({
+        ...production,
+        PUBLIC_URL: "https://core.example.com/",
+      }).ISSUER
+    ).toBe("https://core.example.com");
+  });
+
+  it.each([
+    ["*", "CORS_ALLOWED_ORIGINS"],
+    [
+      "https://app.example.com,http://admin.example.com",
+      "CORS_ALLOWED_ORIGINS",
+    ],
+  ])("refuses CORS_ALLOWED_ORIGINS=%s", (value, path) => {
+    expect(issuesFor({ CORS_ALLOWED_ORIGINS: value })).toContain(path);
+  });
+
+  it("requires CORS_ALLOWED_ORIGINS", () => {
+    const { CORS_ALLOWED_ORIGINS: _unset, ...rest } = production;
+    const result = EnvSchema.safeParse(rest);
+    expect(result.error?.issues.map((i) => i.path.join("."))).toContain(
+      "CORS_ALLOWED_ORIGINS"
+    );
+  });
+
+  it("accepts https and loopback CORS origins", () => {
+    expect(
+      issuesFor({
+        CORS_ALLOWED_ORIGINS:
+          "https://app.example.com, http://localhost:3000,http://127.0.0.1:5173",
+      })
+    ).toEqual([]);
+  });
+
   it.each(["development", "test"])(
     "leaves all three alone in %s",
     (nodeEnv) => {
@@ -70,6 +124,8 @@ describe("production env", () => {
           COOKIE_SECURE: "false",
           PUBLIC_URL: "http://localhost:4001",
           UI_BASE_URL: "http://localhost:4000",
+          ISSUER: "http://localhost:4001",
+          CORS_ALLOWED_ORIGINS: "*",
         })
       ).toEqual([]);
     }

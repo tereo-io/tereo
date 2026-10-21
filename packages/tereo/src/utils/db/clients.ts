@@ -117,6 +117,15 @@ export const getByClientId = async (
   return existing;
 };
 
+/** The redirect URIs of the clients among `clientIds` that exist. */
+export const getRedirectUris = async (
+  clientIds: string[]
+): Promise<{ clientId: string; redirectUris: string[] }[]> =>
+  prisma.oAuthClient.findMany({
+    where: { clientId: { in: clientIds } },
+    select: { clientId: true, redirectUris: true },
+  });
+
 export const getAll = async (): Promise<ClientRecord[]> => {
   return await prisma.oAuthClient.findMany({
     orderBy: { createdAt: "desc" },

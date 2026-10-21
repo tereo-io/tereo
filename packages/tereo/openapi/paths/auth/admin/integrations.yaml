@@ -374,6 +374,9 @@
       integration's tokens: each appears in its tokens' `aud`. Each must be a
       service other than core (`422 invalid_audience`); an integration cannot
       be an audience. Its tokens are revoked when the audience changes.
+      Naming a service lets it read the integration's tokens, so the caller
+      needs `services.approve` too (`403` otherwise), as for a client's
+      audience.
 
       An audit log entry is created and a `core.integration.updated` webhook
       event is emitted when the audience changes.
@@ -408,7 +411,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing integrations.write permission
+        description: Forbidden - missing integrations.write or services.approve permission
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: No integration with this id

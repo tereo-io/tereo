@@ -1,6 +1,5 @@
 import { getDefaultOrganizationId } from "../../../../../../../../utils/defaultOrganization.js";
 import { assertOrgAssignableRoles } from "../../../../../../../../utils/orgRoleAssignment.js";
-import { notifyOrgRolesChanged } from "../../../../../../../../websocket/emitters/index.js";
 import { assertNotIntegrationAccount } from "../../../../../../../../utils/integrations.js";
 import { emitTx, logAuditTx } from "../../../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../../../utils/auth.js";
@@ -9,6 +8,10 @@ import { OrgIdParamSchema } from "../../../../schemas.js";
 import { MemberUserIdParamSchema } from "../schemas.js";
 import { SetMemberRolesSchema } from "./schemas.js";
 import type { Request, Response } from "express";
+import {
+  disconnectTokenSockets,
+  notifyOrgRolesChanged,
+} from "../../../../../../../../websocket/emitters/index.js";
 import {
   lockOrgOwners,
   requireOrgRole,
@@ -59,7 +62,7 @@ export const setMemberOrgRoles = async (req: Request, res: Response) => {
   await db.organizations.get(orgId);
   await assertNotIntegrationAccount(userId);
 
-  const userRoles = await db.$transaction(async (tx) => {
+  const { userRoles, revokedJtis } = await db.$transaction(async (tx) => {
     await db.users.lockAuthority(userId, tx);
     // Under the lock removeMember and tier changes take, so the membership
     // and its tier hold until the write.
@@ -92,6 +95,15 @@ export const setMemberOrgRoles = async (req: Request, res: Response) => {
       tx,
       new Set(added)
     );
+    // A role requiring 2FA counts wherever the user is a member, and
+    // permissions are read live: a token from a password-only login is
+    // revoked, so its refresh meets the step-up.
+    const requires2fa = (await db.roles.getByIds(added, tx)).some(
+      (r) => r.requires2fa
+    );
+    const revokedJtis = requires2fa
+      ? await db.accessTokens.revokeWithoutMfa({ id: userId }, tx)
+      : [];
     await logAuditTx(tx, {
       auth,
       organizationId: orgId,
@@ -99,7 +111,14 @@ export const setMemberOrgRoles = async (req: Request, res: Response) => {
       entityType: "OrganizationMember",
       entityId: membership.id,
       entityName: membership.user.email,
-      metadata: { action: "roles_changed", userId, roleIds },
+      metadata: {
+        action: "roles_changed",
+        userId,
+        roleIds,
+        ...(revokedJtis.length > 0 && {
+          accessTokensRevoked: revokedJtis.length,
+        }),
+      },
     });
     await emitTx(tx, {
       organizationId: getDefaultOrganizationId(),
@@ -113,9 +132,10 @@ export const setMemberOrgRoles = async (req: Request, res: Response) => {
         roleIds,
       },
     });
-    return result;
+    return { userRoles: result, revokedJtis };
   });
 
+  disconnectTokenSockets(revokedJtis);
   notifyOrgRolesChanged(userId, orgId);
   res.json({
     organizationId: orgId,

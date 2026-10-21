@@ -80,8 +80,8 @@ refused caller can't probe which organizations exist:
 | --------------------------------------- | --------------------------------------- |
 | `audit-logs.admin`                      | any organization, or none (system-wide) |
 | token with `org_id`                     | that organization only                  |
-| service account, token without `org_id` | any organization, or none               |
-| person, token without `org_id`          | nothing                                 |
+| app service, token without `org_id`     | any organization, or none               |
+| anyone else, token without `org_id`     | nothing                                 |
 
 Anything else is `403 forbidden`. For an organization-bound writer, a missing or `null`
 `organizationId` is refused too: a system-wide entry lies outside its organization, as it does
@@ -93,13 +93,18 @@ its client with no organization, it is granted `audit_writer` globally, and its 
 entries for every tenant of its app with one set of credentials. Its writes are attributable
 regardless — `writerUserId` is always the service account. A person's session always carries an
 `org_id`, so a person's token without one has no organization to write for and is refused, as for
-reads.
+reads. Only an app service's client (`callerService`) writes without one: an integration's token,
+or any other service account's, is refused too — an integration that writes for an organization is
+bound to it.
 
 ### Source
 
 `source` is self-reported, except for an app service: its client writes only entries whose
 `source` is its slug, and any other is `422 source_mismatch`, naming the slug (one refuses a
-whole batch). It is not a `403`: no grant fixes it, so the SDK outbox dead-letters the row at once
+whole batch). The reverse holds for everyone else, `audit-logs.admin` included: core's source
+(`tereo`), core's slug (`core`) and every app service's slug are reserved for their owner, and an
+entry under one is `422 source_reserved`, naming them, so an entry under a service's slug was
+written by that service. It is not a `403`: no grant fixes it, so the SDK outbox dead-letters the row at once
 rather than retrying. Its reads are scoped
 by source and writer, so they hold exactly what it wrote. Core's own entries have source `tereo`
 (`CORE_SOURCE`); `tereo` and `core` are reserved slugs (`CORE_RESERVED_SLUGS`), refused at

@@ -1,6 +1,22 @@
 import type { ActiveIntrospectionResponse } from "../types/auth.js";
 import crypto from "crypto";
 
+const TEST_MODE_NODE_ENVS = ["test", "development"];
+
+/**
+ * Throws unless test mode may run here: `NODE_ENV` must be `test` or
+ * `development`, so a staging deploy with any other value cannot be made to
+ * accept forged tokens, and `production` must not be set.
+ */
+export const assertTestModeAllowed = (production = false): void => {
+  const nodeEnv = process.env.NODE_ENV;
+  if (production || !nodeEnv || !TEST_MODE_NODE_ENVS.includes(nodeEnv)) {
+    throw new Error(
+      `@tereo-io/sdk: testMode accepts forged tokens and is allowed only with NODE_ENV=test or development (NODE_ENV is ${nodeEnv ? `"${nodeEnv}"` : "unset"}${production ? ", and `production: true`" : ""})`
+    );
+  }
+};
+
 /**
  * Parse a test token into an ActiveIntrospectionResponse.
  *

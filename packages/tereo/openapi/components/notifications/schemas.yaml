@@ -314,8 +314,8 @@ SendNotificationRequest:
       description: |
         Scopes the notification's audit entry and events; omitted or null, the token's
         organization, or the default organization for a token without one. A token with an organization may name only that one; a person's token
-        without one may name none. `notifications.admin` and a service account's token without
-        an organization may name any.
+        without one may name none, nor may an integration's. `notifications.admin` and an app
+        service's token without an organization may name any.
       type: [string, 'null']
       format: uuid
     recipients:

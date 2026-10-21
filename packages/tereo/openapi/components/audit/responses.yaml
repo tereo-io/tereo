@@ -78,7 +78,9 @@ AuditWriteUnprocessableResponse:
     progress). Use a new key, or retry with the original body.
 
     `source_mismatch`: an app service's client sent an entry whose `source` is not its own
-    slug, which the message names. Nothing is written; retrying the same body never succeeds.
+    slug, which the message names. `source_reserved`: another caller sent an entry whose
+    `source` is core's (`tereo`, `core`) or an app service's slug, which the message names.
+    Nothing is written; retrying the same body never succeeds.
   headers:
     X-RateLimit-Limit:
       $ref: '../headers.yaml#/X-RateLimit-Limit'
@@ -96,6 +98,7 @@ AuditWriteUnprocessableResponse:
             enum:
               - idempotency_key_conflict
               - source_mismatch
+              - source_reserved
           error_description:
             type: string
             examples:

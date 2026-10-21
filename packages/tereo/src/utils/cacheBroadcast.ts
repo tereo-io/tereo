@@ -9,14 +9,17 @@ const OBJECT_INVALIDATE_CHANNEL = redisKey("file-service:object-invalidate");
 const IDENTITY_PROVIDER_INVALIDATE_CHANNEL = redisKey(
   "auth:identity-provider-invalidate"
 );
+const SIGNING_KEYS_CHANGED_CHANNEL = redisKey("auth:signing-keys-changed");
 
 let publisher: Redis | null = null;
 let subscriber: Redis | null = null;
 const subscribers: Array<(bucketName: string) => void> = [];
 const identityProviderSubscribers: Array<(id: string) => void> = [];
+const signingKeySubscribers: Array<() => void> = [];
 const listenersByChannel: Record<string, Array<(message: string) => void>> = {
   [BUCKET_INVALIDATE_CHANNEL]: subscribers,
   [IDENTITY_PROVIDER_INVALIDATE_CHANNEL]: identityProviderSubscribers,
+  [SIGNING_KEYS_CHANGED_CHANNEL]: signingKeySubscribers,
 };
 
 /**
@@ -115,6 +118,22 @@ export function onIdentityProviderInvalidate(
   listener: (id: string) => void
 ): void {
   identityProviderSubscribers.push(listener);
+}
+
+/**
+ * Has every process re-read the JWT signing keys now, not at its next periodic
+ * refresh. Fire-and-forget.
+ */
+export async function broadcastSigningKeysChanged(): Promise<void> {
+  try {
+    await getPublisher().publish(SIGNING_KEYS_CHANGED_CHANNEL, "");
+  } catch (err) {
+    logger.warn({ err }, "Failed to broadcast a signing key change");
+  }
+}
+
+export function onSigningKeysChanged(listener: () => void): void {
+  signingKeySubscribers.push(listener);
 }
 
 /** Safe to call more than once: a no-op until `closeCacheBroadcast`. */

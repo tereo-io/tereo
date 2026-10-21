@@ -1,3 +1,4 @@
+import { expectAuthorizeErrorRedirect } from "./utils/authorizeErrors.js";
 import { hashAuthorizationCode } from "../../utils/crypto.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
@@ -45,7 +46,8 @@ describe("OAuth Security Tests", () => {
   async function getAuthorizationCode(
     client: typeof testClient,
     codeChallenge: string,
-    scope: string = "openid profile email offline_access"
+    scope: string = "openid profile email offline_access",
+    user: typeof testUser = testUser
   ): Promise<{ code: string | null; cookies: string }> {
     const state = generateUniqueId();
     const redirectUri = client.redirectUris[0];
@@ -86,8 +88,8 @@ describe("OAuth Security Tests", () => {
         scope,
         code_challenge: codeChallenge,
         code_challenge_method: "S256",
-        email: testUser.email,
-        password: testUser.plainPassword,
+        email: user.email,
+        password: user.plainPassword,
       }),
       redirect: "manual",
     });
@@ -178,26 +180,45 @@ describe("OAuth Security Tests", () => {
     });
 
     it("should reject plain code_challenge_method (insecure)", async () => {
+      // A well-formed 43-character challenge, so only the method is at fault.
+      const codeChallenge = generateCodeChallenge(generateCodeVerifier());
+      expect(codeChallenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      const authorize = (method: string, state: string) => {
+        const authorizeUrl = new URL(`${BASE_URL}/oauth/authorize`);
+        authorizeUrl.searchParams.set("response_type", "code");
+        authorizeUrl.searchParams.set("client_id", testClient.clientId);
+        authorizeUrl.searchParams.set(
+          "redirect_uri",
+          testClient.redirectUris[0]
+        );
+        authorizeUrl.searchParams.set("state", state);
+        authorizeUrl.searchParams.set("scope", "openid");
+        authorizeUrl.searchParams.set("code_challenge", codeChallenge);
+        authorizeUrl.searchParams.set("code_challenge_method", method);
+        return fetch(authorizeUrl.toString(), {
+          method: "GET",
+          redirect: "manual",
+        });
+      };
+
       const state = generateUniqueId();
-      const codeVerifier = generateCodeVerifier();
-      const redirectUri = testClient.redirectUris[0];
-
-      const authorizeUrl = new URL(`${BASE_URL}/oauth/authorize`);
-      authorizeUrl.searchParams.set("response_type", "code");
-      authorizeUrl.searchParams.set("client_id", testClient.clientId);
-      authorizeUrl.searchParams.set("redirect_uri", redirectUri);
-      authorizeUrl.searchParams.set("state", state);
-      authorizeUrl.searchParams.set("scope", "openid");
-      authorizeUrl.searchParams.set("code_challenge", codeVerifier); // Plain verifier
-      authorizeUrl.searchParams.set("code_challenge_method", "plain"); // Insecure method
-
-      const response = await fetch(authorizeUrl.toString(), {
-        method: "GET",
-        redirect: "manual",
-      });
-
-      // Server should reject plain method
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      const plain = await authorize("plain", state);
+      const params = expectAuthorizeErrorRedirect(
+        plain,
+        testClient.redirectUris[0],
+        "invalid_request",
+        state
+      );
+      expect(params.get("error_description")).toContain(
+        "code_challenge_method"
+      );
+      // The same request with S256 is not refused.
+      const s256 = await authorize("S256", generateUniqueId());
+      expect(
+        new URL(s256.headers.get("location") ?? "", BASE_URL).searchParams.get(
+          "error"
+        )
+      ).toBeNull();
     });
   });
 
@@ -223,6 +244,8 @@ describe("OAuth Security Tests", () => {
       });
 
       expect(firstResponse.status).toBe(HTTP_STATUS.OK);
+      const first = (await firstResponse.json()) as TokenResponse;
+      expect(first.refresh_token).toBeTruthy();
 
       // Second exchange with same code - should fail
       const secondResponse = await fetch(`${BASE_URL}/oauth/token`, {
@@ -241,6 +264,73 @@ describe("OAuth Security Tests", () => {
 
       expect(secondResponse.status).toBe(HTTP_STATUS.BAD_REQUEST);
       expect(data.error).toBe(OAUTH_ERRORS.INVALID_GRANT);
+
+      // The replay revokes what the first exchange issued (RFC 6749 4.1.2).
+      const userinfo = await fetch(`${BASE_URL}/oauth/userinfo`, {
+        headers: { Authorization: `Bearer ${first.access_token}` },
+      });
+      expect(userinfo.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+      const refresh = await fetch(`${BASE_URL}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "refresh_token",
+          refresh_token: first.refresh_token,
+          client_id: testClient.clientId,
+        }),
+      });
+      expect(refresh.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(((await refresh.json()) as TokenResponse).error).toBe(
+        OAUTH_ERRORS.INVALID_GRANT
+      );
+      const { jti } = JSON.parse(
+        Buffer.from(first.access_token!.split(".")[1], "base64url").toString()
+      ) as { jti: string };
+      const accessRow = await prisma.accessToken.findUniqueOrThrow({
+        where: { jti },
+      });
+      expect(accessRow.revokedAt).not.toBeNull();
+      const refreshRows = await prisma.refreshToken.findMany({
+        where: { authCodeId: accessRow.authCodeId! },
+      });
+      expect(refreshRows.length).toBeGreaterThan(0);
+      expect(refreshRows.every((r) => r.revokedAt !== null)).toBe(true);
+    });
+
+    it("should refuse a code whose user was deactivated after authorize", async () => {
+      const user = await createTestUser();
+      const codeVerifier = generateCodeVerifier();
+      const { code } = await getAuthorizationCode(
+        testClient,
+        generateCodeChallenge(codeVerifier),
+        "openid",
+        user
+      );
+      expect(code).toBeTruthy();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { isActive: false },
+      });
+
+      const response = await fetch(`${BASE_URL}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: testClient.redirectUris[0],
+          client_id: testClient.clientId,
+          code_verifier: codeVerifier,
+        }),
+      });
+
+      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(((await response.json()) as TokenResponse).error).toBe(
+        OAUTH_ERRORS.INVALID_GRANT
+      );
+      expect(
+        await prisma.accessToken.count({ where: { userId: user.id } })
+      ).toBe(0);
     });
 
     it("should reject authorization code for different client", async () => {

@@ -265,11 +265,14 @@ export const ID_TOKEN_HINT_GRACE_SECONDS = 60 * 60;
 /**
  * An `id_token_hint` (OIDC RP-Initiated Logout): signed by core and issued by
  * this issuer, but possibly expired — the spec lets a logout name a session
- * whose id token has lapsed — though by no more than
- * ID_TOKEN_HINT_GRACE_SECONDS. Access tokens share the signing key, so a
- * token carrying `scope` is refused.
+ * whose id token has lapsed. `stale` when it lapsed more than
+ * ID_TOKEN_HINT_GRACE_SECONDS ago: it still names its client, but vouches
+ * for nothing. Access tokens share the signing key, so a token carrying
+ * `scope` is refused.
  */
-export const verifyIdTokenHint = (token: string): IdTokenPayload | null => {
+export const verifyIdTokenHint = (
+  token: string
+): { payload: IdTokenPayload; stale: boolean } | null => {
   try {
     const payload = jwt.verify(token, verificationKeyFor(token), {
       algorithms: ["RS256"],
@@ -279,10 +282,12 @@ export const verifyIdTokenHint = (token: string): IdTokenPayload | null => {
     if (typeof payload !== "object" || "scope" in payload) return null;
     const now = Math.floor(Date.now() / 1000);
     if (typeof payload.exp !== "number") return null;
-    if (now - payload.exp > ID_TOKEN_HINT_GRACE_SECONDS) return null;
     if (typeof payload.sub !== "string" || !payload.sub) return null;
     if (typeof payload.aud !== "string" || !payload.aud) return null;
-    return payload as IdTokenPayload;
+    return {
+      payload: payload as IdTokenPayload,
+      stale: now - payload.exp > ID_TOKEN_HINT_GRACE_SECONDS,
+    };
   } catch {
     return null;
   }

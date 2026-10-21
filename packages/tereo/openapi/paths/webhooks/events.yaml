@@ -30,9 +30,9 @@
         event types.
 
       **Organization:** a token with an `org_id` may emit only into that
-      organization; a service account's token without one, or a
-      `webhooks.admin` caller, into any; a person's token without one, into
-      none (`403`). This is checked after the body and the reserved type and
+      organization; an app service's token without one, or a
+      `webhooks.admin` caller, into any; anyone else's token without one (a
+      person's, an integration's), into none (`403`). This is checked after the body and the reserved type and
       before `organizationId` is looked up, so a refused caller learns nothing
       about which organizations exist. `organizationId` must be a UUID (`400`
       otherwise) naming an existing organization — an archived one counts —

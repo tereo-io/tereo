@@ -1,8 +1,6 @@
 import { openProviderSecret } from "../../utils/identityProviders/clientSecret.js";
-import { createTestRole, generateUniqueId } from "./utils/test-helpers.js";
 import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
 import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
-import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mapUniqueViolation } from "../../utils/prismaErrors.js";
 import { ensurePermission } from "../utils/testService.js";
@@ -14,6 +12,17 @@ import {
   getCoreEventSubscriberToken,
   waitFor,
 } from "../webhooks/utils/test-helpers.js";
+import {
+  DEFAULT_ORGANIZATION_ID,
+  SYSTEM_USER_ID,
+} from "../../definitions/index.js";
+import {
+  createTestClient,
+  createTestRole,
+  createTestUser,
+  generateUniqueId,
+  getAccessTokenForUser,
+} from "./utils/test-helpers.js";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
@@ -34,6 +43,8 @@ describe("Admin identity providers", () => {
   let writeToken: string;
   let readToken: string;
   let usersReadToken: string;
+  // SSO-only changes and moving such a provider need a global admin.
+  let adminToken: string;
   let orgId: string;
 
   const call = (token: string, method: string, path: string, body?: unknown) =>
@@ -89,6 +100,7 @@ describe("Admin identity providers", () => {
     usersReadToken = await getTestPrincipalToken({
       permissions: ["users.read"],
     });
+    adminToken = await getTestPrincipalToken({ permissions: ["admin"] });
     orgId = await ensureTestOrganization(`idp-org-${generateUniqueId()}`);
   });
 
@@ -447,6 +459,53 @@ describe("Admin identity providers", () => {
       }
     });
 
+    it("needs a global admin to change the issuer or client of a provider with an SSO-only domain", async () => {
+      const provider = await newProvider();
+      await prisma.identityProviderDomain.create({
+        data: {
+          providerId: provider.id,
+          domain: `ssoiss-${generateUniqueId().toLowerCase()}.com`,
+          organizationId: orgId,
+          ssoOnly: true,
+          createdBy: SYSTEM_USER_ID,
+        },
+      });
+
+      const other = await startFakeOidcProvider();
+      try {
+        const swapped = await call(writeToken, "PATCH", `/${provider.id}`, {
+          issuer: other.issuer,
+          clientId: other.clientId,
+          clientSecret: other.clientSecret,
+        });
+        expect(swapped.status).toBe(403);
+        const clientOnly = await call(writeToken, "PATCH", `/${provider.id}`, {
+          clientId: "another-client",
+          clientSecret: fake.clientSecret,
+        });
+        expect(clientOnly.status).toBe(403);
+        const row = await prisma.identityProvider.findUniqueOrThrow({
+          where: { id: provider.id },
+        });
+        expect(row.issuer).toBe(fake.issuer);
+        expect(row.clientId).toBe(fake.clientId);
+
+        const secretOnly = await call(writeToken, "PATCH", `/${provider.id}`, {
+          clientSecret: fake.clientSecret,
+        });
+        expect(secretOnly.status).toBe(200);
+
+        const byAdmin = await call(adminToken, "PATCH", `/${provider.id}`, {
+          issuer: other.issuer,
+          clientId: other.clientId,
+          clientSecret: other.clientSecret,
+        });
+        expect(byAdmin.status).toBe(200);
+      } finally {
+        await other.close();
+      }
+    });
+
     it("changes the slug while no identity exists", async () => {
       const provider = await newProvider();
       const slug = `moved-${generateUniqueId().toLowerCase()}`.slice(0, 40);
@@ -730,7 +789,7 @@ describe("Admin identity providers", () => {
       const path = `/${provider.id}/domains/${created.id}`;
 
       const first = await (
-        await call(writeToken, "PATCH", path, { ssoOnly: true })
+        await call(adminToken, "PATCH", path, { ssoOnly: true })
       ).json();
       expect(first.ssoOnly).toBe(true);
       expect(first.autoAccept).toBe(true);
@@ -740,7 +799,7 @@ describe("Admin identity providers", () => {
 
       const renamed = `kept-${generateUniqueId().toLowerCase()}.com`;
       const second = await (
-        await call(writeToken, "PATCH", path, { domain: renamed })
+        await call(adminToken, "PATCH", path, { domain: renamed })
       ).json();
       expect(second.domain).toBe(renamed);
       expect(second.ssoOnly).toBe(true);
@@ -758,7 +817,7 @@ describe("Admin identity providers", () => {
       ).json();
       const renamed = `audr-${generateUniqueId().toLowerCase()}.com`;
       const patched = await call(
-        writeToken,
+        adminToken,
         "PATCH",
         `/${provider.id}/domains/${created.id}`,
         { domain: renamed, ssoOnly: true, roleIds: [] }
@@ -819,7 +878,7 @@ describe("Admin identity providers", () => {
         (await call(writeToken, "POST", `/${provider.id}/deactivate`)).status
       ).toBe(200);
 
-      const refused = await postDomain(writeToken, provider.id, {
+      const refused = await postDomain(adminToken, provider.id, {
         domain: `inact-${generateUniqueId().toLowerCase()}.com`,
         ssoOnly: true,
       });
@@ -831,7 +890,7 @@ describe("Admin identity providers", () => {
       });
       expect(created.status).toBe(201);
       const path = `/${provider.id}/domains/${(await created.json()).id}`;
-      const patched = await call(writeToken, "PATCH", path, { ssoOnly: true });
+      const patched = await call(adminToken, "PATCH", path, { ssoOnly: true });
       expect(patched.status).toBe(409);
       expect((await patched.json()).error).toBe("provider_inactive");
       expect(
@@ -842,7 +901,7 @@ describe("Admin identity providers", () => {
     it("refuses to deactivate with an SSO-only domain, then allows it", async () => {
       const provider = await newProvider();
       const domain = await (
-        await postDomain(writeToken, provider.id, {
+        await postDomain(adminToken, provider.id, {
           domain: `sso-${generateUniqueId().toLowerCase()}.com`,
           ssoOnly: true,
         })
@@ -856,7 +915,7 @@ describe("Admin identity providers", () => {
       expect(refused.status).toBe(409);
       expect((await refused.json()).error).toBe("sso_only_domain");
 
-      await call(writeToken, "PATCH", `/${provider.id}/domains/${domain.id}`, {
+      await call(adminToken, "PATCH", `/${provider.id}/domains/${domain.id}`, {
         ssoOnly: false,
       });
       const ok = await call(writeToken, "POST", `/${provider.id}/deactivate`);
@@ -880,7 +939,7 @@ describe("Admin identity providers", () => {
 
         const [deactivated, patched] = await Promise.all([
           call(writeToken, "POST", `/${provider.id}/deactivate`),
-          call(writeToken, "PATCH", `/${provider.id}/domains/${domain.id}`, {
+          call(adminToken, "PATCH", `/${provider.id}/domains/${domain.id}`, {
             ssoOnly: true,
           }),
         ]);
@@ -896,6 +955,149 @@ describe("Admin identity providers", () => {
         ]);
         expect(!p.isActive && d.ssoOnly).toBe(false);
       }
+    });
+
+    it("lets only a global admin make a domain SSO-only", async () => {
+      const provider = await newProvider();
+      const name = `ssoadm-${generateUniqueId().toLowerCase()}.com`;
+      const refused = await postDomain(writeToken, provider.id, {
+        domain: name,
+        ssoOnly: true,
+      });
+      expect(refused.status).toBe(403);
+      expect(
+        await prisma.identityProviderDomain.findUnique({
+          where: { domain: name },
+        })
+      ).toBeNull();
+
+      const created = await postDomain(writeToken, provider.id, {
+        domain: name,
+      });
+      expect(created.status).toBe(201);
+      const path = `/${provider.id}/domains/${(await created.json()).id}`;
+      const patched = await call(writeToken, "PATCH", path, { ssoOnly: true });
+      expect(patched.status).toBe(403);
+      expect((await (await call(readToken, "GET", path)).json()).ssoOnly).toBe(
+        false
+      );
+
+      const byAdmin = await call(adminToken, "PATCH", path, { ssoOnly: true });
+      expect(byAdmin.status).toBe(200);
+      expect((await byAdmin.json()).ssoOnly).toBe(true);
+    });
+
+    describe("ending sessions linked elsewhere", () => {
+      let client: Awaited<ReturnType<typeof createTestClient>>;
+
+      beforeAll(async () => {
+        client = await createTestClient();
+      });
+
+      /** A signed-in user at `domain`, with an identity at `providerId` if given. */
+      const signedIn = async (domain: string, providerId?: string) => {
+        const user = await createTestUser({
+          email: `u-${generateUniqueId().toLowerCase()}@${domain}`,
+        });
+        if (providerId) {
+          await prisma.userIdentity.create({
+            data: { userId: user.id, providerId, subject: randomUUID() },
+          });
+        }
+        await getAccessTokenForUser(user, client);
+        return user;
+      };
+      const liveSessions = (userId: string) =>
+        prisma.refreshToken.count({ where: { userId, revokedAt: null } });
+
+      it("ends them when a domain is created SSO-only, sparing its own provider's and password users", async () => {
+        const provider = await newProvider();
+        const other = await newProvider();
+        const name = `ssoend-${generateUniqueId().toLowerCase()}.com`;
+        const elsewhere = await signedIn(name, other.id);
+        const own = await signedIn(name, provider.id);
+        const passwordOnly = await signedIn(name);
+        const outside = await signedIn(
+          `ssoout-${generateUniqueId().toLowerCase()}.com`,
+          other.id
+        );
+
+        const created = await postDomain(adminToken, provider.id, {
+          domain: name,
+          ssoOnly: true,
+        });
+        expect(created.status).toBe(201);
+
+        expect(await liveSessions(elsewhere.id)).toBe(0);
+        for (const kept of [own, passwordOnly, outside]) {
+          expect(await liveSessions(kept.id)).toBeGreaterThan(0);
+        }
+        const entry = await prisma.auditLogEntry.findFirstOrThrow({
+          where: { entityType: "User", entityId: elsewhere.id },
+          orderBy: { createdAt: "desc" },
+        });
+        expect(entry.metadata).toMatchObject({ action: "sessions_revoked" });
+      });
+
+      it("ends them when a domain is PATCHed SSO-only, and not on other changes", async () => {
+        const provider = await newProvider();
+        const other = await newProvider();
+        const name = `ssopatch-${generateUniqueId().toLowerCase()}.com`;
+        const created = await postDomain(writeToken, provider.id, {
+          domain: name,
+        });
+        const path = `/${provider.id}/domains/${(await created.json()).id}`;
+        const elsewhere = await signedIn(name, other.id);
+
+        expect(
+          (await call(writeToken, "PATCH", path, { autoAccept: true })).status
+        ).toBe(200);
+        expect(await liveSessions(elsewhere.id)).toBeGreaterThan(0);
+
+        expect(
+          (await call(adminToken, "PATCH", path, { ssoOnly: true })).status
+        ).toBe(200);
+        expect(await liveSessions(elsewhere.id)).toBe(0);
+      });
+    });
+
+    it("lets only a global admin move, lift or delete an SSO-only domain", async () => {
+      const provider = await newProvider();
+      const created = await postDomain(adminToken, provider.id, {
+        domain: `ssomv-${generateUniqueId().toLowerCase()}.com`,
+        ssoOnly: true,
+      });
+      expect(created.status).toBe(201);
+      const domain = await created.json();
+      const path = `/${provider.id}/domains/${domain.id}`;
+
+      const moved = await call(writeToken, "PATCH", path, {
+        domain: `ssomv2-${generateUniqueId().toLowerCase()}.com`,
+      });
+      expect(moved.status).toBe(403);
+      const lifted = await call(writeToken, "PATCH", path, { ssoOnly: false });
+      expect(lifted.status).toBe(403);
+      const deleted = await call(writeToken, "DELETE", path);
+      expect(deleted.status).toBe(403);
+
+      const row = await prisma.identityProviderDomain.findUniqueOrThrow({
+        where: { id: domain.id },
+      });
+      expect(row.domain).toBe(domain.domain);
+      expect(row.ssoOnly).toBe(true);
+
+      // What SSO-only does not depend on stays the provider admin's.
+      const tweaked = await call(writeToken, "PATCH", path, {
+        autoAccept: true,
+      });
+      expect(tweaked.status).toBe(200);
+      const same = await call(writeToken, "PATCH", path, {
+        domain: domain.domain,
+        ssoOnly: true,
+      });
+      expect(same.status).toBe(200);
+
+      expect((await call(adminToken, "DELETE", path)).status).toBe(204);
     });
   });
 });

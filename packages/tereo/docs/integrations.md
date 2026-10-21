@@ -40,7 +40,8 @@ same rules as granting to a person:
   (`403` naming those lacking), as in [auth](auth.md#granting-only-what-you-hold). Removing roles
   is not checked against what the caller holds.
 - An integration can never hold a role carrying the root `admin` permission, whoever grants it:
-  `403 role_not_allowed_for_integration`. Provisioning refuses one too.
+  `403 role_not_allowed_for_integration`. Provisioning refuses one too, and a role an integration
+  holds cannot gain `admin` or be reactivated carrying it ([auth](auth.md)).
 
 A change to roles revokes the integration's tokens, so the new set applies at once.
 
@@ -49,7 +50,8 @@ A change to roles revokes the integration's tokens, so the new set applies at on
 `PUT /v1/admin/integrations/:id/audiences` (`{ slugs }`, up to 100) names the services whose APIs
 the integration may call: the token's `aud` lists them and they may introspect it. Each must be an
 app service that is not core; an integration, core or an unknown slug is `422 invalid_audience`. A
-change revokes its tokens.
+change revokes its tokens. Naming a service lets it read the integration's tokens, so the caller
+needs `services.approve` too (`403` otherwise), as for a client's audience.
 
 ## Secrets
 

@@ -180,8 +180,8 @@ when the token has none (and for `notifyTx`). Naming one is limited the way audi
 checked before the organization's existence so a refused caller can't probe ids:
 
 - A token with an `org_id` may name only that organization.
-- A service-account token without an `org_id` may name any.
-- A person's token without an `org_id` may name none.
+- An app service's token without an `org_id` may name any.
+- Anyone else's token without an `org_id` (a person's, an integration's) may name none.
 - `notifications.admin` may name any.
 - Leaving `organizationId` out (or null) is always allowed, and means the token's organization.
 - `notifyTx` is unrestricted.

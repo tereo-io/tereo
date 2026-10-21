@@ -110,8 +110,9 @@ info:
 
     4. **Receive authorization code** via redirect:
        ```
-       https://app.example.com/callback?code=AUTHORIZATION_CODE&state=RANDOM_STATE_STRING
+       https://app.example.com/callback?code=AUTHORIZATION_CODE&state=RANDOM_STATE_STRING&iss=https%3A%2F%2Fcore.example.com
        ```
+       Check that `iss` is core's issuer (RFC 9207) before redeeming the code.
 
     5. **Exchange authorization code for tokens**:
        ```bash
@@ -136,7 +137,7 @@ info:
          "access_token": "eyJhbGc...",
          "token_type": "Bearer",
          "expires_in": 3600,
-         "refresh_token": "eyJhbGc...",
+         "refresh_token": "9f2c4e7a1b...",
          "id_token": "eyJhbGc...",
          "scope": "openid profile email"
        }
@@ -198,10 +199,14 @@ info:
       "access_token": "eyJhbGc...",
       "token_type": "Bearer",
       "expires_in": 3600,
-      "refresh_token": "eyJhbGc...",
+      "refresh_token": "5d81b0c3e6...",
+      "id_token": "eyJhbGc...",
       "scope": "openid profile email"
     }
     ```
+
+    The refresh token is opaque (not a JWT) and replaced on every refresh. `id_token` is
+    returned when the scope includes `openid`.
 
     ### 4. Making Authenticated API Calls
 
@@ -275,21 +280,25 @@ info:
 
     ### Cookie-Authenticated Requests
 
-    The browser's login state lives in cookies scoped to `/oauth`: the refresh token
-    (`trt_{client_id}`, cookie mode) and the `tereo_*` SSO and login-flow sessions. They
-    are `SameSite=Lax`, so a cross-site page cannot send them with a POST — but a same-site one
-    (another port or subdomain) can. Every POST (or other unsafe method) under `/oauth` that
-    carries one of them is therefore checked:
+    The browser's login state lives in per-client cookies: the refresh token
+    (`trt_{client_id}`, cookie mode) and the `tereo_*_{client_id}` SSO and login-flow sessions.
+    When Secure and `COOKIE_DOMAIN` is unset they are `__Host-` cookies (`__Host-trt_{client_id}`,
+    path `/`); otherwise unprefixed and scoped to `/oauth`. Only `/oauth` reads them. They are
+    `SameSite=Lax`, so a cross-site page cannot send them with a POST — but a same-site one
+    (another port or subdomain) can, along with every other client's. So a POST (or other unsafe
+    method) under `/oauth` that uses client X's cookie must come from:
 
-    - with `Sec-Fetch-Site`, it must be `same-origin`, or `same-site` with an allowed `Origin`;
-    - without it, `Origin`, when sent, must be allowed;
-    - a request with neither header is not from a browser page and passes.
+    - core's own origin (`Sec-Fetch-Site: same-origin`, or `Origin` = `PUBLIC_URL`'s), or the
+      UI's (`UI_BASE_URL`, which hosts every client's login pages);
+    - or, with `Sec-Fetch-Site: same-site` (or no `Sec-Fetch-Site`), an `Origin` of one of X's
+      registered redirect URIs.
 
-    Allowed origins are core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) and
-    `CORS_ALLOWED_ORIGINS` (any, when that is `*`). A refused request is 403 `access_denied`. This
-    covers the login, consent, org-select and 2FA submits, `POST /oauth/token` and
-    `POST /oauth/revoke` with the refresh cookie, and the sign-out confirmation. A request without
-    these cookies (a client authenticating with a secret, a code or a bearer token) is not checked.
+    A request with neither header is not from a browser page and passes. Any other is 403
+    `access_denied` once the endpoint reads the cookie: the login, consent, org-select and 2FA
+    submits, `POST /oauth/token` and `POST /oauth/revoke` with the refresh cookie, and the
+    sign-out confirmation. `CORS_ALLOWED_ORIGINS` does not widen this; it is only the CORS list.
+    A request that uses none of these cookies (a client authenticating with a secret, a code or a
+    bearer token) is not affected by the ones it carries.
 
     ### OpenID Connect Discovery
 
@@ -360,7 +369,7 @@ info:
     - A batch write (e.g. `POST /v1/audit/entries/batch`) counts as one request
 
     #### Per-Address Limit Before Authentication
-    On `/v1/admin`, `/v1/account`, `/v1/files`, `/v1/audit` and `/v1/webhooks`, a cheaper limit
+    On `/v1/admin`, `/v1/account`, `/v1/files`, `/v1/audit`, `/v1/webhooks` and `/v1/notifications`, a cheaper limit
     runs before the token is checked, so floods of missing or invalid tokens are bounded too:
     300 requests/second per client IP (1000 for a direct connection from an internal network
     address). Passing it adds no headers; past it, the same `429 too_many_requests` as the
@@ -369,7 +378,9 @@ info:
     #### Authentication Failure Rate Limiting
     Credential attempts have additional strict limits to prevent brute force attacks. Each
     attempt is counted before the credential is checked, so concurrent attempts cannot exceed
-    the limit; a correct credential clears the count:
+    the limit. A correct credential clears the count, except for login passwords per client ID
+    and IP address, where a success only gives back its own attempt (the count spans every
+    account tried from that address):
     - **Login passwords** (`POST /oauth/authorize`): 5 attempts per 300 seconds per client ID
       and IP address. In addition, per account (the submitted email, whether or not an account
       has it): 5 attempts, then a delay before each further attempt that starts at 1 second and
@@ -382,9 +393,15 @@ info:
       passwords still count toward the account's delay, and are capped at 5 per 900 seconds
       per cookie. The cookie is bound to the account and its current password: it does nothing
       for another email, and a password change or reset voids it
-    - **Login 2FA** (`/oauth/totp/verify`, `/oauth/totp/recovery`, `/oauth/totp/setup/verify`):
-      5 attempts per 300 seconds per user, across logins — a new login with the password does
-      not reset it
+    - **Login 2FA** (`/oauth/totp/verify`, `/oauth/totp/recovery`): per user, across logins — a
+      new login with the password does not reset it. 5 attempts in 24 hours, then a delay
+      before each further attempt that starts at 1 second and doubles with each, up to one
+      hour. Nothing clears the count: a right code gives back only its own attempt, and each
+      attempt counts for 24 hours. A known-device browser (as for login passwords) is let
+      through the delay, capped at 5 attempts per hour per cookie. Repeated failures are
+      audited
+    - **2FA setup at login** (`/oauth/totp/setup/verify`): 5 wrong codes per user per 300
+      seconds; a right code clears the count
     - **Wrong codes on `/v1/account/totp/*`** (enable, disable, regenerate backup codes): 5 per user
       per 300 seconds
     - **Wrong current password on `POST /v1/account/password`**: 5 per user per 300 seconds
@@ -401,7 +418,8 @@ info:
     `/v1/account/password`, `/v1/account/totp/*`, setup and share unlock) refuse attempts with
     `503 temporarily_unavailable` (with `Retry-After`) rather than allow
     unlimited guesses. The general and per-address limits let requests through, so the rest
-    of the API stays up.
+    of the API stays up, and so does the client-secret limit at `/oauth/token`, `/oauth/revoke`
+    and `/oauth/introspect`: the secret is still verified.
 
     #### Per-Bucket Rate Limits (Files)
     Buckets with a `rateLimitConfig` additionally get a per-bucket token bucket on their
@@ -769,13 +787,14 @@ info:
 
     Writes follow the same rule. Without `audit-logs.admin`, a token with an `org_id` writes
     only entries for that organization: another organization, or a system-wide entry, is
-    `403`, and one such entry refuses a whole batch. A service account's token without an
-    `org_id` — an app service's client, which writes for every tenant of its app — may write
-    for any organization; a person's token without one may not write.
+    `403`, and one such entry refuses a whole batch. An app service's token without an
+    `org_id` — its client writes for every tenant of its app — may write for any
+    organization; anyone else's token without one (a person's, an integration's) may not write.
 
-    An app service's client writes only entries whose `source` is its slug (`403` otherwise),
-    so its reads above hold exactly what it wrote. No service or integration may take the slug
-    `tereo`, the source of core's own entries.
+    An app service's client writes only entries whose `source` is its slug (`422
+    source_mismatch` otherwise), so its reads above hold exactly what it wrote. No service or
+    integration may take the slug `tereo`, the source of core's own entries, and no other writer
+    may use `tereo`, `core` or an app service's slug as `source` (`422 source_reserved`).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -1106,7 +1125,9 @@ paths:
         - OAuth2/OIDC - Authorization
       summary: OAuth2 authorization endpoint (GET)
       description: |
-        Initiates the OAuth2 authorization flow. Always answers with a 302:
+        Initiates the OAuth2 authorization flow. Once `client_id` and
+        `redirect_uri` are valid it always answers with a 302 (the JSON errors
+        before that point are listed below):
 
         - `prompt=none`: with a live user session (the
           `tereo_user_session_{client_id}` cookie) for an active user, for core's
@@ -1119,7 +1140,10 @@ paths:
           `redirect_uri` with `error=login_required` (or `error=invalid_scope`),
           `error_description` and `state`. A request whose `acr_values` demands
           `urn:auth-service:mfa` over a session whose login had no second factor
-          gets `error=interaction_required` instead.
+          gets `error=interaction_required` instead. With `org_id`, the code is
+          for that organization when the user may select it (a membership, or
+          support access) and the consent rules above allow it; another
+          organization is `error=login_required`.
         - `org_id` (without `prompt=login`) with a live user session for an
           active user who is a member of that active organization (or, for any
           active organization, holds `organizations.support-access` through a
@@ -1127,8 +1151,10 @@ paths:
           valid scopes: to `{UI}/consent?session=…` for
           that organization, skipping login — or, for core's own login client,
           straight to `redirect_uri` with `code` and `state`, as with
-          `prompt=none`. This is the one continuation without a password that
-          shows a third-party client the consent screen. An inactive user (session cookie cleared), a too-old
+          `prompt=none` (and a client with `consentRequired: false` that asks
+          no untrusted `core:*` scope, unless `prompt=consent`). This is the one
+          continuation without a password that shows a third-party client the
+          consent screen. An inactive user (session cookie cleared), a too-old
           login, or a login without a second factor when `acr_values` demands
           one falls through to the login page below.
         - otherwise to `{UI}/login` with the OAuth request parameters, setting the
@@ -1149,7 +1175,10 @@ paths:
 
         A user session never outlives its original expiry (`USER_SESSION_TTL`,
         7 days by default, from the password login): continuing it with
-        `prompt=none` or `org_id` does not extend it.
+        `prompt=none` or `org_id` does not extend it. One that has issued no
+        code for `USER_SESSION_IDLE_TTL` (3 days by default) counts as expired
+        here too: `prompt=none` answers `login_required` and `org_id` falls
+        through to the login page.
 
         The consent redirects set the `tereo_consent_session_{client_id}`
         cookie. Every redirect to a login-flow page (consent, org-select, 2FA)
@@ -1158,10 +1187,18 @@ paths:
         `code_challenge_method`, and `nonce`, `max_age`, `acr_values`, `prompt`
         when given) beside the session token, so the page's "Back to sign in" can
         restart `/oauth/authorize` for the client that began the login. They are
-        never read back from the URL: each step uses its stored session. Errors before a redirect is possible are returned as JSON: 400
-        `invalid_request` (validation, unregistered `redirect_uri`, unknown
-        `client_id` — never redirected, since the redirect URI can't be trusted),
-        400 `unauthorized_client` (client lacks the authorization_code grant).
+        never read back from the URL: each step uses its stored session.
+
+        Errors (RFC 6749 section 4.1.2.1): until `client_id` and `redirect_uri`
+        check out — a missing or malformed one, an unknown `client_id`, a
+        `redirect_uri` the client has not registered — the answer is JSON 400
+        `invalid_request`, never a redirect, since the redirect URI cannot be
+        trusted. After, every error goes to `redirect_uri` with `state` (when
+        the request's is usable) and `iss`: `unsupported_response_type` for a
+        `response_type` other than `code`, `unauthorized_client` for a client
+        without the authorization_code grant, and `invalid_request` for any
+        other invalid parameter (a missing `state` or PKCE challenge, `plain`,
+        an unknown `prompt`, an out-of-range `max_age`, …).
 
         `claims`, `login_hint` and `ui_locales` are validated but not used.
       operationId: getAuthorize
@@ -1230,6 +1267,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 2147483647
         - name: acr_values
           in: query
           description: |
@@ -1247,7 +1285,10 @@ paths:
           description: |
             A space-separated list of `none`, `login`, `consent` and
             `select_account` (accepted, ignored). `none` cannot be combined with
-            another value: that, or an unknown value, is 400 `invalid_request`.
+            another value: that, or an unknown value, is `invalid_request` at
+            `redirect_uri`. `consent` shows the consent screen even to a client
+            that would skip it (`consentRequired: false`), except core's own
+            login client, which has none.
           schema:
             type: string
             maxLength: 64
@@ -1495,7 +1536,9 @@ paths:
         (valid for 10 minutes), sets the `tereo_upstream_auth` cookie
         carrying the `state`, and redirects to the provider's authorization
         endpoint, with the callback URL `${PUBLIC_URL}/oauth/upstream/{slug}/callback`
-        as its `redirect_uri`.
+        as its `redirect_uri`. The request's `prompt=login` and `max_age` are
+        sent on to the provider (`max_age=0` also as `prompt=login`), and the
+        callback holds the provider's `auth_time` to them.
 
         Redirect targets:
 
@@ -1518,8 +1561,11 @@ paths:
         account-page link), requires the provider account's verified email to be
         the user's (`email_unverified`, `account_mismatch`), clears the user's
         password, consumes the grant, ends the user's other sessions and
-        completes the login as a provider login. A failed callback leaves the
-        grant usable until it expires.
+        completes the login as a provider login. When a second factor is due,
+        none of that happens at the callback: the TOTP step holds the link and
+        commits it once the code passes, and a user who must first enrol goes
+        to 2FA setup with nothing changed. A failed callback leaves the grant
+        usable until it expires.
 
         Errors that are not safe to redirect are JSON, as at `GET /oauth/authorize`:
         400 `invalid_request` (validation — a `slug` not matching its pattern
@@ -1697,8 +1743,9 @@ paths:
         continues exactly as after a password: the TOTP step unless the provider
         `countsAsMfa`, organization selection, consent, and the code. The login's
         `amr` is `["fed"]`, `["fed","mfa"]` for a `countsAsMfa` provider (or
-        `["fed","otp"]` once the user passes TOTP). A `LOGIN` audit entry names
-        the provider.
+        `["fed","otp"]` once the user passes TOTP), and its `auth_time` is the
+        provider's ID token `auth_time` (now when it sends none). A `LOGIN`
+        audit entry names the provider.
 
         Redirect targets:
 
@@ -1716,7 +1763,8 @@ paths:
         | Code | Meaning |
         |------|---------|
         | `upstream_cancelled` | The provider returned `access_denied` |
-        | `upstream_failed` | The provider returned an error, or the code exchange or ID token validation failed |
+        | `upstream_failed` | The provider returned an error, or the code exchange or ID token validation failed; also a provider response over 1 MiB or a `sub` over 255 characters |
+        | `upstream_reauth_failed` | The authorize request asked for `prompt=login` or `max_age`, and the provider's `auth_time` is older than they allow (counted from the round trip's start, with 30 seconds for clock skew), or missing under a `max_age` sent without `prompt=login` |
         | `session_expired` | No or mismatched `upstream_auth` cookie, or an unknown, used or expired round trip; for a forced link, a link grant used or expired meanwhile |
         | `provider_inactive` | The provider was deactivated |
         | `no_account` | No linked identity, no invite, no auto-accept domain of this provider; also no email claim, or the domain's organization is archived or inactive |
@@ -1726,6 +1774,7 @@ paths:
         | `identity_in_use` | Forced link: the provider account is linked to another user |
         | `already_linked` | Forced link: the user linked this provider meanwhile |
         | `account_mismatch` | Forced link: the provider account's verified email is not the user's |
+        | `sso_required` | The user's email domain is `ssoOnly` for another provider, the only way in for its users: an identity linked here signs no one in, and an invite here is not claimed. The redirect adds `provider=<slug>`, the domain's provider |
         | `too_many_attempts` | Too many failed callbacks from this address (below) |
 
         Callbacks whose round trip is found count toward the failure limiter
@@ -2031,9 +2080,7 @@ paths:
         - 400 `invalid_grant` — missing `code_verifier`, a bad, expired, used or
           revoked code or refresh token, a concurrent request for the same one, a
           code or refresh token whose user is inactive, an authorization code
-          whose authentication is older than the `max_age` it was requested with
-          (re-authentication required), an authorization code whose SSO
-          session has ended (logout, or a sign-out of other sessions) since it
+          whose SSO session has ended (logout, or a sign-out of other sessions) since it
           was issued, or a code or refresh token issued for an organization the
           user has since left or that has since been deactivated (such a refresh
           token is revoked). A refresh or code exchange in flight when the
@@ -2066,12 +2113,13 @@ paths:
         inactive user) clears both cookies in that 400 response, so the browser
         stops retrying it. A refresh that only lost the race to a concurrent
         one with the same token ("is being processed", or a token rotated in
-        the last 30 seconds) leaves them.
+        the last 5 seconds whose successor is still unused) leaves them.
 
-        Replaying a rotated refresh token within 30 seconds of its rotation
-        (two tabs refreshing at once) is `invalid_grant` that leaves the token
-        family and the cookies alone; later, it is treated as theft and the
-        whole family is revoked. A token revoked by logout or `/oauth/revoke`
+        Replaying a rotated refresh token within 5 seconds of its rotation,
+        while the token that replaced it has not been used yet (two tabs
+        refreshing at once), is `invalid_grant` that leaves the token family
+        and the cookies alone; later, or once the successor has been used, it
+        is treated as theft and the whole family is revoked. A token revoked by logout or `/oauth/revoke`
         is plain `invalid_grant`.
 
         Refresh tokens rotate on every use, but a token family has an absolute
@@ -2154,11 +2202,16 @@ paths:
 
         `permissions` are the user's live permissions, whatever client the
         token was issued to: the ceilings of core API scopes limit what a token
-        may do in core's own API, not what an app is told about its user.
+        may do in core's own API, not what an app is told about its user. They
+        are omitted when a client that is not a service's introspects its own
+        token and that token has no core access (not issued to core's UI or a
+        service's client, and no core API scope), as `/oauth/userinfo` omits
+        them.
 
-        Confidential clients authenticate with HTTP Basic; a public client sends
-        its `client_id` in the body. A missing or unknown client or failed
-        authentication is 401 `invalid_client` with `WWW-Authenticate: Basic`;
+        Only a confidential client may introspect, authenticated with HTTP
+        Basic. A missing or unknown client, a public client (which has no
+        secret), failed authentication, or the client of a deactivated service
+        or integration is 401 `invalid_client` with `WWW-Authenticate: Basic`;
         a body `client_id` that differs from the Basic one is 400
         `invalid_request`; repeated wrong secrets are 429 `too_many_requests`,
         counted with `/oauth/token`'s (see there). `token_type_hint` is only a
@@ -2166,7 +2219,6 @@ paths:
       operationId: postIntrospect
       security:
         - ClientCredentials: []
-        - {}
       requestBody:
         required: true
         content:
@@ -2221,8 +2273,9 @@ paths:
         sent as `token`, it revokes nothing.
 
         Confidential clients authenticate with HTTP Basic; a public client sends
-        its `client_id` in the body. A missing or unknown `client_id` or failed
-        authentication is 401 `invalid_client` with `WWW-Authenticate: Basic`;
+        its `client_id` in the body. A missing or unknown `client_id`, failed
+        authentication or the client of a deactivated service or integration is
+        401 `invalid_client` with `WWW-Authenticate: Basic`;
         a body `client_id` that differs from the Basic one is 400
         `invalid_request`; repeated wrong secrets are 429 `too_many_requests`,
         counted with `/oauth/token`'s (see there). `token_type_hint` is only a
@@ -2358,7 +2411,7 @@ paths:
         confirmation page, `{UI}/logout?client_id=…&confirm_token=…` (with
         `post_logout_redirect_uri` and `state` when given), setting the
         `tereo_logout_confirm_{client_id}` cookie (httpOnly, SameSite=Lax,
-        `/oauth`, 10 minutes) to the same random token. Only `POST
+        `/oauth` — or `__Host-`, path `/` — 10 minutes) to the same random token. Only `POST
         /oauth/end-session/confirm`, sent with both, ends the session. With a
         valid `id_token_hint` the session ends at once, as below — unless the
         browser's `tereo_user_session_{client_id}` or `trt_{client_id}`
@@ -2402,9 +2455,11 @@ paths:
 
         `id_token_hint` is verified: it must carry core's signature and issuer
         and must not be an access token. An expired hint is accepted (per
-        RP-Initiated Logout) only within `ID_TOKEN_HINT_GRACE_SECONDS` (3600
-        seconds) of its `exp`; one expired longer ago is 400 `invalid_request`
-        ("Invalid id_token_hint"). Its `aud` must be a known client ("Invalid
+        RP-Initiated Logout) within `ID_TOKEN_HINT_GRACE_SECONDS` (3600
+        seconds) of its `exp`; one expired longer ago still names its client
+        but is otherwise treated as no hint — the confirmation page. A hint
+        that does not verify is 400 `invalid_request` ("Invalid
+        id_token_hint"). Its `aud` must be a known client ("Invalid
         id_token_hint: unknown audience") and must match `client_id` when both
         are given. An unknown `client_id` is 400 `invalid_request` ("Invalid
         client_id").
@@ -2413,7 +2468,11 @@ paths:
         `id_token_hint`) and must exactly match one of that client's
         `postLogoutRedirectUris` (a `javascript:`, `data:`, `vbscript:`,
         `blob:` or `file:` URI is refused even if registered); with a hint the response is then a 302 to it
-        (with `state`), otherwise 200 `{ success: true }`. There is no redirect to an
+        (with `state`). Without one, a navigation (a GET, or a POST with
+        `Sec-Fetch-Mode: navigate`) is a 302 to where the user signs in to the
+        client again — the UI's root for core's own client, else the origin of
+        its first web redirect URI — and a fetch (the admin UI's sign-out) is
+        200 `{ success: true }`. There is no redirect to an
         unregistered URI. Every validation failure above, a redirect URI
         without a client, and an unregistered `post_logout_redirect_uri` are 400
         `invalid_request`.
@@ -2448,7 +2507,7 @@ paths:
             maxLength: 64
       responses:
         '200':
-          description: Logout successful (with a valid id_token_hint and no post_logout_redirect_uri)
+          description: Never for a GET, which is a navigation; see POST
           headers:
             Set-Cookie:
               description: Clears the client's SSO and login-flow session cookies and its `trt_{client_id}` and `tsi_{client_id}` cookies
@@ -2471,12 +2530,13 @@ paths:
                     type: boolean
         '302':
           description: |
-            With a valid id_token_hint and a post_logout_redirect_uri: logged out,
-            redirect to it. Without a hint: nothing ended, redirect to the UI's
-            sign-out confirmation page.
+            With a valid id_token_hint: logged out, redirected to
+            post_logout_redirect_uri, or without one to the client's sign-in.
+            Without a usable hint: nothing ended, redirect to the UI's sign-out
+            confirmation page.
           headers:
             Location:
-              description: '`post_logout_redirect_uri` with `state` when given; without a hint, `{UI}/logout?client_id=…&confirm_token=…` (with `post_logout_redirect_uri` and `state` when given)'
+              description: '`post_logout_redirect_uri` with `state` when given, else the client''s sign-in URL; without a usable hint, `{UI}/logout?client_id=…&confirm_token=…` (with `post_logout_redirect_uri` and `state` when given)'
               schema:
                 type: string
                 format: uri
@@ -2502,7 +2562,9 @@ paths:
       summary: End session endpoint (POST)
       description: |
         `GET /oauth/end-session` with the parameters in the body (JSON or
-        form-encoded); same behaviour and responses.
+        form-encoded); same behaviour and responses, except that with a valid
+        hint and no `post_logout_redirect_uri` a fetch (no
+        `Sec-Fetch-Mode: navigate`) gets 200 `{ success: true }`.
       operationId: postEndSession
       security: []
       requestBody:
@@ -2683,8 +2745,9 @@ paths:
         Permissions are hierarchical (`admin` ⊃ `delete` ⊃ `write` ⊃ `read`).
 
         Requires HTTP Basic credentials of a confidential client: missing or
-        wrong credentials, an unknown client or a public client are 401
-        `invalid_client` with `WWW-Authenticate: Basic`.
+        wrong credentials, an unknown client, a public client or the client of
+        a deactivated service or integration are 401 `invalid_client` with
+        `WWW-Authenticate: Basic`.
 
         A client of an organization may only ask about that organization's
         members, and is answered with their permissions in it; an
@@ -2696,6 +2759,10 @@ paths:
         `/v1/admin/clients` — is refused. Each refusal is 403 `forbidden`,
         decided before the user is looked up. The client is authenticated
         before the body is validated.
+
+        A deactivated user, or a member of an inactive or archived
+        organization asked about in it, holds no permission: `granted` is
+        `false`.
       operationId: postCheckPermission
       security:
         - ClientCredentials: []
@@ -2786,16 +2853,27 @@ paths:
 
         400 `invalid_session` (unknown session, missing or mismatched cookie),
         `session_expired`, `totp_not_configured`; 401 `invalid_code` for a wrong
-        code. Five attempts per user in five minutes — across this endpoint,
-        `/oauth/totp/recovery` and `/oauth/totp/setup/verify`, and across
-        logins, so signing in again with the password does not reset it — lock
-        the user out with 429 for the rest of the window. A right code clears
-        the count.
+        code. Attempts are counted per user, across this endpoint and
+        `/oauth/totp/recovery` and across logins, so signing in again with the
+        password does not reset them: five in 24 hours, then 429 with
+        `Retry-After` until a delay after the last attempt passes, starting at
+        1 second and doubling with each attempt up to an hour. A right code
+        gives back only its own attempt; each counts for 24 hours. A browser
+        holding the user's known-device cookie is let through the delay (at most
+        five attempts an hour per cookie). From the fifth attempt in the window,
+        each failure is audited (User, `metadata.action: totp_failures`).
 
         A code is accepted once: a code from the same 30-second step as one
         already accepted for this user, or an earlier step, is 401
-        `invalid_code` and counts toward the lockout. That includes the code
+        `invalid_code` and counts as a failed attempt. That includes the code
         that completed TOTP setup.
+
+        A 2FA session from an SSO-only user's forced link (see
+        `GET /oauth/upstream/{slug}/start`) holds the link: the right code
+        links the identity, clears the password, consumes the link grant and
+        ends the user's other sessions in the transaction that consumes the
+        session. A grant gone meanwhile takes the session with it (400
+        `invalid_session`).
 
         The 2FA session is single-use too: of two concurrent requests with a
         right code, the second is 401 `invalid_code` when it carries the same
@@ -2856,10 +2934,11 @@ paths:
       description: |
         Use a recovery code instead of TOTP during 2FA.
         Recovery codes are automatically transformed to uppercase and dashes are removed.
-        Session, cookie, errors and lockout as for `POST /oauth/totp/verify`,
+        Session, cookie, errors and attempt limits as for `POST /oauth/totp/verify`,
         plus 400 `no_recovery_codes` when the user has none left. The code and
         the 2FA session are consumed atomically: a code or session already used
-        by a concurrent request is 400 `invalid_session`.
+        by a concurrent request is 400 `invalid_session`. A forced link's
+        2FA session commits the link as at `POST /oauth/totp/verify`.
 
         An audit log entry (User, `metadata.action: recovery_code_used`, the
         user as actor) is created in the same transaction.
@@ -2967,11 +3046,14 @@ paths:
       description: |
         Verify and complete TOTP setup during OAuth flow. Refused with 403
         `totp_disabled` while the system 2FA policy is `disabled`, including for
-        a setup started before the change. 400 `invalid_setup_token` or
-        `setup_expired` for the setup session, 401 `invalid_code` for a wrong
-        code. Attempts count toward the user's lockout shared with
-        `POST /oauth/totp/verify` (five per user in five minutes, then 429 for
-        the rest of the window). The code that completes setup is spent: it
+        a setup started before the change. 400 `invalid_setup_token` (also for
+        a setup begun from `POST /v1/account/totp/setup`, which only
+        `/v1/account/totp/setup/verify` completes) or `setup_expired` for the
+        setup session, 401 `invalid_code` for a wrong
+        code. Five wrong codes per user in five minutes, then 429 for the rest
+        of the window; a right code clears the count. The one setting up holds
+        the secret, so this is apart from the 2FA step's backoff. The code that
+        completes setup is spent: it
         is refused at the 2FA step that follows, which needs the next one.
 
         An audit log entry is created for this action. An
@@ -3623,8 +3705,10 @@ paths:
         The response sets the `tereo_upstream_auth` cookie, carrying the
         round trip's `state`, and answers `{ "redirect_url": ... }`: the UI
         navigates the browser to it. A 404 means the slug is unknown or the
-        provider deactivated; 502 carries the provider failure code
-        (`upstream_failed`) when its discovery could not be reached.
+        provider deactivated; 409 `sso_required` means the user's email domain
+        is `ssoOnly` for another provider, the only one they may use; 502
+        carries the provider failure code (`upstream_failed`) when its
+        discovery could not be reached.
 
         The provider then returns the browser to
         `GET /oauth/upstream/{slug}/callback`, which links the account and
@@ -3635,8 +3719,9 @@ paths:
           `upstream_failed`, `provider_inactive`, `account_inactive`,
           `identity_in_use` (that provider account is linked to another user),
           `already_linked` (the user already has this provider, or this exact
-          account) or `too_many_attempts` (too many failed callbacks from this
-          address);
+          account), `sso_required` (the user's domain turned `ssoOnly` for
+          another provider meanwhile) or `too_many_attempts` (too many failed
+          callbacks from this address);
         - `/login?error=session_expired` when the round trip is gone: no or
           mismatched cookie, or the session expired (10 minutes) or was
           already used.
@@ -3680,6 +3765,19 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: The provider is unknown or deactivated
+        '409':
+          description: The user's email domain is `ssoOnly` for another provider (`sso_required`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum:
+                      - sso_required
+                  error_description:
+                    type: string
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -3710,8 +3808,8 @@ paths:
 
         Refused with 409 when it would lock the user out:
 
-        - `last_sign_in_method`: the user has no password and this is their only
-          identity;
+        - `last_sign_in_method`: the user has no password and no other identity
+          at an active provider;
         - `sso_required`: the user's email domain is `ssoOnly` for this
           identity's provider.
 
@@ -4057,7 +4155,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TotpSetupVerifyResponse'
         '400':
-          description: Bad request - invalid body (`invalid_request`), or an unknown (`invalid_setup_token`) or expired (`setup_expired`) setup token
+          description: Bad request - invalid body (`invalid_request`), or an unknown setup token or one begun at login (`invalid_setup_token`), or an expired one (`setup_expired`)
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
@@ -4463,11 +4561,12 @@ paths:
         changing it to one already in use, in any case, returns
         `409 conflict`.
 
-        Setting a `password`, changing the `email`, or deactivating another
-        user needs a caller holding
+        Setting a `password`, changing the `email`, deactivating another
+        user, or reactivating a deactivated one needs a caller holding
         every permission the user holds, from global roles or roles in any
         organization (`403`, naming the permissions the caller lacks,
-        otherwise). The caller's permissions count from global roles only,
+        otherwise), and `organizations.write` when the user is an `owner` or
+        `admin` member of any organization (`403` otherwise). The caller's permissions count from global roles only,
         capped by a delegated token's scopes: no core API scope reaches
         `admin`, so a third-party client's `core:admin` token cannot reset an
         administrator. A password reset ends all of the
@@ -4591,7 +4690,9 @@ paths:
         count), otherwise `403` naming the permissions. Roles the user keeps
         are not checked. Removing any role from another user needs the caller
         to hold every permission that user holds, in any scope (`403`
-        otherwise).
+        otherwise). Adding a role with `requires2fa` revokes the user's access
+        tokens from logins without a second factor, so their next refresh
+        meets the 2FA step-up.
 
         An audit log entry is created for this action.
         An `auth.user.roles-changed` webhook event is emitted.
@@ -4769,7 +4870,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing users.delete permission, or the user holds permissions the caller does not
+          description: Forbidden - missing users.delete permission, or the user holds permissions the caller does not (or is an organization owner or admin and the caller lacks organizations.write)
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: User not found, or no active session with this id for the user
@@ -4943,8 +5044,8 @@ paths:
         and it is not limited to core's own UI. Refused with 409 when it would
         lock the user out:
 
-        - `last_sign_in_method`: the user has no password and this is their only
-          identity;
+        - `last_sign_in_method`: the user has no password and no other identity
+          at an active provider;
         - `sso_required`: the user's email domain is `ssoOnly` for this
           identity's provider.
 
@@ -4953,8 +5054,9 @@ paths:
         Unlinking changes how the account is entered, so the credential-reset
         guard applies, as for identity invites: the caller must hold every
         permission the user holds, from global roles or roles in any
-        organization (`403`, naming the permissions the caller lacks,
-        otherwise). The caller's own permissions count from global roles only,
+        organization, and `organizations.write` when the user is an `owner` or
+        `admin` member of any organization (`403`, naming what the caller
+        lacks, otherwise). The caller's own permissions count from global roles only,
         capped by a delegated token's scopes.
 
         An audit log entry is created (the admin as actor) and an
@@ -5012,15 +5114,18 @@ paths:
 
         An invite is a new way into the account, so the credential-reset guard
         applies: the caller must hold every permission the user holds, from
-        global roles or roles in any organization (`403`, naming the
-        permissions the caller lacks, otherwise). The caller's own permissions
+        global roles or roles in any organization, and `organizations.write`
+        when the user is an `owner` or `admin` member of any organization
+        (`403`, naming what the caller lacks, otherwise). The caller's own permissions
         count from global roles only, capped by a delegated token's scopes. The
         system user (`400 system_user`) and service accounts (`403`) are
         refused.
 
         Errors: 400 `unknown_provider` (no provider has that id),
         400 `provider_inactive` (the provider is deactivated), 409
-        `already_linked` (the user already has an identity at the provider).
+        `already_linked` (the user already has an identity at the provider),
+        409 `sso_required` (the user's email domain is SSO-only for another
+        provider, whose sign-in is then the only way in).
 
         An audit log entry is created (`entityType` `IdentityInvite`).
       operationId: postAdminUserIdentityInvites
@@ -5062,7 +5167,7 @@ paths:
           description: No such user
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The user is already linked to the provider (`already_linked`)
+          description: The user is already linked to the provider (`already_linked`), or their domain is SSO-only for another provider (`sso_required`)
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5124,8 +5229,9 @@ paths:
         token families end in the same transaction.
 
         Only a caller holding every permission the user holds (from global
-        roles or roles in any organization) may reset it (`403`, naming the
-        permissions the caller lacks, otherwise); the caller's permissions count
+        roles or roles in any organization), and `organizations.write` when the
+        user is an `owner` or `admin` member of any organization, may reset it
+        (`403`, naming what the caller lacks, otherwise); the caller's permissions count
         from global roles only, capped by a delegated token's scopes. The
         system user (`400 system_user`) and a service's service-account user
         (`403`) are refused, as on `PATCH /v1/admin/users/{id}`.
@@ -5683,7 +5789,12 @@ paths:
         the service clients holding it. People's tokens are not revoked:
         permissions are read on every request, so they lose the role at once.
         Deactivating a role that grants `admin` is refused when it would leave
-        no active administrator (`409 conflict`).
+        no active administrator (`409 conflict`). Reactivating a role that
+        grants `admin` while an integration's account holds it is refused
+        (`403 role_not_allowed_for_integration`). Turning `requires2fa` on, or
+        reactivating a role that has it, revokes its holders' access tokens
+        from logins without a second factor, so their next refresh meets the
+        2FA step-up.
 
         An audit log entry is created for this action.
         An `auth.role.updated` webhook event is emitted.
@@ -6006,7 +6117,9 @@ paths:
         a retired permission may stay on the role but cannot be newly added.
         A repeated id counts once. Archived roles are refused with
         `409 resource_archived`. Dropping `admin` from a role is refused when
-        it would leave no active administrator (`409 conflict`).
+        it would leave no active administrator (`409 conflict`). Keeping or
+        adding `admin` on a role an integration's account holds is refused
+        (`403 role_not_allowed_for_integration`): integrations never hold it.
 
         Only grant what you hold: each permission not already on the role
         must be one the caller holds through a global role (`admin` holds
@@ -6997,6 +7110,10 @@ paths:
         check, so a member without the required role may see `409` rather
         than `403`. A caller who is neither gets `403`.
 
+        Adding a role with `requires2fa` revokes the member's access tokens
+        from logins without a second factor, so their next refresh meets the
+        2FA step-up.
+
         An audit log entry is created for this action.
         An `auth.organization.member-roles-changed` webhook event is emitted.
 
@@ -7290,7 +7407,10 @@ paths:
         the provider (409 `provider_has_invites`): withdraw the invites first.
         Turning `countsAsMfa` on needs a caller holding `admin` through a global role
         (403 otherwise), and so does changing `issuer` or `clientId` while it stays
-        on; turning it off does not. Other errors are those of create.
+        on; turning it off does not. Changing `issuer` or `clientId` of a provider
+        with an SSO-only domain needs global `admin` too (403 otherwise): its
+        password users are force-linked to whoever the provider vouches for.
+        Other errors are those of create.
 
         An audit log entry is created for this action.
         An `auth.identity-provider.updated` webhook event is emitted.
@@ -7451,7 +7571,12 @@ paths:
         `roleIds`; `ssoOnly` refuses password sign-in for the domain's users. The two
         are independent. `domain` is lowercased and a leading `@` dropped.
         `ssoOnly: true` is refused with 409 `provider_inactive` while the provider
-        is deactivated, since the domain's users would have no way to sign in.
+        is deactivated, since the domain's users would have no way to sign in, and
+        with 403 unless the caller holds `admin` through a global role: a password
+        sign-in at an SSO-only domain is force-linked to the provider. Creating
+        a domain SSO-only ends, right after, every session of its users who
+        hold an identity at another provider (audited and emitted as
+        `auth.user.sessions-revoked`).
 
         `roleIds` must be roles that may be assigned within an organization: 400
         `unknown_role` for an unknown, archived or retired role, 400
@@ -7539,7 +7664,11 @@ paths:
         to another `organizationId` grants its roles (those sent, or else its current
         ones) in that organization, so all of them are checked there. Errors are those
         of adding a domain, including 409 `provider_inactive` for `ssoOnly: true` on a
-        deactivated provider.
+        deactivated provider. Turning `ssoOnly` on or off, or changing the `domain` of
+        an SSO-only domain, needs `admin` through a global role (403 otherwise).
+        A change that makes the domain SSO-only (or renames an SSO-only one)
+        ends the sessions of its users who hold an identity at another
+        provider, as on create.
 
         An audit log entry is created for this action.
       operationId: updateAdminIdentityProviderDomain
@@ -7582,8 +7711,9 @@ paths:
       summary: Remove a domain
       description: |
         Releases the domain and its default roles. Users already created through it
-        keep their accounts and identities. An audit log entry is created for this
-        action.
+        keep their accounts and identities. Deleting an SSO-only domain reopens its
+        users to passwords, so it needs `admin` through a global role (403
+        otherwise). An audit log entry is created for this action.
       operationId: deleteAdminIdentityProviderDomain
       security:
         - BearerAuth:
@@ -7985,6 +8115,9 @@ paths:
         integration's tokens: each appears in its tokens' `aud`. Each must be a
         service other than core (`422 invalid_audience`); an integration cannot
         be an audience. Its tokens are revoked when the audience changes.
+        Naming a service lets it read the integration's tokens, so the caller
+        needs `services.approve` too (`403` otherwise), as for a client's
+        audience.
 
         An audit log entry is created and a `core.integration.updated` webhook
         event is emitted when the audience changes.
@@ -8020,7 +8153,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing integrations.write permission
+          description: Forbidden - missing integrations.write or services.approve permission
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: No integration with this id
@@ -8565,6 +8698,14 @@ paths:
         an empty body returns `400 invalid_request`. Returns the settings after
         the change.
 
+        Relaxing `totpPolicy` (`required` to anything, `optional` to
+        `disabled`) needs `admin` through a global role (`403` otherwise):
+        `disabled` overrides every role's `requires2fa`. Tightening it revokes
+        the live access tokens from logins without a second factor of the
+        people it newly applies to (everyone for `required`; holders of a role
+        with `requires2fa` for `optional`), so their next refresh meets the
+        2FA step-up.
+
         An audit log entry is created for this action.
         An `auth.settings.updated` webhook event is emitted.
       operationId: patchAdminSettings
@@ -8597,7 +8738,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing settings.write permission
+          description: Forbidden - missing settings.write permission, or a relaxed totpPolicy without a global admin
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -8641,12 +8782,19 @@ paths:
         once and signs every token issued from `activatesAt`, 150 seconds later
         — time for every core process (which refresh each minute) and every
         service that refetches the JWKS to know it before a token carries its
-        `kid`. With `immediate: true` it signs at once, for a compromised key.
+        `kid`.
 
         The previous key signs until then and is then retired: tokens it signed
         keep verifying, and it stays in the JWKS, until `expiresAt` (one
         access-token lifetime plus the `id_token_hint` grace). Keys past their
         retention are deleted.
+
+        With `immediate: true`, for a compromised key, the new key signs at
+        once and every older key (a pending one included) is deleted: tokens
+        they signed, and ID tokens sent as `id_token_hint`, are refused from
+        then on, and the keys leave the JWKS. Signed-in users get tokens from
+        the new key at their next refresh. Every core process is told over
+        Redis to re-read its keys; without Redis each does so within a minute.
 
         Refused with 409 when the signing key is supplied in env
         (`JWT_PRIVATE_KEY`), or when another rotation ran at the same moment.
@@ -13404,9 +13552,9 @@ paths:
           event types.
 
         **Organization:** a token with an `org_id` may emit only into that
-        organization; a service account's token without one, or a
-        `webhooks.admin` caller, into any; a person's token without one, into
-        none (`403`). This is checked after the body and the reserved type and
+        organization; an app service's token without one, or a
+        `webhooks.admin` caller, into any; anyone else's token without one (a
+        person's, an integration's), into none (`403`). This is checked after the body and the reserved type and
         before `organizationId` is looked up, so a refused caller learns nothing
         about which organizations exist. `organizationId` must be a UUID (`400`
         otherwise) naming an existing organization — an archived one counts —
@@ -13670,16 +13818,18 @@ paths:
 
         **Organization:** a caller without `audit-logs.admin` whose token has an `org_id` may
         write only for that organization; another `organizationId`, or none (a system-wide entry),
-        is `403 forbidden`. A service account's token without an `org_id` — an app service's
-        client — may write for any organization or none; a person's token without one may not
-        write at all (`403`). `audit-logs.admin` may write for any organization or none. The
+        is `403 forbidden`. An app service's client's token without an `org_id` may write for
+        any organization or none; anyone else's token without one (a person's, an
+        integration's) may not write at all (`403`). `audit-logs.admin` may write for any organization or none. The
         check runs before `unknown_organization`, so a refused caller learns nothing about which
         organizations exist.
 
         **Source:** an app service's client writes only under its own slug: an entry whose
         `source` is anything else is `422 source_mismatch`, and nothing is written. Its reads are
         scoped to that slug (see `GET /v1/audit/entries`). No service may take the slug `tereo`,
-        the source of core's own entries. Other callers' `source` is as they report it.
+        the source of core's own entries. Every other caller's `source` is as they report it,
+        except that `tereo`, `core` and every app service's slug are reserved for their owner:
+        `422 source_reserved`.
 
         **Idempotency:** with an `idempotencyKey`, a repeat of the same request (same body,
         `idempotencyKey` aside) from the same caller within 24 hours returns the first response
@@ -13692,7 +13842,7 @@ paths:
 
         **Errors (`400`):** `invalid_request` (validation), `unknown_user`, `unknown_organization`.
 
-        **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`.
+        **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`, `source_reserved`.
 
         **Required permission:** `audit-logs.write`
       operationId: createEntry
@@ -13864,6 +14014,8 @@ paths:
         `POST /v1/audit/entries`; one entry the caller may not write refuses the whole batch with
         `403 forbidden`, and nothing is written. An app service's client may write only entries
         whose `source` is its slug; one other refuses the whole batch with `422 source_mismatch`.
+        Anyone else's entry under a reserved source (`tereo`, `core`, an app service's slug)
+        refuses the whole batch with `422 source_reserved`.
 
         **Idempotency:** one optional `idempotencyKey` covers the whole batch (per-entry keys are
         rejected); it behaves as for single entries — a different body is
@@ -13873,7 +14025,7 @@ paths:
         **Errors (`400`):** `invalid_request` (validation, including any unknown field on an
         entry), `unknown_user`, `unknown_organization`.
 
-        **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`.
+        **Errors (`422`):** `idempotency_key_conflict`, `source_mismatch`, `source_reserved`.
 
         **Required permission:** `audit-logs.write`
       operationId: createBatch
@@ -16581,8 +16733,10 @@ webhooks:
         Fired when the JWT signing key is rotated. The JWKS now publishes
         `kid`, and tokens are signed with it from `activatesAt` (150 seconds
         on, or at once for an immediate rotation); `retiredKid` signs until
-        then and keeps verifying until `retiredKidExpiresAt`. A service that
-        caches the JWKS should refetch it. No key material is included.
+        then and keeps verifying until `retiredKidExpiresAt`. On an immediate
+        rotation `retiredKidExpiresAt` equals `activatesAt`: the retired key,
+        and every key before it, no longer verifies. A service that caches
+        the JWKS should refetch it. No key material is included.
       operationId: webhookSigningKeyRotated
       security: []
       parameters:
@@ -20251,7 +20405,9 @@ components:
         progress). Use a new key, or retry with the original body.
 
         `source_mismatch`: an app service's client sent an entry whose `source` is not its own
-        slug, which the message names. Nothing is written; retrying the same body never succeeds.
+        slug, which the message names. `source_reserved`: another caller sent an entry whose
+        `source` is core's (`tereo`, `core`) or an app service's slug, which the message names.
+        Nothing is written; retrying the same body never succeeds.
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -20269,6 +20425,7 @@ components:
                 enum:
                   - idempotency_key_conflict
                   - source_mismatch
+                  - source_reserved
               error_description:
                 type: string
                 examples:
@@ -20436,7 +20593,7 @@ components:
     NotificationsSendForbiddenResponse:
       description: |
         `forbidden`: the caller lacks `notifications.send`, or names an `organizationId` outside its
-        token's organization (only `notifications.admin` and a service account's token without an
+        token's organization (only `notifications.admin` and an app service's token without an
         organization may name any). `attachment_forbidden`: the caller cannot
         read an attachment's bucket (a missing bucket answers the same). `insufficient_scope`: the
         token is delegated; only core's UI and services may send.
@@ -20533,12 +20690,10 @@ components:
                 type: string
     CrossOriginRefusedResponse:
       description: |
-        Forbidden (`access_denied`) - the request carries core's credential
-        cookies but comes from a page that may not act on them: `Sec-Fetch-Site`
-        is neither `same-origin` nor `same-site` with an allowed `Origin`, or,
-        without `Sec-Fetch-Site`, `Origin` is not allowed. Allowed origins are
-        core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) and
-        `CORS_ALLOWED_ORIGINS`. See "Cookie-Authenticated Requests".
+        Forbidden (`access_denied`) - the request uses a client's credential
+        cookie but comes from a page that may not act for that client: neither
+        core (`PUBLIC_URL`), the UI (`UI_BASE_URL`) nor an origin of the
+        client's redirect URIs. See "Cookie-Authenticated Requests".
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -20559,7 +20714,7 @@ components:
                 type: string
           example:
             error: access_denied
-            error_description: 'Cross-origin request refused: this origin may not act on the browser''s session'
+            error_description: 'Cross-origin request refused: this origin may not act on this client''s session'
     CheckPermissionForbiddenResponse:
       description: |
         Forbidden - `forbidden` when the client may not ask about this user or
@@ -20679,8 +20834,8 @@ components:
             error_description: Sign in again to change how you sign in
     IdentityConflictResponse:
       description: |
-        Conflict. `last_sign_in_method`: the user has no password and this is
-        their only linked identity. `sso_required`: the user's email domain is
+        Conflict. `last_sign_in_method`: the user has no password and no other
+        linked identity at an active provider. `sso_required`: the user's email domain is
         `ssoOnly` for this identity's provider.
       headers:
         X-RateLimit-Limit:
@@ -20915,10 +21070,9 @@ components:
           type: array
           items:
             type: string
-          description: '`client_secret_basic` for confidential clients, `none` for public ones; `client_secret_post` is not accepted.'
+          description: '`client_secret_basic` only: a public client cannot introspect; `client_secret_post` is not accepted.'
           examples:
             - - client_secret_basic
-              - none
         revocation_endpoint_auth_methods_supported:
           type: array
           items:
@@ -21020,9 +21174,9 @@ components:
           type: array
           items:
             type: string
+          description: '`client_secret_basic` only: a public client cannot introspect.'
           examples:
             - - client_secret_basic
-              - none
         revocation_endpoint_auth_methods_supported:
           type: array
           items:
@@ -21412,6 +21566,7 @@ components:
         client_id:
           type: string
           maxLength: 64
+          description: Optional; when sent, it must name the client authenticated by HTTP Basic.
     IntrospectResponse:
       type: object
       description: |
@@ -21467,8 +21622,12 @@ components:
             The user's permissions now, scoped to the token's organization, as
             `requireAuth` computes them: a role revoked since the token was issued
             is already gone. Access tokens carry no permissions, so this (or
-            `/oauth/check-permission`) is where a service reads them. Always
-            present for an active token (possibly empty).
+            `/oauth/check-permission`) is where a service reads them. Present
+            (possibly empty) for an active token introspected by a service, or
+            one issued to core's UI, a service's client or with a core API scope;
+            omitted for a client that is not a service's asking about its own
+            token without core access, which `/oauth/userinfo` would not tell
+            it either.
           items:
             type: string
         org_id:
@@ -27480,8 +27639,8 @@ components:
           description: |
             Scopes the notification's audit entry and events; omitted or null, the token's
             organization, or the default organization for a token without one. A token with an organization may name only that one; a person's token
-            without one may name none. `notifications.admin` and a service account's token without
-            an organization may name any.
+            without one may name none, nor may an integration's. `notifications.admin` and an app
+            service's token without an organization may name any.
           type:
             - string
             - 'null'
@@ -28559,8 +28718,9 @@ components:
           default: false
           description: |
             Sign with the new key at once instead of after the activation delay,
-            for a compromised key. Tokens may then carry a kid that services
-            with a cached JWKS do not know yet.
+            and delete every older key, for a compromised key: tokens signed
+            with those keys stop verifying at once. Tokens may then carry a kid
+            that services with a cached JWKS do not know yet.
     SigningKeyRotation:
       type: object
       required:

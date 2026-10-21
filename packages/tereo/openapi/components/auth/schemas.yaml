@@ -63,9 +63,9 @@ OAuthAuthorizationServerMetadata:
       type: array
       items:
         type: string
-      description: '`client_secret_basic` for confidential clients, `none` for public ones; `client_secret_post` is not accepted.'
+      description: '`client_secret_basic` only: a public client cannot introspect; `client_secret_post` is not accepted.'
       examples:
-        - ["client_secret_basic", "none"]
+        - ["client_secret_basic"]
     revocation_endpoint_auth_methods_supported:
       type: array
       items:
@@ -166,8 +166,9 @@ OpenIDConfiguration:
       type: array
       items:
         type: string
+      description: '`client_secret_basic` only: a public client cannot introspect.'
       examples:
-        - ["client_secret_basic", "none"]
+        - ["client_secret_basic"]
     revocation_endpoint_auth_methods_supported:
       type: array
       items:
@@ -574,6 +575,7 @@ IntrospectRequest:
     client_id:
       type: string
       maxLength: 64
+      description: Optional; when sent, it must name the client authenticated by HTTP Basic.
 
 IntrospectResponse:
   type: object
@@ -630,8 +632,12 @@ IntrospectResponse:
         The user's permissions now, scoped to the token's organization, as
         `requireAuth` computes them: a role revoked since the token was issued
         is already gone. Access tokens carry no permissions, so this (or
-        `/oauth/check-permission`) is where a service reads them. Always
-        present for an active token (possibly empty).
+        `/oauth/check-permission`) is where a service reads them. Present
+        (possibly empty) for an active token introspected by a service, or
+        one issued to core's UI, a service's client or with a core API scope;
+        omitted for a client that is not a service's asking about its own
+        token without core access, which `/oauth/userinfo` would not tell
+        it either.
       items:
         type: string
     org_id:
@@ -3209,8 +3215,9 @@ RotateSigningKeyRequest:
       default: false
       description: |
         Sign with the new key at once instead of after the activation delay,
-        for a compromised key. Tokens may then carry a kid that services
-        with a cached JWKS do not know yet.
+        and delete every older key, for a compromised key: tokens signed
+        with those keys stop verifying at once. Tokens may then carry a kid
+        that services with a cached JWKS do not know yet.
 SigningKey:
   type: object
   required: [kid, version, active, activatesAt, retiredAt, expiresAt]

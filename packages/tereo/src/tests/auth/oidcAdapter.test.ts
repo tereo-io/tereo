@@ -10,7 +10,7 @@ import { randomBytes, randomUUID } from "crypto";
 import env from "../../env.js";
 import type {
   IdentityProvider,
-  UpstreamAuthCheck,
+  UpstreamAuthStart,
 } from "../../utils/identityProviders/types.js";
 import {
   adapterFor,
@@ -73,11 +73,17 @@ const inputFor = (p: FakeOidcProvider) => ({
   scopes: ["openid", "email", "profile"],
 });
 
-const newCheck = (provider: IdentityProvider): UpstreamAuthCheck => ({
+const newCheck = (
+  provider: IdentityProvider,
+  reauth: Partial<UpstreamAuthStart> = {}
+): UpstreamAuthStart => ({
   state: randomBytes(16).toString("base64url"),
   nonce: randomBytes(16).toString("base64url"),
   codeVerifier: randomBytes(32).toString("base64url"),
   redirectUri: upstreamCallbackUrl(provider.slug),
+  promptLogin: false,
+  maxAge: null,
+  ...reauth,
 });
 
 /** Sends the browser's leg: the provider redirects straight back. */
@@ -189,6 +195,29 @@ describe("oidc adapter: sign-in", () => {
     expect(url.searchParams.get("code_challenge")).toBeTruthy();
     expect(url.searchParams.get("redirect_uri")).toBe(check.redirectUri);
     expect(url.searchParams.get("scope")).toBe("openid email profile");
+    expect(url.searchParams.has("prompt")).toBe(false);
+    expect(url.searchParams.has("max_age")).toBe(false);
+  });
+
+  it("passes prompt=login and max_age on to the provider", async () => {
+    const provider = await providerFor(fake);
+    const url = await adapter.authorizationUrl(
+      provider,
+      newCheck(provider, { promptLogin: true, maxAge: 0 })
+    );
+    expect(url.searchParams.get("prompt")).toBe("login");
+    expect(url.searchParams.get("max_age")).toBe("0");
+  });
+
+  it("reads the provider's auth_time", async () => {
+    const provider = await providerFor(fake);
+    const authTime = Math.floor(Date.now() / 1000) - 120;
+    fake.nextIdentity({ sub: "user-789", auth_time: authTime });
+
+    await expect(signIn(provider)).resolves.toMatchObject({
+      subject: "user-789",
+      authTime: new Date(authTime * 1000),
+    });
   });
 
   it("returns the bound identity, with the email lower-cased", async () => {
@@ -211,6 +240,7 @@ describe("oidc adapter: sign-in", () => {
       firstName: "Ada",
       lastName: "Lovelace",
       hostedDomain: "example.com",
+      authTime: null,
     });
   });
 
@@ -240,6 +270,7 @@ describe("oidc adapter: sign-in", () => {
       firstName: null,
       lastName: null,
       hostedDomain: null,
+      authTime: null,
     });
   });
 

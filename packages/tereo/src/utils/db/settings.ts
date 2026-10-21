@@ -91,3 +91,10 @@ export const updateTotpSettings = async (
 export const getTotpPolicy = async (): Promise<TotpPolicy> => {
   return (await get<TotpPolicy>("totpPolicy")) ?? DEFAULT_SETTINGS.totpPolicy;
 };
+
+/** Serializes changes to the 2FA settings for the rest of `tx`. */
+export const lockTotpSettings = async (
+  tx: Prisma.TransactionClient
+): Promise<void> => {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"core:settings:totp"}, 0))`;
+};

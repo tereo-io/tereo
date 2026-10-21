@@ -86,26 +86,29 @@ const handleEndSession = async (
     );
   }
 
-  const hint = params.id_token_hint
+  const verified = params.id_token_hint
     ? verifyIdTokenHint(params.id_token_hint)
     : null;
   if (params.id_token_hint) {
-    if (!hint) {
+    if (!verified) {
       throw new OAuth2Error("invalid_request", "Invalid id_token_hint");
     }
-    if (params.client_id && params.client_id !== hint.aud) {
+    if (params.client_id && params.client_id !== verified.payload.aud) {
       throw new OAuth2Error(
         "invalid_request",
         "client_id does not match the id_token_hint audience"
       );
     }
   }
+  // A hint expired past the grace still names its client; otherwise it is
+  // treated as none, so the user is asked to confirm.
+  const hint = verified && !verified.stale ? verified.payload : null;
 
-  const client = await findClient(hint?.aud ?? params.client_id!);
+  const client = await findClient(verified?.payload.aud ?? params.client_id!);
   if (!client) {
     throw new OAuth2Error(
       "invalid_request",
-      hint ? "Invalid id_token_hint: unknown audience" : "Invalid client_id"
+      verified ? "Invalid id_token_hint: unknown audience" : "Invalid client_id"
     );
   }
 
@@ -137,7 +140,11 @@ const handleEndSession = async (
     params.state
   );
   if (redirectUrl) res.redirect(redirectUrl);
-  else res.json({ success: true });
+  // A navigation lands where the user signs in again; a fetch (the admin UI
+  // signing out) gets JSON.
+  else if (source === "query" || req.headers["sec-fetch-mode"] === "navigate") {
+    res.redirect(clientSignInUrl(client));
+  } else res.json({ success: true });
 };
 
 /** Whether this browser's SSO or refresh cookie belongs to another user. */
@@ -148,7 +155,11 @@ const signedInAsOther = async (
 ): Promise<boolean> => {
   const ssoToken = getUserSessionFromCookie(req, client.clientId);
   if (ssoToken) {
-    const session = await db.userSessions.getUserSessionByToken(ssoToken);
+    const session = await db.userSessions.getUserSessionByToken(
+      ssoToken,
+      undefined,
+      { includeIdle: true }
+    );
     if (session && session.userId !== userId) return true;
   }
   const refreshTokenValue = getRefreshTokenFromCookie(req, client.clientId);
@@ -192,7 +203,11 @@ const endThisBrowser = async (
 
   const ssoToken = getUserSessionFromCookie(req, client.clientId);
   if (ssoToken) {
-    const session = await db.userSessions.getUserSessionByToken(ssoToken);
+    const session = await db.userSessions.getUserSessionByToken(
+      ssoToken,
+      undefined,
+      { includeIdle: true }
+    );
     if (session) {
       userSessionIds.add(session.id);
       signOut(session.userId, session.id);
@@ -200,7 +215,11 @@ const endThisBrowser = async (
   }
 
   if (hint?.sid) {
-    const session = await db.userSessions.getUserSessionById(hint.sid);
+    const session = await db.userSessions.getUserSessionById(
+      hint.sid,
+      undefined,
+      { includeIdle: true }
+    );
     if (session && session.userId === hint.sub) {
       userSessionIds.add(session.id);
       signOut(session.userId, session.id);

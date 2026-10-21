@@ -31,8 +31,15 @@ describe("OAuth Introspect Endpoint", () => {
   let testUser: Awaited<ReturnType<typeof createTestUser>>;
 
   beforeAll(async () => {
-    testClient = await createTestClient();
+    testClient = await createTestClient({ clientType: "confidential" });
     testUser = await createTestUser();
+  });
+
+  const testClientHeaders = () => ({
+    "Content-Type": "application/json",
+    Authorization: `Basic ${Buffer.from(
+      `${testClient.clientId}:${testClient.plainSecret}`
+    ).toString("base64")}`,
   });
 
   // Helper to get tokens
@@ -116,12 +123,11 @@ describe("OAuth Introspect Endpoint", () => {
 
     const tokenResponse = await fetch(`${BASE_URL}/oauth/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: testClientHeaders(),
       body: JSON.stringify({
         grant_type: "authorization_code",
         code,
         redirect_uri: redirectUri,
-        client_id: testClient.clientId,
         code_verifier: codeVerifier,
       }),
     });
@@ -135,10 +141,9 @@ describe("OAuth Introspect Endpoint", () => {
 
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: testClientHeaders(),
         body: JSON.stringify({
           token: tokens.access_token,
-          client_id: testClient.clientId,
         }),
       });
 
@@ -153,10 +158,9 @@ describe("OAuth Introspect Endpoint", () => {
 
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: testClientHeaders(),
         body: JSON.stringify({
           token: tokens.access_token,
-          client_id: testClient.clientId,
         }),
       });
 
@@ -192,10 +196,9 @@ describe("OAuth Introspect Endpoint", () => {
     it("should return 200 with active=false for invalid token per RFC 7662", async () => {
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: testClientHeaders(),
         body: JSON.stringify({
           token: "invalid-token",
-          client_id: testClient.clientId,
         }),
       });
 
@@ -216,10 +219,9 @@ describe("OAuth Introspect Endpoint", () => {
       // Revoke the token
       const revokeResponse = await fetch(`${BASE_URL}/oauth/revoke`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: testClientHeaders(),
         body: JSON.stringify({
           token: tokens.access_token,
-          client_id: testClient.clientId,
         }),
       });
       expect(revokeResponse.status).toBe(HTTP_STATUS.OK);
@@ -227,10 +229,9 @@ describe("OAuth Introspect Endpoint", () => {
       // Introspect the revoked token
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: testClientHeaders(),
         body: JSON.stringify({
           token: tokens.access_token,
-          client_id: testClient.clientId,
         }),
       });
 
@@ -245,11 +246,10 @@ describe("OAuth Introspect Endpoint", () => {
 
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: testClientHeaders(),
         body: JSON.stringify({
           token: tokens.access_token,
           token_type_hint: "access_token",
-          client_id: testClient.clientId,
         }),
       });
 
@@ -265,11 +265,10 @@ describe("OAuth Introspect Endpoint", () => {
 
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: testClientHeaders(),
         body: JSON.stringify({
           token: tokens.refresh_token,
           token_type_hint: "refresh_token",
-          client_id: testClient.clientId,
         }),
       });
 
@@ -282,10 +281,8 @@ describe("OAuth Introspect Endpoint", () => {
     it("should return 400 with invalid_request error when token parameter is missing", async () => {
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_id: testClient.clientId,
-        }),
+        headers: testClientHeaders(),
+        body: JSON.stringify({}),
       });
 
       expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
@@ -420,13 +417,30 @@ describe("OAuth Introspect Endpoint", () => {
       expect(data.active).toBe(true);
     });
 
-    it("should return 400 with invalid_request error for empty token", async () => {
+    it("refuses a public client, which sends only its client_id: 401 invalid_client", async () => {
+      const publicClient = await createTestClient({ clientType: "public" });
+      const tokens = await getTokens();
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          token: tokens.access_token,
+          client_id: publicClient.clientId,
+        }),
+      });
+
+      expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+      expect(response.headers.get("www-authenticate")).toContain("Basic");
+      const data = (await response.json()) as { error?: string };
+      expect(data.error).toBe(OAUTH_ERRORS.INVALID_CLIENT);
+    });
+
+    it("should return 400 with invalid_request error for empty token", async () => {
+      const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+        method: "POST",
+        headers: testClientHeaders(),
+        body: JSON.stringify({
           token: "",
-          client_id: testClient.clientId,
         }),
       });
 
@@ -443,10 +457,9 @@ describe("OAuth Introspect Endpoint", () => {
     it("should return 200 with active=false for malformed JWT token per RFC 7662", async () => {
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: testClientHeaders(),
         body: JSON.stringify({
           token: "not.a.valid.jwt.token",
-          client_id: testClient.clientId,
         }),
       });
 
@@ -464,10 +477,9 @@ describe("OAuth Introspect Endpoint", () => {
 
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: testClientHeaders(),
         body: JSON.stringify({
           token: fakeToken,
-          client_id: testClient.clientId,
         }),
       });
 
@@ -483,10 +495,9 @@ describe("OAuth Introspect Endpoint", () => {
 
       const response = await fetch(`${BASE_URL}/oauth/introspect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: testClientHeaders(),
         body: JSON.stringify({
           token: tokens.access_token,
-          client_id: testClient.clientId,
         }),
       });
 

@@ -62,10 +62,12 @@ export const consentPostHandler = async (req: Request, res: Response) => {
     );
   }
 
-  await db.consent.deleteConsentSession(session.id);
   clearConsentSessionCookie(res, client.clientId);
 
   if (!body.approved) {
+    if (!(await db.consent.consumeConsentSession(session.id))) {
+      throw consentSessionGone();
+    }
     logger.debug(
       {
         userId: session.userId,
@@ -84,7 +86,19 @@ export const consentPostHandler = async (req: Request, res: Response) => {
     return;
   }
 
-  const redirectUrl = await issueAuthorizationCode(req, res, client, session);
+  // Consumed under the user's lock: a password change that deleted it, or a
+  // concurrent approval, leaves nothing to issue a code for.
+  const redirectUrl = await issueAuthorizationCode(
+    req,
+    res,
+    client,
+    session,
+    async (tx) => {
+      if (!(await db.consent.consumeConsentSession(session.id, tx))) {
+        throw consentSessionGone();
+      }
+    }
+  );
 
   logger.debug(
     {
@@ -97,3 +111,9 @@ export const consentPostHandler = async (req: Request, res: Response) => {
 
   res.json({ redirect_url: redirectUrl });
 };
+
+const consentSessionGone = () =>
+  new OAuth2Error(
+    "invalid_session",
+    "Consent session not found. Please start again."
+  );

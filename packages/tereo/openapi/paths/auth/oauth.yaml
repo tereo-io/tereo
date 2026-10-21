@@ -4,7 +4,9 @@
       - OAuth2/OIDC - Authorization
     summary: OAuth2 authorization endpoint (GET)
     description: |
-      Initiates the OAuth2 authorization flow. Always answers with a 302:
+      Initiates the OAuth2 authorization flow. Once `client_id` and
+      `redirect_uri` are valid it always answers with a 302 (the JSON errors
+      before that point are listed below):
 
       - `prompt=none`: with a live user session (the
         `tereo_user_session_{client_id}` cookie) for an active user, for core's
@@ -17,7 +19,10 @@
         `redirect_uri` with `error=login_required` (or `error=invalid_scope`),
         `error_description` and `state`. A request whose `acr_values` demands
         `urn:auth-service:mfa` over a session whose login had no second factor
-        gets `error=interaction_required` instead.
+        gets `error=interaction_required` instead. With `org_id`, the code is
+        for that organization when the user may select it (a membership, or
+        support access) and the consent rules above allow it; another
+        organization is `error=login_required`.
       - `org_id` (without `prompt=login`) with a live user session for an
         active user who is a member of that active organization (or, for any
         active organization, holds `organizations.support-access` through a
@@ -25,8 +30,10 @@
         valid scopes: to `{UI}/consent?session=…` for
         that organization, skipping login — or, for core's own login client,
         straight to `redirect_uri` with `code` and `state`, as with
-        `prompt=none`. This is the one continuation without a password that
-        shows a third-party client the consent screen. An inactive user (session cookie cleared), a too-old
+        `prompt=none` (and a client with `consentRequired: false` that asks
+        no untrusted `core:*` scope, unless `prompt=consent`). This is the one
+        continuation without a password that shows a third-party client the
+        consent screen. An inactive user (session cookie cleared), a too-old
         login, or a login without a second factor when `acr_values` demands
         one falls through to the login page below.
       - otherwise to `{UI}/login` with the OAuth request parameters, setting the
@@ -47,7 +54,10 @@
 
       A user session never outlives its original expiry (`USER_SESSION_TTL`,
       7 days by default, from the password login): continuing it with
-      `prompt=none` or `org_id` does not extend it.
+      `prompt=none` or `org_id` does not extend it. One that has issued no
+      code for `USER_SESSION_IDLE_TTL` (3 days by default) counts as expired
+      here too: `prompt=none` answers `login_required` and `org_id` falls
+      through to the login page.
 
       The consent redirects set the `tereo_consent_session_{client_id}`
       cookie. Every redirect to a login-flow page (consent, org-select, 2FA)
@@ -56,10 +66,18 @@
       `code_challenge_method`, and `nonce`, `max_age`, `acr_values`, `prompt`
       when given) beside the session token, so the page's "Back to sign in" can
       restart `/oauth/authorize` for the client that began the login. They are
-      never read back from the URL: each step uses its stored session. Errors before a redirect is possible are returned as JSON: 400
-      `invalid_request` (validation, unregistered `redirect_uri`, unknown
-      `client_id` — never redirected, since the redirect URI can't be trusted),
-      400 `unauthorized_client` (client lacks the authorization_code grant).
+      never read back from the URL: each step uses its stored session.
+
+      Errors (RFC 6749 section 4.1.2.1): until `client_id` and `redirect_uri`
+      check out — a missing or malformed one, an unknown `client_id`, a
+      `redirect_uri` the client has not registered — the answer is JSON 400
+      `invalid_request`, never a redirect, since the redirect URI cannot be
+      trusted. After, every error goes to `redirect_uri` with `state` (when
+      the request's is usable) and `iss`: `unsupported_response_type` for a
+      `response_type` other than `code`, `unauthorized_client` for a client
+      without the authorization_code grant, and `invalid_request` for any
+      other invalid parameter (a missing `state` or PKCE challenge, `plain`,
+      an unknown `prompt`, an out-of-range `max_age`, …).
 
       `claims`, `login_hint` and `ui_locales` are validated but not used.
     operationId: getAuthorize
@@ -126,6 +144,7 @@
         schema:
           type: integer
           minimum: 0
+          maximum: 2147483647
       - name: acr_values
         in: query
         description: |
@@ -143,7 +162,10 @@
         description: |
           A space-separated list of `none`, `login`, `consent` and
           `select_account` (accepted, ignored). `none` cannot be combined with
-          another value: that, or an unknown value, is 400 `invalid_request`.
+          another value: that, or an unknown value, is `invalid_request` at
+          `redirect_uri`. `consent` shows the consent screen even to a client
+          that would skip it (`consentRequired: false`), except core's own
+          login client, which has none.
         schema:
           type: string
           maxLength: 64
@@ -473,9 +495,7 @@
       - 400 `invalid_grant` — missing `code_verifier`, a bad, expired, used or
         revoked code or refresh token, a concurrent request for the same one, a
         code or refresh token whose user is inactive, an authorization code
-        whose authentication is older than the `max_age` it was requested with
-        (re-authentication required), an authorization code whose SSO
-        session has ended (logout, or a sign-out of other sessions) since it
+        whose SSO session has ended (logout, or a sign-out of other sessions) since it
         was issued, or a code or refresh token issued for an organization the
         user has since left or that has since been deactivated (such a refresh
         token is revoked). A refresh or code exchange in flight when the
@@ -508,12 +528,13 @@
       inactive user) clears both cookies in that 400 response, so the browser
       stops retrying it. A refresh that only lost the race to a concurrent
       one with the same token ("is being processed", or a token rotated in
-      the last 30 seconds) leaves them.
+      the last 5 seconds whose successor is still unused) leaves them.
 
-      Replaying a rotated refresh token within 30 seconds of its rotation
-      (two tabs refreshing at once) is `invalid_grant` that leaves the token
-      family and the cookies alone; later, it is treated as theft and the
-      whole family is revoked. A token revoked by logout or `/oauth/revoke`
+      Replaying a rotated refresh token within 5 seconds of its rotation,
+      while the token that replaced it has not been used yet (two tabs
+      refreshing at once), is `invalid_grant` that leaves the token family
+      and the cookies alone; later, or once the successor has been used, it
+      is treated as theft and the whole family is revoked. A token revoked by logout or `/oauth/revoke`
       is plain `invalid_grant`.
 
       Refresh tokens rotate on every use, but a token family has an absolute
@@ -596,11 +617,16 @@
 
       `permissions` are the user's live permissions, whatever client the
       token was issued to: the ceilings of core API scopes limit what a token
-      may do in core's own API, not what an app is told about its user.
+      may do in core's own API, not what an app is told about its user. They
+      are omitted when a client that is not a service's introspects its own
+      token and that token has no core access (not issued to core's UI or a
+      service's client, and no core API scope), as `/oauth/userinfo` omits
+      them.
 
-      Confidential clients authenticate with HTTP Basic; a public client sends
-      its `client_id` in the body. A missing or unknown client or failed
-      authentication is 401 `invalid_client` with `WWW-Authenticate: Basic`;
+      Only a confidential client may introspect, authenticated with HTTP
+      Basic. A missing or unknown client, a public client (which has no
+      secret), failed authentication, or the client of a deactivated service
+      or integration is 401 `invalid_client` with `WWW-Authenticate: Basic`;
       a body `client_id` that differs from the Basic one is 400
       `invalid_request`; repeated wrong secrets are 429 `too_many_requests`,
       counted with `/oauth/token`'s (see there). `token_type_hint` is only a
@@ -608,7 +634,6 @@
     operationId: postIntrospect
     security:
       - ClientCredentials: []
-      - {}
     requestBody:
       required: true
       content:
@@ -663,8 +688,9 @@
       sent as `token`, it revokes nothing.
 
       Confidential clients authenticate with HTTP Basic; a public client sends
-      its `client_id` in the body. A missing or unknown `client_id` or failed
-      authentication is 401 `invalid_client` with `WWW-Authenticate: Basic`;
+      its `client_id` in the body. A missing or unknown `client_id`, failed
+      authentication or the client of a deactivated service or integration is
+      401 `invalid_client` with `WWW-Authenticate: Basic`;
       a body `client_id` that differs from the Basic one is 400
       `invalid_request`; repeated wrong secrets are 429 `too_many_requests`,
       counted with `/oauth/token`'s (see there). `token_type_hint` is only a
@@ -800,7 +826,7 @@
       confirmation page, `{UI}/logout?client_id=…&confirm_token=…` (with
       `post_logout_redirect_uri` and `state` when given), setting the
       `tereo_logout_confirm_{client_id}` cookie (httpOnly, SameSite=Lax,
-      `/oauth`, 10 minutes) to the same random token. Only `POST
+      `/oauth` — or `__Host-`, path `/` — 10 minutes) to the same random token. Only `POST
       /oauth/end-session/confirm`, sent with both, ends the session. With a
       valid `id_token_hint` the session ends at once, as below — unless the
       browser's `tereo_user_session_{client_id}` or `trt_{client_id}`
@@ -844,9 +870,11 @@
 
       `id_token_hint` is verified: it must carry core's signature and issuer
       and must not be an access token. An expired hint is accepted (per
-      RP-Initiated Logout) only within `ID_TOKEN_HINT_GRACE_SECONDS` (3600
-      seconds) of its `exp`; one expired longer ago is 400 `invalid_request`
-      ("Invalid id_token_hint"). Its `aud` must be a known client ("Invalid
+      RP-Initiated Logout) within `ID_TOKEN_HINT_GRACE_SECONDS` (3600
+      seconds) of its `exp`; one expired longer ago still names its client
+      but is otherwise treated as no hint — the confirmation page. A hint
+      that does not verify is 400 `invalid_request` ("Invalid
+      id_token_hint"). Its `aud` must be a known client ("Invalid
       id_token_hint: unknown audience") and must match `client_id` when both
       are given. An unknown `client_id` is 400 `invalid_request` ("Invalid
       client_id").
@@ -855,7 +883,11 @@
       `id_token_hint`) and must exactly match one of that client's
       `postLogoutRedirectUris` (a `javascript:`, `data:`, `vbscript:`,
       `blob:` or `file:` URI is refused even if registered); with a hint the response is then a 302 to it
-      (with `state`), otherwise 200 `{ success: true }`. There is no redirect to an
+      (with `state`). Without one, a navigation (a GET, or a POST with
+      `Sec-Fetch-Mode: navigate`) is a 302 to where the user signs in to the
+      client again — the UI's root for core's own client, else the origin of
+      its first web redirect URI — and a fetch (the admin UI's sign-out) is
+      200 `{ success: true }`. There is no redirect to an
       unregistered URI. Every validation failure above, a redirect URI
       without a client, and an unregistered `post_logout_redirect_uri` are 400
       `invalid_request`.
@@ -890,7 +922,7 @@
           maxLength: 64
     responses:
       '200':
-        description: Logout successful (with a valid id_token_hint and no post_logout_redirect_uri)
+        description: Never for a GET, which is a navigation; see POST
         headers:
           Set-Cookie:
             description: Clears the client's SSO and login-flow session cookies and its `trt_{client_id}` and `tsi_{client_id}` cookies
@@ -913,12 +945,13 @@
                   type: boolean
       '302':
         description: |
-          With a valid id_token_hint and a post_logout_redirect_uri: logged out,
-          redirect to it. Without a hint: nothing ended, redirect to the UI's
-          sign-out confirmation page.
+          With a valid id_token_hint: logged out, redirected to
+          post_logout_redirect_uri, or without one to the client's sign-in.
+          Without a usable hint: nothing ended, redirect to the UI's sign-out
+          confirmation page.
         headers:
           Location:
-            description: '`post_logout_redirect_uri` with `state` when given; without a hint, `{UI}/logout?client_id=…&confirm_token=…` (with `post_logout_redirect_uri` and `state` when given)'
+            description: '`post_logout_redirect_uri` with `state` when given, else the client''s sign-in URL; without a usable hint, `{UI}/logout?client_id=…&confirm_token=…` (with `post_logout_redirect_uri` and `state` when given)'
             schema:
               type: string
               format: uri
@@ -944,7 +977,9 @@
     summary: End session endpoint (POST)
     description: |
       `GET /oauth/end-session` with the parameters in the body (JSON or
-      form-encoded); same behaviour and responses.
+      form-encoded); same behaviour and responses, except that with a valid
+      hint and no `post_logout_redirect_uri` a fetch (no
+      `Sec-Fetch-Mode: navigate`) gets 200 `{ success: true }`.
     operationId: postEndSession
     security: []
     requestBody:
@@ -1125,8 +1160,9 @@
       Permissions are hierarchical (`admin` ⊃ `delete` ⊃ `write` ⊃ `read`).
 
       Requires HTTP Basic credentials of a confidential client: missing or
-      wrong credentials, an unknown client or a public client are 401
-      `invalid_client` with `WWW-Authenticate: Basic`.
+      wrong credentials, an unknown client, a public client or the client of
+      a deactivated service or integration are 401 `invalid_client` with
+      `WWW-Authenticate: Basic`.
 
       A client of an organization may only ask about that organization's
       members, and is answered with their permissions in it; an
@@ -1138,6 +1174,10 @@
       `/v1/admin/clients` — is refused. Each refusal is 403 `forbidden`,
       decided before the user is looked up. The client is authenticated
       before the body is validated.
+
+      A deactivated user, or a member of an inactive or archived
+      organization asked about in it, holds no permission: `granted` is
+      `false`.
     operationId: postCheckPermission
     security:
       - ClientCredentials: []
@@ -1228,16 +1268,27 @@
 
       400 `invalid_session` (unknown session, missing or mismatched cookie),
       `session_expired`, `totp_not_configured`; 401 `invalid_code` for a wrong
-      code. Five attempts per user in five minutes — across this endpoint,
-      `/oauth/totp/recovery` and `/oauth/totp/setup/verify`, and across
-      logins, so signing in again with the password does not reset it — lock
-      the user out with 429 for the rest of the window. A right code clears
-      the count.
+      code. Attempts are counted per user, across this endpoint and
+      `/oauth/totp/recovery` and across logins, so signing in again with the
+      password does not reset them: five in 24 hours, then 429 with
+      `Retry-After` until a delay after the last attempt passes, starting at
+      1 second and doubling with each attempt up to an hour. A right code
+      gives back only its own attempt; each counts for 24 hours. A browser
+      holding the user's known-device cookie is let through the delay (at most
+      five attempts an hour per cookie). From the fifth attempt in the window,
+      each failure is audited (User, `metadata.action: totp_failures`).
 
       A code is accepted once: a code from the same 30-second step as one
       already accepted for this user, or an earlier step, is 401
-      `invalid_code` and counts toward the lockout. That includes the code
+      `invalid_code` and counts as a failed attempt. That includes the code
       that completed TOTP setup.
+
+      A 2FA session from an SSO-only user's forced link (see
+      `GET /oauth/upstream/{slug}/start`) holds the link: the right code
+      links the identity, clears the password, consumes the link grant and
+      ends the user's other sessions in the transaction that consumes the
+      session. A grant gone meanwhile takes the session with it (400
+      `invalid_session`).
 
       The 2FA session is single-use too: of two concurrent requests with a
       right code, the second is 401 `invalid_code` when it carries the same
@@ -1298,10 +1349,11 @@
     description: |
       Use a recovery code instead of TOTP during 2FA.
       Recovery codes are automatically transformed to uppercase and dashes are removed.
-      Session, cookie, errors and lockout as for `POST /oauth/totp/verify`,
+      Session, cookie, errors and attempt limits as for `POST /oauth/totp/verify`,
       plus 400 `no_recovery_codes` when the user has none left. The code and
       the 2FA session are consumed atomically: a code or session already used
-      by a concurrent request is 400 `invalid_session`.
+      by a concurrent request is 400 `invalid_session`. A forced link's
+      2FA session commits the link as at `POST /oauth/totp/verify`.
 
       An audit log entry (User, `metadata.action: recovery_code_used`, the
       user as actor) is created in the same transaction.
@@ -1409,11 +1461,14 @@
     description: |
       Verify and complete TOTP setup during OAuth flow. Refused with 403
       `totp_disabled` while the system 2FA policy is `disabled`, including for
-      a setup started before the change. 400 `invalid_setup_token` or
-      `setup_expired` for the setup session, 401 `invalid_code` for a wrong
-      code. Attempts count toward the user's lockout shared with
-      `POST /oauth/totp/verify` (five per user in five minutes, then 429 for
-      the rest of the window). The code that completes setup is spent: it
+      a setup started before the change. 400 `invalid_setup_token` (also for
+      a setup begun from `POST /v1/account/totp/setup`, which only
+      `/v1/account/totp/setup/verify` completes) or `setup_expired` for the
+      setup session, 401 `invalid_code` for a wrong
+      code. Five wrong codes per user in five minutes, then 429 for the rest
+      of the window; a right code clears the count. The one setting up holds
+      the secret, so this is apart from the 2FA step's backoff. The code that
+      completes setup is spent: it
       is refused at the 2FA step that follows, which needs the next one.
 
       An audit log entry is created for this action. An

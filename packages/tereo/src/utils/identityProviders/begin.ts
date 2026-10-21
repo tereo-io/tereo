@@ -1,6 +1,6 @@
 import { generateRandomString, hashFlowToken } from "../crypto.js";
+import type { IdentityProvider, UpstreamReauth } from "./types.js";
 import { adapterFor, upstreamCallbackUrl } from "./index.js";
-import type { IdentityProvider } from "./types.js";
 
 export interface UpstreamRoundTrip {
   /** Where the browser goes to sign in at the provider. */
@@ -12,9 +12,12 @@ export interface UpstreamRoundTrip {
   codeVerifier: string;
 }
 
+const NO_REAUTH: UpstreamReauth = { promptLogin: false, maxAge: null };
+
 /** The secrets and provider URL for one round trip; throws UpstreamAuthError. */
 export const beginUpstreamAuth = async (
-  provider: IdentityProvider
+  provider: IdentityProvider,
+  reauth: UpstreamReauth = NO_REAUTH
 ): Promise<UpstreamRoundTrip> => {
   const state = generateRandomString(64);
   const nonce = generateRandomString(64);
@@ -26,6 +29,7 @@ export const beginUpstreamAuth = async (
       nonce,
       codeVerifier,
       redirectUri: upstreamCallbackUrl(provider.slug),
+      ...reauth,
     }
   );
   return {

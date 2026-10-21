@@ -1,9 +1,9 @@
 import { absorbCookies, cookieHeader, newPkce } from "../utils/browserLogin.js";
+import { UPSTREAM_COOKIE, upstreamLogin } from "../utils/upstreamLogin.js";
 import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
 import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getTestPrincipalToken } from "../utils/principals.js";
-import { UPSTREAM_COOKIE } from "../utils/upstreamLogin.js";
 import type { CookieJar } from "../utils/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { CORE_URL } from "../utils/coreUrl.js";
@@ -309,6 +309,49 @@ describe("linking from the account page", () => {
     );
   });
 
+  it("makes a provider login on an old session there sign in again before linking", async () => {
+    const user = await createTestUser();
+    const sub = subject();
+    await prisma.userIdentity.create({
+      data: { userId: user.id, providerId: provider.id, subject: sub },
+    });
+    const second = await createProvider();
+    const providerToken = async (
+      authTime: number,
+      maxAge?: number
+    ): Promise<string> => {
+      const { params, verifier, location } = await upstreamLogin({
+        provider: fake,
+        slug: provider.slug,
+        clientId: LOGIN_CLIENT.clientId,
+        redirectUri: UI_REDIRECT_URI,
+        scope: "openid profile email",
+        claims: { sub, email: user.email, auth_time: authTime },
+        maxAge,
+      });
+      expect(location.origin + location.pathname).toBe(UI_REDIRECT_URI);
+      expect(location.searchParams.get("state")).toBe(params.state);
+      return await exchangeUiCode(location.searchParams.get("code")!, verifier);
+    };
+    const now = Math.floor(Date.now() / 1000);
+
+    const silent = await providerToken(now - 3600);
+    const refused = await account(silent, "POST", "/identities", {
+      provider: second.slug,
+    });
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "reauth_required"
+    );
+
+    const again = await providerToken(now, 0);
+    expect(fake.lastAuthorizeQuery()?.get("prompt")).toBe("login");
+    const started = await account(again, "POST", "/identities", {
+      provider: second.slug,
+    });
+    expect(started.status).toBe(200);
+  });
+
   it("refuses a token that carries no auth_time", async () => {
     const token = await getTestPrincipalToken({ permissions: [] });
     const res = await account(token, "POST", "/identities", {
@@ -337,6 +380,52 @@ describe("linking from the account page", () => {
       provider: inactive.slug,
     });
     expect(res.status).toBe(404);
+  });
+
+  it("refuses a provider other than an SSO-only domain's, at the start and at the callback", async () => {
+    const domain = `sso-${generateUniqueId().toLowerCase()}.test`;
+    const user = await createTestUser({ email: `someone@${domain}` });
+    const token = await freshToken(user);
+    const owner = await createProvider();
+    const row = await prisma.identityProviderDomain.create({
+      data: {
+        providerId: owner.id,
+        domain,
+        organizationId: DEFAULT_ORGANIZATION_ID,
+        ssoOnly: false,
+        createdBy: user.id,
+      },
+    });
+
+    const start = await account(token, "POST", "/identities", {
+      provider: provider.slug,
+    });
+    expect(start.status).toBe(200);
+    const jar: CookieJar = new Map();
+    absorbCookies(jar, start);
+    const { redirect_url } = (await start.json()) as { redirect_url: string };
+    await prisma.identityProviderDomain.update({
+      where: { id: row.id },
+      data: { ssoOnly: true },
+    });
+    fake.nextIdentity({ sub: subject() });
+    const atProvider = await fetch(redirect_url, { redirect: "manual" });
+    const callback = await fetch(atProvider.headers.get("location") ?? "", {
+      redirect: "manual",
+      headers: { Cookie: cookieHeader(jar) },
+    });
+    expectAccountRedirect(callback, { error: "sso_required" });
+    expect(
+      await prisma.userIdentity.count({ where: { userId: user.id } })
+    ).toBe(0);
+
+    const again = await account(token, "POST", "/identities", {
+      provider: provider.slug,
+    });
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toBe(
+      "sso_required"
+    );
   });
 
   it("refuses a subject linked to another user with identity_in_use", async () => {
@@ -462,6 +551,26 @@ describe("unlinking", () => {
     });
     const res = await account(token, "DELETE", `/identities/${identity.id}`);
     expect(res.status).toBe(204);
+  });
+
+  it("counts no identity at a deactivated provider as another way in", async () => {
+    const { user, token } = await passwordless();
+    const second = await createProvider();
+    const identity = await prisma.userIdentity.create({
+      data: { userId: user.id, providerId: provider.id, subject: subject() },
+    });
+    await prisma.userIdentity.create({
+      data: { userId: user.id, providerId: second.id, subject: subject() },
+    });
+    await prisma.identityProvider.update({
+      where: { id: second.id },
+      data: { isActive: false },
+    });
+    const res = await account(token, "DELETE", `/identities/${identity.id}`);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "last_sign_in_method"
+    );
   });
 
   it("refuses with 409 sso_required under an SSO-only domain for that provider", async () => {

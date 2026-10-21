@@ -87,6 +87,21 @@ export const hasPrompt = (
   value: "none" | "login" | "consent"
 ): boolean => !!prompt && prompt.split(" ").includes(value);
 
+// OIDC Core 3.1.2.1 sets no bound; past Postgres's int4 it cannot be stored.
+const maxAgeSchema = z.coerce.number().int().min(0).max(2147483647).optional();
+
+/**
+ * What must check out before an error may go to the redirect URI (RFC 6749
+ * section 4.1.2.1): the client and a redirect URI to look up in it.
+ */
+export const AuthorizeTargetSchema = z.object({
+  client_id: z.string().min(1).max(MAX_CLIENT_ID_LENGTH),
+  redirect_uri: redirectUriSchema,
+});
+
+/** The `state` to send back with an error, if the request's is usable. */
+export const ErrorStateSchema = z.string().min(1).max(MAX_STATE_LENGTH);
+
 export const AuthorizeRequestSchema = z.object({
   response_type: z.literal("code"),
   client_id: z.string().min(1).max(MAX_CLIENT_ID_LENGTH),
@@ -96,7 +111,7 @@ export const AuthorizeRequestSchema = z.object({
   nonce: z.string().max(MAX_NONCE_LENGTH).optional(),
   code_challenge: codeChallengeSchema,
   code_challenge_method: z.literal("S256"),
-  max_age: z.coerce.number().int().min(0).optional(),
+  max_age: maxAgeSchema,
   acr_values: z.string().max(MAX_ACR_VALUES_LENGTH).optional(),
   prompt: promptSchema,
   claims: claimsSchema,
@@ -116,7 +131,7 @@ export const AuthorizeSubmitSchema = z.object({
   nonce: z.string().max(MAX_NONCE_LENGTH).optional(),
   code_challenge: codeChallengeSchema,
   code_challenge_method: z.literal("S256"),
-  max_age: z.coerce.number().int().min(0).optional(),
+  max_age: maxAgeSchema,
   acr_values: z.string().max(MAX_ACR_VALUES_LENGTH).optional(),
   prompt: promptSchema,
 });

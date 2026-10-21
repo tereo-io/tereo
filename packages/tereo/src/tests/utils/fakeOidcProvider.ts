@@ -12,6 +12,8 @@ export interface FakeClaims {
   given_name: string;
   family_name: string;
   hd: string;
+  /** Seconds since the epoch. */
+  auth_time: number;
 }
 
 interface Tamper {
@@ -21,6 +23,8 @@ interface Tamper {
   error?: string;
   /** Sign the id_token with a key the JWKS doesn't hold, under the same kid. */
   signWithOtherKey?: boolean;
+  /** Pad the token response past core's 1 MiB cap. */
+  oversizeTokenResponse?: boolean;
 }
 
 export interface FakeOidcProvider {
@@ -31,6 +35,8 @@ export interface FakeOidcProvider {
   tamper(next: Tamper): void;
   /** How many times `/jwks` has been fetched. */
   jwksRequests(): number;
+  /** The query of the latest `/authorize`. */
+  lastAuthorizeQuery(): URLSearchParams | null;
   close(): Promise<void>;
 }
 
@@ -63,6 +69,7 @@ export const startFakeOidcProvider = async (
   const codes = new Map<string, IssuedCode>();
   let pendingIdentity: (Partial<FakeClaims> & { sub: string }) | null = null;
   let pendingTamper: Tamper = {};
+  let lastAuthorizeQuery: URLSearchParams | null = null;
 
   const app = express();
   app.use(express.urlencoded({ extended: false }));
@@ -91,6 +98,7 @@ export const startFakeOidcProvider = async (
 
   app.get("/authorize", (req, res) => {
     const q = req.query as Record<string, string | undefined>;
+    lastAuthorizeQuery = new URL(req.originalUrl, "http://fake").searchParams;
     const tamper = pendingTamper;
     pendingTamper = {};
     if (!q.redirect_uri || q.client_id !== clientId) {
@@ -168,6 +176,9 @@ export const startFakeOidcProvider = async (
       token_type: "Bearer",
       expires_in: 300,
       id_token: idToken,
+      ...(tamper.oversizeTokenResponse && {
+        padding: "x".repeat(1024 * 1024 + 1),
+      }),
     });
   });
 
@@ -189,6 +200,7 @@ export const startFakeOidcProvider = async (
       pendingTamper = next;
     },
     jwksRequests: () => jwksRequests,
+    lastAuthorizeQuery: () => lastAuthorizeQuery,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.closeAllConnections();

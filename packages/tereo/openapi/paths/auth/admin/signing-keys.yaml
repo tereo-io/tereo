@@ -37,12 +37,19 @@
       once and signs every token issued from `activatesAt`, 150 seconds later
       — time for every core process (which refresh each minute) and every
       service that refetches the JWKS to know it before a token carries its
-      `kid`. With `immediate: true` it signs at once, for a compromised key.
+      `kid`.
 
       The previous key signs until then and is then retired: tokens it signed
       keep verifying, and it stays in the JWKS, until `expiresAt` (one
       access-token lifetime plus the `id_token_hint` grace). Keys past their
       retention are deleted.
+
+      With `immediate: true`, for a compromised key, the new key signs at
+      once and every older key (a pending one included) is deleted: tokens
+      they signed, and ID tokens sent as `id_token_hint`, are refused from
+      then on, and the keys leave the JWKS. Signed-in users get tokens from
+      the new key at their next refresh. Every core process is told over
+      Redis to re-read its keys; without Redis each does so within a minute.
 
       Refused with 409 when the signing key is supplied in env
       (`JWT_PRIVATE_KEY`), or when another rotation ran at the same moment.
@@ -88,8 +95,10 @@ core.signing-key.rotated:
       Fired when the JWT signing key is rotated. The JWKS now publishes
       `kid`, and tokens are signed with it from `activatesAt` (150 seconds
       on, or at once for an immediate rotation); `retiredKid` signs until
-      then and keeps verifying until `retiredKidExpiresAt`. A service that
-      caches the JWKS should refetch it. No key material is included.
+      then and keeps verifying until `retiredKidExpiresAt`. On an immediate
+      rotation `retiredKidExpiresAt` equals `activatesAt`: the retired key,
+      and every key before it, no longer verifies. A service that caches
+      the JWKS should refetch it. No key material is included.
     operationId: webhookSigningKeyRotated
     security: []
     parameters:

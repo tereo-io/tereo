@@ -64,3 +64,14 @@ export const cleanupExpiredLinkGrants = async (): Promise<number> => {
   });
   return count;
 };
+
+export const createPendingLink = async (
+  data: Prisma.PendingIdentityLinkUncheckedCreateInput,
+  tx?: Tx
+) => {
+  return await (tx ?? prisma).pendingIdentityLink.create({ data });
+};
+
+export const getPendingLink = async (id: string, tx?: Tx) => {
+  return await (tx ?? prisma).pendingIdentityLink.findUnique({ where: { id } });
+};

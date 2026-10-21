@@ -6,6 +6,9 @@ import { BadRequestError, ConflictError } from "../../../../../utils/errors.js";
 import { adapterFor } from "../../../../../utils/identityProviders/index.js";
 import { mapUniqueViolation } from "../../../../../utils/prismaErrors.js";
 import { sealRowSecret } from "../../../../../utils/sealedSecrets.js";
+import type { AuthContext } from "../../../../../middleware/auth.js";
+import { assertGlobalAdmin } from "../../../../../utils/grants.js";
+import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
@@ -32,6 +35,31 @@ export const getIdentityProvider = async (req: Request, res: Response) => {
   const { id } = validateParams(IdentityProviderIdParamSchema, req);
   res.json(formatProvider(await db.identityProviders.get(id)));
 };
+
+/**
+ * An SSO-only domain force-links its password users to whoever the provider's
+ * issuer and client vouch for, so pointing them elsewhere hands those
+ * accounts over.
+ */
+const repointsSsoOnly = async (
+  id: string,
+  row: { issuer: string | null; clientId: string },
+  body: { issuer?: string; clientId?: string },
+  tx?: Prisma.TransactionClient
+) =>
+  ((body.issuer !== undefined && body.issuer !== row.issuer) ||
+    (body.clientId !== undefined && body.clientId !== row.clientId)) &&
+  (await db.identityProviders.hasSsoOnlyDomain(id, tx));
+
+const assertMayRepointSsoOnly = (
+  auth: Pick<AuthContext, "userId" | "ceiling">,
+  tx?: Prisma.TransactionClient
+) =>
+  assertGlobalAdmin(
+    auth,
+    "Only an administrator (global admin) can change the issuer or client ID of a provider with an SSO-only domain",
+    tx
+  );
 
 /**
  * The trust behind countsAsMfa is in who asserts the identity, so moving a
@@ -110,6 +138,9 @@ export const updateIdentityProvider = async (req: Request, res: Response) => {
   }
 
   if (grantsMfaTrust(existing, body)) await assertMayCountAsMfa(auth);
+  if (await repointsSsoOnly(id, existing, body)) {
+    await assertMayRepointSsoOnly(auth);
+  }
 
   const touchesConfig =
     body.issuer !== undefined ||
@@ -141,9 +172,12 @@ export const updateIdentityProvider = async (req: Request, res: Response) => {
 
   const provider = await db.$transaction(async (tx) => {
     // Again on the locked row: a concurrent PATCH could have turned the flag
-    // on since the check above.
+    // on, or a domain SSO-only, since the checks above.
     const current = await db.identityProviders.lockForUpdate(id, tx);
     if (grantsMfaTrust(current, body)) await assertMayCountAsMfa(auth);
+    if (await repointsSsoOnly(id, current, body, tx)) {
+      await assertMayRepointSsoOnly(auth, tx);
+    }
     const updated = await mapUniqueViolation(
       () => db.identityProviders.update(id, data, tx),
       "An identity provider with this slug already exists",

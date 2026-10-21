@@ -1555,6 +1555,37 @@ describe("Provider-only users, identities and invites", () => {
     );
   });
 
+  it("refuses an invite at another provider than an SSO-only domain's with 409 sso_required", async () => {
+    const domainOwner = await createProvider();
+    const domain = `invsso-${generateUniqueId().toLowerCase()}.example`;
+    await prisma.identityProviderDomain.create({
+      data: {
+        providerId: domainOwner.id,
+        domain,
+        organizationId: DEFAULT_ORGANIZATION_ID,
+        ssoOnly: true,
+        createdBy: SYSTEM_USER_ID,
+      },
+    });
+    const user = await createUser({ email: `someone@${domain}` });
+
+    const refused = await admin("POST", `/${user.id}/identity-invites`, {
+      providerId: provider.id,
+    });
+    expect(refused.status).toBe(HTTP_STATUS.CONFLICT);
+    expect(((await refused.json()) as ErrorResponse).error).toBe(
+      "sso_required"
+    );
+    expect(
+      await prisma.userIdentity.count({ where: { userId: user.id } })
+    ).toBe(0);
+
+    const own = await admin("POST", `/${user.id}/identity-invites`, {
+      providerId: domainOwner.id,
+    });
+    expect(own.status).toBe(HTTP_STATUS.CREATED);
+  });
+
   it("refuses an invite to an unknown provider with 400", async () => {
     const user = await createUser();
     const res = await admin("POST", `/${user.id}/identity-invites`, {

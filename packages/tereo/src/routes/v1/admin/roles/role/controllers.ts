@@ -8,6 +8,7 @@ import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
 import {
+  disconnectTokenSockets,
   notifyRoleDeleted,
   notifyRolePermissionsChanged,
   notifyRoleStatusChanged,
@@ -26,6 +27,7 @@ import {
   ConflictError,
   ForbiddenError,
   ManagedByProvisioningError,
+  RoleNotAllowedForIntegrationError,
 } from "../../../../../utils/errors.js";
 import {
   logAuditTx,
@@ -35,6 +37,24 @@ import {
 
 const refuseProvisioned = (role: { provisioned: boolean }) => {
   if (role.provisioned) throw new ManagedByProvisioningError();
+};
+
+/**
+ * Integrations never hold `admin` (setIntegrationRolesTx), so a role one holds
+ * may not come to grant it. Locks the role, so an integration taking it waits
+ * and then sees what it grants.
+ */
+const refuseAdminForIntegrations = async (
+  roleId: string,
+  tx: Prisma.TransactionClient
+) => {
+  await db.roles.lockRoles([roleId], "update", tx);
+  const holders = await db.roles.integrationHolderSlugs(roleId, tx);
+  if (holders.length > 0) {
+    throw new RoleNotAllowedForIntegrationError(
+      `Integrations can't hold a role carrying the admin permission, and this one is held by: ${holders.join(", ")}`
+    );
+  }
 };
 
 export const getRole = async (req: Request, res: Response) => {
@@ -98,12 +118,33 @@ export const updateRole = async (req: Request, res: Response) => {
     }
   }
 
-  const role = await db.$transaction(async (tx) => {
+  const { role, revokedJtis } = await db.$transaction(async (tx) => {
     if (body.isActive === false && existing.isActive) {
       await assertAdminRemains((a) => a.roleId !== params.id, tx);
     }
+    // A role gains `admin` only under its lock, and only while no
+    // integration holds it, so the role read above settles whether to check.
+    if (
+      body.isActive === true &&
+      !existing.isActive &&
+      db.roles.grantedPermissionNames([existing]).includes("admin")
+    ) {
+      await refuseAdminForIntegrations(params.id, tx);
+    }
     await db.roles.update(params.id, body, tx);
     const updated = await db.roles.get(params.id, tx);
+    // Permissions are read live, so a holder's token from a password-only
+    // login would keep working; revoked, its refresh meets the step-up.
+    const gains2fa =
+      updated.isActive &&
+      updated.requires2fa &&
+      !(existing.isActive && existing.requires2fa);
+    const revokedJtis = gains2fa
+      ? await db.accessTokens.revokeWithoutMfa(
+          { userRoles: { some: { roleId: params.id } } },
+          tx
+        )
+      : [];
     await logAuditTx(tx, {
       auth,
       action: "UPDATE",
@@ -111,6 +152,9 @@ export const updateRole = async (req: Request, res: Response) => {
       entityId: updated.id,
       entityName: updated.name,
       changes: computeChanges(existing, updated),
+      ...(revokedJtis.length > 0 && {
+        metadata: { accessTokensRevoked: revokedJtis.length },
+      }),
     });
     await emitTx(tx, {
       organizationId: getDefaultOrganizationId(),
@@ -119,8 +163,10 @@ export const updateRole = async (req: Request, res: Response) => {
       entityId: updated.id,
       data: formatRole(updated) as Record<string, unknown>,
     });
-    return updated;
+    return { role: updated, revokedJtis };
   });
+
+  disconnectTokenSockets(revokedJtis);
 
   if (body.isActive !== undefined && body.isActive !== existing.isActive) {
     await notifyRoleStatusChanged(params.id);
@@ -362,7 +408,9 @@ export const setRolePermissions = async (req: Request, res: Response) => {
     const keepsAdmin = await tx.permission.count({
       where: { id: { in: body.permissionIds }, name: "admin", retiredAt: null },
     });
-    if (!keepsAdmin) {
+    if (keepsAdmin) {
+      await refuseAdminForIntegrations(params.id, tx);
+    } else {
       await assertAdminRemains((a) => a.roleId !== params.id, tx);
     }
     const updated = await db.roles.setPermissions(

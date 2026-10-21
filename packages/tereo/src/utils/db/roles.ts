@@ -590,3 +590,38 @@ export const getAdminRoleIds = async (
   });
   return roles.map((r) => r.id);
 };
+
+/**
+ * Row-locks the roles for the rest of `tx`, shared or (`update`) exclusive:
+ * a role gaining `admin` holds them exclusively while it checks who holds
+ * it, and an integration taking roles holds them shared while it checks
+ * they carry none.
+ */
+export const lockRoles = async (
+  ids: string[],
+  mode: "share" | "update",
+  tx: Prisma.TransactionClient
+): Promise<void> => {
+  if (ids.length === 0) return;
+  if (mode === "update") {
+    await tx.$queryRaw`SELECT 1 FROM "auth"."roles" WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE`;
+  } else {
+    await tx.$queryRaw`SELECT 1 FROM "auth"."roles" WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR SHARE`;
+  }
+};
+
+/** The slugs of the integrations whose accounts hold the role, in any scope. */
+export const integrationHolderSlugs = async (
+  roleId: string,
+  tx: Prisma.TransactionClient
+): Promise<string[]> => {
+  const services = await tx.service.findMany({
+    where: {
+      kind: "integration",
+      client: { serviceAccountUser: { userRoles: { some: { roleId } } } },
+    },
+    select: { slug: true },
+    orderBy: { slug: "asc" },
+  });
+  return services.map((s) => s.slug);
+};

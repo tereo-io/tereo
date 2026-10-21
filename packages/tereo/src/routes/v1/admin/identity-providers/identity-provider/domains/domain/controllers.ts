@@ -5,7 +5,6 @@ import { mapUniqueViolation } from "../../../../../../../utils/prismaErrors.js";
 import { ConflictError } from "../../../../../../../utils/errors.js";
 import { validateUser } from "../../../../../../../utils/auth.js";
 import db from "../../../../../../../utils/db/index.js";
-import { assertProviderActive } from "../utils.js";
 import { UpdateDomainSchema } from "../schemas.js";
 import { DomainIdParamSchema } from "./schemas.js";
 import type { Request, Response } from "express";
@@ -17,6 +16,12 @@ import {
   computeChanges,
   logAuditTx,
 } from "../../../../../../../utils/outbox.js";
+import {
+  assertMayChangeSsoOnly,
+  assertProviderActive,
+  changesSsoOnly,
+  endSessionsLinkedElsewhere,
+} from "../utils.js";
 
 export const getDomain = async (req: Request, res: Response) => {
   const { id, domainId } = validateParams(DomainIdParamSchema, req);
@@ -56,7 +61,16 @@ export const updateDomain = async (req: Request, res: Response) => {
     );
   }
 
-  await db.$transaction(async (tx) => {
+  const closes = await db.$transaction(async (tx) => {
+    // Every domain write takes the provider's lock, so the row read under it
+    // holds until this one is written.
+    await db.identityProviders.lockForUpdate(providerId, tx);
+    const current = await db.identityProviders.getDomain(
+      providerId,
+      domainId,
+      tx
+    );
+    if (changesSsoOnly(current, body)) await assertMayChangeSsoOnly(auth, tx);
     if (body.ssoOnly) await assertProviderActive(providerId, tx);
     await mapUniqueViolation(
       () =>
@@ -91,7 +105,15 @@ export const updateDomain = async (req: Request, res: Response) => {
       changes: computeChanges(formatDomain(existing), formatDomain(updated)),
       metadata: { providerId },
     });
+    // Newly SSO-only, or SSO-only at a new domain: its users' identities at
+    // other providers stop working.
+    const newlyClosed =
+      updated.ssoOnly &&
+      (!current.ssoOnly || updated.domain !== current.domain);
+    return newlyClosed ? updated.domain : null;
   });
+
+  if (closes) await endSessionsLinkedElsewhere(auth, closes, providerId);
 
   res.json(
     formatDomain(await db.identityProviders.getDomain(providerId, domainId))
@@ -104,6 +126,13 @@ export const deleteDomain = async (req: Request, res: Response) => {
   const existing = await db.identityProviders.getDomain(providerId, domainId);
 
   await db.$transaction(async (tx) => {
+    await db.identityProviders.lockForUpdate(providerId, tx);
+    const current = await db.identityProviders.getDomain(
+      providerId,
+      domainId,
+      tx
+    );
+    if (current.ssoOnly) await assertMayChangeSsoOnly(auth, tx);
     await db.identityProviders.deleteDomain(domainId, tx);
     await logAuditTx(tx, {
       auth,

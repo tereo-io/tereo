@@ -27,6 +27,7 @@ export interface TotpVerificationData {
   acrValues: string | null;
   prompt: string | null;
   firstFactor: string[];
+  pendingLinkId: string | null;
   expiresAt: Date;
 }
 
@@ -279,6 +280,8 @@ export const createVerificationSession = async (
     prompt?: string | null;
     /** How the user got this far; `["pwd"]` when omitted. */
     firstFactor?: string[];
+    /** A forced link that commits only once this step passes. */
+    pendingLinkId?: string;
     expiresAt: Date;
   },
   tx?: Prisma.TransactionClient

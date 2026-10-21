@@ -2,23 +2,23 @@ import type { UpstreamAuthErrorCode } from "../../../../utils/identityProviders/
 import type { NormalizedIdentity } from "../../../../utils/identityProviders/types.js";
 import type { UpstreamRoundTrip } from "../../../../utils/identityProviders/begin.js";
 import type { ResolveFailure } from "../../../../utils/identityProviders/resolve.js";
-import { getDefaultOrganizationId } from "../../../../utils/defaultOrganization.js";
 import { UpstreamAuthError } from "../../../../utils/identityProviders/errors.js";
 import { beginUpstreamAuth } from "../../../../utils/identityProviders/begin.js";
 import type { AuthorizeRequestParams } from "../../../../utils/authorization.js";
 import { continueAfterFirstFactor } from "../../../../utils/firstFactor.js";
-import { recordSessionsRevoked } from "../../../../utils/sessionEvents.js";
-import { uniqueViolationFields } from "../../../../utils/prismaErrors.js";
 import { emailDomain, normalizeEmail } from "../../../../utils/email.js";
 import { authFailure } from "../../../../middleware/rateLimit.js";
-import { emitTx, logAuditTx } from "../../../../utils/outbox.js";
-import { endUserSessions } from "../../../../utils/sessions.js";
 import { hashTotpSetupGrant } from "../../../../utils/totp.js";
 import { hashFlowToken } from "../../../../utils/crypto.js";
+import { logAuditTx } from "../../../../utils/outbox.js";
 import { logger } from "../../../../utils/logger.js";
 import type { Request, Response } from "express";
 import db from "../../../../utils/db/index.js";
 import env from "../../../../env.js";
+import {
+  ForcedLinkRefused,
+  commitForcedLink,
+} from "../../../../utils/identityProviders/forcedLink.js";
 import type {
   IdentityLinkGrant,
   IdentityProvider,
@@ -29,15 +29,25 @@ import {
   emailTrusted,
   linkIdentity,
   resolveLoginIdentity,
+  ssoProviderElsewhere,
 } from "../../../../utils/identityProviders/resolve.js";
+import {
+  upstreamAuthTime,
+  upstreamReauth,
+} from "../../../../utils/identityProviders/reauth.js";
 import {
   adapterFor,
   upstreamCallbackUrl,
 } from "../../../../utils/identityProviders/index.js";
 import {
   authorizeRestartParams,
+  requiresMfa,
   uiUrl,
 } from "../../../../utils/authorization.js";
+import {
+  isForeignKeyConstraintError,
+  uniqueViolationFields,
+} from "../../../../utils/prismaErrors.js";
 import {
   validateParams,
   validateQuery,
@@ -76,6 +86,8 @@ type UpstreamLoginError =
   | "identity_in_use"
   | "already_linked"
   | "account_mismatch"
+  | "upstream_reauth_failed"
+  | "sso_required"
   | "too_many_attempts";
 
 /** Ends a callback on the UI's login page; `restart` is the authorize request to retry. */
@@ -98,6 +110,7 @@ type UpstreamLinkError =
   | "account_inactive"
   | "identity_in_use"
   | "already_linked"
+  | "sso_required"
   | "too_many_attempts";
 
 /** Ends a link callback on the UI's account page, where linking began. */
@@ -141,7 +154,7 @@ export const upstreamStart = async (req: Request, res: Response) => {
 
   let trip: UpstreamRoundTrip;
   try {
-    trip = await beginUpstreamAuth(provider);
+    trip = await beginUpstreamAuth(provider, upstreamReauth(request));
   } catch (err) {
     if (!(err instanceof UpstreamAuthError)) throw err;
     logger.warn({ err, provider: provider.slug }, "Upstream sign-in failed");
@@ -225,7 +238,7 @@ const startForcedLink = async (req: Request, res: Response) => {
 
   let trip: UpstreamRoundTrip;
   try {
-    trip = await beginUpstreamAuth(provider);
+    trip = await beginUpstreamAuth(provider, upstreamReauth(request));
   } catch (err) {
     if (!(err instanceof UpstreamAuthError)) throw err;
     logger.warn({ err, provider: provider.slug }, "Upstream sign-in failed");
@@ -366,7 +379,16 @@ const completeLogin = async (
   );
 
   const resolution = await resolveLoginIdentity(provider, identity);
-  if ("error" in resolution) throw fail(resolution.error);
+  if ("error" in resolution) {
+    if (resolution.error === "sso_required") {
+      // Names the provider to sign in with, as the password POST does.
+      throw new LoginFailure("sso_required", {
+        ...restart,
+        provider: resolution.provider.slug,
+      });
+    }
+    throw fail(resolution.error);
+  }
 
   const user = await db.users.get(resolution.userId);
   if (!user.isActive || user.userType !== "human") {
@@ -381,7 +403,33 @@ const completeLogin = async (
   return await continueProviderLogin(req, res, provider, user, linked.id, {
     client,
     request,
+    authTime: authTimeOrFail(provider, identity, request, session, fail),
   });
+};
+
+/** The provider's `auth_time`, unless it falls short of the request's re-authentication. */
+const authTimeOrFail = (
+  provider: IdentityProvider,
+  identity: NormalizedIdentity,
+  request: AuthorizeRequestParams,
+  session: UpstreamAuthSession,
+  fail: (code: UpstreamLoginError) => Error
+): Date => {
+  const reauth = upstreamReauth(request);
+  const authTime = upstreamAuthTime(identity, reauth, session.createdAt);
+  if (!authTime) {
+    logger.warn(
+      {
+        provider: provider.slug,
+        authTime: identity.authTime,
+        maxAge: reauth.maxAge,
+        promptLogin: reauth.promptLogin,
+      },
+      "Upstream sign-in did not re-authenticate as requested"
+    );
+    throw fail("upstream_reauth_failed");
+  }
+  return authTime;
 };
 
 /** The provider was the first factor: on to TOTP, organization and consent. */
@@ -394,6 +442,7 @@ const continueProviderLogin = async (
   {
     client,
     request,
+    authTime,
   }: {
     client: {
       id: string;
@@ -403,6 +452,7 @@ const continueProviderLogin = async (
       trustedCoreScopes: string[];
     };
     request: AuthorizeRequestParams;
+    authTime: Date;
   }
 ): Promise<string> => {
   const authMethods = provider.countsAsMfa ? ["fed", "mfa"] : ["fed"];
@@ -431,6 +481,7 @@ const continueProviderLogin = async (
     request,
     authMethods,
     mfaSatisfied: provider.countsAsMfa,
+    authTime,
   });
   return redirect_url;
 };
@@ -458,6 +509,9 @@ const completeLink = async (
   const user = await db.users.get(session.userId);
   if (!user.isActive || user.userType !== "human") {
     throw new LinkFailure("account_inactive");
+  }
+  if (await ssoProviderElsewhere(user.email, provider.id)) {
+    throw new LinkFailure("sso_required");
   }
   const holder = await db.userIdentities.getByProviderSubject(
     provider.id,
@@ -500,8 +554,9 @@ const completeLink = async (
  * identity only when the provider vouches for the user's own email (verified,
  * equal to the account's, and trusted for the domain), so a stolen password
  * cannot bind someone else's account at the provider. Then clears the
- * password, consumes the grant and signs in as a provider login. A failure
- * leaves the grant for another try until it expires.
+ * password, consumes the grant and signs in as a provider login; with a
+ * second factor due, all of that waits for it. A failure leaves the grant
+ * for another try until it expires.
  */
 const completeForcedLink = async (
   req: Request,
@@ -562,59 +617,50 @@ const completeForcedLink = async (
   if (!emailTrusted(provider, identity, user.email, "domain")) {
     throw fail("email_unverified");
   }
+  const authTime = authTimeOrFail(provider, identity, request, session, fail);
 
-  const auth = { userId: user.id, email: user.email };
-  let linked: { id: string } | undefined;
+  // By continueAfterFirstFactor's rule: a password and a provider account
+  // alone must not take the password away and sign the user out everywhere.
+  const secondFactorDue =
+    !provider.countsAsMfa &&
+    (requiresMfa(request.acrValues) || (await db.totp.userNeedsTotp(user.id)));
+  if (secondFactorDue) {
+    // A TOTP step holds the link and commits it (writeStepAfterSecondFactor);
+    // a user who must enrol first comes back through password and provider.
+    const pending = await db.upstreamAuth
+      .createPendingLink({
+        linkGrantId,
+        providerId: provider.id,
+        subject: identity.subject,
+        email: normalizeEmail(identity.email),
+      })
+      .catch((err: unknown) => {
+        if (isForeignKeyConstraintError(err)) throw fail("session_expired");
+        throw err;
+      });
+    const { redirect_url } = await continueAfterFirstFactor(req, res, {
+      user,
+      client,
+      request,
+      authMethods: ["fed"],
+      mfaSatisfied: false,
+      authTime,
+      pendingLinkId: pending.id,
+    });
+    return redirect_url;
+  }
+
+  let linked: { id: string };
   try {
-    // Clearing the password signs the user out everywhere, as a password
-    // reset does, in the same transaction; the login below starts afresh.
-    await endUserSessions(
-      user.id,
-      null,
-      async (tx, sessionIds, ssoSessionIds) => {
-        await db.users.lockForSignInChange(user.id, tx);
-        const domain = await db.identityProviders.findDomain(
-          emailDomain(user.email),
-          tx
-        );
-        if (!domain?.ssoOnly || domain.providerId !== provider.id) {
-          throw fail("session_expired");
-        }
-        if (!(await db.upstreamAuth.consumeLinkGrant(linkGrantId, tx))) {
-          throw fail("session_expired");
-        }
-        linked = await linkIdentity(tx, auth, user.id, provider, identity);
-        await db.users.clearPassword(user.id, tx);
-        await logAuditTx(tx, {
-          auth,
-          action: "UPDATE",
-          entityType: "User",
-          entityId: user.id,
-          entityName: user.email,
-          metadata: {
-            passwordRemoved: true,
-            reason: "sso_only",
-            provider: provider.slug,
-          },
-        });
-        await emitTx(tx, {
-          organizationId: getDefaultOrganizationId(),
-          eventType: "auth.user.password-changed",
-          entityType: "User",
-          entityId: user.id,
-          data: { userId: user.id, email: user.email, reason: "sso_only" },
-        });
-        await recordSessionsRevoked(auth, user)(tx, sessionIds, ssoSessionIds);
-      }
-    );
+    linked = await commitForcedLink({
+      user,
+      provider,
+      identity,
+      linkGrantId,
+    });
   } catch (err) {
-    const fields = uniqueViolationFields(err);
-    if (!fields) throw err;
-    throw fail(
-      fields.some((f) => /subject/i.test(f))
-        ? "identity_in_use"
-        : "already_linked"
-    );
+    if (err instanceof ForcedLinkRefused) throw fail(err.code);
+    throw err;
   }
   clearIdentityLinkGrantCookie(res, client.clientId);
 
@@ -623,8 +669,8 @@ const completeForcedLink = async (
     res,
     provider,
     { ...user, passwordHash: null },
-    linked!.id,
-    { client, request }
+    linked.id,
+    { client, request, authTime }
   );
 };
 

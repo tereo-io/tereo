@@ -3,8 +3,8 @@ import { Request, RequestHandler, Response, NextFunction } from "express";
 import { RateLimiterRedis, RateLimiterRes } from "rate-limiter-flexible";
 import { getRedisClient, redisKey } from "./redis.js";
 import { BlockList, isIPv4, isIPv6 } from "node:net";
+import { createHash, randomUUID } from "node:crypto";
 import { redactUrl } from "../telemetry/redact.js";
-import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
 
 // When Redis is unreachable:
@@ -577,6 +577,152 @@ export function createBackoffLimiter(
     },
     async spendUnblocked(req, subject) {
       await spend(req, subject, true);
+    },
+  };
+}
+
+export interface WindowedBackoffConfig {
+  keyPrefix: string;
+  /** Attempts in the window allowed back to back before the first delay. */
+  freeAttempts: number;
+  /** The first delay; each further attempt in the window doubles it. */
+  baseDelaySeconds: number;
+  maxDelaySeconds: number;
+  /** How long an attempt counts. */
+  windowSeconds: number;
+  errorDescription?: string;
+  getKey: (req: Request, subject?: string) => string;
+}
+
+export interface BackoffAttempt {
+  /** Attempts the window holds, this one included. */
+  attempts: number;
+  /** Takes this attempt back out of the window, for one that succeeded. */
+  refund: () => Promise<void>;
+}
+
+export interface WindowedBackoffLimiter {
+  /**
+   * Spends an attempt before the credential is checked, atomically; during
+   * a delay, 429 and nothing spent.
+   */
+  check: (req: Request, subject?: string) => Promise<BackoffAttempt>;
+  /** Whether an attempt now would be refused, without spending one. */
+  isDelayed: (req: Request, subject?: string) => Promise<boolean>;
+  /** Spends an attempt even during a delay, so it still lengthens the next. */
+  spendUnblocked: (req: Request, subject?: string) => Promise<BackoffAttempt>;
+}
+
+// KEYS[1]: a sorted set of attempts scored by time. ARGV: freeAttempts,
+// baseDelayMs, maxDelayMs, windowMs, mode ('check', 'force' or 'peek'),
+// member. Returns {spent, ms to wait, attempts in the window after}.
+const WINDOWED_BACKOFF_SCRIPT = `
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local window = tonumber(ARGV[4])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - window)
+local count = redis.call('ZCARD', KEYS[1])
+local free = tonumber(ARGV[1])
+local wait = 0
+if count >= free then
+  local last = redis.call('ZRANGE', KEYS[1], -1, -1, 'WITHSCORES')
+  local delay = math.min(tonumber(ARGV[3]),
+    tonumber(ARGV[2]) * 2 ^ (count - free))
+  wait = math.max(0, math.floor(tonumber(last[2]) + delay - now))
+end
+if ARGV[5] == 'peek' or (wait > 0 and ARGV[5] ~= 'force') then
+  return {0, wait, count}
+end
+redis.call('ZADD', KEYS[1], now, ARGV[6])
+redis.call('PEXPIRE', KEYS[1], window)
+return {1, 0, count + 1}
+`;
+
+/**
+ * Exponential backoff over a sliding window, e.g. per account. Unlike
+ * `createBackoffLimiter`, nothing resets it: each attempt counts until it
+ * leaves the window, and a success only takes its own attempt back
+ * (`refund`), so the owner's logins hand no one else fresh attempts. Past
+ * `freeAttempts` in the window, the next attempt waits a delay after the
+ * last one that doubles with each, up to `maxDelaySeconds`. Fails closed
+ * without Redis.
+ */
+export function createWindowedBackoffLimiter(
+  config: WindowedBackoffConfig
+): WindowedBackoffLimiter {
+  const {
+    keyPrefix,
+    freeAttempts,
+    baseDelaySeconds,
+    maxDelaySeconds,
+    windowSeconds,
+    errorDescription = "Too many failed attempts. Please try again later.",
+    getKey,
+  } = config;
+  const keyOf = (req: Request, subject?: string) =>
+    redisKey(`${keyPrefix}:${getKey(req, subject)}`);
+
+  const run = async (
+    key: string,
+    mode: "check" | "force" | "peek",
+    member = ""
+  ): Promise<[number, number, number]> => {
+    try {
+      const redis = getRedisClient();
+      if (!isRedisReady(redis)) {
+        throw new Error("Redis connection is not ready");
+      }
+      return (await redis.eval(
+        WINDOWED_BACKOFF_SCRIPT,
+        1,
+        key,
+        freeAttempts,
+        baseDelaySeconds * 1000,
+        maxDelaySeconds * 1000,
+        windowSeconds * 1000,
+        mode,
+        member
+      )) as [number, number, number];
+    } catch (error) {
+      throw failClosed(keyPrefix, error);
+    }
+  };
+
+  const spend = async (
+    req: Request,
+    subject: string | undefined,
+    mode: "check" | "force"
+  ): Promise<BackoffAttempt> => {
+    const key = keyOf(req, subject);
+    const member = randomUUID();
+    const [spent, ms, attempts] = await run(key, mode, member);
+    if (spent !== 1) {
+      throw tooManyFailures(
+        req,
+        Math.max(1, Math.ceil(ms / 1000)),
+        errorDescription,
+        { keyPrefix }
+      );
+    }
+    return {
+      attempts,
+      // A refund lost to Redis costs the user one attempt, not the login.
+      refund: async () => {
+        try {
+          await getRedisClient().zrem(key, member);
+        } catch (err) {
+          logger.warn({ keyPrefix, err }, "Could not refund a backoff attempt");
+        }
+      },
+    };
+  };
+
+  return {
+    check: (req, subject) => spend(req, subject, "check"),
+    spendUnblocked: (req, subject) => spend(req, subject, "force"),
+    async isDelayed(req, subject) {
+      const [, ms] = await run(keyOf(req, subject), "peek");
+      return ms > 0;
     },
   };
 }

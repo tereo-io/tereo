@@ -757,6 +757,10 @@
       check, so a member without the required role may see `409` rather
       than `403`. A caller who is neither gets `403`.
 
+      Adding a role with `requires2fa` revokes the member's access tokens
+      from logins without a second factor, so their next refresh meets the
+      2FA step-up.
+
       An audit log entry is created for this action.
       An `auth.organization.member-roles-changed` webhook event is emitted.
 

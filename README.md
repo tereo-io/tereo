@@ -179,7 +179,7 @@ Elsewhere, run the published image, `ghcr.io/tereo-io/tereo` (amd64 and arm64), 
 |----------|-------|
 | `DATABASE_URL`, `REDIS_URL` | Postgres and Redis (or `REDIS_SENTINELS` + `REDIS_MASTER_NAME`) |
 | `PUBLIC_URL` | Core's public `https://` URL, not localhost. The admin UI is served at `PUBLIC_URL`, core's API under `${PUBLIC_URL}/v1` |
-| `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call core; `*` is refused |
+| `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call core's API with credentials; `*` and non-loopback `http://` origins are refused |
 | `TRUST_PROXY` | The proxies in front of core (`1`, a CIDR list), or `false` when there are none; `true` is refused |
 | `CORE_KEK` | `openssl rand -base64 32`. Encrypts the keys core stores; keep it in a secret manager — the stored keys cannot be read without it |
 
@@ -197,7 +197,9 @@ docker run --rm --env-file core.env ghcr.io/tereo-io/tereo:0.1.0 ./migrate-and-s
 Run it again with each new release's image before starting that release.
 
 The first start logs a setup token, as JSON from the `api` or `all` process; complete setup at
-`${PUBLIC_URL}/setup` as in step 2. `ROLE=api` and
+`${PUBLIC_URL}/setup` as in step 2. In production, set `SETUP_TOKEN` instead (24+
+characters, from your secret manager): core accepts that value and never logs a token, so none
+reaches shipped logs. `ROLE=api` and
 `ROLE=worker` split HTTP from the background workers; at least one process must run `all` or
 `worker`, or webhooks are never delivered. Health checks are `GET /health` on `PORT` (4001) for
 `api` and `all`, and on `WORKER_HEALTH_PORT` (4002) for `worker`.

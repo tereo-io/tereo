@@ -40,8 +40,19 @@ export const listForUser = async (userId: string) => {
   });
 };
 
-export const countForUser = async (userId: string, tx?: Tx) => {
-  return await (tx ?? prisma).userIdentity.count({ where: { userId } });
+/** The user's identities a sign-in could use now: those at active providers. */
+export const countUsableForUser = async (
+  userId: string,
+  except: string | null,
+  tx?: Tx
+) => {
+  return await (tx ?? prisma).userIdentity.count({
+    where: {
+      userId,
+      provider: { isActive: true },
+      ...(except && { id: { not: except } }),
+    },
+  });
 };
 
 export const create = async (
@@ -146,4 +157,19 @@ export const cleanupExpiredInvites = async (): Promise<number> => {
     where: { expiresAt: { lt: new Date() } },
   });
   return count;
+};
+
+/** People whose email is at `domain` and who hold an identity at another provider than `providerId`. */
+export const usersAtDomainLinkedElsewhere = async (
+  domain: string,
+  providerId: string
+) => {
+  return await prisma.user.findMany({
+    where: {
+      email: { endsWith: `@${domain}` },
+      userType: "human",
+      identities: { some: { providerId: { not: providerId } } },
+    },
+    select: { id: true, email: true },
+  });
 };

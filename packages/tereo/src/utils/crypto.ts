@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual, createHash, createHmac } from "crypto";
-import { hashPassword, verifyPassword } from "./password.js";
+import { hashPassword, needsRehash, verifyPassword } from "./password.js";
 import { newClientSecretValue } from "./secretRules.js";
 import { authCodeHmacKey } from "./keys.js";
 
@@ -15,7 +15,7 @@ export interface GeneratedAuthorizationCode {
 
 // Passwords share one scrypt implementation with share passwords and recovery
 // codes (utils/password.ts).
-export { hashPassword, verifyPassword };
+export { hashPassword, needsRehash, verifyPassword };
 
 export const generateRandomString = (length: number): string => {
   return randomBytes(Math.ceil(length / 2))

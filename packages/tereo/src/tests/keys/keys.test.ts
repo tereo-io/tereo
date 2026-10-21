@@ -204,6 +204,21 @@ describe("Generated keys", () => {
     expect(names.some((n) => n.startsWith("JWT_"))).toBe(false);
   });
 
+  it("refuses a JWT key pair from env under 2048 bits", async () => {
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", {
+      modulusLength: 1024,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    });
+
+    await expect(
+      runChild({
+        JWT_PRIVATE_KEY: Buffer.from(privateKey).toString("base64"),
+        JWT_PUBLIC_KEY: Buffer.from(publicKey).toString("base64"),
+      })
+    ).rejects.toThrow(/at least 2048 bits/);
+  });
+
   it("refuses half of the JWT key pair", async () => {
     const { publicKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,

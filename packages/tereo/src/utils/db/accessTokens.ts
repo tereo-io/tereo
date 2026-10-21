@@ -172,6 +172,36 @@ export const revokeByOrganizationId = async (
   return revoked.map((t) => t.jti);
 };
 
+// What `usedMfa` (utils/authorization.ts) counts as a second factor.
+const MFA_AUTH_METHODS = ["otp", "recovery", "mfa"];
+
+/**
+ * Revokes the live access tokens of the people matching `users` that came
+ * from a login without a second factor (a token with no login counts as
+ * one), so the client's next refresh meets the 2FA step-up. Returns their
+ * jtis.
+ */
+export const revokeWithoutMfa = async (
+  users: Prisma.UserWhereInput,
+  tx: Prisma.TransactionClient
+): Promise<string[]> => {
+  const now = new Date();
+  const revoked = await tx.accessToken.updateManyAndReturn({
+    where: {
+      revokedAt: null,
+      expiresAt: { gt: now },
+      user: { ...users, userType: "human" },
+      OR: [
+        { authCodeId: null },
+        { authCode: { NOT: { authMethods: { hasSome: MFA_AUTH_METHODS } } } },
+      ],
+    },
+    data: { revokedAt: now },
+    select: { jti: true },
+  });
+  return revoked.map((t) => t.jti);
+};
+
 export const deleteExpiredBefore = async (cutoff: Date): Promise<number> => {
   const result = await prisma.accessToken.deleteMany({
     where: { expiresAt: { lt: cutoff } },
