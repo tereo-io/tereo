@@ -20,7 +20,8 @@ npm run e2e:report -w tereo-e2e        # open the last HTML report
 ```
 
 `npm run e2e` passes `--grep-invert @slow`, so it skips `@slow` tests even when you name their
-file. Use `e2e:all` for those. Pull requests run `e2e` in CI; master and manual runs run `e2e:all`.
+file. Use `e2e:all` for those. CI runs `e2e`, except on the release PR (`release/version-bump`),
+which runs `e2e:all`.
 
 Each run builds the UI, recreates the database, starts core on **:4501** and stops it afterwards
 (about 40 s in all). It runs alongside a dev core (:4001) and UI (:4000).
@@ -92,8 +93,8 @@ src/tests/
 
 - Import `test` and `expect` from `src/fixtures/index.js`, not from `@playwright/test`.
 - **Tag a slow test `@slow`** (`test("…", { tag: "@slow" }, async (…) => …)`): one that waits out a
-  30-second TOTP step, or takes several full sign-ins. Pull requests skip these, and master runs
-  them. Keep the fast test of each workflow untagged, so a PR still covers it.
+  30-second TOTP step, or takes several full sign-ins. CI skips these everywhere but the release
+  PR. Keep the fast test of each workflow untagged, so every PR still covers it.
 - **Make it independent.** Name everything with `uid("prefix")`; never rely on another spec's data
   or order. Specs run in parallel against one core.
 - **Seed through the API** (`api.createUser`, `createRole`, `setRolePermissions`, `setUserRoles`,
@@ -132,8 +133,10 @@ this package has no `test`/`test:docker` target, so `nx affected -t test:docker`
 - Chromium is cached on the Playwright version; its system libraries are installed every run.
 - Actions sets `CI`, so the run takes 1 retry and 2 workers, fails on `.only`, and annotates
   failures through the GitHub reporter.
-- Pull requests run `npm run e2e`, which skips tests tagged `@slow`. Pushes to master and manual
-  runs run `npm run e2e:all`, so every test still runs before a release.
+- Every run takes `npm run e2e`, which skips tests tagged `@slow`, except on the release PR's
+  branch, `release/version-bump`, which takes `npm run e2e:all`, so every test still runs before a
+  release. `create-version-pr.yml` starts that branch's CI as a `workflow_dispatch` run, so the job
+  matches `github.ref_name` as well as a PR's `github.head_ref`.
 - On failure it uploads `e2e-report`: `playwright-report/`, `test-results/` (traces, videos) and
   `.e2e-state/core.log`.
 - Sharding (`--shard=i/n`) works, with one service set per shard job, since each shard recreates

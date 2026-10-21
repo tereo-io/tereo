@@ -204,12 +204,14 @@ jobs:
           fi
 
       # CI (set by Actions) gives the run 1 retry and 2 workers, fails on
-      # .only, and adds the GitHub reporter's annotations. A PR skips the
-      # tests tagged @slow; master and a run started by hand take them all.
+      # .only, and adds the GitHub reporter's annotations. Only the release
+      # PR's branch runs the tests tagged @slow, so every test still runs
+      # before a release. create-version-pr.yml starts that run by hand, so
+      # match the ref as well as a PR's head.
       - name: Run e2e suite
         if: steps.affected.outputs.run == 'true'
         env:
-          E2E_SCRIPT: ${{ github.event_name == 'pull_request' && 'e2e' || 'e2e:all' }}
+          E2E_SCRIPT: ${{ (github.head_ref == 'release/version-bump' || github.ref_name == 'release/version-bump') && 'e2e:all' || 'e2e' }}
         run: npm run "$E2E_SCRIPT"
 
       - name: Upload e2e report
