@@ -144,3 +144,60 @@ describe("a service's client", () => {
     expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
   });
 });
+
+describe("a deactivated user or an inactive organization", () => {
+  /** A member of a fresh organization holding `permission` globally and in it. */
+  const grantedMember = async () => {
+    const org = await ensureTestOrganization(`check-perm-live-${Date.now()}`);
+    const client = await createTestClient({ clientType: "confidential" });
+    await prisma.oAuthClient.update({
+      where: { id: client.id },
+      data: { organizationId: org },
+    });
+    const perm = await ensurePermission("webhooks.read");
+    const role = await createTestRole();
+    await prisma.rolePermission.create({
+      data: { roleId: role.id, permissionId: perm.id },
+    });
+    const user = (await createTestUser()).id;
+    await ensureTestMembership(user, org);
+    await prisma.userRole.createMany({
+      data: [
+        { userId: user, roleId: role.id, organizationId: org },
+        { userId: user, roleId: role.id },
+      ],
+    });
+    expect(await granted(await check(client, { user_id: user }))).toBe(true);
+    expect(await granted(await check(serviceClient, { user_id: user }))).toBe(
+      true
+    );
+    return { org, client, user };
+  };
+
+  it("holds nothing once the user is deactivated", async () => {
+    const { client, user } = await grantedMember();
+    await prisma.user.update({ where: { id: user }, data: { isActive: false } });
+    expect(await granted(await check(client, { user_id: user }))).toBe(false);
+    expect(await granted(await check(serviceClient, { user_id: user }))).toBe(
+      false
+    );
+  });
+
+  it("holds nothing in a deactivated organization", async () => {
+    const { org, client, user } = await grantedMember();
+    await prisma.organization.update({
+      where: { id: org },
+      data: { isActive: false },
+    });
+    expect(await granted(await check(client, { user_id: user }))).toBe(false);
+  });
+
+  it("holds nothing in an archived organization", async () => {
+    const { org, client, user } = await grantedMember();
+    await prisma.organization.update({
+      where: { id: org },
+      data: { isActive: false, archivedAt: new Date() },
+    });
+    expect(await granted(await check(client, { user_id: user }))).toBe(false);
+  });
+});

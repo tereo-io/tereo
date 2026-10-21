@@ -663,8 +663,9 @@
       sent as `token`, it revokes nothing.
 
       Confidential clients authenticate with HTTP Basic; a public client sends
-      its `client_id` in the body. A missing or unknown `client_id` or failed
-      authentication is 401 `invalid_client` with `WWW-Authenticate: Basic`;
+      its `client_id` in the body. A missing or unknown `client_id`, failed
+      authentication or the client of a deactivated service or integration is
+      401 `invalid_client` with `WWW-Authenticate: Basic`;
       a body `client_id` that differs from the Basic one is 400
       `invalid_request`; repeated wrong secrets are 429 `too_many_requests`,
       counted with `/oauth/token`'s (see there). `token_type_hint` is only a
@@ -1125,8 +1126,9 @@
       Permissions are hierarchical (`admin` ⊃ `delete` ⊃ `write` ⊃ `read`).
 
       Requires HTTP Basic credentials of a confidential client: missing or
-      wrong credentials, an unknown client or a public client are 401
-      `invalid_client` with `WWW-Authenticate: Basic`.
+      wrong credentials, an unknown client, a public client or the client of
+      a deactivated service or integration are 401 `invalid_client` with
+      `WWW-Authenticate: Basic`.
 
       A client of an organization may only ask about that organization's
       members, and is answered with their permissions in it; an
@@ -1138,6 +1140,10 @@
       `/v1/admin/clients` — is refused. Each refusal is 403 `forbidden`,
       decided before the user is looked up. The client is authenticated
       before the body is validated.
+
+      A deactivated user, or a member of an inactive or archived
+      organization asked about in it, holds no permission: `granted` is
+      `false`.
     operationId: postCheckPermission
     security:
       - ClientCredentials: []

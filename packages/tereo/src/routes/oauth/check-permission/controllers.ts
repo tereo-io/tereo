@@ -8,6 +8,7 @@ import db from "../../../utils/db/index.js";
 import {
   authenticateClient,
   clientAuthenticationFailed,
+  isActiveOrganization,
   parseBasicAuth,
 } from "../../../utils/auth.js";
 
@@ -46,6 +47,8 @@ export const checkPermissions = async (req: Request, res: Response) => {
  * organization. Any other client (a login client) is refused, so that it
  * cannot learn any user's global permissions. Every refusal is 403, decided
  * before the user is looked up, so it reveals nothing about which users exist.
+ * A deactivated user, or an inactive or archived organization, holds nothing,
+ * as requireAuth would refuse their tokens.
  */
 const permissionsInClientOrg = async (
   client: ClientRecord,
@@ -64,7 +67,8 @@ const permissionsInClientOrg = async (
         "This client belongs to no organization; it may ask about global permissions only"
       );
     }
-    await db.users.get(body.user_id);
+    const user = await db.users.get(body.user_id);
+    if (!user.isActive) return [];
     return db.roles.getUserPermissions(body.user_id);
   }
   if (body.organization_id && body.organization_id !== clientOrg) {
@@ -72,10 +76,17 @@ const permissionsInClientOrg = async (
       "This client may only ask about its own organization"
     );
   }
-  if (!(await db.organizations.getMembership(clientOrg, body.user_id))) {
+  const membership = await db.organizations.getMembership(
+    clientOrg,
+    body.user_id
+  );
+  if (!membership) {
     throw new ForbiddenError(
       "The user is not a member of this client's organization"
     );
+  }
+  if (!membership.user.isActive || !(await isActiveOrganization(clientOrg))) {
+    return [];
   }
   return db.roles.getUserPermissions(body.user_id, clientOrg);
 };

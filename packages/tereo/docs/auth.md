@@ -133,7 +133,10 @@ Outside core's resource routes:
   client of no organization must be a service's (a platform integration is refused): it is
   answered from the user's global roles only and may not name an organization. Any other client — a login client created under
   `/v1/admin/clients` — is refused, so it cannot read any user's global permissions. Every refusal is
-  403, decided before the user is looked up.
+  403, decided before the user is looked up. A deactivated user holds nothing, and neither does any
+  member of an inactive or archived organization in it: every check answers `false`.
+- `/oauth/introspect`, `/oauth/revoke` and `/oauth/check-permission` refuse a deactivated service's
+  or integration's secret (401 `invalid_client`), as `/oauth/token` refuses to mint for it.
 
 ## Access tokens
 
