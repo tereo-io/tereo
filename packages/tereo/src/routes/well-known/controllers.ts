@@ -5,10 +5,11 @@ import { type Request, Response } from "express";
 import { createPublicKey } from "crypto";
 import env from "../../env.js";
 
+// The issuer is an identifier; the endpoints are where core is reached.
 export const handleWellKnownOAuth = async (_req: Request, res: Response) => {
-  const baseUrl = env.ISSUER;
+  const baseUrl = env.PUBLIC_URL;
   res.json({
-    issuer: baseUrl,
+    issuer: env.ISSUER,
     authorization_endpoint: `${baseUrl}/oauth/authorize`,
     token_endpoint: `${baseUrl}/oauth/token`,
     introspection_endpoint: `${baseUrl}/oauth/introspect`,
@@ -37,9 +38,9 @@ export const handleOpenIdConfiguration = async (
   _req: Request,
   res: Response
 ) => {
-  const baseUrl = env.ISSUER;
+  const baseUrl = env.PUBLIC_URL;
   res.json({
-    issuer: baseUrl,
+    issuer: env.ISSUER,
     authorization_endpoint: `${baseUrl}/oauth/authorize`,
     token_endpoint: `${baseUrl}/oauth/token`,
     userinfo_endpoint: `${baseUrl}/oauth/userinfo`,
