@@ -952,7 +952,7 @@ auth.organization.member-added:
     tags:
       - Admin - Organization Members
     summary: Organization member added
-    description: Fired when a user is added to an organization with `POST /v1/admin/organizations/{id}/members`. Delivered to the default organization's endpoints, like the other `auth.organization.*` events.
+    description: Fired when a user is added to an organization with `POST /v1/admin/organizations/{id}/members`, or made owner of the default organization by first-boot setup (`POST /v1/setup`). Delivered to the default organization's endpoints, like the other `auth.organization.*` events.
     operationId: webhookOrganizationMemberAdded
     security: []
     parameters:
