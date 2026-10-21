@@ -209,4 +209,30 @@ describe("per-bucket CORS", () => {
     );
     expect(res.status).toBe(HTTP_STATUS.OK);
   });
+
+  it("limits bucket preflights per address", async () => {
+    // The default TRUST_PROXY (loopback) honours X-Forwarded-For; a proxied
+    // caller gets the external tier, 300 a minute.
+    const send = (ip: string) =>
+      axios.options(
+        `${BASE_URL}/buckets/missing-${randomUUID()}/objects/a.txt`,
+        {
+          headers: {
+            Origin: FIRST,
+            "Access-Control-Request-Method": "PUT",
+            "X-Forwarded-For": ip,
+          },
+          validateStatus: () => true,
+        }
+      );
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const batch = await Promise.all(
+        Array.from({ length: 51 }, () => send("198.51.100.7"))
+      );
+      statuses.push(...batch.map((r) => r.status));
+    }
+    expect(statuses.filter((s) => s === 429)).toHaveLength(6);
+    expect((await send("198.51.100.8")).status).not.toBe(429);
+  });
 });

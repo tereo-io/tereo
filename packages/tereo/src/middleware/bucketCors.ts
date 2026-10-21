@@ -13,8 +13,11 @@ type CorsConfig = {
   allowCredentials: boolean;
 } | null;
 
-// Keyed by the bucket name in the URL, which anyone can vary: bounded.
+// Keyed by the bucket name in the URL, which anyone can vary: bounded. Names
+// with no bucket go in their own small cache with a short TTL, so a stream of
+// made-up names can't push real buckets out of this one.
 const cache = new BoundedCache<CorsConfig>(1000, 60_000);
+const missing = new BoundedCache<true>(200, 5_000);
 // Bumped by every invalidation. A lookup that started before one may have read
 // the old config, so it must not cache what it read.
 let generation = 0;
@@ -22,11 +25,15 @@ let generation = 0;
 async function getBucketCors(name: string) {
   const existing = cache.get(name);
   if (existing !== undefined) return existing;
+  if (missing.get(name)) return null;
   const startedAt = generation;
   try {
     const bucket = await db.buckets.checkByName(name);
     const value = (bucket?.corsConfig as CorsConfig) ?? null;
-    if (generation === startedAt) cache.set(name, value);
+    if (generation === startedAt) {
+      if (bucket) cache.set(name, value);
+      else missing.set(name, true);
+    }
     return value;
   } catch (err) {
     // This request goes without the bucket's CORS; the next one retries.
@@ -92,8 +99,13 @@ export const bucketCors = async (
 /** Allow tests and management endpoints to flush the per-bucket CORS cache. */
 function invalidateBucketCorsCache(name?: string) {
   generation++;
-  if (name) cache.delete(name);
-  else cache.clear();
+  if (name) {
+    cache.delete(name);
+    missing.delete(name);
+  } else {
+    cache.clear();
+    missing.clear();
+  }
 }
 
 // Any mutation anywhere in the fleet publishes on BUCKET_INVALIDATE_CHANNEL.

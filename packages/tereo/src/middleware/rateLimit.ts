@@ -18,6 +18,19 @@ export const rateLimitGeneral = createRateLimitMiddleware("tereo");
 // Mounted before requireAuth, so floods of missing or bad tokens are bounded.
 export const rateLimitPreAuth = createPreAuthRateLimitMiddleware("tereo");
 
+// Bucket CORS preflights, per IP: each one can cost a bucket lookup.
+export const rateLimitPreflight = createPreAuthRateLimitMiddleware(
+  "tereo",
+  "preflight"
+);
+
+// GET /health, per IP. Probes from the cluster's own network get the internal
+// tier.
+export const rateLimitHealth = createPreAuthRateLimitMiddleware(
+  "tereo",
+  "health"
+);
+
 // Failed logins per client and IP, the client being the one the request was
 // validated against (pass its client_id as the subject), never a header the
 // route does not authenticate with: a key the caller can vary per request is

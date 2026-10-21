@@ -1,6 +1,7 @@
 import { createRequestIdMiddleware } from "./utils/requestId.js";
 import { errorHandler, NotFoundError } from "./utils/errors.js";
 import { authRequestLog } from "./middleware/authRequestLog.js";
+import { rateLimitPreflight } from "./middleware/rateLimit.js";
 import { bucketCors } from "./middleware/bucketCors.js";
 import { apiCors } from "./middleware/apiCors.js";
 import routes from "./routes/index.js";
@@ -57,13 +58,15 @@ app.use(
 
 // A bucket's own CORS config answers preflights for its object routes. The
 // global middleware below ends every preflight itself, so this goes first;
-// a bucket without a config falls through to it.
+// a bucket without a config falls through to it. Preflights carry no token,
+// so they have their own per-IP limit.
 app.options(
   [
     "/v1/files/buckets/:name/objects{/*rest}",
     "/v1/files/buckets/:name/archives{/*rest}",
     "/v1/files/buckets/:name/multipart{/*rest}",
   ],
+  rateLimitPreflight,
   bucketCors
 );
 

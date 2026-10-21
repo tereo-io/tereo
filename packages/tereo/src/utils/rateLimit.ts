@@ -294,13 +294,15 @@ export function createRateLimitMiddleware(
  * invalid tokens is bounded without verifying any of them. The caller isn't
  * known yet, so an internal-network peer (by address alone) gets the internal
  * tier. A request that passes gets no headers; the general limiter, after
- * authentication, sets them.
+ * authentication, sets them. `scope` gives a route its own count, apart from
+ * the API's.
  */
 export function createPreAuthRateLimitMiddleware(
-  serviceName: string
+  serviceName: string,
+  scope = "preauth"
 ): RequestHandler {
   return createTieredLimiter({
-    keyPrefix: `${serviceName}:ratelimit:preauth`,
+    keyPrefix: `${serviceName}:ratelimit:${scope}`,
     externalPoints: PRE_AUTH_EXTERNAL_POINTS,
     internalPoints: PRE_AUTH_INTERNAL_POINTS,
     headersOnPass: false,
