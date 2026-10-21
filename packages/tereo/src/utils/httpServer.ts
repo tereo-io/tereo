@@ -1,5 +1,5 @@
-import type { RequestHandler } from "express";
 import { AppError, sendError } from "./errors.js";
+import type { RequestHandler } from "express";
 import type { Server } from "node:http";
 
 /**

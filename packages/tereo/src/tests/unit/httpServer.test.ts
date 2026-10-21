@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
+import { describe, expect, it, vi } from "vitest";
 import type { AddressInfo } from "node:net";
 import { connect } from "node:net";
 import express from "express";

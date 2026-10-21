@@ -1,6 +1,5 @@
 import { ensureTestUser, getTestPrincipalToken } from "../utils/principals.js";
 import { describe, it, expect, afterEach, beforeAll } from "vitest";
-import { CORE_URL } from "../utils/coreUrl.js";
 import crypto from "crypto";
 import axios from "axios";
 import {

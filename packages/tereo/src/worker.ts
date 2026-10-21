@@ -25,13 +25,13 @@ import {
   stopStaleDeliverySweep,
 } from "./jobs/staleDeliverySweep.js";
 import {
-  startDeliveryRetentionWorker,
-  stopDeliveryRetentionWorker,
-} from "./jobs/deliveryRetention.js";
-import {
   startAccessLogRetentionWorker,
   stopAccessLogRetentionWorker,
 } from "./jobs/accessLogRetention.js";
+import {
+  startDeliveryRetentionWorker,
+  stopDeliveryRetentionWorker,
+} from "./jobs/deliveryRetention.js";
 import {
   startOutboxRetentionWorker,
   stopOutboxRetentionWorker,

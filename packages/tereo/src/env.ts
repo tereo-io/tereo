@@ -293,7 +293,12 @@ const EnvFields = z
     PORT: int(1, 65535, 4001),
     // Caps the HTTP server's open connections (WebSockets included); past
     // it, new ones are closed at once. Unset, unlimited.
-    HTTP_MAX_CONNECTIONS: z.coerce.number().int().min(1).max(1_000_000).optional(),
+    HTTP_MAX_CONNECTIONS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(1_000_000)
+      .optional(),
     // On SIGTERM, how long in-flight requests and running jobs get, side by
     // side, before they are cut off. Keep it a few seconds under the
     // orchestrator's grace period (after any preStop delay).

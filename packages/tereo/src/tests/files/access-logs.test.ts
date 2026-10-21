@@ -464,7 +464,10 @@ describe("Access Logging", () => {
       // A row written later than this one would have been written by now.
       const logged = randomUUID();
       await axios.get(`${BASE_URL}/buckets/missing-${randomUUID()}`, {
-        headers: { "X-Request-ID": logged, Authorization: `Bearer ${testToken}` },
+        headers: {
+          "X-Request-ID": logged,
+          Authorization: `Bearer ${testToken}`,
+        },
         validateStatus: () => true,
       });
       await waitForAccessLog({ requestId: logged });

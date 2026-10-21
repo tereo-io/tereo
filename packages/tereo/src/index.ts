@@ -1,13 +1,9 @@
 import "./preload.js";
 import { ensureBlobDirectory, ensureTempDirectory } from "./utils/storage.js";
-import {
-  closeHttpServer,
-  tuneServerKeepAlive,
-  UPLOAD_REQUEST_TIMEOUT_MS,
-} from "./utils/httpServer.js";
 import { ProvisioningError, provision } from "./utils/provisioning/index.js";
 import { closeRedisEmitter } from "./websocket/emitters/redisEmitter.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
+import { closeWorkerQueues, startWorker, stopWorker } from "./worker.js";
 import { prepareAndRegisterCore } from "./utils/coreRegistration.js";
 import { loadKeys, startSigningKeyRefresh } from "./utils/keys.js";
 import { resealRowSecrets } from "./utils/resealRowSecrets.js";
@@ -16,7 +12,6 @@ import { startWorkerHealthServer } from "./utils/health.js";
 import { ensureLoginClient } from "./utils/loginClient.js";
 import { announceSetupIfPending } from "./utils/setup.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
-import { closeWorkerQueues, startWorker, stopWorker } from "./worker.js";
 import { shutdownOtel } from "./telemetry/index.js";
 import env, { stalePathWarnings } from "./env.js";
 import { createServer, Server } from "http";
@@ -25,6 +20,11 @@ import {
   closeCacheBroadcast,
   startCacheSubscriber,
 } from "./utils/cacheBroadcast.js";
+import {
+  closeHttpServer,
+  tuneServerKeepAlive,
+  UPLOAD_REQUEST_TIMEOUT_MS,
+} from "./utils/httpServer.js";
 import {
   disconnectWebSocketClients,
   initializeWebSocket,

@@ -91,8 +91,7 @@ export const bucketRateLimit = async (
 
   // Anonymous callers (public buckets, signed URLs) are counted per address:
   // one shared key would let a single client exhaust everyone's allowance.
-  const userId = (req as Request & { auth?: { userId?: string } }).auth
-    ?.userId;
+  const userId = (req as Request & { auth?: { userId?: string } }).auth?.userId;
   const caller = userId ? `user:${userId}` : `ip:${getIpIdentifier(req)}`;
   const key = redisKey(`file-service:bucket:${bucketId}:${caller}`);
 
