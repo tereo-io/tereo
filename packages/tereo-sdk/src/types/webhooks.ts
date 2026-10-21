@@ -10,7 +10,9 @@ export interface EmitEventParams {
   organizationId: string;
   eventType: string;
   entityType: string;
+  /** At most 500 characters. */
   entityId: string;
+  /** At most 256 KiB as JSON. */
   data: Record<string, unknown>;
   /** Optional idempotency key to prevent duplicate processing (24h TTL on service). */
   idempotencyKey?: string;

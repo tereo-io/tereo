@@ -3,7 +3,9 @@ export interface EmitEventParams {
   organizationId: string;
   eventType: string;
   entityType: string;
+  /** At most 500 characters. */
   entityId: string;
+  /** At most 256 KiB as JSON. */
   data: Record<string, unknown>;
   /** Idempotency key, held in Redis for 24h per (organization, event type). */
   idempotencyKey?: string;

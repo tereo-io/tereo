@@ -78,4 +78,23 @@ describe("validateEntry — what core would refuse", () => {
       validateEntry({ ...base, ipAddress: "::ffff:127.0.0.1" })
     ).not.toThrow();
   });
+
+  it("rejects metadata or changes over 64 KiB as JSON, as core does", () => {
+    const big = "x".repeat(64 * 1024);
+    expect(() => validateEntry({ ...base, metadata: { big } })).toThrow(
+      /metadata must be at most/
+    );
+    expect(() =>
+      validateEntry({ ...base, changes: { big: { new: big } } })
+    ).toThrow(/changes must be at most/);
+  });
+
+  it("accepts any hex id core's uuid columns take", () => {
+    expect(() =>
+      validateEntry({
+        ...base,
+        organizationId: "00000000-0000-7002-0000-000000000001",
+      })
+    ).not.toThrow();
+  });
 });

@@ -6,8 +6,15 @@ import { z } from "zod";
  * Zod schema for client-side entry validation.
  * Mirrors the service's entryFieldsSchema to fail fast before network/queue.
  */
+// Core's cap on `changes` and `metadata`, each, as JSON.
+const MAX_ENTRY_JSON_BYTES = 64 * 1024;
+
+const jsonWithin = (val: unknown) =>
+  Buffer.byteLength(JSON.stringify(val) ?? "", "utf8") <= MAX_ENTRY_JSON_BYTES;
+
+// `z.guid()`, as core: any 8-4-4-4-12 hex id, which Postgres' uuid type takes.
 const auditLogEntrySchema = z.object({
-  userId: z.string().uuid("userId must be a UUID"),
+  userId: z.guid("userId must be a UUID"),
   action: z.enum(["CREATE", "UPDATE", "DELETE", "MERGE", "ARCHIVE", "RESTORE"]),
   entityType: z
     .string()
@@ -21,7 +28,7 @@ const auditLogEntrySchema = z.object({
     .string()
     .max(500, "entityName exceeds maximum length of 500 characters")
     .optional(),
-  organizationId: z.string().uuid("organizationId must be a UUID").nullish(),
+  organizationId: z.guid("organizationId must be a UUID").nullish(),
   // Core validates with the same `z.string().email()`; an empty string is sent as null.
   userEmail: z
     .union([z.literal(""), z.string().email("Invalid email format")])
@@ -44,8 +51,18 @@ const auditLogEntrySchema = z.object({
       z.string(),
       z.object({ old: z.unknown().optional(), new: z.unknown().optional() })
     )
+    .refine(
+      jsonWithin,
+      `changes must be at most ${MAX_ENTRY_JSON_BYTES} bytes as JSON`
+    )
     .optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  metadata: z
+    .record(z.string(), z.unknown())
+    .refine(
+      jsonWithin,
+      `metadata must be at most ${MAX_ENTRY_JSON_BYTES} bytes as JSON`
+    )
+    .optional(),
 });
 
 // Postgres stores neither a NUL in text nor a \u0000 escape in jsonb; core
