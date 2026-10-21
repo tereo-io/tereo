@@ -1,3 +1,4 @@
+import { ssoProviderElsewhere } from "../../../../../../utils/identityProviders/resolve.js";
 import { logAuditTx } from "../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../utils/auth.js";
 import { CreateIdentityInviteSchema } from "./schemas.js";
@@ -48,6 +49,14 @@ export const createIdentityInvite = async (req: Request, res: Response) => {
       throw new BadRequestError(
         "provider_inactive",
         "The identity provider is deactivated"
+      );
+    }
+    // Claiming it would be refused: the domain's provider is the only way in.
+    const required = await ssoProviderElsewhere(user.email, provider.id, tx);
+    if (required) {
+      throw new ConflictError(
+        `Accounts at this domain must sign in with ${required.displayName}`,
+        "sso_required"
       );
     }
     if (await db.userIdentities.getForUserAtProvider(id, provider.id, tx)) {

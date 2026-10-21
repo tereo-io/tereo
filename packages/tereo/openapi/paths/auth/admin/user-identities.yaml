@@ -128,7 +128,9 @@
 
       Errors: 400 `unknown_provider` (no provider has that id),
       400 `provider_inactive` (the provider is deactivated), 409
-      `already_linked` (the user already has an identity at the provider).
+      `already_linked` (the user already has an identity at the provider),
+      409 `sso_required` (the user's email domain is SSO-only for another
+      provider, whose sign-in is then the only way in).
 
       An audit log entry is created (`entityType` `IdentityInvite`).
     operationId: postAdminUserIdentityInvites
@@ -169,7 +171,7 @@
         description: No such user
       "409":
         $ref: "../../../components/responses.yaml#/ConflictResponse"
-        description: The user is already linked to the provider (`already_linked`)
+        description: The user is already linked to the provider (`already_linked`), or their domain is SSO-only for another provider (`sso_required`)
       "429":
         $ref: "../../../components/responses.yaml#/RateLimitResponse"
       "500":
