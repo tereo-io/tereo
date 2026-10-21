@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   currentSigningKey,
@@ -10,17 +10,9 @@ import {
 /**
  * Overlapping refreshes of the signing keys (the periodic one, an unknown
  * kid's, a rotation's) in this process. The first read is held until the
- * rotation has finished, so it lands last.
+ * rotation has finished, so it lands last. The immediate key is left in
+ * place: the rotation deleted every key before it.
  */
-
-const createdNames: string[] = [];
-
-afterAll(async () => {
-  if (createdNames.length > 0) {
-    await prisma.secret.deleteMany({ where: { name: { in: createdNames } } });
-    await refreshSigningKeys();
-  }
-});
 
 describe("signing key refresh", () => {
   it("does not undo an immediate rotation with a read from before it", async () => {
@@ -49,7 +41,6 @@ describe("signing key refresh", () => {
 
       const { keys } = await rotateSigningKey({ immediate: true });
       const active = keys.find((k) => k.active)!;
-      createdNames.push(`JWT_SIGNING_KEY_V${active.version}`);
       expect(active.kid).not.toBe(before);
       expect(currentSigningKey().kid).toBe(active.kid);
 

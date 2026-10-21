@@ -1,8 +1,18 @@
-import { BASE_URL, getJwtHeader, HTTP_STATUS } from "./utils/test-helpers.js";
+import { generateAccessToken, verifyAccessToken } from "../../utils/tokens.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getTestPrincipalToken } from "../utils/principals.js";
-import { beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
+import {
+  closeCacheBroadcast,
+  startCacheSubscriber,
+} from "../../utils/cacheBroadcast.js";
+import {
+  BASE_URL,
+  fetchJwks,
+  getJwtHeader,
+  HTTP_STATUS,
+} from "./utils/test-helpers.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
@@ -11,7 +21,8 @@ import {
 
 /**
  * An immediate rotation (for a compromised key) while an earlier rotation is
- * still pending: the key that was signing retires at once, and is the one
+ * still pending: the key that was signing stops verifying at once, here (a
+ * second process, told by the broadcast) as in the server, and is the one
  * reported retired, not the pending key that never signed.
  */
 
@@ -46,17 +57,30 @@ describe("immediate signing key rotation while a rotation is pending", () => {
   let immediateAt: number;
   let keys: KeySummary[];
   let endpointId: string;
+  let token: string;
+  let localToken: string;
+
+  afterAll(async () => {
+    await closeCacheBroadcast();
+  });
 
   beforeAll(async () => {
+    await startCacheSubscriber();
     const endpoint = await createTestWebhookEndpoint(
       await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
       { eventTypes: ["core.signing-key.rotated"] }
     );
     endpointId = endpoint.id;
-    const token = await getTestPrincipalToken({
+    token = await getTestPrincipalToken({
       permissions: ["settings.write"],
     });
     signingKid = getJwtHeader(token).kid!;
+    localToken = generateAccessToken({
+      subject: "immediate-rotation-test",
+      clientId: "immediate-rotation-test",
+      scopes: [],
+    }).token;
+    expect(getJwtHeader(localToken).kid).toBe(signingKid);
 
     const pending = await rotate(token);
     expect(pending.status).toBe(HTTP_STATUS.OK);
@@ -70,22 +94,38 @@ describe("immediate signing key rotation while a rotation is pending", () => {
     immediateAt = new Date(body.activatesAt).getTime();
   });
 
-  it("signs with the immediate key", () => {
-    expect(keys.find((k) => k.kid === immediateKid)!.active).toBe(true);
-    expect(keys.find((k) => k.kid === pendingKid)!.active).toBe(false);
+  it("signs with the immediate key, the only one left", () => {
+    expect(keys).toEqual([
+      expect.objectContaining({ kid: immediateKid, active: true }),
+    ]);
   });
 
-  it("retires the key that was signing when the immediate key activates", () => {
-    const compromised = keys.find((k) => k.kid === signingKid)!;
-    expect(compromised.active).toBe(false);
-    expect(new Date(compromised.retiredAt!).getTime()).toBe(immediateAt);
+  it("drops the key that was signing, and the pending one, from the JWKS", async () => {
+    const kids = (await fetchJwks()).keys.map((k) => k.kid);
+    expect(kids).toContain(immediateKid);
+    expect(kids).not.toContain(signingKid);
+    expect(kids).not.toContain(pendingKid);
+  });
+
+  it("refuses the compromised key's tokens at once", async () => {
+    const res = await fetch(`${BASE_URL}/v1/admin/signing-keys`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+  });
+
+  it("has every other process drop the compromised key, without waiting for its periodic refresh", async () => {
+    await waitFor(async () => verifyAccessToken(localToken) === null, 5_000);
   });
 
   it("names the key that was signing as retiredKid in the audit entry and event", async () => {
     const audit = await prisma.auditLogEntry.findFirstOrThrow({
       where: { entityType: "SigningKey", entityId: immediateKid },
     });
-    expect(audit.metadata).toMatchObject({ retiredKid: signingKid });
+    expect(audit.metadata).toMatchObject({
+      retiredKid: signingKid,
+      retiredKidExpiresAt: new Date(immediateAt).toISOString(),
+    });
 
     const where = {
       webhookEndpointId: endpointId,

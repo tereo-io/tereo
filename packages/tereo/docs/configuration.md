@@ -167,8 +167,13 @@ Rotate with `POST /v1/admin/signing-keys/rotate` (`settings.write`); `GET /v1/ad
 keys (`settings.read`). A new key is published in the JWKS at once and starts signing 150 seconds later
 (`activatesAt` in the response): two of the per-minute refreshes every core process runs, plus a
 margin, so every process and every app service that refetches the JWKS knows the key before a token
-carries its `kid`. The previous key signs until then. `{ "immediate": true }` activates the new key at
-once, for a compromised key. The rotation is audited and emits `core.signing-key.rotated` (the new
+carries its `kid`. The previous key signs until then. `{ "immediate": true }`, for a compromised key,
+activates the new key at once and deletes every older version, a pending one included: tokens they
+signed, ID tokens sent as `id_token_hint` included, are refused from that moment, they leave the
+JWKS, and signed-in users get tokens from the new key on their next refresh (their refresh tokens are
+opaque, not signed). The rotating process broadcasts the change over Redis so every other process
+re-reads its keys at once; without Redis they do so at their next per-minute refresh, or on the first
+token carrying the new `kid`. The rotation is audited and emits `core.signing-key.rotated` (the new
 `kid` and its `activatesAt`, and the retired `kid` with its expiry; no key material), so app services
 caching the JWKS can refetch it. A key pair supplied in env is the only key and is rotated by changing
 env (no overlap).

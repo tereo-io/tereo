@@ -1,3 +1,7 @@
+import {
+  broadcastSigningKeysChanged,
+  onSigningKeysChanged,
+} from "./cacheBroadcast.js";
 import { hasMasterKey, setMasterKey } from "./masterKeys.js";
 import { ID_TOKEN_HINT_GRACE_SECONDS } from "./tokens.js";
 import { prisma, type Prisma } from "./db/prisma.js";
@@ -36,9 +40,10 @@ import {
  * publishes the new key at once and activates it `ACTIVATION_DELAY_MS` later.
  * The highest activated version signs (`currentSigningKey()`); each older one
  * is retired when a later version activates and keeps verifying, and stays in
- * the JWKS, for one token lifetime plus the id_token_hint grace. A key pair in
- * env (`JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY`) is the only key, and stored
- * versions are ignored.
+ * the JWKS, for one token lifetime plus the id_token_hint grace. An immediate
+ * rotation deletes every older version instead. A key pair in env
+ * (`JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY`) is the only key, and stored versions
+ * are ignored.
  */
 
 const base64Key = () => randomBytes(32).toString("base64");
@@ -381,12 +386,15 @@ export interface SigningKeyRotation {
 
 /**
  * Generates the next signing key version, published at once and signing from
- * `ACTIVATION_DELAY_MS` later, or at once with `immediate` (for a compromised
- * key); until then the previous one keeps signing, and afterwards it keeps
- * verifying for one token lifetime (plus the logout-hint grace). `record`
- * runs in the same transaction, for the audit entry. Keys past their
- * retention are deleted. Other processes pick the new key up on their
- * periodic refresh, or as soon as they see its kid.
+ * `ACTIVATION_DELAY_MS` later; until then the previous one keeps signing, and
+ * afterwards it keeps verifying for one token lifetime (plus the logout-hint
+ * grace). With `immediate` (for a compromised key) the new key signs at once
+ * and every older version is deleted: tokens they signed, ID-token hints
+ * included, stop verifying, and sessions get new ones on their next refresh.
+ * `record` runs in the same transaction, for the audit entry. Keys past their
+ * retention are deleted. Other processes re-read the keys on the broadcast
+ * that follows, or failing that on their periodic refresh or when they see
+ * the new kid.
  */
 export const rotateSigningKey = async (
   {
@@ -425,7 +433,9 @@ export const rotateSigningKey = async (
     activatesAt,
     retired: {
       kid: previous.kid,
-      expiresAt: new Date(activatesAt.getTime() + retentionMs()),
+      expiresAt: immediate
+        ? activatesAt
+        : new Date(activatesAt.getTime() + retentionMs()),
     },
   };
 
@@ -439,10 +449,23 @@ export const rotateSigningKey = async (
         "Another rotation of the JWT signing key just ran; check the keys and retry if needed"
       );
     }
+    if (immediate) {
+      // A pending version goes too: it never signed, and nothing needs it.
+      const older = (
+        await tx.secret.findMany({
+          where: { name: { startsWith: JWT_KEY_PREFIX } },
+          select: { name: true },
+        })
+      )
+        .map((row) => row.name)
+        .filter((n) => (jwtKeyVersion(n) ?? Infinity) <= latest);
+      await tx.secret.deleteMany({ where: { name: { in: older } } });
+    }
     await record?.(tx, rotation);
   });
 
   await refreshSigningKeys();
+  await broadcastSigningKeysChanged();
   const expired = signingKeys
     .filter((k) => !isUsable(k, Date.now()) && k.version !== null)
     .map((k) => `${JWT_KEY_PREFIX}${k.version}`);
@@ -458,6 +481,12 @@ export const rotateSigningKey = async (
 };
 
 const SIGNING_KEY_REFRESH_MS = 60_000;
+
+onSigningKeysChanged(() => {
+  refreshSigningKeys().catch((err) =>
+    logger.warn({ err }, "Refreshing JWT signing keys failed")
+  );
+});
 
 /** Periodic refresh, so every process starts signing with a rotated key. */
 export const startSigningKeyRefresh = (): (() => void) => {

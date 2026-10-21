@@ -3209,8 +3209,9 @@ RotateSigningKeyRequest:
       default: false
       description: |
         Sign with the new key at once instead of after the activation delay,
-        for a compromised key. Tokens may then carry a kid that services
-        with a cached JWKS do not know yet.
+        and delete every older key, for a compromised key: tokens signed
+        with those keys stop verifying at once. Tokens may then carry a kid
+        that services with a cached JWKS do not know yet.
 SigningKey:
   type: object
   required: [kid, version, active, activatesAt, retiredAt, expiresAt]
