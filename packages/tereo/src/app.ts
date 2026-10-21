@@ -2,11 +2,11 @@ import { createRequestIdMiddleware } from "./utils/requestId.js";
 import { errorHandler, NotFoundError } from "./utils/errors.js";
 import { authRequestLog } from "./middleware/authRequestLog.js";
 import { bucketCors } from "./middleware/bucketCors.js";
+import { apiCors } from "./middleware/apiCors.js";
 import routes from "./routes/index.js";
 import express from "express";
 import helmet from "helmet";
 import env from "./env.js";
-import cors from "cors";
 
 const app = express();
 
@@ -67,23 +67,7 @@ app.options(
   bucketCors
 );
 
-app.use(
-  cors({
-    origin: env.CORS_ALLOWED_ORIGINS,
-    methods: ["GET", "HEAD", "POST", "PUT", "OPTIONS", "PATCH", "DELETE"],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "X-API-Key",
-      "X-Metadata",
-      "X-Tags",
-      "X-Organization-ID",
-      "Idempotency-Key",
-    ],
-    credentials: true,
-    maxAge: 86400,
-  })
-);
+app.use(apiCors);
 
 // Logged for /oauth and /v1/admin, before the routes answer.
 app.use(authRequestLog);

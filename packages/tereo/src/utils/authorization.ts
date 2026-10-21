@@ -368,16 +368,33 @@ export const uiUrl = (path: string, params: Record<string, string>): string => {
 };
 
 /**
+ * The origin of an http(s) URI, or null for any other (a native app's
+ * custom scheme has no origin a browser page could send).
+ */
+export const httpOrigin = (uri: string): string | null => {
+  try {
+    const url = new URL(uri);
+    return url.protocol === "https:" || url.protocol === "http:"
+      ? url.origin
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Where a user goes to sign in to a client again when no authorize request is
  * at hand (after logging out of it): the admin UI's root for core's own
- * client, otherwise the origin of the client's first registered redirect URI.
+ * client, otherwise the origin of the client's first web redirect URI, and
+ * the UI's root for a client with none (a native app).
  */
 export const clientSignInUrl = (client: {
   clientId: string;
   redirectUris: string[];
 }): string => {
-  if (client.clientId === LOGIN_CLIENT.clientId || !client.redirectUris[0]) {
-    return `${env.UI_BASE_URL}/`;
-  }
-  return `${new URL(client.redirectUris[0]).origin}/`;
+  const origin =
+    client.clientId === LOGIN_CLIENT.clientId
+      ? null
+      : client.redirectUris.map(httpOrigin).find((o) => o !== null);
+  return `${origin ?? env.UI_BASE_URL}/`;
 };

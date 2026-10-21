@@ -13,12 +13,12 @@ With `NODE_ENV=production`, core refuses to start unless these are set:
 | `DATABASE_URL` | Postgres |
 | `REDIS_URL`, or `REDIS_SENTINELS` + `REDIS_MASTER_NAME` | Redis — single node or Sentinel |
 | `PUBLIC_URL` | Externally reachable `https://` URL of core, not localhost/127.0.0.1/[::1]. The OIDC issuer, share and presigned links, and the UI's default address are built from it |
-| `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call core; `*` is refused |
+| `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call core's API with credentials; `*` is refused, and so is an `http://` origin other than loopback (`localhost`, `127.0.0.1`, `[::1]`) |
 | `TRUST_PROXY` | The proxies in front of core (`1`, a CIDR list, …), or `loopback`/`false` when there are none. Left at the development default behind a load balancer, `req.ip` — rate-limit keys and audit IPs — would be the proxy's address, so it must be chosen, not inherited. `true` is refused: it trusts every `X-Forwarded-For` hop, so a client could pick its own address |
 | `CORE_KEK` | Base64, 32 bytes. Encrypts the keys core keeps in `core.secrets`; keep it outside the database (a secret manager), since without it the stored keys cannot be read. See [Key encryption](#key-encryption) |
 
-It also refuses, with no override, `COOKIE_SECURE=false` (or `0`) and a `UI_BASE_URL` that is not
-`https://`. Development and test accept all of these.
+It also refuses, with no override, `COOKIE_SECURE=false` (or `0`), and a `UI_BASE_URL` or `ISSUER`
+that is not `https://`. Development and test accept all of these.
 
 Set these too, though core starts without them:
 
@@ -85,7 +85,7 @@ notes as a range; a value outside its range stops core at startup with the varia
 | `REDIS_DB` | URL's path, else `0` | 0–15. The database index, in URL, unix socket and Sentinel modes alike; set, it overrides a database in `REDIS_URL`'s path |
 | `REDIS_KEY_PREFIX` | empty | Up to 64 of `A-Z a-z 0-9 : _ . -`, e.g. `app1:`. Put in front of every key, pub/sub channel, BullMQ prefix (`<prefix>bull`) and socket.io adapter key (`<prefix>socket.io`) core uses, so several cores can share one Redis database. Pub/sub channels span every database index, so cores that share a Redis server on different `REDIS_DB`s still need distinct prefixes. App services must pass the same value as `channelPrefix` to `createCoreClient` to hear core's cache invalidations. Changing it orphans existing keys and jobs: change it only on a fresh Redis or with core stopped and its queues drained |
 | `TRUST_PROXY` | `loopback` outside production | Required in production. Express `trust proxy`: `loopback`, `linklocal`, `uniquelocal`, a hop count, a comma-separated IP/CIDR list, or `true`/`false`; `true` is refused in production |
-| `CORS_ALLOWED_ORIGINS` | `UI_BASE_URL`'s origin outside production | Comma-separated. Required in production |
+| `CORS_ALLOWED_ORIGINS` | `UI_BASE_URL`'s origin outside production | Comma-separated. Required in production, `https://` or loopback only. The origins sent credentialed CORS headers on core's API (`/v1`, `/oauth` but for `GET /oauth/authorize`, `/.well-known`, `/health`); the admin UI's pages get none. It does not decide which pages may use the browser's cookies: an app's page may use only its own client's (see [auth.md](auth.md#browser-cookies)) |
 | `SETUP_TOKEN` | generated and logged | 24 characters or more. Core accepts it as the first-boot setup token until setup completes, so setup can run unattended; it is never logged. It replaces any other setup token, so changing or unsetting it before setup completes retires the old one. Compared case-insensitively, ignoring whitespace and hyphens |
 | `PROVISIONING_PATH` | unset | Path of a JSON file, or a directory of `*.json` files, declaring the app services (with what they own and their access and webhooks), login clients and custom roles core applies at every start, as `provisioned` rows. Documents that cannot be applied stop core from starting. Secrets are read from environment variables the documents name, never from the documents. See [provisioning](provisioning.md) |
 | `INTERNAL_NETWORK_CIDRS` | RFC 1918, loopback, `fc00::/7`, `fe80::/10` | Comma-separated CIDRs whose service-account callers, connecting directly (no proxy header), get the general rate limit's internal tier, keyed per client, instead of the external one. Read straight from the environment by `utils/rateLimit.ts`, outside the schema, so a bad entry is logged and skipped rather than refused |
@@ -177,7 +177,7 @@ env (no overlap).
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `ISSUER` | `PUBLIC_URL` | Changing it invalidates every outstanding token |
+| `ISSUER` | `PUBLIC_URL` | A URL with no query or fragment, `https://` in production; a trailing slash is dropped. Changing it invalidates every outstanding token. Discovery's endpoint URLs are built from `PUBLIC_URL`, where core is reached |
 | `JWT_ACCESS_TOKEN_TTL` | `3600` | Seconds, 1–86400 (24 h) |
 | `JWT_REFRESH_TOKEN_TTL` | `2592000` | Seconds, absolute from the code exchange; at most 31536000 (365 d) |
 | `USER_SESSION_TTL` | `604800` | Seconds, absolute from login; at most 31536000 (365 d) |
@@ -185,7 +185,7 @@ env (no overlap).
 | `LOGIN_FLOW_TTL` | `900` | Seconds (1–3600) a login flow stays usable: the login, consent and org-select steps, their cookies and sessions |
 | `UI_BASE_URL` | `PUBLIC_URL` in production, `http://localhost:4000` otherwise | Login, consent and org-select redirects; the login client's `${UI_BASE_URL}/callback`. Must be `https://` in production |
 | `UI_DIST_PATH` | `packages/tereo-ui/dist` | The admin UI's build, served at the root when present |
-| `COOKIE_DOMAIN` | — | |
+| `COOKIE_DOMAIN` | — | Shares core's cookies with every subdomain of this domain. Unset, they are host-only and, when Secure, `__Host-` cookies (path `/`, refused by the browser from another host or over http). Set, **every subdomain is trusted with them** — any of its pages can read the session indicator and overwrite the credential cookies — and the prefix is off |
 | `COOKIE_SECURE` | `true` in production, `false` otherwise | `false` is refused in production |
 | `TOTP_ISSUER` | `Tereo` | Shown in authenticator apps |
 | `TOTP_VERIFICATION_TTL` | `300` | Seconds, 1–3600 |

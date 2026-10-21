@@ -1,69 +1,73 @@
 import type { NextFunction, Request, Response } from "express";
-import { hasCredentialCookie } from "../utils/cookies.js";
-import { OAuth2Error } from "../utils/errors.js";
+import { httpOrigin } from "../utils/authorization.js";
+import db from "../utils/db/index.js";
 import env from "../env.js";
+import {
+  credentialCookieClientIds,
+  hasCredentialCookie,
+  restrictCookieClients,
+} from "../utils/cookies.js";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-/** Core's own origin, the UI's, and the CORS allowlist; null for any. */
-const allowedOrigins = (): Set<string> | null =>
-  env.CORS_ALLOWED_ORIGINS === "*"
-    ? null
-    : new Set([
-        new URL(env.PUBLIC_URL).origin,
-        new URL(env.UI_BASE_URL).origin,
-        ...env.CORS_ALLOWED_ORIGINS,
-      ]);
+// A browser sends at most this many cookies per host, near enough.
+const MAX_COOKIE_CLIENTS = 50;
 
-const isAllowedOrigin = (origin: string | undefined): boolean => {
-  if (!origin || origin === "null") return false;
-  const allowed = allowedOrigins();
-  return allowed === null || allowed.has(origin);
-};
+const FIRST_PARTY = Symbol("first-party");
+
+const firstPartyOrigins = () =>
+  new Set([new URL(env.PUBLIC_URL).origin, new URL(env.UI_BASE_URL).origin]);
 
 /**
- * Whether a state-changing request may act on the browser's cookies. The
- * cookies are SameSite=Lax, so a cross-site page cannot send them, but a
- * same-site one can (another port or subdomain): only core, the UI and the
- * CORS allowlist may. `Sec-Fetch-Site` decides when the browser sends it,
- * otherwise `Origin`; a request with neither is not from a browser page.
+ * Who sent a state-changing request: `FIRST_PARTY` for core, the UI (which
+ * hosts every client's login pages) and a request from no browser page
+ * (neither `Sec-Fetch-Site` nor `Origin`); otherwise the page's origin, or
+ * null when it may act on no cookie at all (cross-site, an opaque origin).
  */
-const isAllowedCookieRequest = (req: Request): boolean => {
+const requestOrigin = (req: Request): typeof FIRST_PARTY | string | null => {
   const site = req.get("sec-fetch-site");
   const origin = req.get("origin");
-  if (site !== undefined) {
-    if (site === "same-origin") return true;
-    return site === "same-site" && isAllowedOrigin(origin);
-  }
-  if (origin !== undefined) return isAllowedOrigin(origin);
-  return true;
+  if (site === "same-origin") return FIRST_PARTY;
+  if (site === undefined && origin === undefined) return FIRST_PARTY;
+  if (site !== undefined && site !== "same-site") return null;
+  if (!origin || origin === "null") return null;
+  return firstPartyOrigins().has(origin) ? FIRST_PARTY : origin;
 };
 
 /**
- * Refuses a cookie-authenticated POST (or other unsafe method) from a page
- * that is not core, the UI or an allowed origin: login, consent, org
- * selection, 2FA, refresh by cookie, revoke and sign-out confirmation. A
- * request carrying none of core's credential cookies authenticates some
- * other way (a client secret, a code, a bearer token) and is not checked.
+ * Binds a cookie-authenticated POST (or other unsafe method) to the clients
+ * its origin belongs to. The cookies are SameSite=Lax, so a cross-site page
+ * cannot send them, but a same-site one can (another port or subdomain),
+ * along with every other client's. Core and the UI may use any client's
+ * cookies; another origin only those of a client with a redirect URI there,
+ * so an app's page cannot refresh or end another client's session. The
+ * cookie getters refuse the rest when a handler reads them
+ * (`restrictCookieClients`); a request using none of them, authenticated by
+ * a secret, a code or a token in the body, is not affected.
  */
-export const requireAllowedOriginForCookies = (
+export const requireAllowedOriginForCookies = async (
   req: Request,
   _res: Response,
   next: NextFunction
 ) => {
-  if (
-    SAFE_METHODS.has(req.method) ||
-    !hasCredentialCookie(req) ||
-    isAllowedCookieRequest(req)
-  ) {
+  if (SAFE_METHODS.has(req.method) || !hasCredentialCookie(req)) {
     next();
     return;
   }
-  next(
-    new OAuth2Error(
-      "access_denied",
-      "Cross-origin request refused: this origin may not act on the browser's session",
-      403
-    )
-  );
+  const origin = requestOrigin(req);
+  if (origin === FIRST_PARTY) {
+    next();
+    return;
+  }
+  const allowed = new Set<string>();
+  const clientIds = credentialCookieClientIds(req).slice(0, MAX_COOKIE_CLIENTS);
+  if (origin !== null && clientIds.length > 0) {
+    for (const client of await db.clients.getRedirectUris(clientIds)) {
+      if (client.redirectUris.some((uri) => httpOrigin(uri) === origin)) {
+        allowed.add(client.clientId);
+      }
+    }
+  }
+  restrictCookieClients(req, allowed);
+  next();
 };
