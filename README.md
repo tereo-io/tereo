@@ -197,7 +197,9 @@ docker run --rm --env-file core.env ghcr.io/tereo-io/tereo:0.1.0 ./migrate-and-s
 Run it again with each new release's image before starting that release.
 
 The first start logs a setup token, as JSON from the `api` or `all` process; complete setup at
-`${PUBLIC_URL}/setup` as in step 2. `ROLE=api` and
+`${PUBLIC_URL}/setup` as in step 2. In production, set `SETUP_TOKEN` instead (24+
+characters, from your secret manager): core accepts that value and never logs a token, so none
+reaches shipped logs. `ROLE=api` and
 `ROLE=worker` split HTTP from the background workers; at least one process must run `all` or
 `worker`, or webhooks are never delivered. Health checks are `GET /health` on `PORT` (4001) for
 `api` and `all`, and on `WORKER_HEALTH_PORT` (4002) for `worker`.
