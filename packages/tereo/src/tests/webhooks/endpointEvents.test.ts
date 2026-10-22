@@ -1,3 +1,4 @@
+import { redactWebhookUrl } from "../../utils/webhookEndpointEvents.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getTestPrincipalToken } from "../utils/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
@@ -27,6 +28,20 @@ const ENDPOINT_EVENTS = [
   "webhook.endpoint.secret-rotated",
   "webhook.endpoint.previous-secret-revoked",
 ];
+
+describe("redactWebhookUrl", () => {
+  it("keeps only the origin, as capability URLs carry their secret in the path", () => {
+    expect(
+      redactWebhookUrl("https://hooks.slack.com/services/T000/B000/SECRET")
+    ).toBe("https://hooks.slack.com");
+    expect(
+      redactWebhookUrl(
+        "https://user:pass@hooks.example.com:8443/a/SECRET?token=SECRET#SECRET"
+      )
+    ).toBe("https://hooks.example.com:8443");
+    expect(redactWebhookUrl("not a url")).toBe("[invalid url]");
+  });
+});
 
 describe("webhook endpoint events and audit URLs", () => {
   let admin: string;
@@ -62,11 +77,10 @@ describe("webhook endpoint events and audit URLs", () => {
 
   it("emits every endpoint change without its secret or header values", async () => {
     const et = await createTestEventType(admin);
-    const path = `/hook/${randomUUID()}`;
     const created = await api.post(
       `${BASE_URL}/webhooks`,
       {
-        url: `https://example.com${path}?token=url-secret`,
+        url: `https://example.com/hook/${randomUUID()}/path-secret?token=url-secret`,
         eventTypes: [et.eventType],
         customHeaders: { "X-Api-Key": "header-secret" },
       },
@@ -75,6 +89,7 @@ describe("webhook endpoint events and audit URLs", () => {
     expect(created.status).toBe(HTTP_STATUS.CREATED);
     const id: string = created.data.id;
     const secrets = [
+      "path-secret",
       "url-secret",
       "header-secret",
       created.data.signingSecret as string,
@@ -125,7 +140,7 @@ describe("webhook endpoint events and audit URLs", () => {
         secrets.push(response.data.signingSecret!);
       }
       const payload = await delivered(id, `webhook.endpoint.${action}`);
-      expect(payload.data.url).toBe(`https://example.com${path}`);
+      expect(payload.data.url).toBe("https://example.com");
       expect(payload.data.customHeaderNames).toHaveLength(1);
       for (const secret of secrets) {
         expect(JSON.stringify(payload)).not.toContain(secret);
@@ -156,13 +171,13 @@ describe("webhook endpoint events and audit URLs", () => {
     ).toBe(0);
   });
 
-  it("records URLs in the audit log without query string or user-info", async () => {
+  it("records URLs in the audit log as their origin only", async () => {
     const created = await createTestWebhookEndpoint(admin, {
-      url: "https://example.com/audited?token=first-secret",
+      url: "https://example.com/audited/first-path?token=first-secret",
     });
     const patched = await api.patch(
       `${BASE_URL}/webhooks/${created.id}`,
-      { url: "https://example.com/moved?token=second-secret" },
+      { url: "https://www.example.com/moved/second-path?token=second-secret" },
       auth(admin)
     );
     expect(patched.status).toBe(HTTP_STATUS.OK);
@@ -181,18 +196,18 @@ describe("webhook endpoint events and audit URLs", () => {
       "DELETE",
     ]);
     expect(entries[0].metadata).toMatchObject({
-      url: "https://example.com/audited",
+      url: "https://example.com",
     });
     expect(entries[1].changes).toMatchObject({
       url: {
-        old: "https://example.com/audited",
-        new: "https://example.com/moved",
+        old: "https://example.com",
+        new: "https://www.example.com",
       },
     });
     expect(entries[2].metadata).toMatchObject({
-      url: "https://example.com/moved",
+      url: "https://www.example.com",
     });
-    expect(JSON.stringify(entries)).not.toMatch(/first-secret|second-secret/);
+    expect(JSON.stringify(entries)).not.toMatch(/first-|second-/);
   });
 });
 

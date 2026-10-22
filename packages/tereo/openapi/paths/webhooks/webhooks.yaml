@@ -223,7 +223,7 @@
       - `webhooks.write`
 
       An audit log entry is created for this action, with custom header
-      values masked and the URL without query string or user-info. A change
+      values masked and the URL as its origin only. A change
       emits `webhook.endpoint.updated`.
     operationId: updateWebhookEndpoint
     security:
@@ -985,7 +985,7 @@ webhook.endpoint.created:
       Fired by `POST /v1/webhooks/webhooks`. `entityId` is the endpoint's id.
 
       Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
-      or custom header values (only their names), and its `url` has no query string or user-info.
+      or custom header values (only their names), and its `url` is its origin only.
       An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
       organizations and to those of the service that owns it.
     operationId: webhookWebhookEndpointCreated
@@ -1024,7 +1024,7 @@ webhook.endpoint.updated:
       Fired by `PATCH /v1/webhooks/webhooks/{id}` when it changed something; `data.changedFields` names what. `entityId` is the endpoint's id.
 
       Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
-      or custom header values (only their names), and its `url` has no query string or user-info.
+      or custom header values (only their names), and its `url` is its origin only.
       An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
       organizations and to those of the service that owns it.
     operationId: webhookWebhookEndpointUpdated
@@ -1063,7 +1063,7 @@ webhook.endpoint.archived:
       Fired by `POST /v1/webhooks/webhooks/{id}/archive`. `entityId` is the endpoint's id.
 
       Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
-      or custom header values (only their names), and its `url` has no query string or user-info.
+      or custom header values (only their names), and its `url` is its origin only.
       An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
       organizations and to those of the service that owns it.
     operationId: webhookWebhookEndpointArchived
@@ -1102,7 +1102,7 @@ webhook.endpoint.restored:
       Fired by `POST /v1/webhooks/webhooks/{id}/restore`. `entityId` is the endpoint's id.
 
       Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
-      or custom header values (only their names), and its `url` has no query string or user-info.
+      or custom header values (only their names), and its `url` is its origin only.
       An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
       organizations and to those of the service that owns it.
     operationId: webhookWebhookEndpointRestored
@@ -1141,7 +1141,7 @@ webhook.endpoint.deleted:
       Fired by `DELETE /v1/webhooks/webhooks/{id}`; `data` is the endpoint as it was. `entityId` is the endpoint's id.
 
       Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
-      or custom header values (only their names), and its `url` has no query string or user-info.
+      or custom header values (only their names), and its `url` is its origin only.
       An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
       organizations and to those of the service that owns it.
     operationId: webhookWebhookEndpointDeleted
@@ -1180,7 +1180,7 @@ webhook.endpoint.secret-rotated:
       Fired by `POST /v1/webhooks/webhooks/{id}/rotate-secret`; `data.previousSecretExpiresAt` is when the replaced secret stops signing. `entityId` is the endpoint's id.
 
       Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
-      or custom header values (only their names), and its `url` has no query string or user-info.
+      or custom header values (only their names), and its `url` is its origin only.
       An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
       organizations and to those of the service that owns it.
     operationId: webhookWebhookEndpointSecretRotated
@@ -1219,7 +1219,7 @@ webhook.endpoint.previous-secret-revoked:
       Fired by `POST /v1/webhooks/webhooks/{id}/revoke-previous-secret`. `entityId` is the endpoint's id.
 
       Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
-      or custom header values (only their names), and its `url` has no query string or user-info.
+      or custom header values (only their names), and its `url` is its origin only.
       An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
       organizations and to those of the service that owns it.
     operationId: webhookWebhookEndpointPreviousSecretRevoked

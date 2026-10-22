@@ -25,13 +25,13 @@ interface EventEndpoint {
 }
 
 /**
- * Origin and path only: a query string or user-info may carry a credential
+ * Origin only: capability URLs (Slack, Discord, Teams, Zapier) carry their
+ * secret in the path, and a query string or user-info may carry a credential
  * the receiver checks, which the audit log and event subscribers must not see.
  */
 export const redactWebhookUrl = (url: string): string => {
   try {
-    const parsed = new URL(url);
-    return `${parsed.origin}${parsed.pathname}`;
+    return new URL(url).origin;
   } catch {
     return "[invalid url]";
   }

@@ -118,11 +118,12 @@ the delivery worker's auto-disable (`.updated`, `changedFields: ["status"]`,
 `webhook.endpoint.created`, `.updated` (only when something changed; `data.changedFields`),
 `.archived`, `.restored`, `.deleted`, `.secret-rotated` (`data.previousSecretExpiresAt`) and
 `.previous-secret-revoked`, each read with `webhooks.read`. The payload is the endpoint without its
-signing secret or custom header values (`customHeaderNames` only), and its `url` keeps origin and
-path. An endpoint's events are emitted under its organization; an endpoint of all organizations
+signing secret or custom header values (`customHeaderNames` only), and its `url` keeps only the
+origin (`https://hooks.slack.com/services/T000/B000/SECRET` → `https://hooks.slack.com`). An endpoint's events are emitted under its organization; an endpoint of all organizations
 emits them with `organizationId: null`, to endpoints of all organizations and those of its owner.
-The audit entries of create, PATCH and delete record the URL the same way, without query string or
-user-info, which may carry a credential the receiver checks.
+The audit entries of create, PATCH and delete (and of provisioning) record the URL the same way:
+capability URLs (Slack, Discord, Teams, Zapier) carry their secret in the path, and a query string or
+user-info may carry a credential the receiver checks.
 
 ## Service-owned endpoints
 

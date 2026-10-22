@@ -896,7 +896,7 @@ WebhookEndpointEventData:
   type: object
   description: |
     The endpoint a `webhook.endpoint.*` event is about. No signing secret and
-    no custom header values; `url` keeps only origin and path.
+    no custom header values; `url` keeps only the origin.
   properties:
     id:
       type: string
@@ -914,9 +914,12 @@ WebhookEndpointEventData:
       format: uuid
     url:
       type: string
-      description: The endpoint's URL without query string or user-info.
+      description: |
+        The endpoint URL's origin only (scheme, host and port): capability
+        URLs carry their secret in the path, and a query string or user-info
+        may carry a credential.
       examples:
-        - "https://example.com/hooks/tereo"
+        - "https://hooks.slack.com"
     description:
       type:
         - string

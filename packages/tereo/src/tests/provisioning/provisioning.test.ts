@@ -1898,10 +1898,10 @@ describe("webhooks", () => {
         waitForDelivered(receiver.id, eventType, id, fields);
       await delivered("webhook.endpoint.created", { provisioned: true });
 
-      const moved = { ...w, url: "https://example.com/moved-events" };
+      const moved = { ...w, url: "https://www.example.com/moved-events" };
       await apply(withService(d, { webhooks: [moved] }));
       await delivered("webhook.endpoint.updated", {
-        url: "https://example.com/moved-events",
+        url: "https://www.example.com",
       });
 
       const rotated = {
