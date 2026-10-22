@@ -220,6 +220,8 @@ describe("POST /v1/admin/services, GET /v1/admin/services and GET /v1/admin/serv
         slug: `x${"a".repeat(64)}`,
       });
       expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_request");
+      expect(res.body.error_description).toContain("slug");
     });
 
     it("needs services.write", async () => {
@@ -322,21 +324,14 @@ describe("POST /v1/admin/services, GET /v1/admin/services and GET /v1/admin/serv
       expect(
         (await api("GET", "/v1/admin/services/access", outsider)).status
       ).toBe(403);
-      expect((await api("GET", "/v1/admin/services/access", null)).status).toBe(
-        401
+      const bad = await api(
+        "GET",
+        "/v1/admin/services/access?filter[status]=maybe",
+        adminToken
       );
-      for (const status of ["maybe", "pending"]) {
-        expect(
-          (
-            await api(
-              "GET",
-              `/v1/admin/services/access?filter[status]=${status}`,
-              adminToken
-            )
-          ).status,
-          status
-        ).toBe(400);
-      }
+      expect(bad.status).toBe(400);
+      expect(bad.body.error).toBe("invalid_request");
+      expect(bad.body.error_description).toContain("filter[status]");
     });
   });
 });

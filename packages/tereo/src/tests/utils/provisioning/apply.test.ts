@@ -629,59 +629,6 @@ describe("applyProvisioning", () => {
     });
   });
 
-  it("refuses admin edits to a provisioned client or service with 409 managed_by_provisioning", async () => {
-    const d = serviceDoc();
-    const secret = newSecret();
-    const client = clientSpec({
-      clientType: "confidential",
-      secretEnv: "APP_SECRET",
-      secretHash: secret.hash,
-    });
-    await apply(d, clientsDoc(client));
-    const s = await serviceRow(d.service.slug);
-    const c = await clientRow(client.clientId);
-
-    const attempts = [
-      await api("PATCH", `/v1/admin/clients/${c.id}`, { name: "Edited" }),
-      await api("POST", `/v1/admin/clients/${c.id}/regenerate-secret`),
-      await api("DELETE", `/v1/admin/clients/${c.id}`),
-      await api("PATCH", `/v1/admin/services/${s.id}`, { name: "Edited" }),
-      await api("POST", `/v1/admin/services/${s.id}/regenerate-secret`),
-    ];
-    for (const res of attempts) {
-      expect(res.status, JSON.stringify(res.body)).toBe(409);
-      expect(res.body.error).toBe("managed_by_provisioning");
-    }
-    expect((await clientRow(client.clientId)).name).toBe(client.name);
-    expect((await serviceRow(d.service.slug)).name).toBe(d.service.name);
-
-    const shown = await api("GET", `/v1/admin/clients/${c.id}`);
-    expect(shown.body.provisioned).toBe(true);
-    const shownService = await api("GET", `/v1/admin/services/${s.id}`);
-    expect(shownService.body.provisioned).toBe(true);
-  });
-
-  it("lets an admin end a provisioned service's secret overlap at once", async () => {
-    const d = serviceDoc();
-    await apply(d);
-    const next = newSecret();
-    await apply(withService(d, { secretHash: next.hash }));
-    expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(200);
-    const s = await serviceRow(d.service.slug);
-
-    const res = await api(
-      "POST",
-      `/v1/admin/services/${s.id}/revoke-previous-secret`
-    );
-    expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body.provisioned).toBe(true);
-    expect((await serviceRow(d.service.slug)).client?.previousSecretHash).toBe(
-      null
-    );
-    expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(401);
-    expect(await fetchToken(d.service.clientId, next.plain)).toBe(200);
-  });
-
   describe("bucket cache invalidation", () => {
     const seen = new Set<string>();
     beforeAll(async () => {
@@ -954,14 +901,6 @@ describe("applyProvisioning", () => {
       return serviceDoc({ slug: ns, namespace: ns, ...ownerDeclaration(ns) });
     };
 
-    const roleApi = async (method: string, path: string, body?: unknown) =>
-      fetchJson(
-        method,
-        `${CORE_URL}${path}`,
-        await getTestPrincipalToken({ permissions: ["admin"] }),
-        body
-      );
-
     it("creates a custom role over core and service permissions", async () => {
       const owner = ownerDoc();
       const ns = owner.service.namespace;
@@ -1021,70 +960,6 @@ describe("applyProvisioning", () => {
       const result = await apply(rolesDoc({ ...role, requires2fa: false }));
       expect(result.roles).toEqual([`role:${role.name}`]);
       expect((await roleRow(role.name)).requires2fa).toBe(false);
-    });
-
-    it("refuses admin edits with 409 managed_by_provisioning, but still assigns the role", async () => {
-      const owner = ownerDoc();
-      const role = roleSpec([
-        "roles.read",
-        `${owner.service.namespace}.items.read`,
-      ]);
-      await apply(owner, rolesDoc(role));
-      const row = await roleRow(role.name);
-      const permissionId = row.rolePermissions[0].permissionId;
-
-      const attempts = [
-        await roleApi("PATCH", `/v1/admin/roles/${row.id}`, {
-          displayName: "X",
-        }),
-        await roleApi("PUT", `/v1/admin/roles/${row.id}/permissions`, {
-          permissionIds: [permissionId],
-        }),
-        await roleApi("POST", `/v1/admin/roles/${row.id}/archive`),
-        await roleApi("DELETE", `/v1/admin/roles/${row.id}`),
-        await roleApi("POST", `/v1/admin/roles/${row.id}/restore`),
-      ];
-      for (const res of attempts) {
-        expect(res.status, JSON.stringify(res.body)).toBe(409);
-        expect(res.body.error).toBe("managed_by_provisioning");
-      }
-      const shown = await roleApi("GET", `/v1/admin/roles/${row.id}`);
-      expect(shown.body.provisioned).toBe(true);
-
-      const user = await prisma.user.create({
-        data: {
-          email: `prov-role-${rand()}@test.local`,
-          name: "Holder",
-          isActive: true,
-        },
-      });
-      try {
-        const assigned = await roleApi(
-          "PUT",
-          `/v1/admin/users/${user.id}/roles`,
-          { roleIds: [row.id] }
-        );
-        expect(assigned.status, JSON.stringify(assigned.body)).toBeLessThan(
-          300
-        );
-        expect(
-          await prisma.userRole.count({
-            where: { userId: user.id, roleId: row.id },
-          })
-        ).toBe(1);
-
-        const copy = await roleApi(
-          "POST",
-          `/v1/admin/roles/${row.id}/duplicate`,
-          { name: `${role.name}-copy` }
-        );
-        createdRoleNames.push(`${role.name}-copy`);
-        expect(copy.status, JSON.stringify(copy.body)).toBe(201);
-        expect(copy.body.provisioned).toBe(false);
-      } finally {
-        await prisma.userRole.deleteMany({ where: { userId: user.id } });
-        await prisma.user.delete({ where: { id: user.id } });
-      }
     });
 
     it("reactivates a provisioned role left inactive when the set lists it", async () => {

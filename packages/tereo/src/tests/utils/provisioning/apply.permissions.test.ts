@@ -1,12 +1,12 @@
 // @module-tag int
 // @module-tag provisioning
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
+import { type CustomRoleEntry } from "../../../utils/provisioning/schema.js";
 import { applyProvisioning } from "../../../utils/provisioning/index.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateClientSecret } from "../../../utils/crypto.js";
 import { SYSTEM_USER_ID } from "../../../definitions/index.js";
-import { removeServices } from "../../support/provisioning.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
 import { fetchJson } from "../../support/http.js";
@@ -15,12 +15,22 @@ import { randomBytes } from "crypto";
 import {
   type LoadedDocument,
   type ProvisioningSet,
+  type ResolvedClient,
   type ResolvedService,
 } from "../../../utils/provisioning/load.js";
+import {
+  removeLoginClients,
+  removeRoles,
+  removeServices,
+} from "../../support/provisioning.js";
 
 let adminToken: string;
 
 const createdSlugs: string[] = [];
+
+const createdClientIds: string[] = [];
+
+const createdRoleNames: string[] = [];
 
 const rand = () => `p${randomBytes(5).toString("hex")}`;
 
@@ -85,6 +95,47 @@ const setOf = (...docs: LoadedDocument[]): ProvisioningSet => ({
 
 const apply = (...docs: LoadedDocument[]) => applyProvisioning(setOf(...docs));
 
+const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
+  const spec: ResolvedClient = {
+    clientId: `prov-client-${rand()}`,
+    name: "Provisioned app",
+    description: null,
+    clientType: "public",
+    secretEnv: null,
+    secretHash: null,
+    redirectUris: ["https://app.example.com/callback"],
+    postLogoutRedirectUris: [],
+    scopes: ["openid", "profile"],
+    grantTypes: ["authorization_code", "refresh_token"],
+    audience: [],
+    consentRequired: true,
+    trustedCoreScopes: [],
+    ...extra,
+  };
+  createdClientIds.push(spec.clientId);
+  return spec;
+};
+
+const clientsDoc = (...clients: ResolvedClient[]): LoadedDocument => ({
+  file: "clients.json",
+  version: "1.0.0",
+  service: null,
+  clients,
+  roles: [],
+});
+
+const fetchToken = async (clientId: string, clientSecret: string) => {
+  const response = await fetch(`${CORE_URL}/oauth/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+  return response.status;
+};
+
 /** A declaration with one role, `<ns>_item_reader`, granting `grants`. */
 const ownerDeclaration = (ns: string, grants: string[] = ["read"]) => ({
   permissions: ["read", "write"].map((verb) => ({
@@ -114,6 +165,9 @@ const serviceRow = (slug: string) =>
     where: { slug },
     include: { client: { include: { serviceAccountUser: true } } },
   });
+
+const clientRow = (clientId: string) =>
+  prisma.oAuthClient.findUniqueOrThrow({ where: { clientId } });
 
 const serviceToken = async (d: ServiceDoc) => {
   const response = await fetch(`${CORE_URL}/oauth/token`, {
@@ -171,7 +225,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await removeRoles(createdRoleNames);
   await removeServices(createdSlugs);
+  await removeLoginClients(createdClientIds);
 });
 
 describe("applyProvisioning", () => {
@@ -456,6 +512,168 @@ describe("applyProvisioning", () => {
       );
       expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
       expect((await serviceRow(d.service.slug)).client?.audience).toEqual([]);
+    });
+  });
+
+  describe("managed_by_provisioning", () => {
+    it("refuses admin edits to a provisioned client or service with 409 managed_by_provisioning", async () => {
+      const d = serviceDoc();
+      const secret = newSecret();
+      const client = clientSpec({
+        clientType: "confidential",
+        secretEnv: "APP_SECRET",
+        secretHash: secret.hash,
+      });
+      await apply(d, clientsDoc(client));
+      const s = await serviceRow(d.service.slug);
+      const c = await clientRow(client.clientId);
+
+      const attempts = [
+        await api("PATCH", `/v1/admin/clients/${c.id}`, { name: "Edited" }),
+        await api("POST", `/v1/admin/clients/${c.id}/regenerate-secret`),
+        await api("DELETE", `/v1/admin/clients/${c.id}`),
+        await api("PATCH", `/v1/admin/services/${s.id}`, { name: "Edited" }),
+        await api("POST", `/v1/admin/services/${s.id}/regenerate-secret`),
+      ];
+      for (const res of attempts) {
+        expect(res.status, JSON.stringify(res.body)).toBe(409);
+        expect(res.body.error).toBe("managed_by_provisioning");
+      }
+      expect((await clientRow(client.clientId)).name).toBe(client.name);
+      expect((await serviceRow(d.service.slug)).name).toBe(d.service.name);
+
+      const shown = await api("GET", `/v1/admin/clients/${c.id}`);
+      expect(shown.body.provisioned).toBe(true);
+      const shownService = await api("GET", `/v1/admin/services/${s.id}`);
+      expect(shownService.body.provisioned).toBe(true);
+    });
+
+    it("lets an admin end a provisioned service's secret overlap at once", async () => {
+      const d = serviceDoc();
+      await apply(d);
+      const next = newSecret();
+      await apply(withService(d, { secretHash: next.hash }));
+      expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(200);
+      const s = await serviceRow(d.service.slug);
+
+      const res = await api(
+        "POST",
+        `/v1/admin/services/${s.id}/revoke-previous-secret`
+      );
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.provisioned).toBe(true);
+      expect(
+        (await serviceRow(d.service.slug)).client?.previousSecretHash
+      ).toBe(null);
+      expect(await fetchToken(d.service.clientId, d.plainSecret)).toBe(401);
+      expect(await fetchToken(d.service.clientId, next.plain)).toBe(200);
+    });
+
+    const roleSpec = (
+      permissions: string[],
+      extra: Partial<CustomRoleEntry> = {}
+    ): CustomRoleEntry => {
+      const name = extra.name ?? `prov-role-${rand()}`;
+      createdRoleNames.push(name);
+      return {
+        name,
+        displayName: `Role ${name}`,
+        orgAssignable: false,
+        requires2fa: false,
+        permissions,
+        ...extra,
+      };
+    };
+
+    const rolesDoc = (...roles: CustomRoleEntry[]): LoadedDocument => ({
+      file: "roles.json",
+      version: "1.0.0",
+      service: null,
+      clients: [],
+      roles,
+    });
+
+    const roleRow = (name: string) =>
+      prisma.role.findFirstOrThrow({
+        where: { name, serviceId: null },
+        include: { rolePermissions: { include: { permission: true } } },
+      });
+
+    const ownerDoc = () => {
+      const ns = `prov-${rand()}`;
+      return serviceDoc({ slug: ns, namespace: ns, ...ownerDeclaration(ns) });
+    };
+
+    const roleApi = async (method: string, path: string, body?: unknown) =>
+      fetchJson(
+        method,
+        `${CORE_URL}${path}`,
+        await getTestPrincipalToken({ permissions: ["admin"] }),
+        body
+      );
+
+    it("refuses admin edits with 409 managed_by_provisioning, but still assigns the role", async () => {
+      const owner = ownerDoc();
+      const role = roleSpec([
+        "roles.read",
+        `${owner.service.namespace}.items.read`,
+      ]);
+      await apply(owner, rolesDoc(role));
+      const row = await roleRow(role.name);
+      const permissionId = row.rolePermissions[0].permissionId;
+
+      const attempts = [
+        await roleApi("PATCH", `/v1/admin/roles/${row.id}`, {
+          displayName: "X",
+        }),
+        await roleApi("PUT", `/v1/admin/roles/${row.id}/permissions`, {
+          permissionIds: [permissionId],
+        }),
+        await roleApi("POST", `/v1/admin/roles/${row.id}/archive`),
+        await roleApi("DELETE", `/v1/admin/roles/${row.id}`),
+        await roleApi("POST", `/v1/admin/roles/${row.id}/restore`),
+      ];
+      for (const res of attempts) {
+        expect(res.status, JSON.stringify(res.body)).toBe(409);
+        expect(res.body.error).toBe("managed_by_provisioning");
+      }
+      const shown = await roleApi("GET", `/v1/admin/roles/${row.id}`);
+      expect(shown.body.provisioned).toBe(true);
+
+      const user = await prisma.user.create({
+        data: {
+          email: `prov-role-${rand()}@test.local`,
+          name: "Holder",
+          isActive: true,
+        },
+      });
+      try {
+        const assigned = await roleApi(
+          "PUT",
+          `/v1/admin/users/${user.id}/roles`,
+          { roleIds: [row.id] }
+        );
+        expect(assigned.status, JSON.stringify(assigned.body)).toBeLessThan(
+          300
+        );
+        expect(
+          await prisma.userRole.count({
+            where: { userId: user.id, roleId: row.id },
+          })
+        ).toBe(1);
+
+        const copy = await roleApi(
+          "POST",
+          `/v1/admin/roles/${row.id}/duplicate`,
+          { name: `${role.name}-copy` }
+        );
+        createdRoleNames.push(`${role.name}-copy`);
+        expect(copy.status, JSON.stringify(copy.body)).toBe(201);
+        expect(copy.body.provisioned).toBe(false);
+      } finally {
+        await prisma.userRole.deleteMany({ where: { userId: user.id } });
+        await prisma.user.delete({ where: { id: user.id } });
+      }
     });
   });
 });

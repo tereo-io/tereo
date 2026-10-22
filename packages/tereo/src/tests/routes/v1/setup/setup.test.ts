@@ -315,7 +315,10 @@ describe("GET /v1/setup/status and POST /v1/setup", () => {
     it("rejects an invalid body", async () => {
       const body = setupBody(await issueSetupToken());
       body.admin.password = "short";
-      expect((await request(body)).status).toBe(HTTP_STATUS.BAD_REQUEST);
+      const response = await request(body);
+      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(response.data.error).toBe("invalid_request");
+      expect(response.data.error_description).toContain("admin.password");
     });
 
     it("rejects an email that is taken, leaving setup pending", async () => {

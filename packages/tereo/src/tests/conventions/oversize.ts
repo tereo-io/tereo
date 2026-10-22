@@ -12,7 +12,7 @@ export const OVERSIZE: ReadonlyArray<OversizeEntry> = [
   },
   {
     path: "utils/provisioning/apply.test.ts",
-    ceiling: 1600,
+    ceiling: 1500,
     reason:
       "applyProvisioning main behaviour, one section per item kind it applies (services, login clients, custom roles, webhooks, integrations, declarations, retirement and the 409 managed_by_provisioning edits); function module with no methods to split on, and its errors, permissions, audit and races already live in aspect files",
   },
