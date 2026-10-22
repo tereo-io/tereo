@@ -1,9 +1,12 @@
 import { absorbCookies, cookieHeader, newPkce } from "../utils/browserLogin.js";
 import { encryptTotpSecret, generateTotpSecret } from "../../utils/totp.js";
+import { beginPasswordAttempt } from "../../utils/passwordAttempts.js";
+import { getRedisClient, redisKey } from "../../utils/redis.js";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import type { CookieJar } from "../utils/browserLogin.js";
-import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "node:crypto";
+import type { Request } from "express";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -618,6 +621,33 @@ describe("failed password auditing", () => {
         (e.metadata as { action?: string } | null)?.action ===
         "password_failures"
     );
+
+  const failuresTtl = (userId: string) =>
+    getRedisClient().ttl(redisKey("password:failures", userId));
+
+  it("gives the count of wrong passwords an expiry", async () => {
+    const user = await createTestUser();
+    await submitPassword(user.email, "wrong-password", freshIp());
+    expect(await failuresTtl(user.id)).toBeGreaterThan(0);
+  });
+
+  it("sets the count and its expiry together", async () => {
+    const user = await createTestUser();
+    // A lone EXPIRE lost after its INCR would leave the count forever.
+    const expire = vi
+      .spyOn(getRedisClient(), "expire")
+      .mockRejectedValue(new Error("connection lost"));
+    try {
+      await beginPasswordAttempt(
+        { ip: freshIp() } as Request,
+        user,
+        "login"
+      ).failed("invalid_password");
+    } finally {
+      expire.mockRestore();
+    }
+    expect(await failuresTtl(user.id)).toBeGreaterThan(0);
+  });
 
   it("audits a known user's fifth wrong login password in a row", async () => {
     const user = await createTestUser();

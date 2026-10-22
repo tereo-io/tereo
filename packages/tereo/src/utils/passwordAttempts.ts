@@ -47,10 +47,16 @@ export const beginPasswordAttempt = (
       logPasswordFailure({ check, reason, clientId, ip: req.ip });
       return;
     }
-    const redis = getRedisClient();
     const key = failuresKey(user.id);
-    const failures = await redis.incr(key);
-    await redis.expire(key, FAILURES_TTL_SECONDS);
+    // One transaction, so a count is never left without its expiry.
+    const exec = await getRedisClient()
+      .multi()
+      .incr(key)
+      .expire(key, FAILURES_TTL_SECONDS)
+      .exec();
+    const [err, count] = exec?.[0] ?? [new Error("Redis transaction aborted")];
+    if (err) throw err;
+    const failures = Number(count);
     logPasswordFailure({
       check,
       reason,
