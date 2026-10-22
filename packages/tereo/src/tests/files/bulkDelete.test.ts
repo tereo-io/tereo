@@ -155,6 +155,9 @@ describe("Bulk deletes", () => {
               )
             )
         );
+        // The general limiter allows 100 requests a second per user, and the
+        // beforeEach cleanup cannot reset it mid-test: pace the uploads under it.
+        await new Promise((resolve) => setTimeout(resolve, 150));
       }
 
       const res = await axios.post(
