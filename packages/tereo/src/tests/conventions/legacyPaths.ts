@@ -5,17 +5,6 @@
  */
 export const LEGACY_PATHS: readonly string[] = [
   "appServerStart.test.ts",
-  "audit/containsFilters.test.ts",
-  "audit/entries.test.ts",
-  "audit/entryRetention.test.ts",
-  "audit/idempotencyCache.test.ts",
-  "audit/inputValidation.test.ts",
-  "audit/organizationScope.test.ts",
-  "audit/queryOptions.test.ts",
-  "audit/searchEscapedJsonValues.test.ts",
-  "audit/serviceScope.test.ts",
-  "audit/userEmailCase.test.ts",
-  "audit/writeScope.test.ts",
   "auth/accessTokenTyp.test.ts",
   "auth/account.test.ts",
   "auth/accountOrganizations.test.ts",
