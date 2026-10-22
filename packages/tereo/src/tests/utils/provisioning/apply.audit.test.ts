@@ -291,54 +291,58 @@ describe("applyProvisioning", () => {
         include: { subscriptions: { orderBy: { eventType: "asc" } } },
       });
 
-    it("emits webhook.endpoint.* events for what it creates, changes, rotates, archives and restores", async () => {
-      const { endpoint: receiver } = await db.webhookEndpoints.create({
-        organizationId: null,
-        ownerServiceId: TEST_SERVICE_ID,
-        createdBy: SYSTEM_USER_ID,
-        url: "https://example.com/endpoint-events",
-        eventTypes: [
-          "webhook.endpoint.created",
-          "webhook.endpoint.updated",
-          "webhook.endpoint.secret-rotated",
-          "webhook.endpoint.archived",
-          "webhook.endpoint.restored",
-        ],
-      });
-      try {
-        const w = webhook();
-        const d = subscriber(w);
-        await apply(d);
-        const { id } = await endpointRow(`${d.service.slug}:org-events`);
-        const delivered = (eventType: string, fields = {}) =>
-          waitForDelivered(receiver.id, eventType, id, fields);
-        await delivered("webhook.endpoint.created", { provisioned: true });
-
-        const moved = { ...w, url: "https://www.example.com/moved-events" };
-        await apply(withService(d, { webhooks: [moved] }));
-        await delivered("webhook.endpoint.updated", {
-          url: "https://www.example.com",
+    it(
+      "emits webhook.endpoint.* events for what it creates, changes, rotates, archives and restores",
+      { tags: ["slow"] },
+      async () => {
+        const { endpoint: receiver } = await db.webhookEndpoints.create({
+          organizationId: null,
+          ownerServiceId: TEST_SERVICE_ID,
+          createdBy: SYSTEM_USER_ID,
+          url: "https://example.com/endpoint-events",
+          eventTypes: [
+            "webhook.endpoint.created",
+            "webhook.endpoint.updated",
+            "webhook.endpoint.secret-rotated",
+            "webhook.endpoint.archived",
+            "webhook.endpoint.restored",
+          ],
         });
+        try {
+          const w = webhook();
+          const d = subscriber(w);
+          await apply(d);
+          const { id } = await endpointRow(`${d.service.slug}:org-events`);
+          const delivered = (eventType: string, fields = {}) =>
+            waitForDelivered(receiver.id, eventType, id, fields);
+          await delivered("webhook.endpoint.created", { provisioned: true });
 
-        const rotated = {
-          ...moved,
-          secretPlain: randomBytes(32).toString("hex"),
-        };
-        await apply(withService(d, { webhooks: [rotated] }));
-        await delivered("webhook.endpoint.secret-rotated");
+          const moved = { ...w, url: "https://www.example.com/moved-events" };
+          await apply(withService(d, { webhooks: [moved] }));
+          await delivered("webhook.endpoint.updated", {
+            url: "https://www.example.com",
+          });
 
-        await apply(withService(d, { webhooks: [] }));
-        await delivered("webhook.endpoint.archived");
+          const rotated = {
+            ...moved,
+            secretPlain: randomBytes(32).toString("hex"),
+          };
+          await apply(withService(d, { webhooks: [rotated] }));
+          await delivered("webhook.endpoint.secret-rotated");
 
-        await apply(withService(d, { webhooks: [rotated] }));
-        await delivered("webhook.endpoint.restored", { archivedAt: null });
-      } finally {
-        await prisma.webhookDelivery.deleteMany({
-          where: { webhookEndpointId: receiver.id },
-        });
-        await prisma.webhookEndpoint.delete({ where: { id: receiver.id } });
+          await apply(withService(d, { webhooks: [] }));
+          await delivered("webhook.endpoint.archived");
+
+          await apply(withService(d, { webhooks: [rotated] }));
+          await delivered("webhook.endpoint.restored", { archivedAt: null });
+        } finally {
+          await prisma.webhookDelivery.deleteMany({
+            where: { webhookEndpointId: receiver.id },
+          });
+          await prisma.webhookEndpoint.delete({ where: { id: receiver.id } });
+        }
       }
-    });
+    );
   });
 
   describe("provisioned integrations", () => {
