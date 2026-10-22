@@ -100,6 +100,12 @@ describe("oversize rule", () => {
       [entry],
       ["a.ts: listed"],
     ],
+    [
+      "an entry whose ceiling is not above the cap",
+      { "a.ts": 850 },
+      [{ ...entry, ceiling: 800 }],
+      ["a.ts: ceiling 800"],
+    ],
   ])("%s", (_, counts, list, want) => {
     const got = oversizeProblems(new Map(Object.entries(counts)), list);
     expect(got).toHaveLength(want.length);
