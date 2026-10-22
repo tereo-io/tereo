@@ -3,12 +3,9 @@
 import { HEADER_VALUE_MASK } from "../../../../../../utils/webhookHeaders.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../../../utils/db/prisma.js";
+import {} from "../../../../../../jobs/webhookQueues.js";
 import db from "../../../../../../utils/db/index.js";
 import axios from "axios";
-import {
-  closeWebhookQueues,
-  getWebhookDeliveryQueue,
-} from "../../../../../../jobs/webhookQueues.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -214,7 +211,6 @@ describe("GET /v1/webhooks/webhooks/:id and GET /v1/webhooks/webhooks/:id/stats"
 
   describe("Deliveries on the partitioned table", () => {
     let token: string;
-    const jobIds: string[] = [];
     const createdPartitions: string[] = [];
 
     beforeAll(async () => {
@@ -222,9 +218,6 @@ describe("GET /v1/webhooks/webhooks/:id and GET /v1/webhooks/webhooks/:id/stats"
     });
 
     afterAll(async () => {
-      const queue = getWebhookDeliveryQueue();
-      for (const id of jobIds) await queue.remove(id).catch(() => {});
-      await closeWebhookQueues();
       await cleanupTestEntities();
       for (const name of createdPartitions) {
         await db.webhookDeliveries.dropPartition(name).catch(() => {});

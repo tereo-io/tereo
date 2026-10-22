@@ -54,7 +54,7 @@ describe("resetConsecutiveFailures and incrementConsecutiveFailures", () => {
       });
 
       // Disabling at the threshold is exercised through the delivery worker
-      // in deliveryWorker.test.ts.
+      // in jobs/webhookDelivery.test.ts.
     });
   });
 });

@@ -308,70 +308,72 @@ describe("processWebhookDelivery", () => {
       expect(ep.consecutiveFailures).toBe(1);
     });
 
-    it("counts a spent delivery once, however many jobs run for it", async () => {
-      const { endpoint, delivery } = await setup();
+    describe("concurrent jobs", { tags: ["race"] }, () => {
+      it("counts a spent delivery once, however many jobs run for it", async () => {
+        const { endpoint, delivery } = await setup();
 
-      await prisma.webhookDelivery.updateMany({
-        where: { id: delivery.id },
-        data: {
-          attempts: WEBHOOK_DELIVERY_ATTEMPTS,
-          lastAttemptAt: new Date(),
-        },
+        await prisma.webhookDelivery.updateMany({
+          where: { id: delivery.id },
+          data: {
+            attempts: WEBHOOK_DELIVERY_ATTEMPTS,
+            lastAttemptAt: new Date(),
+          },
+        });
+        // Concurrent, so every job reads the delivery PENDING and reaches the
+        // write; only the one whose write applies counts the failure.
+        await Promise.all(Array.from({ length: 4 }, () => run(delivery.id)));
+
+        const ep = await prisma.webhookEndpoint.findUniqueOrThrow({
+          where: { id: endpoint.id },
+        });
+        expect(ep.consecutiveFailures).toBe(1);
       });
-      // Concurrent, so every job reads the delivery PENDING and reaches the
-      // write; only the one whose write applies counts the failure.
-      await Promise.all(Array.from({ length: 4 }, () => run(delivery.id)));
 
-      const ep = await prisma.webhookEndpoint.findUniqueOrThrow({
-        where: { id: endpoint.id },
-      });
-      expect(ep.consecutiveFailures).toBe(1);
-    });
-
-    /** A receiver that, mid-attempt, has another job settle the delivery FAILED. */
-    const settledMeanwhile = (deliveryId: string, status: number) => {
-      handler = (_req, res) => {
-        void prisma.webhookDelivery
-          .updateMany({
-            where: { id: deliveryId },
-            data: {
-              status: "FAILED",
-              attempts: WEBHOOK_DELIVERY_ATTEMPTS,
-              completedAt: new Date(),
-            },
-          })
-          .then(() => res.writeHead(status).end());
+      /** A receiver that, mid-attempt, has another job settle the delivery FAILED. */
+      const settledMeanwhile = (deliveryId: string, status: number) => {
+        handler = (_req, res) => {
+          void prisma.webhookDelivery
+            .updateMany({
+              where: { id: deliveryId },
+              data: {
+                status: "FAILED",
+                attempts: WEBHOOK_DELIVERY_ATTEMPTS,
+                completedAt: new Date(),
+              },
+            })
+            .then(() => res.writeHead(status).end());
+        };
       };
-    };
 
-    it("does not overwrite a delivery another job settled during the attempt with SUCCESS", async () => {
-      const { endpoint, delivery } = await setup();
-      await prisma.webhookEndpoint.update({
-        where: { id: endpoint.id },
-        data: { consecutiveFailures: 3 },
+      it("does not overwrite a delivery another job settled during the attempt with SUCCESS", async () => {
+        const { endpoint, delivery } = await setup();
+        await prisma.webhookEndpoint.update({
+          where: { id: endpoint.id },
+          data: { consecutiveFailures: 3 },
+        });
+        settledMeanwhile(delivery.id, 200);
+
+        await run(delivery.id);
+
+        expect(received).toHaveLength(1);
+        const row = await deliveryRow(delivery.id);
+        expect(row.status).toBe("FAILED");
+        const ep = await prisma.webhookEndpoint.findUniqueOrThrow({
+          where: { id: endpoint.id },
+        });
+        expect(ep.consecutiveFailures).toBe(3);
       });
-      settledMeanwhile(delivery.id, 200);
 
-      await run(delivery.id);
+      it("does not reopen a delivery another job settled during the attempt", async () => {
+        const { delivery } = await setup();
+        settledMeanwhile(delivery.id, 500);
 
-      expect(received).toHaveLength(1);
-      const row = await deliveryRow(delivery.id);
-      expect(row.status).toBe("FAILED");
-      const ep = await prisma.webhookEndpoint.findUniqueOrThrow({
-        where: { id: endpoint.id },
+        await run(delivery.id);
+
+        const row = await deliveryRow(delivery.id);
+        expect(row.status).toBe("FAILED");
+        expect(row.attempts).toBe(WEBHOOK_DELIVERY_ATTEMPTS);
       });
-      expect(ep.consecutiveFailures).toBe(3);
-    });
-
-    it("does not reopen a delivery another job settled during the attempt", async () => {
-      const { delivery } = await setup();
-      settledMeanwhile(delivery.id, 500);
-
-      await run(delivery.id);
-
-      const row = await deliveryRow(delivery.id);
-      expect(row.status).toBe("FAILED");
-      expect(row.attempts).toBe(WEBHOOK_DELIVERY_ATTEMPTS);
     });
 
     it("disables the endpoint at the threshold from a spent delivery", async () => {

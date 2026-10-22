@@ -6,11 +6,9 @@ import {
   BASE_URL,
   HTTP_STATUS,
   getTestAccessToken,
-  getTestOrgId,
   createTestEventType,
   createTestWebhookEndpoint,
   cleanupTestEntities,
-  generateUniqueId,
   WebhookDeliveryResponse,
   PaginatedResponse,
   type WebhookEndpointResponse,
@@ -128,18 +126,6 @@ describe("GET /v1/webhooks/webhooks/:id/deliveries and POST /v1/webhooks/webhook
         });
         endpointId = ep.id;
         before = new Date(Date.now() - 60_000);
-        const emitted = await axios.post(
-          `${BASE_URL}/events`,
-          {
-            organizationId: getTestOrgId(),
-            eventType: et.eventType,
-            entityType: "TestEntity",
-            entityId: `test-entity-${generateUniqueId()}`,
-            data: {},
-          },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        expect(emitted.status).toBe(HTTP_STATUS.ACCEPTED);
       });
 
       const deliveries = (query: string) =>

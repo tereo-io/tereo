@@ -56,8 +56,6 @@ const response = () => {
   return res;
 };
 
-// Redis refusing the job after the delivery committed: the request must still
-
 describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webhooks/webhooks/:id/deliveries/:deliveryId/retry", () => {
   describe("Webhook Deliveries", () => {
     let testToken: string;
@@ -192,6 +190,7 @@ describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webh
     });
   });
 
+  // Redis refusing the job after the delivery committed: the request must still
   // succeed, or the client retries and the delivery is written twice. The
   // stale-delivery sweep queues it later.
   describe("Enqueue failure after the delivery commits", () => {

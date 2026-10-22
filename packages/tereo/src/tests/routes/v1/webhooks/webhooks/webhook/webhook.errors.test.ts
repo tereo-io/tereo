@@ -57,8 +57,6 @@ const response = () => {
   return res;
 };
 
-// Redis refusing the job after the delivery committed: the request must still
-
 describe("/v1/webhooks/webhooks/:id", () => {
   describe("Webhook Endpoint Management", () => {
     let testToken: string;
@@ -226,6 +224,7 @@ describe("/v1/webhooks/webhooks/:id", () => {
     });
   });
 
+  // Redis refusing the job after the delivery committed: the request must still
   // succeed, or the client retries and the delivery is written twice. The
   // stale-delivery sweep queues it later.
   describe("Enqueue failure after the delivery commits", () => {
