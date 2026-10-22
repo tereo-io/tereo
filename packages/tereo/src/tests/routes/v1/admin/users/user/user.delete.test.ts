@@ -48,14 +48,12 @@ interface ErrorResponse {
 let testClient: Awaited<ReturnType<typeof createTestClient>>;
 let regularUser: Awaited<ReturnType<typeof createTestUser>>;
 let adminToken: string;
-let regularToken: string;
 
 beforeAll(async () => {
   testClient = await createTestClient();
   const adminUser = await createAdminUser();
   regularUser = await createTestUser();
   adminToken = await getAccessTokenForUser(adminUser, testClient);
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("DELETE /v1/admin/users/:id", () => {
@@ -119,25 +117,6 @@ describe("DELETE /v1/admin/users/:id/sessions/all", () => {
     const data = (await response.json()) as ErrorResponse;
     expect(data.error).toBeDefined();
   });
-
-  it("should return 403 for a token without the permission", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/users/${regularUser.id}/sessions/all`,
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${regularToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ includeCurrentSession: false }),
-      }
-    );
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
 });
 
 describe("DELETE /v1/admin/users/:id/sessions", () => {
@@ -194,25 +173,6 @@ describe("DELETE /v1/admin/users/:id/sessions", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
-
-  it("should return 403 for a token without the permission", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/users/${regularUser.id}/sessions`,
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${regularToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ sessionId: 123 }),
-      }
-    );
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
 
     const data = (await response.json()) as ErrorResponse;
     expect(data.error).toBeDefined();

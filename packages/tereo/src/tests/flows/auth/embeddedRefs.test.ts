@@ -272,6 +272,9 @@ describe("Admin responses name the ids they return", () => {
       );
       expect(tooMany.status).toBe(400);
       expect(tooMany.body.error).toBe("invalid_request");
+      expect(tooMany.body.error_description).toMatch(
+        /^Invalid request query\. /
+      );
 
       const bad = await api(
         "GET",

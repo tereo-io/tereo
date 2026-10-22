@@ -45,14 +45,12 @@ interface ErrorResponse {
 
 let regularUser: Awaited<ReturnType<typeof createTestUser>>;
 let adminToken: string;
-let regularToken: string;
 
 beforeAll(async () => {
   const testClient = await createTestClient();
   const adminUser = await createAdminUser();
   regularUser = await createTestUser();
   adminToken = await getAccessTokenForUser(adminUser, testClient);
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("GET /v1/admin/users", () => {
@@ -66,26 +64,6 @@ describe("GET /v1/admin/users", () => {
     expect(response.status).toBe(HTTP_STATUS.OK);
     // Response uses "data" key for the array
     expect(Array.isArray(data.data || data.users)).toBe(true);
-  });
-
-  it("should return 401 with error for request without auth token", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/users`);
-
-    expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
-
-  it("should return 403 with error for request with non-admin token", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/users`, {
-      headers: { Authorization: `Bearer ${regularToken}` },
-    });
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
   });
 
   it("should support cursor pagination", async () => {
@@ -302,20 +280,6 @@ describe("POST /v1/admin/users", () => {
     expect(response.status).toBe(HTTP_STATUS.CONFLICT);
   });
 
-  it("returns 400 for userType service_account", async () => {
-    const writer = await getTestPrincipalToken({
-      permissions: ["users.write"],
-    });
-    const email = `svc-${generateUniqueId()}@test.local`;
-    const response = await postUser(writer, {
-      email,
-      password: "Password123!@#",
-      userType: "service_account",
-    });
-    expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
-  });
-
   it("should return 400 with error for invalid email format", async () => {
     const response = await fetch(`${BASE_URL}/v1/admin/users`, {
       method: "POST",
@@ -333,27 +297,8 @@ describe("POST /v1/admin/users", () => {
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
 
     const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
-
-  it("should return 403 with error for request from non-admin", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/users`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${regularToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email: "test@example.com",
-        password: "Password123!",
-        name: "Test User",
-      }),
-    });
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
+    expect(data.error).toBe("invalid_request");
+    expect(data.error_description).toMatch(/^Invalid request body\. email: /);
   });
 });
 

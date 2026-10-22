@@ -157,6 +157,14 @@ describe("POST /v1/admin/organizations/:id/members", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    const error = (await response.json()) as {
+      error?: string;
+      error_description?: string;
+    };
+    expect(error.error).toBe("invalid_request");
+    expect(error.error_description).toMatch(
+      /^Invalid request body\. memberRole: /
+    );
   });
 });
 

@@ -162,21 +162,14 @@ describe("POST /v1/account/totp/setup/verify", () => {
     });
 
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-  });
-
-  it("should reject request without TOTP code", async () => {
-    const response = await fetch(`${BASE_URL}/v1/account/totp/setup/verify`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${uiToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        setupToken: "test-token",
-      }),
-    });
-
-    expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    const error = (await response.json()) as {
+      error?: string;
+      error_description?: string;
+    };
+    expect(error.error).toBe("invalid_request");
+    expect(error.error_description).toMatch(
+      /^Invalid request body\. setupToken: /
+    );
   });
 
   it("enables TOTP and emits auth.user.totp-enabled", async () => {

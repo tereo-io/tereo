@@ -13,14 +13,6 @@ import {
   FakeOidcProvider,
 } from "../support/fakeOidcProvider.js";
 
-declare global {
-  interface Response {
-    // Test bodies are checked field by field.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    json(): Promise<any>;
-  }
-}
-
 const BASE = `${CORE_URL}/v1/admin/identity-providers`;
 
 let fake: FakeOidcProvider;

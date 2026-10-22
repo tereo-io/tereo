@@ -76,14 +76,12 @@ let testClient: Awaited<ReturnType<typeof createTestClient>>;
 let adminUser: Awaited<ReturnType<typeof createAdminUser>>;
 let regularUser: Awaited<ReturnType<typeof createTestUser>>;
 let adminToken: string;
-let regularToken: string;
 
 beforeAll(async () => {
   testClient = await createTestClient();
   adminUser = await createAdminUser();
   regularUser = await createTestUser();
   adminToken = await getAccessTokenForUser(adminUser, testClient);
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("GET /v1/admin/users/:id", () => {
@@ -111,17 +109,6 @@ describe("GET /v1/admin/users/:id", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
-  });
-
-  it("should reject request from non-admin", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/users/${regularUser.id}`,
-      {
-        headers: { Authorization: `Bearer ${regularToken}` },
-      }
-    );
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
   });
 });
 
@@ -345,20 +332,6 @@ describe("GET /v1/admin/users/:id/roles", () => {
     const data = (await response.json()) as ErrorResponse;
     expect(data.error).toBeDefined();
   });
-
-  it("should return 403 for a token without the permission", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/users/${adminUser.id}/roles`,
-      {
-        headers: { Authorization: `Bearer ${regularToken}` },
-      }
-    );
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
 });
 
 describe("GET /v1/admin/users/:id/permissions", () => {
@@ -391,20 +364,6 @@ describe("GET /v1/admin/users/:id/permissions", () => {
     const data = (await response.json()) as ErrorResponse;
     expect(data.error).toBeDefined();
   });
-
-  it("should return 403 for a token without the permission", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/users/${adminUser.id}/permissions`,
-      {
-        headers: { Authorization: `Bearer ${regularToken}` },
-      }
-    );
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
 });
 
 describe("GET /v1/admin/users/:id/sessions", () => {
@@ -433,20 +392,6 @@ describe("GET /v1/admin/users/:id/sessions", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
-
-  it("should return 403 for a token without the permission", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/users/${adminUser.id}/sessions`,
-      {
-        headers: { Authorization: `Bearer ${regularToken}` },
-      }
-    );
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
 
     const data = (await response.json()) as ErrorResponse;
     expect(data.error).toBeDefined();

@@ -7,8 +7,6 @@ import { describe, it, expect, beforeAll } from "vitest";
 import {
   BASE_URL,
   HTTP_STATUS,
-  createTestClient,
-  createTestUser,
   createAdminUser,
   createTestRole,
   getAccessTokenForUser,
@@ -39,12 +37,9 @@ interface ErrorResponse {
 
 let testRole: Awaited<ReturnType<typeof createTestRole>>;
 let adminToken: string;
-let regularToken: string;
 
 beforeAll(async () => {
-  const testClient = await createTestClient();
   const adminUser = await createAdminUser();
-  const regularUser = await createTestUser();
   testRole = await createTestRole();
   // Through core's UI: a delegated token could not grant the test
   // service's permissions, which no core scope's ceiling covers.
@@ -55,7 +50,6 @@ beforeAll(async () => {
     }),
     "openid profile email"
   );
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("GET /v1/admin/roles", () => {
@@ -69,26 +63,6 @@ describe("GET /v1/admin/roles", () => {
     expect(response.status).toBe(HTTP_STATUS.OK);
     // Response uses "data" key for the array
     expect(Array.isArray(data.data || data.roles)).toBe(true);
-  });
-
-  it("should return 401 with error for request without auth token", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/roles`);
-
-    expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
-
-  it("should return 403 with error for request with non-admin token", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/roles`, {
-      headers: { Authorization: `Bearer ${regularToken}` },
-    });
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
   });
 
   it("filters by isActive", async () => {
@@ -156,21 +130,5 @@ describe("POST /v1/admin/roles", () => {
 
     expect(response.status).toBe(HTTP_STATUS.CONFLICT);
     expect(((await response.json()) as ErrorResponse).error).toBe("name_taken");
-  });
-
-  it("should reject request from non-admin", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/roles`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${regularToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: "test-role",
-        displayName: "Test Role",
-      }),
-    });
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
   });
 });

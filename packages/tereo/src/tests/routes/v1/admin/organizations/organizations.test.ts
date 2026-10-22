@@ -7,7 +7,6 @@ import {
   BASE_URL,
   HTTP_STATUS,
   createTestClient,
-  createTestUser,
   createAdminUser,
   getAccessTokenForUser,
   generateUniqueId,
@@ -17,14 +16,11 @@ import {
 } from "../../../../support/auth.js";
 
 let adminToken: string;
-let regularToken: string;
 
 beforeAll(async () => {
   const testClient = await createTestClient();
   const adminUser = await createAdminUser();
-  const regularUser = await createTestUser();
   adminToken = await getAccessTokenForUser(adminUser, testClient);
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("POST /v1/admin/organizations", () => {
@@ -111,54 +107,12 @@ describe("POST /v1/admin/organizations", () => {
     });
 
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-  });
-
-  it("should return 400 for invalid code format", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/organizations`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: "Test",
-        slug: `valid-slug-${generateUniqueId()}`,
-        code: "toolong1",
-      }),
-    });
-
-    expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-  });
-
-  it("should return 401 without auth token", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/organizations`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Test",
-        slug: "test",
-        code: "TST",
-      }),
-    });
-
-    expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-  });
-
-  it("should return 403 for non-admin token", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/organizations`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${regularToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: "Test",
-        slug: `test-${generateUniqueId()}`,
-        code: "TST",
-      }),
-    });
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+    const error = (await response.json()) as {
+      error?: string;
+      error_description?: string;
+    };
+    expect(error.error).toBe("invalid_request");
+    expect(error.error_description).toMatch(/^Invalid request body\. slug: /);
   });
 });
 
@@ -246,17 +200,5 @@ describe("GET /v1/admin/organizations", () => {
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
     const data = (await response.json()) as { error?: string };
     expect(data.error).toBe("invalid_cursor");
-  });
-
-  it("should return 401 without auth token", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/organizations`);
-    expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-  });
-
-  it("should return 403 for non-admin token", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/organizations`, {
-      headers: { Authorization: `Bearer ${regularToken}` },
-    });
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
   });
 });

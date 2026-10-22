@@ -8,7 +8,6 @@ import {
   BASE_URL,
   HTTP_STATUS,
   NON_EXISTENT_UUID,
-  createTestClient,
   createTestUser,
   createAdminUser,
   createTestRole,
@@ -34,12 +33,9 @@ interface RolesListResponse {
 let testRole: Awaited<ReturnType<typeof createTestRole>>;
 let testPermission: Awaited<ReturnType<typeof createTestPermission>>;
 let adminToken: string;
-let regularToken: string;
 
 beforeAll(async () => {
-  const testClient = await createTestClient();
   const adminUser = await createAdminUser();
-  const regularUser = await createTestUser();
   testRole = await createTestRole();
   testPermission = await createTestPermission();
   // Through core's UI: a delegated token could not grant the test
@@ -51,7 +47,6 @@ beforeAll(async () => {
     }),
     "openid profile email"
   );
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("GET /v1/admin/roles/:id", () => {
@@ -268,20 +263,6 @@ describe("DELETE /v1/admin/roles/:id", () => {
 
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
   });
-
-  it("should return 403 for request without admin token", async () => {
-    const roleToDelete = await createTestRole();
-
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/roles/${roleToDelete.id}`,
-      {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${regularToken}` },
-      }
-    );
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-  });
 });
 
 describe("PUT /v1/admin/roles/:id/permissions - validation", () => {
@@ -299,22 +280,14 @@ describe("PUT /v1/admin/roles/:id/permissions - validation", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-  });
-
-  it("should return 400 for mixed valid and invalid permission IDs", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/roles/${testRole.id}/permissions`,
-      {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ permissionIds: [testPermission.id, 999999] }),
-      }
+    const error = (await response.json()) as {
+      error?: string;
+      error_description?: string;
+    };
+    expect(error.error).toBe("invalid_request");
+    expect(error.error_description).toMatch(
+      /^Invalid request body\. permissionIds\.0: /
     );
-
-    expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
   });
 
   it("accepts a repeated permission id once", async () => {

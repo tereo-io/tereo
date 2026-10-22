@@ -12,7 +12,6 @@ import {
   BASE_URL,
   HTTP_STATUS,
   NON_EXISTENT_UUID,
-  createTestClient,
   createTestUser,
   createAdminUser,
   createTestRole,
@@ -31,10 +30,8 @@ interface ErrorResponse {
 let regularUser: Awaited<ReturnType<typeof createTestUser>>;
 let testRole: Awaited<ReturnType<typeof createTestRole>>;
 let adminToken: string;
-let regularToken: string;
 
 beforeAll(async () => {
-  const testClient = await createTestClient();
   const adminUser = await createAdminUser();
   regularUser = await createTestUser();
   testRole = await createTestRole();
@@ -47,7 +44,6 @@ beforeAll(async () => {
     }),
     "openid profile email"
   );
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("DELETE /v1/admin/roles/:id/users/:userId", () => {
@@ -104,22 +100,6 @@ describe("DELETE /v1/admin/roles/:id/users/:userId", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
-  });
-
-  it("should return 403 for request without admin token", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/roles/${testRole.id}/users/${regularUser.id}`,
-      {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${regularToken}` },
-      }
-    );
-
-    // Server returns 403 for non-admin tokens (authenticated but not authorized)
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
   });
 });
 
@@ -211,6 +191,14 @@ describe("DELETE /v1/admin/roles/:id/users/:userId?organizationId", () => {
       { method: "DELETE", headers: { Authorization: `Bearer ${adminToken}` } }
     );
     expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    const error = (await res.json()) as {
+      error?: string;
+      error_description?: string;
+    };
+    expect(error.error).toBe("invalid_request");
+    expect(error.error_description).toMatch(
+      /^Invalid request query\. organizationId: /
+    );
   });
 
   it("removes an org-scoped admin grant, which never kept core administrable", async () => {

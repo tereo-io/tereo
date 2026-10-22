@@ -265,7 +265,10 @@ describe("POST /v1/account/password", () => {
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
 
     const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
+    expect(data.error).toBe("invalid_request");
+    expect(data.error_description).toMatch(
+      /^Invalid request body\. newPassword: /
+    );
   });
 
   it("should reject request without auth token with 401 error", async () => {

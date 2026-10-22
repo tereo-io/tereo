@@ -138,6 +138,12 @@ describe("GET and POST /v1/admin/identity-providers/:id/domains", () => {
       domain: "not a domain",
     });
     expect(response.status).toBe(400);
+    const error = (await response.json()) as {
+      error?: string;
+      error_description?: string;
+    };
+    expect(error.error).toBe("invalid_request");
+    expect(error.error_description).toMatch(/^Invalid request body\. domain: /);
   });
 
   it("refuses a domain another provider claims", async () => {

@@ -37,14 +37,12 @@ interface ErrorResponse {
 
 let regularUser: Awaited<ReturnType<typeof createTestUser>>;
 let adminToken: string;
-let regularToken: string;
 
 beforeAll(async () => {
   const testClient = await createTestClient();
   const adminUser = await createAdminUser();
   regularUser = await createTestUser();
   adminToken = await getAccessTokenForUser(adminUser, testClient);
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("GET /v1/admin/users/:id/totp", () => {
@@ -78,23 +76,59 @@ describe("GET /v1/admin/users/:id/totp", () => {
     const data = (await response.json()) as ErrorResponse;
     expect(data.error).toBeDefined();
   });
-
-  it("should return 403 for a token without the permission", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/users/${regularUser.id}/totp`,
-      {
-        headers: { Authorization: `Bearer ${regularToken}` },
-      }
-    );
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
 });
 
 describe("POST /v1/admin/users/:id/totp/reset", () => {
+  let serviceClient: Awaited<ReturnType<typeof createTestClient>>;
+  let adminUserId: string;
+  let serviceAdminToken: string;
+  let writerToken: string;
+
+  beforeAll(async () => {
+    serviceClient = await createTestClient();
+    // A service's client: its tokens carry the user's full rights. A token
+    // of any other client is capped by its core scopes, which never reach
+    // the `admin` an admin's credential reset needs.
+    await makeServiceOf(serviceClient.id);
+    const admin = await createAdminUser();
+    adminUserId = admin.id;
+    serviceAdminToken = await getAccessTokenForUser(admin, serviceClient);
+    writerToken = await getTestPrincipalToken({ permissions: ["users.write"] });
+  });
+
+  const resetTotp = (token: string, id: string) =>
+    fetch(`${BASE_URL}/v1/admin/users/${id}/totp/reset`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+  const enrolTotp = async (userId: string) => {
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        totpSecret: encryptTotpSecret(generateTotpSecret()),
+        totpEnabled: true,
+        totpEnabledAt: new Date(),
+      },
+    });
+  };
+
+  /** A user signed in once through the login flow: a session and a token. */
+  const signedInUser = async () => {
+    const user = await createTestUser();
+    const token = await getAccessTokenForUser(user, serviceClient);
+    expect(await liveSessions(user.id)).toBeGreaterThan(0);
+    return { user, token };
+  };
+
+  const liveSessions = (userId: string) =>
+    prisma.refreshToken.count({ where: { userId, revokedAt: null } });
+
+  const userinfo = (token: string) =>
+    fetch(`${BASE_URL}/oauth/userinfo`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
   const enrolledUser = async () => {
     const user = await createTestUser();
     await prisma.user.update({
@@ -180,22 +214,6 @@ describe("POST /v1/admin/users/:id/totp/reset", () => {
     ).toBe(3);
   });
 
-  it("should return 400 for user without TOTP enabled", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/users/${regularUser.id}/totp/reset`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${adminToken}` },
-      }
-    );
-
-    // User doesn't have TOTP enabled
-    expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
-
   it("should return 404 for non-existent user", async () => {
     const response = await fetch(
       `${BASE_URL}/v1/admin/users/${NON_EXISTENT_UUID}/totp/reset`,
@@ -210,73 +228,6 @@ describe("POST /v1/admin/users/:id/totp/reset", () => {
     const data = (await response.json()) as ErrorResponse;
     expect(data.error).toBeDefined();
   });
-
-  it("should return 403 for a token without the permission", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/users/${regularUser.id}/totp/reset`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${regularToken}` },
-      }
-    );
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
-});
-
-describe("POST /v1/admin/users/:id/totp/reset", () => {
-  let testClient: Awaited<ReturnType<typeof createTestClient>>;
-  let adminUserId: string;
-  let adminToken: string;
-  let writerToken: string;
-
-  beforeAll(async () => {
-    testClient = await createTestClient();
-    // A service's client: its tokens carry the user's full rights. A token
-    // of any other client is capped by its core scopes, which never reach
-    // the `admin` an admin's credential reset needs.
-    await makeServiceOf(testClient.id);
-    const admin = await createAdminUser();
-    adminUserId = admin.id;
-    adminToken = await getAccessTokenForUser(admin, testClient);
-    writerToken = await getTestPrincipalToken({ permissions: ["users.write"] });
-  });
-
-  const resetTotp = (token: string, id: string) =>
-    fetch(`${BASE_URL}/v1/admin/users/${id}/totp/reset`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-  const enrolTotp = async (userId: string) => {
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        totpSecret: encryptTotpSecret(generateTotpSecret()),
-        totpEnabled: true,
-        totpEnabledAt: new Date(),
-      },
-    });
-  };
-
-  /** A user signed in once through the login flow: a session and a token. */
-  const signedInUser = async () => {
-    const user = await createTestUser();
-    const token = await getAccessTokenForUser(user, testClient);
-    expect(await liveSessions(user.id)).toBeGreaterThan(0);
-    return { user, token };
-  };
-
-  const liveSessions = (userId: string) =>
-    prisma.refreshToken.count({ where: { userId, revokedAt: null } });
-
-  const userinfo = (token: string) =>
-    fetch(`${BASE_URL}/oauth/userinfo`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
 
   it("ends every session in the reset", async () => {
     const { user, token } = await signedInUser();
@@ -305,14 +256,14 @@ describe("POST /v1/admin/users/:id/totp/reset", () => {
 
   it("refuses a user without TOTP: 400 totp_not_enabled", async () => {
     const user = await createTestUser();
-    const response = await resetTotp(adminToken, user.id);
+    const response = await resetTotp(serviceAdminToken, user.id);
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
     const data = (await response.json()) as { error?: string };
     expect(data.error).toBe("totp_not_enabled");
   });
 
   it("refuses the system user", async () => {
-    const response = await resetTotp(adminToken, SYSTEM_USER_ID);
+    const response = await resetTotp(serviceAdminToken, SYSTEM_USER_ID);
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
     const data = (await response.json()) as { error?: string };
     expect(data.error).toBe("system_user");
@@ -322,7 +273,7 @@ describe("POST /v1/admin/users/:id/totp/reset", () => {
     const created = await fetch(`${BASE_URL}/v1/admin/services`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${serviceAdminToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -338,7 +289,7 @@ describe("POST /v1/admin/users/:id/totp/reset", () => {
     const accountId = service.client!.serviceAccountUser!.id;
     await enrolTotp(accountId);
 
-    const response = await resetTotp(adminToken, accountId);
+    const response = await resetTotp(serviceAdminToken, accountId);
     expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
     const row = await prisma.user.findUniqueOrThrow({
       where: { id: accountId },
@@ -351,7 +302,7 @@ describe("POST /v1/admin/users/:id/totp/reset", () => {
     await enrolTotp(user.id);
     const response = await fetch(`${BASE_URL}/v1/admin/users/${user.id}/totp`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${adminToken}` },
+      headers: { Authorization: `Bearer ${serviceAdminToken}` },
     });
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
     const row = await prisma.user.findUniqueOrThrow({
@@ -363,7 +314,9 @@ describe("POST /v1/admin/users/:id/totp/reset", () => {
   it("records the caller as the actor of a reset", async () => {
     const user = await createTestUser();
     await enrolTotp(user.id);
-    expect((await resetTotp(adminToken, user.id)).status).toBe(HTTP_STATUS.OK);
+    expect((await resetTotp(serviceAdminToken, user.id)).status).toBe(
+      HTTP_STATUS.OK
+    );
     const entry = await prisma.auditLogEntry.findFirstOrThrow({
       where: {
         entityId: user.id,

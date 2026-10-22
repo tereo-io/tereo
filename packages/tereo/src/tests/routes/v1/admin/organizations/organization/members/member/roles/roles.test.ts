@@ -185,6 +185,14 @@ describe("PUT /v1/admin/organizations/:id/members/:userId/roles", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    const error = (await response.json()) as {
+      error?: string;
+      error_description?: string;
+    };
+    expect(error.error).toBe("invalid_request");
+    expect(error.error_description).toMatch(
+      /^Invalid request body\. roleIds\.0: /
+    );
   });
 
   it("should return 400 unknown_role for a role id that names no role", async () => {

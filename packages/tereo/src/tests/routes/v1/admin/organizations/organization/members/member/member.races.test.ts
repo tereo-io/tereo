@@ -45,7 +45,7 @@ beforeAll(async () => {
   adminToken = await getTestPrincipalToken({ permissions: ["admin"] });
 });
 
-describe("PATCH and DELETE /v1/v1/admin/organizations/:id/members/:userId", () => {
+describe("PATCH and DELETE /v1/admin/organizations/:id/members/:userId", () => {
   const setup = async () => {
     const org = await createTestOrganization(adminToken);
     const owner = await createTestUser();
@@ -134,7 +134,7 @@ describe("PATCH and DELETE /v1/v1/admin/organizations/:id/members/:userId", () =
   }, 120_000);
 });
 
-describe("DELETE /v1/v1/admin/organizations/:id/members/:userId", () => {
+describe("DELETE /v1/admin/organizations/:id/members/:userId", () => {
   let adminToken: string;
 
   beforeAll(async () => {

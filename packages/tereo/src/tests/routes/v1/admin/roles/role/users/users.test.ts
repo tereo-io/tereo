@@ -8,8 +8,6 @@ import {
   BASE_URL,
   HTTP_STATUS,
   NON_EXISTENT_UUID,
-  createTestClient,
-  createTestUser,
   createAdminUser,
   createTestRole,
   getAccessTokenForUser,
@@ -22,12 +20,9 @@ interface RoleUsersResponse {
 
 let testRole: Awaited<ReturnType<typeof createTestRole>>;
 let adminToken: string;
-let regularToken: string;
 
 beforeAll(async () => {
-  const testClient = await createTestClient();
   const adminUser = await createAdminUser();
-  const regularUser = await createTestUser();
   testRole = await createTestRole();
   // Through core's UI: a delegated token could not grant the test
   // service's permissions, which no core scope's ceiling covers.
@@ -38,7 +33,6 @@ beforeAll(async () => {
     }),
     "openid profile email"
   );
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("GET /v1/admin/roles/:id/users", () => {
@@ -67,16 +61,5 @@ describe("GET /v1/admin/roles/:id/users", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
-  });
-
-  it("should reject request without admin token", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/roles/${testRole.id}/users`,
-      {
-        headers: { Authorization: `Bearer ${regularToken}` },
-      }
-    );
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
   });
 });

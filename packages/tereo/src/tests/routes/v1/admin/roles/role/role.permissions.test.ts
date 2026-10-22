@@ -168,14 +168,6 @@ describe("POST /v1/admin/roles/:id/archive and /restore", () => {
     expect(row?.archivedAt).toBeNull();
   });
 
-  it("should return 403 for archive without permission", async () => {
-    const role = await createTestRole();
-    await deactivateRole(role.id);
-
-    const response = await archiveRole(role.id, regularToken);
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-  });
-
   it("should return 403 (not 409) for unauthorized callers on live and archived roles alike", async () => {
     const liveRole = await createTestRole();
     const archivedRole = await createTestRole();

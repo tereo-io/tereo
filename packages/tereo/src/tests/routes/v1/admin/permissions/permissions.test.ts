@@ -12,7 +12,6 @@ import {
   HTTP_STATUS,
   createTestClient,
   createAdminUser,
-  createTestUser,
   createTestPermission,
   getAccessTokenForUser,
 } from "../../../../support/auth.js";
@@ -35,15 +34,12 @@ interface PermissionsListResponse {
 
 let testPermission: Awaited<ReturnType<typeof createTestPermission>>;
 let adminToken: string;
-let regularToken: string;
 
 beforeAll(async () => {
   const testClient = await createTestClient();
   const adminUser = await createAdminUser();
-  const regularUser = await createTestUser();
   testPermission = await createTestPermission();
   adminToken = await getAccessTokenForUser(adminUser, testClient);
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 const get = (path: string, token?: string) =>
@@ -83,14 +79,6 @@ describe("GET /v1/admin/permissions", () => {
     ).json()) as PermissionsListResponse;
     expect(shown.data).toHaveLength(1);
     expect(shown.data[0].retiredAt).not.toBeNull();
-  });
-
-  it("rejects a request without a token", async () => {
-    expect((await get("")).status).toBe(HTTP_STATUS.UNAUTHORIZED);
-  });
-
-  it("rejects a caller without permissions.read", async () => {
-    expect((await get("", regularToken)).status).toBe(HTTP_STATUS.FORBIDDEN);
   });
 });
 

@@ -106,6 +106,14 @@ describe("PATCH /v1/admin/organizations/:id/members/:userId", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    const error = (await response.json()) as {
+      error?: string;
+      error_description?: string;
+    };
+    expect(error.error).toBe("invalid_request");
+    expect(error.error_description).toMatch(
+      /^Invalid request body\. memberRole: /
+    );
   });
 
   it("should return 409 when demoting the last owner", async () => {

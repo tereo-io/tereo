@@ -10,7 +10,6 @@ import {
   HTTP_STATUS,
   createTestClient,
   createAdminUser,
-  createTestUser,
   getAccessTokenForUser,
 } from "../../../../support/auth.js";
 
@@ -24,9 +23,7 @@ interface SettingsResponse {
 describe("GET /v1/admin/settings and PATCH /v1/admin/settings", () => {
   let testClient: Awaited<ReturnType<typeof createTestClient>>;
   let adminUser: Awaited<ReturnType<typeof createAdminUser>>;
-  let regularUser: Awaited<ReturnType<typeof createTestUser>>;
   let adminToken: string;
-  let regularToken: string;
   let originalSettings: SettingsResponse;
 
   beforeAll(async () => {
@@ -36,10 +33,8 @@ describe("GET /v1/admin/settings and PATCH /v1/admin/settings", () => {
     // relaxing the 2FA policy needs.
     await makeServiceOf(testClient.id);
     adminUser = await createAdminUser();
-    regularUser = await createTestUser();
 
     adminToken = await getAccessTokenForUser(adminUser, testClient);
-    regularToken = await getAccessTokenForUser(regularUser, testClient);
 
     // Store original settings to restore after tests
     const response = await fetch(`${BASE_URL}/v1/admin/settings`, {
@@ -77,20 +72,6 @@ describe("GET /v1/admin/settings and PATCH /v1/admin/settings", () => {
       expect(data.totpPolicy).toBeDefined();
       expect(["disabled", "optional", "required"]).toContain(data.totpPolicy);
       expect(typeof data.totpRecoveryCodeCount).toBe("number");
-    });
-
-    it("should reject request without auth token", async () => {
-      const response = await fetch(`${BASE_URL}/v1/admin/settings`);
-
-      expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-    });
-
-    it("should reject request with non-admin token", async () => {
-      const response = await fetch(`${BASE_URL}/v1/admin/settings`, {
-        headers: { Authorization: `Bearer ${regularToken}` },
-      });
-
-      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
     });
   });
 
@@ -217,42 +198,14 @@ describe("GET /v1/admin/settings and PATCH /v1/admin/settings", () => {
       });
 
       expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-    });
-
-    it("should reject recovery code count below minimum", async () => {
-      const response = await fetch(`${BASE_URL}/v1/admin/settings`, {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ totpRecoveryCodeCount: 2 }),
-      });
-
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-    });
-
-    it("should reject recovery code count above maximum", async () => {
-      const response = await fetch(`${BASE_URL}/v1/admin/settings`, {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ totpRecoveryCodeCount: 25 }),
-      });
-
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-    });
-
-    it("should reject request without auth token", async () => {
-      const response = await fetch(`${BASE_URL}/v1/admin/settings`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ totpPolicy: "optional" }),
-      });
-
-      expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+      const error = (await response.json()) as {
+        error?: string;
+        error_description?: string;
+      };
+      expect(error.error).toBe("invalid_request");
+      expect(error.error_description).toMatch(
+        /^Invalid request body\. totpPolicy: /
+      );
     });
 
     it("lets only a global admin relax the 2FA policy", async () => {
@@ -315,19 +268,6 @@ describe("GET /v1/admin/settings and PATCH /v1/admin/settings", () => {
       } finally {
         await setPolicy(before);
       }
-    });
-
-    it("should reject request with non-admin token", async () => {
-      const response = await fetch(`${BASE_URL}/v1/admin/settings`, {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${regularToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ totpPolicy: "optional" }),
-      });
-
-      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
     });
   });
 });

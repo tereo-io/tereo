@@ -281,5 +281,13 @@ describe("GET /v1/account/organizations", () => {
     const token = await loginToken(user, "openid core:organizations");
     const res = await call(token, "/v1/account/organizations?search=a");
     expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    const error = (await res.json()) as {
+      error?: string;
+      error_description?: string;
+    };
+    expect(error.error).toBe("invalid_request");
+    expect(error.error_description).toMatch(
+      /^Invalid request query\. search: /
+    );
   });
 });

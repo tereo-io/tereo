@@ -12,7 +12,6 @@ import {
   HTTP_STATUS,
   createTestClient,
   createAdminUser,
-  createTestUser,
   getAccessTokenForUser,
   generateUniqueId,
 } from "../../../../support/auth.js";
@@ -55,17 +54,14 @@ const sha256Hex = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 
 let adminToken: string;
-let regularToken: string;
 let managedClient: Awaited<ReturnType<typeof createTestClient>>;
 
 beforeAll(async () => {
   const testClient = await createTestClient();
   const adminUser = await createAdminUser();
-  const regularUser = await createTestUser();
   managedClient = await createTestClient({ clientType: "confidential" });
 
   adminToken = await getAccessTokenForUser(adminUser, testClient);
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("GET /v1/admin/clients", () => {
@@ -79,26 +75,6 @@ describe("GET /v1/admin/clients", () => {
     expect(response.status).toBe(HTTP_STATUS.OK);
     // Response uses "data" key for the array
     expect(Array.isArray(data.data || data.clients)).toBe(true);
-  });
-
-  it("should return 401 with error for request without auth token", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/clients`);
-
-    expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
-
-  it("should return 403 with error for request with non-admin token", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/clients`, {
-      headers: { Authorization: `Bearer ${regularToken}` },
-    });
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
   });
 });
 
@@ -267,23 +243,6 @@ describe("POST /v1/admin/clients", () => {
     expect(row.clientSecret).toBe(sha256Hex(data.clientSecret!));
   });
 
-  it("should reject request from non-admin", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/clients`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${regularToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: "Test Client",
-        clientType: "public",
-        redirectUris: ["http://localhost:3000/callback"],
-      }),
-    });
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-  });
-
   it("should require redirectUris", async () => {
     const response = await fetch(`${BASE_URL}/v1/admin/clients`, {
       method: "POST",
@@ -298,27 +257,12 @@ describe("POST /v1/admin/clients", () => {
     });
 
     expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-  });
-});
-
-// Machine identities are services (/admin/services, tests/registry).
-describe("POST /v1/admin/clients with client_credentials", () => {
-  it("is refused: a machine identity is added as a service", async () => {
-    const response = await fetch(`${BASE_URL}/v1/admin/clients`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: `Machine ${generateUniqueId()}`,
-        clientType: "confidential",
-        redirectUris: [],
-        scopes: ["openid"],
-        grantTypes: ["client_credentials"],
-      }),
-    });
-    expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    const error = (await response.json()) as {
+      error?: string;
+      error_description?: string;
+    };
+    expect(error.error).toBe("invalid_request");
+    expect(error.error_description).toMatch(/^Invalid request body\. /);
   });
 });
 

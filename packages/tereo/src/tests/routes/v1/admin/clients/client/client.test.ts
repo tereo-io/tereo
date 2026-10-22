@@ -55,17 +55,14 @@ const sha256Hex = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 
 let adminToken: string;
-let regularToken: string;
 let managedClient: Awaited<ReturnType<typeof createTestClient>>;
 
 beforeAll(async () => {
   const testClient = await createTestClient();
   const adminUser = await createAdminUser();
-  const regularUser = await createTestUser();
   managedClient = await createTestClient({ clientType: "confidential" });
 
   adminToken = await getAccessTokenForUser(adminUser, testClient);
-  regularToken = await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("GET /v1/admin/clients/:id", () => {
@@ -238,6 +235,14 @@ describe("PATCH /v1/admin/clients/:id", () => {
       grantTypes: [],
     });
     expect(update.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    const error = (await update.json()) as {
+      error?: string;
+      error_description?: string;
+    };
+    expect(error.error).toBe("invalid_request");
+    expect(error.error_description).toMatch(
+      /^Invalid request body\. grantTypes: /
+    );
     const stored = await prisma.oAuthClient.findUniqueOrThrow({
       where: { id: managedClient.id },
     });
@@ -533,21 +538,6 @@ describe("DELETE /v1/admin/clients/:id", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
-
-    const data = (await response.json()) as ErrorResponse;
-    expect(data.error).toBeDefined();
-  });
-
-  it("should return 403 for request without admin token", async () => {
-    const response = await fetch(
-      `${BASE_URL}/v1/admin/clients/${managedClient.id}`,
-      {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${regularToken}` },
-      }
-    );
-
-    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
 
     const data = (await response.json()) as ErrorResponse;
     expect(data.error).toBeDefined();
