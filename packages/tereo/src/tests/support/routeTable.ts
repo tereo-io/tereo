@@ -43,7 +43,10 @@ export const collectRoutes = async (): Promise<RouteEntry[]> => {
   // this runs at collection time, before setup's beforeAll connects it.
   try {
     getRedisClient();
-  } catch {
+  } catch (err) {
+    if (!(err instanceof Error && /not initialized/.test(err.message))) {
+      throw err;
+    }
     await initializeRedis(env);
   }
 
