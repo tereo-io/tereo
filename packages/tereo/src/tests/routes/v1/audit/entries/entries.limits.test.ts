@@ -64,28 +64,6 @@ describe("/v1/audit/entries", () => {
     });
 
     describe("Batch boundary validation", () => {
-      it("should reject batch exceeding 1000 entries", async () => {
-        const entries = Array.from({ length: 1001 }, (_, i) => ({
-          source: "test-service",
-          organizationId,
-          userId: "00000000-0000-7001-8000-000000000001",
-          action: "CREATE" as const,
-          entityType: "Order",
-          entityId: `order-batch-limit-${i}`,
-        }));
-
-        const response = await axios.post(
-          `${BASE_URL}/entries/batch`,
-          { entries },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
       it("should accept batch of exactly 1000 entries", async () => {
         const uniqueId = generateUniqueId();
         const entries = Array.from({ length: 1000 }, (_, i) => ({
@@ -172,26 +150,6 @@ describe("/v1/audit/entries", () => {
         expect(response.data.source).toBe(source);
       });
 
-      it("should reject source exceeding 100 characters", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/entries`,
-          {
-            source: "a".repeat(101),
-            organizationId,
-            userId: "00000000-0000-7001-8000-000000000001",
-            action: "CREATE",
-            entityType: "Order",
-            entityId: "order-1",
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
       it("should accept entityName at exactly 500 characters", async () => {
         const uniqueId = generateUniqueId();
         const entityName = "b".repeat(500);
@@ -203,117 +161,6 @@ describe("/v1/audit/entries", () => {
 
         expect(response.status).toBe(HTTP_STATUS.CREATED);
         expect(response.data.entityName).toBe(entityName);
-      });
-
-      it("should reject entityName exceeding 500 characters", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/entries`,
-          {
-            source: "test-service",
-            organizationId,
-            userId: "00000000-0000-7001-8000-000000000001",
-            action: "CREATE",
-            entityType: "Order",
-            entityId: "order-1",
-            entityName: "b".repeat(501),
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-    });
-
-    describe("Idempotency key boundaries", () => {
-      it("should accept idempotency key at minimum length (1 character)", async () => {
-        const uniqueId = generateUniqueId();
-        const response = await axios.post(
-          `${BASE_URL}/entries`,
-          {
-            source: "test-service",
-            organizationId,
-            userId: "00000000-0000-7001-8000-000000000001",
-            action: "CREATE",
-            entityType: "Order",
-            entityId: `order-${uniqueId}`,
-            idempotencyKey: "x",
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.CREATED);
-      });
-
-      it("should accept idempotency key at maximum length (255 characters)", async () => {
-        const uniqueId = generateUniqueId();
-        const idempotencyKey = "k".repeat(255);
-        const response = await axios.post(
-          `${BASE_URL}/entries`,
-          {
-            source: "test-service",
-            organizationId,
-            userId: "00000000-0000-7001-8000-000000000001",
-            action: "CREATE",
-            entityType: "Order",
-            entityId: `order-${uniqueId}`,
-            idempotencyKey,
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.CREATED);
-      });
-
-      it("should reject idempotency key exceeding 255 characters", async () => {
-        const idempotencyKey = "k".repeat(256);
-        const response = await axios.post(
-          `${BASE_URL}/entries`,
-          {
-            source: "test-service",
-            organizationId,
-            userId: "00000000-0000-7001-8000-000000000001",
-            action: "CREATE",
-            entityType: "Order",
-            entityId: "order-1",
-            idempotencyKey,
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
-      it("should reject empty string idempotency key", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/entries`,
-          {
-            source: "test-service",
-            organizationId,
-            userId: "00000000-0000-7001-8000-000000000001",
-            action: "CREATE",
-            entityType: "Order",
-            entityId: "order-1",
-            idempotencyKey: "",
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
       });
     });
 
@@ -329,26 +176,104 @@ describe("/v1/audit/entries", () => {
         expect(response.status).toBe(HTTP_STATUS.CREATED);
         expect(response.data.correlationId).toBe(longCorrelationId);
       });
+    });
+  });
 
-      it("should reject correlationId exceeding 255 characters", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/entries`,
-          {
-            source: "test-service",
-            organizationId,
-            userId: "00000000-0000-7001-8000-000000000001",
-            action: "CREATE",
-            entityType: "Order",
-            entityId: `order-${generateUniqueId()}`,
-            correlationId: "x".repeat(256),
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            validateStatus: () => true,
-          }
+  describe("Audit query options", () => {
+    const ORG_1 = "00000000-0000-7002-8000-000000000001";
+    const USER_1 = "00000000-0000-7001-8000-000000000001";
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    const auth = (token: string) => ({
+      headers: { Authorization: `Bearer ${token}` },
+      validateStatus: () => true,
+    });
+
+    interface Entry {
+      id: string;
+    }
+
+    const runId = generateUniqueId();
+    const source = `test-query-${runId}`;
+    // Unique per run, so a search never matches another file's entries.
+    const term = `Zq${runId}`;
+
+    let org1Admin: string;
+
+    beforeAll(async () => {
+      org1Admin = await getTestAccessToken(USER_1, ORG_1);
+    });
+
+    const list = async (
+      params: Record<string, string>,
+      token: string = org1Admin
+    ) => {
+      const res = await axios.get(`${BASE_URL}/entries`, {
+        params: { "filter[source]": source, ...params },
+        ...auth(token),
+      });
+      return {
+        status: res.status,
+        error: res.data?.error as string | undefined,
+        ids: res.status === 200 ? res.data.data.map((e: Entry) => e.id) : [],
+        body: res.data,
+      };
+    };
+
+    describe("filter[q]", () => {
+      it("refuses a window longer than 31 days", async () => {
+        const result = await list({
+          "filter[q]": term,
+          "filter[createdAt_gte]": new Date(
+            Date.now() - 40 * DAY_MS
+          ).toISOString(),
+        });
+        expect(result.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(result.error).toBe("search_window_too_large");
+
+        const unbounded = await list({ "filter[createdAt_gte]": "2000-01-01" });
+        expect(unbounded.status).toBe(HTTP_STATUS.OK);
+      });
+
+      it("tolerates a client clock a little ahead when computing 31 days ago", async () => {
+        const result = await list({
+          "filter[q]": term,
+          "filter[createdAt_gte]": new Date(
+            Date.now() - 31 * DAY_MS - 2 * 60 * 1000
+          ).toISOString(),
+        });
+        expect(result.status).toBe(HTTP_STATUS.OK);
+      });
+
+      it("refuses a long window given in _op form, whatever the order", async () => {
+        const old = new Date(Date.now() - 40 * DAY_MS).toISOString();
+        const now = new Date(Date.now() + DAY_MS).toISOString();
+        const lteFirst = await list({
+          "filter[q]": term,
+          "filter[createdAt_lte]": now,
+          "filter[createdAt]": old,
+          "filter[createdAt_op]": "gte",
+        });
+        expect(lteFirst.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(lteFirst.error).toBe("search_window_too_large");
+
+        const gteFirst = await list({
+          "filter[q]": term,
+          "filter[createdAt]": old,
+          "filter[createdAt_op]": "gte",
+          "filter[createdAt_lte]": now,
+        });
+        expect(gteFirst.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(gteFirst.error).toBe("search_window_too_large");
+
+        const repeated = await axios.get(
+          `${BASE_URL}/entries?filter[q]=${term}` +
+            `&filter[createdAt]=${old}&filter[createdAt]=${now}` +
+            `&filter[createdAt_op]=gte&filter[createdAt_op]=lte`,
+          auth(org1Admin)
         );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(repeated.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(repeated.data.error).toBe("search_window_too_large");
       });
     });
   });

@@ -10,6 +10,9 @@ export function loadUnitTestEnv(): Record<string, string> {
   return {
     NODE_ENV: "test",
     LOG_LEVEL: "silent",
+    // utils/logger.ts, which route schemas reach through utils/errors.ts,
+    // throws at import without it; preload sets it from env.ts in the server.
+    SERVICE_NAME: "tereo",
     // Nothing listens on port 1: a unit test that reaches for the database
     // or Redis fails at once instead of touching a real one.
     DATABASE_URL: "postgresql://unit:unit@127.0.0.1:1/unit",

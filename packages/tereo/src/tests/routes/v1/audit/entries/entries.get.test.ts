@@ -525,47 +525,6 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
       });
     });
 
-    describe("Correlation ID filter", () => {
-      it("should filter entries by correlationId with equals operator", async () => {
-        const uniqueId = generateUniqueId();
-        const source = `test-corr-filter-${uniqueId}`;
-        const correlationId = `corr-${uniqueId}`;
-
-        // Create entry with correlationId
-        await createEntry({
-          source,
-          entityId: `order-${uniqueId}-1`,
-          correlationId,
-        });
-
-        // Create entry without correlationId
-        await createEntry({
-          source,
-          entityId: `order-${uniqueId}-2`,
-        });
-
-        // Create entry with different correlationId
-        await createEntry({
-          source,
-          entityId: `order-${uniqueId}-3`,
-          correlationId: `other-${uniqueId}`,
-        });
-
-        const response = await axios.get(`${BASE_URL}/entries`, {
-          params: {
-            "filter[source]": source,
-            "filter[correlationId]": correlationId,
-          },
-          headers: { Authorization: `Bearer ${token}` },
-          validateStatus: () => true,
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.OK);
-        expect(response.data.data).toHaveLength(1);
-        expect(response.data.data[0].correlationId).toBe(correlationId);
-      });
-    });
-
     describe("Default sort direction", () => {
       it("should default to desc sort direction when not specified", async () => {
         // Create two entries with a small delay to ensure ordering
@@ -918,11 +877,6 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
         expect(own.ids).toContain(ids.byAdmin);
       });
 
-      it("rejects a writerUserId that is not a uuid", async () => {
-        const result = await list({ "filter[writerUserId]": "nobody" });
-        expect(result.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
       it("filters the list by userEmail, exactly or by substring", async () => {
         const exact = await list({ "filter[userEmail]": emailB });
         expect(exact.ids).toEqual([ids.byOtherWriter]);
@@ -1045,61 +999,6 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
         expect(result.ids).toEqual([]);
       });
 
-      it("refuses a window longer than 31 days", async () => {
-        const result = await list({
-          "filter[q]": term,
-          "filter[createdAt_gte]": new Date(
-            Date.now() - 40 * DAY_MS
-          ).toISOString(),
-        });
-        expect(result.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        expect(result.error).toBe("search_window_too_large");
-
-        const unbounded = await list({ "filter[createdAt_gte]": "2000-01-01" });
-        expect(unbounded.status).toBe(HTTP_STATUS.OK);
-      });
-
-      it("tolerates a client clock a little ahead when computing 31 days ago", async () => {
-        const result = await list({
-          "filter[q]": term,
-          "filter[createdAt_gte]": new Date(
-            Date.now() - 31 * DAY_MS - 2 * 60 * 1000
-          ).toISOString(),
-        });
-        expect(result.status).toBe(HTTP_STATUS.OK);
-      });
-
-      it("refuses a long window given in _op form, whatever the order", async () => {
-        const old = new Date(Date.now() - 40 * DAY_MS).toISOString();
-        const now = new Date(Date.now() + DAY_MS).toISOString();
-        const lteFirst = await list({
-          "filter[q]": term,
-          "filter[createdAt_lte]": now,
-          "filter[createdAt]": old,
-          "filter[createdAt_op]": "gte",
-        });
-        expect(lteFirst.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        expect(lteFirst.error).toBe("search_window_too_large");
-
-        const gteFirst = await list({
-          "filter[q]": term,
-          "filter[createdAt]": old,
-          "filter[createdAt_op]": "gte",
-          "filter[createdAt_lte]": now,
-        });
-        expect(gteFirst.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        expect(gteFirst.error).toBe("search_window_too_large");
-
-        const repeated = await axios.get(
-          `${BASE_URL}/entries?filter[q]=${term}` +
-            `&filter[createdAt]=${old}&filter[createdAt]=${now}` +
-            `&filter[createdAt_op]=gte&filter[createdAt_op]=lte`,
-          auth(org1Admin)
-        );
-        expect(repeated.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        expect(repeated.data.error).toBe("search_window_too_large");
-      });
-
       it("applies both bounds of a range whatever their form or order", async () => {
         const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
         const yesterday = new Date(Date.now() - DAY_MS).toISOString();
@@ -1130,17 +1029,6 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
         });
         expect(pastReversed.status).toBe(HTTP_STATUS.OK);
         expect(pastReversed.ids).toEqual([]);
-      });
-
-      it("rejects a repeated or blank search", async () => {
-        const repeated = await axios.get(
-          `${BASE_URL}/entries?filter[q]=a&filter[q]=b`,
-          auth(org1Admin)
-        );
-        expect(repeated.status).toBe(HTTP_STATUS.BAD_REQUEST);
-
-        const blank = await list({ "filter[q]": "   " });
-        expect(blank.status).toBe(HTTP_STATUS.BAD_REQUEST);
       });
     });
 

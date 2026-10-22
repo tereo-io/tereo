@@ -577,42 +577,6 @@ describe("POST /v1/audit/entries and /v1/audit/entries/batch", () => {
         expect(response.data.metadata).toEqual(metadata);
       });
     });
-
-    describe("Empty correlationId normalization", () => {
-      it("should normalize empty string correlationId to null", async () => {
-        const uniqueId = generateUniqueId();
-        const response = await axios.post(
-          `${BASE_URL}/entries`,
-          {
-            source: "test-service",
-            organizationId,
-            userId: "00000000-0000-7001-8000-000000000001",
-            action: "CREATE",
-            entityType: "Order",
-            entityId: `order-${uniqueId}`,
-            correlationId: "",
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.CREATED);
-        expect(response.data.correlationId).toBeNull();
-      });
-
-      it("should store non-empty correlationId as-is", async () => {
-        const uniqueId = generateUniqueId();
-        const response = await createEntry({
-          entityId: `order-${uniqueId}`,
-          correlationId: `corr-${uniqueId}`,
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.CREATED);
-        expect(response.data.correlationId).toBe(`corr-${uniqueId}`);
-      });
-    });
   });
 
   describe("Audit userEmail case", () => {

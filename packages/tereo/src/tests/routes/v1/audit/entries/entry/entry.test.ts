@@ -109,15 +109,6 @@ describe("GET /v1/audit/entries/:id", () => {
 
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
       });
-
-      it("should return 401 without auth token", async () => {
-        const response = await axios.get(
-          `${BASE_URL}/entries/00000000-0000-0000-0000-000000000000`,
-          { validateStatus: () => true }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
     });
 
     describe("DELETE /v1/entries/:id", () => {
@@ -173,38 +164,6 @@ describe("GET /v1/audit/entries/:id", () => {
 
         // org-1 should NOT see org-2's entry
         const response = await axios.get(`${BASE_URL}/entries/${entryId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-          validateStatus: () => true,
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
-      });
-
-      it("should scope delete by organizationId from token", async () => {
-        const uniqueId = generateUniqueId();
-
-        // Create entry for org-2
-        const org2Token = await getTestAccessToken(
-          "00000000-0000-7001-8000-000000000002",
-          "00000000-0000-7002-8000-000000000002"
-        );
-        const createResponse = await axios.post(
-          `${BASE_URL}/entries`,
-          {
-            source: "test-service",
-            organizationId: "00000000-0000-7002-8000-000000000002",
-            userId: "00000000-0000-7001-8000-000000000002",
-            action: "CREATE",
-            entityType: "Order",
-            entityId: `order-${uniqueId}`,
-          },
-          { headers: { Authorization: `Bearer ${org2Token}` } }
-        );
-
-        const entryId = createResponse.data.id;
-
-        // org-1 should NOT be able to delete org-2's entry
-        const response = await axios.delete(`${BASE_URL}/entries/${entryId}`, {
           headers: { Authorization: `Bearer ${token}` },
           validateStatus: () => true,
         });

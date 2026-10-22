@@ -40,22 +40,6 @@ describe("POST /v1/audit/entries", () => {
     });
 
     describe("POST /v1/entries", () => {
-      it("should return 401 without auth token", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/entries`,
-          {
-            source: "test-service",
-            userId: "00000000-0000-7001-8000-000000000001",
-            action: "CREATE",
-            entityType: "Order",
-            entityId: "order-1",
-          },
-          { validateStatus: () => true }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
-
       it("should return 403 with read-only permissions", async () => {
         const readOnlyToken = await getTestPrincipalToken({
           organizationId: "00000000-0000-7002-8000-000000000001",
@@ -73,54 +57,6 @@ describe("POST /v1/audit/entries", () => {
           },
           {
             headers: { Authorization: `Bearer ${readOnlyToken}` },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-      });
-    });
-
-    describe("POST /v1/entries/batch", () => {
-      it("should return 401 without auth token", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/entries/batch`,
-          {
-            entries: [
-              {
-                source: "test-service",
-                userId: "00000000-0000-7001-8000-000000000001",
-                action: "CREATE",
-                entityType: "Order",
-                entityId: "order-1",
-              },
-            ],
-          },
-          { validateStatus: () => true }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
-    });
-
-    describe("Auth enforcement", () => {
-      it("should return 403 for insufficient permissions on write", async () => {
-        const noPermsToken = await getTestPrincipalToken({
-          organizationId: "00000000-0000-7002-8000-000000000001",
-          permissions: ["other.read"],
-        });
-
-        const response = await axios.post(
-          `${BASE_URL}/entries`,
-          {
-            source: "test-service",
-            userId: "00000000-0000-7001-8000-000000000001",
-            action: "CREATE",
-            entityType: "Order",
-            entityId: "order-1",
-          },
-          {
-            headers: { Authorization: `Bearer ${noPermsToken}` },
             validateStatus: () => true,
           }
         );

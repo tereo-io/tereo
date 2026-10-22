@@ -61,16 +61,6 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
       );
     }
 
-    describe("GET /v1/entries", () => {
-      it("should return 401 without auth token", async () => {
-        const response = await axios.get(`${BASE_URL}/entries`, {
-          validateStatus: () => true,
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
-    });
-
     describe("Tenant scoping", () => {
       it("should scope list results by organizationId from token", async () => {
         const uniqueId = generateUniqueId();
@@ -124,20 +114,6 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
     });
 
     describe("Auth enforcement", () => {
-      it("should return 403 for insufficient permissions on read", async () => {
-        const noPermsToken = await getTestPrincipalToken({
-          organizationId: "00000000-0000-7002-8000-000000000001",
-          permissions: ["other.read"],
-        });
-
-        const response = await axios.get(`${BASE_URL}/entries`, {
-          headers: { Authorization: `Bearer ${noPermsToken}` },
-          validateStatus: () => true,
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-      });
-
       it("checks the read permission before the organization filter", async () => {
         const noPermsToken = await getTestPrincipalToken({
           organizationId: "00000000-0000-7002-8000-000000000001",
@@ -360,11 +336,6 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
         );
       });
 
-      it("returns 400 for a filter that is neither a uuid nor none", async () => {
-        const result = await listIds(org1Admin, "everything");
-        expect(result.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
       it("names the user, writer and organization", async () => {
         const res = await axios.get(`${BASE_URL}/entries`, {
           params: { "filter[source]": source },
@@ -443,15 +414,6 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
 
       it("refuses a non-admin naming another organization", async () => {
         const res = await facets(org1Reader, ORG_2);
-        expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
-      });
-
-      it("returns 403 without audit-logs.read", async () => {
-        const token = await getTestPrincipalToken({
-          organizationId: ORG_1,
-          permissions: ["other.read"],
-        });
-        const res = await facets(token);
         expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
       });
     });

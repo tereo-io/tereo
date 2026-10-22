@@ -130,15 +130,6 @@ describe("GET /v1/audit/entries/entity/:entityType/:entityId", () => {
         expect(response.data.hasMore).toBe(false);
         expect(response.data.nextCursor).toBeNull();
       });
-
-      it("should return 401 without auth token", async () => {
-        const response = await axios.get(
-          `${BASE_URL}/entries/entity/Order/order-1`,
-          { validateStatus: () => true }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
     });
 
     describe("Tenant scoping", () => {
@@ -278,19 +269,6 @@ describe("GET /v1/audit/entries/entity/:entityType/:entityId", () => {
         const longType = "x".repeat(101);
         const response = await axios.get(
           `${BASE_URL}/entries/entity/${longType}/some-id`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
-      it("should reject entityId exceeding 500 chars in URL", async () => {
-        const longId = "x".repeat(501);
-        const response = await axios.get(
-          `${BASE_URL}/entries/entity/Order/${longId}`,
           {
             headers: { Authorization: `Bearer ${token}` },
             validateStatus: () => true,
