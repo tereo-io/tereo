@@ -92,9 +92,10 @@ describe("/v1/admin/notifications/connections/:id", () => {
       expect(
         (await api("GET", `/connections/${randomUUID()}`, readToken)).status
       ).toBe(404);
-      expect(
-        (await api("GET", "/connections/not-a-uuid", readToken)).status
-      ).toBe(400);
+      const bad = await api("GET", "/connections/not-a-uuid", readToken);
+      expect(bad.status).toBe(400);
+      expect(bad.body.error).toBe("invalid_request");
+      expect(bad.body.error_description).toEqual(expect.any(String));
     });
 
     it("keeps secrets when PATCH omits them, replaces them when given", async () => {
@@ -228,6 +229,8 @@ describe("/v1/admin/notifications/connections/:id", () => {
         slug: "other",
       });
       expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_request");
+      expect(res.body.error_description).toEqual(expect.any(String));
     });
   });
 
@@ -405,13 +408,12 @@ describe("/v1/admin/notifications/connections/:id", () => {
 
     it("rejects an invalid recipient with 400 and an unknown id with 404", async () => {
       const c = await create({ settings: settings(smtp.port) });
-      expect(
-        (
-          await api("POST", `/connections/${c.id}/test`, adminToken, {
-            to: "nope",
-          })
-        ).status
-      ).toBe(400);
+      const bad = await api("POST", `/connections/${c.id}/test`, adminToken, {
+        to: "nope",
+      });
+      expect(bad.status).toBe(400);
+      expect(bad.body.error).toBe("invalid_request");
+      expect(bad.body.error_description).toEqual(expect.any(String));
       expect(
         (
           await api("POST", `/connections/${randomUUID()}/test`, adminToken, {

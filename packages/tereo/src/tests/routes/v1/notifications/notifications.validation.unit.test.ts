@@ -26,6 +26,9 @@ describe("POST /v1/notifications", () => {
     it("refuses content with no body", () => {
       const result = emailAdapter.contentSchema.safeParse({ subject: "Hi" });
       expect(result.success).toBe(false);
+      expect(result.error?.issues).toMatchObject([
+        { message: "text or html is required" },
+      ]);
     });
 
     it.each(["<", ">", "@", '"'])(

@@ -136,7 +136,10 @@ afterAll(async () => {
 describe("/v1/admin/notifications/:id", () => {
   describe("notifications log", () => {
     it("rejects an id that is not a uuid", async () => {
-      expect((await api("GET", "/not-a-uuid", readToken)).status).toBe(400);
+      const res = await api("GET", "/not-a-uuid", readToken);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_request");
+      expect(res.body.error_description).toEqual(expect.any(String));
     });
 
     it("shows detail with content while kept, deliveries and attachments", async () => {

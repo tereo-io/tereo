@@ -97,6 +97,28 @@ describe("POST /v1/admin/notifications/connections", () => {
       expect(res.body.error).toBe("invalid_secrets");
     });
 
+    it("rejects an unknown channel and a bad slug", async () => {
+      const res = await api(
+        "POST",
+        "/connections",
+        adminToken,
+        payload({ channel: "sms" })
+      );
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_request");
+      expect(res.body.error_description).toEqual(expect.any(String));
+      expect(
+        (
+          await api(
+            "POST",
+            "/connections",
+            adminToken,
+            payload({ slug: "Bad Slug" })
+          )
+        ).status
+      ).toBe(400);
+    });
+
     it("seals secrets as kek1 and never returns them", async () => {
       const c = await create({ secrets: { password: "hunter2-secret" } });
       expect(c.hasSecrets).toBe(true);
