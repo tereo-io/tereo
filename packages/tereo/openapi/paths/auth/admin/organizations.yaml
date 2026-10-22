@@ -60,7 +60,8 @@
     summary: Create organization
     description: |
       Creates an organization. A slug or code already used by another
-      organization, archived or not, returns `409`.
+      organization, archived or not, returns `409 slug_taken` or
+      `409 code_taken`.
 
       An audit log entry is created for this action.
       An `auth.organization.created` webhook event is emitted.
@@ -96,7 +97,7 @@
         description: Forbidden - missing organizations.write permission
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: An organization with this slug or code already exists (possibly archived)
+        description: An organization with this slug (`slug_taken`) or code (`code_taken`) already exists (possibly archived)
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -196,7 +197,7 @@
       but not deactivate or reactivate it (`403`). Deactivating it
       (`isActive: false`) revokes every token and session scoped to it; the
       default organization cannot be deactivated (`400 default_organization`). A slug used by another
-      organization returns `409 conflict`; an archived organization is
+      organization returns `409 slug_taken`; an archived organization is
       read-only (`409 resource_archived`).
 
       On an archived organization every mutation answers
@@ -245,7 +246,7 @@
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
-        description: Slug already in use (`conflict`), or the organization is archived (`resource_archived`)
+        description: Slug already in use (`slug_taken`), or the organization is archived (`resource_archived`)
         headers:
           X-RateLimit-Limit:
             $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
@@ -613,6 +614,12 @@
       `owner` is refused (`409 conflict`). Refused on an archived
       organization (`409 resource_archived`).
 
+      Their grants on the organization's buckets are revoked. The shares they
+      created there keep serving unless `revokeShares=true`, which revokes
+      those still live in the same transaction, each audited
+      (`reason: "organization_member_removed"`) and emitted as
+      `file-service.share.revoked`.
+
       On an archived organization every mutation answers
       `409 resource_archived` once the caller passes the member-tier check
       (a member, or `organizations.read`) and before the route's own role
@@ -634,6 +641,7 @@
         schema:
           type: string
           format: uuid
+      - $ref: '../../../components/files/parameters.yaml#/RevokeSharesParam'
     responses:
       '204':
         description: Member removed successfully
@@ -747,6 +755,8 @@
       organization; one granting more returns `403`. Roles the member
       already holds here are kept without either check; whatever they carry
       that is not org-assignable grants nothing within the organization.
+      A role left out is taken away only if the caller holds, the same way,
+      every permission it grants; otherwise `403` naming those lacking.
       An org admin may not change an owner's roles (`403`); an owner or a
       caller with `organizations.write` may.
       Refused on an archived organization (`409 resource_archived`).
@@ -952,7 +962,7 @@ auth.organization.member-added:
     tags:
       - Admin - Organization Members
     summary: Organization member added
-    description: Fired when a user is added to an organization with `POST /v1/admin/organizations/{id}/members`. Delivered to the default organization's endpoints, like the other `auth.organization.*` events.
+    description: Fired when a user is added to an organization with `POST /v1/admin/organizations/{id}/members`, or made owner of the default organization by first-boot setup (`POST /v1/setup`). Delivered to the default organization's endpoints, like the other `auth.organization.*` events.
     operationId: webhookOrganizationMemberAdded
     security: []
     parameters:

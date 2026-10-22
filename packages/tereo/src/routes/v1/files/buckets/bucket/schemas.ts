@@ -85,3 +85,14 @@ export const updateBucketSchema = z.object({
 export type UpdateBucketInput = z.infer<typeof updateBucketSchema>;
 export type CorsConfig = z.infer<typeof corsConfigSchema>;
 export type RateLimitConfig = z.infer<typeof rateLimitConfigSchema>;
+
+// Node's parser has already refused a malformed Content-Length; absent, the
+// body is chunked and its size is checked as it is read.
+export const declaredLengthHeadersSchema = z.object({
+  "content-length": z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .pipe(z.number().int().safe())
+    .optional(),
+});

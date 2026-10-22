@@ -30,21 +30,42 @@ export const create = async (
   await (tx ?? prisma).accessToken.create({ data });
 };
 
-export const revokeByJti = async (
-  jti: string,
-  clientId: string
-): Promise<string | null> => {
-  const now = new Date();
-  const token = await prisma.accessToken.findFirst({
-    where: { jti, clientId, revokedAt: null, expiresAt: { gt: now } },
+/**
+ * The jtis among `jtis` whose row is live: not revoked, its refresh token (if
+ * any) not revoked, its user active. A deleted client or refresh token takes
+ * the row with it.
+ */
+export const getActiveJtis = async (jtis: string[]): Promise<string[]> => {
+  if (jtis.length === 0) return [];
+  const rows = await prisma.accessToken.findMany({
+    where: {
+      jti: { in: jtis },
+      revokedAt: null,
+      user: { isActive: true },
+      OR: [{ refreshTokenId: null }, { refreshToken: { revokedAt: null } }],
+    },
     select: { jti: true },
   });
+  return rows.map((t) => t.jti);
+};
+
+export const revokeByJti = async (
+  jti: string,
+  clientId: string,
+  tx?: Prisma.TransactionClient
+): Promise<{ jti: string; userId: string } | null> => {
+  const db = tx ?? prisma;
+  const now = new Date();
+  const token = await db.accessToken.findFirst({
+    where: { jti, clientId, revokedAt: null, expiresAt: { gt: now } },
+    select: { jti: true, userId: true },
+  });
   if (!token) return null;
-  await prisma.accessToken.updateMany({
+  const { count } = await db.accessToken.updateMany({
     where: { jti, clientId, revokedAt: null, expiresAt: { gt: now } },
     data: { revokedAt: now },
   });
-  return token.jti;
+  return count > 0 ? token : null;
 };
 
 export const revokeByAuthCodeId = async (

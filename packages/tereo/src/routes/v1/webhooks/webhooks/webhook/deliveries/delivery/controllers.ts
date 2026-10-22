@@ -10,11 +10,14 @@ import { Request, Response } from "express";
 import {
   assertNotManagedByIntegration,
   getVisibleEndpoint,
+  isFileEvent,
+  mayResendFileEvents,
   redactUnreadable,
 } from "../../../../../../../utils/webhookAccess.js";
 import {
   BadRequestError,
   ArchivedError,
+  ForbiddenError,
 } from "../../../../../../../utils/errors.js";
 
 export const getDelivery = async (req: Request, res: Response) => {
@@ -48,10 +51,15 @@ export const retryDelivery = async (req: Request, res: Response) => {
   }
   assertRetryableEndpoint(endpoint.status);
 
-  const { createdAt } = await db.webhookDeliveries.getForEndpoint(
+  const { createdAt, eventType } = await db.webhookDeliveries.getForEndpoint(
     deliveryId,
     id
   );
+  if (isFileEvent(eventType) && !mayResendFileEvents(auth, endpoint)) {
+    throw new ForbiddenError(
+      "Only the endpoint's creator or webhooks.admin may retry its file-service deliveries"
+    );
+  }
   const ref = { id: deliveryId, createdAt };
 
   const updated = await db.$transaction(async (tx) => {

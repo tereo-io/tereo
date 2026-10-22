@@ -5,6 +5,11 @@ import { buildUserClaims } from "../../../utils/claims.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
 import {
+  allowsArea,
+  effectivePermissions,
+  type CoreAccess,
+} from "../../../utils/coreAccess.js";
+import {
   InvalidTokenError,
   NotFoundError,
   OAuth2Error,
@@ -19,13 +24,15 @@ interface TokenVerificationResult {
   user: Extract<AccessTokenCheck, { active: true }>["user"];
   scopes: string[];
   payload: AccessTokenPayload;
-  /** Whether the token may see the user's core authorization. */
-  showsAuthorization: boolean;
+  /** What the token may do in core's API, which bounds what it is told. */
+  access: CoreAccess;
 }
 
 export const getUserInfo = async (req: Request, res: Response) => {
-  const { user, scopes, payload, showsAuthorization } =
-    await verifyBearerTokenWithScopes(req, res);
+  const { user, scopes, payload, access } = await verifyBearerTokenWithScopes(
+    req,
+    res
+  );
   const userId = user.id;
   const photoUrl = user.photoObjectId
     ? await presignUserPhotoUrl(user.photoObjectId)
@@ -62,22 +69,36 @@ export const getUserInfo = async (req: Request, res: Response) => {
   // authorization, for the UI, a service or a client granted a core scope;
   // any other relying party gets the OIDC claims only. Roles are the global
   // ones and the token's organization's, the same scope as the permissions.
-  const authorization = showsAuthorization
-    ? {
-        roles: (await db.roles.getLiveUserRoles(userId, orgId)).map(
-          (ur) => ur.role.name
-        ),
-        permissions: await db.roles.getUserPermissions(userId, orgId),
-        organizations: (await db.organizations.getUserOrganizations(userId))
-          .filter((org) => org.isActive)
-          .map((org) => ({
-            id: org.id,
-            name: org.name,
-            slug: org.slug,
-            memberRole: org.memberRole,
-          })),
-      }
-    : {};
+  // A delegated token is told what requireAuth would let it use: its
+  // permissions cut down to its scopes' ceilings, no roles (a role is not
+  // capped, its permissions are), and the memberships only with the scope
+  // that lists them.
+  const delegated = access.kind === "delegated";
+  const authorization =
+    access.kind !== "none"
+      ? {
+          roles: delegated
+            ? []
+            : (await db.roles.getLiveUserRoles(userId, orgId)).map(
+                (ur) => ur.role.name
+              ),
+          permissions: effectivePermissions(
+            await db.roles.getUserPermissions(userId, orgId),
+            access
+          ),
+          organizations:
+            delegated && !allowsArea(access, ["account", "organizations"])
+              ? []
+              : (await db.organizations.getUserOrganizations(userId))
+                  .filter((org) => org.isActive)
+                  .map((org) => ({
+                    id: org.id,
+                    name: org.name,
+                    slug: org.slug,
+                    memberRole: org.memberRole,
+                  })),
+        }
+      : {};
 
   res.json({
     ...claims,
@@ -132,6 +153,6 @@ const verifyBearerTokenWithScopes = async (
     user: check.user,
     scopes,
     payload,
-    showsAuthorization: check.access.kind !== "none",
+    access: check.access,
   };
 };

@@ -16,6 +16,7 @@ import {
 } from "../../../../utils/crypto.js";
 import {
   assertMayChangeAudience,
+  canManageAllClients,
   verifyAudience,
   verifyScopes,
 } from "./utils.js";
@@ -80,10 +81,15 @@ export const createClient = async (req: Request, res: Response) => {
   res.status(201).json(formatClient(created, !isPublic, plainSecret));
 };
 
+/** All clients for a clients.admin; anyone else sees the ones they own. */
 export const listClients = async (req: Request, res: Response) => {
+  const auth = validateUser(req);
   const query = validateQuery(ListClientsQuerySchema, req);
 
-  const where = applyCursorToWhere(query);
+  const where = applyCursorToWhere(
+    query,
+    canManageAllClients(auth) ? {} : { ownerId: auth.userId }
+  );
 
   const result = await db.clients.getPaginated({
     take: query.limit,

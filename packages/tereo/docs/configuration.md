@@ -45,13 +45,29 @@ Run at least one process with `all` or `worker`, or nothing delivers webhooks or
 ### Health checks
 
 `all` and `api` answer `GET /health` on `PORT`: 200 with `status: "ok"` when Postgres and Redis
-answer, 503 and `"degraded"` (naming `db` or `redis` as `"fail"`) when either does not.
+answer, 503 and `"degraded"` (naming `db` or `redis` as `"fail"`) when either does not. The
+probe result is shared for one second, and requests are rate-limited per client IP (1000 a second
+from an internal network address, 300 otherwise), so point probes at it directly rather than
+through a proxy that sets `X-Forwarded-For`. It names no version; an admin finds core's as the
+core service's `declarationVersion` (`GET /v1/admin/services`).
 
 A `worker` serves no API, so it listens on `WORKER_HEALTH_PORT` (default `4002`) for `GET` (or `HEAD`)
 `/health` alone. Besides the Postgres and Redis pings, it is degraded when no BullMQ worker is running or any is
 closing or stopped; `workers.total` counts them and `workers.stopped` names the queues of those that
 are not running. The image's `HEALTHCHECK` probes `PORT` or `WORKER_HEALTH_PORT` according to
 `ROLE`; point a Kubernetes probe at the same port.
+
+## HTTP limits
+
+Once its headers are in, a client has 60 seconds to send the rest of a request; past that it gets
+`408 request_timeout` and the connection is closed. The upload routes — an object `PUT`, a multipart
+part `PUT`, a presigned `PUT` and `POST /v1/account/photo` — get 10 minutes instead (the server's
+`requestTimeout`). Request headers must arrive within 66 seconds and fit in 200 KiB, and an idle
+keep-alive connection is closed after 65 seconds. `HTTP_MAX_CONNECTIONS` caps open connections.
+
+These bound what one slow client can hold, not a flood of them: run core behind a reverse proxy or
+load balancer that buffers requests (and, ideally, limits connections per client) rather than
+exposing it directly.
 
 ## The Docker image
 
@@ -75,6 +91,8 @@ notes as a range; a value outside its range stops core at startup with the varia
 | `LOG_LEVEL` | `info` | `fatal` … `trace`, or `silent` |
 | `ROLE` | `all` | See [Process roles](#process-roles) |
 | `PORT` | `4001` | 1–65535 |
+| `HTTP_MAX_CONNECTIONS` | unlimited | 1–1000000. The most connections the HTTP server holds open at once, WebSockets included; past it, a new connection is closed at once. See [HTTP limits](#http-limits) |
+| `SHUTDOWN_TIMEOUT_SECONDS` | `25` | 1–3600. On SIGTERM, how long in-flight HTTP requests and running background jobs get, side by side, before connections are forced closed and the jobs left to BullMQ (another worker takes each up once its lock lapses); closing Redis and the database follows. Keep it a few seconds under the time the orchestrator allows after SIGTERM: the chart gives 30 seconds after its `preStopSleepSeconds` |
 | `WORKER_HEALTH_PORT` | `4002` | 0–65535. `ROLE=worker` only: its `/health` listener. See [Health checks](#health-checks) |
 | `PUBLIC_URL` | `http://localhost:4001` outside production | Required in production, and `https://` there |
 | `DATABASE_URL` | — | Required. Sessions run with `timezone=UTC` whatever the server default; an `options` parameter in the URL replaces that |
@@ -184,6 +202,7 @@ env (no overlap).
 |----------|---------|-------|
 | `ISSUER` | `PUBLIC_URL` | A URL with no query or fragment, `https://` in production; a trailing slash is dropped. Changing it invalidates every outstanding token. Discovery's endpoint URLs are built from `PUBLIC_URL`, where core is reached |
 | `JWT_ACCESS_TOKEN_TTL` | `3600` | Seconds, 1–86400 (24 h) |
+| `WEBSOCKET_REVALIDATE_INTERVAL_SECONDS` | `60` | Seconds, 0–3600. How often each core process checks the tokens of its connected sockets again and closes those no longer active (a session rotated away, a token or user revoked by a path that closes no socket); `0` turns it off. See [auth.md](auth.md#session-lifetimes) |
 | `JWT_REFRESH_TOKEN_TTL` | `2592000` | Seconds, absolute from the code exchange; at most 31536000 (365 d) |
 | `USER_SESSION_TTL` | `604800` | Seconds, absolute from login; at most 31536000 (365 d) |
 | `USER_SESSION_IDLE_TTL` | `259200`, or `USER_SESSION_TTL` when shorter | Seconds an SSO session may go without issuing a code before it counts as expired; at most `USER_SESSION_TTL` |
@@ -233,6 +252,7 @@ env (no overlap).
 | `FILE_SERVICE_SHARE_DEFAULT_TOKEN_BYTES` | `18` | 12–48 |
 | `FILE_SERVICE_SHARE_RETENTION_DAYS` | `30` | 0–3650. Before a revoked or expired share, or an expired archive request, is hard-deleted |
 | `FILE_SERVICE_EMIT_SHARE_ACCESS_EVENTS` | `false` | One `share.accessed` event per download |
+| `ACCESS_LOG_RETENTION_DAYS` | `90` | 1–3650. How long a `files.access_logs` row is kept before the daily sweep deletes it |
 | `FILE_SERVICE_SWEEP_TIME_BOX_SECONDS` | `60` | 1–3600 |
 | `FILE_SERVICE_SWEEP_HEARTBEAT_SECONDS` | `5` | 1–3600 |
 | `FILE_SERVICE_DISK_RECONCILIATION_MAX_FILES_PER_SHARD` | `10000` | 1–10000000 |

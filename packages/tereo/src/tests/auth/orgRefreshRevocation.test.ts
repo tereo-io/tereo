@@ -1,4 +1,5 @@
 import { getTestPrincipalToken } from "../utils/principals.js";
+import { InvalidGrantError } from "../../utils/errors.js";
 import { handleRefreshToken } from "../../utils/auth.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
@@ -76,7 +77,7 @@ describe("refresh tokens of an organization the user lost", () => {
       data: { isActive: false },
     });
 
-    await expect(refresh(token)).rejects.toThrow("invalid_grant");
+    await expect(refresh(token)).rejects.toThrow(InvalidGrantError);
     const row = await prisma.refreshToken.findUniqueOrThrow({ where: { id } });
     expect(row.revokedAt).not.toBeNull();
   });
@@ -89,7 +90,7 @@ describe("refresh tokens of an organization the user lost", () => {
       },
     });
 
-    await expect(refresh(token)).rejects.toThrow("invalid_grant");
+    await expect(refresh(token)).rejects.toThrow(InvalidGrantError);
     expect(await liveTokens(org.id)).toBe(0);
   });
 

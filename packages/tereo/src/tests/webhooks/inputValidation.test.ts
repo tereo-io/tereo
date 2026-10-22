@@ -36,6 +36,14 @@ describe("Webhook input Postgres cannot take", () => {
     ["a NUL in an event-type filter", "/event-types?filter[eventType]=%00"],
     ["a NUL in an event-type source", "/event-types?filter[source]=%00"],
     ["a NUL in an event-type path", "/event-types/a%00"],
+    [
+      "an event-type path over 100 characters",
+      `/event-types/${"a".repeat(101)}`,
+    ],
+    [
+      "a filter value over 500 characters",
+      `/webhooks?filter[url]=${"u".repeat(501)}`,
+    ],
   ])("refuses %s with a 400", async (_label, path) => {
     const res = await axios.get(`${BASE_URL}${path}`, cfg());
     expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
@@ -76,6 +84,10 @@ describe("Webhook input Postgres cannot take", () => {
       "a character fetch cannot send in a custom header value",
       { customHeaders: { "X-A": "\u2603" } },
     ],
+    [
+      "more than 100 event types",
+      { eventTypes: Array.from({ length: 101 }, (_, i) => `x.type-${i}`) },
+    ],
   ])("refuses %s on create and update with a 400", async (_label, fields) => {
     const created = await axios.post(
       `${BASE_URL}/webhooks`,
@@ -102,6 +114,8 @@ describe("Webhook input Postgres cannot take", () => {
     ["a NUL in entityId", { entityId: "a\u0000" }],
     ["a NUL in data", { data: { k: ["\u0000"] } }],
     ["a NUL in a data key", { data: { "k\u0000": 1 } }],
+    ["an entityId over 500 characters", { entityId: "e".repeat(501) }],
+    ["data over 256 KiB as JSON", { data: { k: "x".repeat(256 * 1024) } }],
   ])("refuses %s in an emitted event with a 400", async (_label, fields) => {
     const event = {
       organizationId: getTestOrgId(),

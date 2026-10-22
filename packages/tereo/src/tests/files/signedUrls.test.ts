@@ -290,6 +290,41 @@ describe("signed URLs", () => {
       );
     });
 
+    it("answers a malformed object id or bucket name like a wrong signature", async () => {
+      const signed = new URL(await presign(admin, "read"));
+      const tampered = new URL(signed);
+      tampered.searchParams.set("sig", "bogus");
+      const wrong = await axios.get(tampered.toString(), anyStatus);
+      expect(wrong.status).toBe(HTTP_STATUS.FORBIDDEN);
+
+      for (const [from, to] of [
+        [`/by-id/${objectId}`, "/by-id/not-a-uuid"],
+        [`/objects/${bucket.name}/`, "/objects/Not_A_Bucket/"],
+      ]) {
+        const url = new URL(signed);
+        url.pathname = url.pathname.replace(from, to);
+        const res = await axios.get(url.toString(), anyStatus);
+        expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
+        expect(res.data).toEqual(wrong.data);
+      }
+    });
+
+    it("carries a share's cosmetic filename to the unlock page, up to 255 characters", async () => {
+      const share = await createShare({
+        kind: "OBJECT",
+        objectId,
+        password: "open-sesame",
+      });
+      const browser = { ...anyStatus, headers: { Accept: "text/html" } };
+      const shared = `${BASE_URL}/shared/${share.token}`;
+      const ok = await axios.get(`${shared}/custom.pdf`, browser);
+      expect(ok.status).toBe(302);
+      expect(ok.headers["location"]).toMatch(/\/custom\.pdf$/);
+
+      const long = await axios.get(`${shared}/${"a".repeat(256)}`, browser);
+      expect(long.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    });
+
     it("refuses a filename longer than 255 characters", async () => {
       const url = new URL(await presign(admin, "read"));
       url.searchParams.set("filename", `${"a".repeat(256)}.pdf`);

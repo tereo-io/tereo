@@ -1,6 +1,7 @@
+import { getDefaultOrganizationId } from "../../../../../../../utils/defaultOrganization.js";
 import { validateParams } from "../../../../../../../utils/validateReq.js";
+import { emitTx, logAuditTx } from "../../../../../../../utils/outbox.js";
 import { NotFoundError } from "../../../../../../../utils/errors.js";
-import { logAuditTx } from "../../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../../utils/auth.js";
 import { IdentityInviteParamsSchema } from "./schemas.js";
 import db from "../../../../../../../utils/db/index.js";
@@ -25,6 +26,13 @@ export const withdrawIdentityInvite = async (req: Request, res: Response) => {
       entityId: invite.id,
       entityName: user.email,
       metadata: { userId: id, providerId },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.user.identity-invite-withdrawn",
+      entityType: "IdentityInvite",
+      entityId: invite.id,
+      data: { userId: id, email: user.email, providerId },
     });
   });
 

@@ -1,3 +1,4 @@
+import { enqueueSsoOnlySessionSweep } from "../../../../../../../jobs/ssoOnlySessionSweep.js";
 import { getDefaultOrganizationId } from "../../../../../../../utils/defaultOrganization.js";
 import { assertOrgAssignableRoles } from "../../../../../../../utils/orgRoleAssignment.js";
 import { formatDomain } from "../../../../../../../utils/identityProviders/format.js";
@@ -14,13 +15,14 @@ import {
 } from "../../../../../../../utils/validateReq.js";
 import {
   computeChanges,
+  emitTx,
   logAuditTx,
 } from "../../../../../../../utils/outbox.js";
 import {
   assertMayChangeSsoOnly,
   assertProviderActive,
   changesSsoOnly,
-  endSessionsLinkedElsewhere,
+  emitDomainTx,
 } from "../utils.js";
 
 export const getDomain = async (req: Request, res: Response) => {
@@ -61,7 +63,7 @@ export const updateDomain = async (req: Request, res: Response) => {
     );
   }
 
-  const closes = await db.$transaction(async (tx) => {
+  const closedAt = await db.$transaction(async (tx) => {
     // Every domain write takes the provider's lock, so the row read under it
     // holds until this one is written.
     await db.identityProviders.lockForUpdate(providerId, tx);
@@ -105,15 +107,30 @@ export const updateDomain = async (req: Request, res: Response) => {
       changes: computeChanges(formatDomain(existing), formatDomain(updated)),
       metadata: { providerId },
     });
+    await emitDomainTx(
+      tx,
+      "auth.identity-provider.domain-updated",
+      providerId,
+      updated
+    );
     // Newly SSO-only, or SSO-only at a new domain: its users' identities at
     // other providers stop working.
-    const newlyClosed =
+    const closes =
       updated.ssoOnly &&
       (!current.ssoOnly || updated.domain !== current.domain);
-    return newlyClosed ? updated.domain : null;
+    return closes ? updated.updatedAt : null;
   });
 
-  if (closes) await endSessionsLinkedElsewhere(auth, closes, providerId);
+  if (closedAt) {
+    await enqueueSsoOnlySessionSweep(
+      {
+        actor: { userId: auth.userId, email: auth.email },
+        providerId,
+        domainId,
+      },
+      closedAt
+    );
+  }
 
   res.json(
     formatDomain(await db.identityProviders.getDomain(providerId, domainId))
@@ -142,6 +159,19 @@ export const deleteDomain = async (req: Request, res: Response) => {
       entityId: domainId,
       entityName: existing.domain,
       metadata: { providerId },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.identity-provider.domain-deleted",
+      entityType: "IdentityProviderDomain",
+      entityId: domainId,
+      data: {
+        providerId,
+        id: domainId,
+        domain: current.domain,
+        organizationId: current.organizationId,
+        ssoOnly: current.ssoOnly,
+      },
     });
   });
 

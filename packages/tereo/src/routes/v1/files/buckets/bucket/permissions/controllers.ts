@@ -3,10 +3,13 @@ import { notifyBucketAccessChanged } from "../../../../../../websocket/emitters/
 import { getManagedBucket } from "../../../../../../utils/bucketAccess.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
-import { grantTx } from "../../../../../../utils/bucketGrants.js";
 import db from "../../../../../../utils/db/index.js";
 import { bucketNameSchema } from "../../schemas.js";
 import { Request, Response } from "express";
+import {
+  assertWithinOwnGrant,
+  grantTx,
+} from "../../../../../../utils/bucketGrants.js";
 import {
   validateBody,
   validateParams,
@@ -105,6 +108,7 @@ export const grantPermission = async (req: Request, res: Response) => {
   const body = validateBody(grantPermissionSchema, req);
 
   const bucket = await getManagedBucket(auth, name, "write");
+  await assertWithinOwnGrant(auth, bucket.id, body);
 
   const userExists = await authUserExists(body.userId);
   if (!userExists) {

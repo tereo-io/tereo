@@ -1,3 +1,4 @@
+import { apiBodyParsers } from "../../../middleware/bodyParsers.js";
 import { createRequireAuth } from "../../../middleware/auth.js";
 import eventTypesRouter from "./event-types/index.js";
 import webhooksRouter from "./webhooks/index.js";
@@ -14,6 +15,9 @@ const apiRouter = Router();
 apiRouter.use(rateLimitPreAuth);
 apiRouter.use(createRequireAuth({ area: "webhooks" }));
 apiRouter.use(rateLimitGeneral);
+// Events carry their payloads inline; a batch carries many.
+apiRouter.use("/events", ...apiBodyParsers("10mb"));
+apiRouter.use(...apiBodyParsers());
 
 apiRouter.use("/event-types", eventTypesRouter);
 apiRouter.use("/webhooks", webhooksRouter);

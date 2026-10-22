@@ -3,8 +3,9 @@ import { OrgMemberRole } from "../../../../../../../../prisma/generated/client/i
 import { assertNotIntegrationAccount } from "../../../../../../../utils/integrations.js";
 import { revokeOrganizationGrantsTx } from "../../../../../../../utils/bucketGrants.js";
 import { formatOrganizationMember } from "../../../../../../../utils/transformers.js";
+import { revokeCreatorSharesTx } from "../../../../../../../utils/shareRevocation.js";
+import { recordSessionsRevoked } from "../../../../../../../utils/sessionEvents.js";
 import { endOrganizationSessions } from "../../../../../../../utils/sessions.js";
-import { MemberUserIdParamSchema, UpdateMemberRoleSchema } from "./schemas.js";
 import type { Prisma } from "../../../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../../../utils/auth.js";
 import db from "../../../../../../../utils/db/index.js";
@@ -21,6 +22,7 @@ import {
 import {
   validateBody,
   validateParams,
+  validateQuery,
 } from "../../../../../../../utils/validateReq.js";
 import {
   computeChanges,
@@ -31,6 +33,11 @@ import {
   ConflictError,
   ForbiddenError,
 } from "../../../../../../../utils/errors.js";
+import {
+  MemberUserIdParamSchema,
+  RemoveMemberQuerySchema,
+  UpdateMemberRoleSchema,
+} from "./schemas.js";
 
 /** An organization keeps at least one owner while it has members. */
 const assertOwnerRemains = async (
@@ -52,6 +59,7 @@ export const removeMember = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { id: orgId } = validateParams(OrgIdParamSchema, req);
   const { userId } = validateParams(MemberUserIdParamSchema, req);
+  const { revokeShares } = validateQuery(RemoveMemberQuerySchema, req);
 
   const callerRole = await requireOrgRole("admin", req, orgId);
 
@@ -93,6 +101,15 @@ export const removeMember = async (req: Request, res: Response) => {
         memberRole: removed.memberRole,
       },
     });
+    // Shares outlive their creator's membership unless asked otherwise.
+    if (revokeShares) {
+      await revokeCreatorSharesTx(
+        tx,
+        auth,
+        { userId, organizationId: orgId },
+        "organization_member_removed"
+      );
+    }
     // Like the roles, a grant on the organization's buckets would come back
     // with a re-added membership.
     return await revokeOrganizationGrantsTx(tx, auth, orgId, userId);
@@ -100,7 +117,12 @@ export const removeMember = async (req: Request, res: Response) => {
 
   // Tokens and SSO sessions bound to this organization end with the
   // membership.
-  await endOrganizationSessions(userId, orgId);
+  await endOrganizationSessions(
+    userId,
+    orgId,
+    recordSessionsRevoked(auth, await db.users.get(userId))
+  );
+
   notifyOrgMembershipChanged(userId, orgId);
   for (const bucketName of revokedBuckets) {
     notifyBucketAccessChanged([userId], bucketName);

@@ -1,10 +1,15 @@
+import { PERMISSIONS } from "../../../../../../../../definitions/permissions.js";
+import { revokeShareTx } from "../../../../../../../../utils/shareRevocation.js";
 import { setAccessLog } from "../../../../../../../../middleware/accessLog.js";
+import { hasPermission } from "../../../../../../../../utils/permissions.js";
 import { validateUser } from "../../../../../../../../middleware/auth.js";
 import { hashPassword } from "../../../../../../../../utils/password.js";
 import { shareIdParamSchema, updateShareBodySchema } from "./schemas.js";
 import db from "../../../../../../../../utils/db/index.js";
+import type { UpdateShareBody } from "./schemas.js";
 import { Request, Response } from "express";
 import {
+  canManageBucket,
   canWriteBucket,
   getGrantedBucket,
   validateBucketAccess,
@@ -16,9 +21,11 @@ import {
 } from "../../../../../../../../utils/validateReq.js";
 import {
   ConflictError,
+  ForbiddenError,
   NotFoundError,
 } from "../../../../../../../../utils/errors.js";
 import {
+  bucketEventScope,
   logAuditTx,
   computeChanges,
   emitTx,
@@ -50,6 +57,34 @@ export const getShare = async (req: Request, res: Response) => {
 };
 
 /**
+ * Whether the edit makes the share reach further: drops its password, lifts
+ * or raises its download cap, or moves its expiry later.
+ */
+const loosensShare = (
+  existing: {
+    passwordHash: string | null;
+    maxDownloads: number | null;
+    expiresAt: Date | null;
+  },
+  body: UpdateShareBody,
+  expiresAt: Date | undefined
+): boolean => {
+  if (body.password === null && existing.passwordHash) return true;
+  if (
+    body.maxDownloads !== undefined &&
+    existing.maxDownloads !== null &&
+    (body.maxDownloads === null || body.maxDownloads > existing.maxDownloads)
+  ) {
+    return true;
+  }
+  return (
+    !!expiresAt &&
+    !!existing.expiresAt &&
+    expiresAt.getTime() > existing.expiresAt.getTime()
+  );
+};
+
+/**
  * PATCH /buckets/:name/shares/by-id/:id
  */
 export const updateShare = async (req: Request, res: Response) => {
@@ -77,6 +112,17 @@ export const updateShare = async (req: Request, res: Response) => {
   // forever.
   const expiresAt =
     "expiresAt" in body ? validateShareTtl(body.expiresAt) : undefined;
+
+  if (
+    loosensShare(existing, body, expiresAt) &&
+    existing.createdByUserId !== auth.userId &&
+    !hasPermission(auth.permissions, PERMISSIONS.admin) &&
+    !(await canManageBucket(auth, name, "write"))
+  ) {
+    throw new ForbiddenError(
+      "Only the share's creator or the bucket's manager can remove its password, lift its download cap or extend its expiry"
+    );
+  }
 
   const update: Parameters<typeof db.shares.update>[1] = {};
   if ("urlFilename" in body) update.urlFilename = body.urlFilename;
@@ -142,15 +188,13 @@ export const updateShare = async (req: Request, res: Response) => {
       },
     });
 
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.share.updated",
-        organizationId: bucket.organizationId,
-        entityType: "share",
-        entityId: next.id,
-        data: { bucketName: bucket.name, kind: next.kind },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.share.updated",
+      ...bucketEventScope(bucket),
+      entityType: "share",
+      entityId: next.id,
+      data: { bucketName: bucket.name, kind: next.kind },
+    });
 
     return next;
   });
@@ -182,29 +226,10 @@ export const revokeShare = async (req: Request, res: Response) => {
     return;
   }
 
-  await db.$transaction(async (tx) => {
-    // Only the first of two concurrent revokes is audited.
-    if (!(await db.shares.revoke(id, auth.userId, tx))) return;
-
-    await logAuditTx(tx, {
-      auth,
-      organizationId: bucket.organizationId ?? undefined,
-      action: "DELETE",
-      entityType: "share",
-      entityId: id,
-      metadata: { bucketName: bucket.name, kind: existing.kind },
-    });
-
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.share.revoked",
-        organizationId: bucket.organizationId,
-        entityType: "share",
-        entityId: id,
-        data: { bucketName: bucket.name, kind: existing.kind },
-      });
-    }
-  });
+  // Only the first of two concurrent revokes is audited.
+  await db.$transaction((tx) =>
+    revokeShareTx(tx, auth, { id, kind: existing.kind, bucket })
+  );
 
   setAccessLog(res, { bucketId: bucket.id, operation: "REVOKE_SHARE" });
 

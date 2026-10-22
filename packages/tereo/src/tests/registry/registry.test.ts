@@ -1,10 +1,12 @@
-import { uploadTestObject } from "../files/utils/test-helpers.js";
+import { uploadTestObject, waitFor } from "../files/utils/test-helpers.js";
 import { getTestPrincipalToken } from "../utils/principals.js";
+import { TEST_SERVICE_ID } from "../utils/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { CORE_VERSION } from "../../utils/version.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { CORE_URL } from "../utils/coreUrl.js";
 import { fetchJson } from "../utils/http.js";
+import db from "../../utils/db/index.js";
 import { randomBytes } from "crypto";
 import FormData from "form-data";
 import env from "../../env.js";
@@ -383,6 +385,13 @@ describe("provisioned access", () => {
     const revoked = await decide(service.id, "revoke", [access[0].id]);
     expect(revoked.status).toBe(200);
     expect((await emit(token, eventType)).status).toBe(401);
+    const entry = await prisma.auditLogEntry.findFirstOrThrow({
+      where: {
+        entityId: service.id,
+        metadata: { path: ["action"], equals: "access_revoked" },
+      },
+    });
+    expect(entry.metadata).toMatchObject({ accessTokensRevoked: 1 });
     token = await tokenFor(service);
     expect((await emit(token, eventType)).status).toBe(403);
 
@@ -807,6 +816,84 @@ describe("retirement", () => {
     expect(back.missingSince).toBeNull();
   });
 
+  it("audits each item it retires and announces a retired bucket", async () => {
+    const slug = newSlug();
+    const bucketName = `${slug}-files`;
+    const full = declarationFor(slug, {
+      buckets: [{ bucketName, policy: "private" }],
+    });
+    await provisionService({ slug, declaration: full });
+    const bucket = await prisma.bucket.findFirstOrThrow({
+      where: { name: bucketName, deletedAt: null },
+    });
+    const permission = await prisma.permission.findUniqueOrThrow({
+      where: { name: `${slug}.items.write` },
+    });
+    const eventType = `${slug}.item.created`;
+    // Of all organizations and created by core, so it is sent what it subscribes to.
+    const { endpoint } = await db.webhookEndpoints.create({
+      organizationId: null,
+      ownerServiceId: TEST_SERVICE_ID,
+      createdBy: SYSTEM_USER_ID,
+      url: "https://example.com/retired-buckets",
+      eventTypes: ["file-service.bucket.updated"],
+    });
+
+    try {
+      await provisionService({
+        slug,
+        declaration: {
+          ...full,
+          permissions: full.permissions!.filter(
+            (p) => p.name !== permission.name
+          ),
+          buckets: [],
+          eventTypes: [],
+        },
+      });
+      await retireMissing(new Date(Date.now() + 25 * 60 * 60 * 1000));
+
+      const entries = await prisma.auditLogEntry.findMany({
+        where: {
+          action: "ARCHIVE",
+          entityId: { in: [permission.id, String(bucket.id), eventType] },
+        },
+      });
+      expect(entries.map((e) => e.entityType).sort()).toEqual([
+        "EventType",
+        "Permission",
+        "bucket",
+      ]);
+      for (const entry of entries) {
+        expect(entry.userId).toBe(SYSTEM_USER_ID);
+        expect(entry.metadata).toMatchObject({ reason: "retired" });
+      }
+
+      await waitFor(
+        async () =>
+          (await prisma.webhookDelivery.count({
+            where: {
+              webhookEndpointId: endpoint.id,
+              payload: { path: ["data", "bucketName"], equals: bucketName },
+            },
+          })) > 0,
+        10_000
+      );
+      const delivery = await prisma.webhookDelivery.findFirstOrThrow({
+        where: { webhookEndpointId: endpoint.id },
+      });
+      expect(delivery.payload).toMatchObject({
+        organizationId: null,
+        data: { bucketName, retired: true },
+      });
+    } finally {
+      await prisma.webhookDelivery.deleteMany({
+        where: { webhookEndpointId: endpoint.id },
+      });
+      await prisma.webhookEndpoint.delete({ where: { id: endpoint.id } });
+    }
+  });
+
   it("makes a retired bucket read-only", async () => {
     const slug = newSlug();
     const bucketName = `${slug}-docs`;
@@ -1004,6 +1091,46 @@ describe("secrets", () => {
     );
     expect(res.status).toBe(200);
     expect((await api("GET", "/v1/files/buckets", token)).status).toBe(401);
+
+    const entry = await prisma.auditLogEntry.findFirstOrThrow({
+      where: { entityType: "Service", entityId: service.id, action: "UPDATE" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(entry.metadata).toMatchObject({ accessTokensRevoked: 1 });
+  });
+
+  it("refuses a secret change to a caller not holding what the service holds", async () => {
+    const service = await addService();
+    const account = await prisma.user.findFirstOrThrow({
+      where: { oauthClient: { clientId: service.credentials.clientId } },
+    });
+    const publisher = await prisma.role.findFirstOrThrow({
+      where: { name: "webhook_publisher", serviceId: CORE_SERVICE_ID },
+    });
+    await prisma.userRole.create({
+      data: { userId: account.id, roleId: publisher.id },
+    });
+    const writer = await getTestPrincipalToken({
+      permissions: ["services.read", "services.write"],
+    });
+
+    for (const action of ["regenerate-secret", "revoke-previous-secret"]) {
+      const res = await api(
+        "POST",
+        `/v1/admin/services/${service.id}/${action}`,
+        writer
+      );
+      expect(res.status, action).toBe(403);
+      expect(res.body.error_description).toContain("webhooks.emit");
+    }
+    expect((await fetchToken(service.credentials)).status).toBe(200);
+
+    const regenerated = await api(
+      "POST",
+      `/v1/admin/services/${service.id}/regenerate-secret`,
+      adminToken
+    );
+    expect(regenerated.status).toBe(200);
   });
 
   it("keeps a service's client out of /admin/clients", async () => {

@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { processShareSweepTick } from "../../jobs/shareSweep.js";
+import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { randomBytes } from "node:crypto";
 import axios from "axios";
+import {
+  processShareSweepTick,
+  SHARE_SWEEP_BATCH_LIMIT,
+} from "../../jobs/shareSweep.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -32,6 +37,11 @@ interface ShareResponse {
   object: { id: string; objectKey: string } | null;
   archiveRequest: { filename: string } | null;
 }
+
+const unlockFailures = (shareId: string) =>
+  prisma.auditLogEntry.findMany({
+    where: { entityType: "shareUnlockFailure", entityId: shareId },
+  });
 
 describe("Shares", () => {
   let token: string;
@@ -263,6 +273,8 @@ describe("Shares", () => {
       );
       expect(unlockRes.status).toBe(HTTP_STATUS.UNAUTHORIZED);
       expect(unlockRes.data.error).toBe("invalid_password");
+      // One wrong password is a typo, not worth an audit entry.
+      expect(await unlockFailures(share.id)).toHaveLength(0);
     });
 
     it("refuses unlock attempts past the limit with the shared 429", async () => {
@@ -284,6 +296,16 @@ describe("Shares", () => {
       expect(limited.headers["retry-after"]).toBe(
         String(limited.data.retry_after)
       );
+
+      // Audited once, by the wrong password that used up the window.
+      const failures = await unlockFailures(share.id);
+      expect(failures).toHaveLength(1);
+      expect(failures[0].userId).toBe(SYSTEM_USER_ID);
+      expect(failures[0].metadata).toMatchObject({
+        reason: "unlock_attempts_exhausted",
+        attemptsInWindow: 5,
+      });
+      expect(JSON.stringify(failures[0].metadata)).not.toContain("wrong");
     });
   });
 
@@ -317,6 +339,14 @@ describe("Shares", () => {
       // An address that has already tried waits out the delay, even with
       // the right password.
       expect((await unlockFrom(100, "right")).status).toBe(429);
+      // Only the wrong password verified during the delay is audited.
+      const failures = await unlockFailures(share.id);
+      expect(failures.map((f) => f.metadata)).toEqual([
+        expect.objectContaining({
+          reason: "invalid_password_during_backoff",
+          ipAddress: "198.51.100.100",
+        }),
+      ]);
 
       // The delay after ten failures is one second.
       await new Promise((resolve) => setTimeout(resolve, 1100));
@@ -740,11 +770,66 @@ describe("Shares", () => {
         where: { id: share.id },
       });
       expect(row.expiresAt?.getTime()).toBe(createdAt.getTime() + MAX_MS);
+      const backfills = await prisma.auditLogEntry.findMany({
+        where: {
+          entityType: "shareExpiryBackfill",
+          entityId: String(bucket.id),
+        },
+      });
+      const entry = backfills.find((e) =>
+        JSON.stringify(e.metadata).includes(share.id)
+      );
+      expect(entry).toMatchObject({ action: "UPDATE", userId: SYSTEM_USER_ID });
       const res = await axios.get(share.url, {
         maxRedirects: 0,
         validateStatus: () => true,
       });
       expect(res.status).toBe(HTTP_STATUS.NOT_FOUND);
+    });
+
+    it("fills at most a batch per tick, and asks for another when it filled one", async () => {
+      const share = await create();
+      const createdAt = new Date(Date.now() - 370 * 24 * 60 * 60 * 1000);
+      const row = await prisma.share.update({
+        where: { id: share.id },
+        data: { expiresAt: null, createdAt },
+      });
+      const { id: _id, token: _token, updatedAt: _updatedAt, ...copy } = row;
+      await prisma.share.createMany({
+        data: Array.from({ length: SHARE_SWEEP_BATCH_LIMIT }, () => ({
+          ...copy,
+          token: randomBytes(24).toString("base64url"),
+        })),
+      });
+      const ours = { bucketId: bucket.id, createdAt, expiresAt: null };
+      const since = new Date();
+
+      const first = await processShareSweepTick();
+      expect(first.hasMore).toBe(true);
+      const left = await prisma.share.count({ where: ours });
+      expect(left).toBeGreaterThanOrEqual(1);
+
+      for (
+        let i = 0;
+        i < 5 && (await prisma.share.count({ where: ours }));
+        i++
+      ) {
+        await processShareSweepTick();
+      }
+      expect(await prisma.share.count({ where: ours })).toBe(0);
+
+      const entries = await prisma.auditLogEntry.findMany({
+        where: {
+          entityType: "shareExpiryBackfill",
+          entityId: String(bucket.id),
+          createdAt: { gte: since },
+        },
+      });
+      expect(entries.length).toBeGreaterThanOrEqual(2);
+      for (const entry of entries) {
+        const { shares } = entry.metadata as { shares: unknown[] };
+        expect(shares.length).toBeLessThanOrEqual(SHARE_SWEEP_BATCH_LIMIT);
+      }
     });
   });
 

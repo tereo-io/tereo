@@ -25,7 +25,8 @@ export const createRole = async (req: Request, res: Response) => {
     throw new ConflictError(
       existing.archivedAt
         ? "An archived role with this name already exists"
-        : "Role with this name already exists"
+        : "Role with this name already exists",
+      "name_taken"
     );
   }
 
@@ -60,8 +61,9 @@ export const listRoles = async (req: Request, res: Response) => {
 
   const where = applyCursorToWhere(query);
 
-  const { includeArchived, includeRetired } = listRolesExtraQuerySchema.parse(
-    req.query
+  const { includeArchived, includeRetired } = validateQuery(
+    listRolesExtraQuerySchema,
+    req
   );
 
   const result = await db.roles.getPaginated({

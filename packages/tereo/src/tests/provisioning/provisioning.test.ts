@@ -3,6 +3,7 @@ import type { CustomRoleEntry } from "../../utils/provisioning/schema.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { openEndpointSecrets } from "../../utils/webhookSecrets.js";
 import { generateClientSecret } from "../../utils/crypto.js";
+import { TEST_SERVICE_ID } from "../utils/testService.js";
 import { retireMissing } from "../../utils/registry.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { logger } from "../../utils/logger.js";
@@ -1872,6 +1873,55 @@ describe("webhooks", () => {
     const back = await apply(d);
     expect(back.updated).toEqual([`webhook:${key}`]);
     expect((await endpointRow(key)).archivedAt).toBeNull();
+  });
+
+  it("emits webhook.endpoint.* events for what it creates, changes, rotates, archives and restores", async () => {
+    const { endpoint: receiver } = await db.webhookEndpoints.create({
+      organizationId: null,
+      ownerServiceId: TEST_SERVICE_ID,
+      createdBy: SYSTEM_USER_ID,
+      url: "https://example.com/endpoint-events",
+      eventTypes: [
+        "webhook.endpoint.created",
+        "webhook.endpoint.updated",
+        "webhook.endpoint.secret-rotated",
+        "webhook.endpoint.archived",
+        "webhook.endpoint.restored",
+      ],
+    });
+    try {
+      const w = webhook();
+      const d = subscriber(w);
+      await apply(d);
+      const { id } = await endpointRow(`${d.service.slug}:org-events`);
+      const delivered = (eventType: string, fields = {}) =>
+        waitForDelivered(receiver.id, eventType, id, fields);
+      await delivered("webhook.endpoint.created", { provisioned: true });
+
+      const moved = { ...w, url: "https://www.example.com/moved-events" };
+      await apply(withService(d, { webhooks: [moved] }));
+      await delivered("webhook.endpoint.updated", {
+        url: "https://www.example.com",
+      });
+
+      const rotated = {
+        ...moved,
+        secretPlain: randomBytes(32).toString("hex"),
+      };
+      await apply(withService(d, { webhooks: [rotated] }));
+      await delivered("webhook.endpoint.secret-rotated");
+
+      await apply(withService(d, { webhooks: [] }));
+      await delivered("webhook.endpoint.archived");
+
+      await apply(withService(d, { webhooks: [rotated] }));
+      await delivered("webhook.endpoint.restored", { archivedAt: null });
+    } finally {
+      await prisma.webhookDelivery.deleteMany({
+        where: { webhookEndpointId: receiver.id },
+      });
+      await prisma.webhookEndpoint.delete({ where: { id: receiver.id } });
+    }
   });
 
   it("leaves a disabled endpoint disabled on reapply", async () => {

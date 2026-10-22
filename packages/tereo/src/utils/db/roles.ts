@@ -543,8 +543,11 @@ export const getUsersByRoleId = async (roleId: string) => {
   }));
 };
 
-export const getUserIdsByRoleId = async (roleId: string) => {
-  return await prisma.userRole.findMany({
+export const getUserIdsByRoleId = async (
+  roleId: string,
+  tx?: Prisma.TransactionClient
+) => {
+  return await (tx ?? prisma).userRole.findMany({
     where: { roleId },
     select: { userId: true, user: { select: { oauthClientId: true } } },
   });

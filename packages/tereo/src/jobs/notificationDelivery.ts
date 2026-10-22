@@ -1,13 +1,13 @@
 import { CHANNELS, getAdapter } from "../utils/notifications/channels/index.js";
 import { openConnectionSecrets } from "../utils/notifications/connections.js";
 import { getDefaultOrganizationId } from "../utils/defaultOrganization.js";
+import { canReadBucket, holdsBucketGrant } from "../utils/bucketAccess.js";
 import type { StoredAttachment } from "../utils/notifications/accept.js";
 import { toConnectionView } from "../utils/notifications/connections.js";
 import { senderAccessSchema } from "../utils/notifications/accept.js";
 import { takeSendToken } from "../utils/notifications/rateLimit.js";
 import type { DeliveryRef } from "../utils/db/notifications.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
-import { canReadBucket } from "../utils/bucketAccess.js";
 import { capToCeiling } from "../utils/coreAccess.js";
 import { openBlobStream } from "../utils/storage.js";
 import { BadRequestError } from "../utils/errors.js";
@@ -106,6 +106,22 @@ const assertAttachmentsReadable = async (
   };
   for (const bucket of buckets) {
     if (!(await canReadBucket(auth, bucket))) throw attachmentForbidden(bucket);
+  }
+  // A public bucket serves anyone its current content, but its history only
+  // grant holders (as at accept): a version made non-current since, or a
+  // grant revoked since, must not still send.
+  const history = await prisma.objectVersion.findMany({
+    where: {
+      id: { in: attachments.map((a) => a.versionId) },
+      isCurrent: false,
+      object: { bucket: { policy: "public" } },
+    },
+    select: { object: { select: { bucket: { select: { name: true } } } } },
+  });
+  for (const bucket of new Set(history.map((v) => v.object.bucket.name))) {
+    if (!(await holdsBucketGrant(auth, bucket))) {
+      throw attachmentForbidden(bucket);
+    }
   }
 };
 

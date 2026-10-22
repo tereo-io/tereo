@@ -1,3 +1,4 @@
+import { closeSsoOnlySessionSweepQueue } from "./jobs/ssoOnlySessionSweep.js";
 import { startBackgroundJobs, stopBackgroundJobs } from "./jobs/index.js";
 import { createOutboxReaper, type OutboxReaper } from "./utils/outbox.js";
 import { dispatchNotification } from "./utils/notifications/dispatch.js";
@@ -24,6 +25,10 @@ import {
   startStaleDeliverySweep,
   stopStaleDeliverySweep,
 } from "./jobs/staleDeliverySweep.js";
+import {
+  startAccessLogRetentionWorker,
+  stopAccessLogRetentionWorker,
+} from "./jobs/accessLogRetention.js";
 import {
   startDeliveryRetentionWorker,
   stopDeliveryRetentionWorker,
@@ -64,6 +69,7 @@ export async function startWorker(): Promise<void> {
     await startNotificationDeliveryWorker();
     await startNotificationStaleSweep();
     await startOutboxRetentionWorker();
+    await startAccessLogRetentionWorker();
   }
 
   // Webhook events written by `emitTx` fan out to subscribed endpoints. The
@@ -91,8 +97,17 @@ export async function stopWorker(): Promise<void> {
   await stopNotificationDeliveryWorker();
   await stopNotificationStaleSweep();
   await stopOutboxRetentionWorker();
+  await stopAccessLogRetentionWorker();
+}
+
+/**
+ * Closes the queues jobs are added to. Separate from `stopWorker`: in a
+ * process that also serves HTTP, requests still draining add jobs to them.
+ */
+export async function closeWorkerQueues(): Promise<void> {
   await closeFileQueues();
   await closeWebhookQueues();
   await closeAuditQueues();
   await closeNotificationQueues();
+  await closeSsoOnlySessionSweepQueue();
 }

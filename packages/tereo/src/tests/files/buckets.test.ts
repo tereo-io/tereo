@@ -630,6 +630,29 @@ describe("Bucket Management", () => {
       ).toBeGreaterThan(Date.now());
     });
 
+    it("counts anonymous callers of the per-bucket limit per address", async () => {
+      const bucket = await createTestBucket(testToken, { policy: "public" });
+      const set = await axios.put(
+        `${BASE_URL}/buckets/${bucket.name}`,
+        { rateLimitConfig: { tokensPerSecond: 0.01, maxTokens: 1 } },
+        {
+          headers: { Authorization: `Bearer ${testToken}` },
+          validateStatus: () => true,
+        }
+      );
+      expect(set.status).toBe(HTTP_STATUS.OK);
+
+      // The default TRUST_PROXY (loopback) honours X-Forwarded-For.
+      const list = (ip: string) =>
+        axios.get(`${BASE_URL}/buckets/${bucket.name}/objects`, {
+          headers: { "X-Forwarded-For": ip },
+          validateStatus: () => true,
+        });
+      expect((await list("203.0.113.10")).status).toBe(HTTP_STATUS.OK);
+      expect((await list("203.0.113.10")).status).toBe(429);
+      expect((await list("203.0.113.11")).status).toBe(HTTP_STATUS.OK);
+    });
+
     it("sets and clears corsConfig and rateLimitConfig", async () => {
       const bucket = await createTestBucket(testToken);
       const put = (body: Record<string, unknown>) =>

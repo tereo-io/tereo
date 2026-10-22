@@ -101,9 +101,10 @@ export const ClientList = () => {
     [navigate, mayDelete, isClientsAdmin, me]
   );
 
+  // Without clients.admin, core lists only the clients the caller owns.
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
-      title: "OAuth Clients",
+      title: isClientsAdmin ? "OAuth Clients" : "Your OAuth Clients",
       filters: [
         {
           type: "SEARCH",
@@ -135,7 +136,7 @@ export const ClientList = () => {
         sortDirection: "asc",
       },
     }),
-    []
+    [isClientsAdmin]
   );
 
   if (!hasPermission("clients.read")) return null;

@@ -6,35 +6,17 @@ import filesRouter from "./files/index.js";
 import auditRouter from "./audit/index.js";
 import adminRouter from "./admin/index.js";
 import setupRouter from "./setup/index.js";
-import express, { Router } from "express";
+import { Router } from "express";
 
 /** Core's own API, mounted at /v1. A later version mounts beside it. */
 const v1Router = Router();
 
-// Files — /v1/files.
+// Files, webhooks, audit and notifications parse bodies in their own routers,
+// after authentication; each sets its limits there.
 v1Router.use("/files", filesRouter);
-
-// Webhooks — /v1/webhooks, and audit — /v1/audit.
-v1Router.use(
-  "/webhooks",
-  express.json({ limit: "10mb" }),
-  express.urlencoded({ extended: true, limit: "10mb" }),
-  webhooksRouter
-);
-v1Router.use(
-  "/audit",
-  express.json({ limit: "10mb" }),
-  express.urlencoded({ extended: true, limit: "10mb" }),
-  auditRouter
-);
-
-// Notifications — /v1/notifications. Content is inline, attachments are
-// references to stored objects.
-v1Router.use(
-  "/notifications",
-  express.json({ limit: "10mb" }),
-  notificationsRouter
-);
+v1Router.use("/webhooks", webhooksRouter);
+v1Router.use("/audit", auditRouter);
+v1Router.use("/notifications", notificationsRouter);
 
 // Account, admin and setup — /v1/account, /v1/admin, /v1/setup.
 v1Router.use("/account", ...smallBodyParsers, accountRouter);

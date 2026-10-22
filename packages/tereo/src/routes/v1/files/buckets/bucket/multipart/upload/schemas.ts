@@ -4,7 +4,7 @@ import { z } from "zod";
 
 export const uploadIdParamsSchema = z.object({
   name: bucketNameSchema.shape.name,
-  uploadId: z.string().uuid(),
+  uploadId: z.guid(),
 });
 
 const MAX_PARTS = env.FILE_SERVICE_MAX_MULTIPART_PARTS;

@@ -1,5 +1,6 @@
 import { ConflictError, NotFoundError, UnauthorizedError } from "./errors.js";
-import { computeChanges, logAuditTx } from "./outbox.js";
+import { computeChanges, emitTx, logAuditTx } from "./outbox.js";
+import { formatUser } from "./transformers.js";
 import { createHash, randomInt } from "crypto";
 import { hashPassword } from "./crypto.js";
 import { prisma } from "./db/prisma.js";
@@ -169,10 +170,10 @@ export const completeSetup = async (input: CompleteSetupInput) => {
         name: organization.name,
         slug: organization.slug,
         code: organization.code,
-        members: {
-          create: { userId: user.id, memberRole: "owner" },
-        },
       },
+    });
+    const member = await tx.organizationMember.create({
+      data: { organizationId: org.id, userId: user.id, memberRole: "owner" },
     });
 
     await tx.instance.update({
@@ -202,6 +203,55 @@ export const completeSetup = async (input: CompleteSetupInput) => {
         { name: org.name, slug: org.slug, code: org.code }
       ),
       metadata: { via: "setup" },
+    });
+    const roleIds = roles.map((role) => role.id);
+    await logAuditTx(tx, {
+      auth,
+      action: "UPDATE",
+      entityType: "User",
+      entityId: user.id,
+      entityName: user.email,
+      metadata: { action: "roles_changed", roleIds, via: "setup" },
+    });
+    await logAuditTx(tx, {
+      auth,
+      organizationId: org.id,
+      action: "CREATE",
+      entityType: "OrganizationMember",
+      entityId: member.id,
+      entityName: user.email,
+      metadata: {
+        userId: user.id,
+        memberRole: member.memberRole,
+        via: "setup",
+      },
+    });
+
+    await emitTx(tx, {
+      organizationId: org.id,
+      eventType: "auth.user.created",
+      entityType: "User",
+      entityId: user.id,
+      data: formatUser(user) as unknown as Record<string, unknown>,
+    });
+    await emitTx(tx, {
+      organizationId: org.id,
+      eventType: "auth.user.roles-changed",
+      entityType: "User",
+      entityId: user.id,
+      data: { userId: user.id, email: user.email, roleIds },
+    });
+    await emitTx(tx, {
+      organizationId: org.id,
+      eventType: "auth.organization.member-added",
+      entityType: "OrganizationMember",
+      entityId: member.id,
+      data: {
+        organizationId: org.id,
+        userId: user.id,
+        email: user.email,
+        memberRole: member.memberRole,
+      },
     });
 
     return { user, organization: org };

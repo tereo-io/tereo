@@ -6,7 +6,10 @@
     description: |
       Probes Postgres and Redis (500 ms timeout each). Returns `200` with
       `status: ok` when both answer, `503` with `status: degraded` and the
-      failing dependency marked `fail` otherwise. Public and not rate-limited.
+      failing dependency marked `fail` otherwise. Public, so it names no
+      version. The probe result is shared for one second, and requests are
+      limited per client IP (300 a second, 1000 for a direct connection from
+      an internal network address).
     operationId: getHealth
     security: []
     responses:
@@ -16,6 +19,8 @@
           application/json:
             schema:
               $ref: '../../components/auth/schemas.yaml#/HealthStatus'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
       '503':
         description: Postgres or Redis is unreachable
         content:

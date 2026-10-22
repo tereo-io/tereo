@@ -1,3 +1,4 @@
+import { emitEndpointEventTx } from "../utils/webhookEndpointEvents.js";
 import { openEndpointSecrets } from "../utils/webhookSecrets.js";
 import { signatureHeader } from "../utils/webhookSigning.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
@@ -359,6 +360,12 @@ async function handleFinalFailure(endpointId: string): Promise<void> {
         consecutiveFailures: updated.consecutiveFailures,
       },
     });
+    await emitEndpointEventTx(
+      tx,
+      "updated",
+      await db.webhookEndpoints.getForUpdate(endpointId, tx),
+      { changedFields: ["status"], reason: "auto-disabled" }
+    );
     return true;
   });
   if (disabled) {

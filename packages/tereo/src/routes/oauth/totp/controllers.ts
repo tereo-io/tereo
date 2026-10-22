@@ -101,7 +101,6 @@ export const totpVerifyHandler = async (req: Request, res: Response) => {
   // change cannot end it between the two and leave that step behind.
   const writeStep = await writeStepAfterSecondFactor(
     verification,
-    client.clientId,
     async (tx) => {
       if (!(await db.totp.consumeVerificationSession(verification.id, tx))) {
         throw new OAuth2Error(
@@ -128,7 +127,8 @@ export const totpVerifyHandler = async (req: Request, res: Response) => {
     verification.prompt || null,
     [...verification.firstFactor, "otp"],
     undefined,
-    writeStep
+    writeStep,
+    verification.provider
   );
   clearTotpSessionCookie(res, client.clientId);
   issueKnownDevice(res, await db.users.get(verification.userId));
@@ -208,7 +208,6 @@ export const totpRecoveryHandler = async (req: Request, res: Response) => {
   // in the transaction that writes the next step, as at the TOTP step.
   const writeStep = await writeStepAfterSecondFactor(
     verification,
-    client.clientId,
     async (tx) => {
       if (
         !(await db.totp.consumeVerificationSession(verification.id, tx)) ||
@@ -250,7 +249,8 @@ export const totpRecoveryHandler = async (req: Request, res: Response) => {
     verification.prompt || null,
     [...verification.firstFactor, "recovery"],
     undefined,
-    writeStep
+    writeStep,
+    verification.provider
   );
   clearTotpSessionCookie(res, client.clientId);
   await attempt.succeeded();
@@ -329,8 +329,8 @@ export const totpSetupInitiateHandler = async (req: Request, res: Response) => {
   const setupToken = generateTotpSetupToken();
   const expiresAt = new Date(Date.now() + env.TOTP_SETUP_TTL * 1000);
 
-  await writeStep((tx) =>
-    db.totp.createSetupSession(
+  await writeStep(async (tx) => {
+    await db.totp.createSetupSession(
       {
         userId: user.id,
         setupToken,
@@ -348,8 +348,16 @@ export const totpSetupInitiateHandler = async (req: Request, res: Response) => {
         prompt: grant.prompt,
       },
       tx
-    )
-  );
+    );
+    await logAuditTx(tx, {
+      auth: { userId: user.id, email: user.email },
+      action: "UPDATE",
+      entityType: "User",
+      entityId: user.id,
+      entityName: user.email,
+      metadata: { action: "totp_setup_started", clientId: client.clientId },
+    });
+  });
   clearTotpSetupGrantCookie(res, client.clientId);
 
   const qrCodeUri = generateTotpUri({

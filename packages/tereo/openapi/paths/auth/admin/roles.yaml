@@ -69,7 +69,7 @@
       - 1-100 characters
 
       The name must not be taken by another custom role, archived ones
-      included (`409`). System roles have their own names and never collide.
+      included (`409 name_taken`). System roles have their own names and never collide.
 
       An audit log entry is created for this action.
       An `auth.role.created` webhook event is emitted.
@@ -105,7 +105,7 @@
         description: Forbidden - missing roles.write permission
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: A custom role with this name already exists (archived ones included)
+        description: A custom role with this name already exists, archived ones included (`name_taken`)
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -158,7 +158,7 @@
       Updates a role. A system role is declared in code: only `requires2fa`
       can be changed on it — any other field is refused with `403`. A new
       `name` must not be taken by another custom role, archived ones
-      included (`409 conflict`). Archived roles cannot be updated
+      included (`409 name_taken`). Archived roles cannot be updated
       (`409 resource_archived`). Changing `requires2fa` needs a caller
       holding every permission the role grants (`403` otherwise), so only an
       `admin` changes it on core's `admin` role; so does reactivating it
@@ -213,7 +213,7 @@
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
-        description: A custom role with the new name already exists, or the deactivation would leave no active administrator (`conflict`), or the role is archived (`resource_archived`), or the role is declared in the provisioning documents (`managed_by_provisioning`; change it there)
+        description: A custom role with the new name already exists (`name_taken`), or the deactivation would leave no active administrator (`conflict`), or the role is archived (`resource_archived`), or the role is declared in the provisioning documents (`managed_by_provisioning`; change it there)
         headers:
           X-RateLimit-Limit:
             $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
@@ -295,7 +295,7 @@
       new `name`. `displayName` and `description` default to the source's.
       The source must not be archived (`409 resource_archived`); the new
       name must not be taken by another custom role, archived ones included
-      (`409 conflict`). The caller must hold every permission copied
+      (`409 name_taken`). The caller must hold every permission copied
       through a global role (`admin` holds all), otherwise `403` naming the ones they lack.
 
       An audit log entry is created for this action, and an
@@ -336,7 +336,7 @@
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
-        description: The source role is archived (`resource_archived`), or a custom role with this name exists (`conflict`)
+        description: The source role is archived (`resource_archived`), or a custom role with this name exists (`name_taken`)
         headers:
           X-RateLimit-Limit:
             $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'

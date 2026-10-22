@@ -383,6 +383,113 @@ describe("file-service webhook events", () => {
     });
   });
 
+  it("emits object.updated when a version restore replaces a live object's content", async () => {
+    const bucket = await createTestBucket(token);
+    await enableVersioning(bucket.name);
+    const obj = await uploadTestObject(
+      token,
+      bucket.name,
+      "restored.txt",
+      createTestFile(`first-${randomUUID()}`, "restored.txt")
+    );
+    const first = await prisma.objectVersion.findFirstOrThrow({
+      where: { objectId: obj.id, isCurrent: true },
+    });
+    await uploadTestObject(
+      token,
+      bucket.name,
+      "restored.txt",
+      createTestFile(`second-${randomUUID()}`, "restored.txt")
+    );
+    const restore = await axios.post(
+      `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}/versions/${first.id}/restore`,
+      {},
+      { headers: auth() }
+    );
+    expect(restore.status).toBe(HTTP_STATUS.CREATED);
+
+    await waitFor(
+      async () =>
+        (await delivered("file-service.object.updated", obj.id)).some(
+          (p) => (p.data as { via: string }).via === "restore"
+        ),
+      10_000
+    );
+    const restored = (await delivered("file-service.object.updated", obj.id))
+      .map((p) => p.data as Record<string, unknown>)
+      .find((d) => d.via === "restore");
+    expect(restored).toMatchObject({
+      etag: first.etag,
+      restoredFromVersionId: first.id,
+      undeleted: false,
+    });
+  });
+
+  it("writes no audit entry and emits nothing for a PATCH that changes nothing", async () => {
+    const bucket = await createTestBucket(token);
+    const obj = await uploadTestObject(
+      token,
+      bucket.name,
+      "unchanged.txt",
+      createTestFile(`patch-${randomUUID()}`, "unchanged.txt")
+    );
+    const patch = (body: Record<string, unknown>) =>
+      axios.patch(
+        `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}`,
+        body,
+        { headers: auth() }
+      );
+
+    const same = await patch({
+      objectKey: "unchanged.txt",
+      contentType: obj.contentType,
+      tags: obj.tags,
+      deleteAfter: null,
+    });
+    expect(same.status).toBe(HTTP_STATUS.OK);
+    expect(same.data).toMatchObject({ id: obj.id, key: "unchanged.txt" });
+    const audits = () =>
+      prisma.auditLogEntry.count({
+        where: { entityType: "object", entityId: obj.id, action: "UPDATE" },
+      });
+    expect(await audits()).toBe(0);
+
+    expect((await patch({ tags: ["changed"] })).status).toBe(HTTP_STATUS.OK);
+    expect(await audits()).toBe(1);
+    const updates = await delivered("file-service.object.updated", obj.id);
+    expect(updates).toHaveLength(1);
+  });
+
+  it("diffs a bucket update against the row it locked", async () => {
+    const bucket = await createTestBucket(token);
+    const put = (description: string) =>
+      axios.put(
+        `${BASE_URL}/buckets/${bucket.name}`,
+        { description },
+        { headers: auth() }
+      );
+    const responses = await Promise.all([put("first"), put("second")]);
+    expect(responses.map((r) => r.status)).toEqual([200, 200]);
+
+    const entries = await prisma.auditLogEntry.findMany({
+      where: {
+        entityType: "bucket",
+        entityId: String(bucket.id),
+        action: "UPDATE",
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    const diffs = entries.map(
+      (e) =>
+        (e.changes as { description: { old: unknown; new: unknown } })
+          .description
+    );
+    expect(diffs).toHaveLength(2);
+    // The update that took the lock second saw the first one's value.
+    const [a, b] = diffs;
+    expect(a.old === b.new || b.old === a.new).toBe(true);
+  });
+
   it("emits permission.granted and permission.revoked", async () => {
     const bucket = await createTestBucket(token);
     const userId = randomUUID();
@@ -454,6 +561,12 @@ describe("file-service webhook events", () => {
       uploadId
     );
     expect(completed).toMatchObject({ data: { objectId } });
+    const uploadAudits = await prisma.auditLogEntry.findMany({
+      where: { entityType: "multipartUpload", entityId: uploadId },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(uploadAudits.map((e) => e.action)).toEqual(["CREATE", "UPDATE"]);
+    expect(uploadAudits[1].metadata).toMatchObject({ completed: true });
 
     const [created] = await delivered("file-service.object.created", objectId);
     expect(created).toMatchObject({

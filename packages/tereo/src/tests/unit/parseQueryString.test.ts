@@ -122,3 +122,49 @@ describe("parseQueryString filters", () => {
     });
   });
 });
+
+describe("parseQueryString caps", () => {
+  const capped = createCursorQuerySchema({
+    filters: {
+      name: { operators: ["equals", "in"], schema: z.string() },
+      key: {
+        operators: ["equals"],
+        schema: z.string(),
+        maxValueLength: 1024,
+      },
+      createdAt: { operators: ["gte"], schema: z.string() },
+    },
+    sortFields: { createdAt: "createdAt" },
+    defaultSort: "createdAt",
+  });
+  const ok = (query: Record<string, unknown>) =>
+    capped.safeParse(query).success;
+
+  it("caps a filter value at 500 characters unless the filter allows more", () => {
+    expect(ok({ "filter[name]": "a".repeat(500) })).toBe(true);
+    expect(ok({ "filter[name]": "a".repeat(501) })).toBe(false);
+    expect(ok({ "filter[createdAt_gte]": "a".repeat(501) })).toBe(false);
+    expect(ok({ "filter[key]": "a".repeat(1024) })).toBe(true);
+    expect(ok({ "filter[key]": "a".repeat(1025) })).toBe(false);
+  });
+
+  it("caps each value of an in list, and the list at 100 values", () => {
+    const list = (n: number, len = 1) =>
+      Array.from({ length: n }, () => "a".repeat(len)).join(",");
+    const inFilter = (value: string) => ({
+      "filter[name]": value,
+      "filter[name_op]": "in",
+    });
+    expect(ok(inFilter(list(100)))).toBe(true);
+    expect(ok(inFilter(list(101)))).toBe(false);
+    expect(ok(inFilter(list(2, 501)))).toBe(false);
+  });
+
+  it("caps a repeated filter at 20 clauses", () => {
+    const repeated = (n: number) => ({
+      "filter[name]": Array.from({ length: n }, (_, i) => `v${i}`),
+    });
+    expect(ok(repeated(20))).toBe(true);
+    expect(ok(repeated(21))).toBe(false);
+  });
+});

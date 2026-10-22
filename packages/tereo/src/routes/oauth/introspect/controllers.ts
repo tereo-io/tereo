@@ -1,3 +1,4 @@
+import { effectivePermissions } from "../../../utils/coreAccess.js";
 import type { ClientRecord } from "../../../utils/db/clients.js";
 import { logTokenIntrospected } from "../../../utils/audit.js";
 import { checkAccessToken } from "../../../utils/sessions.js";
@@ -64,14 +65,20 @@ export const introspectHandler = async (req: Request, res: Response) => {
   // issued no longer counts, though the token still carries it. A service
   // is told them for any token it may introspect; a third-party client
   // asking about its own token with no core access is not, as at userinfo.
+  // A delegated token's are cut down to its scopes' ceilings, as
+  // requireAuth cuts them.
   const showsPermissions =
     callerService?.kind === "service" || check.access.kind !== "none";
-  const permissions = showsPermissions
+  const live = showsPermissions
     ? await db.roles.getUserPermissions(
         user.id,
         check.token.organizationId ?? undefined
       )
     : undefined;
+  const permissions =
+    live && check.access.kind === "delegated"
+      ? effectivePermissions(live, check.access)
+      : live;
 
   // Resolve org_name if org_id is present in token
   let orgClaims = {};

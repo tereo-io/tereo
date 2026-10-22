@@ -43,3 +43,18 @@ export const validateBody = <T extends ZodSchema>(
   }
   return result.data;
 };
+
+/** Header names arrive lowercased: key the schema by `"x-metadata"`, not `"X-Metadata"`. */
+export const validateHeaders = <T extends ZodSchema>(
+  schema: T,
+  req: Request
+): z.infer<T> => {
+  const result = schema.safeParse(req.headers);
+  if (!result.success) {
+    const message = result.error.issues
+      .map((e) => `${e.path.join(".")}: ${e.message}`)
+      .join(", ");
+    throw new ValidationError(`Invalid request headers. ${message}`);
+  }
+  return result.data;
+};

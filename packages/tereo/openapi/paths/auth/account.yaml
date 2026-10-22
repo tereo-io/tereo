@@ -236,7 +236,9 @@
 
       Attempts are limited to 5 per user per 300 seconds, counted before the
       current password is checked and cleared by a correct one; past that,
-      `429 too_many_requests`.
+      `429 too_many_requests`. A wrong current password is logged, and from
+      the user's fifth wrong password in a row (here or at login) each one
+      is audited (`metadata.action` `password_failures`).
 
       A user without a password (`hasPassword: false`, one who signs in through
       an identity provider) cannot set one here: 400 `no_password`, before any
@@ -339,7 +341,8 @@
       most `PROFILE_PHOTO_MAX_SIZE_MB` (default 5 MB).
 
       An audit log entry is created for the stored object (and for the
-      deletion of a replaced one).
+      deletion of a replaced one), and an `auth.user.updated` webhook event
+      is emitted.
     operationId: postAccountPhoto
     security:
       - BearerAuth: []
@@ -452,7 +455,8 @@
     description: |
       Deletes the user's profile photo. `404` when the user has none.
 
-      An audit log entry is created for the deleted object.
+      An audit log entry is created for the deleted object, and an
+      `auth.user.updated` webhook event is emitted.
     operationId: deleteAccountPhoto
     security:
       - BearerAuth: []
@@ -562,7 +566,7 @@
                 message:
                   type: string
       '400':
-        description: Bad request - invalid body (`invalid_request`), or TOTP is not enabled (`totp_not_enabled`)
+        description: Bad request - invalid body (`invalid_request`), TOTP is not enabled (`totp_not_enabled`), or a wrong TOTP code or one already accepted for this user in the same or a later 30-second step (`invalid_code`)
         headers:
           X-RateLimit-Limit:
             $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
@@ -577,34 +581,14 @@
               properties:
                 error:
                   type: string
-                  enum: [invalid_request, totp_not_enabled]
+                  enum: [invalid_request, totp_not_enabled, invalid_code]
                 error_description:
                   type: string
             example:
               error: "totp_not_enabled"
               error_description: "TOTP is not enabled for your account."
       '401':
-        description: Unauthorized - wrong TOTP code, or one already accepted for this user in the same or a later 30-second step (`invalid_code`), or a missing or invalid access token (`invalid_token`)
-        headers:
-          X-RateLimit-Limit:
-            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
-          X-RateLimit-Remaining:
-            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
-          X-RateLimit-Reset:
-            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                error:
-                  type: string
-                  enum: [invalid_code, invalid_token]
-                error_description:
-                  type: string
-            example:
-              error: "invalid_code"
-              error_description: "Invalid verification code."
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         description: Forbidden - TOTP is required for the user and cannot be disabled (`totp_required`), a token not issued to core's UI (`forbidden`), a login older than 10 minutes (`reauth_required`), or a delegated token without `core:account` (`insufficient_scope`, with a `WWW-Authenticate` challenge)
         headers:
@@ -655,6 +639,8 @@
       login must also be recent, `auth_time` within 10 minutes, or the answer
       is 403 `reauth_required` and the UI signs the user in again with
       `max_age=0` before retrying.
+
+      An audit log entry is created (`metadata.action` `totp_setup_started`).
     operationId: postAccountTotpSetup
     security:
       - BearerAuth: []
@@ -768,7 +754,7 @@
             schema:
               $ref: '../../components/auth/schemas.yaml#/TotpSetupVerifyResponse'
       '400':
-        description: Bad request - invalid body (`invalid_request`), or an unknown setup token or one begun at login (`invalid_setup_token`), or an expired one (`setup_expired`)
+        description: Bad request - invalid body (`invalid_request`), or an unknown setup token or one begun at login (`invalid_setup_token`), or an expired one (`setup_expired`), or a wrong TOTP code or one already accepted for this user in the same or a later 30-second step (`invalid_code`)
         headers:
           X-RateLimit-Limit:
             $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
@@ -783,7 +769,7 @@
               properties:
                 error:
                   type: string
-                  enum: [invalid_request, invalid_setup_token, setup_expired]
+                  enum: [invalid_request, invalid_setup_token, setup_expired, invalid_code]
                 error_description:
                   type: string
             examples:
@@ -796,27 +782,7 @@
                   error: "setup_expired"
                   error_description: "Setup session expired. Please start again."
       '401':
-        description: Unauthorized - wrong TOTP code, or one already accepted for this user in the same or a later 30-second step (`invalid_code`), or a missing or invalid access token (`invalid_token`)
-        headers:
-          X-RateLimit-Limit:
-            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
-          X-RateLimit-Remaining:
-            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
-          X-RateLimit-Reset:
-            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                error:
-                  type: string
-                  enum: [invalid_code, invalid_token]
-                error_description:
-                  type: string
-            example:
-              error: "invalid_code"
-              error_description: "Invalid verification code. Please try again."
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         description: Forbidden - TOTP is disabled by policy (`totp_disabled`), the setup token belongs to a different user or the token was not issued to core's UI (`forbidden`), or a delegated token without `core:account` (`insufficient_scope`, with a `WWW-Authenticate` challenge)
         headers:
@@ -897,7 +863,7 @@
             schema:
               $ref: '../../components/auth/schemas.yaml#/RecoveryCodesResponse'
       '400':
-        description: Bad request - invalid body (`invalid_request`), or TOTP is not enabled (`totp_not_enabled`)
+        description: Bad request - invalid body (`invalid_request`), TOTP is not enabled (`totp_not_enabled`), or a wrong TOTP code or one already accepted for this user in the same or a later 30-second step (`invalid_code`)
         headers:
           X-RateLimit-Limit:
             $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
@@ -912,34 +878,14 @@
               properties:
                 error:
                   type: string
-                  enum: [invalid_request, totp_not_enabled]
+                  enum: [invalid_request, totp_not_enabled, invalid_code]
                 error_description:
                   type: string
             example:
               error: "totp_not_enabled"
               error_description: "TOTP is not enabled for your account."
       '401':
-        description: Unauthorized - wrong TOTP code, or one already accepted for this user in the same or a later 30-second step (`invalid_code`), or a missing or invalid access token (`invalid_token`)
-        headers:
-          X-RateLimit-Limit:
-            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
-          X-RateLimit-Remaining:
-            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
-          X-RateLimit-Reset:
-            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                error:
-                  type: string
-                  enum: [invalid_code, invalid_token]
-                error_description:
-                  type: string
-            example:
-              error: "invalid_code"
-              error_description: "Invalid verification code."
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         description: Forbidden - a token not issued to core's UI (`forbidden`), a login older than 10 minutes (`reauth_required`), or a delegated token without `core:account` (`insufficient_scope`, with a `WWW-Authenticate` challenge)
         headers:
@@ -1065,7 +1011,7 @@ auth.user.sessions-revoked:
     tags:
       - Account - Sessions
     summary: User sessions revoked
-    description: Fired when sessions of a user are revoked through `DELETE /v1/account/sessions`, `DELETE /v1/account/sessions/{sessionId}`, `DELETE /v1/admin/users/{id}/sessions`, `DELETE /v1/admin/users/{id}/sessions/all`, an admin password reset (`PATCH /v1/admin/users/{id}` with `password`) or `POST /v1/admin/users/{id}/totp/reset` — not when no session was revoked and no SSO session ended. The other sessions a user's own password or TOTP change ends, and those a deactivation without a password reset ends, emit no event.
+    description: Fired when sessions of a user are revoked through `DELETE /v1/account/sessions`, `DELETE /v1/account/sessions/{sessionId}`, `DELETE /v1/admin/users/{id}/sessions`, `DELETE /v1/admin/users/{id}/sessions/all`, an admin password reset (`PATCH /v1/admin/users/{id}` with `password`) or `POST /v1/admin/users/{id}/totp/reset`; on a refresh-token revoke at `POST /oauth/revoke`, a logout at `/oauth/end-session` (or its confirm), a replayed authorization code or refresh token (its family revoked by core), and a password login in a browser still holding another user's SSO session (for that user) — not when no session was revoked and no SSO session ended. The other sessions a user's own password or TOTP change ends, and those a deactivation without a password reset ends, emit no event.
     operationId: webhookUserSessionsRevoked
     security: []
     parameters:

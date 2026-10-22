@@ -207,6 +207,12 @@
       endpoint refuses every change except a body carrying only `status` (to
       re-enable it): `409 managed_by_provisioning`.
 
+      File events are sent by the endpoint creator's bucket access, so only
+      its creator or a `webhooks.admin` holder may change where they go: a
+      new `url` or `customHeaders` on an endpoint subscribed (before or after
+      the change) to a `file-service.*` event type, or a `file-service.*`
+      event type it was not subscribed to, is `403` for anyone else.
+
       An endpoint an integration owns is visible to anyone but that
       integration only with `webhooks.admin` (others: absent from lists, 404).
       Such an admin may PATCH `{status}` only; any other field is
@@ -217,7 +223,8 @@
       - `webhooks.write`
 
       An audit log entry is created for this action, with custom header
-      values masked.
+      values masked and the URL as its origin only. A change
+      emits `webhook.endpoint.updated`.
     operationId: updateWebhookEndpoint
     security:
       - BearerAuth: []
@@ -709,6 +716,12 @@
       inclusive), event type, and a limit on the number of deliveries to retry
       (default 100, max 1000).
 
+      Anyone but the endpoint's creator or a `webhooks.admin` holder retries
+      only its non-file deliveries: `file-service.*` ones are left as they
+      are (and naming one in `eventType` is `403`), since the endpoint's URL
+      may have changed since its creator's bucket access let them through.
+      A provisioned endpoint's URL comes from its document, so anyone may.
+
       An audit log entry is created for this action when any delivery is reset.
 
       **Required permissions:**
@@ -813,10 +826,14 @@
       status are eligible for retry (`400 invalid_delivery_status` otherwise,
       including when a concurrent retry reset it first). Archived endpoints are
       rejected (`409 resource_archived`), and so is an endpoint that is not
-      `ACTIVE` (`400 invalid_endpoint_status`; re-enable it first).
+      `ACTIVE` (`400 invalid_endpoint_status`; re-enable it first). A
+      `file-service.*` delivery of an endpoint that is not provisioned is
+      retried only by the endpoint's creator or a `webhooks.admin` holder
+      (`403` otherwise).
 
       Returns `202 Accepted` with the updated delivery record. An audit log
       entry is created for this action.
+
 
       **Required permissions:**
       - `webhooks.write`
@@ -958,3 +975,277 @@ webhook.test:
         description: |
           Webhook received. Any 2xx within 30 seconds marks the delivery
           successful; anything else (including a redirect) is retried.
+
+webhook.endpoint.created:
+  post:
+    tags:
+      - Webhook Events
+    summary: Webhook endpoint created
+    description: |-
+      Fired by `POST /v1/webhooks/webhooks`. `entityId` is the endpoint's id.
+
+      Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
+      or custom header values (only their names), and its `url` is its origin only.
+      An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
+      organizations and to those of the service that owns it.
+    operationId: webhookWebhookEndpointCreated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum: ["webhook.endpoint.created"]
+                  entityType:
+                    type: string
+                    enum: ["WebhookEndpoint"]
+                  data:
+                    $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpointEventData'
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+webhook.endpoint.updated:
+  post:
+    tags:
+      - Webhook Events
+    summary: Webhook endpoint updated
+    description: |-
+      Fired by `PATCH /v1/webhooks/webhooks/{id}` when it changed something; `data.changedFields` names what. `entityId` is the endpoint's id.
+
+      Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
+      or custom header values (only their names), and its `url` is its origin only.
+      An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
+      organizations and to those of the service that owns it.
+    operationId: webhookWebhookEndpointUpdated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum: ["webhook.endpoint.updated"]
+                  entityType:
+                    type: string
+                    enum: ["WebhookEndpoint"]
+                  data:
+                    $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpointEventData'
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+webhook.endpoint.archived:
+  post:
+    tags:
+      - Webhook Events
+    summary: Webhook endpoint archived
+    description: |-
+      Fired by `POST /v1/webhooks/webhooks/{id}/archive`. `entityId` is the endpoint's id.
+
+      Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
+      or custom header values (only their names), and its `url` is its origin only.
+      An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
+      organizations and to those of the service that owns it.
+    operationId: webhookWebhookEndpointArchived
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum: ["webhook.endpoint.archived"]
+                  entityType:
+                    type: string
+                    enum: ["WebhookEndpoint"]
+                  data:
+                    $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpointEventData'
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+webhook.endpoint.restored:
+  post:
+    tags:
+      - Webhook Events
+    summary: Webhook endpoint restored
+    description: |-
+      Fired by `POST /v1/webhooks/webhooks/{id}/restore`. `entityId` is the endpoint's id.
+
+      Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
+      or custom header values (only their names), and its `url` is its origin only.
+      An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
+      organizations and to those of the service that owns it.
+    operationId: webhookWebhookEndpointRestored
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum: ["webhook.endpoint.restored"]
+                  entityType:
+                    type: string
+                    enum: ["WebhookEndpoint"]
+                  data:
+                    $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpointEventData'
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+webhook.endpoint.deleted:
+  post:
+    tags:
+      - Webhook Events
+    summary: Webhook endpoint deleted
+    description: |-
+      Fired by `DELETE /v1/webhooks/webhooks/{id}`; `data` is the endpoint as it was. `entityId` is the endpoint's id.
+
+      Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
+      or custom header values (only their names), and its `url` is its origin only.
+      An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
+      organizations and to those of the service that owns it.
+    operationId: webhookWebhookEndpointDeleted
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum: ["webhook.endpoint.deleted"]
+                  entityType:
+                    type: string
+                    enum: ["WebhookEndpoint"]
+                  data:
+                    $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpointEventData'
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+webhook.endpoint.secret-rotated:
+  post:
+    tags:
+      - Webhook Events
+    summary: Webhook endpoint secret rotated
+    description: |-
+      Fired by `POST /v1/webhooks/webhooks/{id}/rotate-secret`; `data.previousSecretExpiresAt` is when the replaced secret stops signing. `entityId` is the endpoint's id.
+
+      Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
+      or custom header values (only their names), and its `url` is its origin only.
+      An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
+      organizations and to those of the service that owns it.
+    operationId: webhookWebhookEndpointSecretRotated
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum: ["webhook.endpoint.secret-rotated"]
+                  entityType:
+                    type: string
+                    enum: ["WebhookEndpoint"]
+                  data:
+                    $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpointEventData'
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.
+webhook.endpoint.previous-secret-revoked:
+  post:
+    tags:
+      - Webhook Events
+    summary: Webhook endpoint previous secret revoked
+    description: |-
+      Fired by `POST /v1/webhooks/webhooks/{id}/revoke-previous-secret`. `entityId` is the endpoint's id.
+
+      Sent to subscribers holding `webhooks.read`. The payload never carries the signing secret
+      or custom header values (only their names), and its `url` is its origin only.
+      An endpoint of all organizations has a null `organizationId`: its events go to endpoints of all
+      organizations and to those of the service that owns it.
+    operationId: webhookWebhookEndpointPreviousSecretRevoked
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    type: string
+                    enum: ["webhook.endpoint.previous-secret-revoked"]
+                  entityType:
+                    type: string
+                    enum: ["WebhookEndpoint"]
+                  data:
+                    $ref: '../../components/webhooks/schemas.yaml#/WebhookEndpointEventData'
+    responses:
+      2XX:
+        description: Any 2xx marks the delivery successful; anything else is retried with exponential backoff.

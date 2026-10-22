@@ -1,7 +1,8 @@
+import { bucketNameSchema } from "../../../schemas.js";
 import { z } from "zod";
 
 export const objectParamsSchema = z.object({
-  name: z.string(),
+  name: bucketNameSchema.shape.name,
   objectKey: z
     .string()
     .min(1, "Object key is required")
@@ -19,7 +20,7 @@ export const objectParamsSchema = z.object({
 });
 
 export const downloadQuerySchema = z.object({
-  versionId: z.string().uuid().optional(),
+  versionId: z.guid().optional(),
   thumbnail: z.enum(["thumb", "small", "medium"]).optional(),
 });
 

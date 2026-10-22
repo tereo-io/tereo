@@ -57,7 +57,7 @@ adding or moving a route.
 
 - Always Zod. `validateBody(schema, req)`, `validateParams(schema, req)`, `validateQuery(schema, req)`
   from `utils/validateReq.ts` — they throw `ValidationError` (400 `invalid_request`).
-- Ids are UUIDv7: param schemas use `z.string().uuid()` (some older ones still `z.string().min(1)`).
+- Ids are UUIDv7: param schemas use `z.guid()` — any 8-4-4-4-12 hex id, as Postgres takes it (`z.uuid()` refuses ids outside RFC 9562's variants).
 - **List endpoints are cursor-paginated**: `createCursorQuerySchema({ filters, sortFields, defaultSort })`
   from `utils/parseQueryString.ts`, then `applyCursorToWhere(query, baseWhere)` and
   `buildCursorPageResponse(result, query)` from `utils/cursor.ts` (cursors are HMAC-signed with

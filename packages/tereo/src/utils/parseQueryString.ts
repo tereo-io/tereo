@@ -29,9 +29,37 @@ interface FilterConfig {
    * are ANDed at the where root. Not applied to `_gte`/`_lte` range keys.
    */
   toWhere?: (clause: Record<string, unknown>) => Record<string, unknown>;
-  /** The most values one `in` filter may list. */
+  /** The most values one `in` filter may list (default `MAX_IN_VALUES`). */
   maxInValues?: number;
+  /** The longest one filter value may be (default `MAX_FILTER_VALUE_LENGTH`). */
+  maxValueLength?: number;
 }
+
+export const MAX_FILTER_VALUE_LENGTH = 500;
+export const MAX_IN_VALUES = 100;
+// Repeated keys (`?filter[x]=a&filter[x]=b`) each become a clause.
+export const MAX_CLAUSES_PER_FILTER = 20;
+
+/**
+ * Checked before a filter's own schema, so a filter on an unbounded column
+ * (`z.string()`) cannot take a value of any size.
+ */
+const checkValueLength = (
+  value: unknown,
+  filterConfig: FilterConfig,
+  filterKey: string,
+  key: string,
+  ctx: z.RefinementCtx
+): boolean => {
+  const max = filterConfig.maxValueLength ?? MAX_FILTER_VALUE_LENGTH;
+  if (typeof value !== "string" || value.length <= max) return true;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: [key],
+    message: `Values for "${filterKey}" may be at most ${max} characters`,
+  });
+  return false;
+};
 
 const CASE_INSENSITIVE_OPS = new Set(["contains", "startsWith", "endsWith"]);
 
@@ -100,6 +128,14 @@ const buildFilterClauses = (
   ctx: z.RefinementCtx
 ): Record<string, unknown>[] => {
   const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+  if (values.length > MAX_CLAUSES_PER_FILTER) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [key],
+      message: `At most ${MAX_CLAUSES_PER_FILTER} values for "${filterKey}"`,
+    });
+    return [];
+  }
 
   let operators: string[];
   if (Array.isArray(rawOperator)) {
@@ -139,14 +175,12 @@ const buildFilterClauses = (
     if (operator === "in") {
       const inValues =
         typeof value === "string" ? value.split(",").map((v) => v.trim()) : [];
-      if (
-        filterConfig.maxInValues !== undefined &&
-        inValues.length > filterConfig.maxInValues
-      ) {
+      const maxInValues = filterConfig.maxInValues ?? MAX_IN_VALUES;
+      if (inValues.length > maxInValues) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [key],
-          message: `At most ${filterConfig.maxInValues} values for "${filterKey}"`,
+          message: `At most ${maxInValues} values for "${filterKey}"`,
         });
         return [];
       }
@@ -154,6 +188,10 @@ const buildFilterClauses = (
       const validated: unknown[] = [];
       let inHadError = false;
       for (const v of inValues) {
+        if (!checkValueLength(v, filterConfig, filterKey, key, ctx)) {
+          inHadError = true;
+          continue;
+        }
         const result = filterConfig.schema.safeParse(v);
         if (!result.success) {
           result.error.issues.forEach((issue) =>
@@ -169,6 +207,7 @@ const buildFilterClauses = (
       continue;
     }
 
+    if (!checkValueLength(value, filterConfig, filterKey, key, ctx)) return [];
     const result = parseFilterValue(filterConfig.schema, value);
     if (!result.success) {
       result.error.issues.forEach((issue) =>
@@ -424,6 +463,9 @@ const parseFilters = (
         continue;
       }
 
+      if (!checkValueLength(rawValue, filterConfig, fieldName, key, ctx)) {
+        continue;
+      }
       const valueResult = filterConfig.schema.safeParse(rawValue);
       if (!valueResult.success) {
         valueResult.error.issues.forEach((issue) => {

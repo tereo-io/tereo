@@ -1,9 +1,9 @@
 import { isClaimHeld } from "../../../../../../../../../utils/uploadIdempotency.js";
 import { setAccessLog } from "../../../../../../../../../middleware/accessLog.js";
-import { validateParams } from "../../../../../../../../../utils/validateReq.js";
 import { assertMultipartFits, multipartCompleteClaim } from "../../../utils.js";
 import { validateUser } from "../../../../../../../../../middleware/auth.js";
 import { stagePart } from "../../../../../../../../../utils/storage.js";
+import { declaredLengthHeadersSchema } from "../../../../schemas.js";
 import { logger } from "../../../../../../../../../utils/logger.js";
 import db from "../../../../../../../../../utils/db/index.js";
 import env from "../../../../../../../../../env.js";
@@ -16,6 +16,10 @@ import {
   getAccessibleBucket,
   validateMultipartOwnership,
 } from "../../../../../../../../../utils/bucketAccess.js";
+import {
+  validateHeaders,
+  validateParams,
+} from "../../../../../../../../../utils/validateReq.js";
 import {
   AppError,
   ConflictError,
@@ -33,8 +37,10 @@ export const uploadPart = async (req: Request, res: Response) => {
 
   // A declared length that cannot fit is refused before the body is read;
   // the staged size is checked again under the upload's lock below.
-  const declared = Number(req.headers["content-length"]);
-  if (Number.isSafeInteger(declared)) {
+  const declared = validateHeaders(declaredLengthHeadersSchema, req)[
+    "content-length"
+  ];
+  if (declared !== undefined) {
     const otherParts = await db.multipartUploads.stagedBytes(
       params.uploadId,
       params.partNumber

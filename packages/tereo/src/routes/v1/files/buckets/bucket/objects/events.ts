@@ -1,5 +1,5 @@
+import { bucketEventScope, emitTx } from "../../../../../../utils/outbox.js";
 import type { Prisma } from "../../../../../../utils/db/prisma.js";
-import { emitTx } from "../../../../../../utils/outbox.js";
 import { serializeObject } from "./utils.js";
 import type {
   ObjectWithCurrent,
@@ -9,6 +9,7 @@ import type {
 type EventBucket = {
   name: string;
   organizationId: string | null;
+  serviceId: string | null;
 };
 
 export type ObjectWriteVia = "direct" | "presigned" | "multipart";
@@ -19,13 +20,12 @@ export const emitVersionCreatedTx = async (
   object: ObjectWithCurrent,
   via: ObjectWriteVia | "metadata"
 ) => {
-  if (!bucket.organizationId) return;
   const version = object.versions[0];
   if (!version) return;
 
   await emitTx(tx, {
     eventType: "file-service.object.version.created",
-    organizationId: bucket.organizationId,
+    ...bucketEventScope(bucket),
     entityType: "objectVersion",
     entityId: version.id,
     data: {
@@ -51,7 +51,6 @@ export const emitObjectWrittenTx = async (
   upsert: UpsertWithBlobResult,
   via: ObjectWriteVia
 ) => {
-  if (!bucket.organizationId) return;
   const serialized = serializeObject(upsert.object);
 
   await emitTx(tx, {
@@ -59,7 +58,7 @@ export const emitObjectWrittenTx = async (
       upsert.type === "updated"
         ? "file-service.object.updated"
         : "file-service.object.created",
-    organizationId: bucket.organizationId,
+    ...bucketEventScope(bucket),
     entityType: "object",
     entityId: String(upsert.object.id),
     data: {

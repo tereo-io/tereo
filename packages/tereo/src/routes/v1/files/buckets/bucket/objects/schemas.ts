@@ -35,6 +35,15 @@ export const metadataSchema = z
 /** An object's tags, from a JSON body's `tags` or the `X-Tags` header. */
 export const tagsSchema = z.array(z.string().min(1).max(128)).max(50);
 
+/**
+ * Headers of an upload that carry object fields. The size, JSON and content
+ * checks that follow keep their own error codes (`utils.ts`).
+ */
+export const objectFieldHeadersSchema = z.object({
+  "x-metadata": z.string().optional(),
+  "x-tags": z.string().optional(),
+});
+
 /** A content type as `normalizeContentType` stores it. */
 export const contentTypeSchema = z
   .string()
@@ -58,6 +67,7 @@ export const listObjectsQuerySchema = createCursorQuerySchema({
     objectKey: {
       operators: ["contains", "startsWith", "equals"],
       schema: z.string().max(1024),
+      maxValueLength: 1024,
     },
     contentType: {
       operators: ["contains", "equals"],
@@ -103,7 +113,7 @@ export type ListPrefixesQuery = z.infer<typeof listPrefixesQuerySchema>;
 export const bulkDeleteBodySchema = z
   .object({
     prefix: z.string().min(1).max(1024).optional(),
-    ids: z.array(z.string().uuid()).min(1).max(1000).optional(),
+    ids: z.array(z.guid()).min(1).max(1000).optional(),
   })
   .refine(
     (v) => (v.prefix !== undefined) !== (v.ids !== undefined),

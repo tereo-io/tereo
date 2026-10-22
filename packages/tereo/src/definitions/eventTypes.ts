@@ -53,7 +53,8 @@ const authEvents: EventTypeDefinition[] = [
   },
   {
     eventType: "auth.user.sessions-revoked",
-    description: "Sessions of a user revoked, by the user or an admin",
+    description:
+      "Sessions of a user revoked: by the user, an admin, or core on a replayed token",
   },
   {
     eventType: "auth.user.recovery-codes-regenerated",
@@ -130,6 +131,28 @@ const authEvents: EventTypeDefinition[] = [
     eventType: "auth.user.identity-unlinked",
     description: "Upstream identity unlinked from a user",
   },
+  {
+    eventType: "auth.identity-provider.domain-created",
+    description: "Email domain added to an identity provider",
+  },
+  {
+    eventType: "auth.identity-provider.domain-updated",
+    description:
+      "Identity provider domain changed (domain, organization, roles, auto-accept or SSO-only)",
+  },
+  {
+    eventType: "auth.identity-provider.domain-deleted",
+    description: "Email domain removed from an identity provider",
+  },
+  {
+    eventType: "auth.user.identity-invite-created",
+    description:
+      "An admin invited a user to link an identity at a provider (or renewed the invite)",
+  },
+  {
+    eventType: "auth.user.identity-invite-withdrawn",
+    description: "An admin withdrew a user's identity invite",
+  },
 ];
 
 const fileEvents: EventTypeDefinition[] = [
@@ -170,7 +193,8 @@ const fileEvents: EventTypeDefinition[] = [
   },
   {
     eventType: "file-service.object.version.deleted",
-    description: "A specific non-current version hard-deleted",
+    description:
+      "A specific non-current version soft-deleted (its content is removed once nothing else holds it)",
   },
   {
     eventType: "file-service.objects.versions.purged",
@@ -240,12 +264,42 @@ export const RESERVED_EVENT_TYPES: ReadonlySet<string> = new Set([
   TEST_EVENT_TYPE,
 ]);
 
-// Registered because a delivery's event type is a foreign key into the
-// registry, so test deliveries need the row.
 const webhookEvents: EventTypeDefinition[] = [
+  // Registered because a delivery's event type is a foreign key into the
+  // registry, so test deliveries need the row.
   {
     eventType: TEST_EVENT_TYPE,
     description: "Test delivery sent on request to a single endpoint",
+  },
+  {
+    eventType: "webhook.endpoint.created",
+    description: "Webhook endpoint created",
+  },
+  {
+    eventType: "webhook.endpoint.updated",
+    description:
+      "Webhook endpoint updated (URL, description, event types, custom headers or status)",
+  },
+  {
+    eventType: "webhook.endpoint.archived",
+    description: "Webhook endpoint archived; it receives no deliveries",
+  },
+  {
+    eventType: "webhook.endpoint.restored",
+    description: "Webhook endpoint restored from the archive",
+  },
+  {
+    eventType: "webhook.endpoint.deleted",
+    description: "Webhook endpoint permanently deleted",
+  },
+  {
+    eventType: "webhook.endpoint.secret-rotated",
+    description: "Webhook endpoint signing secret rotated",
+  },
+  {
+    eventType: "webhook.endpoint.previous-secret-revoked",
+    description:
+      "Webhook endpoint's previous signing secret revoked before its overlap ended",
   },
 ];
 
@@ -350,6 +404,7 @@ const READ_PERMISSIONS: [prefix: string, permission: string][] = [
   ["core.service.", "services.read"],
   ["core.integration.", "integrations.read"],
   ["core.signing-key.", "settings.read"],
+  ["webhook.endpoint.", "webhooks.read"],
   ["notification.connection.", "notifications.admin"],
   ["notification.", "notifications.read"],
 ];

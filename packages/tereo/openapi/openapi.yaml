@@ -426,8 +426,10 @@ info:
     `/v1/files/buckets/{name}/objects`, `/multipart` and `/archives` routes and on presigned
     (`/v1/files/signed/objects/**`) traffic.
 
-    #### Unprotected Endpoints
-    - **Health check** (`/health`): No rate limiting
+    #### Health Checks and Preflights
+    `GET /health` and the CORS preflights (`OPTIONS`) of bucket object, multipart and archive
+    routes each have a per-address limit of their own, at the same rates as the limit before
+    authentication.
 
     ### Rate Limit Headers
 
@@ -567,7 +569,10 @@ info:
     ```
 
     Each endpoint documents its supported filter fields and operators in the endpoint
-    description; a field or operator it does not list is a `400 invalid_request`.
+    description; a field or operator it does not list is a `400 invalid_request`. A filter value
+    is at most 500 characters (an object-key filter 1024), an `in` filter lists at most 100
+    values, and one field may be filtered at most 20 times in a request; beyond that is a `400
+    invalid_request`.
 
     ### Sorting
 
@@ -1972,6 +1977,12 @@ webhooks:
     $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.deactivated'
   auth.identity-provider.activated:
     $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.activated'
+  auth.identity-provider.domain-created:
+    $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.domain-created'
+  auth.identity-provider.domain-updated:
+    $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.domain-updated'
+  auth.identity-provider.domain-deleted:
+    $ref: './paths/auth/admin/identity-providers.yaml#/auth.identity-provider.domain-deleted'
   auth.role.created:
     $ref: './paths/auth/admin/roles.yaml#/auth.role.created'
   auth.role.updated:
@@ -2014,6 +2025,10 @@ webhooks:
     $ref: './paths/auth/admin/user-identities.yaml#/auth.user.identity-linked'
   auth.user.identity-unlinked:
     $ref: './paths/auth/admin/user-identities.yaml#/auth.user.identity-unlinked'
+  auth.user.identity-invite-created:
+    $ref: './paths/auth/admin/user-identities.yaml#/auth.user.identity-invite-created'
+  auth.user.identity-invite-withdrawn:
+    $ref: './paths/auth/admin/user-identities.yaml#/auth.user.identity-invite-withdrawn'
   auth.user.totp-reset:
     $ref: './paths/auth/admin/users.yaml#/auth.user.totp-reset'
   auth.client.created:
@@ -2096,6 +2111,20 @@ webhooks:
     $ref: './paths/files/webhook-events.yaml#/file-service.share.accessed'
   webhook.test:
     $ref: './paths/webhooks/webhooks.yaml#/webhook.test'
+  webhook.endpoint.created:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.created'
+  webhook.endpoint.updated:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.updated'
+  webhook.endpoint.archived:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.archived'
+  webhook.endpoint.restored:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.restored'
+  webhook.endpoint.deleted:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.deleted'
+  webhook.endpoint.secret-rotated:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.secret-rotated'
+  webhook.endpoint.previous-secret-revoked:
+    $ref: './paths/webhooks/webhooks.yaml#/webhook.endpoint.previous-secret-revoked'
   notification.connection.created:
     $ref: './paths/notifications/connections.yaml#/notification.connection.created'
   notification.connection.updated:

@@ -61,6 +61,7 @@ FilterValueParam:
     See endpoint description for available filter fields and operators.
   schema:
     type: string
+    maxLength: 500
 
 FilterOperatorParam:
   name: filter[field_op]

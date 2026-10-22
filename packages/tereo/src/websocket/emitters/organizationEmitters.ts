@@ -1,19 +1,21 @@
 import type { OrganizationChangePayload } from "../types.js";
+import { userAccountRoom } from "./sessionEmitters.js";
 import { getIO } from "./permissionEmitters.js";
-import { userRoom } from "./sessionEmitters.js";
 import { logger } from "../../utils/logger.js";
 import db from "../../utils/db/index.js";
 
 /**
- * Reaches every socket of the users, whichever organization its token was
- * issued for: the client refreshes its token and organization list.
+ * Reaches every account socket (`userAccountRoom`) of the users, whichever organization its
+ * token was issued for: the client refreshes its token and organization list.
  */
 const emitOrgChangeToUsers = (
   userIds: string[],
   payload: OrganizationChangePayload
 ) => {
   if (userIds.length === 0) return;
-  getIO().to(userIds.map(userRoom)).emit("auth:organization:changed", payload);
+  getIO()
+    .to(userIds.map(userAccountRoom))
+    .emit("auth:organization:changed", payload);
   logger.debug(
     { payload, userCount: userIds.length },
     "Emitted organization change"

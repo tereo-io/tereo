@@ -1,12 +1,20 @@
 import { openProviderSecret } from "../../utils/identityProviders/clientSecret.js";
+import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
 import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mapUniqueViolation } from "../../utils/prismaErrors.js";
 import { ensurePermission } from "../utils/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { CORE_URL } from "../utils/coreUrl.js";
+import db from "../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
+import {
+  closeSsoOnlySessionSweepQueue,
+  getSsoOnlySessionSweepQueue,
+  processSsoOnlySessionSweep,
+  type SsoOnlySessionSweepJobData,
+} from "../../jobs/ssoOnlySessionSweep.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
@@ -87,6 +95,9 @@ describe("Admin identity providers", () => {
           "auth.identity-provider.created",
           "auth.identity-provider.deactivated",
           "auth.identity-provider.activated",
+          "auth.identity-provider.domain-created",
+          "auth.identity-provider.domain-updated",
+          "auth.identity-provider.domain-deleted",
         ],
       }
     );
@@ -774,6 +785,15 @@ describe("Admin identity providers", () => {
         `/${provider.id}/domains/${created.id}`
       );
       expect(gone.status).toBe(404);
+
+      const expected = [
+        "auth.identity-provider.domain-created",
+        "auth.identity-provider.domain-updated",
+        "auth.identity-provider.domain-deleted",
+      ];
+      expect((await deliveredEventTypes(created.id, expected)).sort()).toEqual(
+        expected.sort()
+      );
     });
 
     it("keeps fields a domain PATCH does not send", async () => {
@@ -992,6 +1012,12 @@ describe("Admin identity providers", () => {
 
       beforeAll(async () => {
         client = await createTestClient();
+        // Called here, outside the server: what it emits needs the cache.
+        await ensureDefaultOrganization();
+      });
+
+      afterAll(async () => {
+        await closeSsoOnlySessionSweepQueue();
       });
 
       /** A signed-in user at `domain`, with an identity at `providerId` if given. */
@@ -1028,7 +1054,7 @@ describe("Admin identity providers", () => {
         });
         expect(created.status).toBe(201);
 
-        expect(await liveSessions(elsewhere.id)).toBe(0);
+        await waitFor(async () => (await liveSessions(elsewhere.id)) === 0);
         for (const kept of [own, passwordOnly, outside]) {
           expect(await liveSessions(kept.id)).toBeGreaterThan(0);
         }
@@ -1054,10 +1080,116 @@ describe("Admin identity providers", () => {
         ).toBe(200);
         expect(await liveSessions(elsewhere.id)).toBeGreaterThan(0);
 
-        expect(
-          (await call(adminToken, "PATCH", path, { ssoOnly: true })).status
-        ).toBe(200);
+        const patched = await call(adminToken, "PATCH", path, {
+          ssoOnly: true,
+        });
+        expect(patched.status).toBe(200);
+        // Swept by the worker, after the response, under the change's job id.
+        const { id: domainId, updatedAt } =
+          await prisma.identityProviderDomain.findFirstOrThrow({
+            where: { domain: name },
+          });
+        const job = await getSsoOnlySessionSweepQueue().getJob(
+          `${domainId}__${updatedAt.getTime()}`
+        );
+        expect(job?.data).toMatchObject({
+          providerId: provider.id,
+          domainId,
+          actor: { email: expect.any(String) },
+        });
+        await waitFor(async () => (await liveSessions(elsewhere.id)) === 0);
+      });
+
+      it("ends what is left when run again, and nothing once SSO-only is lifted", async () => {
+        const provider = await newProvider();
+        const other = await newProvider();
+        const name = `ssorerun-${generateUniqueId().toLowerCase()}.com`;
+        const created = await (
+          await postDomain(writeToken, provider.id, { domain: name })
+        ).json();
+        const elsewhere = await signedIn(name, other.id);
+        const setSsoOnly = (ssoOnly: boolean) =>
+          prisma.identityProviderDomain.update({
+            where: { id: created.id },
+            data: { ssoOnly },
+          });
+        const data: SsoOnlySessionSweepJobData = {
+          actor: { userId: SYSTEM_USER_ID, email: null },
+          providerId: provider.id,
+          domainId: created.id,
+        };
+        const run = () =>
+          processSsoOnlySessionSweep({ data, updateData: async () => {} });
+        const audits = () =>
+          prisma.auditLogEntry.count({
+            where: { entityType: "User", entityId: elsewhere.id },
+          });
+
+        // Closed with no run after it, as a crash after the commit leaves it.
+        await setSsoOnly(true);
+        await run();
         expect(await liveSessions(elsewhere.id)).toBe(0);
+        const audited = await audits();
+        expect(audited).toBeGreaterThan(0);
+
+        await run();
+        expect(await audits()).toBe(audited);
+
+        await setSsoOnly(false);
+        const reopened = await signedIn(name, other.id);
+        await run();
+        expect(await liveSessions(reopened.id)).toBeGreaterThan(0);
+      });
+
+      it("retries only the users an attempt failed to sign out", async () => {
+        const provider = await newProvider();
+        const other = await newProvider();
+        const name = `ssoretry-${generateUniqueId().toLowerCase()}.com`;
+        const created = await (
+          await postDomain(writeToken, provider.id, { domain: name })
+        ).json();
+        const done = await signedIn(name, other.id);
+        const failing = await signedIn(name, other.id);
+        const setSsoOnly = (ssoOnly: boolean) =>
+          prisma.identityProviderDomain.update({
+            where: { id: created.id },
+            data: { ssoOnly },
+          });
+        await setSsoOnly(true);
+        const job = {
+          data: {
+            actor: { userId: SYSTEM_USER_ID, email: null },
+            providerId: provider.id,
+            domainId: created.id,
+          } as SsoOnlySessionSweepJobData,
+          updateData: async (data: SsoOnlySessionSweepJobData) => {
+            job.data = data;
+          },
+        };
+        const lock = db.users.lockForSessionEnd;
+        const spy = vi
+          .spyOn(db.users, "lockForSessionEnd")
+          .mockImplementation(async (tx, ids) => {
+            if (ids.userIds?.includes(failing.id)) throw new Error("lost");
+            return await lock(tx, ids);
+          });
+        try {
+          await expect(processSsoOnlySessionSweep(job)).rejects.toThrow();
+        } finally {
+          spy.mockRestore();
+        }
+        expect(job.data.userIds).toEqual([failing.id]);
+        expect(await liveSessions(done.id)).toBe(0);
+        expect(await liveSessions(failing.id)).toBeGreaterThan(0);
+
+        // A session started since, standing in for one through the domain's
+        // own provider.
+        await setSsoOnly(false);
+        await getAccessTokenForUser(done, client);
+        await setSsoOnly(true);
+        await processSsoOnlySessionSweep(job);
+        expect(await liveSessions(failing.id)).toBe(0);
+        expect(await liveSessions(done.id)).toBeGreaterThan(0);
       });
     });
 

@@ -44,6 +44,9 @@ interface Provider {
   displayName: string;
 }
 
+const loginEntries = (userId: string) =>
+  prisma.auditLogEntry.findMany({ where: { action: "LOGIN", userId } });
+
 const admin = (method: string, path: string, body?: unknown) =>
   fetch(`${CORE_URL}/v1/admin/identity-providers${path}`, {
     method,
@@ -347,14 +350,14 @@ describe("sign-in through a provider", () => {
       where: { userId: user.id, providerId: provider.id },
     });
     expect(identity.lastLoginAt).not.toBeNull();
-    const audit = await prisma.auditLogEntry.findFirst({
-      where: { action: "LOGIN", entityType: "UserIdentity", userId: user.id },
-    });
-    expect(audit?.entityId).toBe(identity.id);
-    expect(audit?.metadata).toMatchObject({
+    const logins = await loginEntries(user.id);
+    expect(logins).toHaveLength(1);
+    expect(logins[0]).toMatchObject({ entityType: "User", entityId: user.id });
+    expect(logins[0].metadata).toMatchObject({
       provider: provider.slug,
       auth_methods: ["fed"],
       client_id: client.clientId,
+      consent: true,
     });
   });
 
@@ -365,11 +368,27 @@ describe("sign-in through a provider", () => {
       claims,
     });
     expect(location.searchParams.get("client_id")).toBe(client.clientId);
+    // The provider alone is no sign-in while the second factor is due.
+    expect(await loginEntries(user.id)).toHaveLength(0);
     const code = await approveConsent(
       jar,
       await verifyTotp(jar, location, secret)
     );
     expect((await exchange(code, verifier)).amr).toEqual(["fed", "otp"]);
+    const logins = await loginEntries(user.id);
+    expect(logins).toHaveLength(1);
+    expect(logins[0].metadata).toMatchObject({
+      provider: provider.slug,
+      auth_methods: ["fed", "otp"],
+    });
+  });
+
+  it("records no LOGIN when the TOTP step is abandoned", async () => {
+    const { user, claims } = await linkedUser(provider);
+    await enableTotp(user.id);
+    const { location } = await loginFlow(fake, provider, { claims });
+    expect(location.pathname).toBe("/login/2fa");
+    expect(await loginEntries(user.id)).toHaveLength(0);
   });
 
   it("sends a user without TOTP to 2FA setup when a role requires it", async () => {

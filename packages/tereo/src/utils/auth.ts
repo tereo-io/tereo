@@ -1,12 +1,13 @@
-import { ForbiddenError, NotFoundError, OAuth2Error } from "./errors.js";
-import { disconnectTokenSockets } from "../websocket/emitters/index.js";
 import { createFailureLimiter, getIpIdentifier } from "./rateLimit.js";
 import { TokenResponse } from "../routes/oauth/token/controllers.js";
+import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { generateAccessToken, generateIdToken } from "./tokens.js";
 import { TokenRequest } from "../routes/oauth/token/schemas.js";
 import { stepUpRequired, usedMfa } from "./authorization.js";
 import { maySelectOrganization } from "./supportAccess.js";
+import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { presignUserPhotoUrl } from "./userPhotos.js";
+import { emitTx, logAuditTx } from "./outbox.js";
 import type { Request, Response } from "express";
 import { tokenAudience } from "./coreAccess.js";
 import { verifyCodeChallenge } from "./pkce.js";
@@ -14,6 +15,16 @@ import { ClientRecord } from "./db/clients.js";
 import type { Prisma } from "./db/prisma.js";
 import db from "./db/index.js";
 import env from "../env.js";
+import {
+  disconnectTokenSockets,
+  notifySessionsRevoked,
+} from "../websocket/emitters/index.js";
+import {
+  ForbiddenError,
+  InvalidGrantError,
+  NotFoundError,
+  OAuth2Error,
+} from "./errors.js";
 import {
   generateRefreshToken,
   verifyClientSecret,
@@ -249,7 +260,7 @@ export const handleAuthorizationCode = async (
   // Removing a member or deactivating an organization revokes its tokens but
   // not a code already issued for it.
   if (code.organizationId && !(await maySelectGrantOrganization(code))) {
-    throw new Error("invalid_grant");
+    throw new InvalidGrantError();
   }
 
   const idTokenContext: IdTokenContext = {
@@ -261,7 +272,7 @@ export const handleAuthorizationCode = async (
     await db.users.lockForTokenIssue(code.userId, tx);
     // Atomic, so two exchanges racing past the lock cannot both redeem it.
     if (!(await db.authorizationCode.markUsed(code.id, tx))) {
-      throw new Error("invalid_grant");
+      throw new InvalidGrantError();
     }
     return handleCreateTokens(
       client,
@@ -365,26 +376,29 @@ const getAuthorizationCode = async (
   ip?: string
 ) => {
   const code = await db.authorizationCode.get(body.code);
-  if (!code) throw new Error("invalid_grant");
+  if (!code) throw new InvalidGrantError();
   const bound = verifyAuthorizationCodeBinding(body.code, client.clientId);
-  if (!bound) throw new Error("invalid_grant");
-  if (code.clientId !== client.id) throw new Error("invalid_grant");
-  if (!code.user.isActive) throw new Error("invalid_grant");
+  if (!bound) throw new InvalidGrantError();
+  if (code.clientId !== client.id) throw new InvalidGrantError();
+  if (!code.user.isActive) throw new InvalidGrantError();
   if (code.usedAt) {
-    await revokeFamily(code.userId, code.id);
+    await revokeFamily(code.userId, code.id, {
+      clientId: client.clientId,
+      credential: "authorization_code",
+    });
 
     logAuthCodeReuse(client.clientId, code.userId, code.id, ip);
 
-    throw new Error("invalid_grant");
+    throw new InvalidGrantError();
   }
-  if (code.expiresAt < new Date()) throw new Error("invalid_grant");
-  if (code.redirectUri !== body.redirect_uri) throw new Error("invalid_grant");
+  if (code.expiresAt < new Date()) throw new InvalidGrantError();
+  if (code.redirectUri !== body.redirect_uri) throw new InvalidGrantError();
 
-  if (!code.codeChallenge) throw new Error("invalid_grant");
-  if (!body.code_verifier) throw new Error("invalid_grant");
+  if (!code.codeChallenge) throw new InvalidGrantError();
+  if (!body.code_verifier) throw new InvalidGrantError();
 
   const method = code.codeChallengeMethod || "S256";
-  if (method !== "S256") throw new Error("invalid_grant");
+  if (method !== "S256") throw new InvalidGrantError();
 
   const valid = verifyCodeChallenge(
     body.code_verifier,
@@ -392,7 +406,7 @@ const getAuthorizationCode = async (
     method
   );
 
-  if (!valid) throw new Error("invalid_grant");
+  if (!valid) throw new InvalidGrantError();
 
   return code;
 };
@@ -408,7 +422,7 @@ export const handleRefreshToken = async (
   // in flight: the session end's revocation may not have caught it.
   if (old.organizationId && !(await maySelectGrantOrganization(old))) {
     await revokeLostOrganizationGrant(old);
-    throw new Error("invalid_grant");
+    throw new InvalidGrantError();
   }
   // RFC 6749 section 6: a refresh may narrow the access token's scope, never
   // widen it; the rotated refresh token keeps the whole grant. Checked before
@@ -425,7 +439,7 @@ export const handleRefreshToken = async (
   // 2FA required of the user since a login without it: the client signs
   // them in again, through the second factor.
   if (await stepUpRequired(old.userId, login?.authMethods || ["pwd"])) {
-    throw new Error("invalid_grant");
+    throw new InvalidGrantError();
   }
   // Carry the authorization-code id forward as the token-family identifier so
   // every rotation stays linked. Without this, the family lineage is lost after
@@ -441,7 +455,7 @@ export const handleRefreshToken = async (
   const { token, refreshToken, idToken } = await db.$transaction(async (tx) => {
     await db.users.lockForTokenIssue(old.userId, tx);
     if (!(await db.refreshTokens.rotateIfActive(old.id, tx))) {
-      throw new Error("invalid_grant");
+      throw new InvalidGrantError();
     }
     return handleCreateTokens(
       client,
@@ -467,16 +481,78 @@ export const handleRefreshToken = async (
   };
 };
 
-/** Revokes a token family on reuse, serialized like any other session end. */
-const revokeFamily = async (userId: string, authCodeId: string) => {
-  const jtis = await db.$transaction(async (tx) => {
+/** A replayed credential that got its token family revoked. */
+interface TokenReuse {
+  clientId: string;
+  credential: "authorization_code" | "refresh_token";
+}
+
+/**
+ * Revokes a token family, serialized like any other session end. On `reuse`
+ * the revocation is audited as core's and emitted, in its transaction.
+ */
+const revokeFamily = async (
+  userId: string,
+  authCodeId: string,
+  reuse?: TokenReuse
+) => {
+  const { jtis, sessionIds } = await db.$transaction(async (tx) => {
     await db.users.lockForSessionEnd(tx, { userIds: [userId] });
-    const revoked = await db.accessTokens.revokeByAuthCodeId(authCodeId, tx);
-    await db.refreshTokens.revokeByAuthCodeId(authCodeId, tx);
-    return revoked;
+    const jtis = await db.accessTokens.revokeByAuthCodeId(authCodeId, tx);
+    const sessionIds = (
+      await db.refreshTokens.revokeByAuthCodeIds([authCodeId], tx)
+    ).map((t) => t.id);
+    if (reuse) {
+      await recordTokenReuse(tx, userId, authCodeId, reuse, {
+        jtis,
+        sessionIds,
+      });
+    }
+    return { jtis, sessionIds };
   });
   // Suspected theft: the family's sockets close now, not at their tokens' exp.
+  if (sessionIds.length > 0) notifySessionsRevoked(userId, sessionIds);
   disconnectTokenSockets(jtis);
+};
+
+// Written even when the family was already dead: the replay is the finding.
+const recordTokenReuse = async (
+  tx: Prisma.TransactionClient,
+  userId: string,
+  authCodeId: string,
+  reuse: TokenReuse,
+  revoked: { jtis: string[]; sessionIds: string[] }
+) => {
+  const user = await db.users.get(userId, tx);
+  await logAuditTx(tx, {
+    auth: { userId: SYSTEM_USER_ID, email: null },
+    action: "UPDATE",
+    entityType: "User",
+    entityId: user.id,
+    entityName: user.email,
+    metadata: {
+      action: "token_reuse_detected",
+      credential: reuse.credential,
+      clientId: reuse.clientId,
+      authCodeId,
+      sessionIds: revoked.sessionIds,
+      revokedAccessTokens: revoked.jtis.length,
+      revokedRefreshTokens: revoked.sessionIds.length,
+    },
+  });
+  if (revoked.sessionIds.length === 0 && revoked.jtis.length === 0) return;
+  await emitTx(tx, {
+    organizationId: getDefaultOrganizationId(),
+    eventType: "auth.user.sessions-revoked",
+    entityType: "User",
+    entityId: user.id,
+    data: {
+      userId: user.id,
+      email: user.email,
+      sessionIds: revoked.sessionIds,
+      ssoSessionIds: [],
+    },
+  });
 };
 
 /** Revokes a refresh token whose organization the user no longer has. */
@@ -486,11 +562,16 @@ const revokeLostOrganizationGrant = async (token: {
   authCodeId: string | null;
 }) => {
   if (token.authCodeId) return revokeFamily(token.userId, token.authCodeId);
-  await db.$transaction(async (tx) => {
+  const jtis = await db.$transaction(async (tx) => {
     await db.users.lockForSessionEnd(tx, { userIds: [token.userId] });
-    await db.accessTokens.revokeByRefreshTokenIds([token.id], tx);
+    const revoked = await db.accessTokens.revokeByRefreshTokenIds(
+      [token.id],
+      tx
+    );
     await db.refreshTokens.revokeByIds([token.id], tx);
+    return revoked;
   });
+  disconnectTokenSockets(jtis);
 };
 
 /** The requested subset of the granted scopes; all of them when none named. */
@@ -518,9 +599,9 @@ export const REUSE_GRACE_MS = 5_000;
  * successor still unused: an `invalid_grant` that leaves the refresh cookie,
  * which the concurrent request has already replaced with the successor.
  */
-export class RefreshRaceError extends Error {
+export class RefreshRaceError extends InvalidGrantError {
   constructor() {
-    super("invalid_grant");
+    super();
     this.name = "RefreshRaceError";
   }
 }
@@ -532,14 +613,14 @@ const getRefreshToken = async (
   ip?: string
 ) => {
   const refreshTokenValue = body.refresh_token ?? refreshTokenFromCookie;
-  if (!refreshTokenValue) throw new Error("invalid_grant");
+  if (!refreshTokenValue) throw new InvalidGrantError();
   const token = await db.refreshTokens.get(refreshTokenValue);
-  if (!token) throw new Error("invalid_grant");
-  if (token.clientId !== client.id) throw new Error("invalid_grant");
+  if (!token) throw new InvalidGrantError();
+  if (token.clientId !== client.id) throw new InvalidGrantError();
   if (token.revokedAt) {
     // Ended by logout or an admin, not spent on a refresh: nothing was
     // reused, and the rest of the family was dealt with by whoever ended it.
-    if (!token.rotatedAt) throw new Error("invalid_grant");
+    if (!token.rotatedAt) throw new InvalidGrantError();
     // Just rotated: most likely two tabs or a retry refreshing with the same
     // token at once. Refused, but the family (and the successor the other
     // request received) is left alone. Not once the successor has been
@@ -562,12 +643,17 @@ const getRefreshToken = async (
     // attacker now hold divergent lineages of the same grant. Revoke the
     // entire token family — refresh tokens and their derived access tokens —
     // so the attacker's rotated chain is killed too, and audit it.
-    if (token.authCodeId) await revokeFamily(token.userId, token.authCodeId);
+    if (token.authCodeId) {
+      await revokeFamily(token.userId, token.authCodeId, {
+        clientId: client.clientId,
+        credential: "refresh_token",
+      });
+    }
     logRefreshTokenReuse(client.clientId, token.userId, ip);
-    throw new Error("invalid_grant");
+    throw new InvalidGrantError();
   }
-  if (token.expiresAt < new Date()) throw new Error("invalid_grant");
-  if (!token.user.isActive) throw new Error("invalid_grant");
+  if (token.expiresAt < new Date()) throw new InvalidGrantError();
+  if (!token.user.isActive) throw new InvalidGrantError();
   return token;
 };
 

@@ -152,7 +152,8 @@
       Multiple metadata filters may be combined and are AND-ed together with the
       other filters above. Example: `?metadata[requestId_equals]=abc-123`. A `metadata[...]`
       parameter of any other form, or given more than once, is a `400`; one with an empty
-      value is ignored.
+      value is ignored. A key is at most 100 characters, a value at most 500, and a request
+      takes at most 20 metadata filters.
 
       **Supported sort fields:** `createdAt` (default `desc`)
 

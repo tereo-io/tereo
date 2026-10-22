@@ -11,7 +11,7 @@ via BullMQ, exponential backoff retry (10 attempts), and a daily-partitioned del
 |------------|--------|
 | `webhooks.read/write/archive/delete/admin` | Endpoint CRUD, archive/restore, hard delete, delivery viewing and retry, test sends, secret rotation |
 | `webhooks.event-types.read` | Reading event types. They are declared by their services ([registry.md](registry.md)); there is no write API |
-| `webhooks.emit` | Event emission. Core's `webhook_publisher` role grants it; a service may emit only the event types it declares, and none that are retired. Any other caller also needs `webhooks.admin`, and core's own event types (`auth.*`, `file-service.*`, `core.service.*`) are never emitted over HTTP — core emits them in-process |
+| `webhooks.emit` | Event emission. Core's `webhook_publisher` role grants it; a service may emit only the event types it declares, and none that are retired. Any other caller also needs `webhooks.admin`, and core's own event types (`auth.*`, `file-service.*`, `core.service.*`, `webhook.endpoint.*`, …) are never emitted over HTTP — core emits them in-process |
 
 `archivedAt` is an additive lifecycle marker, **independent of `status`** (ACTIVE/PAUSED/DISABLED
 all stay operational). Archive (`POST /v1/webhooks/webhooks/:id/archive`, `webhooks.archive`) retires an
@@ -63,6 +63,11 @@ Paths are under `/v1/webhooks`.
   `202 { retriedCount }`.
 - Both write an audit entry (`WebhookDelivery` / `retry`, or `WebhookEndpoint` /
   `retry-deliveries` when anything was reset).
+- A `file-service.*` delivery was let through by the endpoint creator's bucket access, and the
+  endpoint's URL may have changed since. So on an endpoint that is not provisioned, only its
+  creator or a `webhooks.admin` holder retries one: retry one is `403` for anyone else, and their
+  bulk retry leaves `file-service.*` deliveries out (`metadata.fileEventsExcluded` on its audit
+  entry; naming one in `eventType` is `403`).
 - Test send, retry one and bulk retry queue their deliveries after the transaction commits. If
   Redis refuses the job, the failure is logged and the request still returns `202`: a 500 would
   have the client retry and write a second delivery. The stale-delivery sweep queues the delivery
@@ -95,7 +100,30 @@ whose creator is deactivated or loses access is simply sent nothing; it is not p
 Delivery views (`GET …/deliveries`, `GET …/deliveries/:deliveryId` and the retry responses) apply
 the same check to the caller: a delivery whose event they could not read comes back with
 `payload` and `responseBody` set to `null` and `payloadRedacted: true`. For the same reason the
-audit entry written for an event no endpoint was sent records its type and entity but not its data.
+audit entry written for an event emitted over HTTP records its type and entity but not its data.
+An event of no organization (`organizationId: null`) is judged by the creator's global roles alone.
+
+**Who may redirect file events.** Create and PATCH check the caller's permissions, but not their
+access to a bucket, which is checked per event against the creator. So only the endpoint's creator
+or a `webhooks.admin` holder may change where its file events go: a PATCH that changes `url` or
+`customHeaders` of an endpoint subscribed (before or after the change) to a `file-service.*` event
+type, or that adds a `file-service.*` event type, is `403` for anyone else
+(`assertMayRedirectFileEvents` in `src/utils/webhookAccess.ts`). Retries follow the same rule
+(above).
+
+**Endpoint events.** Every endpoint change is emitted in its transaction — through the API, by
+provisioning (create, change, restore, secret rotation and the archive of a dropped entry) and by
+the delivery worker's auto-disable (`.updated`, `changedFields: ["status"]`,
+`reason: "auto-disabled"`):
+`webhook.endpoint.created`, `.updated` (only when something changed; `data.changedFields`),
+`.archived`, `.restored`, `.deleted`, `.secret-rotated` (`data.previousSecretExpiresAt`) and
+`.previous-secret-revoked`, each read with `webhooks.read`. The payload is the endpoint without its
+signing secret or custom header values (`customHeaderNames` only), and its `url` keeps only the
+origin (`https://hooks.slack.com/services/T000/B000/SECRET` → `https://hooks.slack.com`). An endpoint's events are emitted under its organization; an endpoint of all organizations
+emits them with `organizationId: null`, to endpoints of all organizations and those of its owner.
+The audit entries of create, PATCH and delete (and of provisioning) record the URL the same way:
+capability URLs (Slack, Discord, Teams, Zapier) carry their secret in the path, and a query string or
+user-info may carry a credential the receiver checks.
 
 ## Service-owned endpoints
 
@@ -114,7 +142,9 @@ events to the service. They are ordinary endpoints with an owner:
   service's account. A service's account does not hold its own permissions, so a webhook on the
   service's own events needs a role in the document's `access.roles` granting it.
 - Fan-out for an event of organization X selects the endpoints of X and the owned endpoints of all
-  organizations.
+  organizations. An event of no organization (a bucket an app service declares, or an
+  all-organization endpoint's own events) carries the owning service's id and selects the endpoints
+  of all organizations and the endpoints that service owns, in any organization.
 - Delivery history of an all-organization endpoint is shown per event's organization: a delivery's
   payload and response are redacted unless the viewer can read the event in that organization.
 - Document URLs are checked at load: `http` or `https`, no credentials, and not `localhost` or a
@@ -138,6 +168,8 @@ case-insensitive.
 | `GET /v1/webhooks/webhooks` | `status` (`equals`, `in`), `url` (`contains`), `description` (`contains`), `eventType` (`equals`, `contains` — endpoints subscribed to a matching event type), `archived` (`true` / `false`; takes precedence over the older `includeArchived`) |
 | `GET /v1/webhooks/webhooks/:id/deliveries` | `status` (`equals`, `in`), `eventType` (`equals`), `createdAt_gte` / `createdAt_lte` (ISO 8601; the bulk retry's `createdAfter` / `createdBefore` window) |
 | `GET /v1/webhooks/event-types` | `source` (`equals`), `eventType` (`contains`), `retired` (`true` / `false`; omitted lists both) |
+
+An endpoint subscribes to at most 100 event types (create and PATCH).
 
 Event types carry `serviceName`, the declaring service's name, beside `source` (its slug) and
 `serviceId`. They have no `id`: the name (`eventType`) is the primary key and the key for lists.
@@ -237,13 +269,20 @@ row alone. `POST /v1/webhooks/events` takes the same path directly:
 
 validate the event type (registered, not retired) → find ACTIVE, unarchived endpoints of the
 organization subscribed to it → create a `WebhookDelivery` per endpoint in one transaction → enqueue
-a BullMQ job per delivery → `202 { deliveriesCreated: N }`. With no matching endpoint, an audit entry
-records the undelivered event.
+a BullMQ job per delivery → `202 { deliveriesCreated: N }`. Over HTTP an event's `entityId` is at
+most 500 characters and its `data` at most 256 KiB as JSON (`400` otherwise); core's own events,
+read back from the outbox, are not held to either. Each event emitted over HTTP writes an
+audit entry under the caller (`WebhookEvent`: event type, entity, `deliveriesCreated`, the
+idempotency key and recipients, never the data) in the transaction that writes its deliveries; a
+replay answered from a cached idempotency result writes none. Core's own events write no such
+entry, since the mutation that emitted one has its own: one that reaches no endpoint is only
+logged at debug level.
 
 `POST /v1/webhooks/events/batch` is all-or-nothing (`emitBatchWithIdempotency`): the whole batch is
 validated — schema, reserved types, organizations, the caller's own event types, registered and
 not retired — and every idempotency key claimed before anything is written; then every event's
-deliveries and no-match audit entries go in one transaction, and the jobs are enqueued after it
+deliveries and audit entries go in one transaction
+, and the jobs are enqueued after it
 commits. Keys are scoped per caller + organization + event type + key, as for a single emit, so
 one caller can never answer or block another's key.
 A key's claim lasts 60 seconds while its request runs, so a process that dies mid-request frees it;

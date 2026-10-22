@@ -27,6 +27,7 @@ EventTypeParam:
   description: Event type identifier
   schema:
     type: string
+    maxLength: 100
 
 DeliveryIdParam:
   name: deliveryId

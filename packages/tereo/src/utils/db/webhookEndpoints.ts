@@ -322,19 +322,27 @@ export const incrementConsecutiveFailures = async (
 
 /**
  * The organization's endpoints, and owned ones sent every organization's
- * events; with `recipientServiceIds`, only those these services own.
+ * events; with `recipientServiceIds`, only those these services own. For an
+ * event of no organization, the endpoints of all organizations and those
+ * `serviceId` owns.
  */
 export const findActiveByOrgAndEvent = async (
-  organizationId: string,
+  organizationId: string | null,
   eventType: string,
-  { recipientServiceIds }: { recipientServiceIds?: string[] } = {}
+  {
+    recipientServiceIds,
+    serviceId = null,
+  }: { recipientServiceIds?: string[]; serviceId?: string | null } = {}
 ) => {
+  const own: Prisma.WebhookEndpointWhereInput[] = organizationId
+    ? [{ organizationId }]
+    : serviceId
+      ? [{ ownerServiceId: serviceId }]
+      : [];
   const rows = await prisma.webhookEndpoint.findMany({
     where: {
-      OR: [
-        { organizationId },
-        { organizationId: null, ownerServiceId: { not: null } },
-      ],
+      OR: [...own, { organizationId: null, ownerServiceId: { not: null } }],
+
       ...(recipientServiceIds && {
         ownerServiceId: { in: recipientServiceIds },
       }),

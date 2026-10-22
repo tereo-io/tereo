@@ -2,9 +2,10 @@ import { broadcastObjectInvalidate } from "../../../../../../../utils/cacheBroad
 import { getReadableBucket } from "../../../../../../../utils/bucketAccess.js";
 import { parseContentType } from "../../../../../../../utils/contentType.js";
 import { setAccessLog } from "../../../../../../../middleware/accessLog.js";
-import { downloadQuerySchema, objectParamsSchema } from "./schemas.js";
 import { validateUser } from "../../../../../../../middleware/auth.js";
+import { downloadQuerySchema, objectParamsSchema } from "./schemas.js";
 import { logAuditTx } from "../../../../../../../utils/outbox.js";
+import { declaredLengthHeadersSchema } from "../../schemas.js";
 import { NextFunction, Request, Response } from "express";
 import db from "../../../../../../../utils/db/index.js";
 import { emitObjectWrittenTx } from "../events.js";
@@ -17,6 +18,7 @@ import {
   withIdempotency,
 } from "../../../../../../../utils/uploadIdempotency.js";
 import {
+  validateHeaders,
   validateParams,
   validateQuery,
 } from "../../../../../../../utils/validateReq.js";
@@ -65,10 +67,12 @@ export const authorizeUpload = async (
   res.locals.uploadBucket = bucket;
   // After the access check, so a caller without access learns nothing.
   assertObjectKeyNotReserved(params.objectKey);
-  const declared = Number(req.headers["content-length"]);
+  const declared = validateHeaders(declaredLengthHeadersSchema, req)[
+    "content-length"
+  ];
   // A retry of an upload that filled the bucket gets its stored response.
   if (
-    Number.isSafeInteger(declared) &&
+    declared !== undefined &&
     declared > 0 &&
     !(await hasStoredResult(
       putObjectScope(auth.userId, bucket.id),

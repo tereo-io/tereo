@@ -11,3 +11,13 @@ export const smallBodyParsers = [
   express.urlencoded({ extended: true, limit: "10kb" }),
   cookieParser(),
 ];
+
+/**
+ * JSON and form parsing for the webhooks, audit and notifications areas,
+ * mounted after their rate limit and `requireAuth` so an anonymous caller
+ * can't make core read a body. 1mb, unless a route needs more.
+ */
+export const apiBodyParsers = (limit: "1mb" | "10mb" = "1mb") => [
+  express.json({ limit }),
+  express.urlencoded({ extended: true, limit }),
+];

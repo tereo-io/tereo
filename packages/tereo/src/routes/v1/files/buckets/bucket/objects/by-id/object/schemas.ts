@@ -1,9 +1,10 @@
 import { contentTypeSchema, metadataSchema } from "../../schemas.js";
+import { bucketNameSchema } from "../../../../schemas.js";
 import { z } from "zod";
 
 export const byIdParamsSchema = z.object({
-  name: z.string(),
-  id: z.string().uuid("id must be a UUID"),
+  name: bucketNameSchema.shape.name,
+  id: z.guid("id must be a UUID"),
 });
 
 // PATCH body — every field is optional. `objectKey` supports renames; the

@@ -47,7 +47,9 @@ export const getActiveInOrganization = async (
       bucket: { organizationId, deletedAt: null },
     },
     include: {
-      bucket: { select: { id: true, name: true, organizationId: true } },
+      bucket: {
+        select: { id: true, name: true, organizationId: true, serviceId: true },
+      },
     },
   });
 };

@@ -4,12 +4,16 @@ import { accountTotpFailure } from "../../../../middleware/rateLimit.js";
 import { emitTx, logAuditTx } from "../../../../utils/outbox.js";
 import { validateBody } from "../../../../utils/validateReq.js";
 import { endUserSessions } from "../../../../utils/sessions.js";
-import { OAuth2Error } from "../../../../utils/errors.js";
 import { validateUser } from "../../../../utils/auth.js";
 import { logger } from "../../../../utils/logger.js";
 import type { Request, Response } from "express";
 import db from "../../../../utils/db/index.js";
 import env from "../../../../env.js";
+import {
+  AppError,
+  BadRequestError,
+  ForbiddenError,
+} from "../../../../utils/errors.js";
 import {
   generateTotpSecret,
   generateTotpUri,
@@ -46,7 +50,7 @@ export const initiateSetup = async (req: Request, res: Response) => {
   const user = await db.users.get(userId);
 
   if (user.totpEnabled) {
-    throw new OAuth2Error(
+    throw new BadRequestError(
       "totp_already_enabled",
       "TOTP is already enabled for your account."
     );
@@ -57,11 +61,19 @@ export const initiateSetup = async (req: Request, res: Response) => {
   const expiresAt = new Date(Date.now() + env.TOTP_SETUP_TTL * 1000);
 
   const encryptedSecret = encryptTotpSecret(secret);
-  await db.totp.createSetupSession({
-    userId,
-    setupToken,
-    totpSecret: encryptedSecret,
-    expiresAt,
+  await db.$transaction(async (tx) => {
+    await db.totp.createSetupSession(
+      { userId, setupToken, totpSecret: encryptedSecret, expiresAt },
+      tx
+    );
+    await logAuditTx(tx, {
+      auth: { userId: user.id, email: user.email },
+      action: "UPDATE",
+      entityType: "User",
+      entityId: user.id,
+      entityName: user.email,
+      metadata: { action: "totp_setup_started" },
+    });
   });
 
   const qrCodeUri = generateTotpUri({
@@ -88,23 +100,19 @@ export const verifySetup = async (req: Request, res: Response) => {
   const setupSession = await db.totp.getSetupSession(body.setupToken);
   // One begun at login is bound to that login's OAuth request instead.
   if (!setupSession || setupSession.clientId !== null) {
-    throw new OAuth2Error(
+    throw new BadRequestError(
       "invalid_setup_token",
       "Invalid or expired setup token. Please start again."
     );
   }
 
   if (setupSession.userId !== userId) {
-    throw new OAuth2Error(
-      "forbidden",
-      "This setup token does not belong to you.",
-      403
-    );
+    throw new ForbiddenError("This setup token does not belong to you.");
   }
 
   if (setupSession.expiresAt < new Date()) {
     await db.totp.deleteSetupSession(setupSession.id);
-    throw new OAuth2Error(
+    throw new BadRequestError(
       "setup_expired",
       "Setup session expired. Please start again."
     );
@@ -114,10 +122,9 @@ export const verifySetup = async (req: Request, res: Response) => {
   const step = verifyTotpCode(secret, body.totpCode);
 
   if (step === null) {
-    throw new OAuth2Error(
+    throw new BadRequestError(
       "invalid_code",
-      "Invalid verification code. Please try again.",
-      401
+      "Invalid verification code. Please try again."
     );
   }
   await accountTotpFailure.reset(req);
@@ -140,10 +147,9 @@ export const verifySetup = async (req: Request, res: Response) => {
     caller,
     async (tx, sessionIds, ssoSessionIds) => {
       if (!(await db.totp.enableTotp(userId, encryptedSecret, step, tx))) {
-        throw new OAuth2Error(
+        throw new BadRequestError(
           "invalid_code",
-          "Invalid verification code. Please try again.",
-          401
+          "Invalid verification code. Please try again."
         );
       }
       await db.totp.storeRecoveryCodes(userId, hashedCodes, tx);
@@ -188,7 +194,7 @@ export const disableTotp = async (req: Request, res: Response) => {
 
   const user = await db.users.get(userId);
   if (!user.totpEnabled) {
-    throw new OAuth2Error(
+    throw new BadRequestError(
       "totp_not_enabled",
       "TOTP is not enabled for your account."
     );
@@ -196,22 +202,22 @@ export const disableTotp = async (req: Request, res: Response) => {
 
   const encryptedSecret = await db.totp.getUserTotpSecret(userId);
   if (!encryptedSecret) {
-    throw new OAuth2Error("server_error", "Unable to verify TOTP code.", 500);
+    throw new AppError(500, "server_error", "Unable to verify TOTP code.");
   }
 
   const secret = decryptTotpSecret(encryptedSecret);
   const step = verifyTotpCode(secret, body.totpCode);
   if (step === null || !(await db.totp.claimTotpWindow(userId, step))) {
-    throw new OAuth2Error("invalid_code", "Invalid verification code.", 401);
+    throw new BadRequestError("invalid_code", "Invalid verification code.");
   }
   await accountTotpFailure.reset(req);
 
   const status = await db.totp.getUserTotpStatus(userId);
   if (status.totpRequired) {
-    throw new OAuth2Error(
+    throw new AppError(
+      403,
       "totp_required",
-      "Two-factor authentication is required for your account and cannot be disabled.",
-      403
+      "Two-factor authentication is required for your account and cannot be disabled."
     );
   }
 
@@ -255,7 +261,7 @@ export const regenerateRecoveryCodes = async (req: Request, res: Response) => {
 
   const user = await db.users.get(userId);
   if (!user.totpEnabled) {
-    throw new OAuth2Error(
+    throw new BadRequestError(
       "totp_not_enabled",
       "TOTP is not enabled for your account."
     );
@@ -263,13 +269,13 @@ export const regenerateRecoveryCodes = async (req: Request, res: Response) => {
 
   const encryptedSecret = await db.totp.getUserTotpSecret(userId);
   if (!encryptedSecret) {
-    throw new OAuth2Error("server_error", "Unable to verify TOTP code.", 500);
+    throw new AppError(500, "server_error", "Unable to verify TOTP code.");
   }
 
   const secret = decryptTotpSecret(encryptedSecret);
   const step = verifyTotpCode(secret, body.totpCode);
   if (step === null || !(await db.totp.claimTotpWindow(userId, step))) {
-    throw new OAuth2Error("invalid_code", "Invalid verification code.", 401);
+    throw new BadRequestError("invalid_code", "Invalid verification code.");
   }
   await accountTotpFailure.reset(req);
 

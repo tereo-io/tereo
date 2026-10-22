@@ -387,6 +387,42 @@ describe("org-assignable permissions", () => {
     expect(res.body.error_description).not.toContain("webhooks.read");
   });
 
+  it("may be taken from a member only by a caller holding them there", async () => {
+    const org = await createTestOrganization(adminToken);
+    const member = await createTestUser();
+    await addTestOrgMember(adminToken, org.id, member.id);
+    const role = await roleWith(["webhooks.read"]);
+    await prisma.userRole.create({
+      data: { userId: member.id, roleId: role.id, organizationId: org.id },
+    });
+    const orgAdmin = await createTestUser();
+    await addTestOrgMember(adminToken, org.id, orgAdmin.id, "admin");
+    const path = `/v1/admin/organizations/${org.id}/members/${member.id}/roles`;
+
+    const weak = await getTestPrincipalToken({
+      userId: orgAdmin.id,
+      organizationId: org.id,
+      permissions: [],
+    });
+    const refused = await call("PUT", path, weak, { roleIds: [] });
+    expect(refused.status).toBe(HTTP_STATUS.FORBIDDEN);
+    expect(refused.body.error_description).toContain("webhooks.read");
+    expect(
+      await prisma.userRole.count({
+        where: { userId: member.id, roleId: role.id },
+      })
+    ).toBe(1);
+
+    const holder = await getTestPrincipalToken({
+      userId: orgAdmin.id,
+      organizationId: org.id,
+      permissions: ["webhooks.read"],
+    });
+    expect((await call("PUT", path, holder, { roleIds: [] })).status).toBe(
+      HTTP_STATUS.OK
+    );
+  });
+
   it("show on a role's permissions", async () => {
     const role = await roleWith(["webhooks.read", "users.read"]);
     const res = await call("GET", `/v1/admin/roles/${role.id}`, adminToken);

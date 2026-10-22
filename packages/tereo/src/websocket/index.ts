@@ -1,9 +1,9 @@
 import { closeRedisClient, createRedis, redisKey } from "../utils/redis.js";
 import { redisRetryStrategy } from "../utils/redisRetry.js";
 import { authenticateSocket } from "./middleware/auth.js";
+import { limitMessages } from "./middleware/rateLimit.js";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { setIO } from "./emitters/permissionEmitters.js";
-import { checkAccessToken } from "../utils/sessions.js";
 import type { Server as HttpServer } from "http";
 import { logger } from "../utils/logger.js";
 import handlers from "./handlers/index.js";
@@ -14,9 +14,15 @@ import {
   orgRoom,
   sessionRoom,
   tokenRoom,
+  userAccountRoom,
+  userFilesRoom,
   userOrgRoom,
   userRoom,
 } from "./emitters/sessionEmitters.js";
+import {
+  checkAccessToken,
+  findInactiveAccessTokens,
+} from "../utils/sessions.js";
 import type {
   AuthenticatedSocket,
   ServerToClientEvents,
@@ -84,6 +90,88 @@ const MAX_SOCKETS_PER_USER = 20;
 const MAX_MESSAGE_BYTES = 16 * 1024;
 const socketsPerUser = new Map<string, number>();
 
+/**
+ * Takes one of the user's slots for the socket, or refuses it. Counted at
+ * the handshake, so handshakes in flight together cannot pass the cap. The
+ * slot is freed once, at the socket's disconnect or its connection's close:
+ * a client gone before the handshake finished never connects, and only the
+ * connection's close says so.
+ */
+const claimSocketSlot = (
+  socket: AuthenticatedSocket,
+  next: (err?: Error) => void
+) => {
+  const { userId } = socket.data;
+  const held = socketsPerUser.get(userId) ?? 0;
+  if (held >= MAX_SOCKETS_PER_USER) {
+    next(new Error("Too many connections"));
+    return;
+  }
+  // Closed while the handshake awaited the database: no close event is left.
+  if (socket.conn.readyState !== "open") {
+    next(new Error("Connection closed"));
+    return;
+  }
+  socketsPerUser.set(userId, held + 1);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    const left = (socketsPerUser.get(userId) ?? 1) - 1;
+    if (left > 0) socketsPerUser.set(userId, left);
+    else socketsPerUser.delete(userId);
+  };
+  socket.on("disconnect", release);
+  socket.conn.once("close", release);
+  next();
+};
+
+/** jtis per query in the periodic re-check. */
+const REVALIDATE_BATCH = 500;
+let revalidateTimer: NodeJS.Timeout | null = null;
+let revalidating = false;
+
+/**
+ * Checks the tokens of this node's sockets again and closes those no longer
+ * active. Revocations close their sockets as they happen; this catches what
+ * none closes — the token of a session rotated away by a refresh, a path that
+ * revokes without disconnecting, a disconnect lost while Redis was down.
+ * A failed check closes nothing: a database outage must not drop every client.
+ */
+export const revalidateLocalSockets = async (): Promise<void> => {
+  if (!io || revalidating) return;
+  revalidating = true;
+  try {
+    const sockets = [...io.of("/").sockets.values()] as AuthenticatedSocket[];
+    const jtis = [...new Set(sockets.map((s) => s.data.jti))];
+    const inactive = new Set<string>();
+    for (let i = 0; i < jtis.length; i += REVALIDATE_BATCH) {
+      const batch = jtis.slice(i, i + REVALIDATE_BATCH);
+      for (const jti of await findInactiveAccessTokens(batch)) {
+        inactive.add(jti);
+      }
+    }
+    for (const socket of sockets) {
+      if (inactive.has(socket.data.jti)) socket.disconnect(true);
+    }
+    if (inactive.size > 0) {
+      logger.debug(
+        { tokens: inactive.size },
+        "Closed sockets of inactive tokens"
+      );
+    }
+  } catch (err) {
+    logger.warn({ err }, "WebSocket token re-check failed");
+  } finally {
+    revalidating = false;
+  }
+};
+
+const stopRevalidating = () => {
+  if (revalidateTimer) clearInterval(revalidateTimer);
+  revalidateTimer = null;
+};
+
 // setTimeout's longest delay; a token living longer is checked again then.
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
@@ -110,10 +198,8 @@ export const initializeWebSocket = async (server: HttpServer) => {
   try {
     isShuttingDown = false;
     io = new Server(server, {
-      cors: {
-        origin: env.CORS_ALLOWED_ORIGINS,
-        credentials: true,
-      },
+      // The token comes in `auth`, not a cookie: no credentialed CORS.
+      cors: { origin: env.CORS_ALLOWED_ORIGINS },
       transports: ["websocket", "polling"],
       path: "/ws",
       // Clients send only `auth:ping`.
@@ -138,32 +224,25 @@ export const initializeWebSocket = async (server: HttpServer) => {
       next(new Error("Server is shutting down"));
     });
     io.use(authenticateSocket);
-    io.use((socket, next) => {
-      const userId = (socket as AuthenticatedSocket).data.userId;
-      if ((socketsPerUser.get(userId) ?? 0) >= MAX_SOCKETS_PER_USER) {
-        next(new Error("Too many connections"));
-        return;
-      }
-      next();
-    });
+    // Last, so a refused handshake holds no slot.
+    io.use((socket, next) =>
+      claimSocketSlot(socket as AuthenticatedSocket, next)
+    );
 
     io.on("connection", async (socket) => {
       const authSocket = socket as AuthenticatedSocket;
       const { userId, jti, sid, exp, orgId, clientId } = authSocket.data;
-      socketsPerUser.set(userId, (socketsPerUser.get(userId) ?? 0) + 1);
-      authSocket.on("disconnect", () => {
-        const left = (socketsPerUser.get(userId) ?? 1) - 1;
-        if (left > 0) socketsPerUser.set(userId, left);
-        else socketsPerUser.delete(userId);
-      });
       logger.debug(`User ${userId} connected to auth WebSocket`);
       authSocket.join([
         userRoom(userId),
+        ...(authSocket.data.accountEvents ? [userAccountRoom(userId)] : []),
+        ...(authSocket.data.filesEvents ? [userFilesRoom(userId)] : []),
         tokenRoom(jti),
         ...(sid ? [sessionRoom(sid)] : []),
         ...(orgId ? [orgRoom(orgId), userOrgRoom(userId, orgId)] : []),
       ]);
       closeAtExpiry(authSocket, exp);
+      limitMessages(authSocket);
       handlers.permission(authSocket);
 
       // A revocation between the handshake's check and the joins above
@@ -176,6 +255,15 @@ export const initializeWebSocket = async (server: HttpServer) => {
         authSocket.disconnect(true);
       }
     });
+
+    stopRevalidating();
+    if (env.WEBSOCKET_REVALIDATE_INTERVAL_SECONDS > 0) {
+      revalidateTimer = setInterval(
+        () => void revalidateLocalSockets(),
+        env.WEBSOCKET_REVALIDATE_INTERVAL_SECONDS * 1000
+      );
+      revalidateTimer.unref();
+    }
 
     logger.info("WebSocket server initialized on path /ws");
   } catch (error) {
@@ -191,6 +279,7 @@ export const initializeWebSocket = async (server: HttpServer) => {
  */
 export const disconnectWebSocketClients = async (): Promise<void> => {
   isShuttingDown = true;
+  stopRevalidating();
   if (!io) return;
   // `local`: through the Redis adapter, a plain disconnect would reach every
   // other node's clients too.

@@ -4,6 +4,7 @@ import { ensureDailyPartitions } from "../../utils/partitions.js";
 import { getTestPrincipalToken } from "../utils/principals.js";
 import { waitFor } from "../webhooks/utils/test-helpers.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import { TEST_SERVICE_ID } from "../utils/testService.js";
 import type { Prisma } from "../../utils/db/prisma.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { notifyTx } from "../../utils/outbox.js";
@@ -140,16 +141,18 @@ const promoteWhenDelayed = async (deliveryId: string) => {
 };
 
 /** The webhook event, which the server's reaper fans out (here: to no endpoint). */
+// Core's own events are audited by the mutation that emits them, not by the
+// fan-out, so an endpoint of all organizations stands in as their receiver.
+let eventReceiverId: string;
+
 const waitForEvent = (eventType: string, notificationId: string) =>
   waitFor(
     async () =>
-      (await prisma.auditLogEntry.findFirst({
+      (await prisma.webhookDelivery.findFirst({
         where: {
-          entityType: "WebhookEvent",
-          AND: [
-            { metadata: { path: ["eventType"], equals: eventType } },
-            { metadata: { path: ["entityId"], equals: notificationId } },
-          ],
+          webhookEndpointId: eventReceiverId,
+          eventType,
+          payload: { path: ["entityId"], equals: notificationId },
         },
       })) !== null,
     TIMEOUT,
@@ -163,6 +166,15 @@ beforeAll(async () => {
   await ensureDefaultOrganization();
   await clean();
   await getNotificationQueue("email").obliterate({ force: true });
+  eventReceiverId = (
+    await db.webhookEndpoints.create({
+      organizationId: null,
+      ownerServiceId: TEST_SERVICE_ID,
+      createdBy: SYSTEM_USER_ID,
+      url: "https://example.com/notification-events",
+      eventTypes: ["notification.sent", "notification.failed"],
+    })
+  ).endpoint.id;
 
   smtp = await startFakeSmtpServer({
     reply: (m) => reply(m),
@@ -187,6 +199,10 @@ afterAll(async () => {
   await closeNotificationQueues();
   await smtp.close();
   await clean();
+  await prisma.webhookDelivery.deleteMany({
+    where: { webhookEndpointId: eventReceiverId },
+  });
+  await prisma.webhookEndpoint.deleteMany({ where: { id: eventReceiverId } });
   await cleanupTestEntities();
   env.NOTIFICATIONS_ALLOW_PRIVATE_HOSTS = allowPrivateHosts;
 });
@@ -484,8 +500,67 @@ describe("notification delivery", () => {
         await createConnection();
         await promoteWhenDelayed(waiting.id);
       };
-      return { id, release };
+      return { id, release, versionId };
     };
+
+    /** The bucket made public and the attachment's version made history. */
+    const makeHistoryOnPublicBucket = async (versionId: string) => {
+      await prisma.bucket.updateMany({
+        where: { name: bucket },
+        data: { policy: "public" },
+      });
+      await prisma.objectVersion.update({
+        where: { id: versionId },
+        data: { isCurrent: false },
+      });
+    };
+
+    const revokeSenderGrant = async () => {
+      const { id: bucketId } = await prisma.bucket.findFirstOrThrow({
+        where: { name: bucket },
+      });
+      await prisma.bucketPermission.updateMany({
+        where: { bucketId, userId: senderId },
+        data: { revokedAt: new Date() },
+      });
+    };
+
+    it("sends history of a public bucket while the sender holds a grant", async () => {
+      const { id, release, versionId } = await sendHeld();
+      try {
+        await makeHistoryOnPublicBucket(versionId);
+        await release();
+        await waitForDelivery(id, (d) => d.status === "sent");
+      } finally {
+        await prisma.bucket.updateMany({
+          where: { name: bucket },
+          data: { policy: "private" },
+        });
+      }
+    });
+
+    it("fails when the version became public-bucket history and the grant was revoked", async () => {
+      const { id, release, versionId } = await sendHeld();
+      try {
+        await makeHistoryOnPublicBucket(versionId);
+        await revokeSenderGrant();
+        await release();
+        const delivery = await waitForDelivery(
+          id,
+          (d) => d.status === "failed"
+        );
+        expect(delivery).toMatchObject({
+          lastError: "attachment_forbidden",
+          attempts: 1,
+        });
+        expect(smtp.messages).toHaveLength(0);
+      } finally {
+        await prisma.bucket.updateMany({
+          where: { name: bucket },
+          data: { policy: "private" },
+        });
+      }
+    });
 
     it("sends the attachment while the sender can still read its bucket", async () => {
       const { id, release } = await sendHeld();

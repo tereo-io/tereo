@@ -54,7 +54,7 @@ discovery) are per area, each with a read-only variant:
 | `core:files` / `core:files.read`       | `/v1/files`          | `file-service.admin` / the four `file-service.*.read`                                                    |
 | `core:audit` / `core:audit.read`       | `/v1/audit`          | `audit-logs.admin` / `audit-logs.read`                                                                   |
 | `core:webhooks` / `core:webhooks.read` | `/v1/webhooks`       | `webhooks.admin` / `webhooks.read`, `webhooks.event-types.read`                                          |
-| `core:events`                          | `/ws`                | — (the socket only: permission-change pushes, nothing else)                                              |
+| `core:events`                          | `/ws`                | — (the socket only: permission changes and its own session's end, nothing else)                          |
 | `core:organizations`                   | `GET /v1/account/organizations` | `organizations.support-access` ([Support access](#support-access))                            |
 
 `/v1/notifications` has no scope: only core's UI and services reach it.
@@ -112,6 +112,18 @@ does a silent re-issue (`prompt=none`) in the organization the SSO session alrea
 switching into their own organization write neither; nor does someone whose permission was removed
 before the code was issued.
 
+### Sign-in audit
+
+A login writes one `LOGIN` entry (`User`), when its code is issued, so after any second factor: a
+first factor alone, or a TOTP step abandoned, writes none. Its metadata has `client_id`, `sid` (the
+SSO session) and `auth_methods`, plus `provider` (the identity provider's slug) for a provider
+login — carried through the TOTP, org-select and consent steps (`provider` on their rows). A grant
+approved on the consent page also writes it, continued SSO session or not, with `consent: true`,
+`fresh_login` and the `scopes` approved; a silent re-issue without consent writes nothing. A
+password login in a browser that still holds another user's SSO session ends that session and its
+token families, recorded for that user as a revoke by core (`UPDATE`, actor the system user,
+`metadata.action` `sessions_revoked`) with an `auth.user.sessions-revoked` event.
+
 Outside core's resource routes:
 
 - `/oauth/userinfo` is the OIDC endpoint every relying party uses: any active user access token
@@ -119,24 +131,31 @@ Outside core's resource routes:
   `profile`/`email` claims by scope. `roles`, `permissions` and `organizations` — core's
   authorization — are included only for a token that is not `none` above (the UI, a service's
   client, or a core API scope); any other relying party gets the OIDC claims (and `org_id`/`org_name`
-  for the token's organization) without them.
+  for the token's organization) without them. A `delegated` token is told what `requireAuth` would
+  let it use: `permissions` cut down to its scopes' ceilings, `roles` empty (a role is not capped;
+  its permissions are), and `organizations` only with `core:account` or `core:organizations`, the
+  scopes that list them at `/v1/account/organizations` (otherwise empty).
 - `/oauth/introspect` answers app services (the token's own client, or a service in its audience),
   and only confidential clients, by HTTP Basic: a public client's `client_id` authenticates nothing,
   so it is 401 `invalid_client` (discovery lists `client_secret_basic` alone).
   `sub` is the token's own: the user's id, or a client_credentials token's `client_id`. `user_id`
   names the user the token acts as — the user, or the client's service-account user — so an app
   can record either kind as an actor in `auth.users`.
-  It reports `permissions` as the user's live permissions, unchanged: core's ceilings govern core's
-  API only, and an app enforces its own scopes. An app introspecting a third-party token therefore
-  sees the user's permissions, as it would have before; whether it honours that token for its own
-  API is the app's decision, which `scope` and `aud` in the response inform. A client that is not a
-  service's, introspecting its own token whose access is `none`, is not told them, as at userinfo.
+  It reports `permissions` as the user's live permissions — for a `delegated` token (a third-party
+  client's, with core API scopes) cut down to its scopes' ceilings as `requireAuth` cuts them, so an
+  app is never told more than core itself would let that token do. A third-party token without core
+  scopes (`none`) is reported to a service in its audience with the user's live permissions: core's
+  ceilings come from core API scopes, and an app enforces its own; whether it honours that token for
+  its own API is the app's decision, which `scope` and `aud` in the response inform. A client that is
+  not a service's, introspecting its own token whose access is `none`, is not told them, as at
+  userinfo.
 - `/oauth/check-permission` authenticates a confidential client, not a token. A client of an
   organization may only ask about that organization's members, and is answered in it;
   `organization_id`, if given, must be the client's; a non-member and an unknown user get the same 403. An organization-bound
   [integration](integrations.md) is such a client, answered for its organization's members. A
   client of no organization must be a service's (a platform integration is refused): it is
-  answered from the user's global roles only and may not name an organization. Any other client — a login client created under
+  answered from the user's global roles only and may not name an organization; an unknown user is a
+  403 like every other refusal. Any other client — a login client created under
   `/v1/admin/clients` — is refused, so it cannot read any user's global permissions. Every refusal is
   403, decided before the user is looked up. A deactivated user holds nothing, and neither does any
   member of an inactive or archived organization in it: every check answers `false`.
@@ -174,9 +193,22 @@ happens depends on how it was revoked:
 - **Otherwise** (rotated earlier, or its successor spent) — reuse (OAuth 2.0 Security BCP): the whole family, refresh tokens and their
   access tokens, is revoked and `refresh_token_reuse` is logged.
 
+A replayed authorization code revokes its family the same way (`auth_code_reuse`). Either reuse is
+also recorded in the revoking transaction, as core's: an audit entry (`User`, action `UPDATE`, actor
+the system user, `metadata.action` `token_reuse_detected`, with `credential`
+(`authorization_code` or `refresh_token`), `clientId`, `authCodeId`, the revoked `sessionIds` and
+the `revokedAccessTokens` / `revokedRefreshTokens` counts) — written even when the family was
+already dead, since the replay is the finding — and, when anything was revoked, an
+`auth.user.sessions-revoked` event.
+
 Revoking a refresh token at `/oauth/revoke` ends its whole family, a successor rotated from it
 included, and the SSO session it was issued under (`endSession`), under the same session-end lock
-a refresh takes, so a refresh racing the revocation cannot leave a live successor.
+a refresh takes, so a refresh racing the revocation cannot leave a live successor. It is the user's
+logout: a `LOGOUT` audit entry (`metadata.action` `sessions_revoked`, `method` `revoke`, the
+`sessionIds` and `ssoSessionIds` ended) and an `auth.user.sessions-revoked` event, in that
+transaction; a token already revoked, with nothing else to end, records nothing. Revoking an access
+token revokes it and writes a `LOGOUT` entry (`metadata.action` `token_revoked`, `tokenType`
+`access_token`, `jti`, `clientId`) in one transaction, again only when it was live.
 
 A refresh token issued under an organization is refused (`invalid_grant`) and its family revoked once
 the user is no longer a member or the organization is inactive or archived. Deactivating an
@@ -213,11 +245,11 @@ for. Core's own login client never asks and refuses a change to either field. Bo
 fields can come from the [provisioning file](provisioning.md), whose clients are read-only here
 (`409 managed_by_provisioning`).
 
-**Listing clients.** `clients.read` is not scoped by organization or owner: `GET /v1/admin/clients`
-and `GET /v1/admin/clients/:id` show every client — services', organizations' and login clients
-alike — with their metadata (name, type, redirect URIs, scopes, grant types, audience, owner,
-organization, service). No secret is ever returned; a client secret is shown once, when it is
-created or regenerated. Grant `clients.read` with that in mind.
+**Listing clients.** With `clients.read`, `GET /v1/admin/clients` lists the clients the caller owns,
+and `GET /v1/admin/clients/:id` reads one of them. With `clients.admin` as well, both show every
+client — services', organizations' and login clients alike — with their metadata (name, type,
+redirect URIs, scopes, grant types, audience, owner, organization, service). No secret is ever
+returned; a client secret is shown once, when it is created or regenerated.
 
 ## Requested authentication class (`acr_values`)
 
@@ -377,7 +409,9 @@ replaces the set (roles the domain already hands out skip the grant check, excep
 moves the domain to another organization: then every role it will hand out there, sent or kept, is
 checked against that organization). Setting `ssoOnly: true` (on create or `PATCH`) is refused with 409
 `provider_inactive` while the provider is deactivated, since its users would have no way in.
-Deleting a custom role removes it from every domain's default roles.
+Deleting a custom role removes it from every domain's default roles. Each create, `PATCH` and delete
+is audited and emits `auth.identity-provider.domain-created`, `-updated` or `-deleted` in its
+transaction.
 
 **`ssoOnly` hands the domain's accounts to the provider.** The next password sign-in of an existing
 user at an SSO-only domain is force-linked to the provider and the password dropped (see _Linking
@@ -390,11 +424,17 @@ an SSO-only domain; 403 otherwise. The checks run under the provider's row lock,
 write takes.
 
 A domain becoming SSO-only (created with it, `PATCH`ed to it, or an SSO-only domain renamed) closes
-every other provider to its users, so right after the change commits core ends all sessions of each
-person at the domain who holds an identity at another provider (`endUserSessions`, one transaction
-per user), audited and emitted as an admin session revoke (`sessions_revoked`,
+every other provider to its users, so once the change commits core enqueues a sweep
+(`jobs/ssoOnlySessionSweep.ts`, named by the domain and its `updatedAt`) that ends all sessions of
+each person at the domain who holds an identity at another provider (`endUserSessions`, one
+transaction per user), audited and emitted as an admin session revoke (`sessions_revoked`,
 `auth.user.sessions-revoked`). The domain's own provider's users and password users keep theirs; the
-latter are force-linked at their next password sign-in.
+latter are force-linked at their next password sign-in. The sweep reads the domain as it is when it
+runs, and does nothing once the domain is no longer SSO-only. A failure for one user is logged and
+the sweep goes on to the next; the job then fails and is retried (10 attempts, exponential backoff
+from 10s) for the users that failed only, since ending a user's sessions again would also end the SSO
+sessions they have started since. When the job cannot be enqueued (Redis unreachable) the sweep runs
+in the request instead, once.
 
 A domain's `autoAccept` only matches the provider that owns the domain. A user with a matching
 email who already exists is never signed in by it: see _No matching by email_ below.
@@ -439,7 +479,8 @@ provider than the one an SSO-only domain names, for a user at that domain, is re
 `sso_required`, as linking it from the account page is: claiming it could never succeed. Changing a user's email
 withdraws all of their outstanding invites, because an invite is matched by email and must not
 follow the account to an address the issuing admin never saw. Core sends no email: tell the user to
-"Sign in with <provider>".
+"Sign in with <provider>". Issuing and withdrawing an invite are audited and emit
+`auth.user.identity-invite-created` and `auth.user.identity-invite-withdrawn` in the same transaction.
 
 An invite is a new way into the account, so it is held to the same rule as a password reset: the
 caller must hold every permission the user holds (see _TOTP_ below). Issuing is refused for the system user and service accounts, with `provider_inactive`
@@ -498,7 +539,8 @@ When a second factor is due (by the usual rules: the user's TOTP, the instance p
 `acr_values`, and the provider not `countsAsMfa`), a password and the provider account alone change
 nothing: the callback records the vouched-for identity as a pending link (`auth.pending_identity_links`)
 held by the TOTP step, and that transaction runs only when the TOTP or recovery code passes, in the
-one that consumes the step (the `LOGIN` entry then names the new identity, `amr` `["fed","otp"]`).
+one that consumes the step (the login's `LOGIN` entry, written with the code, records the provider
+and `amr` `["fed","otp"]`).
 The pending link belongs to the grant: a password change, a sign-out everywhere or the grant's
 expiry removes it and its TOTP step (400 `invalid_session`). A user who must first enrol goes to 2FA
 setup with nothing changed, and after enrolling signs in again through the password and the
@@ -667,11 +709,22 @@ strip an administrator, nor `users.delete` sign one out, nor `roles.delete` take
 `admin` role. Acting on yourself is not checked. Removing an org-scoped assignment
 (`DELETE /v1/admin/roles/:id/users/:userId?organizationId=`) is bounded instead as setting a
 member's org roles is: organization authority, and an org `admin` cannot remove an `owner`'s role.
+Setting a member's org roles (`PUT /v1/admin/organizations/:id/members/:userId/roles`) also needs
+the caller to hold, in that organization, every permission of each role it removes
+(`assertCanTakeAway`) — otherwise 403 naming those lacking.
+
+A service's or an integration's secret is a way into its account: `regenerate-secret` and
+`revoke-previous-secret` under `/v1/admin/services/:id` and `/v1/admin/integrations/:id` need the
+caller's global permissions to cover every permission the account holds, in any scope
+(`assertMayTakeOverAccount`) — otherwise 403 naming those lacking.
 
 Changing a role itself takes its permissions from every holder at once, so deleting a role
 (`DELETE /v1/admin/roles/:id`), deactivating it (`PATCH` with `isActive: false`) and dropping
 permissions from it (`PUT /v1/admin/roles/:id/permissions`) need the caller's global permissions to
 cover every permission taken away (`assertCanTakeAway`) — otherwise 403 naming those lacking.
+Each of the three revokes the access tokens of the service clients holding the role in its
+transaction, and its audit entry counts them (`accessTokensRevoked`).
+
 
 ## Organizations: roles, members, activation
 
@@ -789,7 +842,8 @@ its own kind of setup: `/oauth/totp/setup/verify` refuses a setup begun from the
 A TOTP code is accepted once. `auth.users.totp_last_window` holds the 30-second step of the last
 code accepted for the user's secret; every check — the 2FA step at login, both setup verifies, and
 `DELETE /v1/account/totp` and `POST /v1/account/totp/recovery-codes` — refuses a code from that step or
-an earlier one with 401 `invalid_code`, and records the new step with a conditional update, so two
+an earlier one with `invalid_code` (401 at login, 400 on the `/v1/account/totp` routes, whose
+bearer token is valid), and records the new step with a conditional update, so two
 concurrent submissions of one code cannot both pass. Disabling TOTP clears it. Recovery codes are
 single-use on their own and do not touch it.
 
@@ -797,7 +851,8 @@ The login flow's 2FA, org-select and consent sessions (`auth.totp_verifications`
 `auth.org_selection_sessions`, `auth.consent_sessions`) are found by the SHA-256 of their token, as
 the setup grant is; the URL and the cookie carry the token itself.
 
-Enabling and disabling are audited (`User`, action `UPDATE`, `metadata.action` `totp_enabled` /
+Starting a setup is audited (`User`, action `UPDATE`, `metadata.action` `totp_setup_started`, with
+`clientId` when begun at login). Enabling and disabling are audited (`totp_enabled` /
 `totp_disabled`) and emit `auth.user.totp-enabled` / `auth.user.totp-disabled`, whether the user
 disables it (`DELETE /v1/account/totp`, confirmed with a current TOTP code — not a recovery code).
 Users regenerate their own recovery codes (`POST /v1/account/totp/recovery-codes`, audited as
@@ -814,7 +869,9 @@ returns a user's codes. An admin with
 An admin password reset (`PATCH /v1/admin/users/:id` with `password`) and a TOTP reset both end all of
 the user's sessions and token families, in the transaction that makes the reset
 (`endUserSessions`, recorded as a `sessions_revoked` entry and an `auth.user.sessions-revoked`
-event); an admin resetting their own password keeps the session they act from. Every such sign-out
+event); an admin resetting their own password keeps the session they act from. Deactivating a user
+(all their sessions) and removing a member (their sessions in that organization) are recorded the
+same way, in the transaction that ends them. Every such sign-out
 also revokes the access tokens issued without a refresh token (clients without the `refresh_token`
 grant), all but the caller's own, and closes their sockets. An app service using `@tereo-io/sdk`
 may cache an active introspection for up to its `introspectionCacheTtlSeconds` (60 s by default,
@@ -926,24 +983,38 @@ Every
 password login gives the browser's SSO session a new token (session fixation); silent and org-switch
 continuations keep it.
 
-A WebSocket is authenticated once, at the handshake. It joins rooms for its user (`user:{id}`),
+A WebSocket is authenticated once, at the handshake, with the token in `auth.token` (or an
+`Authorization` header): a string of at most 8 KiB, else `Invalid access token`. The socket.io CORS
+is not credentialed — no cookie is involved. It joins rooms for its user (`user:{id}`),
 token (`token:{jti}`), session (`session:{refresh token id}`) and, for an organization's token,
-`org:{orgId}` and `user:{id}:org:{orgId}`. Revoking the session or token closes it
+`org:{orgId}` and `user:{id}:org:{orgId}`; a token that reaches the user's account (core's UI, a
+service, or `core:account`) also `user:{id}:account`, and one that reaches core's files
+`user:{id}:files`. Revoking the session or token closes it
 (`notifySessionsRevoked`, `disconnectTokenSockets`), as do deactivating the user, removing them from
-the organization or deactivating it (`disconnectUserSockets`, `disconnectOrganizationSockets`), and
-the token's `exp`. The UI reconnects with a fresh token after a server-side close. The token is
+the organization or deactivating it (`disconnectUserSockets`, `disconnectOrganizationSockets` — the
+sockets close even if ending the sessions then fails), and
+the token's `exp`. Signing out everywhere revokes the families of the sessions it ends, so the
+token of a session a refresh has rotated away, and its socket, go too. The UI reconnects with a fresh
+token after a server-side close. The token is
 checked once more after the socket joins its rooms, so a revocation landing mid-handshake still
-closes it. One user may hold 20 sockets per core process (`Too many connections` beyond that), and
-a client message may be at most 16 KiB.
+closes it, and every `WEBSOCKET_REVALIDATE_INTERVAL_SECONDS` (default 60) each core process checks
+its sockets' tokens in batches and closes those no longer active — whatever closed no socket when it
+happened. One user may hold 20 sockets per core process, counted from the handshake
+(`Too many connections` beyond that), and
+a client message may be at most 16 KiB. A socket may send 10 messages at once and one a second after
+that; more are dropped, and a client that keeps sending well past the rate is disconnected.
 
-Events go to the user's room, after the change commits (`websocket/emitters/`):
+Events go out after the change commits (`websocket/emitters/`). A socket whose token reaches neither
+the user's account nor core's files (`core:events` alone) gets only `auth:permissions:changed` and
+the `auth:session:revoked` of its own session — nothing naming the user's other sessions,
+organizations or buckets:
 
 | Event                       | Payload                                 | Sent when                                                                                                                                                                                                         |
 | --------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth:permissions:changed`  | `{ reason, timestamp }`                 | the user's global roles change, or an admin changes a role they hold (a registry retirement is not notified; the UI sees it on its next token refresh)                                                            |
-| `auth:session:revoked`      | `{ sessionId, timestamp }`              | one of the user's sessions is revoked; its sockets close after                                                                                                                                                    |
-| `auth:organization:changed` | `{ reason, organizationId, timestamp }` | `membership_changed`: added, removed, or member tier changed; `roles_changed`: org-scoped roles set; `org_deactivated`: to every member, after the organization's tokens are revoked and before its sockets close |
-| `files:bucket-access:changed` | `{ bucketName, timestamp }` | a bucket grant was given to or revoked from the user (a member removal included), or the bucket's ownership moved to or from them (see [files.md](files.md)) |
+| `auth:permissions:changed`  | `{ reason, timestamp }`                 | to every socket of the user: their global roles change, or an admin changes a role they hold (a registry retirement is not notified; the UI sees it on its next token refresh)                                    |
+| `auth:session:revoked`      | `{ sessionId, timestamp }`              | to the account room and the session's own sockets: one of the user's sessions is revoked; its sockets close after                                                                                                 |
+| `auth:organization:changed` | `{ reason, organizationId, timestamp }` | to the account room. `membership_changed`: added, removed, or member tier changed; `roles_changed`: org-scoped roles set; `org_deactivated`: to every member, after the organization's tokens are revoked and before its sockets close |
+| `files:bucket-access:changed` | `{ bucketName, timestamp }` | to the files room: a bucket grant was given to or revoked from the user (a member removal included), or the bucket's ownership moved to or from them (see [files.md](files.md)) |
 
 The UI refreshes its token on `auth:permissions:changed` and `auth:organization:changed`; a refresh
 core rejects signs it out.
@@ -964,6 +1035,11 @@ ends nothing: it sets a one-time `tereo_logout_confirm_{client_id}` cookie and r
 `{UI}/logout`, whose confirm button posts the same token to `/oauth/end-session/confirm`. Only that
 post, carrying the cookie (SameSite keeps it off cross-site posts), ends the session — so a
 cross-site link cannot log anyone out.
+
+Each user signed out writes a `LOGOUT` entry (`client_id`, the `sids` ended, the `sessionIds`
+revoked, `method` `id_token_hint` or `confirm`) and an `auth.user.sessions-revoked` event in the
+revoking transaction — none for a user of whom nothing was still live (a stale cookie, a repeated
+logout).
 
 The hourly `auth-cleanup` job (`jobs/authCleanup.ts`) deletes SSO, consent, org-selection and TOTP
 sessions and TOTP setup grants once expired, and access tokens, refresh tokens and authorization
@@ -1035,11 +1111,12 @@ All in Redis; limiters in `utils/rateLimit.ts`, instances in `middleware/rateLim
 - **General** — `rateLimitGeneral`, after authentication: per user, per IP when anonymous, per OAuth client for internal service accounts.
 - **Credentials** — counted before the credential is checked, atomically, and cleared by a success: login passwords per client and IP (`authFailure`, keyed by the body's `client_id` once that client is found — never by a header the login does not authenticate with, which a caller could vary per request; the key spans every account tried from that address, so a success only gives back its own attempt — clearing the count would let a login to one's own account wipe the failures against everyone else's) and per account (`loginAccountBackoff`: keyed on a hash of the normalised email, so unknown emails behave the same; five attempts, then a delay doubling from 1 s to 15 min — a backoff, not a lockout); provider callbacks per IP once their round trip is consumed (see _Errors_ under _Sign in with an identity provider_); confidential-client secrets at `/oauth/token`, `/oauth/revoke` and `/oauth/introspect` per client and IP (`clientSecretFailure`: 10 wrong secrets per 5 min, keyed with the IP so one address cannot lock a client out for its other callers. Unlike the others it counts only failures — read before the secret is hashed, spent after a wrong one — so any number of concurrent correct secrets from one address, such as pods behind one NAT, pass. Once the count is full every attempt is refused before hashing, the right secret included, until the window expires: a correct secret cannot clear a full count, so a stale-secret pod sharing an address can hold the client off for up to 5 min. Concurrent wrong secrets can overshoot the limit by the burst, acceptable for high-entropy secrets); login 2FA setup per user; `/v1/account/password` and `/v1/account/totp/*` per user; setup per IP; share unlock per token and IP.
 - **Login 2FA** — `/oauth/totp/verify` and `/oauth/totp/recovery` share `totpBackoff`, per user, which nothing resets: a sliding 24-hour window (`createWindowedBackoffLimiter`) in which five attempts pass, then each next one waits a delay after the last that doubles from 1 s to an hour. Each attempt is spent before the code is checked; a right code takes back only its own, so the owner signing in hands an attacker who holds the password no fresh guesses, and the attacker gets some forty guesses a day at most. From the fifth attempt in the window every failure writes an audit entry (`User`, action `UPDATE`, `metadata.action` `totp_failures`, with `method` and `recentFailures`). The trade-off is the owner's access while an attacker keeps the delay at its cap: a browser holding the user's known-device cookie (set by a completed login) is let through the delay, its attempts still counting toward it, capped at 5 per hour per cookie (`knownDeviceTotp`); a browser without one competes with the attacker for the next attempt, at most an hour away, so an attacker who spends each one as it opens can keep the owner out until they sign in from a known device or an admin resets the password. A per-2FA-session limit would add nothing, since the password buys a new session. The setup verify (`/oauth/totp/setup/verify`), whose caller holds the secret, keeps a fixed 5 per 300 s per user (`totpSetupFailure`).
+- **Wrong passwords** — every failed password check at `POST /oauth/authorize` and `POST /v1/account/password` is logged (`authLog` `password_failure`: user, client, IP, `check` and `reason` — `unknown_user`, `login_not_allowed`, `no_password` or `invalid_password` — never what was typed). For an existing user, `utils/passwordAttempts.ts` counts the failures in a row in Redis (both routes share the count; a correct password clears it, and it lapses after 24 hours without a failure), and from the fifth each one writes an audit entry (`User`, action `UPDATE`, `metadata.action` `password_failures`, with `check`, `reason` and `consecutiveFailures`). An email no account has is only logged.
 - **Known device** — so that someone holding an account in backoff does not lock its owner out, a completed login (after 2FA when required) sets `tereo_known_device` (`utils/knownDevice.ts`; httpOnly, `SameSite=Lax`, path `/oauth` or a `__Host-` cookie as in [Browser cookies](#browser-cookies), 90 days): `<userId>.<issuedAt>.<HMAC>`, keyed with `KNOWN_DEVICE_KEY` and covering the user's password hash, so a password change or admin reset (a freshly salted hash) voids every earlier cookie with no extra column. At the login submit, while the account is delayed (`loginAccountBackoff.isDelayed`), a cookie valid for that same user skips the delay: `authFailure` and the password check still apply, the attempt still counts toward the account (`spendUnblocked`, which lengthens the delay without being refused by it), and `knownDeviceFailure` caps it at 5 wrong passwords per 15 min per cookie, so a stolen cookie is not an unlimited guess. Outside a delay a known device is treated like any browser. The cookie is checked only against the user the email names, so it reveals nothing about other emails; sign-out leaves it, since it is not a session.
 - **Redis down** — credential limiters fail closed with `503 temporarily_unavailable`, except `clientSecretFailure`, which fails open: the secret is still verified, and client authentication (`/oauth/token`, `/oauth/revoke`, `/oauth/introspect`) must not go down with Redis; the general and pre-auth limiters fail open, so an outage does not take the API down. None waits in ioredis's offline queue: each refuses (or passes) at once while the client is not ready.
 - **Tests** run every limiter at its production limits. `tests/setup.ts` clears limiter keys before each test; a test needing several client addresses sends `X-Forwarded-For`, trusted from loopback by the default `TRUST_PROXY`.
 
-`authLog` (`utils/audit.ts`) logs failures and code/refresh-token reuse at `warn`, successes at `info`, and per-request and introspection lines at `debug`.
+`authLog` (`utils/audit.ts`) logs failures (wrong passwords included) and code/refresh-token reuse at `warn`, successes at `info`, and per-request and introspection lines at `debug`.
 
 ## Pagination
 

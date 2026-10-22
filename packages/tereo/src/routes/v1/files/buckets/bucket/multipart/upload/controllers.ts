@@ -1,6 +1,5 @@
 import { broadcastObjectInvalidate } from "../../../../../../../utils/cacheBroadcast.js";
 import { setAccessLog } from "../../../../../../../middleware/accessLog.js";
-import { logAuditTx, emitTx } from "../../../../../../../utils/outbox.js";
 import { assertMultipartFits, multipartCompleteClaim } from "../utils.js";
 import { completeBodySchema, uploadIdParamsSchema } from "./schemas.js";
 import { validateUser } from "../../../../../../../middleware/auth.js";
@@ -40,6 +39,11 @@ import {
   openMultipartPartStream,
   removeMultipartDir,
 } from "../../../../../../../utils/storage.js";
+import {
+  bucketEventScope,
+  logAuditTx,
+  emitTx,
+} from "../../../../../../../utils/outbox.js";
 import {
   BadRequestError,
   ConflictError,
@@ -131,19 +135,17 @@ export const abortMultipart = async (req: Request, res: Response) => {
       },
     });
 
-    if (bucket.organizationId) {
-      await emitTx(tx, {
-        eventType: "file-service.multipart.aborted",
-        organizationId: bucket.organizationId,
-        entityType: "multipartUpload",
-        entityId: upload.id,
-        data: {
-          bucketName: bucket.name,
-          objectKey: upload.objectKey,
-          reason: "aborted",
-        },
-      });
-    }
+    await emitTx(tx, {
+      eventType: "file-service.multipart.aborted",
+      ...bucketEventScope(bucket),
+      entityType: "multipartUpload",
+      entityId: upload.id,
+      data: {
+        bucketName: bucket.name,
+        objectKey: upload.objectKey,
+        reason: "aborted",
+      },
+    });
   });
   await removeMultipartDir(params.uploadId);
   await db.multipartUploads.deleteParts(params.uploadId);
@@ -450,11 +452,12 @@ const runComplete = async (
       await logAuditTx(tx, {
         auth,
         organizationId: bucket.organizationId ?? undefined,
-        action: "CREATE",
+        action: "UPDATE",
         entityType: "multipartUpload",
         entityId: activeUpload.id,
         entityName: activeUpload.objectKey,
         metadata: {
+          completed: true,
           bucketName: bucket.name,
           objectKey: activeUpload.objectKey,
           contentType: activeUpload.contentType,
@@ -464,22 +467,20 @@ const runComplete = async (
         },
       });
 
-      if (bucket.organizationId) {
-        await emitTx(tx, {
-          eventType: "file-service.multipart.completed",
-          organizationId: bucket.organizationId,
-          entityType: "multipartUpload",
-          entityId: activeUpload.id,
-          data: {
-            bucketName: bucket.name,
-            objectKey: activeUpload.objectKey,
-            contentType: activeUpload.contentType,
-            sizeBytes: plaintextSize.toString(),
-            etag,
-            objectId: upsert.object.id,
-          },
-        });
-      }
+      await emitTx(tx, {
+        eventType: "file-service.multipart.completed",
+        ...bucketEventScope(bucket),
+        entityType: "multipartUpload",
+        entityId: activeUpload.id,
+        data: {
+          bucketName: bucket.name,
+          objectKey: activeUpload.objectKey,
+          contentType: activeUpload.contentType,
+          sizeBytes: plaintextSize.toString(),
+          etag,
+          objectId: upsert.object.id,
+        },
+      });
 
       await emitObjectWrittenTx(tx, bucket, upsert, "multipart");
 

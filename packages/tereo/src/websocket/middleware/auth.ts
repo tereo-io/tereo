@@ -8,13 +8,13 @@ interface ExtendedError extends Error {
   data?: unknown;
 }
 
-const extractAccessToken = (socket: Socket): string | null => {
-  if (socket.handshake.auth?.token) {
-    return socket.handshake.auth.token as string;
-  }
+/** Far above any token core issues; a longer one is not worth verifying. */
+const MAX_TOKEN_LENGTH = 8 * 1024;
 
-  return bearerToken(socket.handshake.headers.authorization);
-};
+/** `auth.token`, else the Authorization header's — whatever the client sent. */
+const extractAccessToken = (socket: Socket): unknown =>
+  socket.handshake.auth?.token ??
+  bearerToken(socket.handshake.headers.authorization);
 
 export const authenticateSocket = async (
   socket: Socket,
@@ -24,6 +24,9 @@ export const authenticateSocket = async (
     const token = extractAccessToken(socket);
     if (!token) {
       return next(new Error("No access token provided"));
+    }
+    if (typeof token !== "string" || token.length > MAX_TOKEN_LENGTH) {
+      return next(new Error("Invalid access token"));
     }
 
     const payload = verifyAccessToken(token);
@@ -49,10 +52,14 @@ export const authenticateSocket = async (
     socket.data.exp = payload.exp;
     socket.data.orgId = stored.organizationId ?? null;
     socket.data.clientId = payload.client_id;
+    // A token delegated only `core:events` hears of no more than its scopes
+    // would let it read: permission changes and its own session's end.
+    socket.data.accountEvents = allowsArea(check.access, "account");
+    socket.data.filesEvents = allowsArea(check.access, "files");
 
     next();
   } catch (error) {
-    logger.error({ err: error }, "WebSocket authentication error");
+    logger.warn({ err: error }, "WebSocket authentication error");
     next(new Error("Authentication failed"));
   }
 };

@@ -1,14 +1,17 @@
 import { pgJson, pgText } from "../../../../utils/pgInput.js";
 import { z } from "zod";
 
+/** The largest `data` one event may carry, as JSON. */
+export const MAX_EVENT_DATA_BYTES = 256 * 1024;
+
 export const emitEventSchema = z.object({
   // Any 8-4-4-4-12 id, as Postgres' uuid type takes it; z.uuid() would also
   // reject ids whose variant nibble is outside 8-b.
   organizationId: z.guid(),
   eventType: pgText().min(1).max(100),
   entityType: pgText().min(1).max(100),
-  entityId: pgText().min(1),
-  data: pgJson(z.record(z.string(), z.unknown())),
+  entityId: pgText().min(1).max(500),
+  data: pgJson(z.record(z.string(), z.unknown()), MAX_EVENT_DATA_BYTES),
   idempotencyKey: pgText().min(1).max(255).optional(),
   /**
    * Slugs of services or integrations: the event goes only to endpoints they

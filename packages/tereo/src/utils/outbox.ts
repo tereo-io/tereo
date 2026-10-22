@@ -39,7 +39,16 @@ type Tx = Prisma.TransactionClient;
 // ===========================================================================
 
 export interface AuditLogInput {
-  auth: { userId: string; email: string | null };
+  /**
+   * The actor. A request's `AuthContext` also carries the token's client and,
+   * for a token delegated to a third-party client, its ceiling.
+   */
+  auth: {
+    userId: string;
+    email: string | null;
+    clientId?: string;
+    ceiling?: string[];
+  };
   organizationId?: string | null;
   action:
     | "CREATE"
@@ -76,13 +85,23 @@ export async function logAuditTx(tx: Tx, input: AuditLogInput): Promise<void> {
       entityId: input.entityId,
       entityName: input.entityName,
       changes: input.changes as Prisma.InputJsonValue | undefined,
-      metadata: input.metadata as Prisma.InputJsonValue | undefined,
+      metadata: auditMetadata(input) as Prisma.InputJsonValue | undefined,
       ipAddress: ip === "unknown" ? null : ip,
       correlationId: input.correlationId ?? getRequestId(),
       writerUserId: SYSTEM_USER_ID,
     },
   });
 }
+
+// A delegated token acts for its user through a third-party client, which
+// the entry names: the user alone would read as the user's own doing.
+const auditMetadata = ({
+  auth,
+  metadata,
+}: AuditLogInput): Record<string, unknown> | undefined =>
+  auth.ceiling && auth.clientId
+    ? { clientId: auth.clientId, ...metadata }
+    : metadata;
 
 /**
  * Deep equality comparison for computing field-level diffs.
@@ -154,7 +173,13 @@ export function computeChanges(
 // ===========================================================================
 
 export interface EmitTxInput {
-  organizationId: string;
+  /**
+   * Null for a resource outside any organization (an app service's declared
+   * bucket): sent only to endpoints of all organizations and to `serviceId`'s.
+   */
+  organizationId: string | null;
+  /** The service whose resource this is; used only without an organization. */
+  serviceId?: string | null;
   eventType: string;
   entityType: string;
   entityId: string;
@@ -162,6 +187,15 @@ export interface EmitTxInput {
   /** Slugs of services or integrations: sent only to endpoints they own. */
   recipients?: string[];
 }
+
+/** Where a bucket's events go: its organization, or its service's endpoints. */
+export const bucketEventScope = (bucket: {
+  organizationId: string | null;
+  serviceId: string | null;
+}): Pick<EmitTxInput, "organizationId" | "serviceId"> =>
+  bucket.organizationId
+    ? { organizationId: bucket.organizationId }
+    : { organizationId: null, serviceId: bucket.serviceId };
 
 const KNOWN_EVENT_TYPES = new Set(EVENT_TYPES.map((e) => e.eventType));
 

@@ -13,6 +13,10 @@ import { logAuditTx } from "../../../../utils/outbox.js";
 import db from "../../../../utils/db/index.js";
 import { Request, Response } from "express";
 import {
+  emitEndpointEventTx,
+  redactWebhookUrl,
+} from "../../../../utils/webhookEndpointEvents.js";
+import {
   applyCursorToWhere,
   buildCursorPageResponse,
 } from "../../../../utils/cursor.js";
@@ -27,12 +31,11 @@ export const listWebhookEndpoints = async (req: Request, res: Response) => {
   const { organizationId, owner } = webhookScope(req);
 
   const query = validateQuery(getWebhookEndpointsQuerySchema, req);
-  const { includeArchived } = validateQuery(
+  const { includeArchived, archivedFiltered } = validateQuery(
     listWebhookEndpointsExtraQuerySchema,
     req
   );
 
-  const archivedFiltered = !!req.query["filter[archived]"];
   // As getVisibleEndpoint shows them: an integration's own; otherwise the
   // organization's, with owned endpoints sent every organization's events
   // and integrations' endpoints only for webhooks.admin.
@@ -114,10 +117,11 @@ export const createWebhookEndpoint = async (req: Request, res: Response) => {
       entityType: "WebhookEndpoint",
       entityId: created.endpoint.id,
       metadata: {
-        url: body.url,
+        url: redactWebhookUrl(body.url),
         eventTypes: body.eventTypes,
       },
     });
+    await emitEndpointEventTx(tx, "created", created.endpoint);
     return created;
   });
 

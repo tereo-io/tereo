@@ -9,9 +9,11 @@
       is created and queued for asynchronous delivery via BullMQ (up to 10 attempts
       with exponential backoff).
 
-      Returns `202 Accepted` with the number of deliveries created. If no active
-      endpoints match, returns `202` with `deliveriesCreated: 0` and an audit log
-      entry is created to preserve the event details.
+      Returns `202 Accepted` with the number of deliveries created (`0` when no
+      active endpoint matches). Each emitted event writes an audit entry
+      (`WebhookEvent`) under the caller, in the transaction that writes its
+      deliveries: its event type, entity and `deliveriesCreated`, not its data.
+      A replay answered from an idempotency key's cached result writes none.
 
       The event type must be registered (declared by a service in its
       provisioning document) and not retired, or the request fails with
@@ -153,8 +155,9 @@
     summary: Batch emit events
     description: |
       Emits up to 100 events in a single API call. For each event, matching
-      endpoints are found and deliveries are created; an event with no
-      matching endpoint generates an audit log entry.
+      endpoints are found and deliveries are created, and an audit entry
+      under the caller records it, as for a single emit.
+
 
       Returns `202 Accepted` with per-event results, in request order,
       including the number of deliveries created for each event.

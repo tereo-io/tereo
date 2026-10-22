@@ -42,7 +42,9 @@ describe("emit with an idempotency key while Redis is unavailable", () => {
     const status = redis.status;
     redis.status = "reconnecting";
     try {
-      await expectUnavailable(emitWithIdempotency(event(), SYSTEM_USER_ID));
+      await expectUnavailable(
+        emitWithIdempotency(event(), { userId: SYSTEM_USER_ID, email: null })
+      );
     } finally {
       redis.status = status;
     }
@@ -52,6 +54,8 @@ describe("emit with an idempotency key while Redis is unavailable", () => {
     vi.spyOn(getRedisClient(), "set").mockRejectedValue(
       new Error("connection reset")
     );
-    await expectUnavailable(emitWithIdempotency(event(), SYSTEM_USER_ID));
+    await expectUnavailable(
+      emitWithIdempotency(event(), { userId: SYSTEM_USER_ID, email: null })
+    );
   });
 });

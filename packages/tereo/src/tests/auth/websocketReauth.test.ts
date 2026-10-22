@@ -1,7 +1,9 @@
+import { notifyBucketAccessChanged } from "../../websocket/emitters/index.js";
+import { closeRedisEmitter } from "../../websocket/emitters/redisEmitter.js";
 import { browserLogin, cookieHeader } from "../utils/browserLogin.js";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateAccessToken } from "../../utils/tokens.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
-import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   BASE_URL,
@@ -15,6 +17,13 @@ import {
   getTestPrincipalToken,
   testOrgId,
 } from "../utils/principals.js";
+import {
+  connect,
+  received,
+  stillOpen,
+  within,
+  type TestSocket,
+} from "./utils/socket.js";
 
 /**
  * A socket is authenticated once, at the handshake, with an access token.
@@ -26,59 +35,14 @@ const REDIRECT_URI = "http://localhost:3000/websocket-reauth-callback";
 
 let client: Awaited<ReturnType<typeof createTestClient>>;
 
-interface TestSocket {
-  /** Resolves with the connect result: null, or the handshake's error. */
-  connected: Promise<string | null>;
-  /** Resolves when the server closes the connection. */
-  closed: Promise<void>;
-  /** Event names received, in order. */
-  events: { name: string; payload: unknown }[];
-  close: () => void;
-}
-
-/**
- * A socket.io client over a plain WebSocket (Engine.IO v4): enough of the
- * protocol to connect with a token, receive events and see a disconnect.
- */
-const connect = (token: string): TestSocket => {
-  const ws = new WebSocket(
-    `${BASE_URL.replace(/^http/, "ws")}/ws/?EIO=4&transport=websocket`
-  );
-  const events: TestSocket["events"] = [];
-  let settle: (error: string | null) => void;
-  const connected = new Promise<string | null>((r) => (settle = r));
-  const closed = new Promise<void>((resolve) =>
-    ws.addEventListener("close", () => {
-      settle("closed before connecting");
-      resolve();
-    })
-  );
-  ws.addEventListener("message", ({ data }) => {
-    const packet = String(data);
-    if (packet.startsWith("0")) ws.send(`40${JSON.stringify({ token })}`);
-    else if (packet === "2") ws.send("3");
-    else if (packet.startsWith("40")) settle(null);
-    else if (packet.startsWith("44")) {
-      settle((JSON.parse(packet.slice(2)) as { message: string }).message);
-    } else if (packet.startsWith("42")) {
-      const [name, payload] = JSON.parse(packet.slice(2)) as [string, unknown];
-      events.push({ name, payload });
-    }
-  });
-  return { connected, closed, events, close: () => ws.close() };
-};
-
-const within = <T>(promise: Promise<T>, ms: number, what: string) =>
-  Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${what} within ${ms}ms`)), ms)
-    ),
-  ]);
+type TestUser = Awaited<ReturnType<typeof createTestUser>>;
 
 /** A browser login through to tokens: a session with a refresh token. */
-const signIn = async (scope = "openid core:account") => {
-  const user = await createTestUser();
+const signIn = async (
+  scope = "openid core:account",
+  existing: TestUser | null = null
+) => {
+  const user = existing ?? (await createTestUser());
   const login = await browserLogin({
     clientId: client.clientId,
     redirectUri: REDIRECT_URI,
@@ -158,6 +122,11 @@ beforeAll(async () => {
   client = await createTestClient({ redirectUris: [REDIRECT_URI] });
 });
 
+// The bucket test emits from this process, through Redis.
+afterAll(async () => {
+  await closeRedisEmitter();
+});
+
 describe("WebSocket re-authentication", () => {
   it("closes the socket when its session is revoked, and only that one", async () => {
     const mine = await signIn();
@@ -208,6 +177,54 @@ describe("WebSocket re-authentication", () => {
       });
       expect((await refresh(refreshToken)).status).toBe(400);
 
+      await within(socket.closed, 5000, "socket closed");
+    } finally {
+      socket.close();
+    }
+  });
+
+  it("closes a refreshed-away token's socket at sign-out everywhere, not the caller's", async () => {
+    const first = await signIn();
+    const rotated = connect(first.accessToken);
+    const caller = await signIn("openid core:account", first.user);
+    const callerSocket = connect(caller.accessToken);
+    let current: TestSocket | null = null;
+    try {
+      expect(await rotated.connected).toBeNull();
+      expect(await callerSocket.connected).toBeNull();
+      const res = await refresh(first.refreshToken);
+      expect(res.status).toBe(200);
+      const { access_token } = (await res.json()) as { access_token: string };
+      current = connect(access_token);
+      expect(await current.connected).toBeNull();
+
+      const signOut = await fetch(`${BASE_URL}/v1/account/sessions`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${caller.accessToken}` },
+      });
+      expect(signOut.status).toBe(200);
+
+      await within(rotated.closed, 5000, "rotated token's socket closed");
+      await within(current.closed, 5000, "current token's socket closed");
+      expect(await stillOpen(callerSocket)).toBe(true);
+    } finally {
+      rotated.close();
+      callerSocket.close();
+      current?.close();
+    }
+  });
+
+  it("closes the socket of a refresh token without a family whose organization was lost", async () => {
+    const { user, accessToken, refreshToken, sessionId } = await signIn();
+    const lost = await ensureTestOrganization(`ws-lost-${user.id}`);
+    await prisma.refreshToken.update({
+      where: { id: sessionId },
+      data: { organizationId: lost, authCodeId: null },
+    });
+    const socket = connect(accessToken);
+    try {
+      expect(await socket.connected).toBeNull();
+      expect((await refresh(refreshToken)).status).toBe(400);
       await within(socket.closed, 5000, "socket closed");
     } finally {
       socket.close();
@@ -275,6 +292,53 @@ describe("WebSocket re-authentication", () => {
     }
   });
 
+  it("caps handshakes in flight together", async () => {
+    const { accessToken } = await signIn();
+    const sockets = Array.from({ length: 25 }, () => connect(accessToken));
+    try {
+      const results = await Promise.all(sockets.map((s) => s.connected));
+      expect(results.filter((r) => r === null)).toHaveLength(20);
+      expect(results.filter((r) => r === "Too many connections")).toHaveLength(
+        5
+      );
+    } finally {
+      for (const s of sockets) s.close();
+    }
+  });
+
+  it("refuses a token that is not a string, or too long to be one of core's", async () => {
+    const user = await createTestUser();
+    const token = await shortLivedToken(user.id, 600);
+    for (const bad of [42, { token }, [token], `${token}${"a".repeat(8192)}`]) {
+      const socket = connect(bad);
+      try {
+        expect(await socket.connected).toBe("Invalid access token");
+      } finally {
+        socket.close();
+      }
+    }
+  });
+
+  it("drops pings past the burst, and closes a socket that keeps flooding", async () => {
+    const socket = connect(
+      await shortLivedToken((await createTestUser()).id, 600)
+    );
+    try {
+      expect(await socket.connected).toBeNull();
+      for (let i = 0; i < 15; i++) socket.emit("auth:ping");
+      await new Promise((r) => setTimeout(r, 300));
+      const pongs = socket.events.filter((e) => e.name === "auth:pong");
+      expect(pongs.length).toBeGreaterThanOrEqual(10);
+      expect(pongs.length).toBeLessThan(15);
+      expect(await stillOpen(socket)).toBe(true);
+
+      for (let i = 0; i < 50; i++) socket.emit("auth:ping");
+      await within(socket.closed, 5000, "flooding socket closed");
+    } finally {
+      socket.close();
+    }
+  });
+
   it("refuses a handshake with an expired token", async () => {
     const user = await createTestUser();
     const socket = connect(await shortLivedToken(user.id, -1));
@@ -284,13 +348,6 @@ describe("WebSocket re-authentication", () => {
       socket.close();
     }
   });
-
-  /** Resolves true when the socket is still open after a moment. */
-  const stillOpen = (socket: TestSocket) =>
-    Promise.race([
-      socket.closed.then(() => false),
-      new Promise<boolean>((r) => setTimeout(() => r(true), 300)),
-    ]);
 
   it("closes every socket of a deactivated user, sessions or not", async () => {
     const { user, accessToken } = await signIn();
@@ -586,13 +643,16 @@ describe("Organization change events", () => {
 });
 
 describe("Socket scopes", () => {
-  it("admits a core:events-only token, which receives its user's events and nothing else", async () => {
-    const { user, accessToken } = await signIn("openid core:events");
+  it("admits a core:events-only token, which hears of permission changes and its own session only", async () => {
+    const { user, accessToken, sessionId } = await signIn("openid core:events");
+    const other = await signIn("openid core:account", user);
     const socket = connect(accessToken);
+    const full = connect(await shortLivedToken(user.id, 600));
     try {
       expect(await socket.connected).toBeNull();
+      expect(await full.connected).toBeNull();
 
-      const res = await fetch(`${BASE_URL}/v1/admin/users/${user.id}/roles`, {
+      const roles = await fetch(`${BASE_URL}/v1/admin/users/${user.id}/roles`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${await getTestPrincipalToken({
@@ -602,30 +662,77 @@ describe("Socket scopes", () => {
         },
         body: JSON.stringify({ roleIds: [] }),
       });
-      expect(res.status).toBe(200);
+      expect(roles.status).toBe(200);
+      await received(socket, "auth:permissions:changed");
 
-      await within(
-        (async () => {
-          while (
-            !socket.events.some((e) => e.name === "auth:permissions:changed")
-          ) {
-            await new Promise((r) => setTimeout(r, 20));
-          }
-        })(),
-        5000,
-        "auth:permissions:changed received"
+      // The user's other sessions, organizations and buckets are not its to see.
+      const endOther = await fetch(
+        `${BASE_URL}/v1/account/sessions/${other.sessionId}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${other.accessToken}` },
+        }
       );
+      expect(endOther.status).toBe(204);
+      const orgId = await ensureTestOrganization(`ws-events-${user.id}`);
+      const added = await fetch(
+        `${BASE_URL}/v1/admin/organizations/${orgId}/members`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${await getTestPrincipalToken({
+              permissions: ["organizations.write"],
+            })}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ userId: user.id, memberRole: "member" }),
+        }
+      );
+      expect(added.status).toBe(201);
+      notifyBucketAccessChanged([user.id], `ws-events-${user.id}`);
+
+      for (const name of [
+        "auth:session:revoked",
+        "auth:organization:changed",
+        "files:bucket-access:changed",
+      ]) {
+        await received(full, name);
+      }
+      expect(socket.events.map((e) => e.name)).toEqual([
+        "auth:permissions:changed",
+      ]);
+
+      const me = await fetch(`${BASE_URL}/v1/account/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      expect(me.status).toBe(403);
+      expect(((await me.json()) as { error: string }).error).toBe(
+        "insufficient_scope"
+      );
+
+      const endOwn = await fetch(
+        `${BASE_URL}/v1/admin/users/${user.id}/sessions`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${await getTestPrincipalToken({
+              permissions: ["users.delete"],
+            })}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ sessionId }),
+        }
+      );
+      expect(endOwn.status).toBe(204);
+      await within(socket.closed, 5000, "socket closed");
+      expect(socket.events).toContainEqual({
+        name: "auth:session:revoked",
+        payload: expect.objectContaining({ sessionId }),
+      });
     } finally {
       socket.close();
+      full.close();
     }
-
-    const me = await fetch(`${BASE_URL}/v1/account/me`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    expect(me.status).toBe(403);
-    expect(((await me.json()) as { error: string }).error).toBe(
-      "insufficient_scope"
-    );
   });
 
   it("refuses a token whose core scopes open neither account nor events", async () => {

@@ -110,8 +110,11 @@ export const updateThing = async (req: Request, res: Response) => {
 every controller in `src/routes/` does; none calls `prisma.$transaction`. Mutation helpers in
 `utils/db/{model}.ts` take an optional trailing `tx?: Prisma.TransactionClient`.
 
-**Which organization**: org-scoped resources use their own org (`bucket.organizationId` in
-`routes/v1/files/`). System-wide ones — organizations, roles, clients, services, registrations — use
+**Which organization**: org-scoped resources use their own org. A bucket's events spread
+`bucketEventScope(bucket)` (`utils/outbox.ts`): its organization, or for a bucket outside any
+(an app service's) `organizationId: null` plus the bucket's `serviceId`, which fans out only to
+endpoints of all organizations and that service's endpoints. Never skip an emit because a bucket
+has no organization. System-wide ones — organizations, roles, clients, services, registrations — use
 `getDefaultOrganizationId()` from `utils/defaultOrganization.ts`, cached at startup so it is
 synchronous.
 
@@ -145,7 +148,8 @@ in-process, not through the audit API.
 
 | Field            | Required | Notes                                                                                      |
 | ---------------- | -------- | ------------------------------------------------------------------------------------------ |
-| `organizationId` | yes      | Tenant scope — see *Which organization* above                                              |
+| `organizationId` | yes      | Tenant scope — see *Which organization* above; null for a resource outside any             |
+| `serviceId`      | no       | With a null organization: the service whose resource it is (its endpoints get the event)   |
 | `eventType`      | yes      | Must be listed in `definitions/eventTypes.ts`                                              |
 | `entityType`     | yes      | The model name                                                                             |
 | `entityId`       | yes      | Id of the affected row                                                                     |
@@ -344,8 +348,9 @@ Same claim query, backoff, dead-lettering and replay as core's, with these diffe
   `token_issued`, …) to the Pino logger. Audit entries come from `logAuditTx`.
 - **`webhook.test` is registered but never emitted through the outbox** — only
   `POST /v1/webhooks/webhooks/:id/test` uses it.
-- **`processEvent` audits undelivered events itself** (`WebhookEvent`, `reason: "no-matching-endpoints"`)
-  via `logAuditTx` as the system user.
+- **`processEvent` audits only HTTP emits** (`WebhookEvent`, one per event, under the caller). Core's
+  own events write no such entry; one that reaches no endpoint is only logged at debug level.
+
 - **`computeChanges` skips `createdAt`, `updatedAt`, `deletedAt`, `archivedAt`** and returns
   `undefined`, not `{}`, when nothing else changed. Pass it straight through.
 - **The reaper runs under test too** — `NODE_ENV=test` skips only the webhook-delivery and

@@ -70,6 +70,13 @@ export class NotFoundError extends AppError {
   }
 }
 
+/** `lookup`'s result, or null when it throws `NotFoundError`; anything else is rethrown. */
+export const nullIfNotFound = <T>(lookup: Promise<T>): Promise<T | null> =>
+  lookup.catch((err) => {
+    if (err instanceof NotFoundError) return null;
+    throw err;
+  });
+
 export class ConflictError extends AppError {
   constructor(message: string, code = "conflict") {
     super(409, code, message);
@@ -173,6 +180,25 @@ export class ServiceUnavailableError extends AppError {
   }
 }
 
+/**
+ * A 500 thrown on purpose, for state that should be impossible: the client
+ * gets the generic message, and whatever names the rows goes in the log.
+ */
+export class InternalServerError extends AppError {
+  constructor(message = "An unexpected error occurred") {
+    super(500, "server_error", message);
+    this.name = "InternalServerError";
+  }
+}
+
+/** An upstream service core depends on failed or could not be reached. */
+export class BadGatewayError extends AppError {
+  constructor(code: string, message: string) {
+    super(502, code, message);
+    this.name = "BadGatewayError";
+  }
+}
+
 export class PreconditionFailedError extends AppError {
   constructor(message: string, code = "precondition_failed") {
     super(412, code, message);
@@ -196,6 +222,21 @@ export class OAuth2Error extends AppError {
   constructor(error: string, description: string, statusCode = 400) {
     super(statusCode, error, description);
     this.name = "OAuth2Error";
+  }
+}
+
+/**
+ * The token endpoint's `invalid_grant`: a code or refresh token that is
+ * unknown, spent, expired, revoked or not this client's. Deliberately one
+ * description for every cause, so a caller cannot tell them apart.
+ */
+export class InvalidGrantError extends OAuth2Error {
+  constructor() {
+    super(
+      "invalid_grant",
+      "The provided authorization grant is invalid, expired, or revoked"
+    );
+    this.name = "InvalidGrantError";
   }
 }
 

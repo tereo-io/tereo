@@ -138,7 +138,8 @@ export interface UpdateBucketInput {
  * Effective permissions for the calling user on a bucket, as returned by
  * `GET /buckets/:name/my-permissions`. `admin` principals see every flag
  * `true`; anyone else their own grant's flags, plus `canRead` on a public
- * bucket. A missing bucket, or another organization's, is a 403.
+ * bucket. A missing bucket, another organization's, or a private one the
+ * caller holds no grant on is the same 403, so it can't confirm a name exists.
  */
 export interface MyBucketPermissions {
   canRead: boolean;

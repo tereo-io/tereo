@@ -8,6 +8,7 @@ import helmet from "helmet";
 import {
   accessLogErrorFallback,
   accessLogMiddleware,
+  skipRejectedAccessLogs,
 } from "../../../middleware/accessLog.js";
 import {
   rateLimitGeneral,
@@ -60,12 +61,16 @@ router.use(accessLogMiddleware);
 // probing and replay of leaked signed URLs would be unthrottled. Signed URLs
 // take no parsed body: a presigned PUT streams its raw bytes.
 router.use("/signed", rateLimitGeneral, filesSignedRouter);
-router.use(parseBody);
-router.use("/shared", rateLimitGeneral, filesSharedRouter);
+router.use("/shared", rateLimitGeneral, parseBody, filesSharedRouter);
 
+// Past here, a 401 or 429 that no controller logged writes no access-log row:
+// anyone can send those, as fast as the limiters let them.
+router.use(skipRejectedAccessLogs);
 router.use(rateLimitPreAuth);
 router.use(requireAuth);
 router.use(rateLimitGeneral);
+// After authentication, so an anonymous caller can't make core read a body.
+router.use(parseBody);
 
 router.use("/buckets", bucketsRouter);
 

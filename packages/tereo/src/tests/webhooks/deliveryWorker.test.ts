@@ -16,6 +16,7 @@ import {
   getTestAccessToken,
   createTestWebhookEndpoint,
   cleanupTestEntities,
+  waitFor,
 } from "./utils/test-helpers.js";
 
 type Received = {
@@ -383,6 +384,37 @@ describe("Webhook delivery worker", () => {
       orderBy: { createdAt: "desc" },
     });
     expect(audit?.metadata).toMatchObject({ reason: "auto-disabled" });
+  });
+
+  it("emits webhook.endpoint.updated when it disables an endpoint", async () => {
+    const subscriber = await createTestWebhookEndpoint(token, {
+      eventTypes: ["webhook.endpoint.updated"],
+    });
+    const { endpoint, delivery } = await setup();
+    await prisma.webhookEndpoint.update({
+      where: { id: endpoint.id },
+      data: { consecutiveFailures: AUTO_DISABLE_THRESHOLD - 1 },
+    });
+
+    await run(delivery.id, WEBHOOK_DELIVERY_ATTEMPTS);
+
+    let payload: { data?: Record<string, unknown> } | undefined;
+    await waitFor(async () => {
+      const row = await prisma.webhookDelivery.findFirst({
+        where: {
+          webhookEndpointId: subscriber.id,
+          eventType: "webhook.endpoint.updated",
+          payload: { path: ["entityId"], equals: endpoint.id },
+        },
+      });
+      payload = row?.payload as typeof payload;
+      return !!row;
+    }, 10_000);
+    expect(payload?.data).toMatchObject({
+      status: "DISABLED",
+      changedFields: ["status"],
+      reason: "auto-disabled",
+    });
   });
 
   it("disables the endpoint at the threshold, with an audit entry", async () => {

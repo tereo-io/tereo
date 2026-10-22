@@ -145,11 +145,14 @@ const resolveOnce = async (
     }
     const required = await ssoProviderElsewhere(invite.user.email, provider.id);
     if (required) return { error: "sso_required", provider: required };
-    // One account per provider per user: the invite is not this subject's to claim.
+    // One account per provider per user: the invite is not this subject's to
+    // claim, unless a concurrent sign-in of this subject just claimed it.
     if (
       await db.userIdentities.getForUserAtProvider(invite.userId, provider.id)
     ) {
-      return { error: "account_exists" };
+      return (
+        (await signInLinked(provider, identity)) ?? { error: "account_exists" }
+      );
     }
     await db.$transaction((tx) =>
       linkIdentity(

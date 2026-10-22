@@ -624,6 +624,47 @@ describe("updating", () => {
     await tokenOf(next);
   });
 
+  it("refuses a secret change to a caller not holding what the integration holds", async () => {
+    const created = await createIntegration();
+    const row = await prisma.service.findUniqueOrThrow({
+      where: { id: created.id },
+      include: { client: { include: { serviceAccountUser: true } } },
+    });
+    await prisma.userRole.create({
+      data: {
+        userId: row.client!.serviceAccountUser!.id,
+        roleId: await customRole(["users.read"]),
+      },
+    });
+    const before = await prisma.oAuthClient.findUniqueOrThrow({
+      where: { clientId: created.credentials.clientId },
+    });
+
+    for (const action of ["regenerate-secret", "revoke-previous-secret"]) {
+      const res = await api(
+        "POST",
+        `/v1/admin/integrations/${created.id}/${action}`
+      );
+      expect(res.status, action).toBe(403);
+      expect(res.body.error_description).toContain("users.read");
+    }
+    const after = await prisma.oAuthClient.findUniqueOrThrow({
+      where: { clientId: created.credentials.clientId },
+    });
+    expect(after.clientSecret).toBe(before.clientSecret);
+
+    const holder = await getTestPrincipalToken({
+      permissions: ["integrations.write", "users.read"],
+    });
+    const res = await api(
+      "POST",
+      `/v1/admin/integrations/${created.id}/regenerate-secret`,
+      undefined,
+      holder
+    );
+    expect(res.status).toBe(200);
+  });
+
   it("does not treat a service as an integration", async () => {
     const serviceSlug = `int-svc-${rand()}`;
     createdSlugs.push(serviceSlug);

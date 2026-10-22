@@ -91,7 +91,9 @@ describe("Admin Organizations Endpoints", () => {
         }),
       });
 
+      const data = (await response.json()) as { error?: string };
       expect(response.status).toBe(HTTP_STATUS.CONFLICT);
+      expect(data.error).toBe("slug_taken");
     });
 
     it("should return 409 for duplicate code", async () => {
@@ -113,7 +115,7 @@ describe("Admin Organizations Endpoints", () => {
 
       const data = (await response.json()) as { error?: string };
       expect(response.status).toBe(HTTP_STATUS.CONFLICT);
-      expect(data.error).toBe("conflict");
+      expect(data.error).toBe("code_taken");
     });
 
     it("should return 400 for invalid slug format", async () => {

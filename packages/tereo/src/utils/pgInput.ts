@@ -20,9 +20,19 @@ export const hasNul = (value: unknown): boolean => {
 export const pgText = () =>
   z.string().refine((val) => !val.includes("\0"), NUL_MESSAGE);
 
-/** `schema`, refusing a NUL anywhere in the value — for jsonb columns. */
-export const pgJson = <T extends z.ZodType>(schema: T) =>
-  schema.refine((val) => !hasNul(val), NUL_MESSAGE);
+/**
+ * `schema`, refusing a NUL anywhere in the value — for jsonb columns — and,
+ * given `maxBytes`, a value whose JSON is larger.
+ */
+export const pgJson = <T extends z.ZodType>(schema: T, maxBytes?: number) =>
+  schema
+    .refine((val) => !hasNul(val), NUL_MESSAGE)
+    .refine(
+      (val) =>
+        maxBytes === undefined ||
+        Buffer.byteLength(JSON.stringify(val) ?? "", "utf8") <= maxBytes,
+      `must be at most ${maxBytes} bytes as JSON`
+    );
 
 /** A date Postgres can compare against a timestamp column. */
 export const pgDate = () =>

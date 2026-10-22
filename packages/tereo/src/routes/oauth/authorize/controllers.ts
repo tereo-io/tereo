@@ -1,5 +1,6 @@
 import { AppError, NotFoundError, OAuth2Error } from "../../../utils/errors.js";
 import { validateBody, validateQuery } from "../../../utils/validateReq.js";
+import { beginPasswordAttempt } from "../../../utils/passwordAttempts.js";
 import { maySelectOrganization } from "../../../utils/supportAccess.js";
 import { UserType } from "../../../../prisma/generated/client/index.js";
 import type { AuthorizeRequest, AuthorizeSubmit } from "./schemas.js";
@@ -363,16 +364,22 @@ export const authorizePostHandler = async (req: Request, res: Response) => {
     await loginAccountBackoff.check(req, body.email);
   }
 
+  const attempt = beginPasswordAttempt(req, user, "login", client.clientId);
   if (!user || !canLogIn || !user.passwordHash) {
     await verifyPassword(await UNKNOWN_USER_HASH, body.password);
+    await attempt.failed(
+      !user ? "unknown_user" : !canLogIn ? "login_not_allowed" : "no_password"
+    );
     throw new OAuth2Error("access_denied", "Invalid credentials", 401);
   }
 
   const validPassword = await verifyPassword(user.passwordHash, body.password);
   if (!validPassword) {
+    await attempt.failed("invalid_password");
     throw new OAuth2Error("access_denied", "Invalid credentials", 401);
   }
 
+  await attempt.succeeded();
   await authFailure.refund(req, client.clientId);
   await loginAccountBackoff.reset(req, body.email);
   if (knownDevice) await knownDeviceFailure.reset(req, knownDevice);

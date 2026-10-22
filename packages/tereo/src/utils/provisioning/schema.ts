@@ -48,10 +48,10 @@ const WebhookEntry = z
   .object({
     key: Slug,
     url: z.string().max(2048),
-    events: z.array(Text).min(1),
+    events: z.array(Text).min(1).max(100),
     secretFrom: EnvName,
     organizations: z
-      .union([z.literal("all"), z.array(z.uuid()).min(1)])
+      .union([z.literal("all"), z.array(z.guid()).min(1)])
       .default("all"),
     description: Description.optional(),
   })
@@ -86,7 +86,7 @@ const IntegrationEntry = z
     slug: Slug,
     name: Name,
     // Org-bound when set: its tokens carry this org_id. Fixed once created.
-    organizationId: z.uuid().optional(),
+    organizationId: z.guid().optional(),
     secretFrom: EnvName,
     // Role names: org-assignable custom roles of the set when org-bound;
     // otherwise also core's roles and `<slug>/<name>` services' system roles.

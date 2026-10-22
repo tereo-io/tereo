@@ -14,7 +14,7 @@ import {
   setUpstreamAuthCookie,
 } from "../../../../utils/cookies.js";
 import {
-  AppError,
+  BadGatewayError,
   ConflictError,
   ForbiddenError,
   NotFoundError,
@@ -51,8 +51,7 @@ export const startLink = async (req: Request, res: Response) => {
   } catch (err) {
     if (!(err instanceof UpstreamAuthError)) throw err;
     logger.warn({ err, provider: provider.slug }, "Upstream link failed");
-    throw new AppError(
-      502,
+    throw new BadGatewayError(
       err.code,
       "The identity provider could not be reached"
     );

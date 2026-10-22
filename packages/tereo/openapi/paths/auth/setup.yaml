@@ -44,8 +44,11 @@
       the count: past 10 in 15 minutes, `429` until the window passes (`503`
       when the limiter cannot reach Redis).
 
-      Audit log entries are created for the new admin and for the renamed
-      default organization. No webhook event is emitted.
+      Audit log entries are created for the new admin, their role grants
+      (`metadata.action` `roles_changed`), their owner membership of the
+      default organization and its renaming; `auth.user.created`,
+      `auth.user.roles-changed` and `auth.organization.member-added` webhook
+      events are emitted.
     operationId: completeSetup
     security: []
     requestBody:

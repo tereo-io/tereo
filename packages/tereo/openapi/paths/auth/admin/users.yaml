@@ -720,7 +720,7 @@ auth.user.updated:
     tags:
       - Admin - Users
     summary: User updated
-    description: Fired when an admin updates a user. `data` is the user after the change.
+    description: Fired when an admin updates a user, and when a user sets or removes their profile photo (`POST` / `DELETE /v1/account/photo`). `data` is the user after the change.
     operationId: webhookUserUpdated
     security: []
     parameters:
@@ -752,7 +752,7 @@ auth.user.roles-changed:
     tags:
       - Admin - Users
     summary: User roles changed
-    description: Fired when a user's global role assignments are replaced.
+    description: Fired when a user's global role assignments are replaced, and when first-boot setup (`POST /v1/setup`) grants the first admin core's admin roles.
     operationId: webhookUserRolesChanged
     security: []
     parameters:
@@ -797,7 +797,7 @@ auth.user.created:
     tags:
       - Admin - Users
     summary: User created
-    description: Fired when a user is created with `POST /v1/admin/users`.
+    description: Fired when a user is created with `POST /v1/admin/users`, or by first-boot setup (`POST /v1/setup`).
     operationId: webhookUserCreated
     security: []
     parameters:

@@ -4,7 +4,7 @@ import { z } from "zod";
 
 export const partParamsSchema = z.object({
   name: bucketNameSchema.shape.name,
-  uploadId: z.string().uuid(),
+  uploadId: z.guid(),
   partNumber: z.coerce
     .number()
     .int()

@@ -1,6 +1,5 @@
 import { ensureTestUser, getTestPrincipalToken } from "../utils/principals.js";
 import { describe, it, expect, afterEach, beforeAll } from "vitest";
-import { CORE_URL } from "../utils/coreUrl.js";
 import crypto from "crypto";
 import axios from "axios";
 import {
@@ -2768,20 +2767,6 @@ describe("Audit Log Entries", () => {
       );
 
       expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-    });
-  });
-
-  // ── Health endpoint version field ─────────────────────────────────────
-
-  describe("Health endpoint version field", () => {
-    it("should include version field in health response", async () => {
-      const response = await axios.get(`${CORE_URL}/health`, {
-        validateStatus: () => true,
-      });
-
-      expect(response.status).toBe(HTTP_STATUS.OK);
-      expect(response.data.version).toBeDefined();
-      expect(typeof response.data.version).toBe("string");
     });
   });
 });

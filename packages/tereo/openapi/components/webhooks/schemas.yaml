@@ -233,8 +233,9 @@ CreateWebhookEndpointRequest:
         type: string
         maxLength: 100
       minItems: 1
+      maxItems: 100
       description: |
-        Event types to subscribe to (at least one). Each must be registered and
+        Event types to subscribe to (at least one, at most 100). Each must be registered and
         not retired, or the request fails with `400 invalid_event_type`.
         `webhook.test` is reserved for the test action (`400 reserved_event_type`).
       examples:
@@ -292,8 +293,9 @@ UpdateWebhookEndpointRequest:
         type: string
         maxLength: 100
       minItems: 1
+      maxItems: 100
       description: |
-        Replaces the subscriptions. Each must be registered and not retired
+        Replaces the subscriptions (at most 100). Each must be registered and not retired
         (`400 invalid_event_type`), and none may be `webhook.test`
         (`400 reserved_event_type`).
       examples:
@@ -642,11 +644,12 @@ EmitEventRequest:
       type: string
       description: The unique identifier of the entity
       minLength: 1
+      maxLength: 500
       examples:
         - "ord-12345"
     data:
       type: object
-      description: Event payload data
+      description: Event payload data, at most 256 KiB as JSON (`400` otherwise)
       additionalProperties: true
       examples:
         - { "orderNumber": "ORD-001", "status": "CONFIRMED" }
@@ -888,3 +891,80 @@ DeliveryStats:
     - successRate
     - averageAttempts
     - last24Hours
+
+WebhookEndpointEventData:
+  type: object
+  description: |
+    The endpoint a `webhook.endpoint.*` event is about. No signing secret and
+    no custom header values; `url` keeps only the origin.
+  properties:
+    id:
+      type: string
+      format: uuid
+    organizationId:
+      type:
+        - string
+        - "null"
+      format: uuid
+      description: Null for an endpoint of all organizations.
+    ownerServiceId:
+      type:
+        - string
+        - "null"
+      format: uuid
+    url:
+      type: string
+      description: |
+        The endpoint URL's origin only (scheme, host and port): capability
+        URLs carry their secret in the path, and a query string or user-info
+        may carry a credential.
+      examples:
+        - "https://hooks.slack.com"
+    description:
+      type:
+        - string
+        - "null"
+    status:
+      $ref: '#/WebhookEndpointStatus'
+    eventTypes:
+      type: array
+      items:
+        type: string
+    customHeaderNames:
+      type: array
+      items:
+        type: string
+      description: Names of the endpoint's custom headers, sorted; never their values.
+    provisioned:
+      type: boolean
+    createdBy:
+      type: string
+      format: uuid
+    archivedAt:
+      type:
+        - string
+        - "null"
+      format: date-time
+    changedFields:
+      type: array
+      items:
+        type: string
+      description: On `webhook.endpoint.updated`, the fields the update changed.
+    previousSecretExpiresAt:
+      type:
+        - string
+        - "null"
+      format: date-time
+      description: On `webhook.endpoint.secret-rotated`, when the replaced secret stops signing (null without an overlap).
+  required:
+    - id
+    - organizationId
+    - ownerServiceId
+    - url
+    - description
+    - status
+    - eventTypes
+    - customHeaderNames
+    - provisioned
+    - createdBy
+    - archivedAt

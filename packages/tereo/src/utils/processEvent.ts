@@ -1,12 +1,13 @@
-import { RESERVED_EVENT_TYPES, SYSTEM_USER_ID } from "../definitions/index.js";
 import { emitEventSchema } from "../routes/v1/webhooks/events/schemas.js";
 import { enqueueCommittedDelivery } from "../jobs/webhookQueues.js";
 import { isRedisReady, limiterUnavailable } from "./rateLimit.js";
 import { logAuditTx, PermanentDispatchError } from "./outbox.js";
+import { RESERVED_EVENT_TYPES } from "../definitions/index.js";
 import type { DeliveryRef } from "./db/webhookDeliveries.js";
 import { createRecipientCheck } from "./webhookAccess.js";
 import { canonicalJson } from "./uploadIdempotency.js";
 import { getRedisClient, redisKey } from "./redis.js";
+import { pgJson, pgText } from "./pgInput.js";
 import type { Prisma } from "./db/prisma.js";
 import { prisma } from "./db/prisma.js";
 import { logger } from "./logger.js";
@@ -22,6 +23,26 @@ import {
 
 type EmitEventInput = z.infer<typeof emitEventSchema>;
 type Tx = Prisma.TransactionClient;
+
+/**
+ * An event as `emitTx` stores it: unlike one emitted over HTTP, it may have no
+ * organization, and then names the service whose resource it is.
+ */
+const outboxEventSchema = emitEventSchema.extend({
+  organizationId: z.guid().nullable(),
+  serviceId: z.guid().nullable().optional(),
+  // The HTTP caps bound what a caller may send; core's own events (a bulk
+  // delete's keys) may be larger, and refusing one would dead-letter it.
+  entityId: pgText().min(1),
+  data: pgJson(z.record(z.string(), z.unknown())),
+});
+type FanoutInput = z.infer<typeof outboxEventSchema>;
+
+/** Who emitted over HTTP: each event they emit is audited under them. */
+export interface EmitCaller {
+  userId: string;
+  email: string | null;
+}
 
 export interface ProcessEventResult {
   eventType: string;
@@ -76,7 +97,7 @@ async function assertEmittable(
 }
 
 type PlannedEvent = {
-  event: EmitEventInput;
+  event: FanoutInput;
   endpointIds: string[];
 };
 
@@ -103,7 +124,7 @@ async function resolveRecipients(slugs: string[]): Promise<string[]> {
 }
 
 async function planEvent(
-  event: EmitEventInput,
+  event: FanoutInput,
   readPermission: string | null
 ): Promise<PlannedEvent> {
   const recipientServiceIds = event.recipients
@@ -112,7 +133,7 @@ async function planEvent(
   const endpoints = await db.webhookEndpoints.findActiveByOrgAndEvent(
     event.organizationId,
     event.eventType,
-    { recipientServiceIds }
+    { recipientServiceIds, serviceId: event.serviceId ?? null }
   );
   const mayReceive = createRecipientCheck(event, readPermission);
   const endpointIds: string[] = [];
@@ -123,18 +144,19 @@ async function planEvent(
 }
 
 /**
- * Write one event's deliveries, or the audit entry recording that nothing
- * matched, in the caller's transaction. Returns the deliveries to enqueue
- * once it commits.
+ * Write one event's deliveries in the caller's transaction, and for an event
+ * emitted over HTTP the audit entry recording it. Returns the deliveries to
+ * enqueue once it commits.
  */
 async function writeEventTx(
   tx: Tx,
   { event, endpointIds }: PlannedEvent,
-  occurredAt: Date
+  occurredAt: Date,
+  caller: EmitCaller | undefined
 ): Promise<DeliveryRef[]> {
-  if (endpointIds.length === 0) {
+  if (caller) {
     await logAuditTx(tx, {
-      auth: { userId: SYSTEM_USER_ID, email: null },
+      auth: caller,
       organizationId: event.organizationId,
       action: "CREATE",
       entityType: "WebhookEvent",
@@ -144,12 +166,22 @@ async function writeEventTx(
         entityType: event.entityType,
         entityId: event.entityId,
         // Not the event's data: anyone reading the organization's audit log
-        // would see what no recipient, and maybe not they, could read.
-        deliveriesCreated: 0,
-        reason: "no-matching-endpoints",
+        // would see what its recipients, and maybe not they, could read.
+        deliveriesCreated: endpointIds.length,
+        ...(event.idempotencyKey && { idempotencyKey: event.idempotencyKey }),
+        ...(event.recipients && { recipients: event.recipients }),
       },
     });
-    return [];
+  } else if (endpointIds.length === 0) {
+    // Core's own event: the mutation that emitted it has its own audit entry.
+    logger.debug(
+      {
+        eventType: event.eventType,
+        entityType: event.entityType,
+        entityId: event.entityId,
+      },
+      "Event matched no webhook endpoints"
+    );
   }
 
   const written: DeliveryRef[] = [];
@@ -174,7 +206,7 @@ async function writeEventTx(
 }
 
 const toResult = (
-  event: EmitEventInput,
+  event: FanoutInput,
   deliveriesCreated: number
 ): ProcessEventResult => ({
   eventType: event.eventType,
@@ -190,8 +222,11 @@ const toResult = (
  * when the row was written, however long it waited to be dispatched.
  */
 async function processEvents(
-  events: EmitEventInput[],
-  outbox?: { id: string; createdAt: Date }
+  events: FanoutInput[],
+  {
+    outbox,
+    caller,
+  }: { outbox?: { id: string; createdAt: Date }; caller?: EmitCaller }
 ): Promise<ProcessEventResult[]> {
   const readPermissions = await assertEmittable(events.map((e) => e.eventType));
   const plans = await Promise.all(
@@ -205,7 +240,7 @@ async function processEvents(
     }
     const perEvent: DeliveryRef[][] = [];
     for (const plan of plans) {
-      perEvent.push(await writeEventTx(tx, plan, occurredAt));
+      perEvent.push(await writeEventTx(tx, plan, occurredAt, caller));
     }
     return perEvent;
   });
@@ -304,7 +339,7 @@ export async function dispatchOutboxEvent(
   rowId: string,
   rowCreatedAt: Date
 ): Promise<void> {
-  const parsed = emitEventSchema.safeParse(payload);
+  const parsed = outboxEventSchema.safeParse(payload);
   if (!parsed.success) {
     throw new PermanentDispatchError(
       `Malformed webhook outbox payload: ${parsed.error.message}`
@@ -313,7 +348,9 @@ export async function dispatchOutboxEvent(
   // Already fanned out: done, even if its event type has since been retired.
   if (await db.outboxFanouts.exists(rowId)) return;
   try {
-    await processEvents([parsed.data], { id: rowId, createdAt: rowCreatedAt });
+    await processEvents([parsed.data], {
+      outbox: { id: rowId, createdAt: rowCreatedAt },
+    });
   } catch (err) {
     if (
       err instanceof AppError &&
@@ -326,12 +363,12 @@ export async function dispatchOutboxEvent(
   }
 }
 
-/** `callerUserId` scopes the idempotency key: the authenticated emitter. */
+/** The caller scopes the idempotency key and is audited as the emitter. */
 export async function emitWithIdempotency(
   body: EmitEventInput,
-  callerUserId: string
+  caller: EmitCaller
 ): Promise<ProcessEventResult> {
-  const [result] = await emitBatchWithIdempotency([body], callerUserId);
+  const [result] = await emitBatchWithIdempotency([body], caller);
   return result;
 }
 
@@ -353,11 +390,11 @@ export async function emitWithIdempotency(
  */
 export async function emitBatchWithIdempotency(
   events: EmitEventInput[],
-  callerUserId: string
+  caller: EmitCaller
 ): Promise<ProcessEventResult[]> {
   assertNoReservedEventTypes(events.map((e) => e.eventType));
 
-  const cacheKeys = events.map((e) => cacheKeyOf(e, callerUserId));
+  const cacheKeys = events.map((e) => cacheKeyOf(e, caller.userId));
   const seen = new Set<string>();
   for (const key of cacheKeys) {
     if (!key) continue;
@@ -370,7 +407,7 @@ export async function emitBatchWithIdempotency(
     seen.add(key);
   }
 
-  if (seen.size === 0) return processEvents(events);
+  if (seen.size === 0) return processEvents(events, { caller });
   const bodyHashes = events.map(bodyHashOf);
 
   // Without Redis no key can be checked: refuse with a 503 rather than wait
@@ -425,7 +462,8 @@ export async function emitBatchWithIdempotency(
     }
 
     const fresh = events.filter((_, i) => !cached.has(i));
-    freshResults = fresh.length > 0 ? await processEvents(fresh) : [];
+    freshResults =
+      fresh.length > 0 ? await processEvents(fresh, { caller }) : [];
   } catch (err) {
     // Nothing was written: release the claims so the caller can retry
     // without waiting for them to expire.

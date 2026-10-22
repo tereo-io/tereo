@@ -7,6 +7,13 @@ export const sessionRoom = (sessionId: string) => `session:${sessionId}`;
 export const tokenRoom = (jti: string) => `token:${jti}`;
 /** Every socket of a user. */
 export const userRoom = (userId: string) => `user:${userId}`;
+/**
+ * A user's sockets whose token reaches their account: events naming their
+ * sessions and organizations go here, not to `userRoom`.
+ */
+export const userAccountRoom = (userId: string) => `user:${userId}:account`;
+/** A user's sockets whose token reaches core's files: bucket grant changes. */
+export const userFilesRoom = (userId: string) => `user:${userId}:files`;
 /** The sockets connected with tokens issued for an organization. */
 export const orgRoom = (orgId: string) => `org:${orgId}`;
 /** A user's sockets connected with tokens issued for an organization. */
@@ -34,6 +41,7 @@ export const disconnectOrganizationSockets = (orgId: string) => {
  * sockets that connected with those sessions' tokens: a socket is
  * authenticated once, at the handshake, and would otherwise keep receiving
  * events. The client reconnects with a fresh token if it still has one.
+ * A socket outside the account room hears only of its own session.
  */
 export const notifySessionsRevoked = (userId: string, sessionIds: string[]) => {
   if (sessionIds.length === 0) return;
@@ -42,10 +50,10 @@ export const notifySessionsRevoked = (userId: string, sessionIds: string[]) => {
   const timestamp = Date.now();
 
   for (const sessionId of sessionIds) {
-    io.to(userRoom(userId)).emit("auth:session:revoked", {
-      sessionId,
-      timestamp,
-    });
+    io.to([userAccountRoom(userId), sessionRoom(sessionId)]).emit(
+      "auth:session:revoked",
+      { sessionId, timestamp }
+    );
   }
   io.in(sessionIds.map(sessionRoom)).disconnectSockets(true);
   logger.debug(

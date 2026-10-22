@@ -331,7 +331,7 @@ export const listExpired = async (limit: number) => {
       abortedAt: null,
     },
     include: {
-      bucket: { select: { name: true, organizationId: true } },
+      bucket: { select: { name: true, organizationId: true, serviceId: true } },
     },
     take: limit,
     orderBy: { expiresAt: "asc" },

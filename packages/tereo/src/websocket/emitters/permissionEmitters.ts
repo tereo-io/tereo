@@ -1,3 +1,4 @@
+import { userFilesRoom } from "./sessionEmitters.js";
 import { getRedisEmitter } from "./redisEmitter.js";
 import { logger } from "../../utils/logger.js";
 import db from "../../utils/db/index.js";
@@ -114,11 +115,9 @@ export const notifyBucketAccessChanged = (
     bucketName,
     timestamp: Date.now(),
   };
-  for (const userId of new Set(userIds)) {
-    ioInstance
-      .to(`user:${userId}`)
-      .emit("files:bucket-access:changed", payload);
-  }
+  ioInstance
+    .to([...new Set(userIds)].map(userFilesRoom))
+    .emit("files:bucket-access:changed", payload);
   logger.debug(
     { bucketName, userIds },
     `Emitted bucket access change to ${userIds.length} users`

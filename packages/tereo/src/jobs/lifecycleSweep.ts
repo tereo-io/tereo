@@ -1,6 +1,6 @@
+import { bucketEventScope, emitTx, logAuditTx } from "../utils/outbox.js";
 import { enqueueOrphanBlobCleanup } from "./orphanBlobCleanup.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
-import { emitTx, logAuditTx } from "../utils/outbox.js";
 import { TrackedWorker } from "./workerRegistry.js";
 import type { Prisma } from "../utils/db/prisma.js";
 import { getRedisClient } from "../utils/redis.js";
@@ -42,16 +42,22 @@ async function safeEnqueueOrphan(hash: string): Promise<void> {
 type LifecycleStage =
   "expireObjects" | "expireVersions" | "purgeSoftDeleted" | "perObjectTtl";
 
+type LifecycleBucket = {
+  id: number;
+  name: string;
+  organizationId: string | null;
+  serviceId: string | null;
+};
+
 /**
  * The audit entry and webhook event for one sweep batch, written in the
- * batch's transaction so both commit with the deletes they record. The event
- * is skipped for a bucket with no organizationId (global buckets have no
- * webhook audience). One event per batch caps its payload at BATCH_LIMIT ids,
- * even when a sweep purges millions of objects across many ticks.
+ * batch's transaction so both commit with the deletes they record. One event
+ * per batch caps its payload at BATCH_LIMIT ids, even when a sweep purges
+ * millions of objects across many ticks.
  */
 async function recordLifecycleBatchTx(
   tx: Prisma.TransactionClient,
-  bucket: { id: number; name: string; organizationId: string | null },
+  bucket: LifecycleBucket,
   stage: LifecycleStage,
   entityType: "object" | "objectVersion",
   entities: Array<{ id: string; objectKey?: string }>
@@ -71,10 +77,9 @@ async function recordLifecycleBatchTx(
       entities,
     },
   });
-  if (!bucket.organizationId) return;
   await emitTx(tx, {
     eventType: "file-service.lifecycle.policy.applied",
-    organizationId: bucket.organizationId,
+    ...bucketEventScope(bucket),
     entityType: "bucket",
     entityId: String(bucket.id),
     data: {
@@ -148,7 +153,7 @@ function dayStamp(d = new Date()): string {
  * BATCH_LIMIT objects; returns the new cursor + whether more remain.
  */
 async function tickExpireObjects(
-  bucket: { id: number; name: string; organizationId: string | null },
+  bucket: LifecycleBucket,
   days: number,
   afterId: string
 ): Promise<{ lastId: string; hasMore: boolean; processed: number }> {
@@ -192,7 +197,7 @@ async function tickExpireObjects(
  * lines stay inflated even after the bytes are reclaimed.
  */
 async function tickExpireVersions(
-  bucket: { id: number; name: string; organizationId: string | null },
+  bucket: LifecycleBucket,
   days: number,
   versioningEnabled: boolean,
   afterId: string
@@ -257,7 +262,7 @@ async function tickExpireVersions(
  * referenced blobs in one aggregated UPDATE, then cascade-drop object rows.
  */
 async function tickPurgeSoftDeleted(
-  bucket: { id: number; name: string; organizationId: string | null },
+  bucket: LifecycleBucket,
   days: number,
   versioningEnabled: boolean,
   afterId: string
@@ -382,10 +387,8 @@ async function processLifecycleSweepPolicy(
     return;
   }
 
-  // Need the bucket row for versioningEnabled + org context (the latter drives
-  // whether lifecycle ticks emit webhooks).
   let versioningEnabled: boolean;
-  let bucketCtx: { id: number; name: string; organizationId: string | null };
+  let bucketCtx: LifecycleBucket;
   try {
     const bucket = await db.buckets.get(bucketId);
     versioningEnabled = bucket.versioningEnabled;
@@ -393,6 +396,7 @@ async function processLifecycleSweepPolicy(
       id: bucket.id,
       name: bucket.name,
       organizationId: bucket.organizationId,
+      serviceId: bucket.serviceId,
     };
   } catch {
     logger.info({ bucketId }, "Bucket missing; exiting policy sweep");
@@ -579,6 +583,7 @@ async function processLifecycleSweepPerObjectTtl(
             id: row.id,
             name: row.name,
             organizationId: row.organizationId,
+            serviceId: row.serviceId,
           };
           const removed = await db.objects.removeExpiredObjects(
             bucket.id,
