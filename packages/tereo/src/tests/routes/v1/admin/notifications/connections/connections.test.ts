@@ -1,0 +1,167 @@
+// @module-tag int
+// @module-tag notifications
+import { getTestPrincipalToken } from "../../../../../support/principals.js";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { prisma } from "../../../../../../utils/db/prisma.js";
+import { CORE_URL } from "../../../../../support/coreUrl.js";
+import { fetchJson } from "../../../../../support/http.js";
+import { randomBytes, randomUUID } from "crypto";
+
+const BASE = `${CORE_URL}/v1/admin/notifications`;
+
+let adminToken: string;
+let readToken: string;
+
+let adminUserId: string;
+
+const rand = () => randomBytes(4).toString("hex");
+
+const api = (
+  method: string,
+  path: string,
+  token: string | null,
+  body?: unknown
+) => fetchJson(method, `${BASE}${path}`, token, body);
+
+const settings = (port = 2525, over: Record<string, unknown> = {}) => ({
+  host: "127.0.0.1",
+  port,
+  security: "none",
+  defaultFrom: { address: "billing@acme.com" },
+  allowedSenders: ["@acme.com"],
+  ...over,
+});
+
+const payload = (over: Record<string, unknown> = {}) => ({
+  channel: "email",
+  slug: `c-${rand()}`,
+  displayName: "Main",
+  settings: settings(),
+  ...over,
+});
+
+const create = async (over: Record<string, unknown> = {}) => {
+  const res = await api("POST", "/connections", adminToken, payload(over));
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+  return res.body;
+};
+
+const clean = async () => {
+  await prisma.notificationDelivery.deleteMany();
+  await prisma.notification.deleteMany();
+  await prisma.notificationConnection.deleteMany();
+};
+
+beforeAll(async () => {
+  adminUserId = randomUUID();
+  adminToken = await getTestPrincipalToken({
+    userId: adminUserId,
+    permissions: ["notifications.admin", "notifications.read"],
+  });
+  readToken = await getTestPrincipalToken({
+    permissions: ["notifications.read"],
+  });
+
+  await clean();
+});
+
+afterAll(async () => {
+  await clean();
+});
+
+describe("POST /v1/admin/notifications/connections", () => {
+  describe("create", () => {
+    it("validates settings with the adapter and reports field issues", async () => {
+      const res = await api(
+        "POST",
+        "/connections",
+        adminToken,
+        payload({ settings: { host: "", port: 99999 } })
+      );
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_settings");
+      const paths = res.body.issues.map((i: { path: string }) => i.path);
+      expect(paths).toContain("host");
+      expect(paths).toContain("port");
+    });
+
+    it("validates secrets with the adapter", async () => {
+      const res = await api(
+        "POST",
+        "/connections",
+        adminToken,
+        payload({ secrets: { password: 42 } })
+      );
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_secrets");
+    });
+
+    it("rejects an unknown channel and a bad slug", async () => {
+      expect(
+        (
+          await api(
+            "POST",
+            "/connections",
+            adminToken,
+            payload({ channel: "sms" })
+          )
+        ).status
+      ).toBe(400);
+      expect(
+        (
+          await api(
+            "POST",
+            "/connections",
+            adminToken,
+            payload({ slug: "Bad Slug" })
+          )
+        ).status
+      ).toBe(400);
+    });
+
+    it("seals secrets as kek1 and never returns them", async () => {
+      const c = await create({ secrets: { password: "hunter2-secret" } });
+      expect(c.hasSecrets).toBe(true);
+      expect(JSON.stringify(c)).not.toContain("hunter2-secret");
+      expect(c).not.toHaveProperty("secrets");
+      expect(c.createdBy).toBe(adminUserId);
+
+      const row = await prisma.notificationConnection.findUniqueOrThrow({
+        where: { id: c.id },
+      });
+      expect(row.secrets).toMatch(/^kek1:/);
+      expect(row.secrets).not.toContain("hunter2-secret");
+
+      const got = await api("GET", `/connections/${c.id}`, readToken);
+      expect(got.body.hasSecrets).toBe(true);
+      expect(got.body).not.toHaveProperty("secrets");
+      const list = await api("GET", "/connections", readToken);
+      expect(JSON.stringify(list.body)).not.toContain("hunter2-secret");
+      expect(JSON.stringify(list.body)).not.toContain("kek1:");
+    });
+
+    it("reports hasSecrets false without secrets", async () => {
+      const c = await create();
+      expect(c.hasSecrets).toBe(false);
+    });
+
+    it("conflicts on a duplicate slug within a channel", async () => {
+      const c = await create();
+      const res = await api(
+        "POST",
+        "/connections",
+        adminToken,
+        payload({ slug: c.slug })
+      );
+      expect(res.status).toBe(409);
+    });
+
+    it("makes the first connection of a channel the default", async () => {
+      await clean();
+      const first = await create();
+      const second = await create();
+      expect(first.isDefault).toBe(true);
+      expect(second.isDefault).toBe(false);
+    });
+  });
+});

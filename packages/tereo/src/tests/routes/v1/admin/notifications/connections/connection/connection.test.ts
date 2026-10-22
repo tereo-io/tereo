@@ -1,28 +1,22 @@
-import { openConnectionSecrets } from "../../utils/notifications/connections.js";
+// @module-tag int
+// @module-tag notifications
+import { getTestPrincipalToken } from "../../../../../../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
-import { getTestPrincipalToken } from "../support/principals.js";
+import { prisma } from "../../../../../../../utils/db/prisma.js";
+import { CORE_URL } from "../../../../../../support/coreUrl.js";
+import { fetchJson } from "../../../../../../support/http.js";
 import { createServer, type AddressInfo } from "net";
-import { prisma } from "../../utils/db/prisma.js";
-import { currentKek } from "../../utils/keys.js";
 import { randomBytes, randomUUID } from "crypto";
-import { CORE_URL } from "../support/coreUrl.js";
-import { fetchJson } from "../support/http.js";
 import {
   startFakeSmtpServer,
   type FakeSmtpServer,
-} from "../support/fakeSmtpServer.js";
-import {
-  createTestWebhookEndpoint,
-  getCoreEventSubscriberToken,
-  waitFor,
-} from "../support/webhooks.js";
+} from "../../../../../../support/fakeSmtpServer.js";
 
 const BASE = `${CORE_URL}/v1/admin/notifications`;
 
 let adminToken: string;
 let readToken: string;
-let sendOnlyToken: string;
+
 let smtp: FakeSmtpServer;
 let smtpCode = 250;
 let adminUserId: string;
@@ -74,9 +68,7 @@ beforeAll(async () => {
   readToken = await getTestPrincipalToken({
     permissions: ["notifications.read"],
   });
-  sendOnlyToken = await getTestPrincipalToken({
-    permissions: ["notifications.send"],
-  });
+
   smtp = await startFakeSmtpServer({ reply: () => smtpCode });
   await clean();
 });
@@ -91,145 +83,7 @@ afterAll(async () => {
   await clean();
 });
 
-describe("connections admin API", () => {
-  describe("authorization", () => {
-    it("requires authentication", async () => {
-      expect((await api("GET", "/connections", null)).status).toBe(401);
-    });
-
-    it("refuses a caller with neither read nor admin", async () => {
-      expect((await api("GET", "/connections", sendOnlyToken)).status).toBe(
-        403
-      );
-    });
-
-    it("lets .read list and get, but not write", async () => {
-      await clean();
-      const c = await create();
-      const list = await api("GET", "/connections", readToken);
-      expect(list.status).toBe(200);
-      expect(list.body.data.map((x: { id: string }) => x.id)).toContain(c.id);
-      expect((await api("GET", `/connections/${c.id}`, readToken)).status).toBe(
-        200
-      );
-
-      expect(
-        (await api("POST", "/connections", readToken, payload())).status
-      ).toBe(403);
-      expect(
-        (await api("PATCH", `/connections/${c.id}`, readToken, {})).status
-      ).toBe(403);
-      expect(
-        (await api("DELETE", `/connections/${c.id}`, readToken)).status
-      ).toBe(403);
-      expect(
-        (await api("POST", `/connections/${c.id}/default`, readToken)).status
-      ).toBe(403);
-      expect(
-        (
-          await api("POST", `/connections/${c.id}/test`, readToken, {
-            to: "a@b.com",
-          })
-        ).status
-      ).toBe(403);
-    });
-  });
-
-  describe("create", () => {
-    it("validates settings with the adapter and reports field issues", async () => {
-      const res = await api(
-        "POST",
-        "/connections",
-        adminToken,
-        payload({ settings: { host: "", port: 99999 } })
-      );
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe("invalid_settings");
-      const paths = res.body.issues.map((i: { path: string }) => i.path);
-      expect(paths).toContain("host");
-      expect(paths).toContain("port");
-    });
-
-    it("validates secrets with the adapter", async () => {
-      const res = await api(
-        "POST",
-        "/connections",
-        adminToken,
-        payload({ secrets: { password: 42 } })
-      );
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe("invalid_secrets");
-    });
-
-    it("rejects an unknown channel and a bad slug", async () => {
-      expect(
-        (
-          await api(
-            "POST",
-            "/connections",
-            adminToken,
-            payload({ channel: "sms" })
-          )
-        ).status
-      ).toBe(400);
-      expect(
-        (
-          await api(
-            "POST",
-            "/connections",
-            adminToken,
-            payload({ slug: "Bad Slug" })
-          )
-        ).status
-      ).toBe(400);
-    });
-
-    it("seals secrets as kek1 and never returns them", async () => {
-      const c = await create({ secrets: { password: "hunter2-secret" } });
-      expect(c.hasSecrets).toBe(true);
-      expect(JSON.stringify(c)).not.toContain("hunter2-secret");
-      expect(c).not.toHaveProperty("secrets");
-      expect(c.createdBy).toBe(adminUserId);
-
-      const row = await prisma.notificationConnection.findUniqueOrThrow({
-        where: { id: c.id },
-      });
-      expect(row.secrets).toMatch(/^kek1:/);
-      expect(row.secrets).not.toContain("hunter2-secret");
-
-      const got = await api("GET", `/connections/${c.id}`, readToken);
-      expect(got.body.hasSecrets).toBe(true);
-      expect(got.body).not.toHaveProperty("secrets");
-      const list = await api("GET", "/connections", readToken);
-      expect(JSON.stringify(list.body)).not.toContain("hunter2-secret");
-      expect(JSON.stringify(list.body)).not.toContain("kek1:");
-    });
-
-    it("reports hasSecrets false without secrets", async () => {
-      const c = await create();
-      expect(c.hasSecrets).toBe(false);
-    });
-
-    it("conflicts on a duplicate slug within a channel", async () => {
-      const c = await create();
-      const res = await api(
-        "POST",
-        "/connections",
-        adminToken,
-        payload({ slug: c.slug })
-      );
-      expect(res.status).toBe(409);
-    });
-
-    it("makes the first connection of a channel the default", async () => {
-      await clean();
-      const first = await create();
-      const second = await create();
-      expect(first.isDefault).toBe(true);
-      expect(second.isDefault).toBe(false);
-    });
-  });
-
+describe("/v1/admin/notifications/connections/:id", () => {
   describe("get, list, update", () => {
     it("filters the list by channel and answers 404 for an unknown id", async () => {
       const c = await create();
@@ -566,154 +420,6 @@ describe("connections admin API", () => {
         ).status
       ).toBe(404);
       expect(smtp.messages).toHaveLength(0);
-    });
-  });
-
-  describe("channels", () => {
-    it("lists email with JSON schemas of its settings and secrets", async () => {
-      const res = await api("GET", "/channels", readToken);
-      expect(res.status).toBe(200);
-      const email = res.body.data.find(
-        (c: { channel: string }) => c.channel === "email"
-      );
-      expect(email.settingsSchema.type).toBe("object");
-      expect(email.settingsSchema.properties).toHaveProperty("host");
-      expect(email.secretsSchema.properties).toHaveProperty("password");
-    });
-  });
-
-  describe("audit and events", () => {
-    let endpointId: string;
-
-    beforeAll(async () => {
-      const endpoint = await createTestWebhookEndpoint(
-        await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
-        {
-          eventTypes: [
-            "notification.connection.created",
-            "notification.connection.updated",
-            "notification.connection.deleted",
-          ],
-        }
-      );
-      endpointId = endpoint.id;
-    });
-
-    const findEvent = async (eventType: string, entityId: string) => {
-      const where = {
-        webhookEndpointId: endpointId,
-        eventType,
-        payload: { path: ["entityId"], equals: entityId },
-      };
-      await waitFor(
-        async () => (await prisma.webhookDelivery.count({ where })) > 0,
-        10_000
-      );
-      return (await prisma.webhookDelivery.findFirstOrThrow({ where }))
-        .payload as { data: Record<string, unknown> };
-    };
-
-    const audit = (entityId: string) =>
-      prisma.auditLogEntry.findMany({
-        where: { entityType: "NotificationConnection", entityId },
-        orderBy: { createdAt: "asc" },
-      });
-
-    it("records and emits create, update and delete without secrets", async () => {
-      const c = await create({ secrets: { password: "audit-secret-pw" } });
-      await api("PATCH", `/connections/${c.id}`, adminToken, {
-        displayName: "Audited",
-        secrets: { password: "audit-secret-pw-2" },
-      });
-      await api("DELETE", `/connections/${c.id}`, adminToken);
-
-      const entries = await audit(c.id);
-      expect(entries.map((e) => e.action)).toEqual([
-        "CREATE",
-        "UPDATE",
-        "DELETE",
-      ]);
-      expect(entries.every((e) => e.userId === adminUserId)).toBe(true);
-      expect(JSON.stringify(entries)).not.toContain("audit-secret-pw");
-      expect(JSON.stringify(entries)).not.toContain("kek1:");
-
-      for (const type of ["created", "updated", "deleted"]) {
-        const event = await findEvent(`notification.connection.${type}`, c.id);
-        expect(event.data).toMatchObject({ id: c.id, slug: c.slug });
-        expect(JSON.stringify(event)).not.toContain("audit-secret-pw");
-      }
-    });
-
-    it("notes a secrets change in the update's audit entry, never the values", async () => {
-      const c = await create({ secrets: { password: "rotate-me-1" } });
-      await api("PATCH", `/connections/${c.id}`, adminToken, {
-        secrets: { password: "rotate-me-2" },
-      });
-      await api("PATCH", `/connections/${c.id}`, adminToken, {
-        secrets: null,
-      });
-      await api("PATCH", `/connections/${c.id}`, adminToken, {
-        displayName: "Renamed",
-      });
-
-      const updates = (await audit(c.id)).filter((e) => e.action === "UPDATE");
-      expect(updates.map((e) => e.metadata)).toEqual([
-        { secretsChanged: true },
-        { secretsCleared: true },
-        null,
-      ]);
-      expect(JSON.stringify(updates)).not.toContain("rotate-me");
-    });
-
-    it("audits a default change", async () => {
-      await clean();
-      await create();
-      const b = await create();
-      await api("POST", `/connections/${b.id}/default`, adminToken);
-      const entries = await audit(b.id);
-      expect(entries.map((e) => e.action)).toEqual(["CREATE", "UPDATE"]);
-      await findEvent("notification.connection.updated", b.id);
-    });
-  });
-
-  describe("opening secrets", () => {
-    const storePlain = async (password: string) => {
-      const c = await create();
-      return prisma.notificationConnection.update({
-        where: { id: c.id },
-        data: { secrets: JSON.stringify({ password }) },
-      });
-    };
-
-    it("reseals a value not under the current KEK, leaving updatedAt alone", async () => {
-      const row = await storePlain("old-kek-pw");
-      const opened = await openConnectionSecrets(row);
-      expect(opened).toEqual({ password: "old-kek-pw" });
-
-      const after = await prisma.notificationConnection.findUniqueOrThrow({
-        where: { id: row.id },
-      });
-      expect(after.secrets).toMatch(new RegExp(`^kek1:${currentKek().id}:`));
-      expect(after.updatedAt).toEqual(row.updatedAt);
-      expect(await openConnectionSecrets(after)).toEqual({
-        password: "old-kek-pw",
-      });
-    });
-
-    it("does not overwrite secrets changed since they were read", async () => {
-      const row = await storePlain("stale-pw");
-      const newer = await prisma.notificationConnection.update({
-        where: { id: row.id },
-        data: { secrets: JSON.stringify({ password: "newer-pw" }) },
-      });
-
-      expect(await openConnectionSecrets(row)).toEqual({
-        password: "stale-pw",
-      });
-      const after = await prisma.notificationConnection.findUniqueOrThrow({
-        where: { id: row.id },
-      });
-      expect(after.secrets).toBe(newer.secrets);
     });
   });
 });

@@ -1,6 +1,7 @@
 // @module-tag unit
+// @module-tag notifications
 // @module-tag platform
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { randomBytes } from "crypto";
 import {
   resolveCookieSecure,
@@ -339,5 +340,50 @@ describe("signing keys in env", () => {
     expect(parse({ CURSOR_SIGNING_KEY_V3: "" }).CURSOR_SIGNING_KEY_V3).toBe(
       undefined
     );
+  });
+});
+
+describe("env", () => {
+  describe("NOTIFICATIONS_ALLOW_PRIVATE_HOSTS", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    });
+
+    const load = async () => {
+      vi.resetModules();
+      return (await import("../env.js")).default;
+    };
+
+    it("defaults to false and parses true outside production", async () => {
+      expect((await load()).NOTIFICATIONS_ALLOW_PRIVATE_HOSTS).toBe(false);
+      vi.stubEnv("NOTIFICATIONS_ALLOW_PRIVATE_HOSTS", "true");
+      expect((await load()).NOTIFICATIONS_ALLOW_PRIVATE_HOSTS).toBe(true);
+    });
+
+    it("is refused in production", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("NOTIFICATIONS_ALLOW_PRIVATE_HOSTS", "true");
+      await expect(load()).rejects.toThrow(/NOTIFICATIONS_ALLOW_PRIVATE_HOSTS/);
+    });
+  });
+
+  describe("ALLOW_PLAINTEXT_SMTP", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    });
+
+    const load = async () => {
+      vi.resetModules();
+      return (await import("../env.js")).default;
+    };
+
+    it("defaults to false and parses true", async () => {
+      vi.stubEnv("ALLOW_PLAINTEXT_SMTP", undefined);
+      expect((await load()).ALLOW_PLAINTEXT_SMTP).toBe(false);
+      vi.stubEnv("ALLOW_PLAINTEXT_SMTP", "true");
+      expect((await load()).ALLOW_PLAINTEXT_SMTP).toBe(true);
+    });
   });
 });

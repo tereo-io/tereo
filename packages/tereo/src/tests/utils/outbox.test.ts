@@ -1,3 +1,5 @@
+// @module-tag int
+// @module-tag notifications
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { ensureDailyPartitions } from "../../utils/partitions.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";

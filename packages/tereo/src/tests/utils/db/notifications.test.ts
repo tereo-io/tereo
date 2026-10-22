@@ -1,11 +1,14 @@
+// @module-tag int
+// @module-tag notifications
+// @module-tag race
+import type { DeliveryRef } from "../../../utils/db/notifications.js";
+import { ensureDailyPartitions } from "../../../utils/partitions.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import type { DeliveryRef } from "../../utils/db/notifications.js";
-import { ensureDailyPartitions } from "../../utils/partitions.js";
-import { SYSTEM_USER_ID } from "../../definitions/index.js";
-import type { Prisma } from "../../utils/db/prisma.js";
-import { prisma } from "../../utils/db/prisma.js";
-import { waitFor } from "../support/webhooks.js";
-import db from "../../utils/db/index.js";
+import { SYSTEM_USER_ID } from "../../../definitions/index.js";
+import type { Prisma } from "../../../utils/db/prisma.js";
+import { prisma } from "../../../utils/db/prisma.js";
+import { waitFor } from "../../support/webhooks.js";
+import db from "../../../utils/db/index.js";
 
 type Tx = Prisma.TransactionClient;
 
@@ -111,30 +114,36 @@ const sent = (tx: Tx, ref: DeliveryRef) =>
     providerResponse: "250 OK",
   });
 
-describe("notification roll-up", () => {
-  it("is sent, with content dropped, when two deliveries are sent at once", async () => {
-    const { notification, deliveries } = await twoDeliveries();
-    await settleConcurrently(notification, [sent, sent], deliveries.map(refOf));
+describe("db.notifications", () => {
+  describe("notification roll-up", () => {
+    it("is sent, with content dropped, when two deliveries are sent at once", async () => {
+      const { notification, deliveries } = await twoDeliveries();
+      await settleConcurrently(
+        notification,
+        [sent, sent],
+        deliveries.map(refOf)
+      );
 
-    const row = await prisma.notification.findFirstOrThrow({
-      where: { id: notification.id },
+      const row = await prisma.notification.findFirstOrThrow({
+        where: { id: notification.id },
+      });
+      expect(row.status).toBe("sent");
+      expect(row.content).toBeNull();
     });
-    expect(row.status).toBe("sent");
-    expect(row.content).toBeNull();
-  });
 
-  it("is partial when one is sent and one fails at once", async () => {
-    const { notification, deliveries } = await twoDeliveries();
-    await settleConcurrently(
-      notification,
-      [sent, (tx, ref) => db.notifications.markFailed(tx, ref, "550 no")],
-      deliveries.map(refOf)
-    );
+    it("is partial when one is sent and one fails at once", async () => {
+      const { notification, deliveries } = await twoDeliveries();
+      await settleConcurrently(
+        notification,
+        [sent, (tx, ref) => db.notifications.markFailed(tx, ref, "550 no")],
+        deliveries.map(refOf)
+      );
 
-    const row = await prisma.notification.findFirstOrThrow({
-      where: { id: notification.id },
+      const row = await prisma.notification.findFirstOrThrow({
+        where: { id: notification.id },
+      });
+      expect(row.status).toBe("partial");
+      expect(row.content).not.toBeNull();
     });
-    expect(row.status).toBe("partial");
-    expect(row.content).not.toBeNull();
   });
 });
