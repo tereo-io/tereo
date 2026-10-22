@@ -474,6 +474,38 @@ describe("resolveLoginIdentity", () => {
       expect(results).toEqual([{ userId: user.id }, { userId: user.id }]);
       expect(await identitiesFor(provider.id, id.subject)).toHaveLength(1);
     });
+
+    it("signs in a subject whose invite a concurrent sign-in claimed after its first lookup", async () => {
+      const provider = await makeProvider();
+      const user = await createTestUser();
+      await invite(user.id, provider.id);
+      const id = identity({ email: user.email });
+      expect(await resolveLoginIdentity(provider, id)).toEqual({
+        userId: user.id,
+      });
+
+      // As if the other sign-in committed its link between this one's
+      // lookup by subject and its invite check.
+      const lookup = vi
+        .spyOn(db.userIdentities, "getByProviderSubject")
+        .mockResolvedValueOnce(null);
+      // The invite as that lookup's moment saw it, before the claim.
+      const findInvite = vi
+        .spyOn(db.userIdentities, "findInvite")
+        .mockResolvedValueOnce({
+          userId: user.id,
+          user: { email: user.email },
+        } as never);
+      try {
+        expect(await resolveLoginIdentity(provider, id)).toEqual({
+          userId: user.id,
+        });
+        expect(lookup).toHaveBeenCalledTimes(2);
+      } finally {
+        lookup.mockRestore();
+        findInvite.mockRestore();
+      }
+    });
   });
 
   describe("concurrent first sign-ins of two subjects with one email", () => {
