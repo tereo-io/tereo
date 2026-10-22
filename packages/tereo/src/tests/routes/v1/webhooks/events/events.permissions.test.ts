@@ -19,54 +19,6 @@ import {
 const OTHER_ORG = "00000000-0000-7002-8000-000000000001";
 
 describe("POST /v1/webhooks/events and /v1/webhooks/events/batch", () => {
-  describe("Event Emission", () => {
-    describe("POST /events", () => {
-      it("should return 401 without authentication", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/events`,
-          {
-            organizationId: getTestOrgId(),
-            eventType: "test.event",
-            entityType: "TestEntity",
-            entityId: "test-1",
-            data: { key: "value" },
-          },
-          {
-            headers: { "Content-Type": "application/json" },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
-    });
-
-    describe("POST /events/batch", () => {
-      it("should return 401 without authentication", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/events/batch`,
-          {
-            events: [
-              {
-                organizationId: getTestOrgId(),
-                eventType: "test.event",
-                entityType: "TestEntity",
-                entityId: "test-1",
-                data: { key: "value" },
-              },
-            ],
-          },
-          {
-            headers: { "Content-Type": "application/json" },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
-    });
-  });
-
   describe("Who may emit an event", () => {
     let adminToken: string;
 

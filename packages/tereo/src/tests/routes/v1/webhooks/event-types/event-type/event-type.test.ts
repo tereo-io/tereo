@@ -51,6 +51,20 @@ describe("GET /v1/webhooks/event-types/:eventType", () => {
 
         expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
       });
+
+      it("should return 400 for an event type over 100 characters", async () => {
+        const response = await axios.get(
+          `${BASE_URL}/event-types/${"a".repeat(101)}`,
+          {
+            headers: { Authorization: `Bearer ${testToken}` },
+            validateStatus: () => true,
+          }
+        );
+
+        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(response.data.error).toBe("invalid_request");
+        expect(response.data.error_description).toEqual(expect.any(String));
+      });
     });
   });
 });

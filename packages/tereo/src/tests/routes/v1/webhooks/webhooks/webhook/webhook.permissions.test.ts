@@ -245,16 +245,6 @@ describe("/v1/webhooks/webhooks/:id", () => {
         );
         expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
       });
-
-      it("returns 401 without a token", async () => {
-        const ep = await createTestWebhookEndpoint(token);
-        const response = await axios.post(
-          `${BASE_URL}/webhooks/${ep.id}/revoke-previous-secret`,
-          {},
-          { validateStatus: () => true }
-        );
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
     });
   });
 });

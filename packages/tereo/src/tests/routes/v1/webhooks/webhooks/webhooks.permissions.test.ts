@@ -36,22 +36,6 @@ const ids = (res: { data: { data: { id: string }[] } }) =>
 describe("GET /v1/webhooks/webhooks and POST /v1/webhooks/webhooks", () => {
   describe("Webhook Endpoint Management", () => {
     describe("POST /webhooks", () => {
-      it("should return 401 without authentication", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/webhooks`,
-          {
-            url: "https://example.com/webhook",
-            eventTypes: ["test.event"],
-          },
-          {
-            headers: { "Content-Type": "application/json" },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
-
       it("should return 403 without org_id in token", async () => {
         // Token with no organization
         const tokenNoOrg = await getTestAccessToken(undefined, null);

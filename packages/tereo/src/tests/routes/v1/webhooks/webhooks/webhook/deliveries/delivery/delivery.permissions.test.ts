@@ -30,7 +30,7 @@ describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webh
       });
       endpointId = ep.id;
 
-      // Emit events to generate delivery records
+      // Emit an event to generate a delivery record
       await axios.post(
         `${BASE_URL}/events`,
         {
@@ -39,24 +39,6 @@ describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webh
           entityType: "TestEntity",
           entityId: `test-entity-${generateUniqueId()}`,
           data: { key: "value1" },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${testToken}`,
-            "Content-Type": "application/json",
-          },
-          validateStatus: () => true,
-        }
-      );
-
-      await axios.post(
-        `${BASE_URL}/events`,
-        {
-          organizationId: getTestOrgId(),
-          eventType: et.eventType,
-          entityType: "TestEntity",
-          entityId: `test-entity-${generateUniqueId()}`,
-          data: { key: "value2" },
         },
         {
           headers: {

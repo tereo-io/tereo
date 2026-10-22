@@ -3,7 +3,6 @@
 import { HEADER_VALUE_MASK } from "../../../../../../utils/webhookHeaders.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../../../utils/db/prisma.js";
-import {} from "../../../../../../jobs/webhookQueues.js";
 import db from "../../../../../../utils/db/index.js";
 import axios from "axios";
 import {

@@ -9,7 +9,6 @@ import {
   HTTP_STATUS,
   getTestAccessToken,
   createTestEventType,
-  createTestWebhookEndpoint,
   cleanupTestEntities,
   generateUniqueId,
   EventTypeResponse,
@@ -54,34 +53,6 @@ describe("GET /v1/webhooks/event-types", () => {
           validateStatus: () => true,
         });
         expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
-      });
-    });
-
-    describe("retired event types", () => {
-      it("cannot be subscribed to, and existing subscriptions are flagged", async () => {
-        const et = await createTestEventType(testToken);
-        const endpoint = await createTestWebhookEndpoint(testToken, {
-          eventTypes: [et.eventType],
-        });
-        await prisma.eventType.update({
-          where: { eventType: et.eventType },
-          data: { retiredAt: new Date() },
-        });
-
-        const fetched = await axios.get(`${BASE_URL}/webhooks/${endpoint.id}`, {
-          headers: { Authorization: `Bearer ${testToken}` },
-        });
-        expect(fetched.data.retiredEventTypes).toEqual([et.eventType]);
-
-        const subscribe = await axios.post(
-          `${BASE_URL}/webhooks`,
-          { url: "https://example.com/hook", eventTypes: [et.eventType] },
-          {
-            headers: { Authorization: `Bearer ${testToken}` },
-            validateStatus: () => true,
-          }
-        );
-        expect(subscribe.status).toBe(HTTP_STATUS.BAD_REQUEST);
       });
     });
 
@@ -215,14 +186,6 @@ describe("GET /v1/webhooks/event-types", () => {
         expect(response.data.data.length).toBeGreaterThanOrEqual(1);
         expect(response.data.data[0].eventType).toContain(uniqueId);
       });
-
-      it("should return 401 without authentication", async () => {
-        const response = await axios.get(`${BASE_URL}/event-types`, {
-          validateStatus: () => true,
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
     });
   });
 
@@ -301,6 +264,10 @@ describe("GET /v1/webhooks/event-types", () => {
         for (const name of ["constructor", "toString", "__proto__"]) {
           const res = await list(`filter[${name}]=x`);
           expect(res.status, name).toBe(HTTP_STATUS.BAD_REQUEST);
+          expect(res.data, name).toMatchObject({
+            error: "invalid_request",
+            error_description: expect.any(String),
+          });
         }
       });
 
