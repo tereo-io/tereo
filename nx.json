@@ -54,7 +54,12 @@
       }
     },
     "versionPlans": {
-      "ignorePatternsForPlanCheck": ["**/*.md"]
+      "ignorePatternsForPlanCheck": [
+        "**/*.md",
+        "packages/tereo/src/tests/**",
+        "packages/tereo/vitest.config.ts",
+        "docker/test/**"
+      ]
     },
     "version": {
       "currentVersionResolver": "disk",

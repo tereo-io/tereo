@@ -15,6 +15,20 @@ import path from "path";
  * worktrees can run side by side, or beside a core already on 4001. In Docker (DOCKER_TEST=true) the container environment is
  * used as-is.
  */
+export function loadUnitTestEnv(): Record<string, string> {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return {
+    NODE_ENV: "test",
+    LOG_LEVEL: "silent",
+    // Nothing listens on port 1: a unit test that reaches for the database
+    // or Redis fails at once instead of touching a real one.
+    DATABASE_URL: "postgresql://unit:unit@127.0.0.1:1/unit",
+    REDIS_URL: "redis://127.0.0.1:1",
+    PUBLIC_URL: "http://localhost:4001",
+    UI_DIST_PATH: path.join(here, "../fixtures/ui-dist"),
+  };
+}
+
 export function loadTestEnv(): Record<string, string> {
   const here = path.dirname(fileURLToPath(import.meta.url));
   // A stand-in for the admin UI's build, so the suite covers the UI whether or
