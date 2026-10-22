@@ -432,7 +432,6 @@ describe("/.well-known", () => {
   });
 });
 
-
 describe("GET /.well-known/openid-configuration", () => {
   it("lists core:events and core:organizations in scopes_supported", async () => {
     const res = await fetch(`${BASE_URL}/.well-known/openid-configuration`);

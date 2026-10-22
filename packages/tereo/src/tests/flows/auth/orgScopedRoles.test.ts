@@ -1,11 +1,5 @@
 // @module-tag int
 // @module-tag auth
-import {
-  ensureTestMembership,
-  ensureTestOrganization,
-  ensureTestUser,
-  getTestPrincipalToken,
-} from "../../support/principals.js";
 import { ensurePermission, makeServiceOf } from "../../support/testService.js";
 import { SYSTEM_USER_ID } from "../../../definitions/index.js";
 import { describe, it, expect, beforeAll } from "vitest";
@@ -13,6 +7,12 @@ import { prisma } from "../../../utils/db/prisma.js";
 import { fetchJson } from "../../support/http.js";
 import db from "../../../utils/db/index.js";
 import { randomUUID } from "crypto";
+import {
+  ensureTestMembership,
+  ensureTestOrganization,
+  ensureTestUser,
+  getTestPrincipalToken,
+} from "../../support/principals.js";
 import {
   BASE_URL,
   HTTP_STATUS,
