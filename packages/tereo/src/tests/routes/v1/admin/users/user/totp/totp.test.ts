@@ -214,6 +214,22 @@ describe("POST /v1/admin/users/:id/totp/reset", () => {
     ).toBe(3);
   });
 
+  it("should return 400 for user without TOTP enabled", async () => {
+    const response = await fetch(
+      `${BASE_URL}/v1/admin/users/${regularUser.id}/totp/reset`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${adminToken}` },
+      }
+    );
+
+    // User doesn't have TOTP enabled
+    expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+
+    const data = (await response.json()) as ErrorResponse;
+    expect(data.error).toBeDefined();
+  });
+
   it("should return 404 for non-existent user", async () => {
     const response = await fetch(
       `${BASE_URL}/v1/admin/users/${NON_EXISTENT_UUID}/totp/reset`,

@@ -21,6 +21,7 @@ describe("GET /v1/admin/users", () => {
         "filter[id_op]": "in",
       });
       expect(result.success).toBe(false);
+      expect(result.error?.issues[0].path).toEqual(["filter[id]"]);
     });
   });
 });

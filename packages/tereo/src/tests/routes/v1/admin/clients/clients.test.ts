@@ -253,6 +253,7 @@ describe("POST /v1/admin/clients", () => {
       body: JSON.stringify({
         name: "Test Client",
         clientType: "public",
+        grantTypes: ["authorization_code"],
       }),
     });
 
@@ -262,7 +263,9 @@ describe("POST /v1/admin/clients", () => {
       error_description?: string;
     };
     expect(error.error).toBe("invalid_request");
-    expect(error.error_description).toMatch(/^Invalid request body\. /);
+    expect(error.error_description).toMatch(
+      /^Invalid request body\. redirectUris: /
+    );
   });
 });
 

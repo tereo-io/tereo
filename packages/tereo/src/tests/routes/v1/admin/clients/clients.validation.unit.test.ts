@@ -8,11 +8,17 @@ describe("POST /v1/admin/clients", () => {
     it.each([
       [
         "a public client without redirectUris",
-        { name: "Test Client", clientType: "public" },
+        {
+          name: "Test Client",
+          clientType: "public",
+          grantTypes: ["authorization_code"],
+        },
+        ["redirectUris"],
       ],
       [
         "an empty grantTypes",
         { name: "No Grants", clientType: "confidential", grantTypes: [] },
+        ["grantTypes"],
       ],
       [
         "the client_credentials grant: a machine identity is added as a service",
@@ -23,9 +29,12 @@ describe("POST /v1/admin/clients", () => {
           scopes: ["openid"],
           grantTypes: ["client_credentials"],
         },
+        ["grantTypes", 0],
       ],
-    ])("rejects %s", (_label, body) => {
-      expect(CreateClientSchema.safeParse(body).success).toBe(false);
+    ])("rejects %s", (_label, body, path) => {
+      const result = CreateClientSchema.safeParse(body);
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0].path).toEqual(path);
     });
   });
 });

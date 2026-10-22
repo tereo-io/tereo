@@ -54,6 +54,9 @@ beforeAll(async () => {
   const adminUser = await createAdminUser();
   regularUser = await createTestUser();
   adminToken = await getAccessTokenForUser(adminUser, testClient);
+  // A live session, so the 404 for an unknown session id is not just an
+  // empty session list.
+  await getAccessTokenForUser(regularUser, testClient);
 });
 
 describe("DELETE /v1/admin/users/:id", () => {
