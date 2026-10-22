@@ -2,9 +2,9 @@
 // @module-tag files
 // @module-tag job
 // @module-tag race
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SYSTEM_USER_ID } from "../../definitions/systemUser.js";
 import { getIdempotencySweepQueue } from "../../jobs/queues.js";
-import { afterAll, describe, expect, it } from "vitest";
 import { getRedisClient } from "../../utils/redis.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
@@ -69,8 +69,22 @@ describe("db.idempotencyRecords.sweepExpired", () => {
   };
   const scope = `sweep-test-${crypto.randomUUID()}`;
 
+  // The running server's worker sweeps every expired record, this test's
+  // included, whenever its job runs (the first test's resume leaves one due).
+  // Paused, and idle, it cannot delete the row between its creation and the
+  // writer's UPDATE.
+  beforeAll(async () => {
+    const queue = getIdempotencySweepQueue();
+    await queue.pause();
+    for (let i = 0; i < 400 && (await queue.getActiveCount()) > 0; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(await queue.getActiveCount()).toBe(0);
+  });
+
   afterAll(async () => {
     await prisma.idempotencyRecord.deleteMany({ where: { scope } });
+    await getIdempotencySweepQueue().resume();
   });
 
   it("keeps an expired record that a request refreshes while the sweep waits on it", async () => {
