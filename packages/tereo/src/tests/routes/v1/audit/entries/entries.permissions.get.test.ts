@@ -30,7 +30,7 @@ import {
   generateUniqueId,
 } from "../../../../support/audit.js";
 
-describe("GET /v1/audit/entries", () => {
+describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
   describe("Audit Log Entries", () => {
     let token: string;
     const organizationId = getTestOrgId();

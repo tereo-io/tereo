@@ -398,11 +398,7 @@ describe("GET /v1/audit/entries/:id", () => {
 
       const readerAccount = await accountOf(reader);
       const writerAccount = await accountOf(writer);
-      await insert("own1", reader.slug, readerAccount, org1, { ownKey: "x" });
       await insert("own2", reader.slug, readerAccount, org2, { ownKey: "x" });
-      await insert("ownSystem", reader.slug, readerAccount, null, {
-        ownKey: "x",
-      });
       // Same source, written by someone else: not the service's own.
       await insert("forged", reader.slug, userId, org1, { forgedKey: "x" });
       await insert("other", writer.slug, writerAccount, org1, {

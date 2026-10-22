@@ -182,17 +182,8 @@ describe("POST /v1/audit/entries", () => {
       return ((await response.json()) as { access_token: string }).access_token;
     };
 
-    const accountOf = async (service: ProvisionedService) => {
-      const row = await prisma.service.findUniqueOrThrow({
-        where: { id: service.id },
-        include: { client: { include: { serviceAccountUser: true } } },
-      });
-      return row.client!.serviceAccountUser!.id;
-    };
-
     const runId = generateUniqueId();
     const entityType = `SvcScope${runId}`;
-    const entityId = `svc-scope-${runId}`;
     const userEmail = `test-svc-scope-${runId}@example.com`;
     const slugs: string[] = [];
 
@@ -200,33 +191,7 @@ describe("POST /v1/audit/entries", () => {
     let writer: ProvisionedService;
     let writerToken: string;
     let org1: string;
-    let org2: string;
     let userId: string;
-    const ids: Record<string, string> = {};
-
-    const insert = async (
-      key: string,
-      source: string,
-      writerUserId: string,
-      organizationId: string | null,
-      metadata: Record<string, unknown>
-    ) => {
-      const entry = await prisma.auditLogEntry.create({
-        data: {
-          source,
-          organizationId,
-          userId,
-          userEmail,
-          action: "CREATE",
-          entityType,
-          entityId,
-          entityName: `needle-${runId}`,
-          metadata: metadata as object,
-          writerUserId,
-        },
-      });
-      ids[key] = entry.id;
-    };
 
     beforeAll(async () => {
       reader = await provisionService({ access: { roles: ["audit_reader"] } });
@@ -234,29 +199,14 @@ describe("POST /v1/audit/entries", () => {
       slugs.push(reader.slug, writer.slug);
       writerToken = await clientToken(writer);
       org1 = await ensureTestOrganization(`svc-scope-1-${runId}`);
-      org2 = await ensureTestOrganization(`svc-scope-2-${runId}`);
       userId = await ensureTestUser(
         `00000000-0000-7001-8000-${runId.slice(0, 12).padStart(12, "0")}`
       );
-
-      const readerAccount = await accountOf(reader);
-      const writerAccount = await accountOf(writer);
-      await insert("own1", reader.slug, readerAccount, org1, { ownKey: "x" });
-      await insert("own2", reader.slug, readerAccount, org2, { ownKey: "x" });
-      await insert("ownSystem", reader.slug, readerAccount, null, {
-        ownKey: "x",
-      });
-      // Same source, written by someone else: not the service's own.
-      await insert("forged", reader.slug, userId, org1, { forgedKey: "x" });
-      await insert("other", writer.slug, writerAccount, org1, {
-        otherKey: "x",
-      });
     });
 
     afterAll(async () => {
       await prisma.auditLogEntry.deleteMany({ where: { userEmail } });
       await removeServices(slugs);
-      await cleanupIntegrations();
     });
 
     describe("writes", () => {
