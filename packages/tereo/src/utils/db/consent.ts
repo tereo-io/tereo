@@ -94,7 +94,8 @@ export const getConsentDetails = async (
   }
 
   if (session.expiresAt < new Date()) {
-    await prisma.consentSession.delete({ where: { id: session.id } });
+    // A concurrent request may have deleted it already.
+    await prisma.consentSession.deleteMany({ where: { id: session.id } });
     throw new NotFoundError("Consent session expired");
   }
 
@@ -129,8 +130,9 @@ export const consumeConsentSession = async (
   return count === 1;
 };
 
+/** No-op when a concurrent request deleted it already. */
 export const deleteConsentSession = async (id: string): Promise<void> => {
-  await prisma.consentSession.delete({ where: { id } });
+  await prisma.consentSession.deleteMany({ where: { id } });
 };
 
 export const cleanupExpiredConsentSessions = async (): Promise<number> => {

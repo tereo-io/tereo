@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
+import { NotFoundError } from "../../utils/errors.js";
+import db from "../../utils/db/index.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -628,5 +630,39 @@ describe("OAuth Consent Endpoint", () => {
       // The exact implementation may vary
       expect(response.status).toBe(HTTP_STATUS.OK);
     });
+  });
+});
+
+describe("an expired consent session read twice at once", () => {
+  it("is not found for both, and deleting it twice does not throw", async () => {
+    const client = await createTestClient();
+    const user = await createTestUser();
+    const sessionToken = generateUniqueId();
+    const session = await db.consent.createConsentSession({
+      sessionToken,
+      userId: user.id,
+      clientId: client.id,
+      redirectUri: client.redirectUris[0],
+      scopes: ["openid"],
+      state: null,
+      codeChallenge: generateCodeChallenge(generateCodeVerifier()),
+      codeChallengeMethod: "S256",
+      nonce: null,
+      authTime: new Date(),
+      expiresAt: new Date(Date.now() - 1000),
+    });
+
+    const results = await Promise.allSettled([
+      db.consent.getConsentDetails(sessionToken),
+      db.consent.getConsentDetails(sessionToken),
+    ]);
+    for (const result of results) {
+      expect(result.status).toBe("rejected");
+      expect((result as PromiseRejectedResult).reason).toBeInstanceOf(
+        NotFoundError
+      );
+    }
+
+    await db.consent.deleteConsentSession(session.id);
   });
 });
