@@ -558,59 +558,56 @@ describe("POST /oauth/revoke", () => {
   const expectRevokedEvent = (userId: string) =>
     waitFor(async () => (await revokedEventsFor(userId)) > 0, 10_000);
 
-  describe("POST /oauth/revoke", () => {
-    it("audits a refresh-token revoke as a LOGOUT and emits it, once", async () => {
-      const { user, tokens } = await signIn();
-      const sid = sidOf(tokens.access_token);
+  it("audits a refresh-token revoke as a LOGOUT and emits it, once", async () => {
+    const { user, tokens } = await signIn();
+    const sid = sidOf(tokens.access_token);
 
-      expect((await revoke(tokens.refresh_token)).status).toBe(HTTP_STATUS.OK);
+    expect((await revoke(tokens.refresh_token)).status).toBe(HTTP_STATUS.OK);
 
-      const logouts = (await entriesOf(user.id)).filter(
-        (e) => e.action === "LOGOUT"
-      );
-      expect(logouts).toHaveLength(1);
-      expect(logouts[0]).toMatchObject({ userId: user.id });
-      expect(logouts[0].metadata).toMatchObject({
-        action: "sessions_revoked",
-        method: "revoke",
-        sessionIds: [sid],
-      });
-      await expectRevokedEvent(user.id);
+    const logouts = (await entriesOf(user.id)).filter(
+      (e) => e.action === "LOGOUT"
+    );
+    expect(logouts).toHaveLength(1);
+    expect(logouts[0]).toMatchObject({ userId: user.id });
+    expect(logouts[0].metadata).toMatchObject({
+      action: "sessions_revoked",
+      method: "revoke",
+      sessionIds: [sid],
+    });
+    await expectRevokedEvent(user.id);
 
-      // Nothing left to revoke: nothing more recorded.
-      expect((await revoke(tokens.refresh_token)).status).toBe(HTTP_STATUS.OK);
-      expect(
-        (await entriesOf(user.id)).filter((e) => e.action === "LOGOUT")
-      ).toHaveLength(1);
+    // Nothing left to revoke: nothing more recorded.
+    expect((await revoke(tokens.refresh_token)).status).toBe(HTTP_STATUS.OK);
+    expect(
+      (await entriesOf(user.id)).filter((e) => e.action === "LOGOUT")
+    ).toHaveLength(1);
+  });
+
+  it("audits an access-token revoke in its transaction, once", async () => {
+    const { user, tokens } = await signIn();
+    const { jti } = decodeJwt(tokens.access_token) as unknown as {
+      jti: string;
+    };
+
+    expect((await revoke(tokens.access_token)).status).toBe(HTTP_STATUS.OK);
+    expect(
+      (await prisma.accessToken.findUniqueOrThrow({ where: { jti } })).revokedAt
+    ).not.toBeNull();
+    const logouts = (await entriesOf(user.id)).filter(
+      (e) => e.action === "LOGOUT"
+    );
+    expect(logouts).toHaveLength(1);
+    expect(logouts[0].metadata).toEqual({
+      action: "token_revoked",
+      method: "revoke",
+      tokenType: "access_token",
+      jti,
+      clientId: client.clientId,
     });
 
-    it("audits an access-token revoke in its transaction, once", async () => {
-      const { user, tokens } = await signIn();
-      const { jti } = decodeJwt(tokens.access_token) as unknown as {
-        jti: string;
-      };
-
-      expect((await revoke(tokens.access_token)).status).toBe(HTTP_STATUS.OK);
-      expect(
-        (await prisma.accessToken.findUniqueOrThrow({ where: { jti } }))
-          .revokedAt
-      ).not.toBeNull();
-      const logouts = (await entriesOf(user.id)).filter(
-        (e) => e.action === "LOGOUT"
-      );
-      expect(logouts).toHaveLength(1);
-      expect(logouts[0].metadata).toEqual({
-        action: "token_revoked",
-        method: "revoke",
-        tokenType: "access_token",
-        jti,
-        clientId: client.clientId,
-      });
-
-      expect((await revoke(tokens.access_token)).status).toBe(HTTP_STATUS.OK);
-      expect(
-        (await entriesOf(user.id)).filter((e) => e.action === "LOGOUT")
-      ).toHaveLength(1);
-    });
+    expect((await revoke(tokens.access_token)).status).toBe(HTTP_STATUS.OK);
+    expect(
+      (await entriesOf(user.id)).filter((e) => e.action === "LOGOUT")
+    ).toHaveLength(1);
   });
 });

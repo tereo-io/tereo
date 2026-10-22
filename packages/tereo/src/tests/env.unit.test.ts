@@ -1,6 +1,6 @@
 // @module-tag unit
-// @module-tag notifications
 // @module-tag platform
+// @module-tag notifications
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { randomBytes } from "crypto";
 import {

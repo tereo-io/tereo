@@ -37,16 +37,16 @@ describe("root router", () => {
   describe("URL layout", () => {
     const ROOT = CORE_URL;
 
-    const get = (path: string, headers: Record<string, string> = {}) =>
+    const getCore = (path: string, headers: Record<string, string> = {}) =>
       axios.get(`${ROOT}${path}`, { headers, validateStatus: () => true });
 
     it("serves core's own API under /v1", async () => {
-      expect((await get("/v1/admin/users")).status).toBe(401);
-      expect((await get("/v1/account/profile")).status).toBe(401);
-      expect((await get("/v1/audit/entries")).status).toBe(401);
-      expect((await get("/v1/webhooks/webhooks")).status).toBe(401);
-      expect((await get("/v1/files/buckets")).status).toBe(401);
-      expect((await get("/v1/setup/status")).status).toBe(200);
+      expect((await getCore("/v1/admin/users")).status).toBe(401);
+      expect((await getCore("/v1/account/profile")).status).toBe(401);
+      expect((await getCore("/v1/audit/entries")).status).toBe(401);
+      expect((await getCore("/v1/webhooks/webhooks")).status).toBe(401);
+      expect((await getCore("/v1/files/buckets")).status).toBe(401);
+      expect((await getCore("/v1/setup/status")).status).toBe(200);
     });
 
     it.each([
@@ -58,7 +58,7 @@ describe("root router", () => {
       "/registry/declaration",
       "/setup/status",
     ])("answers the old path %s with a JSON 404", async (path) => {
-      const response = await get(path, { Accept: "application/json" });
+      const response = await getCore(path, { Accept: "application/json" });
       expect(response.status).toBe(404);
       expect(response.headers["content-type"]).toMatch(/json/);
     });
@@ -72,12 +72,14 @@ describe("root router", () => {
         ["/v1/audit/v1/entries", auditToken],
         ["/v1/webhooks/v1/webhooks", webhooksToken],
       ]) {
-        const response = await get(path, { Authorization: `Bearer ${token}` });
+        const response = await getCore(path, {
+          Authorization: `Bearer ${token}`,
+        });
         expect(response.status, path).toBe(404);
       }
       expect(
         (
-          await get("/v1/audit/entries", {
+          await getCore("/v1/audit/entries", {
             Authorization: `Bearer ${auditToken}`,
           })
         ).status
@@ -110,11 +112,11 @@ describe("root router", () => {
     });
 
     it("keeps the protocol and infrastructure paths at the root", async () => {
-      const discovery = await get("/.well-known/openid-configuration");
+      const discovery = await getCore("/.well-known/openid-configuration");
       expect(discovery.status).toBe(200);
       expect(discovery.data.token_endpoint).toMatch(/\/oauth\/token$/);
       expect(discovery.data.userinfo_endpoint).toMatch(/\/oauth\/userinfo$/);
-      expect((await get("/health")).status).toBe(200);
+      expect((await getCore("/health")).status).toBe(200);
     });
   });
 

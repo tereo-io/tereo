@@ -436,24 +436,28 @@ describe("Session lifecycle", () => {
       await expectBrowserLoggedOut(user, laptop, laptopSso);
     });
 
-    it("works after /oauth/revoke already revoked the refresh token (the UI's race)", async () => {
-      const user = await createUser();
-      const laptop = await login(user);
-      const phone = await login(user);
-      const laptopSso = laptop.jar.get(userSessionCookieName())!;
+    it(
+      "works after /oauth/revoke already revoked the refresh token (the UI's race)",
+      { tags: ["race"] },
+      async () => {
+        const user = await createUser();
+        const laptop = await login(user);
+        const phone = await login(user);
+        const laptopSso = laptop.jar.get(userSessionCookieName())!;
 
-      expect((await revokeRefresh(laptop.tokens.refresh_token)).status).toBe(
-        200
-      );
-      const res = await endSession(laptop.jar, {
-        client_id: client.clientId,
-        id_token_hint: laptop.tokens.id_token!,
-      });
-      expect(res.status).toBe(200);
+        expect((await revokeRefresh(laptop.tokens.refresh_token)).status).toBe(
+          200
+        );
+        const res = await endSession(laptop.jar, {
+          client_id: client.clientId,
+          id_token_hint: laptop.tokens.id_token!,
+        });
+        expect(res.status).toBe(200);
 
-      await expectBrowserLoggedOut(user, laptop, laptopSso);
-      await expectStillSignedIn(phone);
-    });
+        await expectBrowserLoggedOut(user, laptop, laptopSso);
+        await expectStillSignedIn(phone);
+      }
+    );
 
     it("works before /oauth/revoke, which then still succeeds", async () => {
       const user = await createUser();

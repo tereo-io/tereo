@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag platform
+// @module-tag security
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { errorHandler } from "../../utils/errors.js";
 import { logger } from "../../utils/logger.js";

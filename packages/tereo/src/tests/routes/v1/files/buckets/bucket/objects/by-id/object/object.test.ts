@@ -2,7 +2,6 @@
 // @module-tag files
 import { prisma } from "../../../../../../../../../utils/db/prisma.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {} from "../../../../../../../../support/principals.js";
 import axios from "axios";
 import {
   BASE_URL,

@@ -2,7 +2,6 @@
 // @module-tag files
 import { afterAll, describe, expect, it } from "vitest";
 import { CORE_URL } from "../../support/coreUrl.js";
-import {} from "../../support/principals.js";
 import axios from "axios";
 import {
   BASE_URL,

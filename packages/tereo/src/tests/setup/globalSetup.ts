@@ -60,7 +60,7 @@ export async function setup() {
   const { seedTestFixtures } = await import("../support/principals.js");
   await seedTestFixtures();
 
-  // Setup is done for the suite; tests/setup/ puts it back to pending
+  // Setup is done for the suite; routes/v1/setup/ puts it back to pending
   // around its own cases.
   await prisma.instance.update({
     where: { id: 1 },

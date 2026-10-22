@@ -108,8 +108,8 @@ describe("POST /v1/files/buckets/:name/objects/bulk-delete", () => {
               )
             )
         );
-        // The general limiter allows 100 requests a second per user, more
-        // than these uploads take together: start it over between chunks.
+        // the limiter allows 100 requests a second per user, and the uploads
+        // together exceed that, so reset it between chunks
         await resetRateLimits();
       }
 

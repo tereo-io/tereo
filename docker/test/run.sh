@@ -18,6 +18,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHARDS="${TEST_SHARDS:-4}"
 export TEST_STACK_PREFIX="${TEST_STACK_PREFIX:-tereo-test}"
 
+# Compose project names: lowercase letters, digits, `-` and `_`, starting with
+# a letter or digit. The prefix becomes the start of every stack's name.
+if [[ ! "$TEST_STACK_PREFIX" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+  echo "TEST_STACK_PREFIX='$TEST_STACK_PREFIX' is not a valid compose project name: use lowercase letters, digits, '-' and '_', starting with a letter or digit" >&2
+  exit 1
+fi
+
 compose() {
   local shard=$1
   shift

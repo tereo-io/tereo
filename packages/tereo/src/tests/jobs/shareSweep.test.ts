@@ -3,25 +3,21 @@
 // @module-tag job
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import { testOrgId } from "../support/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes } from "node:crypto";
-import { randomUUID } from "crypto";
 import axios from "axios";
 import {
   processShareSweepTick,
   SHARE_SWEEP_BATCH_LIMIT,
 } from "../../jobs/shareSweep.js";
 import {
-  ensureTestMembership,
-  getTestPrincipalToken,
-  testOrgId,
-} from "../support/principals.js";
-import {
   BASE_URL,
   cleanupTestEntities,
   createTestBucket,
   createTestFile,
   getTestAccessToken,
+  bucketOwnerAccess,
   HTTP_STATUS,
   uploadTestObject,
   uploadTestObjectAndGetId,
@@ -162,32 +158,7 @@ describe("processShareSweepTick", () => {
   });
 
   describe("Bucket ownership and active grants", () => {
-    // Everything a bucket owner does, but no `file-service.admin`.
-    const MEMBER = [
-      "file-service.buckets.delete",
-      "file-service.objects.delete",
-      "file-service.permissions.delete",
-      "file-service.shares.delete",
-    ];
-
-    const ORG = "bucket-owner-access-org";
-
-    const as = (token?: string) => ({
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      validateStatus: () => true,
-    });
-
-    /** A user in ORG holding MEMBER, and a token for it. */
-    const member = async (permissions = MEMBER) => {
-      const userId = randomUUID();
-      await ensureTestMembership(userId, ORG);
-      const token = await getTestPrincipalToken({
-        userId,
-        organizationId: ORG,
-        permissions,
-      });
-      return { userId, token };
-    };
+    const { ORG, as, member } = bucketOwnerAccess;
 
     afterAll(async () => {
       await cleanupTestEntities();

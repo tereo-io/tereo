@@ -55,37 +55,35 @@ const deactivate = async (provider: Provider) => {
 };
 
 describe("GET /oauth/upstream/providers", () => {
-  describe("GET /oauth/upstream/providers", () => {
-    let fake: FakeOidcProvider;
+  let fake: FakeOidcProvider;
 
-    beforeAll(async () => {
-      fake = await startFakeOidcProvider();
-    });
+  beforeAll(async () => {
+    fake = await startFakeOidcProvider();
+  });
 
-    afterAll(async () => {
-      await fake.close();
-    });
+  afterAll(async () => {
+    await fake.close();
+  });
 
-    it("lists active providers by display name and hides deactivated ones", async () => {
-      const zed = await createProvider(fake, { displayName: "Zed Upstream" });
-      const abe = await createProvider(fake, { displayName: "Abe Upstream" });
-      const gone = await createProvider(fake);
-      await deactivate(gone);
+  it("lists active providers by display name and hides deactivated ones", async () => {
+    const zed = await createProvider(fake, { displayName: "Zed Upstream" });
+    const abe = await createProvider(fake, { displayName: "Abe Upstream" });
+    const gone = await createProvider(fake);
+    await deactivate(gone);
 
-      const res = await fetch(`${CORE_URL}/oauth/upstream/providers`);
-      expect(res.status).toBe(200);
-      const list = (await res.json()) as {
-        slug: string;
-        displayName: string;
-      }[];
-      expect(Object.keys(list[0]).sort()).toEqual(["displayName", "slug"]);
-      const slugs = list.map((p) => p.slug);
-      expect(slugs).not.toContain(gone.slug);
-      expect(slugs.indexOf(abe.slug)).toBeLessThan(slugs.indexOf(zed.slug));
-      expect(list).toContainEqual({
-        slug: abe.slug,
-        displayName: "Abe Upstream",
-      });
+    const res = await fetch(`${CORE_URL}/oauth/upstream/providers`);
+    expect(res.status).toBe(200);
+    const list = (await res.json()) as {
+      slug: string;
+      displayName: string;
+    }[];
+    expect(Object.keys(list[0]).sort()).toEqual(["displayName", "slug"]);
+    const slugs = list.map((p) => p.slug);
+    expect(slugs).not.toContain(gone.slug);
+    expect(slugs.indexOf(abe.slug)).toBeLessThan(slugs.indexOf(zed.slug));
+    expect(list).toContainEqual({
+      slug: abe.slug,
+      displayName: "Abe Upstream",
     });
   });
 });

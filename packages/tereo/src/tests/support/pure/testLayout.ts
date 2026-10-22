@@ -32,6 +32,12 @@ export function oversizeProblems(
     }
   }
   for (const { path: file, ceiling } of oversize) {
+    if (ceiling <= MAX_LINES) {
+      problems.push(
+        `${file}: ceiling ${ceiling} in oversize.ts is not above ${MAX_LINES}; an entry's ceiling must exceed ${MAX_LINES}`
+      );
+      continue;
+    }
     const lines = counts.get(file);
     if (lines === undefined)
       problems.push(`${file}: listed in oversize.ts but missing`);
@@ -109,7 +115,7 @@ export function mapTestPath(rel: string): string | null {
   const srcDir = dir === "." ? "" : dir;
   if (existsSync(path.join(SRC_DIR, srcDir, `${base}.ts`))) return null;
   if (
-    srcDir.startsWith("routes") &&
+    (srcDir === "routes" || srcDir.startsWith("routes/")) &&
     path.posix.basename(srcDir) === base &&
     isRouterFolder(srcDir)
   ) {

@@ -430,16 +430,20 @@ describe("refresh tokens", () => {
       );
     });
 
-    it("leaves the cookie when its token was just rotated by a concurrent refresh", async () => {
-      const tokens = await loginAndExchange();
-      const cookie = `trt_${publicClient.clientId}=${tokens.refresh_token}`;
-      expect((await cookieRefresh(cookie)).status).toBe(200);
+    it(
+      "leaves the cookie when its token was just rotated by a concurrent refresh",
+      { tags: ["race"] },
+      async () => {
+        const tokens = await loginAndExchange();
+        const cookie = `trt_${publicClient.clientId}=${tokens.refresh_token}`;
+        expect((await cookieRefresh(cookie)).status).toBe(200);
 
-      const res = await cookieRefresh(cookie);
-      expect(res.status).toBe(400);
-      expect((await json(res)).error).toBe("invalid_grant");
-      expect(res.headers.getSetCookie()).toEqual([]);
-    });
+        const res = await cookieRefresh(cookie);
+        expect(res.status).toBe(400);
+        expect((await json(res)).error).toBe("invalid_grant");
+        expect(res.headers.getSetCookie()).toEqual([]);
+      }
+    );
 
     it("leaves the cookie alone for a body refresh token", async () => {
       const res = await postForm("/oauth/token", {
