@@ -1,8 +1,12 @@
-import { absorbCookies, cookieHeader, newPkce } from "../utils/browserLogin.js";
 import { encryptTotpSecret, generateTotpSecret } from "../../utils/totp.js";
-import type { CookieJar } from "../utils/browserLogin.js";
+import type { CookieJar } from "../support/browserLogin.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
+import {
+  absorbCookies,
+  cookieHeader,
+  newPkce,
+} from "../support/browserLogin.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -10,7 +14,7 @@ import {
   createTestUser,
   generateTotpCode,
   getUiAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * A TOTP code is accepted once: every place that checks one records the

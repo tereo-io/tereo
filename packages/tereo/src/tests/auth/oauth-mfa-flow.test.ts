@@ -11,7 +11,7 @@ import {
   startTotpSetup,
   loginToTotpSetup,
   createUserRequiringTotpSetup,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * MFA Authentication Flow Tests

@@ -7,7 +7,11 @@ import axios from "axios";
 import {
   createAppServiceAccount,
   TEST_SERVICE_ID,
-} from "../utils/testService.js";
+} from "../support/testService.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../support/principals.js";
 import {
   BASE_URL,
   getTestAccessToken,
@@ -15,11 +19,7 @@ import {
   uploadTestObject,
   uploadTestObjectAndGetId,
   waitFor,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestOrganization,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/files.js";
 
 // A bucket an app service declares belongs to no organization. Its events
 // are emitted without one and go only to endpoints of all organizations and

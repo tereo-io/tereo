@@ -1,4 +1,4 @@
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { generateIdToken } from "../../utils/tokens.js";
 import { currentSigningKey } from "../../utils/keys.js";
@@ -12,7 +12,7 @@ import {
   HTTP_STATUS,
   createTestUser,
   getJwtHeader,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * Access tokens carry `typ: at+jwt` (RFC 9068). One without it is from

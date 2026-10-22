@@ -7,7 +7,11 @@ import {
   cookieHeader,
   newPkce,
   type CookieJar,
-} from "../utils/browserLogin.js";
+} from "../support/browserLogin.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../support/principals.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -15,11 +19,7 @@ import {
   createTestRole,
   createTestUser,
   generateTotpCode,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestOrganization,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/auth.js";
 
 /**
  * 2FA made required after a password-only sign-in (a role the user holds

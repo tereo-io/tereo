@@ -1,11 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { processShareSweepTick } from "../../jobs/shareSweep.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
-import { TEST_SERVICE_ID } from "../utils/testService.js";
+import { TEST_SERVICE_ID } from "../support/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
+import { CORE_URL } from "../support/coreUrl.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
+import {
+  ensureTestMembership,
+  ensureTestUser,
+  getTestPrincipalToken,
+  testOrgId,
+} from "../support/principals.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -15,13 +21,7 @@ import {
   generateUniqueId,
   getTestAccessToken,
   uploadTestObject,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestMembership,
-  ensureTestUser,
-  getTestPrincipalToken,
-  testOrgId,
-} from "../utils/principals.js";
+} from "../support/files.js";
 
 // Everything a bucket owner does, but no `file-service.admin`.
 const MEMBER = [

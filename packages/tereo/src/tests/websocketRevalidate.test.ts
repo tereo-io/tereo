@@ -1,12 +1,8 @@
-import { connect, stillOpen, within } from "./auth/utils/socket.js";
-import { browserLogin } from "./utils/browserLogin.js";
+import { BASE_URL, createTestClient, createTestUser } from "./support/auth.js";
+import { connect, stillOpen, within } from "./support/socket.js";
+import { browserLogin } from "./support/browserLogin.js";
 import { createServer, type Server } from "node:http";
 import { describe, expect, it, vi } from "vitest";
-import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
-} from "./auth/utils/test-helpers.js";
 
 /**
  * A socket's token can die without anything closing the socket — its session

@@ -1,7 +1,7 @@
-import { FIXTURE_USER_IDS, ensureTestUser } from "../utils/principals.js";
-import { TEST_SERVICE, TEST_SERVICE_ID } from "../utils/testService.js";
+import { FIXTURE_USER_IDS, ensureTestUser } from "../support/principals.js";
+import { TEST_SERVICE, TEST_SERVICE_ID } from "../support/testService.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
@@ -13,7 +13,7 @@ import {
   createTestBucket,
   generateUniqueId,
   getTestAccessToken,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const MANAGER = [
   "file-service.buckets.delete",

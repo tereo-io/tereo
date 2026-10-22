@@ -9,7 +9,7 @@ import {
   cookieHeader,
   newPkce,
   type CookieJar,
-} from "../utils/browserLogin.js";
+} from "../support/browserLogin.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -18,7 +18,7 @@ import {
   createUserRequiringTotpSetup,
   generateTotpCode,
   loginToTotpSetup,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * A password checked just before the password changes must not leave a login

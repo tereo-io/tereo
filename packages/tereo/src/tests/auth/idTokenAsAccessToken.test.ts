@@ -6,7 +6,7 @@ import {
   createTestClient,
   createTestUser,
   getAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * ID tokens are signed with the access tokens' key and issuer, but carry no

@@ -18,7 +18,7 @@ import {
   cleanupTestEntities,
   createTestWebhookEndpoint,
   getTestAccessToken,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 const toLocalReceiver = async () =>
   createPinnedDispatcher([{ address: "127.0.0.1", family: 4 }]);

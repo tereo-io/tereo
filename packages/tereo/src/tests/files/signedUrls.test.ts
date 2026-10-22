@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
@@ -13,7 +13,7 @@ import {
   grantTestPermission,
   uploadTestObjectAndGetId,
   waitFor,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const anyStatus = { validateStatus: () => true, maxRedirects: 0 };
 

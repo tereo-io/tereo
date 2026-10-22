@@ -1,7 +1,7 @@
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
+import { makeServiceOf } from "../support/testService.js";
+import { browserLogin } from "../support/browserLogin.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { makeServiceOf } from "../utils/testService.js";
-import { browserLogin } from "../utils/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   BASE_URL,
@@ -9,7 +9,7 @@ import {
   createTestClient,
   createTestUser,
   decodeJwt,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * Core's own API admits core's UI and services with the user's full rights;

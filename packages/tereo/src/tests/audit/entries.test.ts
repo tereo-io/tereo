@@ -1,7 +1,10 @@
-import { ensureTestUser, getTestPrincipalToken } from "../utils/principals.js";
 import { describe, it, expect, afterEach, beforeAll } from "vitest";
 import crypto from "crypto";
 import axios from "axios";
+import {
+  ensureTestUser,
+  getTestPrincipalToken,
+} from "../support/principals.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -9,7 +12,7 @@ import {
   getTestOrgId,
   cleanupTestEntities,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/audit.js";
 
 describe("Audit Log Entries", () => {
   let token: string;

@@ -1,4 +1,4 @@
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
   BASE_URL,
@@ -6,7 +6,7 @@ import {
   createTestClient,
   createTestUser,
   getAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 describe("bearer scheme case", () => {
   let token: string;

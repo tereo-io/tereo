@@ -1,4 +1,4 @@
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { InvalidGrantError } from "../../utils/errors.js";
 import { handleRefreshToken } from "../../utils/auth.js";
 import { describe, it, expect, beforeAll } from "vitest";
@@ -12,7 +12,7 @@ import {
   createTestUser,
   createTestOrganization,
   addTestOrgMember,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * A refresh token issued under an organization stops working once the user

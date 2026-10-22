@@ -1,4 +1,4 @@
-import env from "../../env.js";
+import env from "../../../env.js";
 import crypto from "crypto";
 import {
   BLOB_HEADER_BYTES,
@@ -9,7 +9,7 @@ import {
   generateDek,
   unwrapDek,
   wrapDek,
-} from "../../utils/encryption.js";
+} from "../../../utils/encryption.js";
 
 // AES-GCM's IV and tag sizes, as utils/encryption.ts writes them.
 const IV_BYTES = 12;

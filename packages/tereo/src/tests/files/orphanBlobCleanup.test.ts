@@ -15,7 +15,7 @@ import {
   createTestFile,
   getTestAccessToken,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const jobsFor = async (hash: string) => {
   const jobs = await getOrphanBlobCleanupQueue().getJobs(

@@ -1,9 +1,18 @@
+import { confirmLogout } from "../support/browserLogin.js";
+import { makeServiceOf } from "../support/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { confirmLogout } from "../utils/browserLogin.js";
-import { makeServiceOf } from "../utils/testService.js";
 import { hashFlowToken } from "../../utils/crypto.js";
 import { prisma } from "../../utils/db/prisma.js";
 import env from "../../env.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../support/principals.js";
+import {
+  ID_TOKEN_HINT_GRACE_SECONDS,
+  generateAccessToken,
+  generateIdToken,
+} from "../../utils/tokens.js";
 import {
   BASE_URL,
   createTestClient,
@@ -14,16 +23,7 @@ import {
   generateTotpCode,
   generateUniqueId,
   getUiAccessTokenForUser,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestOrganization,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
-import {
-  ID_TOKEN_HINT_GRACE_SECONDS,
-  generateAccessToken,
-  generateIdToken,
-} from "../../utils/tokens.js";
+} from "../support/auth.js";
 
 /**
  * Session lifecycle: how long each credential lives, and whether logout and

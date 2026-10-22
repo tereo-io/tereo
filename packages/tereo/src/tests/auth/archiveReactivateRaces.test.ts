@@ -1,11 +1,11 @@
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   BASE_URL,
   createTestOrganization,
   createTestRole,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * Archiving needs the row inactive; a PATCH may reactivate it only while it

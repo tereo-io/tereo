@@ -11,7 +11,7 @@ import {
   getTestAccessToken,
   uploadTestObject,
   waitFor,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const FIRST = "https://first.bucket-cors.test";
 const SECOND = "https://second.bucket-cors.test";

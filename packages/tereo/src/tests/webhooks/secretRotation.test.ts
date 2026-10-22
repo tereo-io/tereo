@@ -1,8 +1,8 @@
 import { updateWebhookEndpoint } from "../../routes/v1/webhooks/webhooks/webhook/controllers.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { openEndpointSecrets } from "../../utils/webhookSecrets.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { signatureHeader } from "../../utils/webhookSigning.js";
-import { getTestPrincipalToken } from "../utils/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import type { Request, Response } from "express";
 import db from "../../utils/db/index.js";
@@ -20,7 +20,7 @@ import {
   PaginatedResponse,
   getTestOrgId,
   getTestUserId,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 const NON_EXISTENT_UUID = "00000000-0000-7000-8000-000000000000";
 const DAY_MS = 24 * 60 * 60 * 1000;

@@ -1,21 +1,13 @@
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import type { CustomRoleEntry } from "../../utils/provisioning/schema.js";
+import { removeRoles, removeServices } from "../support/provisioning.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateClientSecret } from "../../utils/crypto.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
-import { fetchJson } from "../utils/http.js";
+import { CORE_URL } from "../support/coreUrl.js";
+import { fetchJson } from "../support/http.js";
 import { randomBytes } from "crypto";
-import {
-  removeRoles,
-  removeServices,
-} from "../provisioning/utils/test-helpers.js";
-import {
-  createTestWebhookEndpoint,
-  getCoreEventSubscriberToken,
-  waitFor,
-} from "../webhooks/utils/test-helpers.js";
 import {
   applyProvisioning,
   deprovisionMissing,
@@ -30,7 +22,12 @@ import {
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/principals.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../support/webhooks.js";
 
 const createdSlugs: string[] = [];
 const createdRoleNames: string[] = [];

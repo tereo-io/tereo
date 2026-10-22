@@ -1,12 +1,16 @@
-import { absorbCookies, cookieHeader, newPkce } from "../utils/browserLogin.js";
 import { encryptTotpSecret, generateTotpSecret } from "../../utils/totp.js";
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import type { CookieJar } from "../utils/browserLogin.js";
+import type { CookieJar } from "../support/browserLogin.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { normalizeEmail } from "../../utils/email.js";
 import { getRedisClient } from "../../utils/redis.js";
 import { prisma } from "../../utils/db/prisma.js";
 import env from "../../env.js";
+import {
+  absorbCookies,
+  cookieHeader,
+  newPkce,
+} from "../support/browserLogin.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -14,7 +18,7 @@ import {
   createTestUser,
   generateTotpCode,
   getAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * The known-device cookie lets a browser that has logged in as an account

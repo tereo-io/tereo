@@ -8,7 +8,7 @@ import {
   createTestFile,
   getTestAccessToken,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const tarEntries = (buf: Buffer): Record<string, string> => {
   const out: Record<string, string> = {};

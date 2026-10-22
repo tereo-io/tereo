@@ -1,8 +1,8 @@
-import { getTestPrincipalToken } from "../../utils/principals.js";
-import { TEST_SERVICE } from "../../utils/testService.js";
-import { prisma } from "../../../utils/db/prisma.js";
-import { CORE_URL } from "../../utils/coreUrl.js";
+import { getTestPrincipalToken } from "./principals.js";
+import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes, randomUUID } from "crypto";
+import { TEST_SERVICE } from "./testService.js";
+import { CORE_URL } from "./coreUrl.js";
 import axios from "axios";
 
 export const BASE_URL = `${CORE_URL}/v1/webhooks`;

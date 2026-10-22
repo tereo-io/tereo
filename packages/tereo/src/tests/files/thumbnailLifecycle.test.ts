@@ -8,6 +8,10 @@ import db from "../../utils/db/index.js";
 import axios from "axios";
 import sharp from "sharp";
 import {
+  getOrphanBlobCleanupQueue,
+  getThumbnailGenerationQueue,
+} from "../../jobs/queues.js";
+import {
   BASE_URL,
   HTTP_STATUS,
   cleanupTestEntities,
@@ -16,11 +20,7 @@ import {
   testIdempotencyKey,
   uploadTestObject,
   waitFor,
-} from "./utils/test-helpers.js";
-import {
-  getOrphanBlobCleanupQueue,
-  getThumbnailGenerationQueue,
-} from "../../jobs/queues.js";
+} from "../support/files.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { setMasterKey } from "../../utils/masterKeys.js";
-import { BASE_URL } from "./utils/test-helpers.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { BASE_URL } from "../support/files.js";
 import FormData from "form-data";
 import env from "../../env.js";
 import crypto from "crypto";
@@ -21,7 +21,7 @@ import {
   createTestBucket,
   getTestAccessToken,
   testIdempotencyKey,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 /**
  * Integration tests for the rewrap-master-key CLI. The single-master-key test

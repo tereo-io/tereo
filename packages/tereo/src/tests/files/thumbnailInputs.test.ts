@@ -11,7 +11,7 @@ import {
   createTestBucket,
   getTestAccessToken,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const png = (width: number, height: number) =>
   sharp({

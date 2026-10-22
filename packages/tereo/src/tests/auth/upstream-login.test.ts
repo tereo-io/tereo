@@ -1,12 +1,12 @@
 import { encryptTotpSecret, generateTotpSecret } from "../../utils/totp.js";
-import { absorbCookies, cookieHeader } from "../utils/browserLogin.js";
-import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
-import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
+import { absorbCookies, cookieHeader } from "../support/browserLogin.js";
+import { startFakeOidcProvider } from "../support/fakeOidcProvider.js";
+import type { FakeOidcProvider } from "../support/fakeOidcProvider.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
-import type { CookieJar } from "../utils/browserLogin.js";
+import { getTestPrincipalToken } from "../support/principals.js";
+import type { CookieJar } from "../support/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
+import { CORE_URL } from "../support/coreUrl.js";
 import { randomUUID } from "node:crypto";
 import env from "../../env.js";
 import {
@@ -14,7 +14,7 @@ import {
   upstreamCallback,
   upstreamLogin,
   upstreamToCallback,
-} from "../utils/upstreamLogin.js";
+} from "../support/upstreamLogin.js";
 import {
   createTestClient,
   createTestRole,
@@ -22,7 +22,7 @@ import {
   decodeJwt,
   generateTotpCode,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 const REDIRECT_URI = "http://localhost:3000/callback";
 const SCOPE = "openid profile email";

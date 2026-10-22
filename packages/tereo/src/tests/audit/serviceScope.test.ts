@@ -1,28 +1,24 @@
+import { BASE_URL, HTTP_STATUS, generateUniqueId } from "../support/audit.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
+import { CORE_URL } from "../support/coreUrl.js";
 import axios from "axios";
 import {
   provisionService,
   removeServices,
   type ProvisionedService,
-} from "../provisioning/utils/test-helpers.js";
+} from "../support/provisioning.js";
 import {
   cleanup as cleanupIntegrations,
   createIntegration,
   grant,
   integrationToken,
-} from "../webhooks/utils/integrations.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/integrations.js";
 import {
   ensureTestOrganization,
   ensureTestUser,
   getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/principals.js";
 
 // A service reads the audit entries it wrote, under its own slug, across every
 // organization, with only audit-logs.read (audit_reader) or audit-logs.write

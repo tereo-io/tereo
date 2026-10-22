@@ -13,7 +13,7 @@ import {
   getTestAccessToken,
   createTestWebhookEndpoint,
   cleanupTestEntities,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

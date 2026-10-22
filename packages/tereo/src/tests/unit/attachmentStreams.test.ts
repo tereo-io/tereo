@@ -1,7 +1,7 @@
 import { openBlobRangeStream, openBlobStream } from "../../utils/storage.js";
 import { emailAdapter } from "../../utils/notifications/channels/email.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { encryptBuffer } from "../utils/blobCrypto.js";
+import { encryptBuffer } from "../support/pure/blobCrypto.js";
 import { PassThrough, type Readable } from "stream";
 import type { ReadStream } from "fs";
 import { createServer } from "net";

@@ -1,4 +1,4 @@
-import { decryptBuffer, encryptBuffer } from "../utils/blobCrypto.js";
+import { decryptBuffer, encryptBuffer } from "../support/pure/blobCrypto.js";
 import { openBlobRangeStream } from "../../utils/storage.js";
 import { describe, expect, it } from "vitest";
 import { Readable } from "stream";

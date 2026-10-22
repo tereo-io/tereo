@@ -19,7 +19,7 @@ export function loadTestEnv(): Record<string, string> {
   const here = path.dirname(fileURLToPath(import.meta.url));
   // A stand-in for the admin UI's build, so the suite covers the UI whether or
   // not the real one has been built.
-  const UI_DIST_PATH = path.join(here, "fixtures/ui-dist");
+  const UI_DIST_PATH = path.join(here, "../fixtures/ui-dist");
   // The partition tests wait out this timeout a dozen times. Kept above
   // Postgres's 1s deadlock_timeout, so their deadlock still is one.
   const PARTITION_DDL_LOCK_TIMEOUT_MS = "2000";
@@ -35,7 +35,7 @@ export function loadTestEnv(): Record<string, string> {
       PARTITION_DDL_LOCK_TIMEOUT_MS,
     };
   }
-  const envPath = path.resolve(here, "../../.env");
+  const envPath = path.resolve(here, "../../../.env");
   if (!existsSync(envPath)) {
     throw new Error(
       `.env not found at ${envPath} — copy .env.example and fill it in`
@@ -78,7 +78,7 @@ export function loadTestEnv(): Record<string, string> {
  * `./storage`, and the same one in every worktree that tests against it.
  */
 function testStoragePath(here: string, databaseUrl: string): string {
-  let root = path.resolve(here, "../..");
+  let root = path.resolve(here, "../../..");
   try {
     const common = execFileSync(
       "git",

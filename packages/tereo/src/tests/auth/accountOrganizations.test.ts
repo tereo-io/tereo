@@ -1,6 +1,6 @@
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
+import { browserLogin } from "../support/browserLogin.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { browserLogin } from "../utils/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes } from "crypto";
 import {
@@ -8,7 +8,7 @@ import {
   HTTP_STATUS,
   createTestClient,
   createTestUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * GET /v1/account/organizations: the caller's active memberships, or, for a

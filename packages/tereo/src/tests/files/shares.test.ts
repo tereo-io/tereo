@@ -16,7 +16,7 @@ import {
   getTestAccessToken,
   uploadTestObject,
   uploadTestObjectAndGetId,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 interface ShareResponse {
   id: string;

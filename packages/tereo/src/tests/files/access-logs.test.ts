@@ -13,7 +13,7 @@ import {
   cleanupTestEntities,
   testIdempotencyKey,
   waitFor,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 // The access log is written after the response is sent.
 const waitForAccessLog = async (where: Record<string, unknown>) => {

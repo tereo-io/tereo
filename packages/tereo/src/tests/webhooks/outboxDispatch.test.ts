@@ -13,7 +13,7 @@ import {
   createTestEventType,
   createTestWebhookEndpoint,
   cleanupTestEntities,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 describe("Outbox webhook dispatcher", () => {
   let token: string;

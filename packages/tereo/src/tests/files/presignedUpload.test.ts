@@ -11,7 +11,7 @@ import {
   getTestAccessToken,
   getTestUserId,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const ID = "018ebd2a-b2b3-7d1c-a7c2-3e3f9a1c8d00";
 const USER = "00000000-0000-7001-8000-000000000001";

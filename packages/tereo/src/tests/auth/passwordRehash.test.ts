@@ -5,7 +5,7 @@ import {
   createTestClient,
   createTestUser,
   getAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 const legacyHash = (password: string) => {
   const salt = randomBytes(32);

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
-import { makeServiceOf } from "../utils/testService.js";
+import { getTestPrincipalToken } from "../support/principals.js";
+import { makeServiceOf } from "../support/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   BASE_URL,
@@ -9,7 +9,7 @@ import {
   createAdminUser,
   createTestUser,
   getAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 interface SettingsResponse {
   totpPolicy?: "disabled" | "optional" | "required";

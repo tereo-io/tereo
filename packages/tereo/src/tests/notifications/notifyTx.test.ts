@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { ensureDailyPartitions } from "../../utils/partitions.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
-import { waitFor } from "../webhooks/utils/test-helpers.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { waitFor } from "../support/webhooks.js";
 import { notifyTx } from "../../utils/outbox.js";
 import {
   closeNotificationQueues,

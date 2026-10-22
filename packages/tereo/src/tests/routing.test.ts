@@ -1,8 +1,8 @@
-import { getTestAccessToken as getWebhooksToken } from "./webhooks/utils/test-helpers.js";
-import { getTestAccessToken as getAuditToken } from "./audit/utils/test-helpers.js";
-import { provisionService } from "./provisioning/utils/test-helpers.js";
+import { getTestAccessToken as getWebhooksToken } from "./support/webhooks.js";
+import { getTestAccessToken as getAuditToken } from "./support/audit.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CORE_URL } from "./utils/coreUrl.js";
+import { provisionService } from "./support/provisioning.js";
+import { CORE_URL } from "./support/coreUrl.js";
 import axios from "axios";
 import {
   BASE_URL as FILES_URL,
@@ -11,7 +11,7 @@ import {
   createTestFile,
   getTestAccessToken,
   uploadTestObjectAndGetId,
-} from "./files/utils/test-helpers.js";
+} from "./support/files.js";
 
 const ROOT = CORE_URL;
 

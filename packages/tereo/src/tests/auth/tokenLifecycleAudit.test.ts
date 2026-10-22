@@ -1,11 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import {
-  createTestWebhookEndpoint,
-  getCoreEventSubscriberToken,
-  waitFor,
-} from "../webhooks/utils/test-helpers.js";
-import {
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
 } from "../../definitions/index.js";
@@ -15,14 +10,19 @@ import {
   cookieHeader,
   newPkce,
   type CookieJar,
-} from "../utils/browserLogin.js";
+} from "../support/browserLogin.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../support/webhooks.js";
 import {
   BASE_URL,
   HTTP_STATUS,
   createTestClient,
   createTestUser,
   decodeJwt,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * What the token lifecycle leaves behind: audit entries and

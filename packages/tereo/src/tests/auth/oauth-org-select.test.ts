@@ -12,7 +12,7 @@ import {
   generateUniqueId,
   createTestOrganization,
   addTestOrgMember,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 interface OrgSelectGetResponse {
   organizations: Array<{ id: string; name: string; slug: string }>;

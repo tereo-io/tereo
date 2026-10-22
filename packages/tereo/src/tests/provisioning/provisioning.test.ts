@@ -3,20 +3,15 @@ import type { CustomRoleEntry } from "../../utils/provisioning/schema.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { openEndpointSecrets } from "../../utils/webhookSecrets.js";
 import { generateClientSecret } from "../../utils/crypto.js";
-import { TEST_SERVICE_ID } from "../utils/testService.js";
+import { TEST_SERVICE_ID } from "../support/testService.js";
 import { retireMissing } from "../../utils/registry.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { CORE_URL } from "../support/coreUrl.js";
 import { logger } from "../../utils/logger.js";
-import { CORE_URL } from "../utils/coreUrl.js";
-import { fetchJson } from "../utils/http.js";
+import { fetchJson } from "../support/http.js";
 import db from "../../utils/db/index.js";
 import { randomBytes } from "crypto";
 import env from "../../env.js";
-import {
-  createTestWebhookEndpoint,
-  getCoreEventSubscriberToken,
-  waitFor,
-} from "../webhooks/utils/test-helpers.js";
 import {
   applyProvisioning,
   deprovisionMissing,
@@ -43,11 +38,16 @@ import {
   removeLoginClients,
   removeRoles,
   removeServices,
-} from "./utils/test-helpers.js";
+} from "../support/provisioning.js";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/principals.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../support/webhooks.js";
 
 let adminToken: string;
 const createdSlugs: string[] = [];

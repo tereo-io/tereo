@@ -1,8 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
+import { CORE_URL } from "../support/coreUrl.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
+import {
+  ensureTestMembership,
+  getTestPrincipalToken,
+  testOrgId,
+} from "../support/principals.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -10,12 +15,7 @@ import {
   createTestBucket,
   createTestFile,
   uploadTestObject,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestMembership,
-  getTestPrincipalToken,
-  testOrgId,
-} from "../utils/principals.js";
+} from "../support/files.js";
 
 // Everything a bucket owner does, but no `file-service.admin`.
 const MEMBER = [

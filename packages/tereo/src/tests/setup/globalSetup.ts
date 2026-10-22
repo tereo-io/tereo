@@ -1,4 +1,4 @@
-import type { ServerInstance } from "../index.js";
+import type { ServerInstance } from "../../index.js";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -7,7 +7,7 @@ let server: ServerInstance | null = null;
 
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../.."
+  "../../.."
 );
 
 export async function setup() {
@@ -31,8 +31,8 @@ export async function setup() {
   run(["prisma", "migrate", "deploy"]);
   run(["tsx", "src/scripts/seed.ts"]);
 
-  const { prisma } = await import("../utils/db/prisma.js");
-  const { hashPassword } = await import("../utils/crypto.js");
+  const { prisma } = await import("../../utils/db/prisma.js");
+  const { hashPassword } = await import("../../utils/crypto.js");
 
   // Auth's admin-client tests register clients owned by this user. Created
   // here, not per worker, so parallel creation can't race.
@@ -50,14 +50,14 @@ export async function setup() {
   // Core's own permissions and roles, which fixtures and tests build on. The
   // server registers them again on start; unchanged, that is a no-op.
   const { ensureDefaultOrganization } =
-    await import("../utils/defaultOrganization.js");
-  const { registerCore } = await import("../utils/coreRegistration.js");
+    await import("../../utils/defaultOrganization.js");
+  const { registerCore } = await import("../../utils/coreRegistration.js");
   await ensureDefaultOrganization();
   await registerCore();
 
   // Users and organizations the suites reference by fixed id, and the test
   // service that owns what tests create directly.
-  const { seedTestFixtures } = await import("./utils/principals.js");
+  const { seedTestFixtures } = await import("../support/principals.js");
   await seedTestFixtures();
 
   // Setup is done for the suite; tests/setup/ puts it back to pending
@@ -67,17 +67,17 @@ export async function setup() {
     data: { setupCompletedAt: new Date(), setupCompletedBy: owner.id },
   });
 
-  const { createAppServer } = await import("../index.js");
+  const { createAppServer } = await import("../../index.js");
   server = createAppServer(Number(process.env.PORT ?? 4001));
   await server.start();
   delete process.env.NOTIFICATIONS_ALLOW_PRIVATE_HOSTS;
 }
 
 export async function teardown() {
-  const files = await import("./files/utils/test-helpers.js");
-  const webhooks = await import("./webhooks/utils/test-helpers.js");
-  const audit = await import("./audit/utils/test-helpers.js");
-  const provisioning = await import("./provisioning/utils/test-helpers.js");
+  const files = await import("../support/files.js");
+  const webhooks = await import("../support/webhooks.js");
+  const audit = await import("../support/audit.js");
+  const provisioning = await import("../support/provisioning.js");
   for (const cleanup of [
     files.cleanupAllTestEntities,
     webhooks.cleanupAllTestEntities,

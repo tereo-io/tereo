@@ -1,5 +1,5 @@
-import * as webhookHelpers from "../webhooks/utils/test-helpers.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import * as webhookHelpers from "../support/webhooks.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import type { Job } from "bullmq";
@@ -10,17 +10,17 @@ import {
   processLifecycleSweepPolicy,
 } from "../../jobs/lifecycleSweep.js";
 import {
+  getLifecyclePolicyQueue,
+  getLifecycleOrchestratorQueue,
+  getLifecyclePerObjectTtlQueue,
+} from "../../jobs/queues.js";
+import {
   cleanupTestEntities,
   createTestBucket,
   createTestFile,
   getTestAccessToken,
   uploadTestObject,
-} from "./utils/test-helpers.js";
-import {
-  getLifecyclePolicyQueue,
-  getLifecycleOrchestratorQueue,
-  getLifecyclePerObjectTtlQueue,
-} from "../../jobs/queues.js";
+} from "../support/files.js";
 import {
   afterAll,
   afterEach,

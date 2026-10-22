@@ -1,5 +1,5 @@
-import { createTestUser } from "./utils/test-helpers.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { createTestUser } from "../support/auth.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import { randomBytes } from "crypto";

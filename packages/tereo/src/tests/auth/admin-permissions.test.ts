@@ -1,5 +1,5 @@
 import { CORE_SERVICE, CORE_SERVICE_ID } from "../../definitions/index.js";
-import { TEST_SERVICE, makeServiceOf } from "../utils/testService.js";
+import { TEST_SERVICE, makeServiceOf } from "../support/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import {
@@ -13,7 +13,7 @@ import {
   createTestPermission,
   createTestRole,
   getAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 interface PermissionResponse {
   id: string;

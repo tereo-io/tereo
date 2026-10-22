@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import axios from "axios";
 import {
@@ -12,7 +12,7 @@ import {
   getCoreEventSubscriberToken,
   cleanupTestEntities,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 const OTHER_ORG = "00000000-0000-7002-8000-000000000001";
 

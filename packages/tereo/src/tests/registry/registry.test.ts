@@ -1,11 +1,11 @@
-import { uploadTestObject, waitFor } from "../files/utils/test-helpers.js";
-import { getTestPrincipalToken } from "../utils/principals.js";
-import { TEST_SERVICE_ID } from "../utils/testService.js";
+import { getTestPrincipalToken } from "../support/principals.js";
+import { uploadTestObject, waitFor } from "../support/files.js";
+import { TEST_SERVICE_ID } from "../support/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { CORE_VERSION } from "../../utils/version.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
-import { fetchJson } from "../utils/http.js";
+import { CORE_URL } from "../support/coreUrl.js";
+import { fetchJson } from "../support/http.js";
 import db from "../../utils/db/index.js";
 import { randomBytes } from "crypto";
 import FormData from "form-data";
@@ -15,7 +15,7 @@ import {
   provisionService,
   provisionServices,
   type ProvisionSpec,
-} from "../provisioning/utils/test-helpers.js";
+} from "../support/provisioning.js";
 import {
   CORE_DECLARATION,
   CORE_SERVICE_ID,

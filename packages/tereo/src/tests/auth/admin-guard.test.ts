@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import {
@@ -7,7 +7,7 @@ import {
   HTTP_STATUS,
   createTestUser,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * The last-admin guard. Other suites leave admins behind, so this file sets

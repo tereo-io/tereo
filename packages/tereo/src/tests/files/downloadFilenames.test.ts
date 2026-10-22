@@ -9,7 +9,7 @@ import {
   createTestFile,
   getTestAccessToken,
   uploadTestObjectAndGetId,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const CYRILLIC = "Отчёт.zip";
 const EMOJI = "report 📦 (final).pdf";

@@ -1,7 +1,7 @@
 import { InvalidGrantError } from "../../utils/errors.js";
+import { browserLogin } from "../support/browserLogin.js";
 import { handleRefreshToken } from "../../utils/auth.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { browserLogin } from "../utils/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import {
@@ -10,7 +10,7 @@ import {
   createTestClient,
   createTestUser,
   getAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * Signing out everywhere must also reach the token families being created

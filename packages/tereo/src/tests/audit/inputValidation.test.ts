@@ -7,7 +7,7 @@ import {
   getTestAccessToken,
   cleanupTestEntities,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/audit.js";
 
 const ORG_1 = "00000000-0000-7002-8000-000000000001";
 const USER_1 = "00000000-0000-7001-8000-000000000001";

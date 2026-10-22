@@ -10,7 +10,7 @@ import {
   getTestUserId,
   createTestWebhookEndpoint,
   cleanupTestEntities,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 import {
   describe,
   it,

@@ -8,7 +8,7 @@ import {
   createTestWebhookEndpoint,
   cleanupTestEntities,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 describe("Expect as a custom webhook header", () => {
   let token: string;

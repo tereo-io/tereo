@@ -1,4 +1,4 @@
-import { BASE_URL, HTTP_STATUS } from "./utils/test-helpers.js";
+import { BASE_URL, HTTP_STATUS } from "../support/auth.js";
 import { describe, it, expect } from "vitest";
 
 interface OIDCConfig {

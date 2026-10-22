@@ -15,7 +15,7 @@ import {
   getTestAccessToken,
   testIdempotencyKey,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];

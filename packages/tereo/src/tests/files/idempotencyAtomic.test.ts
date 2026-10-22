@@ -4,17 +4,17 @@ import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import {
+  discardStagedFile,
+  getBlobPath,
+  saveBlobBuffer,
+} from "../../utils/storage.js";
+import {
   cleanupTestEntities,
   createTestBucket,
   getTestAccessToken,
   getTestUserId,
   testIdempotencyKey,
-} from "./utils/test-helpers.js";
-import {
-  discardStagedFile,
-  getBlobPath,
-  saveBlobBuffer,
-} from "../../utils/storage.js";
+} from "../support/files.js";
 
 describe("idempotency record in the write's transaction", () => {
   let bucket: { id: number; name: string };

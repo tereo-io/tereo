@@ -10,7 +10,7 @@ import {
   createTestFile,
   getTestAccessToken,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

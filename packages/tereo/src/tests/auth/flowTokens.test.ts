@@ -8,7 +8,7 @@ import {
   cookieHeader,
   newPkce,
   userSessionCookieName,
-} from "../utils/browserLogin.js";
+} from "../support/browserLogin.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -20,7 +20,7 @@ import {
   generateTotpCode,
   getAccessTokenForUser,
   getUiAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * The 2FA, org-select and consent steps of a login each hand the browser a

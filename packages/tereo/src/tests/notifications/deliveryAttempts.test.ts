@@ -16,7 +16,7 @@ import {
 import {
   startFakeSmtpServer,
   type FakeSmtpServer,
-} from "../utils/fakeSmtpServer.js";
+} from "../support/fakeSmtpServer.js";
 import {
   describe,
   it,

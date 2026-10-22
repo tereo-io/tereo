@@ -1,8 +1,8 @@
-import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
-import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
+import { startFakeOidcProvider } from "../support/fakeOidcProvider.js";
+import type { FakeOidcProvider } from "../support/fakeOidcProvider.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
-import { browserLogin } from "../utils/browserLogin.js";
+import { getTestPrincipalToken } from "../support/principals.js";
+import { browserLogin } from "../support/browserLogin.js";
 import { hashFlowToken } from "../../utils/crypto.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
@@ -15,7 +15,7 @@ import {
   getUiAccessTokenForUser,
   loginToTotpSetup,
   startTotpSetup,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * What a sign-out everywhere must not leave behind: a 2FA setup begun from

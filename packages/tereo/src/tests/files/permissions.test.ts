@@ -2,6 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "crypto";
 import axios from "axios";
 import {
+  ensureTestMembership,
+  ensureTestUser,
+  getTestPrincipalToken,
+} from "../support/principals.js";
+import {
   BASE_URL,
   HTTP_STATUS,
   getTestAccessToken,
@@ -11,12 +16,7 @@ import {
   cleanupTestEntities,
   createTestFile,
   uploadTestObject,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestMembership,
-  ensureTestUser,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/files.js";
 
 interface PermissionResponse {
   id: number;

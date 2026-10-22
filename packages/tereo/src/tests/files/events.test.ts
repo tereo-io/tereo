@@ -4,11 +4,16 @@ import { prisma } from "../../utils/db/prisma.js";
 import { createHash, randomUUID } from "crypto";
 import axios from "axios";
 import {
+  FIXTURE_ORGANIZATION_IDS,
+  ensureTestMembership,
+  getTestPrincipalToken,
+} from "../support/principals.js";
+import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   cleanupTestEntities as cleanupWebhookEntities,
   waitFor,
-} from "../webhooks/utils/test-helpers.js";
+} from "../support/webhooks.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -17,12 +22,7 @@ import {
   createTestFile,
   grantTestPermission,
   uploadTestObject,
-} from "./utils/test-helpers.js";
-import {
-  FIXTURE_ORGANIZATION_IDS,
-  ensureTestMembership,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/files.js";
 
 const ORG_ID = FIXTURE_ORGANIZATION_IDS[0];
 

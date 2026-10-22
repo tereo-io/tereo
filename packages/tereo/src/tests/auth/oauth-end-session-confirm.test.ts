@@ -1,3 +1,4 @@
+import { BASE_URL, createTestClient, createTestUser } from "../support/auth.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { hashFlowToken } from "../../utils/crypto.js";
 import { prisma } from "../../utils/db/prisma.js";
@@ -8,12 +9,7 @@ import {
   cookieHeader,
   userSessionCookieName,
   type CookieJar,
-} from "../utils/browserLogin.js";
-import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
-} from "./utils/test-helpers.js";
+} from "../support/browserLogin.js";
 
 /**
  * End-session without an id_token_hint: anything can send a browser there,

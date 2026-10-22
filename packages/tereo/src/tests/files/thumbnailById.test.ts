@@ -12,7 +12,7 @@ import {
   createTestBucket,
   getTestAccessToken,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 describe("thumbnails are not addressable by their own id", () => {
   let token: string;

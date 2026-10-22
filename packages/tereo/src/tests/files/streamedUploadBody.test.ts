@@ -11,7 +11,7 @@ import {
   getTestAccessToken,
   testIdempotencyKey,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 // A body whose Content-Type a JSON or form parser would match must still be
 // stored byte for byte by the streamed upload routes.

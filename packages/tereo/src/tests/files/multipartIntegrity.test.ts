@@ -15,6 +15,10 @@ import {
   createMultipartPartEncryptStream,
 } from "../../utils/encryption.js";
 import {
+  FIXTURE_USER_IDS,
+  getTestPrincipalToken,
+} from "../support/principals.js";
+import {
   BASE_URL,
   HTTP_STATUS,
   cleanupTestEntities,
@@ -23,11 +27,7 @@ import {
   grantTestPermission,
   testIdempotencyKey,
   waitFor,
-} from "./utils/test-helpers.js";
-import {
-  FIXTURE_USER_IDS,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/files.js";
 
 const MIN_PART = env.FILE_SERVICE_MIN_PART_SIZE_MB * 1024 * 1024;
 

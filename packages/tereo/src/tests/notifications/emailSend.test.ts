@@ -10,7 +10,7 @@ import env from "../../env.js";
 import {
   startFakeSmtpServer,
   type FakeSmtpServer,
-} from "../utils/fakeSmtpServer.js";
+} from "../support/fakeSmtpServer.js";
 
 type Ctx = SendContext<
   Parameters<typeof emailAdapter.validate>[0]["settings"],

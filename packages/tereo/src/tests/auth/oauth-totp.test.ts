@@ -13,7 +13,7 @@ import {
   loginToTotpSetup,
   startTotpSetup,
   createUserRequiringTotpSetup,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 interface TotpVerifyResponse {
   redirect_url?: string;

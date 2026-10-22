@@ -1,31 +1,35 @@
-import { absorbCookies, cookieHeader, newPkce } from "../utils/browserLogin.js";
+import { UPSTREAM_COOKIE, upstreamLogin } from "../support/upstreamLogin.js";
 import { encryptTotpSecret, generateTotpSecret } from "../../utils/totp.js";
-import { UPSTREAM_COOKIE, upstreamLogin } from "../utils/upstreamLogin.js";
-import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
-import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
+import { startFakeOidcProvider } from "../support/fakeOidcProvider.js";
+import type { FakeOidcProvider } from "../support/fakeOidcProvider.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
-import type { CookieJar } from "../utils/browserLogin.js";
+import { getTestPrincipalToken } from "../support/principals.js";
+import type { CookieJar } from "../support/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
+import { CORE_URL } from "../support/coreUrl.js";
 import { randomUUID } from "node:crypto";
 import env from "../../env.js";
 import {
-  createTestWebhookEndpoint,
-  getCoreEventSubscriberToken,
-  waitFor,
-} from "../webhooks/utils/test-helpers.js";
+  absorbCookies,
+  cookieHeader,
+  newPkce,
+} from "../support/browserLogin.js";
 import {
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
 } from "../../definitions/index.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../support/webhooks.js";
 import {
   createTestClient,
   createTestUser,
   decodeJwt,
   generateTotpCode,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 const REDIRECT_URI = "http://localhost:3000/callback";
 const SCOPE = "openid profile email";

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
@@ -13,7 +13,7 @@ import {
   cleanupTestEntities,
   generateUniqueId,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 interface BucketResponse {
   id: number;

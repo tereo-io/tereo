@@ -11,7 +11,7 @@ import {
   getTestAccessToken,
   testIdempotencyKey,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const put = (
   token: string,

@@ -1,8 +1,8 @@
 import { LOGIN_CLIENT, loginClientConfig } from "../../definitions/index.js";
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { ensureLoginClient } from "../../utils/loginClient.js";
-import { browserLogin } from "../utils/browserLogin.js";
+import { browserLogin } from "../support/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import env from "../../env.js";
 import {
@@ -10,7 +10,7 @@ import {
   HTTP_STATUS,
   createTestClient,
   createTestUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 type Client = { clientId: string; redirectUris: string[] };
 

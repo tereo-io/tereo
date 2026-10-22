@@ -1,7 +1,7 @@
-import { getTestPrincipalToken } from "../../utils/principals.js";
-import { prisma } from "../../../utils/db/prisma.js";
-import { CORE_URL } from "../../utils/coreUrl.js";
+import { getTestPrincipalToken } from "./principals.js";
+import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes, randomUUID } from "crypto";
+import { CORE_URL } from "./coreUrl.js";
 import FormData from "form-data";
 import axios from "axios";
 

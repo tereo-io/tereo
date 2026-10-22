@@ -1,5 +1,5 @@
+import { makeServiceOf } from "../support/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { makeServiceOf } from "../utils/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   BASE_URL,
@@ -12,7 +12,7 @@ import {
   generateUniqueId,
   TokenResponse,
   IntrospectResponse,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 interface AuthorizeResponse {
   redirect_url?: string;
@@ -693,7 +693,7 @@ describe("OAuth Introspect Endpoint", () => {
     });
 
     it("lets a service in a login client's audience introspect that client's user tokens", async () => {
-      const { browserLogin } = await import("../utils/browserLogin.js");
+      const { browserLogin } = await import("../support/browserLogin.js");
       const { prisma } = await import("../../utils/db/prisma.js");
       const inAudience = await createTestClient({
         clientType: "confidential",

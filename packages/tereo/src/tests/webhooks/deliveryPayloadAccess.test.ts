@@ -1,27 +1,27 @@
 import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { dispatchOutboxEvent } from "../../utils/processEvent.js";
-import { ensurePermission } from "../utils/testService.js";
+import { ensurePermission } from "../support/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
 import {
-  createTestBucket,
-  grantTestPermission,
-  getTestAccessToken as getFilesToken,
-} from "../files/utils/test-helpers.js";
+  ensureTestMembership,
+  getTestPrincipalToken,
+  testOrgId,
+} from "../support/principals.js";
 import {
   BASE_URL,
   HTTP_STATUS,
   cleanupTestEntities,
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 import {
-  ensureTestMembership,
-  getTestPrincipalToken,
-  testOrgId,
-} from "../utils/principals.js";
+  createTestBucket,
+  grantTestPermission,
+  getTestAccessToken as getFilesToken,
+} from "../support/files.js";
 
 // A stored delivery carries the event as it was sent. Whoever views it sees
 // the payload, and the receiver's response that may echo it, only if they

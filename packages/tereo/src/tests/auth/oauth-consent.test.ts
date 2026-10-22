@@ -9,7 +9,7 @@ import {
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 describe("OAuth Consent Endpoint", () => {
   let testClient: Awaited<ReturnType<typeof createTestClient>>;

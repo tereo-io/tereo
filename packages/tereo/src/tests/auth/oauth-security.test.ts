@@ -1,4 +1,4 @@
-import { expectAuthorizeErrorRedirect } from "./utils/authorizeErrors.js";
+import { expectAuthorizeErrorRedirect } from "../support/pure/authorizeErrors.js";
 import { hashAuthorizationCode } from "../../utils/crypto.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
@@ -13,7 +13,7 @@ import {
   generateUniqueId,
   TokenResponse,
   decodeJwt,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 interface AuthorizeResponse {
   redirect_url?: string;

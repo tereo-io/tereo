@@ -1,20 +1,20 @@
 import { encryptTotpSecret, generateTotpSecret } from "../../utils/totp.js";
-import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
-import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
+import { startFakeOidcProvider } from "../support/fakeOidcProvider.js";
+import type { FakeOidcProvider } from "../support/fakeOidcProvider.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
-import { upstreamLogin } from "../utils/upstreamLogin.js";
+import { getTestPrincipalToken } from "../support/principals.js";
+import { upstreamLogin } from "../support/upstreamLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "node:crypto";
-import {
-  createTestWebhookEndpoint,
-  getCoreEventSubscriberToken,
-  waitFor,
-} from "../webhooks/utils/test-helpers.js";
 import {
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
 } from "../../definitions/index.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../support/webhooks.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -27,7 +27,7 @@ import {
   generateUniqueId,
   createTestOrganization,
   addTestOrgMember,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 interface UserResponse {
   id?: string;

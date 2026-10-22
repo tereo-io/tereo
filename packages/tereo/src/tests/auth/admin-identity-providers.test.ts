@@ -1,12 +1,12 @@
 import { openProviderSecret } from "../../utils/identityProviders/clientSecret.js";
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { startFakeOidcProvider } from "../utils/fakeOidcProvider.js";
-import type { FakeOidcProvider } from "../utils/fakeOidcProvider.js";
+import { startFakeOidcProvider } from "../support/fakeOidcProvider.js";
+import type { FakeOidcProvider } from "../support/fakeOidcProvider.js";
 import { mapUniqueViolation } from "../../utils/prismaErrors.js";
-import { ensurePermission } from "../utils/testService.js";
+import { ensurePermission } from "../support/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
+import { CORE_URL } from "../support/coreUrl.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -16,25 +16,25 @@ import {
   type SsoOnlySessionSweepJobData,
 } from "../../jobs/ssoOnlySessionSweep.js";
 import {
-  createTestWebhookEndpoint,
-  getCoreEventSubscriberToken,
-  waitFor,
-} from "../webhooks/utils/test-helpers.js";
-import {
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
 } from "../../definitions/index.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../support/principals.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../support/webhooks.js";
 import {
   createTestClient,
   createTestRole,
   createTestUser,
   generateUniqueId,
   getAccessTokenForUser,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestOrganization,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/auth.js";
 
 declare global {
   interface Response {

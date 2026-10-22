@@ -1,3 +1,4 @@
+import { BASE_URL, createTestClient, createTestUser } from "../support/auth.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import env from "../../env.js";
@@ -6,12 +7,7 @@ import {
   browserLogin,
   cookieHeader,
   confirmLogout,
-} from "../utils/browserLogin.js";
-import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
-} from "./utils/test-helpers.js";
+} from "../support/browserLogin.js";
 
 /**
  * A POST that acts on the browser's cookies is refused when it comes from a

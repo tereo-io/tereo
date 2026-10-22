@@ -1,17 +1,17 @@
 import { generateRandomString, hashFlowToken } from "../../utils/crypto.js";
 import type { Request, Response as ExpressResponse } from "express";
-import { ensureTestOrganization } from "../utils/principals.js";
+import { ensureTestOrganization } from "../support/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { hashPassword } from "../../utils/crypto.js";
+import { newPkce } from "../support/browserLogin.js";
 import { OAuth2Error } from "../../utils/errors.js";
-import { newPkce } from "../utils/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import {
   createTestClient,
   createTestUser,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * The consent and org-select steps are consumed under the user's lock, in

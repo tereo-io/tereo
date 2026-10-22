@@ -1,4 +1,4 @@
-import { expectAuthorizeErrorRedirect } from "./utils/authorizeErrors.js";
+import { expectAuthorizeErrorRedirect } from "../support/pure/authorizeErrors.js";
 import { createHash, generateKeyPairSync, randomBytes } from "crypto";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { currentSigningKey } from "../../utils/keys.js";
@@ -15,18 +15,18 @@ import {
   newPkce,
   userSessionCookieName,
   type CookieJar,
-} from "../utils/browserLogin.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  OAUTH_ERRORS,
-  fetchDiscoveryDocument,
-} from "./utils/test-helpers.js";
+} from "../support/browserLogin.js";
 import {
   ID_TOKEN_HINT_GRACE_SECONDS,
   generateIdToken,
   generateAccessToken,
 } from "../../utils/tokens.js";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+  OAUTH_ERRORS,
+  fetchDiscoveryDocument,
+} from "../support/auth.js";
 
 /**
  * OIDC Compliance Tests

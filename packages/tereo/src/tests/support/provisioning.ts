@@ -1,9 +1,9 @@
-import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
-import type { ResolvedService } from "../../../utils/provisioning/load.js";
-import { applyProvisioning } from "../../../utils/provisioning/index.js";
-import { removeBuckets } from "../../files/utils/test-helpers.js";
-import { generateClientSecret } from "../../../utils/crypto.js";
-import { prisma } from "../../../utils/db/prisma.js";
+import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
+import type { ResolvedService } from "../../utils/provisioning/load.js";
+import { applyProvisioning } from "../../utils/provisioning/index.js";
+import { generateClientSecret } from "../../utils/crypto.js";
+import { prisma } from "../../utils/db/prisma.js";
+import { removeBuckets } from "./files.js";
 import { randomBytes } from "crypto";
 import type { z } from "zod";
 import {
@@ -11,7 +11,7 @@ import {
   eventTypeItem,
   permissionItem,
   systemRoleItem,
-} from "../../../utils/registry.js";
+} from "../../utils/registry.js";
 
 // Production never deletes a service or an integration; tests do, with
 // everything that would otherwise hold it: its buckets with their objects, its

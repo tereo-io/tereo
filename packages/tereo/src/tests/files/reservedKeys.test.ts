@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import FormData from "form-data";
 import axios from "axios";
@@ -12,7 +12,7 @@ import {
   getTestAccessToken,
   testIdempotencyKey,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 // Keys the objects router answers with its own routes, and where generated
 // thumbnails live. Routes match case-insensitively, so their case variants too.

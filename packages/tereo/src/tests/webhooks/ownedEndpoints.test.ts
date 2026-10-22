@@ -1,15 +1,15 @@
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
-import { removeServices } from "../provisioning/utils/test-helpers.js";
 import { processWebhookDelivery } from "../../jobs/webhookDelivery.js";
 import { applyProvisioning } from "../../utils/provisioning/index.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createPinnedDispatcher } from "../../utils/ssrfGuard.js";
-import { BASE_URL, HTTP_STATUS } from "./utils/test-helpers.js";
+import { BASE_URL, HTTP_STATUS } from "../support/webhooks.js";
 import { generateClientSecret } from "../../utils/crypto.js";
 import { createHmac, randomBytes, randomUUID } from "crypto";
+import { removeServices } from "../support/provisioning.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
+import { CORE_URL } from "../support/coreUrl.js";
 import db from "../../utils/db/index.js";
 import axios from "axios";
 import http from "http";
@@ -21,7 +21,7 @@ import {
   ensureTestMembership,
   ensureTestOrganization,
   getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/principals.js";
 
 // An endpoint a service's provisioning document subscribes it to: owned by
 // the service, created by its account, for every organization unless it lists

@@ -1,26 +1,26 @@
 import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { dispatchOutboxEvent } from "../../utils/processEvent.js";
-import { ensurePermission } from "../utils/testService.js";
+import { ensurePermission } from "../support/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
 import {
-  createTestBucket,
-  grantTestPermission,
-  getTestAccessToken as getFilesToken,
-} from "../files/utils/test-helpers.js";
+  ensureTestMembership,
+  getTestPrincipalToken,
+  testOrgId,
+} from "../support/principals.js";
 import {
   BASE_URL,
   HTTP_STATUS,
   cleanupTestEntities,
   createTestEventType,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 import {
-  ensureTestMembership,
-  getTestPrincipalToken,
-  testOrgId,
-} from "../utils/principals.js";
+  createTestBucket,
+  grantTestPermission,
+  getTestAccessToken as getFilesToken,
+} from "../support/files.js";
 
 // An endpoint acts as its creator: it is sent an event only while the creator
 // is active and could read the event — the event type's read permission in

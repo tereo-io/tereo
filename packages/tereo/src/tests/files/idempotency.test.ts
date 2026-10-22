@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withIdempotency } from "../../utils/uploadIdempotency.js";
-import { FIXTURE_USER_IDS } from "../utils/principals.js";
+import { FIXTURE_USER_IDS } from "../support/principals.js";
 import FormData from "form-data";
 import axios from "axios";
 import {
@@ -11,7 +11,7 @@ import {
   createTestFile,
   getTestAccessToken,
   testIdempotencyKey,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const putObject = async (
   token: string,

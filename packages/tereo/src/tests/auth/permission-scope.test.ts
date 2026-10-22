@@ -1,18 +1,14 @@
-import { ensurePermission, makeServiceOf } from "../utils/testService.js";
+import { BASE_URL, HTTP_STATUS, createTestClient } from "../support/auth.js";
+import { ensurePermission, makeServiceOf } from "../support/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-} from "./utils/test-helpers.js";
 import {
   ensureTestMembership,
   ensureTestOrganization,
   ensureTestUser,
   getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/principals.js";
 
 /**
  * A role held in an organization counts only where that organization is

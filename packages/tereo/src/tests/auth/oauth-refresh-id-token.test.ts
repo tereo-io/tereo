@@ -1,12 +1,12 @@
+import { browserLogin } from "../support/browserLogin.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { browserLogin } from "../utils/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   BASE_URL,
   createTestClient,
   createTestUser,
   decodeJwt,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * OIDC Core 12.2: a refresh of an openid grant returns a fresh ID token for

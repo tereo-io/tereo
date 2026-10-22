@@ -1,17 +1,22 @@
+import { createAppServiceAccount } from "../support/testService.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { ensureDailyPartitions } from "../../utils/partitions.js";
-import { createAppServiceAccount } from "../utils/testService.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
-import { waitFor } from "../webhooks/utils/test-helpers.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { waitFor } from "../support/webhooks.js";
 import { randomBytes, randomUUID } from "crypto";
-import { CORE_URL } from "../utils/coreUrl.js";
-import { fetchJson } from "../utils/http.js";
+import { CORE_URL } from "../support/coreUrl.js";
+import { fetchJson } from "../support/http.js";
 import axios from "axios";
 import {
   closeNotificationQueues,
   getNotificationQueue,
 } from "../../jobs/notificationQueues.js";
+import {
+  ensureTestOrganization,
+  ensureTestUser,
+  getTestPrincipalToken,
+} from "../support/principals.js";
 import {
   BASE_URL,
   cleanupTestEntities,
@@ -20,12 +25,7 @@ import {
   getTestAccessToken,
   grantTestPermission,
   uploadTestObjectAndGetId,
-} from "../files/utils/test-helpers.js";
-import {
-  ensureTestOrganization,
-  ensureTestUser,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/files.js";
 
 const BASE = `${CORE_URL}/v1/notifications`;
 

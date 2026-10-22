@@ -12,7 +12,7 @@ import {
   getTestAccessToken,
   getTestOrgId,
   waitFor,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 const DESTINATION = "dead-letter-test";
 const DAY_MS = 24 * 60 * 60 * 1000;

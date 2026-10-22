@@ -1,13 +1,13 @@
 import { encryptTotpSecret, generateTotpSecret } from "../../utils/totp.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
-} from "../webhooks/utils/test-helpers.js";
+} from "../support/webhooks.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -17,7 +17,7 @@ import {
   generateTotpCode,
   getAccessTokenForUser,
   getUiAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 interface AccountResponse {
   id?: string;

@@ -10,7 +10,7 @@ import {
   cleanupTestEntities,
   getTestOrgId,
   getTestUserId,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 // A mask means "keep the stored value": it must resolve against the row as it
 // is when the PATCH writes, or a header changed since the PATCH's first read

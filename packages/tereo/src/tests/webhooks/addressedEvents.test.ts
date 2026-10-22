@@ -1,10 +1,10 @@
 import { emitTx, PermanentDispatchError } from "../../utils/outbox.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { dispatchOutboxEvent } from "../../utils/processEvent.js";
-import { TEST_SERVICE } from "../utils/testService.js";
+import { TEST_SERVICE } from "../support/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
-import { fetchJson } from "../utils/http.js";
+import { CORE_URL } from "../support/coreUrl.js";
+import { fetchJson } from "../support/http.js";
 import { randomUUID } from "crypto";
 import {
   cleanup,
@@ -14,11 +14,11 @@ import {
   readableEventType,
   revoke,
   type TestIntegration,
-} from "./utils/integrations.js";
+} from "../support/integrations.js";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/principals.js";
 
 // An event addressed to `recipients` (service or integration slugs) goes
 // only to endpoints those recipients own, each still gated by its owner's

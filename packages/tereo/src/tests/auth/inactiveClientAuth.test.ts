@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { makeServiceOf } from "../utils/testService.js";
+import { makeServiceOf } from "../support/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   BASE_URL,
@@ -8,7 +8,7 @@ import {
   createTestClient,
   createTestUser,
   type TokenResponse,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * A deactivated service's or integration's secret authenticates nowhere:

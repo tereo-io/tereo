@@ -1,4 +1,4 @@
-import { BASE_URL } from "./test-helpers.js";
+import { BASE_URL } from "./auth.js";
 
 export interface TestSocket {
   /** Resolves with the connect result: null, or the handshake's error. */

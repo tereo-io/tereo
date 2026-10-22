@@ -1,8 +1,8 @@
 import { CORE_SERVICE_ID, SYSTEM_USER_ID } from "../../definitions/index.js";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
-import { fetchJson } from "../utils/http.js";
+import { fetchJson } from "../support/http.js";
 import db from "../../utils/db/index.js";
 import {
   BASE_URL,
@@ -12,7 +12,7 @@ import {
   createTestRole,
   createTestUser,
   getUiAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 // Who may grant what: only what you hold (users, roles, organizations),
 // org-assignable permissions, inactive organizations, which users can be

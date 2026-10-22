@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
-import { ensureTestUser } from "../utils/principals.js";
+import { ensureTestUser } from "../support/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
@@ -14,7 +14,7 @@ import {
   getTestAccessToken,
   grantTestPermission,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

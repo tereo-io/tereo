@@ -1,8 +1,8 @@
-import { getTestAccessToken as getAuditToken } from "./audit/utils/test-helpers.js";
-import { getTestAccessToken } from "./files/utils/test-helpers.js";
-import { HTTP_STATUS } from "./files/utils/test-helpers.js";
+import { getTestAccessToken as getAuditToken } from "./support/audit.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { CORE_URL } from "./utils/coreUrl.js";
+import { getTestAccessToken } from "./support/files.js";
+import { HTTP_STATUS } from "./support/files.js";
+import { CORE_URL } from "./support/coreUrl.js";
 
 const BASE_URL = CORE_URL;
 

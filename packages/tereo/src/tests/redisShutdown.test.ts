@@ -1,4 +1,4 @@
-import { startRedisProxy, withinMs } from "./utils/redisOutage.js";
+import { startRedisProxy, withinMs } from "./support/redisOutage.js";
 import { describe, expect, it } from "vitest";
 import env from "../env.js";
 import {

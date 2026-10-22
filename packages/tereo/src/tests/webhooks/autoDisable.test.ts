@@ -8,7 +8,7 @@ import {
   getTestAccessToken,
   createTestWebhookEndpoint,
   cleanupTestEntities,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 describe("Auto-Disable Endpoints", () => {
   let testToken: string;

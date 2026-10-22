@@ -14,7 +14,7 @@ import {
   generateUniqueId,
   WebhookEndpointResponse,
   PaginatedResponse,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 const MASK = HEADER_VALUE_MASK;
 

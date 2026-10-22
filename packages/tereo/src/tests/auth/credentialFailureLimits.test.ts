@@ -1,12 +1,16 @@
-import { absorbCookies, cookieHeader, newPkce } from "../utils/browserLogin.js";
 import { encryptTotpSecret, generateTotpSecret } from "../../utils/totp.js";
 import { beginPasswordAttempt } from "../../utils/passwordAttempts.js";
 import { getRedisClient, redisKey } from "../../utils/redis.js";
 import { describe, it, expect, beforeAll, vi } from "vitest";
-import type { CookieJar } from "../utils/browserLogin.js";
+import type { CookieJar } from "../support/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "node:crypto";
 import type { Request } from "express";
+import {
+  absorbCookies,
+  cookieHeader,
+  newPkce,
+} from "../support/browserLogin.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -15,7 +19,7 @@ import {
   generateTotpCode,
   getAccessTokenForUser,
   getUiAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * Wrong-credential limits: five attempts per window, counted before the

@@ -40,7 +40,7 @@ const KEY_NAMES = [
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(here, "../../..");
-const childScript = path.join(here, "loadKeysChild.ts");
+const childScript = path.join(here, "../fixtures/loadKeysChild.ts");
 const tsxCli = createRequire(import.meta.url).resolve("tsx/cli");
 
 // No `.env` in the child's working directory, so dotenv adds nothing back.

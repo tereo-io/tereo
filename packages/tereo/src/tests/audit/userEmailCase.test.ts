@@ -9,7 +9,7 @@ import {
   getTestAccessToken,
   getTestOrgId,
   getTestUserId,
-} from "./utils/test-helpers.js";
+} from "../support/audit.js";
 
 const auth = (token: string) => ({
   headers: { Authorization: `Bearer ${token}` },

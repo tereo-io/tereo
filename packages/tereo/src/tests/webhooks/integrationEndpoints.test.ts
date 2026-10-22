@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
-import { fetchJson } from "../utils/http.js";
+import { CORE_URL } from "../support/coreUrl.js";
+import { fetchJson } from "../support/http.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import {
@@ -12,11 +12,11 @@ import {
   readableEventType,
   revoke,
   type TestIntegration,
-} from "./utils/integrations.js";
+} from "../support/integrations.js";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/principals.js";
 
 // An integration manages its own webhook endpoints through /v1/webhooks with
 // no webhooks.* permission: it sees and changes only the endpoints it owns,

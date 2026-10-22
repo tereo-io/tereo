@@ -1,5 +1,5 @@
-import { BASE_URL } from "../auth/utils/test-helpers.js";
 import { createHash, randomBytes } from "crypto";
+import { BASE_URL } from "./auth.js";
 import { expect } from "vitest";
 
 /**

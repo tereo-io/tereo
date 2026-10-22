@@ -9,7 +9,7 @@ import {
   createTestBucket,
   getTestAccessToken,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const patterned = (size: number) => {
   const buf = Buffer.alloc(size);

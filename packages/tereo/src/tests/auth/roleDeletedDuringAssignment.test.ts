@@ -1,11 +1,7 @@
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { BASE_URL, createTestRole, createTestUser } from "../support/auth.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
-import {
-  BASE_URL,
-  createTestRole,
-  createTestUser,
-} from "./utils/test-helpers.js";
 
 /** Resolves once some backend waits on a lock in a query matching `like`. */
 const waitForLockWait = async (like: string, timeoutMs = 10_000) => {

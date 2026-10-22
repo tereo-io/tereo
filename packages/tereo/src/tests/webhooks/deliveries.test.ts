@@ -13,7 +13,7 @@ import {
   emitTestEvent,
   WebhookDeliveryResponse,
   PaginatedResponse,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 describe("Webhook Deliveries", () => {
   let testToken: string;

@@ -17,7 +17,7 @@ import {
   createTestWebhookEndpoint,
   cleanupTestEntities,
   waitFor,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 type Received = {
   headers: http.IncomingHttpHeaders;

@@ -1,7 +1,7 @@
 import { generateAccessToken, verifyAccessToken } from "../../utils/tokens.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
 import { ID_TOKEN_HINT_GRACE_SECONDS } from "../../utils/tokens.js";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import { generateKeyPairSync } from "crypto";
@@ -12,7 +12,13 @@ import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
-} from "../webhooks/utils/test-helpers.js";
+} from "../support/webhooks.js";
+import {
+  ACTIVATION_DELAY_MS,
+  currentSigningKey,
+  publishedSigningKeys,
+  refreshSigningKeys,
+} from "../../utils/keys.js";
 import {
   BASE_URL,
   createTestClient,
@@ -20,13 +26,7 @@ import {
   getJwtHeader,
   HTTP_STATUS,
   type TokenResponse,
-} from "./utils/test-helpers.js";
-import {
-  ACTIVATION_DELAY_MS,
-  currentSigningKey,
-  publishedSigningKeys,
-  refreshSigningKeys,
-} from "../../utils/keys.js";
+} from "../support/auth.js";
 
 /**
  * Rotating the JWT signing key through the admin API. The server keeps the

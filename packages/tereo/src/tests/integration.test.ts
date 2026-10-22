@@ -1,24 +1,24 @@
-import { getTestPrincipalToken } from "./utils/principals.js";
+import { getTestPrincipalToken } from "./support/principals.js";
+import { CORE_URL } from "./support/coreUrl.js";
 import { prisma } from "../utils/db/prisma.js";
-import { CORE_URL } from "./utils/coreUrl.js";
 import { describe, it, expect } from "vitest";
 import { randomUUID } from "crypto";
 import axios from "axios";
 import {
+  DEFAULT_ORGANIZATION_ID,
+  SYSTEM_USER_ID,
+} from "../definitions/index.js";
+import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
-} from "./webhooks/utils/test-helpers.js";
+} from "./support/webhooks.js";
 import {
   createTestBucket,
   createTestFile,
   uploadTestObject,
   getTestAccessToken as getFilesToken,
-} from "./files/utils/test-helpers.js";
-import {
-  DEFAULT_ORGANIZATION_ID,
-  SYSTEM_USER_ID,
-} from "../definitions/index.js";
+} from "./support/files.js";
 
 // Behaviour that only exists now that auth, files, webhooks and audit share
 // one process: work that used to cross a service boundary.

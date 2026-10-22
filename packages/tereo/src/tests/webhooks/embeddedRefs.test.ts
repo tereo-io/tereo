@@ -8,7 +8,7 @@ import {
   createTestWebhookEndpoint,
   getTestAccessToken,
   getTestUserId,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 describe("Webhook endpoints name their creator", () => {
   let token: string;

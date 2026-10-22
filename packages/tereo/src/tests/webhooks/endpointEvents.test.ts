@@ -1,6 +1,6 @@
 import { redactWebhookUrl } from "../../utils/webhookEndpointEvents.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
@@ -12,7 +12,7 @@ import {
   createTestWebhookEndpoint,
   getTestAccessToken,
   waitFor,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 const api = axios.create({ validateStatus: () => true });
 const auth = (token: string) => ({

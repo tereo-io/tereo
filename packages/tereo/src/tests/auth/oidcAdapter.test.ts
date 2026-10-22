@@ -17,15 +17,15 @@ import {
   upstreamCallbackUrl,
 } from "../../utils/identityProviders/index.js";
 import {
+  type FakeOidcProvider,
+  startFakeOidcProvider,
+} from "../support/fakeOidcProvider.js";
+import {
   broadcastIdentityProviderInvalidate,
   closeCacheBroadcast,
   onIdentityProviderInvalidate,
   startCacheSubscriber,
 } from "../../utils/cacheBroadcast.js";
-import {
-  type FakeOidcProvider,
-  startFakeOidcProvider,
-} from "../utils/fakeOidcProvider.js";
 
 const adapter = adapterFor("oidc");
 

@@ -6,7 +6,11 @@ import {
   cookieHeader,
   newPkce,
   type CookieJar,
-} from "../utils/browserLogin.js";
+} from "../support/browserLogin.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../support/principals.js";
 import {
   BASE_URL,
   createTestClient,
@@ -15,11 +19,7 @@ import {
   getUiAccessTokenForUser,
   loginToTotpSetup,
   startTotpSetup,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestOrganization,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/auth.js";
 
 /**
  * A login step past the password (consent, an organization pick, 2FA) is

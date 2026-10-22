@@ -3,6 +3,13 @@ import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
 import {
+  FIXTURE_USER_IDS,
+  ensureTestMembership,
+  ensureTestUser,
+  getTestPrincipalToken,
+  testOrgId,
+} from "../support/principals.js";
+import {
   BASE_URL,
   HTTP_STATUS,
   cleanupTestEntities,
@@ -12,14 +19,7 @@ import {
   getTestAccessToken,
   grantTestPermission,
   uploadTestObject,
-} from "./utils/test-helpers.js";
-import {
-  FIXTURE_USER_IDS,
-  ensureTestMembership,
-  ensureTestUser,
-  getTestPrincipalToken,
-  testOrgId,
-} from "../utils/principals.js";
+} from "../support/files.js";
 
 // Everything a bucket creator does here, but no `file-service.admin`: object
 // access has to come from the creator's grant.

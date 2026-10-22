@@ -19,7 +19,7 @@ import {
 import {
   startFakeSmtpServer,
   type FakeSmtpServer,
-} from "../utils/fakeSmtpServer.js";
+} from "../support/fakeSmtpServer.js";
 
 const MINUTE = 60_000;
 

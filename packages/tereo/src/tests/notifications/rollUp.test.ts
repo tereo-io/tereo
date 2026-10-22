@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { DeliveryRef } from "../../utils/db/notifications.js";
 import { ensureDailyPartitions } from "../../utils/partitions.js";
-import { waitFor } from "../webhooks/utils/test-helpers.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import type { Prisma } from "../../utils/db/prisma.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { waitFor } from "../support/webhooks.js";
 import db from "../../utils/db/index.js";
 
 type Tx = Prisma.TransactionClient;

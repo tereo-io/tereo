@@ -1,18 +1,22 @@
 import { encryptTotpSecret, generateTotpSecret } from "../../utils/totp.js";
+import { makeServiceOf } from "../support/testService.js";
+import { browserLogin } from "../support/browserLogin.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { makeServiceOf } from "../utils/testService.js";
-import { browserLogin } from "../utils/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
-import {
-  createTestWebhookEndpoint,
-  getCoreEventSubscriberToken,
-  waitFor,
-} from "../webhooks/utils/test-helpers.js";
 import {
   CORE_SERVICE_ID,
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
 } from "../../definitions/index.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../support/principals.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../support/webhooks.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -21,11 +25,7 @@ import {
   createTestRole,
   createTestUser,
   getAccessTokenForUser,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestOrganization,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/auth.js";
 
 type TestUser = Awaited<ReturnType<typeof createTestUser>>;
 

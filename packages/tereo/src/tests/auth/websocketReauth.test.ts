@@ -1,29 +1,29 @@
 import { notifyBucketAccessChanged } from "../../websocket/emitters/index.js";
 import { closeRedisEmitter } from "../../websocket/emitters/redisEmitter.js";
-import { browserLogin, cookieHeader } from "../utils/browserLogin.js";
+import { browserLogin, cookieHeader } from "../support/browserLogin.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateAccessToken } from "../../utils/tokens.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
-  decodeJwt,
-} from "./utils/test-helpers.js";
-import {
   ensureTestMembership,
   ensureTestOrganization,
   getTestPrincipalToken,
   testOrgId,
-} from "../utils/principals.js";
+} from "../support/principals.js";
 import {
   connect,
   received,
   stillOpen,
   within,
   type TestSocket,
-} from "./utils/socket.js";
+} from "../support/socket.js";
+import {
+  BASE_URL,
+  createTestClient,
+  createTestUser,
+  decodeJwt,
+} from "../support/auth.js";
 
 /**
  * A socket is authenticated once, at the handshake, with an access token.

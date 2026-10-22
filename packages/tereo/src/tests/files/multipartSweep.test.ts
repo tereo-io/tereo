@@ -16,7 +16,7 @@ import {
   cleanupTestEntities,
   createTestBucket,
   getTestAccessToken,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 describe("multipartSweep worker", () => {
   let token: string;

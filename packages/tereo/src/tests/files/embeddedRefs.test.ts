@@ -3,19 +3,19 @@ import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
 import {
+  ensureTestMembership,
+  ensureTestUser,
+  getTestPrincipalToken,
+  testOrgId,
+} from "../support/principals.js";
+import {
   BASE_URL,
   HTTP_STATUS,
   cleanupTestEntities,
   createTestBucket,
   createTestFile,
   uploadTestObject,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestMembership,
-  ensureTestUser,
-  getTestPrincipalToken,
-  testOrgId,
-} from "../utils/principals.js";
+} from "../support/files.js";
 
 const ORG = "files-embedded-refs-org";
 

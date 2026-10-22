@@ -15,7 +15,7 @@ import {
   getTestAccessToken,
   getTestUserId,
   testIdempotencyKey,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 describe("multipart staging limits", () => {
   let token: string;

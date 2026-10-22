@@ -1,5 +1,5 @@
-import { expectAuthorizeErrorRedirect } from "./utils/authorizeErrors.js";
-import { ensureTestOrganization } from "../utils/principals.js";
+import { expectAuthorizeErrorRedirect } from "../support/pure/authorizeErrors.js";
+import { ensureTestOrganization } from "../support/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import {
@@ -7,7 +7,7 @@ import {
   browserLogin,
   cookieHeader,
   newPkce,
-} from "../utils/browserLogin.js";
+} from "../support/browserLogin.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -17,7 +17,7 @@ import {
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 describe("OAuth Authorize Endpoint", () => {
   let testClient: Awaited<ReturnType<typeof createTestClient>>;

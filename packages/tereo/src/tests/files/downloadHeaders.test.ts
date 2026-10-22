@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { open, rename, rm, writeFile } from "fs/promises";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes, randomUUID } from "crypto";
@@ -16,7 +16,7 @@ import {
   testIdempotencyKey,
   uploadTestObject,
   waitFor,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const text = (content: string) => createTestFile(content, "a.txt");
 

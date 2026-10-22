@@ -11,7 +11,7 @@ import {
   getTestAccessToken,
   uploadTestObjectAndGetId,
   waitFor,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 describe("share tokens in the access log", () => {
   let token: string;

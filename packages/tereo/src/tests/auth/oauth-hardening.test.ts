@@ -1,7 +1,7 @@
-import { expectAuthorizeErrorRedirect } from "./utils/authorizeErrors.js";
-import { FIXTURE_USER_IDS } from "../utils/principals.js";
+import { expectAuthorizeErrorRedirect } from "../support/pure/authorizeErrors.js";
+import { FIXTURE_USER_IDS } from "../support/principals.js";
+import { makeServiceOf } from "../support/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { makeServiceOf } from "../utils/testService.js";
 import { getRedisClient } from "../../utils/redis.js";
 import { prisma } from "../../utils/db/prisma.js";
 import jwt from "jsonwebtoken";
@@ -10,7 +10,7 @@ import {
   browserLogin,
   cookieHeader,
   newPkce,
-} from "../utils/browserLogin.js";
+} from "../support/browserLogin.js";
 import {
   BASE_URL,
   addTestOrgMember,
@@ -25,7 +25,7 @@ import {
   generateTotpCode,
   loginToTotpSetup,
   startTotpSetup,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * The OAuth endpoints' edge cases: client authentication and its challenge,

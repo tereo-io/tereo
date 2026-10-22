@@ -1,23 +1,26 @@
-import { announceSetupIfPending, issueSetupToken } from "../../utils/setup.js";
-import { prisma } from "../../utils/db/prisma.js";
-import { logger } from "../../utils/logger.js";
-import env from "../../env.js";
+import { prisma } from "../../../../utils/db/prisma.js";
+import { logger } from "../../../../utils/logger.js";
+import env from "../../../../env.js";
 import axios from "axios";
+import {
+  DEFAULT_ORGANIZATION_ID,
+  LOGIN_CLIENT,
+} from "../../../../definitions/index.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
-} from "../webhooks/utils/test-helpers.js";
+} from "../../../support/webhooks.js";
+import {
+  announceSetupIfPending,
+  issueSetupToken,
+} from "../../../../utils/setup.js";
 import {
   BASE_URL,
   HTTP_STATUS,
   generateUniqueId,
   getAccessTokenForUser,
-} from "../auth/utils/test-helpers.js";
-import {
-  DEFAULT_ORGANIZATION_ID,
-  LOGIN_CLIENT,
-} from "../../definitions/index.js";
+} from "../../../support/auth.js";
 import {
   describe,
   it,

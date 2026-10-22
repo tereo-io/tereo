@@ -19,7 +19,7 @@ import {
   createTestFile,
   uploadTestObject,
   cleanupTestEntities,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 interface CreateArchiveResponse {
   id: string;

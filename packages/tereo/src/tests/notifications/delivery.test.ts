@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { ensureDailyPartitions } from "../../utils/partitions.js";
-import { getTestPrincipalToken } from "../utils/principals.js";
-import { waitFor } from "../webhooks/utils/test-helpers.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
-import { TEST_SERVICE_ID } from "../utils/testService.js";
+import { TEST_SERVICE_ID } from "../support/testService.js";
 import type { Prisma } from "../../utils/db/prisma.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { waitFor } from "../support/webhooks.js";
 import { notifyTx } from "../../utils/outbox.js";
 import { randomBytes, randomUUID } from "crypto";
-import { CORE_URL } from "../utils/coreUrl.js";
+import { CORE_URL } from "../support/coreUrl.js";
 import db from "../../utils/db/index.js";
 import env from "../../env.js";
 import {
@@ -21,18 +21,18 @@ import {
   getNotificationQueue,
 } from "../../jobs/notificationQueues.js";
 import {
+  startFakeSmtpServer,
+  type CapturedMessage,
+  type FakeSmtpServer,
+} from "../support/fakeSmtpServer.js";
+import {
   cleanupTestEntities,
   createTestBucket,
   createTestFile,
   getTestAccessToken,
   grantTestPermission,
   uploadTestObjectAndGetId,
-} from "../files/utils/test-helpers.js";
-import {
-  startFakeSmtpServer,
-  type CapturedMessage,
-  type FakeSmtpServer,
-} from "../utils/fakeSmtpServer.js";
+} from "../support/files.js";
 
 // End to end: the server's outbox reaper dispatches each accepted send onto
 // the channel's queue; this file runs the delivery worker, which the server

@@ -3,6 +3,11 @@ import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import {
+  ensureTestMembership,
+  getTestPrincipalToken,
+  testOrgId,
+} from "../support/principals.js";
+import {
   BASE_URL,
   HTTP_STATUS,
   OAUTH_ERRORS,
@@ -15,12 +20,7 @@ import {
   getUiAccessTokenForUser,
   UserInfoResponse,
   TokenResponse,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestMembership,
-  getTestPrincipalToken,
-  testOrgId,
-} from "../utils/principals.js";
+} from "../support/auth.js";
 
 interface AuthorizeResponse {
   redirect_url?: string;

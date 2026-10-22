@@ -1,14 +1,14 @@
-import { hashPassword, generateClientSecret } from "../../../utils/crypto.js";
-import { TEST_SERVICE, TEST_SERVICE_ID } from "../../utils/testService.js";
+import { hashPassword, generateClientSecret } from "../../utils/crypto.js";
+import { TEST_SERVICE, TEST_SERVICE_ID } from "./testService.js";
 import { createHash, createHmac, randomBytes } from "crypto";
-import { prisma } from "../../../utils/db/prisma.js";
-import { CORE_URL } from "../../utils/coreUrl.js";
+import { prisma } from "../../utils/db/prisma.js";
+import { CORE_URL } from "./coreUrl.js";
 import * as jose from "jose";
 import {
   CORE_SCOPES,
   CORE_SERVICE_ID,
   LOGIN_CLIENT,
-} from "../../../definitions/index.js";
+} from "../../definitions/index.js";
 
 // Vite/Vitest inject BASE_URL="/" (the vite `base` default) into worker env,
 // and the registry resolver's `??=` won't overwrite it — accept only an

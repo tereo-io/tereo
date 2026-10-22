@@ -1,13 +1,17 @@
-import { browserLogin, cookieHeader, newPkce } from "../utils/browserLogin.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { getRedisClient } from "../../utils/redis.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { describe, it, expect } from "vitest";
 import {
+  browserLogin,
+  cookieHeader,
+  newPkce,
+} from "../support/browserLogin.js";
+import {
   BASE_URL,
   createTestUser,
   getUiAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * A silent authorize issues a code under the browser's SSO session while a

@@ -6,7 +6,7 @@ import {
   createTestClient,
   createTestUser,
   getAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 describe("Email case", () => {
   let client: Awaited<ReturnType<typeof createTestClient>>;

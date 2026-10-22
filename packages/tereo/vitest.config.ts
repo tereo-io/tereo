@@ -1,4 +1,4 @@
-import { loadTestEnv } from "./src/tests/testEnv.js";
+import { loadTestEnv } from "./src/tests/setup/testEnv.js";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -9,8 +9,8 @@ export default defineConfig({
     hookTimeout: 60000,
     slowTestThreshold: 1000,
     include: ["src/**/*.test.ts"],
-    setupFiles: ["src/tests/setup.ts"],
-    globalSetup: ["src/tests/globalSetup.ts"],
+    setupFiles: ["src/tests/setup/setup.ts"],
+    globalSetup: ["src/tests/setup/globalSetup.ts"],
     env: loadTestEnv(),
     // Serial across files: every file shares one server and database, and
     // the files tests race on shared state (orphan-blob cleanup, content-blob

@@ -14,7 +14,7 @@ import {
   getTestAccessToken,
   testIdempotencyKey,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 describe("upload quota", () => {
   let token: string;

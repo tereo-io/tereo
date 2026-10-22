@@ -1,6 +1,6 @@
-import { getTestPrincipalToken, testOrgId } from "../utils/principals.js";
+import { getTestPrincipalToken, testOrgId } from "../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { TEST_SERVICE } from "../utils/testService.js";
+import { TEST_SERVICE } from "../support/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
 import axios from "axios";
 import {
@@ -15,7 +15,7 @@ import {
   PaginatedResponse,
   WebhookDeliveryResponse,
   WebhookEndpointResponse,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 type EventTypeRow = {
   eventType: string;

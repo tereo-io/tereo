@@ -1,8 +1,12 @@
-import { getRedisClient, initializeRedis, redisKey } from "../utils/redis.js";
-import { prisma } from "../utils/db/prisma.js";
+import { prisma } from "../../utils/db/prisma.js";
 import { beforeAll, beforeEach } from "vitest";
-import { loadKeys } from "../utils/keys.js";
-import env from "../env.js";
+import { loadKeys } from "../../utils/keys.js";
+import env from "../../env.js";
+import {
+  getRedisClient,
+  initializeRedis,
+  redisKey,
+} from "../../utils/redis.js";
 
 beforeAll(async () => {
   await initializeRedis(env);

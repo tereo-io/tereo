@@ -11,7 +11,7 @@ import {
   cleanupTestEntities,
   createFormDataWithMetadata,
   testIdempotencyKey,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 interface ObjectResponse {
   id: string;

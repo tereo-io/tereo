@@ -9,7 +9,7 @@ import {
   createTestWebhookEndpoint,
   cleanupTestEntities,
   type WebhookEndpointResponse,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 // Input that reached Postgres and failed there with a 500.
 describe("Webhook input Postgres cannot take", () => {

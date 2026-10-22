@@ -7,14 +7,14 @@ import {
   cookieHeader,
   newPkce,
   type CookieJar,
-} from "../utils/browserLogin.js";
+} from "../support/browserLogin.js";
 import {
   BASE_URL,
   HTTP_STATUS,
   createTestUser,
   decodeJwt,
   generateTotpCode,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * `acr_values=urn:auth-service:mfa` is enforced: the login must complete a

@@ -7,17 +7,17 @@ import {
   cookieHeader,
   newPkce,
   type CookieJar,
-} from "../utils/browserLogin.js";
+} from "../support/browserLogin.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../support/principals.js";
 import {
   BASE_URL,
   createTestClient,
   createTestUser,
   decodeJwt,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestOrganization,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/auth.js";
 
 /**
  * LOGIN and LOGOUT audit entries: a fresh sign-in writes LOGIN, a silent

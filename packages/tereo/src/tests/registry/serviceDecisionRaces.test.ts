@@ -1,10 +1,10 @@
-import { provisionServices } from "../provisioning/utils/test-helpers.js";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
+import { provisionServices } from "../support/provisioning.js";
 import { CORE_SERVICE_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
+import { CORE_URL } from "../support/coreUrl.js";
+import { fetchJson } from "../support/http.js";
 import { describe, expect, it } from "vitest";
-import { fetchJson } from "../utils/http.js";
 import db from "../../utils/db/index.js";
 import { randomBytes } from "crypto";
 

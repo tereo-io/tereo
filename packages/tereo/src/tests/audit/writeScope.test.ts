@@ -1,6 +1,6 @@
+import { createAppServiceAccount } from "../support/testService.js";
 import { describe, it, expect, afterAll, beforeAll } from "vitest";
-import { createAppServiceAccount } from "../utils/testService.js";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
@@ -9,14 +9,14 @@ import {
   createIntegration,
   grant,
   integrationToken,
-} from "../webhooks/utils/integrations.js";
+} from "../support/integrations.js";
 import {
   BASE_URL,
   HTTP_STATUS,
   getTestAccessToken,
   cleanupTestEntities,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/audit.js";
 
 const ORG_1 = "00000000-0000-7002-8000-000000000001";
 const ORG_2 = "00000000-0000-7002-8000-000000000002";

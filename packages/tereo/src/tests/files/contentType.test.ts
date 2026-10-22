@@ -10,7 +10,7 @@ import {
   createTestFile,
   getTestAccessToken,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 // A browser takes the last type of a list: this renders as HTML.
 const SMUGGLED = "image/png, text/html";

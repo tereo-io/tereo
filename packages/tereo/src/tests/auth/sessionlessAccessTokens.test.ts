@@ -1,4 +1,4 @@
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
   BASE_URL,
@@ -7,7 +7,7 @@ import {
   createTestUser,
   getAccessTokenForUser,
   getUiAccessTokenForUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * A client without the refresh_token grant gets access tokens that no

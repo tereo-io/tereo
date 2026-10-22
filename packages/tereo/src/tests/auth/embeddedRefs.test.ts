@@ -1,21 +1,21 @@
-import { TEST_SERVICE, makeServiceOf } from "../utils/testService.js";
+import { TEST_SERVICE, makeServiceOf } from "../support/testService.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
 import {
+  ensureTestOrganization,
+  ensureTestUser,
+  getTestPrincipalToken,
+} from "../support/principals.js";
+import {
   BASE_URL,
   createTestClient,
   createTestRole,
   createTestUser,
   generateUniqueId,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestOrganization,
-  ensureTestUser,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/auth.js";
 
 const userRef = (user: { id: string; email: string; name: string | null }) => ({
   id: user.id,

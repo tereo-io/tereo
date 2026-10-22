@@ -1,8 +1,8 @@
 import type { NormalizedIdentity } from "../../utils/identityProviders/types.js";
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
-import { createTestRole, createTestUser } from "./utils/test-helpers.js";
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
-import { ensureTestOrganization } from "../utils/principals.js";
+import { createTestRole, createTestUser } from "../support/auth.js";
+import { ensureTestOrganization } from "../support/principals.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { emitTx } from "../../utils/outbox.js";

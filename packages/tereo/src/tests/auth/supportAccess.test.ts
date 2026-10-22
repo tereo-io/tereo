@@ -1,5 +1,5 @@
-import { BASE_URL, HTTP_STATUS, createTestUser } from "./utils/test-helpers.js";
 import { generateRandomString, hashFlowToken } from "../../utils/crypto.js";
+import { BASE_URL, HTTP_STATUS, createTestUser } from "../support/auth.js";
 import { issueAuthorizationCode } from "../../utils/authorization.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { InvalidGrantError } from "../../utils/errors.js";
@@ -10,21 +10,21 @@ import type { Request, Response } from "express";
 import db from "../../utils/db/index.js";
 import { randomBytes } from "crypto";
 import {
-  createTestWebhookEndpoint,
-  getCoreEventSubscriberToken,
-  waitFor,
-} from "../webhooks/utils/test-helpers.js";
-import {
   absorbCookies,
   browserLogin,
   cookieHeader,
   newPkce,
   type CookieJar,
-} from "../utils/browserLogin.js";
+} from "../support/browserLogin.js";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/principals.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../support/webhooks.js";
 
 /**
  * A holder of `organizations.support-access` may select any active,

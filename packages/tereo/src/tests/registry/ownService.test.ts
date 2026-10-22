@@ -1,17 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
-import { CORE_URL } from "../utils/coreUrl.js";
+import { getTestPrincipalToken } from "../support/principals.js";
+import { CORE_URL } from "../support/coreUrl.js";
 import axios from "axios";
 import {
   provisionService,
   removeServices,
   type ProvisionedService,
-} from "../provisioning/utils/test-helpers.js";
+} from "../support/provisioning.js";
 import {
   cleanup as cleanupIntegrations,
   createIntegration,
   integrationToken,
-} from "../webhooks/utils/integrations.js";
+} from "../support/integrations.js";
 
 // GET /v1/account/service: a service reads its own row — the declaration core
 // last applied and its access — with no permission.

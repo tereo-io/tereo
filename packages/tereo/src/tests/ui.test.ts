@@ -1,6 +1,6 @@
-import { HTTP_STATUS } from "./files/utils/test-helpers.js";
 import { RESERVED_PREFIXES } from "../utils/ui.js";
-import { CORE_URL } from "./utils/coreUrl.js";
+import { HTTP_STATUS } from "./support/files.js";
+import { CORE_URL } from "./support/coreUrl.js";
 import { describe, it, expect } from "vitest";
 import axios from "axios";
 

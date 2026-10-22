@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { makeServiceOf } from "../utils/testService.js";
+import { makeServiceOf } from "../support/testService.js";
 import { hashFlowToken } from "../../utils/crypto.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
@@ -11,7 +11,7 @@ import {
   createTestUser,
   createTestPermission,
   createTestRole,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 interface CheckPermissionResponse {
   granted?: boolean;

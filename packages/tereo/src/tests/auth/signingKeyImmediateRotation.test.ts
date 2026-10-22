@@ -1,23 +1,23 @@
 import { generateAccessToken, verifyAccessToken } from "../../utils/tokens.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { prisma } from "../../utils/db/prisma.js";
-import {
-  createTestWebhookEndpoint,
-  getCoreEventSubscriberToken,
-  waitFor,
-} from "../webhooks/utils/test-helpers.js";
 import {
   closeCacheBroadcast,
   startCacheSubscriber,
 } from "../../utils/cacheBroadcast.js";
 import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../support/webhooks.js";
+import {
   BASE_URL,
   fetchJwks,
   getJwtHeader,
   HTTP_STATUS,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * An immediate rotation (for a compromised key) while an earlier rotation is

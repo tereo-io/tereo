@@ -11,6 +11,10 @@ import {
   type BucketCleanupJobData,
 } from "../../jobs/bucketCleanup.js";
 import {
+  getBucketCleanupQueue,
+  getOrphanBlobCleanupQueue,
+} from "../../jobs/queues.js";
+import {
   BASE_URL,
   cleanupTestEntities,
   createTestBucket,
@@ -18,11 +22,7 @@ import {
   getTestAccessToken,
   uploadTestObject,
   waitFor,
-} from "./utils/test-helpers.js";
-import {
-  getBucketCleanupQueue,
-  getOrphanBlobCleanupQueue,
-} from "../../jobs/queues.js";
+} from "../support/files.js";
 
 const liveRefs = (bucketId: number) =>
   prisma.objectVersion.count({

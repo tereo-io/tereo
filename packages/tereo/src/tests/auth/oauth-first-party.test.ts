@@ -1,8 +1,8 @@
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { generateTotpSecret, encryptTotpSecret } from "../../utils/totp.js";
-import { removeLoginClients } from "../provisioning/utils/test-helpers.js";
 import { applyProvisioning } from "../../utils/provisioning/index.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { removeLoginClients } from "../support/provisioning.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes } from "crypto";
@@ -12,18 +12,18 @@ import {
   cookieHeader,
   newPkce,
   type CookieJar,
-} from "../utils/browserLogin.js";
+} from "../support/browserLogin.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../support/principals.js";
 import {
   BASE_URL,
   createAdminUser,
   createTestClient,
   createTestUser,
   generateTotpCode,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestOrganization,
-  getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/auth.js";
 
 /**
  * Which client a login flow belongs to, beyond its first step:

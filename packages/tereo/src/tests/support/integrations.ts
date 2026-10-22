@@ -1,8 +1,8 @@
-import { removeServices } from "../../provisioning/utils/test-helpers.js";
-import { TEST_SERVICE } from "../../utils/testService.js";
-import { prisma } from "../../../utils/db/prisma.js";
-import { CORE_URL } from "../../utils/coreUrl.js";
-import { fetchJson } from "../../utils/http.js";
+import { removeServices } from "./provisioning.js";
+import { prisma } from "../../utils/db/prisma.js";
+import { TEST_SERVICE } from "./testService.js";
+import { CORE_URL } from "./coreUrl.js";
+import { fetchJson } from "./http.js";
 import { randomBytes } from "crypto";
 import { expect } from "vitest";
 

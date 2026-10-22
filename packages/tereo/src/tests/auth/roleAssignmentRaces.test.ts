@@ -1,5 +1,5 @@
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import type { AuthContext } from "../../middleware/auth.js";
 import { ForbiddenError } from "../../utils/errors.js";
@@ -17,7 +17,7 @@ import {
   createTestOrganization,
   createTestRole,
   createTestUser,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 /**
  * Checks that depend on what the target holds or is must see it as of the

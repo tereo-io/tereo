@@ -16,7 +16,7 @@ import {
   createTestFile,
   getTestAccessToken,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

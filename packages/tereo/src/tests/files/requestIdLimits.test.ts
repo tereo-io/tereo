@@ -9,7 +9,7 @@ import {
   createTestBucket,
   getTestAccessToken,
   waitFor,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 describe("client-supplied request metadata on files requests", () => {
   let token: string;

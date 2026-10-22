@@ -17,7 +17,7 @@ import {
   verifyIdTokenSignature,
   fetchDiscoveryDocument,
   validateIdTokenClaims,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 describe("OAuth Token Endpoint", () => {
   let testClient: Awaited<ReturnType<typeof createTestClient>>;

@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { ensureDailyPartitions } from "../../utils/partitions.js";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
-import { waitFor } from "../webhooks/utils/test-helpers.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { waitFor } from "../support/webhooks.js";
 import { randomBytes, randomUUID } from "crypto";
-import { CORE_URL } from "../utils/coreUrl.js";
-import { fetchJson } from "../utils/http.js";
+import { CORE_URL } from "../support/coreUrl.js";
+import { fetchJson } from "../support/http.js";
 import env from "../../env.js";
 import {
   startNotificationDeliveryWorker,
@@ -20,7 +20,7 @@ import {
 import {
   startFakeSmtpServer,
   type FakeSmtpServer,
-} from "../utils/fakeSmtpServer.js";
+} from "../support/fakeSmtpServer.js";
 
 const BASE = `${CORE_URL}/v1/admin/notifications`;
 const rand = () => randomBytes(4).toString("hex");

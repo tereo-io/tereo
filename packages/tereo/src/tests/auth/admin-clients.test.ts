@@ -1,7 +1,7 @@
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
+import { makeServiceOf } from "../support/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { makeServiceOf } from "../utils/testService.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { createHash } from "node:crypto";
 import {
@@ -13,7 +13,7 @@ import {
   createTestUser,
   getAccessTokenForUser,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 interface ServiceAccountUser {
   id: string;

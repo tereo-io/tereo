@@ -1,14 +1,13 @@
-import { ensureTestUser, getTestPrincipalToken } from "../utils/principals.js";
+import { removeRoles, removeServices } from "../support/provisioning.js";
 import { provisioningJsonSchema } from "../../cli/provision/index.js";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { removeRoles, removeServices } from "./utils/test-helpers.js";
 import { CORE_SERVICE_ID } from "../../definitions/index.js";
 import { generateClientSecret } from "../../utils/crypto.js";
 import { describe, it, expect, afterAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
+import { loadTestEnv } from "../setup/testEnv.js";
 import { randomBytes, randomUUID } from "crypto";
-import { CORE_URL } from "../utils/coreUrl.js";
-import { loadTestEnv } from "../testEnv.js";
+import { CORE_URL } from "../support/coreUrl.js";
 import { spawnSync } from "child_process";
 import db from "../../utils/db/index.js";
 import { tmpdir } from "os";
@@ -18,6 +17,10 @@ import {
   partitionName,
   utcDay,
 } from "../../utils/partitions.js";
+import {
+  ensureTestUser,
+  getTestPrincipalToken,
+} from "../support/principals.js";
 
 const packageDir = path.resolve(import.meta.dirname, "../../..");
 const dirs: string[] = [];

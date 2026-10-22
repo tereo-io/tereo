@@ -1,17 +1,17 @@
-import { ensurePermission, makeServiceOf } from "../utils/testService.js";
+import { ensurePermission, makeServiceOf } from "../support/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
+import {
+  ensureTestMembership,
+  ensureTestOrganization,
+} from "../support/principals.js";
 import {
   BASE_URL,
   HTTP_STATUS,
   createTestClient,
   createTestRole,
   createTestUser,
-} from "./utils/test-helpers.js";
-import {
-  ensureTestMembership,
-  ensureTestOrganization,
-} from "../utils/principals.js";
+} from "../support/auth.js";
 
 /**
  * /oauth/check-permission answers a client of an organization about that

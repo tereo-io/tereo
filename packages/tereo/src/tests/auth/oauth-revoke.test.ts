@@ -1,5 +1,5 @@
+import { browserLogin } from "../support/browserLogin.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { browserLogin } from "../utils/browserLogin.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   BASE_URL,
@@ -11,7 +11,7 @@ import {
   generateCodeChallenge,
   generateUniqueId,
   TokenResponse,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 interface AuthorizeResponse {
   redirect_url?: string;

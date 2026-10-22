@@ -12,7 +12,7 @@ import {
   createTestWebhookEndpoint,
   cleanupTestEntities,
   generateUniqueId,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 describe("Event Emission", () => {
   let testToken: string;

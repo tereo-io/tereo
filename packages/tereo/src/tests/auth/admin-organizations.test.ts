@@ -1,5 +1,5 @@
 import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "node:crypto";
@@ -7,7 +7,7 @@ import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
-} from "../webhooks/utils/test-helpers.js";
+} from "../support/webhooks.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -20,14 +20,14 @@ import {
   generateUniqueId,
   createTestOrganization,
   addTestOrgMember,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 import type {
   OrganizationResponse,
   OrganizationListResponse,
   OrganizationMembersResponse,
   OrganizationMemberResponse,
   MemberRolesResponse,
-} from "./utils/test-helpers.js";
+} from "../support/auth.js";
 
 describe("Admin Organizations Endpoints", () => {
   let testClient: Awaited<ReturnType<typeof createTestClient>>;

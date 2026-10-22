@@ -11,7 +11,7 @@ import {
   generateUniqueId,
   EventTypeResponse,
   PaginatedResponse,
-} from "./utils/test-helpers.js";
+} from "../support/webhooks.js";
 
 describe("Event Type Management", () => {
   let testToken: string;

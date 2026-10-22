@@ -1,14 +1,14 @@
-import { removeServices } from "../provisioning/utils/test-helpers.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { ensurePermission } from "../utils/testService.js";
+import { ensurePermission } from "../support/testService.js";
+import { removeServices } from "../support/provisioning.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../utils/coreUrl.js";
-import { fetchJson } from "../utils/http.js";
+import { CORE_URL } from "../support/coreUrl.js";
+import { fetchJson } from "../support/http.js";
 import { randomBytes } from "crypto";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
-} from "../utils/principals.js";
+} from "../support/principals.js";
 
 const createdSlugs: string[] = [];
 const createdRoleIds: string[] = [];

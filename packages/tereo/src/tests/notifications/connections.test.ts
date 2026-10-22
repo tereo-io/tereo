@@ -1,22 +1,22 @@
 import { openConnectionSecrets } from "../../utils/notifications/connections.js";
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { DEFAULT_ORGANIZATION_ID } from "../../definitions/index.js";
-import { getTestPrincipalToken } from "../utils/principals.js";
+import { getTestPrincipalToken } from "../support/principals.js";
 import { createServer, type AddressInfo } from "net";
 import { prisma } from "../../utils/db/prisma.js";
 import { currentKek } from "../../utils/keys.js";
 import { randomBytes, randomUUID } from "crypto";
-import { CORE_URL } from "../utils/coreUrl.js";
-import { fetchJson } from "../utils/http.js";
+import { CORE_URL } from "../support/coreUrl.js";
+import { fetchJson } from "../support/http.js";
+import {
+  startFakeSmtpServer,
+  type FakeSmtpServer,
+} from "../support/fakeSmtpServer.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
-} from "../webhooks/utils/test-helpers.js";
-import {
-  startFakeSmtpServer,
-  type FakeSmtpServer,
-} from "../utils/fakeSmtpServer.js";
+} from "../support/webhooks.js";
 
 const BASE = `${CORE_URL}/v1/admin/notifications`;
 

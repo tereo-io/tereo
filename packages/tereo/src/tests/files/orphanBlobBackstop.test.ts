@@ -8,7 +8,7 @@ import {
   createTestFile,
   getTestAccessToken,
   uploadTestObject,
-} from "./utils/test-helpers.js";
+} from "../support/files.js";
 
 describe("orphanBlobBackstop worker", () => {
   let token: string;
