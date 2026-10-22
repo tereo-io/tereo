@@ -1,8 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { processShareSweepTick } from "../../jobs/shareSweep.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { randomBytes } from "node:crypto";
 import axios from "axios";
+import {
+  processShareSweepTick,
+  SHARE_SWEEP_BATCH_LIMIT,
+} from "../../jobs/shareSweep.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -781,6 +785,51 @@ describe("Shares", () => {
         validateStatus: () => true,
       });
       expect(res.status).toBe(HTTP_STATUS.NOT_FOUND);
+    });
+
+    it("fills at most a batch per tick, and asks for another when it filled one", async () => {
+      const share = await create();
+      const createdAt = new Date(Date.now() - 370 * 24 * 60 * 60 * 1000);
+      const row = await prisma.share.update({
+        where: { id: share.id },
+        data: { expiresAt: null, createdAt },
+      });
+      const { id: _id, token: _token, updatedAt: _updatedAt, ...copy } = row;
+      await prisma.share.createMany({
+        data: Array.from({ length: SHARE_SWEEP_BATCH_LIMIT }, () => ({
+          ...copy,
+          token: randomBytes(24).toString("base64url"),
+        })),
+      });
+      const ours = { bucketId: bucket.id, createdAt, expiresAt: null };
+      const since = new Date();
+
+      const first = await processShareSweepTick();
+      expect(first.hasMore).toBe(true);
+      const left = await prisma.share.count({ where: ours });
+      expect(left).toBeGreaterThanOrEqual(1);
+
+      for (
+        let i = 0;
+        i < 5 && (await prisma.share.count({ where: ours }));
+        i++
+      ) {
+        await processShareSweepTick();
+      }
+      expect(await prisma.share.count({ where: ours })).toBe(0);
+
+      const entries = await prisma.auditLogEntry.findMany({
+        where: {
+          entityType: "shareExpiryBackfill",
+          entityId: String(bucket.id),
+          createdAt: { gte: since },
+        },
+      });
+      expect(entries.length).toBeGreaterThanOrEqual(2);
+      for (const entry of entries) {
+        const { shares } = entry.metadata as { shares: unknown[] };
+        expect(shares.length).toBeLessThanOrEqual(SHARE_SWEEP_BATCH_LIMIT);
+      }
     });
   });
 

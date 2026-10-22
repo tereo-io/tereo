@@ -14,18 +14,19 @@ import env from "../env.js";
 // lives in the audit log). One run per day is enough; the grace window
 // is measured in days.
 const JOB_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BATCH_LIMIT = 500;
+export const SHARE_SWEEP_BATCH_LIMIT = 500;
 
 let worker: Worker | null = null;
 
 /**
- * Gives the shares still without an expiry the longest one allowed, with one
- * audit entry per bucket they are on.
+ * Gives a batch of the shares still without an expiry the longest one
+ * allowed, with one audit entry per bucket they are on.
  */
 const backfillShareExpiry = async (): Promise<number> =>
   await db.$transaction(async (tx) => {
     const filled = await db.shares.backfillExpiry(
       env.FILE_SERVICE_MAX_SHARE_TTL_SECONDS,
+      SHARE_SWEEP_BATCH_LIMIT,
       tx
     );
     if (filled.length === 0) return 0;
@@ -57,13 +58,13 @@ export async function processShareSweepTick(): Promise<{
   processed: number;
   hasMore: boolean;
 }> {
-  await backfillShareExpiry();
+  const filled = await backfillShareExpiry();
   const graceMs = env.FILE_SERVICE_SHARE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  const processed = await db.$transaction(async (tx) => {
+  const swept = await db.$transaction(async (tx) => {
     const deleted = await db.shares.deleteExpired(
       graceMs,
       new Date(),
-      BATCH_LIMIT,
+      SHARE_SWEEP_BATCH_LIMIT,
       tx
     );
     // One entry per bucket in the batch, so each lands in its organization's
@@ -93,7 +94,11 @@ export async function processShareSweepTick(): Promise<{
     }
     return deleted.length;
   });
-  return { processed, hasMore: processed >= BATCH_LIMIT };
+  return {
+    processed: swept + filled,
+    hasMore:
+      swept >= SHARE_SWEEP_BATCH_LIMIT || filled >= SHARE_SWEEP_BATCH_LIMIT,
+  };
 }
 
 async function processShareSweepJob(job: Job): Promise<void> {

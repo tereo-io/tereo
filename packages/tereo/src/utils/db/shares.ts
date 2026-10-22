@@ -286,20 +286,27 @@ export const getPaginated = async (options: GetPaginatedOptions) => {
 };
 
 /**
- * Give every share without an expiry the longest one allowed, counted from its
- * creation. Shares created before expiries were required have none; the
- * `expires_at` index makes this a no-op lookup once they are filled. Returns
- * the shares it gave one.
+ * Give up to `limit` shares without an expiry the longest one allowed, counted
+ * from its creation. Shares created before expiries were required have none;
+ * the `expires_at` index makes this a no-op lookup once they are filled.
+ * Returns the shares it gave one.
  */
 export const backfillExpiry = async (
   maxTtlSeconds: number,
+  limit: number,
   tx: Prisma.TransactionClient
 ): Promise<{ id: string; bucketId: number; expiresAt: Date }[]> =>
   await tx.$queryRaw`
     UPDATE "files"."shares"
     SET expires_at = created_at + make_interval(secs => ${maxTtlSeconds}::double precision),
         updated_at = now()
-    WHERE expires_at IS NULL
+    WHERE id IN (
+      SELECT id FROM "files"."shares"
+      WHERE expires_at IS NULL
+      ORDER BY id
+      LIMIT ${limit}
+      FOR UPDATE SKIP LOCKED
+    )
     RETURNING id, bucket_id AS "bucketId", expires_at AS "expiresAt"`;
 
 /**
