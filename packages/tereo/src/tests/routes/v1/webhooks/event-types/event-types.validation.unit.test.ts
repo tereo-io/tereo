@@ -19,6 +19,16 @@ describe("/v1/webhooks/event-types", () => {
       expect(getEventTypesQuerySchema.safeParse(query).success).toBe(false);
     });
 
+    it("rejects filter[eventType] with no operator, since only contains is allowed", () => {
+      const result = getEventTypesQuerySchema.safeParse({
+        "filter[eventType]": "x",
+      });
+      expect(result.error?.issues[0]).toMatchObject({
+        path: ["filter[eventType_op]"],
+        message: expect.stringContaining("not allowed"),
+      });
+    });
+
     it("names the NUL in filter[source]", () => {
       const result = getEventTypesQuerySchema.safeParse({
         "filter[source]": "\u0000",

@@ -160,6 +160,27 @@ describe("/v1/webhooks/webhooks", () => {
       );
     });
 
+    it.each(["filter[url]", "filter[description]"])(
+      "rejects %s with no operator, since only contains is allowed",
+      (key) => {
+        const result = getWebhookEndpointsQuerySchema.safeParse({ [key]: "x" });
+        expect(result.error?.issues[0]).toMatchObject({
+          path: [`${key.slice(0, -1)}_op]`],
+          message: expect.stringContaining("not allowed"),
+        });
+      }
+    );
+
+    it("rejects a NUL in filter[eventType] with no operator", () => {
+      const result = getWebhookEndpointsQuerySchema.safeParse({
+        "filter[eventType]": "\u0000",
+      });
+      expect(result.error?.issues[0]).toMatchObject({
+        path: ["filter[eventType]"],
+        message: NUL,
+      });
+    });
+
     it("names the NUL in filter[url]", () => {
       const result = getWebhookEndpointsQuerySchema.safeParse({
         "filter[url]": "a\u0000",
