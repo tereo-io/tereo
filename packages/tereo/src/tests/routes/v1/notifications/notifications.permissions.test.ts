@@ -68,7 +68,6 @@ let otherSenderToken: string;
 let noPermToken: string;
 let connectionSlug: string;
 
-let readableBucket: string;
 let forbiddenBucket: string;
 
 let forbiddenObjectId: string;
@@ -122,11 +121,7 @@ beforeAll(async () => {
   connectionSlug = connection.slug;
 
   const filesToken = await getTestAccessToken();
-  readableBucket = (await createTestBucket(filesToken)).name;
   forbiddenBucket = (await createTestBucket(filesToken)).name;
-  await grantTestPermission(filesToken, readableBucket, senderId, {
-    canRead: true,
-  });
 
   forbiddenObjectId = await uploadTestObjectAndGetId(
     filesToken,

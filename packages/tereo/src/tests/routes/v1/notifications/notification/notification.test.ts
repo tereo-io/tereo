@@ -48,7 +48,6 @@ const createConnection = (over: Record<string, unknown> = {}) =>
   });
 
 let senderToken: string;
-let senderId: string;
 let otherSenderToken: string;
 let readerToken: string;
 let noPermToken: string;
@@ -79,10 +78,8 @@ beforeAll(async () => {
   await ensureDailyPartitions("notificationDeliveries", 0, 1);
   await clean();
 
-  senderId = randomUUID();
   senderToken = await getTestPrincipalToken({
-    userId: senderId,
-    permissions: ["notifications.send", "file-service.objects.read"],
+    permissions: ["notifications.send"],
   });
   otherSenderToken = await getTestPrincipalToken({
     permissions: ["notifications.send"],
