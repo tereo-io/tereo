@@ -1,13 +1,11 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag race
+import { createTestClient } from "../../../support/auth/clients.js";
 import { browserLogin } from "../../../support/browserLogin.js";
+import { createTestUser } from "../../../support/auth/users.js";
+import { BASE_URL } from "../../../support/auth/constants.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
-} from "../../../support/auth.js";
 
 const SCOPE = "openid profile email offline_access";
 const REDIRECT_URI = "http://localhost:3000/callback";

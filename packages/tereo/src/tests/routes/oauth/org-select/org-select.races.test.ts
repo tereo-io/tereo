@@ -1,29 +1,30 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag race
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
 import { ensureTestOrganization } from "../../../support/principals.js";
+import { getAccessTokenForUser } from "../../../support/auth/login.js";
 import type { Request, Response as ExpressResponse } from "express";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { generateUniqueId } from "../../../support/auth/crypto.js";
 import { newPkce } from "../../../support/browserLogin.js";
 import { OAuth2Error } from "../../../../utils/errors.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import db from "../../../../utils/db/index.js";
 import {
+  createTestOrganization,
+  addTestOrgMember,
+} from "../../../support/auth/organizations.js";
+import {
+  createTestUser,
+  createAdminUser,
+} from "../../../support/auth/users.js";
+import {
   generateRandomString,
   hashFlowToken,
   hashPassword,
 } from "../../../../utils/crypto.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
-  createAdminUser,
-  getAccessTokenForUser,
-  generateUniqueId,
-  createTestOrganization,
-  addTestOrgMember,
-} from "../../../support/auth.js";
 
 describe("/oauth/org-select and /oauth/org-select/submit", () => {
   describe("OAuth Org Select Endpoints", () => {

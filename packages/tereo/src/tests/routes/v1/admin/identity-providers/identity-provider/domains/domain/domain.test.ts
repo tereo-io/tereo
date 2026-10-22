@@ -3,6 +3,8 @@
 
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../../../../definitions/index.js";
 import { ensurePermission } from "../../../../../../../support/testService.js";
+import { generateUniqueId } from "../../../../../../../support/auth/crypto.js";
+import { createTestRole } from "../../../../../../../support/auth/users.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CORE_URL } from "../../../../../../../support/coreUrl.js";
@@ -19,10 +21,6 @@ import {
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../../../../../../support/webhooks.js";
-import {
-  createTestRole,
-  generateUniqueId,
-} from "../../../../../../../support/auth.js";
 
 declare global {
   interface Response {

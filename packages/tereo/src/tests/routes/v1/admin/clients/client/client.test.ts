@@ -1,6 +1,9 @@
 // @module-tag int
 // @module-tag auth
 
+import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
+import { generateUniqueId } from "../../../../../support/auth/crypto.js";
 import { LOGIN_CLIENT } from "../../../../../../definitions/index.js";
 import { makeServiceOf } from "../../../../../support/testService.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
@@ -10,12 +13,11 @@ import {
   BASE_URL,
   HTTP_STATUS,
   NON_EXISTENT_UUID,
-  createTestClient,
+} from "../../../../../support/auth/constants.js";
+import {
   createAdminUser,
   createTestUser,
-  getAccessTokenForUser,
-  generateUniqueId,
-} from "../../../../../support/auth.js";
+} from "../../../../../support/auth/users.js";
 
 interface ServiceAccountUser {
   id: string;

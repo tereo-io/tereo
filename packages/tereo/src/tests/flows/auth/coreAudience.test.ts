@@ -1,17 +1,14 @@
 // @module-tag int
 // @module-tag auth
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
+import { createTestClient } from "../../support/auth/clients.js";
 import { makeServiceOf } from "../../support/testService.js";
 import { browserLogin } from "../../support/browserLogin.js";
+import { createTestUser } from "../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { decodeJwt } from "../../support/auth/tokens.js";
 import { prisma } from "../../../utils/db/prisma.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
-  decodeJwt,
-} from "../../support/auth.js";
 
 /**
  * Core's own API admits core's UI and services with the user's full rights;

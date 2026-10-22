@@ -1,20 +1,17 @@
 // @module-tag int
 // @module-tag auth
 
+import { BASE_URL, HTTP_STATUS } from "../../../../support/auth/constants.js";
 import { getTestPrincipalToken } from "../../../../support/principals.js";
+import { getAccessTokenForUser } from "../../../../support/auth/login.js";
+import { createTestClient } from "../../../../support/auth/clients.js";
+import { generateUniqueId } from "../../../../support/auth/crypto.js";
+import { createAdminUser } from "../../../../support/auth/users.js";
 import { LOGIN_CLIENT } from "../../../../../definitions/index.js";
 import { makeServiceOf } from "../../../../support/testService.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { createHash } from "node:crypto";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createAdminUser,
-  getAccessTokenForUser,
-  generateUniqueId,
-} from "../../../../support/auth.js";
 
 interface ServiceAccountUser {
   id: string;

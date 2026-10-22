@@ -2,23 +2,25 @@
 // @module-tag auth
 
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../../definitions/index.js";
+import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
 import { makeServiceOf } from "../../../../../support/testService.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+  NON_EXISTENT_UUID,
+} from "../../../../../support/auth/constants.js";
+import {
+  createTestUser,
+  createAdminUser,
+} from "../../../../../support/auth/users.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../../../../support/webhooks.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  NON_EXISTENT_UUID,
-  createTestClient,
-  createTestUser,
-  createAdminUser,
-  getAccessTokenForUser,
-} from "../../../../../support/auth.js";
 
 interface UserSessionsResponse {
   userId: string;

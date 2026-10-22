@@ -1,7 +1,7 @@
 // @module-tag int
 // @module-tag auth
 
-import { generateUniqueId } from "../../../../../../../support/auth.js";
+import { generateUniqueId } from "../../../../../../../support/auth/crypto.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CORE_URL } from "../../../../../../../support/coreUrl.js";

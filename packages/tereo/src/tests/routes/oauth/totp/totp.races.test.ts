@@ -1,11 +1,19 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag race
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
 import type { Request, Response as ExpressResponse } from "express";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { generateTotpCode } from "../../../support/auth/crypto.js";
+import { createTestUser } from "../../../support/auth/users.js";
 import { hashPassword } from "../../../../utils/crypto.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import db from "../../../../utils/db/index.js";
+import {
+  createUserRequiringTotpSetup,
+  loginToTotpSetup,
+} from "../../../support/auth/totpSetup.js";
 import {
   absorbCookies,
   cookieHeader,
@@ -16,15 +24,6 @@ import {
   generateTotpSecret,
   encryptTotpSecret,
 } from "../../../../utils/totp.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
-  createUserRequiringTotpSetup,
-  generateTotpCode,
-  loginToTotpSetup,
-} from "../../../support/auth.js";
 
 describe("/oauth/totp", () => {
   let client: Awaited<ReturnType<typeof createTestClient>>;

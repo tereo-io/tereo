@@ -1,7 +1,8 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag job
-import { createTestClient, createTestUser } from "../support/auth.js";
+import { createTestClient } from "../support/auth/clients.js";
+import { createTestUser } from "../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes } from "node:crypto";

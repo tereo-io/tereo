@@ -1,5 +1,7 @@
 // @module-tag int
 // @module-tag auth
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { fetchDiscoveryDocument } from "../../support/auth/tokens.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { hashPassword } from "../../../utils/crypto.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -11,11 +13,6 @@ import {
   newPkce,
   type CookieJar,
 } from "../../support/browserLogin.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  fetchDiscoveryDocument,
-} from "../../support/auth.js";
 
 // Test entity variables
 let TEST_CLIENT_ID = "";

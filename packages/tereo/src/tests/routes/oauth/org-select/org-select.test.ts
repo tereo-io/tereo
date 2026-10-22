@@ -1,23 +1,27 @@
 // @module-tag int
 // @module-tag auth
+import { getAccessTokenForUser } from "../../../support/auth/login.js";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { generateUniqueId } from "../../../support/auth/crypto.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import {
-  generateRandomString,
-  hashFlowToken,
-} from "../../../../utils/crypto.js";
+  createTestOrganization,
+  addTestOrgMember,
+} from "../../../support/auth/organizations.js";
 import {
   BASE_URL,
   HTTP_STATUS,
   NON_EXISTENT_UUID,
-  createTestClient,
+} from "../../../support/auth/constants.js";
+import {
   createTestUser,
   createAdminUser,
-  getAccessTokenForUser,
-  generateUniqueId,
-  createTestOrganization,
-  addTestOrgMember,
-} from "../../../support/auth.js";
+} from "../../../support/auth/users.js";
+import {
+  generateRandomString,
+  hashFlowToken,
+} from "../../../../utils/crypto.js";
 
 interface OrgSelectGetResponse {
   organizations: Array<{ id: string; name: string; slug: string }>;

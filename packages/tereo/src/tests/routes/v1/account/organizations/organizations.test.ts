@@ -1,17 +1,14 @@
 // @module-tag int
 // @module-tag auth
 
+import { BASE_URL, HTTP_STATUS } from "../../../../support/auth/constants.js";
 import { getTestPrincipalToken } from "../../../../support/principals.js";
+import { createTestClient } from "../../../../support/auth/clients.js";
 import { browserLogin } from "../../../../support/browserLogin.js";
+import { createTestUser } from "../../../../support/auth/users.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { randomBytes } from "crypto";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
-} from "../../../../support/auth.js";
 
 type Client = Awaited<ReturnType<typeof createTestClient>>;
 type User = Awaited<ReturnType<typeof createTestUser>>;

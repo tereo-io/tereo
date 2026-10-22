@@ -1,20 +1,19 @@
 // @module-tag int
 // @module-tag auth
 import { expectAuthorizeErrorRedirect } from "../../../support/pure/authorizeErrors.js";
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
+import { fetchDiscoveryDocument } from "../../../support/auth/tokens.js";
+import { createTestClient } from "../../../support/auth/clients.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { createTestUser } from "../../../support/auth/users.js";
 import { hashPassword } from "../../../../utils/crypto.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { createHash, randomBytes } from "node:crypto";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
-  fetchDiscoveryDocument,
-} from "../../../support/auth.js";
+} from "../../../support/auth/crypto.js";
 
 describe("/oauth/authorize", () => {
   describe("OAuth Authorize Endpoint", () => {

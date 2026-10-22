@@ -2,16 +2,16 @@
 // @module-tag auth
 // @module-tag security
 import { describe, it, expect, beforeEach, beforeAll } from "vitest";
+import { type TokenResponse } from "../../support/auth/tokens.js";
+import { createTestClient } from "../../support/auth/clients.js";
 import { makeServiceOf } from "../../support/testService.js";
+import { createTestUser } from "../../support/auth/users.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import {
   BASE_URL,
   HTTP_STATUS,
   OAUTH_ERRORS,
-  createTestClient,
-  createTestUser,
-  type TokenResponse,
-} from "../../support/auth.js";
+} from "../../support/auth/constants.js";
 
 describe("client authentication at /oauth", () => {
   /**

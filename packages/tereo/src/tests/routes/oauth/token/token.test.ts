@@ -1,6 +1,10 @@
 // @module-tag int
 // @module-tag auth
 import { browserLogin, type CookieJar } from "../../../support/browserLogin.js";
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
+import { TokenResponse, decodeJwt } from "../../../support/auth/tokens.js";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { createTestUser } from "../../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { createHash } from "node:crypto";
@@ -10,21 +14,15 @@ import {
   SYSTEM_USER_ID,
 } from "../../../../definitions/index.js";
 import {
+  generateCodeVerifier,
+  generateCodeChallenge,
+  generateUniqueId,
+} from "../../../support/auth/crypto.js";
+import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../../support/webhooks.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
-  generateCodeVerifier,
-  generateCodeChallenge,
-  generateUniqueId,
-  TokenResponse,
-  decodeJwt,
-} from "../../../support/auth.js";
 
 describe("POST /oauth/token", () => {
   describe("OAuth Token Endpoint", () => {

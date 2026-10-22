@@ -1,27 +1,30 @@
 // @module-tag int
 // @module-tag auth
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
 import { getTestPrincipalToken } from "../../../support/principals.js";
+import { getAccessTokenForUser } from "../../../support/auth/login.js";
+import { createTestClient } from "../../../support/auth/clients.js";
 import { InvalidGrantError } from "../../../../utils/errors.js";
 import { browserLogin } from "../../../support/browserLogin.js";
+import { TokenResponse } from "../../../support/auth/tokens.js";
 import { handleRefreshToken } from "../../../../utils/auth.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import db from "../../../../utils/db/index.js";
 import { randomBytes } from "node:crypto";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
+  createTestOrganization,
+  addTestOrgMember,
+} from "../../../support/auth/organizations.js";
+import {
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
-  TokenResponse,
-  createTestOrganization,
-  addTestOrgMember,
+} from "../../../support/auth/crypto.js";
+import {
+  createTestUser,
   createAdminUser,
-  getAccessTokenForUser,
-} from "../../../support/auth.js";
+} from "../../../support/auth/users.js";
 
 describe("POST /oauth/token", () => {
   describe("OAuth Token Endpoint", () => {

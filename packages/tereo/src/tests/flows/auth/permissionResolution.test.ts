@@ -1,23 +1,24 @@
 // @module-tag int
 // @module-tag auth
 
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { createTestClient } from "../../support/auth/clients.js";
 import { makeServiceOf } from "../../support/testService.js";
 import { browserLogin } from "../../support/browserLogin.js";
 import { LOGIN_CLIENT } from "../../../definitions/index.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { decodeJwt } from "../../support/auth/tokens.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import {
-  BASE_URL,
-  HTTP_STATUS,
   checkUserPermission,
-  createTestClient,
+  getAccessTokenForUser,
+} from "../../support/auth/login.js";
+import {
   createTestUser,
   createAdminUser,
   createTestRole,
   createTestPermission,
-  decodeJwt,
-  getAccessTokenForUser,
-} from "../../support/auth.js";
+} from "../../support/auth/users.js";
 
 let adminToken: string;
 

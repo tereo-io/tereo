@@ -1,24 +1,24 @@
 // @module-tag int
 // @module-tag auth
 import { ensureTestOrganization } from "../../support/principals.js";
+import { createTestClient } from "../../support/auth/clients.js";
 import { confirmLogout } from "../../support/browserLogin.js";
 import { makeServiceOf } from "../../support/testService.js";
+import { createTestUser } from "../../support/auth/users.js";
+import { BASE_URL } from "../../support/auth/constants.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { hashFlowToken } from "../../../utils/crypto.js";
+import { decodeJwt } from "../../support/auth/tokens.js";
 import { prisma } from "../../../utils/db/prisma.js";
+import {
+  generateCodeChallenge,
+  generateCodeVerifier,
+  generateUniqueId,
+} from "../../support/auth/crypto.js";
 import {
   ID_TOKEN_HINT_GRACE_SECONDS,
   generateIdToken,
 } from "../../../utils/tokens.js";
-import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
-  decodeJwt,
-  generateCodeChallenge,
-  generateCodeVerifier,
-  generateUniqueId,
-} from "../../support/auth.js";
 
 const REDIRECT_URI = "http://localhost:3000/session-lifecycle-callback";
 const POST_LOGOUT_URI = "http://localhost:3000/session-lifecycle-logout";

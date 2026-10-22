@@ -2,14 +2,23 @@
 // @module-tag auth
 
 import { getTestPrincipalToken } from "../../support/principals.js";
+import { getAccessTokenForUser } from "../../support/auth/login.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { createTestClient } from "../../support/auth/clients.js";
+import { generateUniqueId } from "../../support/auth/crypto.js";
 import { upstreamLogin } from "../../support/upstreamLogin.js";
+import { createTestUser } from "../../support/auth/users.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { randomUUID } from "node:crypto";
 import {
   startFakeOidcProvider,
   type FakeOidcProvider,
 } from "../../support/fakeOidcProvider.js";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+  NON_EXISTENT_UUID,
+} from "../../support/auth/constants.js";
 import {
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
@@ -19,15 +28,6 @@ import {
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../support/webhooks.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  NON_EXISTENT_UUID,
-  createTestClient,
-  createTestUser,
-  getAccessTokenForUser,
-  generateUniqueId,
-} from "../../support/auth.js";
 
 interface UserResponse {
   id?: string;

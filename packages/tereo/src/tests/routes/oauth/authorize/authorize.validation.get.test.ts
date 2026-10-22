@@ -1,16 +1,18 @@
 // @module-tag int
 // @module-tag auth
 import { expectAuthorizeErrorRedirect } from "../../../support/pure/authorizeErrors.js";
+import { createTestClient } from "../../../support/auth/clients.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
   BASE_URL,
   HTTP_STATUS,
   OAUTH_ERRORS,
-  createTestClient,
+} from "../../../support/auth/constants.js";
+import {
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
-} from "../../../support/auth.js";
+} from "../../../support/auth/crypto.js";
 
 describe("GET /oauth/authorize", () => {
   describe("OAuth Authorize Endpoint", () => {

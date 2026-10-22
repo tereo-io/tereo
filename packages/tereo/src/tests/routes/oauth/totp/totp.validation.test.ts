@@ -1,12 +1,12 @@
 // @module-tag int
 // @module-tag auth
+import { startTotpSetup } from "../../../support/auth/totpSetup.js";
 import { describe, it, expect } from "vitest";
 import {
   BASE_URL,
   HTTP_STATUS,
   OAUTH_ERRORS,
-  startTotpSetup,
-} from "../../../support/auth.js";
+} from "../../../support/auth/constants.js";
 
 interface TotpVerifyResponse {
   redirect_url?: string;

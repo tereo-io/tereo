@@ -3,21 +3,21 @@
 // @module-tag race
 import { NotFoundError, OAuth2Error } from "../../../../utils/errors.js";
 import type { Request, Response as ExpressResponse } from "express";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { createTestUser } from "../../../support/auth/users.js";
 import { newPkce } from "../../../support/browserLogin.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import db from "../../../../utils/db/index.js";
 import {
-  generateRandomString,
-  hashPassword,
-} from "../../../../utils/crypto.js";
-import {
-  createTestClient,
-  createTestUser,
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
-} from "../../../support/auth.js";
+} from "../../../support/auth/crypto.js";
+import {
+  generateRandomString,
+  hashPassword,
+} from "../../../../utils/crypto.js";
 
 describe("/oauth/consent", () => {
   describe("an expired consent session read twice at once", () => {

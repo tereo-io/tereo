@@ -2,9 +2,16 @@
 // @module-tag auth
 import { DEFAULT_ORGANIZATION_ID } from "../../../../definitions/index.js";
 import { hashFlowToken, hashPassword } from "../../../../utils/crypto.js";
+import { createTestClient } from "../../../support/auth/clients.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { createTestUser } from "../../../support/auth/users.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { randomBytes } from "node:crypto";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+  OAUTH_ERRORS,
+} from "../../../support/auth/constants.js";
 import {
   absorbCookies,
   browserLogin,
@@ -18,13 +25,6 @@ import {
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../../support/webhooks.js";
-import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
-  HTTP_STATUS,
-  OAUTH_ERRORS,
-} from "../../../support/auth.js";
 
 describe("/oauth/end-session and /oauth/end-session/confirm", () => {
   /**

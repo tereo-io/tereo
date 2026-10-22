@@ -5,6 +5,7 @@
 import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrganization.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { type AuthContext } from "../../../../../../middleware/auth.js";
+import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { ForbiddenError } from "../../../../../../utils/errors.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll, vi } from "vitest";
@@ -16,10 +17,9 @@ import {
   updateUser,
 } from "../../../../../../routes/v1/admin/users/user/controllers.js";
 import {
-  BASE_URL,
   createTestRole,
   createTestUser,
-} from "../../../../../support/auth.js";
+} from "../../../../../support/auth/users.js";
 
 const ITERATIONS = 60;
 

@@ -1,10 +1,10 @@
 // @module-tag int
 // @module-tag auth
 import { LOGIN_CLIENT, loginClientConfig } from "../../definitions/index.js";
+import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { getTestPrincipalToken } from "../support/principals.js";
 import { ensureLoginClient } from "../../utils/loginClient.js";
-import { BASE_URL, HTTP_STATUS } from "../support/auth.js";
 import { prisma } from "../../utils/db/prisma.js";
 import env from "../../env.js";
 

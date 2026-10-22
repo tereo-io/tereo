@@ -1,18 +1,20 @@
 // @module-tag int
 // @module-tag auth
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { generateTotpCode } from "../../../support/auth/crypto.js";
+import { createTestUser } from "../../../support/auth/users.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import {
   BASE_URL,
   HTTP_STATUS,
   OAUTH_ERRORS,
-  createTestClient,
-  createTestUser,
-  generateTotpCode,
+} from "../../../support/auth/constants.js";
+import {
   loginToTotpSetup,
   startTotpSetup,
   createUserRequiringTotpSetup,
-} from "../../../support/auth.js";
+} from "../../../support/auth/totpSetup.js";
 
 interface TotpSetupResponse {
   secret?: string;

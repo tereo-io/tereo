@@ -2,18 +2,17 @@
 // @module-tag auth
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { generateTotpSecret, encryptTotpSecret } from "../../../utils/totp.js";
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { generateTotpCode } from "../../support/auth/crypto.js";
+import { decodeJwt } from "../../support/auth/tokens.js";
 import { hashPassword } from "../../../utils/crypto.js";
 import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "../../../utils/db/prisma.js";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  decodeJwt,
-  generateTotpCode,
   startTotpSetup,
   loginToTotpSetup,
   createUserRequiringTotpSetup,
-} from "../../support/auth.js";
+} from "../../support/auth/totpSetup.js";
 
 // Test entity variables
 let TEST_CLIENT_ID = "";

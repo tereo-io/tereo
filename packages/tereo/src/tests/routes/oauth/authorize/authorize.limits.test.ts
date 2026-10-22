@@ -2,6 +2,9 @@
 // @module-tag auth
 // @module-tag race
 
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { createTestUser } from "../../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
@@ -10,12 +13,6 @@ import {
   cookieHeader,
   newPkce,
 } from "../../../support/browserLogin.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
-} from "../../../support/auth.js";
 
 const REDIRECT_URI = "http://localhost:3000/callback";
 

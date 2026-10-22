@@ -1,21 +1,25 @@
 // @module-tag int
 // @module-tag auth
 
+import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
 import { SYSTEM_USER_ID } from "../../../../../../definitions/index.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
+  createTestOrganization,
+  addTestOrgMember,
+} from "../../../../../support/auth/organizations.js";
+import {
   BASE_URL,
   HTTP_STATUS,
-  createTestClient,
+} from "../../../../../support/auth/constants.js";
+import {
   createTestUser,
   createAdminUser,
   createTestRole,
-  getAccessTokenForUser,
-  createTestOrganization,
-  addTestOrgMember,
-} from "../../../../../support/auth.js";
+} from "../../../../../support/auth/users.js";
 
 interface UserRolesResponse {
   userId: string;

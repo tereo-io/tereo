@@ -3,19 +3,21 @@
 // @module-tag security
 import { expectAuthorizeErrorRedirect } from "../../support/pure/authorizeErrors.js";
 import { hashAuthorizationCode } from "../../../utils/crypto.js";
+import { createTestClient } from "../../support/auth/clients.js";
+import { createTestUser } from "../../support/auth/users.js";
+import { TokenResponse } from "../../support/auth/tokens.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../utils/db/prisma.js";
 import {
   BASE_URL,
   HTTP_STATUS,
   OAUTH_ERRORS,
-  createTestClient,
-  createTestUser,
+} from "../../support/auth/constants.js";
+import {
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
-  TokenResponse,
-} from "../../support/auth.js";
+} from "../../support/auth/crypto.js";
 
 interface AuthorizeResponse {
   redirect_url?: string;

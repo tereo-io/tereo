@@ -2,13 +2,11 @@
 // @module-tag auth
 // @module-tag race
 
+import { createTestOrganization } from "../../../../../support/auth/organizations.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
+import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import {
-  BASE_URL,
-  createTestOrganization,
-} from "../../../../../support/auth.js";
 
 const call = (method: string, path: string, token: string, body?: unknown) =>
   fetch(`${BASE_URL}${path}`, {

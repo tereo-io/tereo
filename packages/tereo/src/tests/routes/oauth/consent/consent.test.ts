@@ -1,15 +1,14 @@
 // @module-tag int
 // @module-tag auth
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { createTestUser } from "../../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
-} from "../../../support/auth.js";
+} from "../../../support/auth/crypto.js";
 
 describe("/oauth/consent", () => {
   describe("OAuth Consent Endpoint", () => {

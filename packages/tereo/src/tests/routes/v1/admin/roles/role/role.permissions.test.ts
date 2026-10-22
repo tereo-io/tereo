@@ -2,21 +2,23 @@
 // @module-tag auth
 
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
+import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+} from "../../../../../support/auth/constants.js";
 import {
   CORE_SERVICE_ID,
   LOGIN_CLIENT,
 } from "../../../../../../definitions/index.js";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
   createTestUser,
   createAdminUser,
   createTestRole,
-  getAccessTokenForUser,
-} from "../../../../../support/auth.js";
+} from "../../../../../support/auth/users.js";
 
 let adminToken: string;
 let regularToken: string;

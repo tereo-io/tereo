@@ -1,7 +1,6 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag security
-import { BASE_URL, HTTP_STATUS, OAUTH_ERRORS } from "../../../support/auth.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { currentSigningKey } from "../../../../utils/keys.js";
@@ -9,6 +8,11 @@ import { hashPassword } from "../../../../utils/crypto.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import env from "../../../../env.js";
 import jwt from "jsonwebtoken";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+  OAUTH_ERRORS,
+} from "../../../support/auth/constants.js";
 import {
   ID_TOKEN_HINT_GRACE_SECONDS,
   generateIdToken,

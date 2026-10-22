@@ -2,7 +2,8 @@
 // @module-tag auth
 // @module-tag security
 
-import { BASE_URL, HTTP_STATUS, createTestClient } from "../support/auth.js";
+import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
+import { createTestClient } from "../support/auth/clients.js";
 import { describe, it, expect } from "vitest";
 
 const TOO_MANY_REQUESTS = 429;

@@ -2,6 +2,8 @@
 // @module-tag auth
 // @module-tag race
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../definitions/index.js";
+import { BASE_URL, HTTP_STATUS } from "../../../../support/auth/constants.js";
+import { fetchJwks, getJwtHeader } from "../../../../support/auth/tokens.js";
 import { getTestPrincipalToken } from "../../../../support/principals.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../utils/db/prisma.js";
@@ -18,12 +20,6 @@ import {
   generateAccessToken,
   verifyAccessToken,
 } from "../../../../../utils/tokens.js";
-import {
-  BASE_URL,
-  fetchJwks,
-  getJwtHeader,
-  HTTP_STATUS,
-} from "../../../../support/auth.js";
 
 /**
  * An immediate rotation (for a compromised key) while an earlier rotation is

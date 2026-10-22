@@ -2,6 +2,8 @@
 // @module-tag auth
 
 import { ensurePermission } from "../../../../../../support/testService.js";
+import { generateUniqueId } from "../../../../../../support/auth/crypto.js";
+import { createTestRole } from "../../../../../../support/auth/users.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../../support/coreUrl.js";
@@ -14,10 +16,6 @@ import {
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../../../../../../support/principals.js";
-import {
-  createTestRole,
-  generateUniqueId,
-} from "../../../../../../support/auth.js";
 
 declare global {
   interface Response {

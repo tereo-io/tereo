@@ -1,4 +1,4 @@
-import { BASE_URL } from "./auth.js";
+import { BASE_URL } from "./auth/constants.js";
 
 export interface TestSocket {
   /** Resolves with the connect result: null, or the handshake's error. */

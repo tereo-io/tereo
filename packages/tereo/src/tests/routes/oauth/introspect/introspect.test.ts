@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag auth
+import { createTestClient } from "../../../support/auth/clients.js";
 import { makeServiceOf } from "../../../support/testService.js";
 import { browserLogin } from "../../../support/browserLogin.js";
 import { describe, it, expect, beforeAll } from "vitest";
@@ -9,16 +10,21 @@ import {
   BASE_URL,
   HTTP_STATUS,
   OAUTH_ERRORS,
-  createTestClient,
-  createTestUser,
+} from "../../../support/auth/constants.js";
+import {
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
+} from "../../../support/auth/crypto.js";
+import {
   TokenResponse,
   IntrospectResponse,
+} from "../../../support/auth/tokens.js";
+import {
+  createTestUser,
   createTestPermission,
   createTestRole,
-} from "../../../support/auth.js";
+} from "../../../support/auth/users.js";
 
 describe("POST /oauth/introspect", () => {
   interface AuthorizeResponse {

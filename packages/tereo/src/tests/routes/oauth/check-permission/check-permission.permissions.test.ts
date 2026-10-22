@@ -1,6 +1,9 @@
 // @module-tag int
 // @module-tag auth
 
+import { createTestRole, createTestUser } from "../../../support/auth/users.js";
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
+import { createTestClient } from "../../../support/auth/clients.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import {
@@ -11,13 +14,6 @@ import {
   ensureTestMembership,
   ensureTestOrganization,
 } from "../../../support/principals.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestRole,
-  createTestUser,
-} from "../../../support/auth.js";
 
 /**
  * /oauth/check-permission answers a client of an organization about that

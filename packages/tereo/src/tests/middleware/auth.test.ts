@@ -1,24 +1,21 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag security
+import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { getTestPrincipalToken } from "../support/principals.js";
+import { getAccessTokenForUser } from "../support/auth/login.js";
+import { createTestClient } from "../support/auth/clients.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { browserLogin } from "../support/browserLogin.js";
+import { createTestUser } from "../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { getJwtHeader } from "../support/auth/tokens.js";
 import { generateIdToken } from "../../utils/tokens.js";
 import { currentSigningKey } from "../../utils/keys.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "node:crypto";
 import env from "../../env.js";
 import jwt from "jsonwebtoken";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestUser,
-  getJwtHeader,
-  createTestClient,
-  getAccessTokenForUser,
-} from "../support/auth.js";
 
 describe("requireAuth", () => {
   /**

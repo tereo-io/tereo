@@ -1,9 +1,12 @@
 // @module-tag int
 // @module-tag auth
 import { encryptTotpSecret, generateTotpSecret } from "../../../utils/totp.js";
+import { createTestRole, createTestUser } from "../../support/auth/users.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestClient } from "../../support/auth/clients.js";
 import { upstreamLogin } from "../../support/upstreamLogin.js";
+import { decodeJwt } from "../../support/auth/tokens.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
 import { randomUUID } from "node:crypto";
@@ -17,13 +20,9 @@ import {
   type CookieJar,
 } from "../../support/browserLogin.js";
 import {
-  createTestClient,
-  createTestRole,
-  createTestUser,
-  decodeJwt,
   generateTotpCode,
   generateUniqueId,
-} from "../../support/auth.js";
+} from "../../support/auth/crypto.js";
 
 const REDIRECT_URI = "http://localhost:3000/callback";
 const SCOPE = "openid profile email";

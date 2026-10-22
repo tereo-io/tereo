@@ -2,8 +2,8 @@
 // @module-tag auth
 // @module-tag race
 
+import { generateUniqueId } from "../../../../../support/auth/crypto.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { generateUniqueId } from "../../../../../support/auth.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../support/coreUrl.js";
 import {

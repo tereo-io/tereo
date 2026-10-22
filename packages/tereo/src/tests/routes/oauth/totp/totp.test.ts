@@ -1,10 +1,21 @@
 // @module-tag int
 // @module-tag auth
+import { createTestRole, createTestUser } from "../../../support/auth/users.js";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
 import { hashFlowToken, hashPassword } from "../../../../utils/crypto.js";
+import { getAccessTokenForUser } from "../../../support/auth/login.js";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { generateTotpCode } from "../../../support/auth/crypto.js";
 import { getRedisClient } from "../../../../utils/redis.js";
+import { decodeJwt } from "../../../support/auth/tokens.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { createHash, randomBytes } from "node:crypto";
+import {
+  loginToTotpSetup,
+  startTotpSetup,
+  createUserRequiringTotpSetup,
+} from "../../../support/auth/totpSetup.js";
 import {
   absorbCookies,
   cookieHeader,
@@ -14,19 +25,6 @@ import {
   generateTotpSecret,
   encryptTotpSecret,
 } from "../../../../utils/totp.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestRole,
-  createTestUser,
-  generateTotpCode,
-  getAccessTokenForUser,
-  loginToTotpSetup,
-  startTotpSetup,
-  createUserRequiringTotpSetup,
-  decodeJwt,
-} from "../../../support/auth.js";
 
 describe("/oauth/totp", () => {
   interface TotpSetupResponse {

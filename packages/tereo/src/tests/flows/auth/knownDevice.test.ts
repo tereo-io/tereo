@@ -1,7 +1,12 @@
 // @module-tag int
 // @module-tag auth
 import { encryptTotpSecret, generateTotpSecret } from "../../../utils/totp.js";
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { getAccessTokenForUser } from "../../support/auth/login.js";
 import { createHash, createHmac, randomUUID } from "node:crypto";
+import { createTestClient } from "../../support/auth/clients.js";
+import { generateTotpCode } from "../../support/auth/crypto.js";
+import { createTestUser } from "../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { normalizeEmail } from "../../../utils/email.js";
 import { getRedisClient } from "../../../utils/redis.js";
@@ -13,14 +18,6 @@ import {
   newPkce,
   type CookieJar,
 } from "../../support/browserLogin.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
-  generateTotpCode,
-  getAccessTokenForUser,
-} from "../../support/auth.js";
 
 /**
  * The known-device cookie lets a browser that has logged in as an account

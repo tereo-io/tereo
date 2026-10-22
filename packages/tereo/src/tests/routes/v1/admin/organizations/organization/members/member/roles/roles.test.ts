@@ -1,21 +1,25 @@
 // @module-tag int
 // @module-tag auth
 
+import { getAccessTokenForUser } from "../../../../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../../../../support/auth/clients.js";
 import { prisma } from "../../../../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
-  createAdminUser,
-  createTestRole,
-  getAccessTokenForUser,
   createTestOrganization,
   addTestOrgMember,
   type MemberRolesResponse,
-} from "../../../../../../../../support/auth.js";
+} from "../../../../../../../../support/auth/organizations.js";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+} from "../../../../../../../../support/auth/constants.js";
+import {
+  createTestUser,
+  createAdminUser,
+  createTestRole,
+} from "../../../../../../../../support/auth/users.js";
 
 let adminUser: Awaited<ReturnType<typeof createAdminUser>>;
 let adminToken: string;

@@ -2,8 +2,8 @@
 // @module-tag auth
 import type { NormalizedIdentity } from "../../../utils/identityProviders/types.js";
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
+import { createTestRole, createTestUser } from "../../support/auth/users.js";
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
-import { createTestRole, createTestUser } from "../../support/auth.js";
 import { ensureTestOrganization } from "../../support/principals.js";
 import { SYSTEM_USER_ID } from "../../../definitions/index.js";
 import { prisma } from "../../../utils/db/prisma.js";

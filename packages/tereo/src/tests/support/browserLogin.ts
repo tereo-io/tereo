@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "crypto";
-import { BASE_URL } from "./auth.js";
+import { BASE_URL } from "./auth/constants.js";
 import { expect } from "vitest";
 
 /**

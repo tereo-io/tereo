@@ -3,18 +3,22 @@
 // @module-tag race
 
 import { getTestPrincipalToken } from "../../../../../../../support/principals.js";
+import { getAccessTokenForUser } from "../../../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../../../support/auth/clients.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
-  BASE_URL,
   addTestOrgMember,
   createTestOrganization,
-  createTestUser,
+} from "../../../../../../../support/auth/organizations.js";
+import {
+  BASE_URL,
   HTTP_STATUS,
-  createTestClient,
+} from "../../../../../../../support/auth/constants.js";
+import {
+  createTestUser,
   createAdminUser,
-  getAccessTokenForUser,
-} from "../../../../../../../support/auth.js";
+} from "../../../../../../../support/auth/users.js";
 
 const ITERATIONS = 60;
 

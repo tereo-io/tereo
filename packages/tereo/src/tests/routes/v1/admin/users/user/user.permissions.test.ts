@@ -1,28 +1,30 @@
 // @module-tag int
 // @module-tag auth
 
+import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
 import { CORE_SERVICE_ID } from "../../../../../../definitions/index.js";
 import { makeServiceOf } from "../../../../../support/testService.js";
 import { browserLogin } from "../../../../../support/browserLogin.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
+  BASE_URL,
+  HTTP_STATUS,
+} from "../../../../../support/auth/constants.js";
+import {
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../../../../../support/principals.js";
 import {
+  createAdminUser,
+  createTestRole,
+  createTestUser,
+} from "../../../../../support/auth/users.js";
+import {
   encryptTotpSecret,
   generateTotpSecret,
 } from "../../../../../../utils/totp.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createAdminUser,
-  createTestClient,
-  createTestRole,
-  createTestUser,
-  getAccessTokenForUser,
-} from "../../../../../support/auth.js";
 
 type TestUser = Awaited<ReturnType<typeof createTestUser>>;
 

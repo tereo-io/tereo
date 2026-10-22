@@ -2,8 +2,9 @@
 // @module-tag auth
 
 import { generateRandomString, hashFlowToken } from "../../../utils/crypto.js";
-import { BASE_URL, HTTP_STATUS, createTestUser } from "../../support/auth.js";
 import { issueAuthorizationCode } from "../../../utils/authorization.js";
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { createTestUser } from "../../support/auth/users.js";
 import { LOGIN_CLIENT } from "../../../definitions/index.js";
 import { InvalidGrantError } from "../../../utils/errors.js";
 import { handleRefreshToken } from "../../../utils/auth.js";

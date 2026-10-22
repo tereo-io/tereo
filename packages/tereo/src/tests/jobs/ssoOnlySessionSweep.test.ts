@@ -4,7 +4,11 @@
 
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { getAccessTokenForUser } from "../support/auth/login.js";
+import { createTestClient } from "../support/auth/clients.js";
+import { generateUniqueId } from "../support/auth/crypto.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import { createTestUser } from "../support/auth/users.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { CORE_URL } from "../support/coreUrl.js";
 import { waitFor } from "../support/webhooks.js";
@@ -24,12 +28,6 @@ import {
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../support/principals.js";
-import {
-  createTestClient,
-  createTestUser,
-  generateUniqueId,
-  getAccessTokenForUser,
-} from "../support/auth.js";
 
 declare global {
   interface Response {

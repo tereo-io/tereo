@@ -1,7 +1,11 @@
 // @module-tag int
 // @module-tag auth
 
+import { createTestClient } from "../../support/auth/clients.js";
+import { createTestUser } from "../../support/auth/users.js";
+import { BASE_URL } from "../../support/auth/constants.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { decodeJwt } from "../../support/auth/tokens.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import {
   absorbCookies,
@@ -15,12 +19,6 @@ import {
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../../support/principals.js";
-import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
-  decodeJwt,
-} from "../../support/auth.js";
 
 /**
  * LOGIN and LOGOUT audit entries: a fresh sign-in writes LOGIN, a silent

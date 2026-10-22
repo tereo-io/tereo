@@ -2,25 +2,29 @@
 // @module-tag auth
 
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../../../../definitions/index.js";
+import { getAccessTokenForUser } from "../../../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../../../support/auth/clients.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import {
+  createTestOrganization,
+  addTestOrgMember,
+  type OrganizationMemberResponse,
+} from "../../../../../../../support/auth/organizations.js";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+} from "../../../../../../../support/auth/constants.js";
+import {
+  createTestUser,
+  createAdminUser,
+  createTestRole,
+} from "../../../../../../../support/auth/users.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../../../../../../support/webhooks.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
-  createAdminUser,
-  createTestRole,
-  getAccessTokenForUser,
-  createTestOrganization,
-  addTestOrgMember,
-  type OrganizationMemberResponse,
-} from "../../../../../../../support/auth.js";
 
 let testClient: Awaited<ReturnType<typeof createTestClient>>;
 let adminUser: Awaited<ReturnType<typeof createAdminUser>>;

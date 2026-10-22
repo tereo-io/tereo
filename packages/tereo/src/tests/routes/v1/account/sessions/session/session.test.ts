@@ -1,15 +1,15 @@
 // @module-tag int
 // @module-tag auth
 
+import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
+import { createTestUser } from "../../../../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
   BASE_URL,
   HTTP_STATUS,
   NON_EXISTENT_UUID,
-  createTestClient,
-  createTestUser,
-  getAccessTokenForUser,
-} from "../../../../../support/auth.js";
+} from "../../../../../support/auth/constants.js";
 
 interface SessionsResponse {
   sessions: Array<{

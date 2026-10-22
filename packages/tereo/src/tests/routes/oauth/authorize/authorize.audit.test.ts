@@ -1,5 +1,9 @@
 // @module-tag int
 // @module-tag auth
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { createTestUser } from "../../../support/auth/users.js";
+import { decodeJwt } from "../../../support/auth/tokens.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import {
@@ -18,13 +22,6 @@ import {
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../../support/webhooks.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
-  decodeJwt,
-} from "../../../support/auth.js";
 
 const REDIRECT_URI = "http://localhost:3000/token-lifecycle-audit-callback";
 const SCOPE = "openid offline_access";

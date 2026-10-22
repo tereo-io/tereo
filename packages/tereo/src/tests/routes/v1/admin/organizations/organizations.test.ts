@@ -1,19 +1,18 @@
 // @module-tag int
 // @module-tag auth
 
+import { BASE_URL, HTTP_STATUS } from "../../../../support/auth/constants.js";
+import { getAccessTokenForUser } from "../../../../support/auth/login.js";
+import { createTestClient } from "../../../../support/auth/clients.js";
+import { generateUniqueId } from "../../../../support/auth/crypto.js";
+import { createAdminUser } from "../../../../support/auth/users.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createAdminUser,
-  getAccessTokenForUser,
-  generateUniqueId,
   createTestOrganization,
   type OrganizationResponse,
   type OrganizationListResponse,
-} from "../../../../support/auth.js";
+} from "../../../../support/auth/organizations.js";
 
 let adminToken: string;
 

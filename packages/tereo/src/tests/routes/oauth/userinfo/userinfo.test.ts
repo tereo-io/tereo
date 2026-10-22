@@ -1,29 +1,35 @@
 // @module-tag int
 // @module-tag auth
+import { createTestClient } from "../../../support/auth/clients.js";
 import { generateAccessToken } from "../../../../utils/tokens.js";
 import { LOGIN_CLIENT } from "../../../../definitions/index.js";
 import { browserLogin } from "../../../support/browserLogin.js";
+import { createTestUser } from "../../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+  OAUTH_ERRORS,
+} from "../../../support/auth/constants.js";
+import {
+  generateCodeVerifier,
+  generateCodeChallenge,
+  generateUniqueId,
+} from "../../../support/auth/crypto.js";
+import {
+  UserInfoResponse,
+  TokenResponse,
+} from "../../../support/auth/tokens.js";
 import {
   ensureTestMembership,
   getTestPrincipalToken,
   testOrgId,
 } from "../../../support/principals.js";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  OAUTH_ERRORS,
-  createTestClient,
-  createTestUser,
   getAccessTokenForUser,
-  generateCodeVerifier,
-  generateCodeChallenge,
-  generateUniqueId,
   getUiAccessTokenForUser,
-  UserInfoResponse,
-  TokenResponse,
-} from "../../../support/auth.js";
+} from "../../../support/auth/login.js";
 
 describe("/oauth/userinfo", () => {
   interface AuthorizeResponse {

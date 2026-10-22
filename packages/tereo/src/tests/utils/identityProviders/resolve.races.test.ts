@@ -6,7 +6,7 @@ import { resolveLoginIdentity } from "../../../utils/identityProviders/resolve.j
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { ensureTestOrganization } from "../../support/principals.js";
-import { createTestUser } from "../../support/auth.js";
+import { createTestUser } from "../../support/auth/users.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { emitTx } from "../../../utils/outbox.js";
 import db from "../../../utils/db/index.js";

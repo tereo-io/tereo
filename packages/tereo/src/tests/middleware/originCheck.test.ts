@@ -1,9 +1,11 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag security
-import { BASE_URL, createTestClient, createTestUser } from "../support/auth.js";
+import { createTestClient } from "../support/auth/clients.js";
+import { createTestUser } from "../support/auth/users.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { BASE_URL } from "../support/auth/constants.js";
 import env from "../../env.js";
 import {
   absorbCookies,

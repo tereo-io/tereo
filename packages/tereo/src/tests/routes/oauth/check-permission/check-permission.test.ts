@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag auth
+import { createTestClient } from "../../../support/auth/clients.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { FIXTURE_USER_IDS } from "../../../support/principals.js";
 import { makeServiceOf } from "../../../support/testService.js";
@@ -10,11 +11,12 @@ import {
   HTTP_STATUS,
   NON_EXISTENT_UUID,
   OAUTH_ERRORS,
-  createTestClient,
+} from "../../../support/auth/constants.js";
+import {
   createTestUser,
   createTestPermission,
   createTestRole,
-} from "../../../support/auth.js";
+} from "../../../support/auth/users.js";
 
 describe("POST /oauth/check-permission and /oauth/check-permission/batch", () => {
   interface CheckPermissionResponse {

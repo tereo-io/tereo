@@ -1,17 +1,16 @@
 // @module-tag int
 // @module-tag auth
+import { createTestRole, createTestUser } from "../../support/auth/users.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
+import { BASE_URL } from "../../support/auth/constants.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../utils/db/prisma.js";
 import { fetchJson } from "../../support/http.js";
 import db from "../../../utils/db/index.js";
 import {
-  BASE_URL,
   addTestOrgMember,
   createTestOrganization,
-  createTestRole,
-  createTestUser,
-} from "../../support/auth.js";
+} from "../../support/auth/organizations.js";
 
 const CLIENT_IP = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250) + 1}`;
 

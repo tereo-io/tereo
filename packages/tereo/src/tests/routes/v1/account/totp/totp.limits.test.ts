@@ -2,19 +2,16 @@
 // @module-tag auth
 // @module-tag race
 
+import { BASE_URL, HTTP_STATUS } from "../../../../support/auth/constants.js";
+import { getUiAccessTokenForUser } from "../../../../support/auth/login.js";
+import { generateTotpCode } from "../../../../support/auth/crypto.js";
+import { createTestUser } from "../../../../support/auth/users.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { describe, it, expect } from "vitest";
 import {
   encryptTotpSecret,
   generateTotpSecret,
 } from "../../../../../utils/totp.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestUser,
-  generateTotpCode,
-  getUiAccessTokenForUser,
-} from "../../../../support/auth.js";
 
 interface TotpSetupResponse {
   secret?: string;

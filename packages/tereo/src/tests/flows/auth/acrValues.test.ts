@@ -1,8 +1,12 @@
 // @module-tag int
 // @module-tag auth
 import { generateTotpSecret, encryptTotpSecret } from "../../../utils/totp.js";
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { generateTotpCode } from "../../support/auth/crypto.js";
 import { LOGIN_CLIENT } from "../../../definitions/index.js";
+import { createTestUser } from "../../support/auth/users.js";
+import { decodeJwt } from "../../support/auth/tokens.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import {
   absorbCookies,
@@ -10,13 +14,6 @@ import {
   newPkce,
   type CookieJar,
 } from "../../support/browserLogin.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestUser,
-  decodeJwt,
-  generateTotpCode,
-} from "../../support/auth.js";
 
 /**
  * `acr_values=urn:auth-service:mfa` is enforced: the login must complete a

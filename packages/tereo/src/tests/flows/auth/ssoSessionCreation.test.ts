@@ -1,8 +1,8 @@
 // @module-tag int
 // @module-tag auth
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
 import { hashFlowToken, hashPassword } from "../../../utils/crypto.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { BASE_URL, HTTP_STATUS } from "../../support/auth.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { randomBytes } from "node:crypto";
 import {

@@ -3,7 +3,8 @@
 // @module-tag race
 
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
-import { BASE_URL, createTestRole } from "../../../../../support/auth.js";
+import { createTestRole } from "../../../../../support/auth/users.js";
+import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 

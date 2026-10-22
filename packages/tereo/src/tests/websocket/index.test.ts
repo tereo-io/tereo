@@ -5,10 +5,14 @@ import { notifyBucketAccessChanged } from "../../websocket/emitters/index.js";
 import { closeRedisEmitter } from "../../websocket/emitters/redisEmitter.js";
 import { browserLogin, cookieHeader } from "../support/browserLogin.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { createTestClient } from "../support/auth/clients.js";
 import { generateAccessToken } from "../../utils/tokens.js";
 import { closeHttpServer } from "../../utils/httpServer.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
+import { createTestUser } from "../support/auth/users.js";
+import { BASE_URL } from "../support/auth/constants.js";
 import { createServer, type Server } from "node:http";
+import { decodeJwt } from "../support/auth/tokens.js";
 import { prisma } from "../../utils/db/prisma.js";
 import {
   ensureTestMembership,
@@ -28,12 +32,6 @@ import {
   within,
   type TestSocket,
 } from "../support/socket.js";
-import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
-  decodeJwt,
-} from "../support/auth.js";
 
 describe("initializeWebSocket", () => {
   const REDIRECT_URI = "http://localhost:3000/websocket-reauth-callback";

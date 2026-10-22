@@ -1,7 +1,7 @@
 // @module-tag int
 // @module-tag auth
+import { createTestUser } from "../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import { createTestUser } from "../../support/auth.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import db from "../../../utils/db/index.js";
 import { randomBytes } from "node:crypto";

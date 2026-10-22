@@ -2,26 +2,27 @@
 // @module-tag auth
 import { browserLogin, type CookieJar } from "../../../support/browserLogin.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../../../definitions/index.js";
+import { TokenResponse, decodeJwt } from "../../../support/auth/tokens.js";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { createTestUser } from "../../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import jwt from "jsonwebtoken";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+  OAUTH_ERRORS,
+} from "../../../support/auth/constants.js";
+import {
+  generateCodeVerifier,
+  generateCodeChallenge,
+  generateUniqueId,
+} from "../../../support/auth/crypto.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../../support/webhooks.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  OAUTH_ERRORS,
-  createTestClient,
-  createTestUser,
-  generateCodeVerifier,
-  generateCodeChallenge,
-  generateUniqueId,
-  TokenResponse,
-  decodeJwt,
-} from "../../../support/auth.js";
 
 describe("POST /oauth/revoke", () => {
   interface AuthorizeResponse {

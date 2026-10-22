@@ -1,23 +1,24 @@
 // @module-tag int
 // @module-tag auth
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { createTestClient } from "../../support/auth/clients.js";
 import { browserLogin } from "../../support/browserLogin.js";
+import { createTestUser } from "../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../utils/db/prisma.js";
 import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
   decodeJwt,
-  HTTP_STATUS,
-  generateCodeVerifier,
-  generateCodeChallenge,
-  generateUniqueId,
   TokenResponse,
   verifyAtHash,
   getJwtHeader,
   verifyIdTokenSignature,
   fetchDiscoveryDocument,
-} from "../../support/auth.js";
+} from "../../support/auth/tokens.js";
+import {
+  generateCodeVerifier,
+  generateCodeChallenge,
+  generateUniqueId,
+} from "../../support/auth/crypto.js";
 
 describe("ID token verification", () => {
   /**

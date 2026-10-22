@@ -4,6 +4,9 @@ import { encryptTotpSecret, generateTotpSecret } from "../../../utils/totp.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UPSTREAM_COOKIE } from "../../support/upstreamLogin.js";
+import { createTestClient } from "../../support/auth/clients.js";
+import { createTestUser } from "../../support/auth/users.js";
+import { decodeJwt } from "../../support/auth/tokens.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
 import { randomUUID } from "node:crypto";
@@ -23,17 +26,14 @@ import {
   SYSTEM_USER_ID,
 } from "../../../definitions/index.js";
 import {
+  generateTotpCode,
+  generateUniqueId,
+} from "../../support/auth/crypto.js";
+import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../support/webhooks.js";
-import {
-  createTestClient,
-  createTestUser,
-  decodeJwt,
-  generateTotpCode,
-  generateUniqueId,
-} from "../../support/auth.js";
 
 const REDIRECT_URI = "http://localhost:3000/callback";
 const SCOPE = "openid profile email";

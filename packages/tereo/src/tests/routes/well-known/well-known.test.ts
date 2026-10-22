@@ -1,6 +1,6 @@
 // @module-tag int
 // @module-tag auth
-import { BASE_URL, HTTP_STATUS } from "../../support/auth.js";
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
 import { describe, it, expect } from "vitest";
 
 describe("/.well-known", () => {

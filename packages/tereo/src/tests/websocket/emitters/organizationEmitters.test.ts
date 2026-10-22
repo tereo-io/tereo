@@ -3,9 +3,13 @@
 import { closeRedisEmitter } from "../../../websocket/emitters/redisEmitter.js";
 import { connect, within, type TestSocket } from "../../support/socket.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { createTestClient } from "../../support/auth/clients.js";
 import { generateAccessToken } from "../../../utils/tokens.js";
 import { browserLogin } from "../../support/browserLogin.js";
 import { LOGIN_CLIENT } from "../../../definitions/index.js";
+import { createTestUser } from "../../support/auth/users.js";
+import { BASE_URL } from "../../support/auth/constants.js";
+import { decodeJwt } from "../../support/auth/tokens.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import {
   ensureTestMembership,
@@ -13,12 +17,6 @@ import {
   getTestPrincipalToken,
   testOrgId,
 } from "../../support/principals.js";
-import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
-  decodeJwt,
-} from "../../support/auth.js";
 
 const REDIRECT_URI = "http://localhost:3000/websocket-reauth-callback";
 

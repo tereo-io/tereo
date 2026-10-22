@@ -1,17 +1,19 @@
 // @module-tag int
 // @module-tag auth
 
+import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
 import { TEST_SERVICE } from "../../../../../support/testService.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
   BASE_URL,
   HTTP_STATUS,
   NON_EXISTENT_UUID,
-  createTestClient,
+} from "../../../../../support/auth/constants.js";
+import {
   createAdminUser,
   createTestPermission,
-  getAccessTokenForUser,
-} from "../../../../../support/auth.js";
+} from "../../../../../support/auth/users.js";
 
 interface PermissionResponse {
   id: string;

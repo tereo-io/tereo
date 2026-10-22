@@ -3,8 +3,12 @@
 // @module-tag security
 
 import { beginPasswordAttempt } from "../../utils/passwordAttempts.js";
+import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
+import { getAccessTokenForUser } from "../support/auth/login.js";
 import { getRedisClient, redisKey } from "../../utils/redis.js";
+import { createTestClient } from "../support/auth/clients.js";
 import { describe, it, expect, beforeAll, vi } from "vitest";
+import { createTestUser } from "../support/auth/users.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "node:crypto";
 import { type Request } from "express";
@@ -14,13 +18,6 @@ import {
   cookieHeader,
   newPkce,
 } from "../support/browserLogin.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
-  getAccessTokenForUser,
-} from "../support/auth.js";
 
 const REDIRECT_URI = "http://localhost:3000/callback";
 

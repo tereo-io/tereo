@@ -1,7 +1,11 @@
 // @module-tag int
 // @module-tag auth
 import { generateTotpSecret, encryptTotpSecret } from "../../../utils/totp.js";
+import { createTestRole, createTestUser } from "../../support/auth/users.js";
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { createTestClient } from "../../support/auth/clients.js";
+import { generateTotpCode } from "../../support/auth/crypto.js";
 import { LOGIN_CLIENT } from "../../../definitions/index.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import {
@@ -14,14 +18,6 @@ import {
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../../support/principals.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestRole,
-  createTestUser,
-  generateTotpCode,
-} from "../../support/auth.js";
 
 /**
  * 2FA made required after a password-only sign-in (a role the user holds

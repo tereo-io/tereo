@@ -2,7 +2,10 @@
 // @module-tag auth
 // @module-tag security
 import { getTestPrincipalToken } from "../../../../support/principals.js";
+import { createTestClient } from "../../../../support/auth/clients.js";
+import { generateUniqueId } from "../../../../support/auth/crypto.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestUser } from "../../../../support/auth/users.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../support/coreUrl.js";
 import { randomUUID } from "node:crypto";
@@ -22,11 +25,6 @@ import {
   cookieHeader,
   type CookieJar,
 } from "../../../../support/browserLogin.js";
-import {
-  createTestClient,
-  createTestUser,
-  generateUniqueId,
-} from "../../../../support/auth.js";
 
 const REDIRECT_URI = "http://localhost:3000/callback";
 const SCOPE = "openid profile email";

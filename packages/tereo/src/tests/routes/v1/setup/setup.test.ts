@@ -1,5 +1,8 @@
 // @module-tag int
 // @module-tag platform
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
+import { getAccessTokenForUser } from "../../../support/auth/login.js";
+import { generateUniqueId } from "../../../support/auth/crypto.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { logger } from "../../../../utils/logger.js";
 import env from "../../../../env.js";
@@ -17,12 +20,6 @@ import {
   announceSetupIfPending,
   issueSetupToken,
 } from "../../../../utils/setup.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  generateUniqueId,
-  getAccessTokenForUser,
-} from "../../../support/auth.js";
 import {
   describe,
   it,

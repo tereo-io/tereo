@@ -2,24 +2,28 @@
 // @module-tag auth
 
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../../definitions/index.js";
+import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
+import { generateUniqueId } from "../../../../../support/auth/crypto.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  NON_EXISTENT_UUID,
-  createTestClient,
-  createTestUser,
-  createAdminUser,
-  createTestRole,
-  getAccessTokenForUser,
-  generateUniqueId,
   createTestOrganization,
   addTestOrgMember,
   type OrganizationResponse,
   type OrganizationListResponse,
   type MemberRolesResponse,
-} from "../../../../../support/auth.js";
+} from "../../../../../support/auth/organizations.js";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+  NON_EXISTENT_UUID,
+} from "../../../../../support/auth/constants.js";
+import {
+  createTestUser,
+  createAdminUser,
+  createTestRole,
+} from "../../../../../support/auth/users.js";
 
 let adminToken: string;
 

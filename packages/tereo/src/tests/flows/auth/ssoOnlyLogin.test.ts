@@ -2,7 +2,10 @@
 // @module-tag auth
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestClient } from "../../support/auth/clients.js";
+import { generateUniqueId } from "../../support/auth/crypto.js";
 import { upstreamLogin } from "../../support/upstreamLogin.js";
+import { createTestUser } from "../../support/auth/users.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
 import { randomUUID } from "node:crypto";
@@ -21,11 +24,6 @@ import {
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
 } from "../../../definitions/index.js";
-import {
-  createTestClient,
-  createTestUser,
-  generateUniqueId,
-} from "../../support/auth.js";
 
 const REDIRECT_URI = "http://localhost:3000/callback";
 const SCOPE = "openid profile email";

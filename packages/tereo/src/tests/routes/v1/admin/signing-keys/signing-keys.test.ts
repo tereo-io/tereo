@@ -1,13 +1,20 @@
 // @module-tag int
 // @module-tag auth
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../definitions/index.js";
+import { BASE_URL, HTTP_STATUS } from "../../../../support/auth/constants.js";
 import { getTestPrincipalToken } from "../../../../support/principals.js";
+import { createTestClient } from "../../../../support/auth/clients.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
 import env from "../../../../../env.js";
 import jwt from "jsonwebtoken";
 import * as jose from "jose";
+import {
+  fetchJwks,
+  getJwtHeader,
+  type TokenResponse,
+} from "../../../../support/auth/tokens.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
@@ -24,14 +31,6 @@ import {
   publishedSigningKeys,
   refreshSigningKeys,
 } from "../../../../../utils/keys.js";
-import {
-  BASE_URL,
-  createTestClient,
-  fetchJwks,
-  getJwtHeader,
-  HTTP_STATUS,
-  type TokenResponse,
-} from "../../../../support/auth.js";
 
 /**
  * Rotating the JWT signing key through the admin API. The server keeps the

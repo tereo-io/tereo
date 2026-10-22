@@ -2,23 +2,27 @@
 // @module-tag auth
 
 import { getTestPrincipalToken } from "../../../../../../../support/principals.js";
+import { getAccessTokenForUser } from "../../../../../../../support/auth/login.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import {
+  createTestOrganization,
+  addTestOrgMember,
+} from "../../../../../../../support/auth/organizations.js";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+  NON_EXISTENT_UUID,
+} from "../../../../../../../support/auth/constants.js";
 import {
   CORE_SERVICE_ID,
   LOGIN_CLIENT,
 } from "../../../../../../../../definitions/index.js";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  NON_EXISTENT_UUID,
   createTestUser,
   createAdminUser,
   createTestRole,
-  createTestOrganization,
-  addTestOrgMember,
-  getAccessTokenForUser,
-} from "../../../../../../../support/auth.js";
+} from "../../../../../../../support/auth/users.js";
 
 interface ErrorResponse {
   error?: string;

@@ -1,7 +1,10 @@
 // @module-tag int
 // @module-tag auth
+import { createTestRole, createTestUser } from "../../support/auth/users.js";
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestClient } from "../../support/auth/clients.js";
 import { browserLogin } from "../../support/browserLogin.js";
 import { hashFlowToken } from "../../../utils/crypto.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -10,18 +13,17 @@ import {
   type FakeOidcProvider,
 } from "../../support/fakeOidcProvider.js";
 import {
-  BASE_URL,
-  createTestClient,
-  createTestRole,
-  createTestUser,
-  generateTotpCode,
-  generateUniqueId,
-  getUiAccessTokenForUser,
   loginToTotpSetup,
   startTotpSetup,
-  HTTP_STATUS,
+} from "../../support/auth/totpSetup.js";
+import {
+  generateTotpCode,
+  generateUniqueId,
+} from "../../support/auth/crypto.js";
+import {
+  getUiAccessTokenForUser,
   getAccessTokenForUser,
-} from "../../support/auth.js";
+} from "../../support/auth/login.js";
 
 describe("ending sessions", () => {
   /**

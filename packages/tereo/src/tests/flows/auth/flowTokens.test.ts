@@ -2,9 +2,17 @@
 // @module-tag auth
 // @module-tag security
 import { encryptTotpSecret, generateTotpSecret } from "../../../utils/totp.js";
+import { createAdminUser, createTestUser } from "../../support/auth/users.js";
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { createTestClient } from "../../support/auth/clients.js";
+import { generateTotpCode } from "../../support/auth/crypto.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
+import {
+  addTestOrgMember,
+  createTestOrganization,
+} from "../../support/auth/organizations.js";
 import {
   absorbCookies,
   browserLogin,
@@ -13,17 +21,9 @@ import {
   userSessionCookieName,
 } from "../../support/browserLogin.js";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  addTestOrgMember,
-  createAdminUser,
-  createTestClient,
-  createTestOrganization,
-  createTestUser,
-  generateTotpCode,
   getAccessTokenForUser,
   getUiAccessTokenForUser,
-} from "../../support/auth.js";
+} from "../../support/auth/login.js";
 
 /**
  * The 2FA, org-select and consent steps of a login each hand the browser a

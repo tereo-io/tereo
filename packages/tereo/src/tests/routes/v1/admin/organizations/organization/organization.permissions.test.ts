@@ -1,16 +1,18 @@
 // @module-tag int
 // @module-tag auth
 
+import { createTestOrganization } from "../../../../../support/auth/organizations.js";
+import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
   BASE_URL,
   HTTP_STATUS,
-  createTestClient,
+} from "../../../../../support/auth/constants.js";
+import {
   createTestUser,
   createAdminUser,
-  getAccessTokenForUser,
-  createTestOrganization,
-} from "../../../../../support/auth.js";
+} from "../../../../../support/auth/users.js";
 
 let adminToken: string;
 let regularToken: string;

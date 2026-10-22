@@ -1,8 +1,12 @@
 // @module-tag int
 // @module-tag auth
 
+import { createTestRole, createTestUser } from "../../support/auth/users.js";
 import { TEST_SERVICE, makeServiceOf } from "../../support/testService.js";
+import { createTestClient } from "../../support/auth/clients.js";
+import { generateUniqueId } from "../../support/auth/crypto.js";
 import { SYSTEM_USER_ID } from "../../../definitions/index.js";
+import { BASE_URL } from "../../support/auth/constants.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
@@ -12,13 +16,6 @@ import {
   ensureTestUser,
   getTestPrincipalToken,
 } from "../../support/principals.js";
-import {
-  BASE_URL,
-  createTestClient,
-  createTestRole,
-  createTestUser,
-  generateUniqueId,
-} from "../../support/auth.js";
 
 const userRef = (user: { id: string; email: string; name: string | null }) => ({
   id: user.id,

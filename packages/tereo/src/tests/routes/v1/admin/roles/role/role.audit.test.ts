@@ -1,25 +1,27 @@
 // @module-tag int
 // @module-tag auth
 
+import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { generateUniqueId } from "../../../../../support/auth/crypto.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+} from "../../../../../support/auth/constants.js";
 import {
   DEFAULT_ORGANIZATION_ID,
   LOGIN_CLIENT,
 } from "../../../../../../definitions/index.js";
 import {
+  createAdminUser,
+  createTestRole,
+} from "../../../../../support/auth/users.js";
+import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../../../../support/webhooks.js";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createAdminUser,
-  createTestRole,
-  getAccessTokenForUser,
-  generateUniqueId,
-} from "../../../../../support/auth.js";
 
 interface RoleResponse {
   id?: string;

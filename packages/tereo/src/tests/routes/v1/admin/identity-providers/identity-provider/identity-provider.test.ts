@@ -3,8 +3,8 @@
 
 import { openProviderSecret } from "../../../../../../utils/identityProviders/clientSecret.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../../definitions/index.js";
+import { generateUniqueId } from "../../../../../support/auth/crypto.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { generateUniqueId } from "../../../../../support/auth.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../support/coreUrl.js";
 import { randomUUID } from "node:crypto";

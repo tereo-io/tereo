@@ -1,18 +1,19 @@
 // @module-tag int
 // @module-tag auth
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { createTestClient } from "../../support/auth/clients.js";
 import { makeServiceOf } from "../../support/testService.js";
+import { createTestUser } from "../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
+} from "../../support/auth/crypto.js";
+import {
   TokenResponse,
   IntrospectResponse,
-} from "../../support/auth.js";
+} from "../../support/auth/tokens.js";
 
 interface AuthorizeResponse {
   redirect_url?: string;

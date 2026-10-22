@@ -1,8 +1,11 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag race
+import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { createTestClient } from "../../support/auth/clients.js";
 import { LOGIN_CLIENT } from "../../../definitions/index.js";
 import { InvalidGrantError } from "../../../utils/errors.js";
+import { createTestUser } from "../../support/auth/users.js";
 import { handleRefreshToken } from "../../../utils/auth.js";
 import { getRedisClient } from "../../../utils/redis.js";
 import { describe, it, expect, beforeAll } from "vitest";
@@ -14,13 +17,9 @@ import {
   newPkce,
 } from "../../support/browserLogin.js";
 import {
-  BASE_URL,
-  createTestUser,
   getUiAccessTokenForUser,
-  HTTP_STATUS,
-  createTestClient,
   getAccessTokenForUser,
-} from "../../support/auth.js";
+} from "../../support/auth/login.js";
 
 describe("ending sessions", () => {
   /**

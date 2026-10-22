@@ -1,17 +1,19 @@
 // @module-tag int
 // @module-tag auth
 import { cookieHeader, newPkce } from "../../../support/browserLogin.js";
+import { createTestClient } from "../../../support/auth/clients.js";
+import { createTestUser } from "../../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
   BASE_URL,
   HTTP_STATUS,
   OAUTH_ERRORS,
-  createTestClient,
-  createTestUser,
+} from "../../../support/auth/constants.js";
+import {
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
-} from "../../../support/auth.js";
+} from "../../../support/auth/crypto.js";
 
 describe("POST /oauth/authorize", () => {
   describe("OAuth Authorize Endpoint", () => {

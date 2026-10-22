@@ -1,8 +1,12 @@
 // @module-tag int
 // @module-tag auth
+import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
 import { ensureTestOrganization } from "../../../support/principals.js";
+import { getAccessTokenForUser } from "../../../support/auth/login.js";
+import { createTestClient } from "../../../support/auth/clients.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomBytes, scryptSync, createHash } from "node:crypto";
+import { createTestUser } from "../../../support/auth/users.js";
 import { hashPassword } from "../../../../utils/crypto.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import {
@@ -13,15 +17,10 @@ import {
   type CookieJar,
 } from "../../../support/browserLogin.js";
 import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestClient,
-  createTestUser,
   generateCodeVerifier,
   generateCodeChallenge,
   generateUniqueId,
-  getAccessTokenForUser,
-} from "../../../support/auth.js";
+} from "../../../support/auth/crypto.js";
 
 describe("/oauth/authorize", () => {
   describe("OAuth Authorize Endpoint", () => {

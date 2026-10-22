@@ -2,10 +2,14 @@
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
 import { generateTotpSecret, encryptTotpSecret } from "../../../utils/totp.js";
+import { createAdminUser, createTestUser } from "../../support/auth/users.js";
 import { applyProvisioning } from "../../../utils/provisioning/index.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { removeLoginClients } from "../../support/provisioning.js";
+import { createTestClient } from "../../support/auth/clients.js";
+import { generateTotpCode } from "../../support/auth/crypto.js";
 import { LOGIN_CLIENT } from "../../../definitions/index.js";
+import { BASE_URL } from "../../support/auth/constants.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { randomBytes } from "node:crypto";
 import {
@@ -19,13 +23,6 @@ import {
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../../support/principals.js";
-import {
-  BASE_URL,
-  createAdminUser,
-  createTestClient,
-  createTestUser,
-  generateTotpCode,
-} from "../../support/auth.js";
 
 /**
  * Which client a login flow belongs to, beyond its first step:

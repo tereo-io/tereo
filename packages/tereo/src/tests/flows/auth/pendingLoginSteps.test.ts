@@ -1,7 +1,16 @@
 // @module-tag int
 // @module-tag auth
+import { getUiAccessTokenForUser } from "../../support/auth/login.js";
+import { createTestClient } from "../../support/auth/clients.js";
+import { createTestUser } from "../../support/auth/users.js";
+import { BASE_URL } from "../../support/auth/constants.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { describe, it, expect } from "vitest";
+import {
+  createUserRequiringTotpSetup,
+  loginToTotpSetup,
+  startTotpSetup,
+} from "../../support/auth/totpSetup.js";
 import {
   absorbCookies,
   browserLogin,
@@ -13,15 +22,6 @@ import {
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../../support/principals.js";
-import {
-  BASE_URL,
-  createTestClient,
-  createTestUser,
-  createUserRequiringTotpSetup,
-  getUiAccessTokenForUser,
-  loginToTotpSetup,
-  startTotpSetup,
-} from "../../support/auth.js";
 
 /**
  * A login step past the password (consent, an organization pick, 2FA) is

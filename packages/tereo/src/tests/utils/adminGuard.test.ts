@@ -2,16 +2,13 @@
 // @module-tag auth
 // @module-tag race
 
+import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getTestPrincipalToken } from "../support/principals.js";
+import { generateUniqueId } from "../support/auth/crypto.js";
+import { createTestUser } from "../support/auth/users.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
-import {
-  BASE_URL,
-  HTTP_STATUS,
-  createTestUser,
-  generateUniqueId,
-} from "../support/auth.js";
 
 /**
  * The last-admin guard. Other suites leave admins behind, so this file sets

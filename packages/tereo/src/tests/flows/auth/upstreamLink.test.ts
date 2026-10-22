@@ -2,7 +2,12 @@
 // @module-tag auth
 import { UPSTREAM_COOKIE, upstreamLogin } from "../../support/upstreamLogin.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
+import { getAccessTokenForUser } from "../../support/auth/login.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestClient } from "../../support/auth/clients.js";
+import { generateUniqueId } from "../../support/auth/crypto.js";
+import { createTestUser } from "../../support/auth/users.js";
+import { decodeJwt } from "../../support/auth/tokens.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
 import { randomUUID } from "node:crypto";
@@ -27,13 +32,6 @@ import {
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../support/webhooks.js";
-import {
-  createTestClient,
-  createTestUser,
-  decodeJwt,
-  generateUniqueId,
-  getAccessTokenForUser,
-} from "../../support/auth.js";
 
 const SCOPE = ["openid profile email", ...CORE_SCOPES.map((s) => s.name)].join(
   " "
