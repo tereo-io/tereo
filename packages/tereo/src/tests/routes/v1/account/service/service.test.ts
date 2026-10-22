@@ -1,17 +1,20 @@
+// @module-tag int
+// @module-tag auth
+// @module-tag provisioning
+import { getTestPrincipalToken } from "../../../../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getTestPrincipalToken } from "../support/principals.js";
-import { CORE_URL } from "../support/coreUrl.js";
+import { CORE_URL } from "../../../../support/coreUrl.js";
 import axios from "axios";
 import {
   provisionService,
   removeServices,
   type ProvisionedService,
-} from "../support/provisioning.js";
+} from "../../../../support/provisioning.js";
 import {
   cleanup as cleanupIntegrations,
   createIntegration,
   integrationToken,
-} from "../support/integrations.js";
+} from "../../../../support/integrations.js";
 
 // GET /v1/account/service: a service reads its own row — the declaration core
 // last applied and its access — with no permission.

@@ -210,3 +210,45 @@ export async function provisionService(
 ): Promise<ProvisionedService> {
   return (await provisionServices([spec]))[0];
 }
+
+const rand = () => `x${randomBytes(5).toString("hex")}`;
+
+export const newSlug = () => `reg-${rand()}`;
+
+export type Declaration = NonNullable<ProvisionSpec["declaration"]>;
+
+/** A small valid declaration under the namespace. */
+export const declarationFor = (
+  ns: string,
+  extra: Partial<Declaration> = {}
+): Declaration => ({
+  permissions: [
+    { name: `${ns}.items.read`, displayName: "Read items" },
+    { name: `${ns}.items.write`, displayName: "Write items" },
+  ],
+  systemRoles: [
+    {
+      name: `${ns}_item_reader`,
+      displayName: "Item reader",
+      permissions: [`${ns}.items.read`],
+    },
+  ],
+  buckets: [],
+  eventTypes: [
+    { eventType: `${ns}.item.created`, description: "Item created" },
+  ],
+  ...extra,
+});
+
+/** A service provisioned with `declarationFor` its namespace, its slug. */
+export const provisionDeclared = (
+  extra: Partial<Declaration> = {},
+  spec: Omit<ProvisionSpec, "declaration"> = {}
+) => {
+  const slug = spec.slug ?? newSlug();
+  return provisionService({
+    ...spec,
+    slug,
+    declaration: declarationFor(spec.namespace ?? slug, extra),
+  });
+};
