@@ -31,15 +31,11 @@ export const listWebhookEndpoints = async (req: Request, res: Response) => {
   const { organizationId, owner } = webhookScope(req);
 
   const query = validateQuery(getWebhookEndpointsQuerySchema, req);
-  const { includeArchived } = validateQuery(
+  const { includeArchived, archivedFiltered } = validateQuery(
     listWebhookEndpointsExtraQuerySchema,
     req
   );
 
-  // filter[archived] lands in `where.AND` as an `archivedAt` clause.
-  const archivedFiltered = (
-    (query.where?.AND as Record<string, unknown>[] | undefined) ?? []
-  ).some((clause) => "archivedAt" in clause);
   // As getVisibleEndpoint shows them: an integration's own; otherwise the
   // organization's, with owned endpoints sent every organization's events
   // and integrations' endpoints only for webhooks.admin.

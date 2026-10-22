@@ -339,6 +339,13 @@ export const PERMISSIONS = {
     },
   },
 
+  CLIENTS: {
+    READ: "clients.read",
+    WRITE: "clients.write",
+    DELETE: "clients.delete",
+    ADMIN: "clients.admin",
+  },
+
   NOTIFICATIONS: {
     SEND: "notifications.send",
     READ: "notifications.read",

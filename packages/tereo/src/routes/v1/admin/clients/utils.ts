@@ -1,3 +1,4 @@
+import { PERMISSIONS } from "../../../../definitions/permissions.js";
 import { hasPermission } from "../../../../utils/permissions.js";
 import { CORE_SERVICE } from "../../../../definitions/index.js";
 import type { Prisma } from "../../../../utils/db/prisma.js";
@@ -57,3 +58,7 @@ export const assertMayChangeAudience = (
     );
   }
 };
+
+/** A clients.admin manages every client; anyone else only those they own. */
+export const canManageAllClients = (user: ReturnType<typeof validateUser>) =>
+  hasPermission(user.permissions, PERMISSIONS.CLIENTS.ADMIN);

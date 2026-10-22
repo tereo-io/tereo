@@ -3,7 +3,9 @@ import { getReadableBucket } from "../../../../../../../utils/bucketAccess.js";
 import { parseContentType } from "../../../../../../../utils/contentType.js";
 import { setAccessLog } from "../../../../../../../middleware/accessLog.js";
 import { validateUser } from "../../../../../../../middleware/auth.js";
+import { downloadQuerySchema, objectParamsSchema } from "./schemas.js";
 import { logAuditTx } from "../../../../../../../utils/outbox.js";
+import { declaredLengthHeadersSchema } from "../../schemas.js";
 import { NextFunction, Request, Response } from "express";
 import db from "../../../../../../../utils/db/index.js";
 import { emitObjectWrittenTx } from "../events.js";
@@ -28,11 +30,6 @@ import {
   BadRequestError,
   NotFoundError,
 } from "../../../../../../../utils/errors.js";
-import {
-  declaredLengthHeadersSchema,
-  downloadQuerySchema,
-  objectParamsSchema,
-} from "./schemas.js";
 import {
   assertObjectKeyNotReserved,
   cleanupMulterTempFile,

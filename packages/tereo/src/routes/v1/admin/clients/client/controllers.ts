@@ -4,7 +4,6 @@ import { UserType } from "../../../../../../prisma/generated/client/index.js";
 import { UpdateClientSchema, type UpdateClientInput } from "./schemas.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { formatClient } from "../../../../../utils/transformers.js";
-import { hasPermission } from "../../../../../utils/permissions.js";
 import { LOGIN_CLIENT } from "../../../../../definitions/index.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
@@ -35,6 +34,7 @@ import {
 } from "../schemas.js";
 import {
   assertMayChangeAudience,
+  canManageAllClients,
   verifyAudience,
   verifyScopes,
 } from "../utils.js";
@@ -86,10 +86,7 @@ const assertOwnerOrAdmin = (
   user: ReturnType<typeof validateUser>,
   action: string
 ) => {
-  if (
-    ownerId !== user.userId &&
-    !hasPermission(user.permissions, "clients.admin")
-  ) {
+  if (ownerId !== user.userId && !canManageAllClients(user)) {
     throw new ForbiddenError(
       `Only the client's owner or a clients.admin can ${action} it`
     );

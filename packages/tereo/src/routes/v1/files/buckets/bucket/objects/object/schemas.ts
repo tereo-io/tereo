@@ -26,14 +26,3 @@ export const downloadQuerySchema = z.object({
 
 export type ObjectParams = z.infer<typeof objectParamsSchema>;
 export type DownloadQuery = z.infer<typeof downloadQuerySchema>;
-
-// Node's parser has already refused a malformed Content-Length; absent, the
-// body is chunked and its size is checked as it is read.
-export const declaredLengthHeadersSchema = z.object({
-  "content-length": z
-    .string()
-    .regex(/^\d+$/)
-    .transform(Number)
-    .pipe(z.number().int().safe())
-    .optional(),
-});

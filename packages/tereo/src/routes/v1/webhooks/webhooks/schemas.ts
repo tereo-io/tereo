@@ -111,11 +111,22 @@ export const getWebhookEndpointsQuerySchema = createCursorQuerySchema({
   maxLimit: 100,
 });
 
-export const listWebhookEndpointsExtraQuerySchema = z.object({
-  // Kept for clients that predate filter[archived], which takes precedence.
-  includeArchived: z
-    .enum(["true", "false"])
-    .optional()
-    .default("false")
-    .transform((v) => v === "true"),
-});
+const booleanQuery = z.enum(["true", "false"]);
+
+export const listWebhookEndpointsExtraQuerySchema = z
+  .object({
+    // Kept for clients that predate filter[archived], which takes precedence.
+    includeArchived: booleanQuery
+      .optional()
+      .default("false")
+      .transform((v) => v === "true"),
+    // As the cursor query accepts it, a repeated key included; it applies
+    // the filter, this only tells whether one was given.
+    "filter[archived]": z
+      .union([booleanQuery, z.array(booleanQuery)])
+      .optional(),
+  })
+  .transform(({ includeArchived, "filter[archived]": archived }) => ({
+    includeArchived,
+    archivedFiltered: archived !== undefined,
+  }));
