@@ -2,9 +2,9 @@
 // @module-tag auth
 import { ensureTestOrganization } from "../../../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { randomBytes, scryptSync, createHash } from "node:crypto";
 import { hashPassword } from "../../../../utils/crypto.js";
 import { prisma } from "../../../../utils/db/prisma.js";
-import { randomBytes, scryptSync } from "node:crypto";
 import {
   absorbCookies,
   browserLogin,
@@ -545,6 +545,24 @@ describe("/oauth/authorize", () => {
   const TEST_USER_PASSWORD = "TestPassword123!";
   const TEST_REDIRECT_URI = "http://localhost:3000/test-callback";
 
+  // Helper functions
+  function generateCodeVerifier(): string {
+    return randomBytes(32)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "");
+  }
+
+  function generateCodeChallenge(verifier: string): string {
+    return createHash("sha256")
+      .update(verifier)
+      .digest("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "");
+  }
+
   describe("OIDC Compliance", () => {
     beforeAll(async () => {
       // Check server is running
@@ -677,6 +695,85 @@ describe("/oauth/authorize", () => {
             data: { consentRequired: true },
           });
         }
+      });
+
+      it("should accept prompt=select_account and pass to login URL", async () => {
+        const codeVerifier = generateCodeVerifier();
+        const codeChallenge = generateCodeChallenge(codeVerifier);
+
+        const url = new URL(`${BASE_URL}/oauth/authorize`);
+        url.searchParams.set("response_type", "code");
+        url.searchParams.set("client_id", TEST_CLIENT_ID);
+        url.searchParams.set("redirect_uri", TEST_REDIRECT_URI);
+        url.searchParams.set("state", "test-state");
+        url.searchParams.set("scope", "openid");
+        url.searchParams.set("code_challenge", codeChallenge);
+        url.searchParams.set("code_challenge_method", "S256");
+        url.searchParams.set("prompt", "select_account");
+
+        const response = await fetch(url.toString(), { redirect: "manual" });
+
+        expect(response.status).toBe(HTTP_STATUS.FOUND);
+        const location = response.headers.get("location") || "";
+        expect(location).toContain("prompt=select_account");
+      });
+
+      const authorizeWithPrompt = (prompt: string) => {
+        const url = new URL(`${BASE_URL}/oauth/authorize`);
+        url.searchParams.set("response_type", "code");
+        url.searchParams.set("client_id", TEST_CLIENT_ID);
+        url.searchParams.set("redirect_uri", TEST_REDIRECT_URI);
+        url.searchParams.set("state", "test-state");
+        url.searchParams.set("scope", "openid");
+        url.searchParams.set(
+          "code_challenge",
+          generateCodeChallenge(generateCodeVerifier())
+        );
+        url.searchParams.set("code_challenge_method", "S256");
+        url.searchParams.set("prompt", prompt);
+        return fetch(url.toString(), { redirect: "manual" });
+      };
+
+      it("should accept a space-separated prompt list", async () => {
+        const response = await authorizeWithPrompt("login consent");
+        expect(response.status).toBe(HTTP_STATUS.FOUND);
+        const location = new URL(response.headers.get("location") ?? "");
+        expect(location.pathname).toMatch(/\/login$/);
+        expect(location.searchParams.get("prompt")).toBe("login consent");
+      });
+    });
+
+    describe("Multiple OIDC parameters combined", () => {
+      it("should accept multiple OIDC parameters together", async () => {
+        const codeVerifier = generateCodeVerifier();
+        const codeChallenge = generateCodeChallenge(codeVerifier);
+        const nonce = randomBytes(16).toString("hex");
+        const state = randomBytes(16).toString("hex");
+
+        const url = new URL(`${BASE_URL}/oauth/authorize`);
+        url.searchParams.set("response_type", "code");
+        url.searchParams.set("client_id", TEST_CLIENT_ID);
+        url.searchParams.set("redirect_uri", TEST_REDIRECT_URI);
+        url.searchParams.set("state", state);
+        url.searchParams.set("scope", "openid profile email");
+        url.searchParams.set("code_challenge", codeChallenge);
+        url.searchParams.set("code_challenge_method", "S256");
+        url.searchParams.set("nonce", nonce);
+        url.searchParams.set("prompt", "login");
+        url.searchParams.set("max_age", "3600");
+        url.searchParams.set("ui_locales", "en");
+        url.searchParams.set("acr_values", "urn:auth-service:pwd");
+        url.searchParams.set("login_hint", "user@example.com");
+
+        const response = await fetch(url.toString(), { redirect: "manual" });
+
+        expect(response.status).toBe(HTTP_STATUS.FOUND);
+        const location = response.headers.get("location") || "";
+
+        // Verify multiple params are passed through
+        expect(location).toContain("nonce=");
+        expect(location).toContain("prompt=");
+        expect(location).toContain("max_age=");
       });
     });
   });

@@ -6,6 +6,7 @@ import { prisma } from "../../../../utils/db/prisma.js";
 import {
   BASE_URL,
   HTTP_STATUS,
+  OAUTH_ERRORS,
   createTestClient,
   createTestUser,
   generateCodeVerifier,
@@ -575,6 +576,29 @@ describe("POST /oauth/token", () => {
         expect(data.token_type).toBe("Bearer");
         // Client credentials grant should NOT return refresh_token or id_token
         expect(data.refresh_token).toBeUndefined();
+      });
+
+      it("should reject confidential client with wrong secret", async () => {
+        const credentials = Buffer.from(
+          `${confidentialClient.clientId}:wrong-secret`
+        ).toString("base64");
+
+        const response = await fetch(`${BASE_URL}/oauth/token`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${credentials}`,
+          },
+          body: JSON.stringify({
+            grant_type: "client_credentials",
+            scope: "openid",
+          }),
+        });
+
+        const data = (await response.json()) as TokenResponse;
+
+        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+        expect(data.error).toBe(OAUTH_ERRORS.INVALID_CLIENT);
       });
     });
   });
