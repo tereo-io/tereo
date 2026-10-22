@@ -16,7 +16,7 @@
     "db:seed": "tsx src/scripts/seed.ts",
     "db:studio": "prisma studio",
     "test": "../../docker/test/run.sh",
-    "test:unit": "vitest run --project unit --passWithNoTests",
+    "test:unit": "vitest run --project unit",
     "test:int": "vitest run --project int",
     "test:local": "vitest run",
     "test:watch": "vitest",

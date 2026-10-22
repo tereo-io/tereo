@@ -1,3 +1,5 @@
+// @module-tag unit
+// @module-tag platform
 import { readdirSync, readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "url";

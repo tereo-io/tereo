@@ -4,17 +4,7 @@ import { fileURLToPath } from "url";
 import { parse } from "dotenv";
 import path from "path";
 
-/**
- * The test environment: `.env`, pointed at a separate database and Redis db
- * so tests never touch dev data, and at blob storage of that database's own
- * (`testStoragePath`). `globalSetup` migrates and seeds that
- * database, then starts one server on 4001 that every test file talks to.
- *
- * `TEST_DATABASE_URL` / `TEST_REDIS_URL`, from the shell or `.env`, override
- * the derived URLs, and `TEST_PORT` the server's port — so suites in two
- * worktrees can run side by side, or beside a core already on 4001. In Docker (DOCKER_TEST=true) the container environment is
- * used as-is.
- */
+/** The environment of the `unit` project: unreachable database and Redis, so a unit test that reaches for either fails at once. */
 export function loadUnitTestEnv(): Record<string, string> {
   const here = path.dirname(fileURLToPath(import.meta.url));
   return {
@@ -29,6 +19,17 @@ export function loadUnitTestEnv(): Record<string, string> {
   };
 }
 
+/**
+ * The test environment: `.env`, pointed at a separate database and Redis db
+ * so tests never touch dev data, and at blob storage of that database's own
+ * (`testStoragePath`). `globalSetup` migrates and seeds that
+ * database, then starts one server on 4001 that every test file talks to.
+ *
+ * `TEST_DATABASE_URL` / `TEST_REDIS_URL`, from the shell or `.env`, override
+ * the derived URLs, and `TEST_PORT` the server's port — so suites in two
+ * worktrees can run side by side, or beside a core already on 4001. In Docker (DOCKER_TEST=true) the container environment is
+ * used as-is.
+ */
 export function loadTestEnv(): Record<string, string> {
   const here = path.dirname(fileURLToPath(import.meta.url));
   // A stand-in for the admin UI's build, so the suite covers the UI whether or
