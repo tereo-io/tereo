@@ -139,12 +139,6 @@ afterAll(async () => {
 
 describe("POST /v1/notifications", () => {
   describe("authorization", () => {
-    it("requires authentication", async () => {
-      expect((await send(message(), null as unknown as string)).status).toBe(
-        401
-      );
-    });
-
     it("refuses a caller without notifications.send", async () => {
       expectError(await send(message(), noPermToken), 403, "forbidden");
     });

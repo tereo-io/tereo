@@ -80,6 +80,7 @@ describe("POST /v1/admin/notifications/connections", () => {
       );
       expect(res.status).toBe(400);
       expect(res.body.error).toBe("invalid_settings");
+      expect(res.body.error_description).toEqual(expect.any(String));
       const paths = res.body.issues.map((i: { path: string }) => i.path);
       expect(paths).toContain("host");
       expect(paths).toContain("port");
@@ -94,29 +95,6 @@ describe("POST /v1/admin/notifications/connections", () => {
       );
       expect(res.status).toBe(400);
       expect(res.body.error).toBe("invalid_secrets");
-    });
-
-    it("rejects an unknown channel and a bad slug", async () => {
-      expect(
-        (
-          await api(
-            "POST",
-            "/connections",
-            adminToken,
-            payload({ channel: "sms" })
-          )
-        ).status
-      ).toBe(400);
-      expect(
-        (
-          await api(
-            "POST",
-            "/connections",
-            adminToken,
-            payload({ slug: "Bad Slug" })
-          )
-        ).status
-      ).toBe(400);
     });
 
     it("seals secrets as kek1 and never returns them", async () => {

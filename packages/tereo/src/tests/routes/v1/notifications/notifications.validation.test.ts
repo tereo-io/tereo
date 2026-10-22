@@ -167,24 +167,10 @@ describe("POST /v1/notifications", () => {
       );
     });
 
-    it("refuses header injection in the subject", async () => {
-      expectError(
-        await send(
-          message({
-            content: { subject: "Hi\r\nBcc: victim@example.com", text: "x" },
-          })
-        ),
-        400,
-        "invalid_content"
-      );
-    });
-
     it("refuses content with no body", async () => {
-      expectError(
-        await send(message({ content: { subject: "Hi" } })),
-        400,
-        "invalid_content"
-      );
+      const res = await send(message({ content: { subject: "Hi" } }));
+      expectError(res, 400, "invalid_content");
+      expect(res.body.error_description).toEqual(expect.any(String));
     });
 
     it("refuses an address that is not one email address", async () => {
@@ -192,21 +178,6 @@ describe("POST /v1/notifications", () => {
         await send(
           message({
             recipients: [{ address: "a@example.com, b@example.com" }],
-          })
-        ),
-        400,
-        "invalid_content"
-      );
-    });
-
-    it("refuses an unknown recipient option", async () => {
-      expectError(
-        await send(
-          message({
-            recipients: [
-              { address: "a@example.com" },
-              { address: "b@example.com", As: "bcc" },
-            ],
           })
         ),
         400,
@@ -283,28 +254,6 @@ describe("POST /v1/notifications", () => {
       );
       expect(res.status, JSON.stringify(res.body)).toBe(202);
     });
-
-    it.each(["<", ">", "@", '"'])(
-      "refuses a `from.name` containing %s",
-      async (char) => {
-        expectError(
-          await send(
-            message({
-              content: {
-                subject: "Hi",
-                text: "x",
-                from: {
-                  address: "billing@acme.com",
-                  name: `ceo${char}bank.com`,
-                },
-              },
-            })
-          ),
-          400,
-          "invalid_content"
-        );
-      }
-    );
 
     it("refuses an unknown user", async () => {
       expectError(

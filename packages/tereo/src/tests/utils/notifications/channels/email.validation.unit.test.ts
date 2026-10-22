@@ -1,4 +1,4 @@
-// @module-tag int
+// @module-tag unit
 // @module-tag notifications
 import type { NotificationConnection } from "../../../../../prisma/generated/client/index.js";
 import { toConnectionView } from "../../../../utils/notifications/connections.js";

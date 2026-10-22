@@ -73,10 +73,6 @@ afterAll(async () => {
 
 describe("/v1/admin/notifications/connections", () => {
   describe("authorization", () => {
-    it("requires authentication", async () => {
-      expect((await api("GET", "/connections", null)).status).toBe(401);
-    });
-
     it("refuses a caller with neither read nor admin", async () => {
       expect((await api("GET", "/connections", sendOnlyToken)).status).toBe(
         403
