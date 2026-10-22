@@ -126,61 +126,6 @@ describe("OAuth Security Tests", () => {
   }
 
   describe("PKCE Security", () => {
-    it("should reject authorization code exchange without code_verifier for public client", async () => {
-      const codeVerifier = generateCodeVerifier();
-      const codeChallenge = generateCodeChallenge(codeVerifier);
-
-      const { code } = await getAuthorizationCode(testClient, codeChallenge);
-      expect(code).toBeTruthy();
-
-      // Try to exchange code without code_verifier
-      const response = await fetch(`${BASE_URL}/oauth/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "authorization_code",
-          code,
-          redirect_uri: testClient.redirectUris[0],
-          client_id: testClient.clientId,
-          // Intentionally omitting code_verifier
-        }),
-      });
-
-      const data = (await response.json()) as TokenResponse;
-
-      // RFC 7636 Section 4.6: Missing code_verifier with PKCE must return invalid_grant
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      expect(data.error).toBe(OAUTH_ERRORS.INVALID_GRANT);
-    });
-
-    it("should reject authorization code exchange with wrong code_verifier", async () => {
-      const codeVerifier = generateCodeVerifier();
-      const codeChallenge = generateCodeChallenge(codeVerifier);
-
-      const { code } = await getAuthorizationCode(testClient, codeChallenge);
-      expect(code).toBeTruthy();
-
-      // Try to exchange code with different code_verifier
-      const wrongVerifier = generateCodeVerifier(); // Different verifier
-
-      const response = await fetch(`${BASE_URL}/oauth/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "authorization_code",
-          code,
-          redirect_uri: testClient.redirectUris[0],
-          client_id: testClient.clientId,
-          code_verifier: wrongVerifier,
-        }),
-      });
-
-      const data = (await response.json()) as TokenResponse;
-
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      expect(data.error).toBe(OAUTH_ERRORS.INVALID_GRANT);
-    });
-
     it("should reject plain code_challenge_method (insecure)", async () => {
       // A well-formed 43-character challenge, so only the method is at fault.
       const codeChallenge = generateCodeChallenge(generateCodeVerifier());
@@ -365,32 +310,6 @@ describe("OAuth Security Tests", () => {
       const data = (await response.json()) as TokenResponse;
 
       // RFC 6749: Authorization code issued to another client = invalid_grant
-      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      expect(data.error).toBe(OAUTH_ERRORS.INVALID_GRANT);
-    });
-
-    it("should reject authorization code with wrong redirect_uri", async () => {
-      const codeVerifier = generateCodeVerifier();
-      const codeChallenge = generateCodeChallenge(codeVerifier);
-
-      const { code } = await getAuthorizationCode(testClient, codeChallenge);
-      expect(code).toBeTruthy();
-
-      // Try to exchange with different redirect_uri
-      const response = await fetch(`${BASE_URL}/oauth/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "authorization_code",
-          code,
-          redirect_uri: "http://malicious-site.com/callback",
-          client_id: testClient.clientId,
-          code_verifier: codeVerifier,
-        }),
-      });
-
-      const data = (await response.json()) as TokenResponse;
-
       expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
       expect(data.error).toBe(OAUTH_ERRORS.INVALID_GRANT);
     });

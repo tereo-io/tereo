@@ -236,20 +236,6 @@ describe("/.well-known", () => {
         expect(config.acr_values_supported).toContain("urn:auth-service:pwd");
         expect(config.acr_values_supported).toContain("urn:auth-service:mfa");
       });
-
-      it("should include prompt_values_supported for UI prompts", async () => {
-        const response = await fetch(
-          `${BASE_URL}/.well-known/openid-configuration`
-        );
-        const config = (await response.json()) as OIDCConfig;
-
-        expect(response.status).toBe(HTTP_STATUS.OK);
-        expect(config.prompt_values_supported).toBeDefined();
-        expect(Array.isArray(config.prompt_values_supported)).toBe(true);
-        expect(config.prompt_values_supported).toContain("none");
-        expect(config.prompt_values_supported).toContain("login");
-        expect(config.prompt_values_supported).toContain("consent");
-      });
     });
 
     describe("GET /.well-known/oauth-authorization-server", () => {
@@ -392,27 +378,6 @@ describe("/.well-known", () => {
 
   describe("OIDC Compliance", () => {
     describe("Discovery Document", () => {
-      it("should include end_session_endpoint", async () => {
-        const response = await fetch(
-          `${BASE_URL}/.well-known/openid-configuration`
-        );
-        const config = (await response.json()) as DiscoveryDocument;
-
-        expect(config.end_session_endpoint).toBeDefined();
-        expect(config.end_session_endpoint).toContain("/oauth/end-session");
-      });
-
-      it("should include acr_values_supported with pwd and mfa", async () => {
-        const response = await fetch(
-          `${BASE_URL}/.well-known/openid-configuration`
-        );
-        const config = (await response.json()) as DiscoveryDocument;
-
-        expect(config.acr_values_supported).toBeDefined();
-        expect(config.acr_values_supported).toContain("urn:auth-service:pwd");
-        expect(config.acr_values_supported).toContain("urn:auth-service:mfa");
-      });
-
       it("should include prompt_values_supported", async () => {
         const response = await fetch(
           `${BASE_URL}/.well-known/openid-configuration`

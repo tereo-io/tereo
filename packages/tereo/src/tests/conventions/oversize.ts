@@ -5,12 +5,6 @@ import type { OversizeEntry } from "../support/pure/testLayout.js";
 
 export const OVERSIZE: ReadonlyArray<OversizeEntry> = [
   {
-    path: "routes/oauth/authorize/authorize.test.ts",
-    ceiling: 1200,
-    reason:
-      "OAuth authorize main behaviour incl. prompt handling; one route, no further aspect or method split",
-  },
-  {
     path: "routes/v1/audit/entries/entries.get.test.ts",
     ceiling: 1350,
     reason:

@@ -17,14 +17,10 @@ describe("POST /oauth/authorize", () => {
   describe("OAuth Authorize Endpoint", () => {
     let testClient: Awaited<ReturnType<typeof createTestClient>>;
     let testUser: Awaited<ReturnType<typeof createTestUser>>;
-    let limitedScopeClient: Awaited<ReturnType<typeof createTestClient>>;
 
     beforeAll(async () => {
       testClient = await createTestClient();
       testUser = await createTestUser();
-      limitedScopeClient = await createTestClient({
-        scopes: ["openid"], // Only openid scope allowed
-      });
     });
 
     interface AuthorizeResponse {
@@ -157,44 +153,6 @@ describe("POST /oauth/authorize", () => {
         expect(data.error_description).toContain("Session expired");
       });
 
-      it("should return invalid_scope for scope not allowed by client", async () => {
-        const codeVerifier = generateCodeVerifier();
-        const codeChallenge = generateCodeChallenge(codeVerifier);
-        const state = generateUniqueId();
-
-        const { sessionCookie } = await getSessionCookie(
-          limitedScopeClient.clientId,
-          limitedScopeClient.redirectUris[0],
-          { codeChallenge, state, scope: "openid profile" } // profile not allowed
-        );
-
-        const response = await fetch(`${BASE_URL}/oauth/authorize`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Cookie: sessionCookie,
-          },
-          body: JSON.stringify({
-            response_type: "code",
-            client_id: limitedScopeClient.clientId,
-            redirect_uri: limitedScopeClient.redirectUris[0],
-            state,
-            scope: "openid profile", // profile not allowed
-            code_challenge: codeChallenge,
-            code_challenge_method: "S256",
-            email: testUser.email,
-            password: testUser.plainPassword,
-          }),
-          redirect: "manual",
-        });
-
-        const data = (await response.json()) as AuthorizeResponse;
-
-        expect(response.status).toBe(HTTP_STATUS.OK);
-        expect(data.redirect_url).toBeDefined();
-        expect(data.redirect_url).toContain("error=invalid_scope");
-      });
-
       it("should return 400 for invalid email format", async () => {
         const codeVerifier = generateCodeVerifier();
         const codeChallenge = generateCodeChallenge(codeVerifier);
@@ -229,42 +187,7 @@ describe("POST /oauth/authorize", () => {
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
         const data = (await response.json()) as ErrorResponse;
         expect(data.error).toBe("invalid_request");
-      });
-
-      it("should return 400 for empty password", async () => {
-        const codeVerifier = generateCodeVerifier();
-        const codeChallenge = generateCodeChallenge(codeVerifier);
-        const state = generateUniqueId();
-
-        const { sessionCookie } = await getSessionCookie(
-          testClient.clientId,
-          testClient.redirectUris[0],
-          { codeChallenge, state }
-        );
-
-        const response = await fetch(`${BASE_URL}/oauth/authorize`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Cookie: sessionCookie,
-          },
-          body: JSON.stringify({
-            response_type: "code",
-            client_id: testClient.clientId,
-            redirect_uri: testClient.redirectUris[0],
-            state,
-            scope: "openid",
-            code_challenge: codeChallenge,
-            code_challenge_method: "S256",
-            email: testUser.email,
-            password: "",
-          }),
-          redirect: "manual",
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        const data = (await response.json()) as ErrorResponse;
-        expect(data.error).toBe("invalid_request");
+        expect(data.error_description).toEqual(expect.any(String));
       });
     });
   });
@@ -278,12 +201,10 @@ describe("POST /oauth/authorize", () => {
   const json = async (res: Response) =>
     (await res.json()) as Record<string, unknown>;
 
-  let publicClient: Client;
   let ccClient: Client;
   let user: Awaited<ReturnType<typeof createTestUser>>;
 
   beforeAll(async () => {
-    publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
     ccClient = await createTestClient({
       clientType: "confidential",
       grantTypes: ["client_credentials"],
@@ -309,27 +230,6 @@ describe("POST /oauth/authorize", () => {
       });
       expect(res.status).toBe(400);
       expect((await json(res)).error).toBe("unauthorized_client");
-    });
-  });
-
-  describe("Login step", () => {
-    it("answers a missing login-session cookie with invalid_session", async () => {
-      const pkce = newPkce();
-      const res = await fetch(`${BASE_URL}/oauth/authorize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_id: publicClient.clientId,
-          redirect_uri: REDIRECT_URI,
-          state: pkce.state,
-          code_challenge: pkce.challenge,
-          code_challenge_method: "S256",
-          email: user.email,
-          password: user.plainPassword,
-        }),
-      });
-      expect(res.status).toBe(400);
-      expect((await json(res)).error).toBe("invalid_session");
     });
   });
 

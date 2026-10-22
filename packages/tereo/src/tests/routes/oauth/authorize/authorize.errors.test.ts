@@ -250,44 +250,6 @@ describe("/oauth/authorize", () => {
         expect(data.error).toBe("access_denied");
         expect(data.error_description).toBe("Invalid credentials");
       });
-
-      it("should return 401 for authentication failure", async () => {
-        const codeVerifier = generateCodeVerifier();
-        const codeChallenge = generateCodeChallenge(codeVerifier);
-        const state = "unique-state-value-12345";
-
-        const { sessionCookie } = await getSessionCookie(
-          testClient.clientId,
-          testClient.redirectUris[0],
-          { codeChallenge, state }
-        );
-
-        const response = await fetch(`${BASE_URL}/oauth/authorize`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Cookie: sessionCookie,
-          },
-          body: JSON.stringify({
-            response_type: "code",
-            client_id: testClient.clientId,
-            redirect_uri: testClient.redirectUris[0],
-            state,
-            scope: "openid",
-            code_challenge: codeChallenge,
-            code_challenge_method: "S256",
-            email: testUser.email,
-            password: "WrongPassword123!",
-          }),
-          redirect: "manual",
-        });
-
-        const data = (await response.json()) as ErrorResponse;
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-        expect(data.error).toBe("access_denied");
-        expect(data.error_description).toBe("Invalid credentials");
-      });
     });
   });
 });
@@ -368,26 +330,6 @@ describe("/oauth/authorize", () => {
     });
 
     describe("Authorize Endpoint - response_mode parameter", () => {
-      it("should accept response_mode=query (default)", async () => {
-        const codeVerifier = generateCodeVerifier();
-        const codeChallenge = generateCodeChallenge(codeVerifier);
-
-        const url = new URL(`${BASE_URL}/oauth/authorize`);
-        url.searchParams.set("response_type", "code");
-        url.searchParams.set("client_id", TEST_CLIENT_ID);
-        url.searchParams.set("redirect_uri", TEST_REDIRECT_URI);
-        url.searchParams.set("state", "test-state");
-        url.searchParams.set("scope", "openid");
-        url.searchParams.set("code_challenge", codeChallenge);
-        url.searchParams.set("code_challenge_method", "S256");
-        url.searchParams.set("response_mode", "query");
-
-        const response = await fetch(url.toString(), { redirect: "manual" });
-
-        // Should redirect without error
-        expect(response.status).toBe(HTTP_STATUS.FOUND);
-      });
-
       it("should reject response_mode=fragment, which it does not advertise", async () => {
         const discovery = await fetchDiscoveryDocument();
         expect(discovery.response_modes_supported).toEqual(["query"]);
@@ -431,30 +373,6 @@ describe("/oauth/authorize", () => {
         url.searchParams.set("code_challenge", codeChallenge);
         url.searchParams.set("code_challenge_method", "S256");
         url.searchParams.set("response_mode", "form_post");
-
-        const response = await fetch(url.toString(), { redirect: "manual" });
-
-        expectAuthorizeErrorRedirect(
-          response,
-          TEST_REDIRECT_URI,
-          "invalid_request",
-          "test-state"
-        );
-      });
-
-      it("should reject invalid response_mode with invalid_request error", async () => {
-        const codeVerifier = generateCodeVerifier();
-        const codeChallenge = generateCodeChallenge(codeVerifier);
-
-        const url = new URL(`${BASE_URL}/oauth/authorize`);
-        url.searchParams.set("response_type", "code");
-        url.searchParams.set("client_id", TEST_CLIENT_ID);
-        url.searchParams.set("redirect_uri", TEST_REDIRECT_URI);
-        url.searchParams.set("state", "test-state");
-        url.searchParams.set("scope", "openid");
-        url.searchParams.set("code_challenge", codeChallenge);
-        url.searchParams.set("code_challenge_method", "S256");
-        url.searchParams.set("response_mode", "invalid_mode");
 
         const response = await fetch(url.toString(), { redirect: "manual" });
 

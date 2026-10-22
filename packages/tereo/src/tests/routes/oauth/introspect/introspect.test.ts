@@ -444,25 +444,6 @@ describe("POST /oauth/introspect", () => {
         expect(data.error).toBe(OAUTH_ERRORS.INVALID_CLIENT);
       });
 
-      it("should return 400 with invalid_request error for empty token", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
-          method: "POST",
-          headers: testClientHeaders(),
-          body: JSON.stringify({
-            token: "",
-          }),
-        });
-
-        const data = (await response.json()) as {
-          error?: string;
-          error_description?: string;
-        };
-
-        // Server validates token is not empty
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
-      });
-
       it("should return 200 with active=false for malformed JWT token per RFC 7662", async () => {
         const response = await fetch(`${BASE_URL}/oauth/introspect`, {
           method: "POST",

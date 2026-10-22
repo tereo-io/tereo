@@ -181,14 +181,6 @@ describe("requireAuth", () => {
       expect(me.status).toBe(HTTP_STATUS.OK);
     });
 
-    it("is refused with 401 as a bearer token", async () => {
-      const user = await createTestUser();
-      const res = await fetch(`${BASE_URL}/v1/account/me`, {
-        headers: { Authorization: `Bearer ${idTokenFor(user.id)}` },
-      });
-      expect(res.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-    });
-
     it("is inactive at /oauth/userinfo", async () => {
       const user = await createTestUser();
       const res = await fetch(`${BASE_URL}/oauth/userinfo`, {

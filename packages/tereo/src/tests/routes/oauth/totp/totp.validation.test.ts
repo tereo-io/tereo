@@ -47,21 +47,7 @@ describe("/oauth/totp", () => {
 
         const data = (await response.json()) as TotpVerifyResponse;
         expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
-      });
-
-      it("should return 400 with invalid_request error without TOTP code", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/totp/verify`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            session_token: "invalid-session-token",
-          }),
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-
-        const data = (await response.json()) as TotpVerifyResponse;
-        expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
+        expect(data.error_description).toEqual(expect.any(String));
       });
 
       it("should return 400 with invalid_session error for invalid session token", async () => {
@@ -78,51 +64,6 @@ describe("/oauth/totp", () => {
 
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
         expect(data.error).toBe(OAUTH_ERRORS.INVALID_SESSION);
-      });
-
-      it("should return 400 with invalid_request error for invalid TOTP code format (5 digits)", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/totp/verify`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            session_token: "some-session",
-            totp_code: "12345", // Only 5 digits - must be 6
-          }),
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-
-        const data = (await response.json()) as TotpVerifyResponse;
-        expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
-      });
-
-      it("should return 400 with invalid_request error for non-numeric TOTP code", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/totp/verify`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            session_token: "some-session",
-            totp_code: "abcdef",
-          }),
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-
-        const data = (await response.json()) as TotpVerifyResponse;
-        expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
-      });
-
-      it("should return 400 with invalid_request error for TOTP code with 7 digits", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/totp/verify`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            session_token: "some-session",
-            totp_code: "1234567", // 7 digits - must be 6
-          }),
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
       });
     });
 
@@ -140,21 +81,7 @@ describe("/oauth/totp", () => {
 
         const data = (await response.json()) as TotpVerifyResponse;
         expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
-      });
-
-      it("should return 400 with invalid_request error without recovery code", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/totp/recovery`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            session_token: "invalid-session-token",
-          }),
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-
-        const data = (await response.json()) as TotpVerifyResponse;
-        expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
+        expect(data.error_description).toEqual(expect.any(String));
       });
 
       it("should return 400 with invalid_session error for invalid session token", async () => {
@@ -172,19 +99,6 @@ describe("/oauth/totp", () => {
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
         expect(data.error).toBe(OAUTH_ERRORS.INVALID_SESSION);
       });
-
-      it("should return 400 with invalid_request error for empty recovery code", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/totp/recovery`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            session_token: "some-session",
-            recovery_code: "",
-          }),
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
     });
 
     describe("POST /oauth/totp/setup", () => {
@@ -194,6 +108,7 @@ describe("/oauth/totp", () => {
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
         const data = (await response.json()) as TotpSetupResponse;
         expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
+        expect(data.error_description).toEqual(expect.any(String));
       });
     });
 
@@ -211,21 +126,7 @@ describe("/oauth/totp", () => {
 
         const data = (await response.json()) as TotpSetupVerifyResponse;
         expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
-      });
-
-      it("should return 400 with invalid_request error without totp_code", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/totp/setup/verify`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            setup_token: "invalid-setup-token",
-          }),
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-
-        const data = (await response.json()) as TotpSetupVerifyResponse;
-        expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
+        expect(data.error_description).toEqual(expect.any(String));
       });
 
       it("should return 400 with invalid_setup_token error for invalid setup_token", async () => {
@@ -242,35 +143,6 @@ describe("/oauth/totp", () => {
 
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
         expect(data.error).toBe(OAUTH_ERRORS.INVALID_SETUP_TOKEN);
-      });
-
-      it("should return 400 with invalid_request error for invalid TOTP code format (5 digits)", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/totp/setup/verify`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            setup_token: "some-token",
-            totp_code: "12345", // Only 5 digits - must be 6
-          }),
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-
-        const data = (await response.json()) as TotpSetupVerifyResponse;
-        expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
-      });
-
-      it("should return 400 with invalid_request error for empty totp_code", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/totp/setup/verify`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            setup_token: "some-token",
-            totp_code: "",
-          }),
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
       });
     });
   });

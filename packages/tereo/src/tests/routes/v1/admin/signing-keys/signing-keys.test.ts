@@ -153,6 +153,12 @@ describe("/v1/admin/signing-keys", () => {
         body: JSON.stringify({ immediate: "yes" }),
       });
       expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      const data = (await response.json()) as {
+        error?: string;
+        error_description?: string;
+      };
+      expect(data.error).toBe("invalid_request");
+      expect(data.error_description).toEqual(expect.any(String));
     });
 
     it("publishes a new key that activates later; the old one keeps signing", async () => {

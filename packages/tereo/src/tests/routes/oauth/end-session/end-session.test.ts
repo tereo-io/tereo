@@ -638,29 +638,6 @@ describe("/oauth/end-session and /oauth/end-session/confirm", () => {
 });
 
 describe("/oauth/end-session and /oauth/end-session/confirm", () => {
-  const REDIRECT_URI = "http://localhost:3000/callback";
-
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  let publicClient: Client;
-
-  beforeAll(async () => {
-    publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
-  });
-
-  describe("Discovery and logout", () => {
-    it("refuses an over-long post_logout_redirect_uri", async () => {
-      const params = new URLSearchParams({
-        client_id: publicClient.clientId,
-        post_logout_redirect_uri: `http://localhost:3000/${"a".repeat(2100)}`,
-      });
-      const res = await fetch(`${BASE_URL}/oauth/end-session?${params}`, {
-        redirect: "manual",
-      });
-      expect(res.status).toBe(400);
-    });
-  });
-
   describe("Redirect URI schemes", () => {
     it("refuses a script-capable post_logout_redirect_uri", async () => {
       const uri = "javascript:alert(1)";
@@ -673,6 +650,12 @@ describe("/oauth/end-session and /oauth/end-session/confirm", () => {
         { redirect: "manual" }
       );
       expect(res.status).toBe(400);
+      const data = (await res.json()) as {
+        error?: string;
+        error_description?: string;
+      };
+      expect(data.error).toBe("invalid_request");
+      expect(data.error_description).toEqual(expect.any(String));
     });
   });
 });

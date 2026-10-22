@@ -176,14 +176,9 @@ describe("/oauth/consent", () => {
         });
 
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
-      it("should return 400 for empty session parameter", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/consent?session=`, {
-          method: "GET",
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        const data = (await response.json()) as ConsentDetailsResponse;
+        expect(data.error).toBe("invalid_request");
+        expect(data.error_description).toEqual(expect.any(String));
       });
     });
 
@@ -289,20 +284,9 @@ describe("/oauth/consent", () => {
         });
 
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
-      it("should return 400 for missing approved field", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/consent`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            session_token: "some-token",
-          }),
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        const data = (await response.json()) as ConsentSubmitResponse;
+        expect(data.error).toBe("invalid_request");
+        expect(data.error_description).toEqual(expect.any(String));
       });
 
       it("should prevent consent session reuse after approval", async () => {

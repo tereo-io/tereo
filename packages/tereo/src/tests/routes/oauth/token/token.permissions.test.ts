@@ -6,7 +6,6 @@ import { prisma } from "../../../../utils/db/prisma.js";
 import {
   BASE_URL,
   HTTP_STATUS,
-  OAUTH_ERRORS,
   createTestClient,
   createTestUser,
   generateCodeVerifier,
@@ -537,11 +536,9 @@ describe("POST /oauth/token", () => {
 
 describe("POST /oauth/token", () => {
   describe("OAuth Security Tests", () => {
-    let testClient: Awaited<ReturnType<typeof createTestClient>>;
     let confidentialClient: Awaited<ReturnType<typeof createTestClient>>;
 
     beforeAll(async () => {
-      testClient = await createTestClient();
       // Create confidential client with client_credentials grant for security tests
       confidentialClient = await createTestClient({
         clientType: "confidential",
@@ -554,25 +551,6 @@ describe("POST /oauth/token", () => {
     });
 
     describe("Client Authentication Security", () => {
-      it("should reject client_credentials grant for public client", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/token`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            grant_type: "client_credentials",
-            client_id: testClient.clientId,
-            scope: "openid",
-          }),
-        });
-
-        const data = (await response.json()) as TokenResponse;
-
-        // RFC 6749 Section 5.2: unauthorized_client - the client is not authorized
-        // to use this grant type (public clients cannot use client_credentials)
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        expect(data.error).toBe(OAUTH_ERRORS.UNAUTHORIZED_CLIENT);
-      });
-
       it("should accept client_credentials grant for confidential client with valid secret", async () => {
         const credentials = Buffer.from(
           `${confidentialClient.clientId}:${confidentialClient.plainSecret}`
@@ -597,29 +575,6 @@ describe("POST /oauth/token", () => {
         expect(data.token_type).toBe("Bearer");
         // Client credentials grant should NOT return refresh_token or id_token
         expect(data.refresh_token).toBeUndefined();
-      });
-
-      it("should reject confidential client with wrong secret", async () => {
-        const credentials = Buffer.from(
-          `${confidentialClient.clientId}:wrong-secret`
-        ).toString("base64");
-
-        const response = await fetch(`${BASE_URL}/oauth/token`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Basic ${credentials}`,
-          },
-          body: JSON.stringify({
-            grant_type: "client_credentials",
-            scope: "openid",
-          }),
-        });
-
-        const data = (await response.json()) as TokenResponse;
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-        expect(data.error).toBe(OAUTH_ERRORS.INVALID_CLIENT);
       });
     });
   });

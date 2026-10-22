@@ -377,31 +377,6 @@ describe("POST /oauth/token", () => {
         expect(data.sub).toBe(clientCredentialsClient.clientId);
       });
 
-      it("should support Basic Auth for client_credentials grant with 200 status", async () => {
-        const credentials = Buffer.from(
-          `${clientCredentialsClient.clientId}:${clientCredentialsClient.plainSecret}`
-        ).toString("base64");
-
-        const response = await fetch(`${BASE_URL}/oauth/token`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Basic ${credentials}`,
-          },
-          body: JSON.stringify({
-            grant_type: "client_credentials",
-            scope: "openid",
-          }),
-        });
-
-        const data = (await response.json()) as TokenResponse;
-
-        expect(response.status).toBe(HTTP_STATUS.OK);
-        expect(data.access_token).toBeDefined();
-        expect(data.token_type).toBe("Bearer");
-        expect(data.error).toBeUndefined();
-      });
-
       it("issues a token to a client holding no scopes, when none is asked for, and refuses openid", async () => {
         // As a provisioned service or integration client: scopes [].
         const scopeless = await createTestClient({

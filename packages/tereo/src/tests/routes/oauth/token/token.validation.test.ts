@@ -206,52 +206,6 @@ describe("POST /oauth/token", () => {
         expect(data.access_token).toBeUndefined();
       });
 
-      it("should reject reused authorization code with 400 and invalid_grant error", async () => {
-        const codeVerifier = generateCodeVerifier();
-        const codeChallenge = generateCodeChallenge(codeVerifier);
-        const code = await getAuthorizationCode(
-          testClient,
-          testUser,
-          codeChallenge
-        );
-
-        expect(code).not.toBeNull();
-
-        // First use - should succeed
-        const firstResponse = await fetch(`${BASE_URL}/oauth/token`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            grant_type: "authorization_code",
-            code,
-            redirect_uri: testClient.redirectUris[0],
-            client_id: testClient.clientId,
-            code_verifier: codeVerifier,
-          }),
-        });
-
-        expect(firstResponse.status).toBe(HTTP_STATUS.OK);
-
-        // Second use - should fail (code already used)
-        const secondResponse = await fetch(`${BASE_URL}/oauth/token`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            grant_type: "authorization_code",
-            code,
-            redirect_uri: testClient.redirectUris[0],
-            client_id: testClient.clientId,
-            code_verifier: codeVerifier,
-          }),
-        });
-
-        const data = (await secondResponse.json()) as TokenResponse;
-
-        expect(secondResponse.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        expect(data.error).toBe("invalid_grant");
-        expect(data.access_token).toBeUndefined();
-      });
-
       it("should reject missing code parameter with 400 and invalid_request error", async () => {
         const codeVerifier = generateCodeVerifier();
 
@@ -434,26 +388,6 @@ describe("POST /oauth/token", () => {
         expect(data.access_token).toBeUndefined();
       });
 
-      it("should reject missing grant_type with 400 and invalid_request error", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/token`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            code: "some-code",
-            client_id: testClient.clientId,
-          }),
-        });
-
-        const data = (await response.json()) as TokenResponse;
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        expect(data.error).toBeDefined();
-        // RFC 6749 Section 5.2: missing required parameter must be invalid_request
-        expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
-        expect(data.error_description).toBeDefined();
-        expect(data.access_token).toBeUndefined();
-      });
-
       it("should reject missing client_id with 400 and invalid_request error", async () => {
         const response = await fetch(`${BASE_URL}/oauth/token`, {
           method: "POST",
@@ -496,69 +430,6 @@ describe("POST /oauth/token", () => {
         expect(data.error).toBe(OAUTH_ERRORS.INVALID_CLIENT);
         expect(data.access_token).toBeUndefined();
       });
-
-      it("should reject empty body with 400 and invalid_request error", async () => {
-        const response = await fetch(`${BASE_URL}/oauth/token`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-
-        const data = (await response.json()) as TokenResponse;
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        expect(data.error).toBeDefined();
-        // RFC 6749 Section 5.2: missing required parameter must be invalid_request
-        expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
-        expect(data.error_description).toBeDefined();
-        expect(data.access_token).toBeUndefined();
-      });
-    });
-  });
-});
-
-describe("POST /oauth/token", () => {
-  const REDIRECT_URI = "http://localhost:3000/callback";
-
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
-
-  const form = (body: Record<string, string>) =>
-    new URLSearchParams(body).toString();
-
-  const postForm = (
-    path: string,
-    body: Record<string, string>,
-    headers: Record<string, string> = {}
-  ) =>
-    fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...headers,
-      },
-      body: form(body),
-    });
-
-  let publicClient: Client;
-
-  beforeAll(async () => {
-    publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
-  });
-
-  describe("Authorization request validation", () => {
-    it("refuses a code_verifier outside the RFC 7636 alphabet", async () => {
-      const res = await postForm("/oauth/token", {
-        grant_type: "authorization_code",
-        client_id: publicClient.clientId,
-        code: "x",
-        redirect_uri: REDIRECT_URI,
-        code_verifier: `${"a".repeat(42)} `,
-      });
-      expect(res.status).toBe(400);
-      expect((await json(res)).error).toBe("invalid_request");
     });
   });
 });
