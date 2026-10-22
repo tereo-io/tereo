@@ -3,6 +3,7 @@
 import { LEGACY_PATHS } from "./legacyPaths.js";
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "fs";
+import { OVERSIZE } from "./oversize.js";
 import path from "path";
 import {
   MAX_LINES,
@@ -11,6 +12,7 @@ import {
   lineCount,
   listFiles,
   mapTestPath,
+  oversizeProblems,
   parseName,
   reachesInfrastructure,
   readTags,
@@ -83,6 +85,32 @@ describe("path mapping", () => {
   });
 });
 
+describe("oversize rule", () => {
+  const entry = { path: "a.ts", ceiling: 900, reason: "one big table" };
+  it.each([
+    ["a file at the cap, unlisted", { "b.ts": 800 }, [], []],
+    ["an unlisted file over the cap", { "b.ts": 801 }, [], ["b.ts: 801 lines"]],
+    ["a listed file within its ceiling", { "a.ts": 900 }, [entry], []],
+    [
+      "a listed file over its ceiling",
+      { "a.ts": 901 },
+      [entry],
+      ["a.ts: 901 lines"],
+    ],
+    ["a listed file at the cap", { "a.ts": 800 }, [entry], ["a.ts: 800 lines"]],
+    [
+      "a listed file that is missing",
+      { "b.ts": 10 },
+      [entry],
+      ["a.ts: listed"],
+    ],
+  ])("%s", (_, counts, list, want) => {
+    const got = oversizeProblems(new Map(Object.entries(counts)), list);
+    expect(got).toHaveLength(want.length);
+    want.forEach((w, i) => expect(got[i]).toContain(w));
+  });
+});
+
 describe("test layout", () => {
   it("maps every test file to a source file, router folder, flow or convention", () => {
     const offenders = testFiles().flatMap((f) => {
@@ -122,13 +150,13 @@ describe("test layout", () => {
     expect(offenders).toEqual([]);
   });
 
-  it(`keeps every file under src/tests within ${MAX_LINES} lines`, () => {
-    const offenders = listFiles(
-      (f) => f.endsWith(".ts") && !f.startsWith("fixtures/") && !legacy.has(f)
-    ).flatMap((f) =>
-      lineCount(f) > MAX_LINES ? [`${f}: ${lineCount(f)} lines`] : []
+  it(`keeps every file under src/tests within ${MAX_LINES} lines, or lists it in oversize.ts`, () => {
+    const counts = new Map(
+      listFiles(
+        (f) => f.endsWith(".ts") && !f.startsWith("fixtures/") && !legacy.has(f)
+      ).map((f) => [f, lineCount(f)])
     );
-    expect(offenders).toEqual([]);
+    expect(oversizeProblems(counts, OVERSIZE)).toEqual([]);
   });
 
   it("keeps unit files off the database, server and Redis", () => {

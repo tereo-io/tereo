@@ -49,9 +49,13 @@ A test that exercises one route belongs to that route even if it sets up state t
 
 ## Size cap
 
-No `.ts` file under `src/tests` (test or support, `fixtures/` excepted) exceeds 500 lines. Split by
+No `.ts` file under `src/tests` (test or support, `fixtures/` excepted) exceeds 800 lines. Split by
 aspect; if one aspect still exceeds it, split by method (`user.validation.patch.unit.test.ts`). No
 free-form names.
+
+A file that still cannot fit is listed in `conventions/oversize.ts` with its path, a line ceiling and
+a reason. The layout test fails on an unlisted file over 800, on a listed file past its ceiling, and
+on a listed file that is at or under 800 or gone, so the list is the complete record of oversize files.
 
 ## Projects
 

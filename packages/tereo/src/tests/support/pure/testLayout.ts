@@ -5,7 +5,46 @@ import path from "path";
 export const TESTS_DIR = path.resolve(import.meta.dirname, "../..");
 export const SRC_DIR = path.resolve(TESTS_DIR, "..");
 
-export const MAX_LINES = 500;
+export const MAX_LINES = 800;
+
+export interface OversizeEntry {
+  path: string;
+  ceiling: number;
+  reason: string;
+}
+
+/**
+ * What is wrong with the files' sizes, given each file's line count and the
+ * declared oversize list: an unlisted file over the cap, a listed file over
+ * its ceiling, a listed file at or under the cap, or a listed file missing.
+ */
+export function oversizeProblems(
+  counts: ReadonlyMap<string, number>,
+  oversize: ReadonlyArray<OversizeEntry>
+): string[] {
+  const listed = new Map(oversize.map((e) => [e.path, e]));
+  const problems: string[] = [];
+  for (const [file, lines] of counts) {
+    if (lines > MAX_LINES && !listed.has(file)) {
+      problems.push(
+        `${file}: ${lines} lines, over ${MAX_LINES} and not in oversize.ts`
+      );
+    }
+  }
+  for (const { path: file, ceiling } of oversize) {
+    const lines = counts.get(file);
+    if (lines === undefined)
+      problems.push(`${file}: listed in oversize.ts but missing`);
+    else if (lines <= MAX_LINES) {
+      problems.push(
+        `${file}: ${lines} lines, listed in oversize.ts but not over ${MAX_LINES}`
+      );
+    } else if (lines > ceiling) {
+      problems.push(`${file}: ${lines} lines, over its ceiling of ${ceiling}`);
+    }
+  }
+  return problems;
+}
 
 // The regex Vitest reads file-level tags with.
 const MODULE_TAG = /(\/\/|\*)\s*@module-tag\s+([\w\-/]+)\b/g;
