@@ -1,6 +1,21 @@
 // @module-tag int
 // @module-tag notifications
 // @module-tag webhooks
+import { dispatchNotification } from "../../utils/notifications/dispatch.js";
+import { dispatchOutboxEvent } from "../../utils/processEvent.js";
+import { ensureDailyPartitions } from "../../utils/partitions.js";
+import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import { prisma } from "../../utils/db/prisma.js";
+import { waitFor } from "../support/webhooks.js";
+import {
+  closeNotificationQueues,
+  getNotificationQueue,
+} from "../../jobs/notificationQueues.js";
+import {
+  createOutboxReaper,
+  notifyTx,
+  type OutboxDispatcher,
+} from "../../utils/outbox.js";
 import {
   describe,
   it,
@@ -10,21 +25,6 @@ import {
   afterEach,
   vi,
 } from "vitest";
-import { dispatchNotification } from "../../utils/notifications/dispatch.js";
-import { dispatchOutboxEvent } from "../../utils/processEvent.js";
-import { ensureDailyPartitions } from "../../utils/partitions.js";
-import { SYSTEM_USER_ID } from "../../definitions/index.js";
-import { prisma } from "../../utils/db/prisma.js";
-import { waitFor } from "../support/webhooks.js";
-import {
-  createOutboxReaper,
-  notifyTx,
-  type OutboxDispatcher,
-} from "../../utils/outbox.js";
-import {
-  closeNotificationQueues,
-  getNotificationQueue,
-} from "../../jobs/notificationQueues.js";
 
 const input = {
   channel: "email" as const,
