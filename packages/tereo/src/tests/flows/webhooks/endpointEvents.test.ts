@@ -62,78 +62,89 @@ describe("webhook endpoint events and audit URLs", () => {
     await cleanupTestEntities();
   });
 
-  it("emits every endpoint change without its secret or header values", async () => {
-    const et = await createTestEventType(admin);
-    const created = await api.post(
-      `${BASE_URL}/webhooks`,
-      {
-        url: `https://example.com/hook/${randomUUID()}/path-secret?token=url-secret`,
-        eventTypes: [et.eventType],
-        customHeaders: { "X-Api-Key": "header-secret" },
-      },
-      auth(admin)
-    );
-    expect(created.status).toBe(HTTP_STATUS.CREATED);
-    const id: string = created.data.id;
-    const secrets = [
-      "path-secret",
-      "url-secret",
-      "header-secret",
-      created.data.signingSecret as string,
-    ];
+  it(
+    "emits every endpoint change without its secret or header values",
+    { tags: ["slow"] },
+    async () => {
+      const et = await createTestEventType(admin);
+      const created = await api.post(
+        `${BASE_URL}/webhooks`,
+        {
+          url: `https://example.com/hook/${randomUUID()}/path-secret?token=url-secret`,
+          eventTypes: [et.eventType],
+          customHeaders: { "X-Api-Key": "header-secret" },
+        },
+        auth(admin)
+      );
+      expect(created.status).toBe(HTTP_STATUS.CREATED);
+      const id: string = created.data.id;
+      const secrets = [
+        "path-secret",
+        "url-secret",
+        "header-secret",
+        created.data.signingSecret as string,
+      ];
 
-    const steps: [
-      string,
-      () => Promise<{ status: number; data: { signingSecret?: string } }>,
-    ][] = [
-      ["created", async () => created],
-      [
-        "updated",
-        () =>
-          api.patch(
-            `${BASE_URL}/webhooks/${id}`,
-            { description: "changed" },
-            auth(admin)
-          ),
-      ],
-      [
-        "secret-rotated",
-        () =>
-          api.post(`${BASE_URL}/webhooks/${id}/rotate-secret`, {}, auth(admin)),
-      ],
-      [
-        "previous-secret-revoked",
-        () =>
-          api.post(
-            `${BASE_URL}/webhooks/${id}/revoke-previous-secret`,
-            {},
-            auth(admin)
-          ),
-      ],
-      [
-        "archived",
-        () => api.post(`${BASE_URL}/webhooks/${id}/archive`, {}, auth(admin)),
-      ],
-      [
-        "restored",
-        () => api.post(`${BASE_URL}/webhooks/${id}/restore`, {}, auth(admin)),
-      ],
-      ["deleted", () => api.delete(`${BASE_URL}/webhooks/${id}`, auth(admin))],
-    ];
-    for (const [action, step] of steps) {
-      const response = await step();
-      expect(response.status, action).toBeLessThan(300);
-      if (action === "secret-rotated") {
-        secrets.push(response.data.signingSecret!);
-      }
-      const payload = await delivered(id, `webhook.endpoint.${action}`);
-      expect(payload.data.url).toBe("https://example.com");
-      expect(payload.data.customHeaderNames).toHaveLength(1);
-      for (const secret of secrets) {
-        expect(JSON.stringify(payload)).not.toContain(secret);
+      const steps: [
+        string,
+        () => Promise<{ status: number; data: { signingSecret?: string } }>,
+      ][] = [
+        ["created", async () => created],
+        [
+          "updated",
+          () =>
+            api.patch(
+              `${BASE_URL}/webhooks/${id}`,
+              { description: "changed" },
+              auth(admin)
+            ),
+        ],
+        [
+          "secret-rotated",
+          () =>
+            api.post(
+              `${BASE_URL}/webhooks/${id}/rotate-secret`,
+              {},
+              auth(admin)
+            ),
+        ],
+        [
+          "previous-secret-revoked",
+          () =>
+            api.post(
+              `${BASE_URL}/webhooks/${id}/revoke-previous-secret`,
+              {},
+              auth(admin)
+            ),
+        ],
+        [
+          "archived",
+          () => api.post(`${BASE_URL}/webhooks/${id}/archive`, {}, auth(admin)),
+        ],
+        [
+          "restored",
+          () => api.post(`${BASE_URL}/webhooks/${id}/restore`, {}, auth(admin)),
+        ],
+        [
+          "deleted",
+          () => api.delete(`${BASE_URL}/webhooks/${id}`, auth(admin)),
+        ],
+      ];
+      for (const [action, step] of steps) {
+        const response = await step();
+        expect(response.status, action).toBeLessThan(300);
+        if (action === "secret-rotated") {
+          secrets.push(response.data.signingSecret!);
+        }
+        const payload = await delivered(id, `webhook.endpoint.${action}`);
+        expect(payload.data.url).toBe("https://example.com");
+        expect(payload.data.customHeaderNames).toHaveLength(1);
+        for (const secret of secrets) {
+          expect(JSON.stringify(payload)).not.toContain(secret);
+        }
       }
     }
-  });
+  );
 
   it("emits no updated event for a PATCH that changes nothing", async () => {
     const endpoint = await createTestWebhookEndpoint(admin, {
