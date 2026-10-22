@@ -40,6 +40,7 @@ describe("path mapping", () => {
     "routes/v1/admin/users/user/user.permissions.test.ts",
     "routes/routes.permissions.test.ts",
     "utils/permissions.unit.test.ts",
+    "utils/db/index.test.ts",
     "jobs/lifecycleSweep.test.ts",
     "index.test.ts",
     "app.test.ts",
@@ -51,6 +52,8 @@ describe("path mapping", () => {
 
   it.each([
     ["routes/v1/admin/users/user/users.test.ts", "not a router folder"],
+    ["jobs/jobs.test.ts", "no src/jobs/jobs.ts"],
+    ["utils/db/db.test.ts", "no src/utils/db/db.ts"],
     ["utils/nope.test.ts", "no src/utils/nope.ts"],
     ["routes/v1/admin/users/user/user.misc.test.ts", "undeclared name segment"],
     [
@@ -109,9 +112,9 @@ describe("test layout", () => {
       );
       const expected = expectedArea(f);
       if (areas.length === 0) return [`${f}: no area tag`];
-      if (expected && !areas.includes(expected)) {
+      if (expected && areas[0] !== expected) {
         return [
-          `${f}: path requires the ${expected} tag, has ${areas.join(", ")}`,
+          `${f}: path requires ${expected} as the first area tag, has ${areas.join(", ")}`,
         ];
       }
       return [];
@@ -170,6 +173,9 @@ describe("test layout", () => {
       (t) => `${t} (${kind(t)})`
     );
     expect(rows.sort()).toEqual(declared.sort());
+    expect(TAGS.map((t) => t.name).sort()).toEqual(
+      [...TIER_TAGS, ...AREA_TAGS, ...DETAIL_TAGS].sort()
+    );
   });
 
   it("lists only legacy paths that still exist", () => {

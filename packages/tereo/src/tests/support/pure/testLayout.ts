@@ -69,7 +69,11 @@ export function mapTestPath(rel: string): string | null {
   }
   const srcDir = dir === "." ? "" : dir;
   if (existsSync(path.join(SRC_DIR, srcDir, `${base}.ts`))) return null;
-  if (path.posix.basename(srcDir) === base && isRouterFolder(srcDir)) {
+  if (
+    srcDir.startsWith("routes") &&
+    path.posix.basename(srcDir) === base &&
+    isRouterFolder(srcDir)
+  ) {
     return null;
   }
   return `no src/${srcDir ? `${srcDir}/` : ""}${base}.ts, and src/${srcDir} is not a router folder named ${base}`;
@@ -126,6 +130,10 @@ export function reachesInfrastructure(target: string): boolean {
   return (
     target.startsWith("utils/db/") ||
     target === "utils/redis.ts" ||
+    // The entry points start the server, database and Redis.
+    target === "app.ts" ||
+    target === "index.ts" ||
+    target === "worker.ts" ||
     // tags.ts is a pure declaration, imported by the config as well.
     (target.startsWith("tests/setup/") && target !== "tests/setup/tags.ts") ||
     (target.startsWith("tests/support/") &&

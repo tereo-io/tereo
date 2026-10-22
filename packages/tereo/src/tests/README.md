@@ -61,7 +61,8 @@ free-form names.
 | `int`   | every other `*.test.ts` | `globalSetup`: migrates, seeds, starts one server      | serial      |
 
 A `.unit` file must not import `utils/db/`, `utils/redis.ts`, `setup/` (except `tags.ts`) or
-`support/` (except `support/pure/`). `int` tests use real users and tokens
+`support/` (except `support/pure/`), or the entry points `app.ts`, `index.ts`, `worker.ts`.
+`setup/tags.ts` is the sole exception to the `setup/` denylist. The check covers direct imports only. `int` tests use real users and tokens
 (`getTestPrincipalToken`), test-made permissions and event types under the test service, and no
 mocks of Postgres, Redis or auth.
 
@@ -92,7 +93,7 @@ line silently drop all but the first):
 | `slow`          | detail | Takes long; raises the test timeout               |
 | `redis-outage`  | detail | Behaviour while Redis is unavailable              |
 
-Exactly one tier tag per file, matching `.unit`. At least one area tag, and the one the path
+Exactly one tier tag per file, matching `.unit`. At least one area tag; the first is the primary one, and it must be the one the path
 requires (`AREA_BY_PATH` in `tags.ts`, longest prefix wins). Detail tags are optional, at file,
 `describe` or `it` level.
 
