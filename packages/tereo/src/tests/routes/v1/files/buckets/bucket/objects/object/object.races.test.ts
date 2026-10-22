@@ -8,6 +8,10 @@ import FormData from "form-data";
 import fs from "fs/promises";
 import axios from "axios";
 import {
+  lockWaiters,
+  untilQueued,
+} from "../../../../../../../../tests/support/dbLocks.js";
+import {
   BASE_URL,
   HTTP_STATUS,
   cleanupTestEntities,
@@ -79,7 +83,6 @@ describe("PUT /v1/files/buckets/:name/objects/*objectKey", () => {
   });
 
   describe("concurrent writes", () => {
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
     /**
@@ -95,8 +98,9 @@ describe("PUT /v1/files/buckets/:name/objects/*objectKey", () => {
       await prisma.$transaction(
         async (tx) => {
           await hold(tx);
+          const baseline = await lockWaiters();
           pending = Promise.all(requests.map((r) => r()));
-          await sleep(1000);
+          await untilQueued(baseline, requests.length);
         },
         { timeout: 30_000 }
       );
@@ -291,8 +295,6 @@ describe("PUT /v1/files/buckets/:name/objects/*objectKey", () => {
   });
 
   describe("files integrity", () => {
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
     /**
      * Runs `during` while a transaction holds `lock` (a statement that takes a
      * row lock), then commits. Lets a test queue a request behind the lock and
@@ -355,8 +357,9 @@ describe("PUT /v1/files/buckets/:name/objects/*objectKey", () => {
         (tx) =>
           tx.$executeRaw`UPDATE "files"."buckets" SET "versioning_enabled" = true WHERE "id" = ${bucket.id}`,
         async () => {
+          const baseline = await lockWaiters();
           overwrite = upload(bucket.name, "v.txt", `v2 ${randomUUID()}`);
-          await sleep(1500);
+          await untilQueued(baseline, 1, 1500);
         }
       );
       await overwrite;

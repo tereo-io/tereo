@@ -440,79 +440,83 @@ describe("POST, GET and DELETE /v1/files/buckets/:name/multipart/:uploadId", () 
           }
         );
 
-      it("runs once however long assembly takes, and a retry gets its result", async () => {
-        const bucket = await createTestBucket(token);
-        const { uploadId, parts } = await startUpload(
-          bucket.name,
-          `mp ${randomUUID()}`
-        );
-        const redis = getRedisClient();
-        const claimKey = `file-service:multipart-complete:${uploadId}`;
-        const first = testIdempotencyKey();
+      it(
+        "runs once however long assembly takes, and a retry gets its result",
+        { tags: ["slow"] },
+        async () => {
+          const bucket = await createTestBucket(token);
+          const { uploadId, parts } = await startUpload(
+            bucket.name,
+            `mp ${randomUUID()}`
+          );
+          const redis = getRedisClient();
+          const claimKey = `file-service:multipart-complete:${uploadId}`;
+          const first = testIdempotencyKey();
 
-        // A slow assembly: the staged part becomes a FIFO, so reading it blocks
-        // until the test writes the part's bytes in.
-        const part = await prisma.multipartPart.findFirstOrThrow({
-          where: { uploadId },
-        });
-        const partPath = path.resolve(part.fsPath);
-        const partBytes = await fs.readFile(partPath);
-        await fs.unlink(partPath);
-        execFileSync("mkfifo", [partPath]);
+          // A slow assembly: the staged part becomes a FIFO, so reading it blocks
+          // until the test writes the part's bytes in.
+          const part = await prisma.multipartPart.findFirstOrThrow({
+            where: { uploadId },
+          });
+          const partPath = path.resolve(part.fsPath);
+          const partBytes = await fs.readFile(partPath);
+          await fs.unlink(partPath);
+          execFileSync("mkfifo", [partPath]);
 
-        const pending = complete(bucket.name, uploadId, parts, first);
-        await sleep(1000);
+          const pending = complete(bucket.name, uploadId, parts, first);
+          await sleep(1000);
 
-        const duringOtherKey = await complete(
-          bucket.name,
-          uploadId,
-          parts,
-          testIdempotencyKey()
-        );
-        const duringSameKey = await complete(
-          bucket.name,
-          uploadId,
-          parts,
-          first
-        );
+          const duringOtherKey = await complete(
+            bucket.name,
+            uploadId,
+            parts,
+            testIdempotencyKey()
+          );
+          const duringSameKey = await complete(
+            bucket.name,
+            uploadId,
+            parts,
+            first
+          );
 
-        // Shorten both claims; a renewal puts them back to a full TTL.
-        const [idemKey] = await redis.keys(
-          `file-service:idempotency:*multipart-complete:${uploadId}:${first}`
-        );
-        await redis.pexpire(claimKey, 8000);
-        await redis.pexpire(idemKey, 8000);
-        await sleep(6500);
-        const renewedTtl = await redis.pttl(claimKey);
-        const idemRenewedTtl = await redis.pttl(idemKey);
+          // Shorten both claims; a renewal puts them back to a full TTL.
+          const [idemKey] = await redis.keys(
+            `file-service:idempotency:*multipart-complete:${uploadId}:${first}`
+          );
+          await redis.pexpire(claimKey, 8000);
+          await redis.pexpire(idemKey, 8000);
+          await sleep(6500);
+          const renewedTtl = await redis.pttl(claimKey);
+          const idemRenewedTtl = await redis.pttl(idemKey);
 
-        await fs.writeFile(partPath, partBytes);
-        const done = await pending;
+          await fs.writeFile(partPath, partBytes);
+          const done = await pending;
 
-        expect(duringOtherKey.status).toBe(HTTP_STATUS.CONFLICT);
-        expect(duringOtherKey.data.error).toBe(
-          "multipart_complete_in_progress"
-        );
-        expect(duringSameKey.status).toBe(HTTP_STATUS.CONFLICT);
-        expect(renewedTtl).toBeGreaterThan(10_000);
-        expect(idemRenewedTtl).toBeGreaterThan(10_000);
-        expect(done.status).toBe(HTTP_STATUS.CREATED);
-        expect(await redis.exists(claimKey)).toBe(0);
+          expect(duringOtherKey.status).toBe(HTTP_STATUS.CONFLICT);
+          expect(duringOtherKey.data.error).toBe(
+            "multipart_complete_in_progress"
+          );
+          expect(duringSameKey.status).toBe(HTTP_STATUS.CONFLICT);
+          expect(renewedTtl).toBeGreaterThan(10_000);
+          expect(idemRenewedTtl).toBeGreaterThan(10_000);
+          expect(done.status).toBe(HTTP_STATUS.CREATED);
+          expect(await redis.exists(claimKey)).toBe(0);
 
-        const retry = await complete(
-          bucket.name,
-          uploadId,
-          parts,
-          testIdempotencyKey()
-        );
-        expect(retry.status).toBe(HTTP_STATUS.CREATED);
-        expect(retry.data).toEqual(done.data);
-        expect(
-          await prisma.objectVersion.count({
-            where: { objectId: done.data.id, deletedAt: null },
-          })
-        ).toBe(1);
-      });
+          const retry = await complete(
+            bucket.name,
+            uploadId,
+            parts,
+            testIdempotencyKey()
+          );
+          expect(retry.status).toBe(HTTP_STATUS.CREATED);
+          expect(retry.data).toEqual(done.data);
+          expect(
+            await prisma.objectVersion.count({
+              where: { objectId: done.data.id, deletedAt: null },
+            })
+          ).toBe(1);
+        }
+      );
     });
   });
 

@@ -7,6 +7,10 @@ import { randomUUID } from "crypto";
 import FormData from "form-data";
 import axios from "axios";
 import {
+  lockWaiters,
+  untilQueued,
+} from "../../../../../../../../../../../tests/support/dbLocks.js";
+import {
   BASE_URL,
   HTTP_STATUS,
   cleanupTestEntities,
@@ -19,7 +23,6 @@ import {
 
 describe("POST /v1/files/buckets/:name/objects/by-id/:id/versions/:versionId/restore and DELETE /v1/files/buckets/:name/objects/by-id/:id/versions/:versionId", () => {
   describe("object write lock order", () => {
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
     /**
@@ -36,8 +39,9 @@ describe("POST /v1/files/buckets/:name/objects/by-id/:id/versions/:versionId/res
       await prisma.$transaction(
         async (tx) => {
           await hold(tx);
+          const baseline = await lockWaiters();
           pending = request();
-          await sleep(1000);
+          await untilQueued(baseline, 1);
           await whileQueued(tx);
         },
         { timeout: 30_000 }
@@ -199,10 +203,11 @@ describe("POST /v1/files/buckets/:name/objects/by-id/:id/versions/:versionId/res
         await prisma.$transaction(
           async (tx) => {
             await lockBucket(bucket.id)(tx);
+            const baseline = await lockWaiters();
             upload = putObject(bucket.name, "copy.txt", firstBody);
-            await sleep(1000);
+            await untilQueued(baseline, 1);
             released = release();
-            await sleep(1000);
+            await untilQueued(baseline, 2);
           },
           { timeout: 30_000 }
         );

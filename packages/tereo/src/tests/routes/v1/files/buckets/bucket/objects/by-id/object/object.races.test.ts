@@ -6,6 +6,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "crypto";
 import axios from "axios";
 import {
+  lockWaiters,
+  untilQueued,
+} from "../../../../../../../../../tests/support/dbLocks.js";
+import {
   BASE_URL,
   HTTP_STATUS,
   cleanupTestEntities,
@@ -17,7 +21,6 @@ import {
 
 describe("PATCH /v1/files/buckets/:name/objects/by-id/:id", () => {
   describe("object write lock order", () => {
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
     /**
@@ -34,8 +37,9 @@ describe("PATCH /v1/files/buckets/:name/objects/by-id/:id", () => {
       await prisma.$transaction(
         async (tx) => {
           await hold(tx);
+          const baseline = await lockWaiters();
           pending = request();
-          await sleep(1000);
+          await untilQueued(baseline, 1);
           await whileQueued(tx);
         },
         { timeout: 30_000 }
@@ -154,8 +158,6 @@ describe("PATCH /v1/files/buckets/:name/objects/by-id/:id", () => {
   });
 
   describe("files integrity", () => {
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
     /**
      * Runs `during` while a transaction holds `lock` (a statement that takes a
      * row lock), then commits. Lets a test queue a request behind the lock and
@@ -218,14 +220,15 @@ describe("PATCH /v1/files/buckets/:name/objects/by-id/:id", () => {
         (tx) =>
           tx.$queryRaw`SELECT 1 FROM "files"."objects" WHERE "id" = ${obj.id}::uuid FOR UPDATE`,
         async () => {
+          const baseline = await lockWaiters();
           overwrite = upload(bucket.name, "p.txt", `p2 ${randomUUID()}`);
-          await sleep(1000);
+          await untilQueued(baseline, 1);
           patching = axios.patch(
             `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}`,
             { tags: ["patched"] },
             auth()
           );
-          await sleep(1000);
+          await untilQueued(baseline, 2);
         }
       );
       await overwrite;
