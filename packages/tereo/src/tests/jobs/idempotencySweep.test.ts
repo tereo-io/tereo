@@ -59,7 +59,8 @@ describe("db.idempotencyRecords.sweepExpired", () => {
     for (let i = 0; i < 200; i++) {
       const rows = await prisma.$queryRaw<{ n: bigint }[]>`
       SELECT count(*) AS n FROM pg_stat_activity
-      WHERE wait_event_type = 'Lock'
+      WHERE datname = current_database()
+        AND wait_event_type = 'Lock'
         AND query LIKE '%DELETE FROM "files"."idempotency_records"%'`;
       if (Number(rows[0].n) > 0) return;
       await new Promise((r) => setTimeout(r, 25));

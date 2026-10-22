@@ -4,6 +4,7 @@
 import { notifyBucketAccessChanged } from "../../websocket/emitters/index.js";
 import { closeRedisEmitter } from "../../websocket/emitters/redisEmitter.js";
 import { browserLogin, cookieHeader } from "../support/browserLogin.js";
+import { setIO } from "../../websocket/emitters/permissionEmitters.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createTestClient } from "../support/auth/clients.js";
 import { generateAccessToken } from "../../utils/tokens.js";
@@ -617,11 +618,6 @@ describe("initializeWebSocket", () => {
   });
 });
 
-// The describes above must run before the in-process shutdownWebSocket tests
-// below: shutdownWebSocket clears websocket/index's io, but permissionEmitters
-// keeps its own module-level io pointing at the dead server, so the core
-// server's events would no longer reach these sockets.
-
 /**
  * A socket's token can die without anything closing the socket — its session
  * rotated away by a refresh is one. Each node checks its sockets' tokens
@@ -712,6 +708,13 @@ describe("revalidateLocalSockets", () => {
 });
 
 describe("shutdownWebSocket", () => {
+  // shutdownWebSocket clears websocket/index's io, but permissionEmitters
+  // keeps its own, pointing at the dead server; null sends it back to Redis,
+  // as in a process that never started a server.
+  afterAll(() => {
+    setIO(null as unknown as Parameters<typeof setIO>[0]);
+  });
+
   it("closes the HTTP server without waiting out the drain window", async () => {
     const server = createServer();
     await initializeWebSocket(server);

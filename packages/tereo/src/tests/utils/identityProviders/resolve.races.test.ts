@@ -169,10 +169,32 @@ describe("resolveLoginIdentity", () => {
       const user = await createTestUser();
       await invite(user.id, provider.id);
 
-      const results = await Promise.all([
-        resolveLoginIdentity(provider, identity({ email: user.email })),
-        resolveLoginIdentity(provider, identity({ email: user.email })),
-      ]);
+      // Claiming deletes the invite, so a sign-in that looks it up after the
+      // other committed finds none and answers no_account. Hold each lookup
+      // until both have run: both see the invite, and the loser is the one
+      // that finds it taken.
+      const realFindInvite = db.userIdentities.findInvite;
+      let looked = 0;
+      let bothLooked!: () => void;
+      const gate = new Promise<void>((resolve) => (bothLooked = resolve));
+      const lookup = vi
+        .spyOn(db.userIdentities, "findInvite")
+        .mockImplementation(async (...args) => {
+          const found = await realFindInvite(...args);
+          if (++looked === 2) bothLooked();
+          await gate;
+          return found;
+        });
+
+      let results;
+      try {
+        results = await Promise.all([
+          resolveLoginIdentity(provider, identity({ email: user.email })),
+          resolveLoginIdentity(provider, identity({ email: user.email })),
+        ]);
+      } finally {
+        lookup.mockRestore();
+      }
 
       expect(results).toHaveLength(2);
       expect(results).toContainEqual({ userId: user.id });
