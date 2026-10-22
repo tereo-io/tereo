@@ -4,8 +4,8 @@
 // @module-tag race
 import { SYSTEM_USER_ID } from "../../definitions/systemUser.js";
 import { getIdempotencySweepQueue } from "../../jobs/queues.js";
-import { getRedisClient } from "../../utils/redis.js";
 import { afterAll, describe, expect, it } from "vitest";
+import { getRedisClient } from "../../utils/redis.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import { Client } from "pg";

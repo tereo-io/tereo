@@ -1,10 +1,10 @@
 // @module-tag unit
 // @module-tag files
+import { describe, expect, it } from "vitest";
 import {
   contentDisposition,
   isInlineSafeContentType,
 } from "../../../../../../../routes/v1/files/buckets/bucket/objects/utils.js";
-import { describe, expect, it } from "vitest";
 
 describe("isInlineSafeContentType", () => {
   it("never inlines a list of types, whatever comes first", () => {

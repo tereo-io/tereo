@@ -2,11 +2,17 @@
 // @module-tag files
 import { bucketRateLimit } from "../../middleware/bucketRateLimit.js";
 import { bucketCors } from "../../middleware/bucketCors.js";
-import type { Request, Response } from "express";
 import { prisma } from "../../utils/db/prisma.js";
+import type { Request, Response } from "express";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
+import {
+  broadcastBucketInvalidate,
+  closeCacheBroadcast,
+  onBucketInvalidate,
+  startCacheSubscriber,
+} from "../../utils/cacheBroadcast.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -17,12 +23,6 @@ import {
   uploadTestObject,
   waitFor,
 } from "../support/files.js";
-import {
-  broadcastBucketInvalidate,
-  closeCacheBroadcast,
-  onBucketInvalidate,
-  startCacheSubscriber,
-} from "../../utils/cacheBroadcast.js";
 import {
   afterAll,
   afterEach,

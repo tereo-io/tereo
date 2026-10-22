@@ -1,10 +1,5 @@
 // @module-tag int
 // @module-tag files
-import {
-  assertUnreadBody,
-  openBlobRangeStream,
-  openBlobStream,
-} from "../../utils/storage.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createEncryptStream } from "../../utils/encryption.js";
 import { encryptBuffer } from "../support/pure/blobCrypto.js";
@@ -14,6 +9,11 @@ import fs from "fs/promises";
 import crypto from "crypto";
 import path from "path";
 import os from "os";
+import {
+  assertUnreadBody,
+  openBlobRangeStream,
+  openBlobStream,
+} from "../../utils/storage.js";
 
 // Records every file stream storage opens, so a test can see it was closed.
 vi.mock("fs", async (importOriginal) => {
