@@ -24,7 +24,6 @@ let TEST_USER_ID = "";
 let TEST_USER_EMAIL = "";
 const TEST_USER_PASSWORD = "TestPassword123!";
 const TEST_REDIRECT_URI = "http://localhost:3000/test-callback";
-const TEST_POST_LOGOUT_URI = "http://localhost:3000/test-logout";
 
 describe("OIDC Compliance", () => {
   beforeAll(async () => {
@@ -59,7 +58,7 @@ describe("OIDC Compliance", () => {
         clientType: "public",
         name: `OIDC Test Client ${uniqueId}`,
         redirectUris: [TEST_REDIRECT_URI],
-        postLogoutRedirectUris: [TEST_POST_LOGOUT_URI],
+        postLogoutRedirectUris: [],
         scopes: ["openid", "profile", "email", "offline_access"],
         grantTypes: ["authorization_code", "refresh_token"],
         audience: [],

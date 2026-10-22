@@ -11,14 +11,13 @@ import {
   rotateSigningKey,
 } from "../../utils/keys.js";
 
+/**
+ * Overlapping refreshes of the signing keys (the periodic one, an unknown
+ * kid's, a rotation's) in this process. The first read is held until the
+ * rotation has finished, so it lands last. The immediate key is left in
+ * place: the rotation deleted every key before it.
+ */
 describe("refreshSigningKeys", () => {
-  /**
-   * Overlapping refreshes of the signing keys (the periodic one, an unknown
-   * kid's, a rotation's) in this process. The first read is held until the
-   * rotation has finished, so it lands last. The immediate key is left in
-   * place: the rotation deleted every key before it.
-   */
-
   describe("signing key refresh", () => {
     it("does not undo an immediate rotation with a read from before it", async () => {
       await refreshSigningKeys();

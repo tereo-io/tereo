@@ -360,7 +360,6 @@ describe("GET /oauth/authorize", () => {
   let TEST_CLIENT_ID = "";
   let TEST_CLIENT_DB_ID = "";
   const TEST_REDIRECT_URI = "http://localhost:3000/test-callback";
-  const TEST_POST_LOGOUT_URI = "http://localhost:3000/test-logout";
 
   // Helper functions
   function generateCodeVerifier(): string {
@@ -412,7 +411,7 @@ describe("GET /oauth/authorize", () => {
           clientType: "public",
           name: `OIDC Test Client ${uniqueId}`,
           redirectUris: [TEST_REDIRECT_URI],
-          postLogoutRedirectUris: [TEST_POST_LOGOUT_URI],
+          postLogoutRedirectUris: [],
           scopes: ["openid", "profile", "email", "offline_access"],
           grantTypes: ["authorization_code", "refresh_token"],
           audience: [],

@@ -619,6 +619,11 @@ describe("initializeWebSocket", () => {
   });
 });
 
+// The describes above must run before the in-process shutdownWebSocket tests
+// below: shutdownWebSocket clears websocket/index's io, but permissionEmitters
+// keeps its own module-level io pointing at the dead server, so the core
+// server's events would no longer reach these sockets.
+
 /**
  * A socket's token can die without anything closing the socket — its session
  * rotated away by a refresh is one. Each node checks its sockets' tokens
