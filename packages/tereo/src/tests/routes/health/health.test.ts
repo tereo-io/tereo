@@ -7,6 +7,11 @@ import axios from "axios";
 
 const BASE_URL = CORE_URL;
 
+interface HealthResponse {
+  status?: string;
+  [key: string]: unknown;
+}
+
 describe("GET /health", () => {
   describe("GET /health", () => {
     it("should return 200 with service status", async () => {
@@ -66,6 +71,14 @@ describe("GET /health", () => {
       // Verify timestamp is valid ISO 8601 format
       const timestamp = new Date(data.timestamp);
       expect(timestamp.toISOString()).toBe(data.timestamp);
+    });
+
+    it("should return 200 with health status", async () => {
+      const response = await fetch(`${BASE_URL}/health`);
+      const data = (await response.json()) as HealthResponse;
+
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(data.status).toBe("ok");
     });
   });
 });
