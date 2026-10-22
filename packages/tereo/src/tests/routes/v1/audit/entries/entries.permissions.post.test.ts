@@ -65,6 +65,32 @@ describe("POST /v1/audit/entries", () => {
       });
     });
 
+    describe("Auth enforcement", () => {
+      it("should return 403 for insufficient permissions on write", async () => {
+        const noPermsToken = await getTestPrincipalToken({
+          organizationId: "00000000-0000-7002-8000-000000000001",
+          permissions: ["other.read"],
+        });
+
+        const response = await axios.post(
+          `${BASE_URL}/entries`,
+          {
+            source: "test-service",
+            userId: "00000000-0000-7001-8000-000000000001",
+            action: "CREATE",
+            entityType: "Order",
+            entityId: "order-1",
+          },
+          {
+            headers: { Authorization: `Bearer ${noPermsToken}` },
+            validateStatus: () => true,
+          }
+        );
+
+        expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+      });
+    });
+
     describe("Permission hierarchy", () => {
       it("should allow delete permission to write entries", async () => {
         const deleteToken = await getTestPrincipalToken({

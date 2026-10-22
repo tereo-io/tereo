@@ -525,6 +525,47 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
       });
     });
 
+    describe("Correlation ID filter", () => {
+      it("should filter entries by correlationId with equals operator", async () => {
+        const uniqueId = generateUniqueId();
+        const source = `test-corr-filter-${uniqueId}`;
+        const correlationId = `corr-${uniqueId}`;
+
+        // Create entry with correlationId
+        await createEntry({
+          source,
+          entityId: `order-${uniqueId}-1`,
+          correlationId,
+        });
+
+        // Create entry without correlationId
+        await createEntry({
+          source,
+          entityId: `order-${uniqueId}-2`,
+        });
+
+        // Create entry with different correlationId
+        await createEntry({
+          source,
+          entityId: `order-${uniqueId}-3`,
+          correlationId: `other-${uniqueId}`,
+        });
+
+        const response = await axios.get(`${BASE_URL}/entries`, {
+          params: {
+            "filter[source]": source,
+            "filter[correlationId]": correlationId,
+          },
+          headers: { Authorization: `Bearer ${token}` },
+          validateStatus: () => true,
+        });
+
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(response.data.data).toHaveLength(1);
+        expect(response.data.data[0].correlationId).toBe(correlationId);
+      });
+    });
+
     describe("Default sort direction", () => {
       it("should default to desc sort direction when not specified", async () => {
         // Create two entries with a small delay to ensure ordering

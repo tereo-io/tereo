@@ -276,6 +276,7 @@ describe("GET /v1/audit/entries/entity/:entityType/:entityId", () => {
         );
 
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(response.data.error).toBe("invalid_request");
       });
     });
   });

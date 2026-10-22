@@ -35,6 +35,7 @@ describe("/v1/audit/entries", () => {
         );
 
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(response.data.error).toBe("invalid_request");
       });
     });
 
@@ -50,6 +51,7 @@ describe("/v1/audit/entries", () => {
         );
 
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(response.data.error).toBe("invalid_request");
       });
     });
 
