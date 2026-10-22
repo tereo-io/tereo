@@ -1,6 +1,5 @@
 // @module-tag unit
 // @module-tag platform
-import { LEGACY_PATHS } from "./legacyPaths.js";
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "fs";
 import { OVERSIZE } from "./oversize.js";
@@ -27,11 +26,8 @@ import {
   TIER_TAGS,
 } from "../setup/tags.js";
 
-// The rules in src/tests/README.md. Every rule lists the offending paths,
-// and skips the files still in LEGACY_PATHS.
-const legacy = new Set(LEGACY_PATHS);
-const testFiles = () =>
-  listFiles((f) => f.endsWith(".test.ts") && !legacy.has(f));
+// The rules in src/tests/README.md. Every rule lists the offending paths.
+const testFiles = () => listFiles((f) => f.endsWith(".test.ts"));
 const unitFiles = () => testFiles().filter((f) => parseName(f).unit);
 const KNOWN_TAGS = new Set<string>(TAGS.map((t) => t.name));
 
@@ -152,9 +148,9 @@ describe("test layout", () => {
 
   it(`keeps every file under src/tests within ${MAX_LINES} lines, or lists it in oversize.ts`, () => {
     const counts = new Map(
-      listFiles(
-        (f) => f.endsWith(".ts") && !f.startsWith("fixtures/") && !legacy.has(f)
-      ).map((f) => [f, lineCount(f)])
+      listFiles((f) => f.endsWith(".ts") && !f.startsWith("fixtures/")).map(
+        (f) => [f, lineCount(f)]
+      )
     );
     expect(oversizeProblems(counts, OVERSIZE)).toEqual([]);
   });
@@ -204,12 +200,5 @@ describe("test layout", () => {
     expect(TAGS.map((t) => t.name).sort()).toEqual(
       [...TIER_TAGS, ...AREA_TAGS, ...DETAIL_TAGS].sort()
     );
-  });
-
-  it("lists only legacy paths that still exist", () => {
-    const missing = LEGACY_PATHS.filter(
-      (f) => !existsSync(path.join(TESTS_DIR, f))
-    );
-    expect(missing).toEqual([]);
   });
 });

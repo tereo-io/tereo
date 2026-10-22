@@ -2,8 +2,7 @@
 
 `src/tests` mirrors `src/`. A source path tells you which test file covers it, and a test's path
 tells you what it covers. `src/tests/conventions/testLayout.unit.test.ts` enforces every rule below
-and lists the offending paths when one breaks. (`conventions/legacyPaths.ts` lists the files not yet
-moved into this layout; it shrinks as they move.)
+and lists the offending paths when one breaks.
 
 ## Where files go
 
