@@ -1,6 +1,5 @@
 // @module-tag int
 // @module-tag files
-// @module-tag race
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
@@ -483,7 +482,7 @@ describe("GET and POST /v1/files/buckets/:name/permissions", () => {
     });
   });
 
-  describe("files integrity", () => {
+  describe("files integrity", { tags: ["race"] }, () => {
     let token: string;
     const auth = () => ({
       headers: { Authorization: `Bearer ${token}` },

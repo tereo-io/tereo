@@ -212,7 +212,7 @@ describe("GET and HEAD /v1/files/signed/objects/:bucket/by-id/:id", () => {
       });
     });
 
-    describe("a capped share's nonce", () => {
+    describe("a capped share's nonce", { tags: ["race"] }, () => {
       it("survives a 404 after the signature verifies", async () => {
         const share = await createShare({
           kind: "OBJECT",

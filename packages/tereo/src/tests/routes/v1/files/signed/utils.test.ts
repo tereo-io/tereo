@@ -57,18 +57,22 @@ describe("auditAndSpendShareUrl", () => {
     expect(await entries(replay)).toBe(0);
   });
 
-  it("lets only one of two concurrent hits through", async () => {
-    const verified = await minted();
-    const results = await Promise.allSettled(
-      [randomUUID(), randomUUID()].map((id) =>
-        auditAndSpendShareUrl(verified, capped, auditFor(id))
-      )
-    );
-    expect(results.map((r) => r.status).sort()).toEqual([
-      "fulfilled",
-      "rejected",
-    ]);
-  });
+  it(
+    "lets only one of two concurrent hits through",
+    { tags: ["race"] },
+    async () => {
+      const verified = await minted();
+      const results = await Promise.allSettled(
+        [randomUUID(), randomUUID()].map((id) =>
+          auditAndSpendShareUrl(verified, capped, auditFor(id))
+        )
+      );
+      expect(results.map((r) => r.status).sort()).toEqual([
+        "fulfilled",
+        "rejected",
+      ]);
+    }
+  );
 
   it("gives the nonce back when the commit fails after spending it", async () => {
     const verified = await minted();

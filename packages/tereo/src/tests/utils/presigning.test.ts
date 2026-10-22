@@ -3,7 +3,7 @@
 import { sign, verify } from "../../utils/presigning.js";
 import { describe, expect, it } from "vitest";
 
-describe("utils/presigning", () => {
+describe("sign and verify", () => {
   describe("presigned URLs", () => {
     function parseUrl(url: string): URLSearchParams {
       return new URL(url).searchParams;

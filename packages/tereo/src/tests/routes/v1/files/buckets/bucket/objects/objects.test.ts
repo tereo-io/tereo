@@ -1,6 +1,5 @@
 // @module-tag int
 // @module-tag files
-// @module-tag race
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
@@ -646,7 +645,7 @@ describe("GET /v1/files/buckets/:name/objects and /objects/prefixes, POST /objec
     });
   });
 
-  describe("object write lock order", () => {
+  describe("object write lock order", { tags: ["race"] }, () => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 

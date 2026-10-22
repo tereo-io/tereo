@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag files
 // @module-tag slow
+import { resetRateLimits } from "../../../../../../support/redis.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
@@ -107,9 +108,9 @@ describe("POST /v1/files/buckets/:name/objects/bulk-delete", () => {
               )
             )
         );
-        // The general limiter allows 100 requests a second per user, and the
-        // beforeEach cleanup cannot reset it mid-test: pace the uploads under it.
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        // The general limiter allows 100 requests a second per user, more
+        // than these uploads take together: start it over between chunks.
+        await resetRateLimits();
       }
 
       const res = await axios.post(

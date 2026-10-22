@@ -2,12 +2,9 @@
 // @module-tag files
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../utils/db/prisma.js";
+import {} from "../../../../../support/principals.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
-import {
-  ensureTestMembership,
-  getTestPrincipalToken,
-} from "../../../../../support/principals.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -18,6 +15,7 @@ import {
   uploadTestObject,
   uploadTestObjectAndGetId,
   waitFor,
+  bucketOwnerAccess,
 } from "../../../../../support/files.js";
 
 describe("GET and HEAD /v1/files/shared/:token, POST /v1/files/shared/:token/unlock", () => {
@@ -515,48 +513,7 @@ describe("GET and HEAD /v1/files/shared/:token, POST /v1/files/shared/:token/unl
 
   describe("Bucket ownership and active grants", () => {
     // Everything a bucket owner does, but no `file-service.admin`.
-    const MEMBER = [
-      "file-service.buckets.delete",
-      "file-service.objects.delete",
-      "file-service.permissions.delete",
-      "file-service.shares.delete",
-    ];
-
-    const ORG = "bucket-owner-access-org";
-
-    const as = (token?: string) => ({
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      validateStatus: () => true,
-    });
-
-    /** A user in ORG holding MEMBER, and a token for it. */
-    const member = async (permissions = MEMBER) => {
-      const userId = randomUUID();
-      await ensureTestMembership(userId, ORG);
-      const token = await getTestPrincipalToken({
-        userId,
-        organizationId: ORG,
-        permissions,
-      });
-      return { userId, token };
-    };
-
-    const grant = (
-      token: string,
-      bucketName: string,
-      userId: string,
-      flags: { canRead?: boolean; canWrite?: boolean; canDelete?: boolean }
-    ) =>
-      axios.post(
-        `${BASE_URL}/buckets/${bucketName}/permissions`,
-        {
-          userId,
-          canRead: flags.canRead ?? false,
-          canWrite: flags.canWrite ?? false,
-          canDelete: flags.canDelete ?? false,
-        },
-        as(token)
-      );
+    const { as, member, grant } = bucketOwnerAccess;
 
     afterAll(async () => {
       await cleanupTestEntities();

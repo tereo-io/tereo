@@ -88,7 +88,7 @@ describe("openBlobStream", () => {
   }
 });
 
-describe("utils/storage", () => {
+describe("openBlobRangeStream and assertUnreadBody", () => {
   describe("range decryption", () => {
     async function collectStream(
       stream: NodeJS.ReadableStream

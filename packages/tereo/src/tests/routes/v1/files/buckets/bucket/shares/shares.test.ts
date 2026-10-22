@@ -19,6 +19,7 @@ import {
   grantTestPermission,
   uploadTestObject,
   uploadTestObjectAndGetId,
+  bucketOwnerAccess,
 } from "../../../../../../support/files.js";
 
 describe("GET and POST /v1/files/buckets/:name/shares", () => {
@@ -364,48 +365,7 @@ describe("GET and POST /v1/files/buckets/:name/shares", () => {
 
   describe("Bucket ownership and active grants", () => {
     // Everything a bucket owner does, but no `file-service.admin`.
-    const MEMBER = [
-      "file-service.buckets.delete",
-      "file-service.objects.delete",
-      "file-service.permissions.delete",
-      "file-service.shares.delete",
-    ];
-
-    const ORG = "bucket-owner-access-org";
-
-    const as = (token?: string) => ({
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      validateStatus: () => true,
-    });
-
-    /** A user in ORG holding MEMBER, and a token for it. */
-    const member = async (permissions = MEMBER) => {
-      const userId = randomUUID();
-      await ensureTestMembership(userId, ORG);
-      const token = await getTestPrincipalToken({
-        userId,
-        organizationId: ORG,
-        permissions,
-      });
-      return { userId, token };
-    };
-
-    const grant = (
-      token: string,
-      bucketName: string,
-      userId: string,
-      flags: { canRead?: boolean; canWrite?: boolean; canDelete?: boolean }
-    ) =>
-      axios.post(
-        `${BASE_URL}/buckets/${bucketName}/permissions`,
-        {
-          userId,
-          canRead: flags.canRead ?? false,
-          canWrite: flags.canWrite ?? false,
-          canDelete: flags.canDelete ?? false,
-        },
-        as(token)
-      );
+    const { as, member, grant } = bucketOwnerAccess;
 
     afterAll(async () => {
       await cleanupTestEntities();

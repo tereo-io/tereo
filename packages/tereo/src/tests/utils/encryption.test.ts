@@ -19,7 +19,7 @@ import {
   wrapDek,
 } from "../../utils/encryption.js";
 
-describe("utils/encryption", () => {
+describe("wrapDek, unwrapDek and the encrypt and decrypt streams", () => {
   describe("envelope encryption", () => {
     async function collectStream(
       stream: NodeJS.ReadableStream

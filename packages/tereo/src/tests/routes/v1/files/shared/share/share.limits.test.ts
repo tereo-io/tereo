@@ -182,7 +182,7 @@ describe("GET /v1/files/shared/:token, POST /v1/files/shared/:token/unlock", () 
     });
   });
 
-  describe("Download caps", () => {
+  describe("Download caps", { tags: ["race"] }, () => {
     it("maxDownloads=2: third GET returns 404 (uniform-not-serveable)", async () => {
       const createRes = await axios.post<ShareResponse>(
         `${BASE_URL}/buckets/${bucket.name}/shares`,

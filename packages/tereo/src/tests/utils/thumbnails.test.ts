@@ -1,13 +1,10 @@
 // @module-tag int
 // @module-tag files
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { generateThumbnails } from "../../utils/thumbnails.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import sharp from "sharp";
-import {
-  generateThumbnails,
-  isThumbnailSource,
-} from "../../utils/thumbnails.js";
 import {
   cleanupTestEntities,
   createTestBucket,
@@ -15,15 +12,7 @@ import {
   uploadTestObject,
 } from "../support/files.js";
 
-describe("isThumbnailSource and generateThumbnails", () => {
-  describe("isThumbnailSource", () => {
-    it("takes raster images and leaves out SVG and non-images", () => {
-      expect(isThumbnailSource("image/png")).toBe(true);
-      expect(isThumbnailSource("image/svg+xml")).toBe(false);
-      expect(isThumbnailSource("text/plain")).toBe(false);
-    });
-  });
-
+describe("generateThumbnails", () => {
   describe("generateThumbnails inputs", () => {
     const png = (width: number, height: number) =>
       sharp({

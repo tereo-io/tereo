@@ -1,6 +1,5 @@
 // @module-tag int
 // @module-tag files
-// @module-tag race
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import axios from "axios";
@@ -299,7 +298,7 @@ describe("GET, PUT and DELETE /v1/files/buckets/:name", () => {
       });
     });
 
-    describe("bucket races and limits", () => {
+    describe("bucket races and limits", { tags: ["race"] }, () => {
       const auth = () => ({
         headers: { Authorization: `Bearer ${testToken}` },
         validateStatus: () => true,
@@ -363,7 +362,7 @@ describe("GET, PUT and DELETE /v1/files/buckets/:name", () => {
     });
   });
 
-  describe("file-service webhook events", () => {
+  describe("file-service webhook events", { tags: ["race"] }, () => {
     const ORG_ID = FIXTURE_ORGANIZATION_IDS[0];
 
     const EVENT_TYPES = [
