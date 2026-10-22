@@ -166,6 +166,8 @@ describe("GET and POST /v1/files/buckets/:name/shares", () => {
           }
         );
         expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(res.data.error).toBe("invalid_request");
+        expect(res.data.error_description).toEqual(expect.any(String));
       });
     });
 
@@ -226,6 +228,8 @@ describe("GET and POST /v1/files/buckets/:name/shares", () => {
           }
         );
         expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(res.data.error).toBe("invalid_request");
+        expect(res.data.error_description).toEqual(expect.any(String));
       });
 
       it("pages by expiresAt past shares from before expiries were required", async () => {

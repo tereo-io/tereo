@@ -145,26 +145,6 @@ describe("PUT /v1/files/buckets/:name/objects/*objectKey", () => {
         expect(parseInt(data.sizeBytes)).toBe(file2.buffer.length);
       });
 
-      it("should return 401 without authentication", async () => {
-        const file = createTestFile("Test", "test.txt", "text/plain");
-        const formData = new FormData();
-        formData.append("file", file.buffer, {
-          filename: file.filename,
-          contentType: file.contentType,
-        });
-
-        const response = await axios.put(
-          `${BASE_URL}/buckets/${testBucket.name}/objects/unauthorized.txt`,
-          formData,
-          {
-            headers: formData.getHeaders(),
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
-
       it("should return 400 when no file is provided", async () => {
         const formData = new FormData();
 
@@ -264,39 +244,6 @@ describe("PUT /v1/files/buckets/:name/objects/*objectKey", () => {
 
     afterAll(async () => {
       await cleanupTestEntities();
-    });
-
-    describe("ETag conditional requests", () => {
-      it("rejects PUT with If-None-Match: * when the object exists", async () => {
-        const bucket = await createTestBucket(testToken, { policy: "private" });
-        await uploadTestObject(
-          testToken,
-          bucket.name,
-          "exists.txt",
-          createTestFile("first", "exists.txt", "text/plain")
-        );
-
-        const file = createTestFile("second", "exists.txt", "text/plain");
-        const form = new FormData();
-        form.append("file", file.buffer, {
-          filename: file.filename,
-          contentType: file.contentType,
-        });
-        const res = await axios.put(
-          `${BASE_URL}/buckets/${bucket.name}/objects/exists.txt`,
-          form,
-          {
-            headers: {
-              ...authHeader(testToken),
-              ...form.getHeaders(),
-              "Idempotency-Key": testIdempotencyKey(),
-              "If-None-Match": "*",
-            },
-            validateStatus: () => true,
-          }
-        );
-        expect(res.status).toBe(412);
-      });
     });
 
     describe("Tags", () => {

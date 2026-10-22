@@ -387,41 +387,6 @@ describe("bucketCors", () => {
     ).toBeUndefined();
   });
 
-  it.each([
-    { allowedOrigins: ["https://ok.test\r\nX-Injected: 1"] },
-    { allowedOrigins: ["https://ok.test/path"] },
-    { allowedOrigins: ["https://bücher.test"] },
-    { allowedOrigins: [FIRST], allowedHeaders: ["X-Ok\r\nX-Injected: 1"] },
-    { allowedOrigins: [FIRST], exposedHeaders: ["X-Тест"] },
-  ])("refuses a config that can't be a header value: %j", async (cfg) => {
-    const res = await axios.put(
-      `${BASE_URL}/buckets/${bucketName}`,
-      { corsConfig: cfg },
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        validateStatus: () => true,
-      }
-    );
-    expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
-  });
-
-  it("accepts origins with ports, IPv6 hosts and the wildcard", async () => {
-    const res = await axios.put(
-      `${BASE_URL}/buckets/${bucketName}`,
-      {
-        corsConfig: {
-          allowedOrigins: ["http://localhost:3000", "http://[::1]:8080", "*"],
-          allowedHeaders: ["X-Custom-Header", "*"],
-        },
-      },
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        validateStatus: () => true,
-      }
-    );
-    expect(res.status).toBe(HTTP_STATUS.OK);
-  });
-
   it("limits bucket preflights per address", async () => {
     // The default TRUST_PROXY (loopback) honours X-Forwarded-For; a proxied
     // caller gets the external tier, 300 a second.

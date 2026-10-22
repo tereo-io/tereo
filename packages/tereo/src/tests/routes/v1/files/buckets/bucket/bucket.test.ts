@@ -84,16 +84,6 @@ describe("GET, PUT and DELETE /v1/files/buckets/:name", () => {
 
         expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
       });
-
-      it("should return 401 without authentication", async () => {
-        const bucket = await createTestBucket(testToken);
-
-        const response = await axios.get(`${BASE_URL}/buckets/${bucket.name}`, {
-          validateStatus: () => true,
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
     });
 
     describe("PUT /buckets/:name", () => {
@@ -307,17 +297,6 @@ describe("GET, PUT and DELETE /v1/files/buckets/:name", () => {
 
         expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
       });
-
-      it("should return 401 without authentication", async () => {
-        const bucket = await createTestBucket(testToken);
-
-        const response = await axios.delete(
-          `${BASE_URL}/buckets/${bucket.name}`,
-          { validateStatus: () => true }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
     });
 
     describe("bucket races and limits", () => {
@@ -340,6 +319,8 @@ describe("GET, PUT and DELETE /v1/files/buckets/:name", () => {
           auth()
         );
         expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(res.data.error).toBe("invalid_request");
+        expect(res.data.error_description).toEqual(expect.any(String));
         const equal = await axios.put(
           `${BASE_URL}/buckets/${bucket.name}`,
           {

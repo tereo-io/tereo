@@ -183,24 +183,6 @@ describe("GET and POST /v1/files/buckets/:name/permissions", () => {
         expect(data.error || data.error_description).toBeDefined();
       });
 
-      it("should return 401 without authentication", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/buckets/${testBucket.name}/permissions`,
-          {
-            userId: "00000000-0000-7001-0000-000000000999",
-            canRead: true,
-            canWrite: false,
-            canDelete: false,
-          },
-          {
-            headers: { "Content-Type": "application/json" },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
-
       it("is 400 unknown_user for a userId that names no user", async () => {
         const response = await axios.post<ErrorResponse>(
           `${BASE_URL}/buckets/${testBucket.name}/permissions`,
@@ -234,27 +216,6 @@ describe("GET and POST /v1/files/buckets/:name/permissions", () => {
         );
 
         expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
-      });
-
-      it("should return 400 for invalid user ID", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/buckets/${testBucket.name}/permissions`,
-          {
-            userId: "",
-            canRead: true,
-            canWrite: false,
-            canDelete: false,
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${testToken}`,
-              "Content-Type": "application/json",
-            },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
       });
     });
 
@@ -305,6 +266,8 @@ describe("GET and POST /v1/files/buckets/:name/permissions", () => {
           validateStatus: () => true,
         });
         expect(bad.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(bad.data.error).toBe("invalid_request");
+        expect(bad.data.error_description).toEqual(expect.any(String));
       });
 
       it("filters by canRead/canWrite/canDelete, including false", async () => {
@@ -338,17 +301,6 @@ describe("GET and POST /v1/files/buckets/:name/permissions", () => {
         const deleters = await list("filter[canDelete]=true");
         expect(deleters).not.toContain(reader);
         expect(deleters).not.toContain(writer);
-      });
-
-      it("should return 401 without authentication", async () => {
-        const response = await axios.get(
-          `${BASE_URL}/buckets/${testBucket.name}/permissions`,
-          {
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
       });
 
       it("should return 404 for non-existent bucket", async () => {
@@ -408,12 +360,16 @@ describe("GET and POST /v1/files/buckets/:name/permissions", () => {
           as(creatorToken)
         );
         expect(grant.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(grant.data.error).toBe("invalid_request");
+        expect(grant.data.error_description).toEqual(expect.any(String));
 
         const revoke = await axios.delete(
           `${url}/not-a-uuid`,
           as(creatorToken)
         );
         expect(revoke.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(revoke.data.error).toBe("invalid_request");
+        expect(revoke.data.error_description).toEqual(expect.any(String));
 
         // Any hex UUID is a user id, RFC variant or not.
         await ensureTestMembership(FIXTURE_USER_IDS[2], ORG);

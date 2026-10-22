@@ -98,6 +98,8 @@ describe("POST /v1/files/buckets/:name/archives", () => {
         }
       );
       expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(res.data.error).toBe("invalid_request");
+      expect(res.data.error_description).toEqual(expect.any(String));
     });
 
     it("rejects an empty prefix match", async () => {

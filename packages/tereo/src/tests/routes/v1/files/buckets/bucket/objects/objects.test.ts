@@ -598,6 +598,8 @@ describe("GET /v1/files/buckets/:name/objects and /objects/prefixes, POST /objec
       for (const body of [{ prefix: "" }, { prefix: "a/", ids: [] }, {}]) {
         const res = await axios.post(url, body, auth());
         expect([body, res.status]).toEqual([body, HTTP_STATUS.BAD_REQUEST]);
+        expect(res.data.error).toBe("invalid_request");
+        expect(res.data.error_description).toEqual(expect.any(String));
       }
     });
 

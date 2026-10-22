@@ -41,6 +41,8 @@ describe("POST /v1/files/buckets/:name/multipart", () => {
           { headers: authHeader(testToken), validateStatus: () => true }
         );
         expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(res.data.error).toBe("invalid_request");
+        expect(res.data.error_description).toEqual(expect.any(String));
       }
     });
   });

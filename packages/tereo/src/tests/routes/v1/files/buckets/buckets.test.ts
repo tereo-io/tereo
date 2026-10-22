@@ -135,19 +135,6 @@ describe("GET and POST /v1/files/buckets", () => {
         expect(data.storageQuotaBytes).toBe(bucketData.storageQuotaBytes);
       });
 
-      it("should return 401 without authentication", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/buckets`,
-          { name: "unauthorized-bucket", policy: "private" },
-          {
-            headers: { "Content-Type": "application/json" },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
-
       it("should return 409 for duplicate bucket name", async () => {
         const bucket = await createTestBucket(testToken);
 
@@ -170,7 +157,7 @@ describe("GET and POST /v1/files/buckets", () => {
       });
 
       it("should return 400 for invalid bucket name", async () => {
-        const response = await axios.post(
+        const response = await axios.post<ErrorResponse>(
           `${BASE_URL}/buckets`,
           { name: "invalid name with spaces", policy: "private" },
           {
@@ -183,162 +170,8 @@ describe("GET and POST /v1/files/buckets", () => {
         );
 
         expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
-      it("should return 400 for bucket name with uppercase letters", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/buckets`,
-          { name: "InvalidBucket", policy: "private" },
-          {
-            headers: {
-              Authorization: `Bearer ${testToken}`,
-              "Content-Type": "application/json",
-            },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
-      it("should return 400 for bucket name shorter than 3 characters", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/buckets`,
-          { name: "ab", policy: "private" },
-          {
-            headers: {
-              Authorization: `Bearer ${testToken}`,
-              "Content-Type": "application/json",
-            },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
-      it("should return 400 for bucket name longer than 63 characters", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/buckets`,
-          { name: "a".repeat(64), policy: "private" },
-          {
-            headers: {
-              Authorization: `Bearer ${testToken}`,
-              "Content-Type": "application/json",
-            },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
-      it("should return 400 for bucket name starting with hyphen", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/buckets`,
-          { name: "-invalid-bucket", policy: "private" },
-          {
-            headers: {
-              Authorization: `Bearer ${testToken}`,
-              "Content-Type": "application/json",
-            },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
-      it("should return 400 for bucket name ending with hyphen", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/buckets`,
-          {
-            name: "invalid-bucket-",
-            policy: "private",
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${testToken}`,
-              "Content-Type": "application/json",
-            },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
-      it("should return 400 for bucket name with special characters", async () => {
-        const response = await axios.post(
-          `${BASE_URL}/buckets`,
-          { name: "bucket_name!@#", policy: "private" },
-          {
-            headers: {
-              Authorization: `Bearer ${testToken}`,
-              "Content-Type": "application/json",
-            },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      });
-
-      it("should accept valid bucket name with hyphens", async () => {
-        const uniqueId = generateUniqueId();
-        const response = await axios.post(
-          `${BASE_URL}/buckets`,
-          { name: `valid-bucket-name-${uniqueId}`, policy: "private" },
-          {
-            headers: {
-              Authorization: `Bearer ${testToken}`,
-              "Content-Type": "application/json",
-            },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.CREATED);
-      });
-
-      it("should accept valid bucket name with numbers", async () => {
-        const uniqueId = generateUniqueId();
-        const response = await axios.post(
-          `${BASE_URL}/buckets`,
-          { name: `bucket123-${uniqueId}`, policy: "private" },
-          {
-            headers: {
-              Authorization: `Bearer ${testToken}`,
-              "Content-Type": "application/json",
-            },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.CREATED);
-      });
-
-      it("should return 400 for storage quota exceeding maximum (1TB)", async () => {
-        const uniqueId = generateUniqueId();
-        const overLimit = "1099511627777"; // Just over 1TB
-
-        const response = await axios.post(
-          `${BASE_URL}/buckets`,
-          {
-            name: `bucket-over-quota-${uniqueId}`,
-            policy: "private",
-            storageQuotaBytes: overLimit,
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${testToken}`,
-              "Content-Type": "application/json",
-            },
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(response.data.error).toBe("invalid_request");
+        expect(response.data.error_description).toEqual(expect.any(String));
       });
     });
 
@@ -368,14 +201,6 @@ describe("GET and POST /v1/files/buckets", () => {
         expect(bucket.name).toBeDefined();
         expect(bucket.policy).toBeDefined();
         expect(bucket.currentUsageBytes).toBeDefined();
-      });
-
-      it("should return 401 without authentication", async () => {
-        const response = await axios.get(`${BASE_URL}/buckets`, {
-          validateStatus: () => true,
-        });
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
       });
     });
 

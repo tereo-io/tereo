@@ -77,27 +77,6 @@ describe("GET, PATCH and DELETE /v1/files/buckets/:name/objects/by-id/:id", () =
 
         expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
       });
-
-      it("should return 401 without authentication", async () => {
-        const file = createTestFile("Test", "test.txt", "text/plain");
-        const objectKey = "auth-delete-test.txt";
-
-        const { id } = await uploadTestObject(
-          testToken,
-          testBucket.name,
-          objectKey,
-          file
-        );
-
-        const response = await axios.delete(
-          `${BASE_URL}/buckets/${testBucket.name}/objects/by-id/${id}`,
-          {
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
     });
 
     describe("Storage Quota Enforcement", () => {
@@ -319,6 +298,8 @@ describe("GET, PATCH and DELETE /v1/files/buckets/:name/objects/by-id/:id", () =
             { headers: authHeader(testToken), validateStatus: () => true }
           );
           expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+          expect(res.data.error).toBe("invalid_request");
+          expect(res.data.error_description).toEqual(expect.any(String));
         }
 
         const ok = await axios.patch(

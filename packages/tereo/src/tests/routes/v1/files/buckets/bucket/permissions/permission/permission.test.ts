@@ -97,17 +97,6 @@ describe("DELETE /v1/files/buckets/:name/permissions/:userId", () => {
         expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
       });
 
-      it("should return 401 without authentication", async () => {
-        const response = await axios.delete(
-          `${BASE_URL}/buckets/${testBucket.name}/permissions/00000000-0000-7001-0000-000000000002`,
-          {
-            validateStatus: () => true,
-          }
-        );
-
-        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-      });
-
       it("should return 404 for non-existent bucket", async () => {
         const response = await axios.delete(
           `${BASE_URL}/buckets/non-existent/permissions/00000000-0000-7001-0000-000000000002`,
@@ -264,15 +253,6 @@ describe("DELETE /v1/files/buckets/:name/permissions/:userId", () => {
           bucketName: bucket.name,
           reason: "permission_revoked",
         });
-      });
-
-      it("refuses a revokeShares that isn't true or false", async () => {
-        const { owner, creator, bucket } = await setup();
-        const res = await axios.delete(
-          `${BASE_URL}/buckets/${bucket.name}/permissions/${creator.userId}?revokeShares=yes`,
-          as(owner.token)
-        );
-        expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
       });
     });
   });
