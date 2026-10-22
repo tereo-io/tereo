@@ -1,35 +1,39 @@
-import { UPSTREAM_COOKIE, upstreamLogin } from "../support/upstreamLogin.js";
-import { startFakeOidcProvider } from "../support/fakeOidcProvider.js";
-import type { FakeOidcProvider } from "../support/fakeOidcProvider.js";
+// @module-tag int
+// @module-tag auth
+import { UPSTREAM_COOKIE, upstreamLogin } from "../../support/upstreamLogin.js";
+import { getTestPrincipalToken } from "../../support/principals.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getTestPrincipalToken } from "../support/principals.js";
-import type { CookieJar } from "../support/browserLogin.js";
-import { prisma } from "../../utils/db/prisma.js";
-import { CORE_URL } from "../support/coreUrl.js";
+import { prisma } from "../../../utils/db/prisma.js";
+import { CORE_URL } from "../../support/coreUrl.js";
 import { randomUUID } from "node:crypto";
-import env from "../../env.js";
+import env from "../../../env.js";
+import {
+  startFakeOidcProvider,
+  type FakeOidcProvider,
+} from "../../support/fakeOidcProvider.js";
 import {
   absorbCookies,
   cookieHeader,
   newPkce,
-} from "../support/browserLogin.js";
+  type CookieJar,
+} from "../../support/browserLogin.js";
 import {
   CORE_SCOPES,
   DEFAULT_ORGANIZATION_ID,
   LOGIN_CLIENT,
-} from "../../definitions/index.js";
+} from "../../../definitions/index.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
-} from "../support/webhooks.js";
+} from "../../support/webhooks.js";
 import {
   createTestClient,
   createTestUser,
   decodeJwt,
   generateUniqueId,
   getAccessTokenForUser,
-} from "../support/auth.js";
+} from "../../support/auth.js";
 
 const SCOPE = ["openid profile email", ...CORE_SCOPES.map((s) => s.name)].join(
   " "

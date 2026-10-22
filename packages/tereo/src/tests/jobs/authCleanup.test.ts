@@ -1,7 +1,10 @@
+// @module-tag int
+// @module-tag auth
+// @module-tag job
 import { createTestClient, createTestUser } from "../support/auth.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
-import { randomBytes } from "crypto";
+import { randomBytes } from "node:crypto";
 import {
   AUTH_TOKEN_GRACE_MS,
   cleanupExpiredAuthRows,

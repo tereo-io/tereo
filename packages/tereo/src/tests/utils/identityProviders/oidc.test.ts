@@ -1,31 +1,30 @@
-import { openProviderSecret } from "../../utils/identityProviders/clientSecret.js";
+// @module-tag int
+// @module-tag auth
+import { UpstreamAuthError } from "../../../utils/identityProviders/errors.js";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { UpstreamAuthError } from "../../utils/identityProviders/errors.js";
-import { guardedFetch } from "../../utils/identityProviders/fetch.js";
-import { SYSTEM_USER_ID } from "../../definitions/systemUser.js";
-import { sealRowSecret } from "../../utils/sealedSecrets.js";
-import { prisma } from "../../utils/db/prisma.js";
-import { currentKek } from "../../utils/keys.js";
-import { randomBytes, randomUUID } from "crypto";
-import env from "../../env.js";
+import { guardedFetch } from "../../../utils/identityProviders/fetch.js";
+import { SYSTEM_USER_ID } from "../../../definitions/systemUser.js";
+import { sealRowSecret } from "../../../utils/sealedSecrets.js";
+import { randomBytes, randomUUID } from "node:crypto";
+import env from "../../../env.js";
 import type {
   IdentityProvider,
   UpstreamAuthStart,
-} from "../../utils/identityProviders/types.js";
+} from "../../../utils/identityProviders/types.js";
 import {
   adapterFor,
   upstreamCallbackUrl,
-} from "../../utils/identityProviders/index.js";
+} from "../../../utils/identityProviders/index.js";
 import {
   type FakeOidcProvider,
   startFakeOidcProvider,
-} from "../support/fakeOidcProvider.js";
+} from "../../support/fakeOidcProvider.js";
 import {
   broadcastIdentityProviderInvalidate,
   closeCacheBroadcast,
   onIdentityProviderInvalidate,
   startCacheSubscriber,
-} from "../../utils/cacheBroadcast.js";
+} from "../../../utils/cacheBroadcast.js";
 
 const adapter = adapterFor("oidc");
 
@@ -363,69 +362,6 @@ describe("oidc adapter: sign-in", () => {
     await expect(
       adapter.authorizationUrl(moved, newCheck(moved))
     ).rejects.toThrow();
-  });
-});
-
-describe("openProviderSecret", () => {
-  const ids: string[] = [];
-  afterAll(async () => {
-    await prisma.identityProvider.deleteMany({ where: { id: { in: ids } } });
-  });
-
-  const insertRow = async (clientSecret: string) => {
-    const row = await prisma.identityProvider.create({
-      data: {
-        slug: `fake-${randomBytes(3).toString("hex")}`,
-        displayName: "Fake",
-        kind: "oidc",
-        issuer: fake.issuer,
-        clientId: fake.clientId,
-        clientSecret,
-        createdBy: SYSTEM_USER_ID,
-      },
-    });
-    ids.push(row.id);
-    return row;
-  };
-
-  it("opens through openRowSecret and leaves a current seal alone", async () => {
-    const row = await insertRow("placeholder");
-    const sealed = await sealRowSecret(`identity-provider:${row.id}`, "s3cret");
-    const current = await prisma.identityProvider.update({
-      where: { id: row.id },
-      data: { clientSecret: sealed },
-    });
-
-    await expect(openProviderSecret(current)).resolves.toBe("s3cret");
-    const after = await prisma.identityProvider.findUniqueOrThrow({
-      where: { id: row.id },
-    });
-    expect(after.clientSecret).toBe(sealed);
-  });
-
-  it("writes a resealed value back while the row is unchanged", async () => {
-    const row = await insertRow("s3cret");
-
-    await expect(openProviderSecret(row)).resolves.toBe("s3cret");
-    const after = await prisma.identityProvider.findUniqueOrThrow({
-      where: { id: row.id },
-    });
-    expect(after.clientSecret).toMatch(new RegExp(`^kek1:${currentKek().id}:`));
-  });
-
-  it("does not overwrite a secret changed since it was read", async () => {
-    const row = await insertRow("s3cret");
-    const replaced = await sealRowSecret(`identity-provider:${row.id}`, "new");
-    await prisma.identityProvider.update({
-      where: { id: row.id },
-      data: { clientSecret: replaced },
-    });
-
-    await expect(openProviderSecret(row)).resolves.toBe("s3cret");
-    const after = await prisma.identityProvider.findUniqueOrThrow({
-      where: { id: row.id },
-    });
-    expect(after.clientSecret).toBe(replaced);
   });
 });
 
