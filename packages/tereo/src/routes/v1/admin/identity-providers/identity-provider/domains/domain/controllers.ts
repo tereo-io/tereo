@@ -1,3 +1,4 @@
+import { enqueueSsoOnlySessionSweep } from "../../../../../../../jobs/ssoOnlySessionSweep.js";
 import { getDefaultOrganizationId } from "../../../../../../../utils/defaultOrganization.js";
 import { assertOrgAssignableRoles } from "../../../../../../../utils/orgRoleAssignment.js";
 import { formatDomain } from "../../../../../../../utils/identityProviders/format.js";
@@ -22,7 +23,6 @@ import {
   assertProviderActive,
   changesSsoOnly,
   emitDomainTx,
-  endSessionsLinkedElsewhere,
 } from "../utils.js";
 
 export const getDomain = async (req: Request, res: Response) => {
@@ -63,7 +63,7 @@ export const updateDomain = async (req: Request, res: Response) => {
     );
   }
 
-  const closes = await db.$transaction(async (tx) => {
+  const closedAt = await db.$transaction(async (tx) => {
     // Every domain write takes the provider's lock, so the row read under it
     // holds until this one is written.
     await db.identityProviders.lockForUpdate(providerId, tx);
@@ -115,12 +115,22 @@ export const updateDomain = async (req: Request, res: Response) => {
     );
     // Newly SSO-only, or SSO-only at a new domain: its users' identities at
     // other providers stop working.
-    return (
-      updated.ssoOnly && (!current.ssoOnly || updated.domain !== current.domain)
-    );
+    const closes =
+      updated.ssoOnly &&
+      (!current.ssoOnly || updated.domain !== current.domain);
+    return closes ? updated.updatedAt : null;
   });
 
-  if (closes) await endSessionsLinkedElsewhere(auth, providerId, domainId);
+  if (closedAt) {
+    await enqueueSsoOnlySessionSweep(
+      {
+        actor: { userId: auth.userId, email: auth.email },
+        providerId,
+        domainId,
+      },
+      closedAt
+    );
+  }
 
   res.json(
     formatDomain(await db.identityProviders.getDomain(providerId, domainId))

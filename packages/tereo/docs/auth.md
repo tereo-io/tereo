@@ -424,14 +424,17 @@ an SSO-only domain; 403 otherwise. The checks run under the provider's row lock,
 write takes.
 
 A domain becoming SSO-only (created with it, `PATCH`ed to it, or an SSO-only domain renamed) closes
-every other provider to its users, so right after the change commits core ends all sessions of each
-person at the domain who holds an identity at another provider (`endUserSessions`, one transaction
-per user), audited and emitted as an admin session revoke (`sessions_revoked`,
+every other provider to its users, so once the change commits core enqueues a sweep
+(`jobs/ssoOnlySessionSweep.ts`, named by the domain and its `updatedAt`) that ends all sessions of
+each person at the domain who holds an identity at another provider (`endUserSessions`, one
+transaction per user), audited and emitted as an admin session revoke (`sessions_revoked`,
 `auth.user.sessions-revoked`). The domain's own provider's users and password users keep theirs; the
-latter are force-linked at their next password sign-in. The run reads the domain as it is when it
-runs: running it again (`endSessionsLinkedElsewhere`) ends only what is left and records nothing
-when nothing was, and it does nothing once the domain is no longer SSO-only. A failure for one user
-is logged and the run goes on to the next.
+latter are force-linked at their next password sign-in. The sweep reads the domain as it is when it
+runs, and does nothing once the domain is no longer SSO-only. A failure for one user is logged and
+the sweep goes on to the next; the job then fails and is retried (10 attempts, exponential backoff
+from 10s) for the users that failed only, since ending a user's sessions again would also end the SSO
+sessions they have started since. When the job cannot be enqueued (Redis unreachable) the sweep runs
+in the request instead, once.
 
 A domain's `autoAccept` only matches the provider that owns the domain. A user with a matching
 email who already exists is never signed in by it: see _No matching by email_ below.

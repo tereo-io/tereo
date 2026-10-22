@@ -1,3 +1,4 @@
+import { enqueueSsoOnlySessionSweep } from "../../../../../../jobs/ssoOnlySessionSweep.js";
 import { getDefaultOrganizationId } from "../../../../../../utils/defaultOrganization.js";
 import { assertOrgAssignableRoles } from "../../../../../../utils/orgRoleAssignment.js";
 import { formatDomain } from "../../../../../../utils/identityProviders/format.js";
@@ -17,7 +18,6 @@ import {
   assertMayChangeSsoOnly,
   assertProviderActive,
   emitDomainTx,
-  endSessionsLinkedElsewhere,
 } from "./utils.js";
 
 export const listDomains = async (req: Request, res: Response) => {
@@ -92,7 +92,14 @@ export const createDomain = async (req: Request, res: Response) => {
   });
 
   if (created.ssoOnly) {
-    await endSessionsLinkedElsewhere(auth, providerId, created.id);
+    await enqueueSsoOnlySessionSweep(
+      {
+        actor: { userId: auth.userId, email: auth.email },
+        providerId,
+        domainId: created.id,
+      },
+      created.updatedAt
+    );
   }
 
   res

@@ -7554,9 +7554,9 @@ paths:
         is deactivated, since the domain's users would have no way to sign in, and
         with 403 unless the caller holds `admin` through a global role: a password
         sign-in at an SSO-only domain is force-linked to the provider. Creating
-        a domain SSO-only ends, right after, every session of its users who
-        hold an identity at another provider (audited and emitted as
-        `auth.user.sessions-revoked`).
+        a domain SSO-only ends, shortly after and in the background, every
+        session of its users who hold an identity at another provider (audited
+        and emitted as `auth.user.sessions-revoked`).
 
         `roleIds` must be roles that may be assigned within an organization: 400
         `unknown_role` for an unknown, archived or retired role, 400

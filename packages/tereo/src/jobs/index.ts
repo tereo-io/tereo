@@ -16,6 +16,10 @@ import {
   stopThumbnailGeneration,
 } from "./thumbnailGeneration.js";
 import {
+  startSsoOnlySessionSweep,
+  stopSsoOnlySessionSweep,
+} from "./ssoOnlySessionSweep.js";
+import {
   startRegistryRetirement,
   stopRegistryRetirement,
 } from "./registryRetirement.js";
@@ -54,6 +58,7 @@ export async function startBackgroundJobs(): Promise<void> {
     await startArchiveSweep();
     await startRegistryRetirement();
     await startAuthCleanup();
+    await startSsoOnlySessionSweep();
   } catch (err) {
     logger.error(
       {
@@ -86,6 +91,7 @@ export async function stopBackgroundJobs(): Promise<void> {
     stopArchiveSweep(),
     stopRegistryRetirement(),
     stopAuthCleanup(),
+    stopSsoOnlySessionSweep(),
   ]);
   started = false;
 }
