@@ -26,7 +26,7 @@ export function generateUniqueId(): string {
 
 /**
  * A real access token for a test user holding `audit-logs.admin`, scoped to
- * `orgId`. See `tests/utils/principals.ts`.
+ * `orgId`. See `support/principals.ts`.
  */
 export function getTestAccessToken(
   userId: string = "00000000-0000-7001-8000-000000000001",

@@ -63,11 +63,12 @@ on a listed file that is at or under 800 or gone, so the list is the complete re
 | `unit`  | `**/*.unit.test.ts`     | none: no server, and an unreachable database and Redis | in parallel |
 | `int`   | every other `*.test.ts` | `globalSetup`: migrates, seeds, starts one server      | serial      |
 
-A `.unit` file must not import `utils/db/`, `utils/redis.ts`, `setup/` (except `tags.ts`) or
-`support/` (except `support/pure/`), or the entry points `app.ts`, `index.ts`, `worker.ts`.
-`setup/tags.ts` is the sole exception to the `setup/` denylist. The check covers direct imports only. `int` tests use real users and tokens
-(`getTestPrincipalToken`), test-made permissions and event types under the test service, and no
-mocks of Postgres, Redis or auth.
+A `.unit` file must not import any of these: `utils/db/`, `utils/redis.ts`, the entry points
+`app.ts`, `index.ts` and `worker.ts`, `setup/` (only `setup/tags.ts` is allowed) and `support/` (only
+`support/pure/` is allowed). The check covers direct imports only.
+
+`int` tests use real users and tokens (`getTestPrincipalToken`), test-made permissions and event
+types under the test service, and no mocks of Postgres, Redis or auth.
 
 ## Tags
 

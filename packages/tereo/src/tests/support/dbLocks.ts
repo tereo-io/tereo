@@ -10,8 +10,8 @@ export async function lockWaiters(): Promise<number> {
 
 /**
  * Resolves once `queued` more sessions are blocked on a lock than `baseline`,
- * or after `ms` when a request waits on something else, so it is never slower
- * than a fixed wait of `ms`.
+ * or after `ms` when a request waits on something else or fewer requests queue
+ * than expected, so it is never slower than a fixed wait of `ms`.
  */
 export async function untilQueued(
   baseline: number,

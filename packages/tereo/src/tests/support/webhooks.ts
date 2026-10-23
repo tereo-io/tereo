@@ -31,7 +31,7 @@ export function generateUniqueId(): string {
 /**
  * A real access token for a test user holding `webhooks.admin`, scoped to
  * `orgId` — webhook routes resolve the organization from the token. `orgId`
- * may be a label ("other-org-1"); see `tests/utils/principals.ts`. `null`
+ * may be a label ("other-org-1"); see `support/principals.ts`. `null`
  * gives a token with no organization.
  */
 export function getTestAccessToken(

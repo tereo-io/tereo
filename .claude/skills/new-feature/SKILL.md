@@ -74,7 +74,7 @@ The folder tree mirrors the URL: the protocol endpoints at the root (`oauth/`, `
 wired in `routes/index.ts`); everything else is core's API under `v1/` (`v1/account/`, `v1/admin/`,
 `v1/setup/`, `v1/files/`, `v1/webhooks/`, `v1/audit/`), wired in
 `routes/v1/index.ts`. A new API route goes under `routes/v1/`. Follow the `routes` skill for
-where each file goes and the registration order — `tests/unit/routeLayout.test.ts` enforces the layout.
+where each file goes and the registration order — `tests/conventions/routeLayout.unit.test.ts` enforces the layout.
 
 - [ ] `routes/<…>/<resources>/schemas.ts` — Zod schemas: create/update bodies,
       `:id` params, and the list query via `createCursorQuerySchema()` from
@@ -127,18 +127,19 @@ One spec covers every area; files are split by area (`auth`, `files`, `webhooks`
       doesn't, so a public one must say `security: []`
 - [ ] Lint and re-bundle from `packages/tereo`: `npm run openapi:build`
 
-## Step 6: Tests (`src/tests/<area>/`)
+## Step 6: Tests (`src/tests/routes/<URL path>/`)
 
 One suite against one server; `globalSetup` migrates and seeds `<db>_test`.
 
-- [ ] `src/tests/<area>/<resource>.test.ts`
+- [ ] `src/tests/routes/<URL path>/<folder>.test.ts`, plus `.validation.unit` and `.permissions` files as
+      `src/tests/README.md` says; tags one per line
 - [ ] Real users and tokens — no test-mode shortcut:
       `getTestPrincipalToken({ permissions: [...], organizationId?, userId? })`
-      from `tests/utils/principals.ts`; area helpers in
-      `tests/<area>/utils/test-helpers.ts`
+      from `tests/support/principals.ts`; area helpers in
+      `tests/support/<area>.ts`
 - [ ] Permissions, roles and event types a test needs that aren't core's: make
       them under the test service (`ensurePermission`, `TEST_SERVICE_ID` from
-      `tests/utils/testService.ts`), never under core — core's declaration would
+      `tests/support/testService.ts`), never under core — core's declaration would
       retire them
 - [ ] Cover: create, read, update, delete/archive, list with cursor pagination
 - [ ] Cover: 403 without the permission, 400 on bad input, 404 on unknown ids

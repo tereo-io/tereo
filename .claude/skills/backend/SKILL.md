@@ -38,7 +38,7 @@ packages/tereo/
     │   ├── outbox.ts                    # logAuditTx, emitTx, computeChanges, the outbox reaper
     │   └── cursor.ts                    # applyCursorToWhere, buildCursorPageResponse
     ├── jobs/                            # BullMQ queues and workers
-    └── tests/                           # One suite, area subfolders (see the `test` skill)
+    └── tests/                           # Mirrors src/ (see the `test` skill and tests/README.md)
 ```
 
 URL → folder: `routes/index.ts` is the root of the tree. It mounts `/health` (`routes/health/`),
@@ -50,7 +50,7 @@ A new API route goes under `routes/v1/`.
 ## Route Layout and Registration Order
 
 Where a route's files go, what each file holds, `:param` folders and the order routes register in
-are in the `routes` skill (enforced by `tests/unit/routeLayout.test.ts`). **REQUIRED:** load it before
+are in the `routes` skill (enforced by `tests/conventions/routeLayout.unit.test.ts`). **REQUIRED:** load it before
 adding or moving a route.
 
 ## Validation
@@ -241,7 +241,7 @@ it with every route change — invoke the `openapi` skill.
 5. Permissions in `definitions/permissions.ts` (`PERMISSION_CATALOG` + `PERMISSIONS`), and in
    `definitions/roles.ts` if a system role should hold them
 6. Event types in `definitions/eventTypes.ts`; `logAuditTx` + `emitTx` in every mutation
-7. OpenAPI paths and schemas; tests in `src/tests/{area}/`
+7. OpenAPI paths and schemas; tests mirroring the route under `src/tests/routes/` (see the `test` skill)
 
 ## DO
 

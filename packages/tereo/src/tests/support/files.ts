@@ -217,7 +217,7 @@ export async function grantTestPermission(
 
 /**
  * A real access token for a test user holding `file-service.admin`.
- * See `tests/utils/principals.ts`.
+ * See `support/principals.ts`.
  */
 export function getTestAccessToken(
   userId: string = "00000000-0000-7001-0000-000000000001"

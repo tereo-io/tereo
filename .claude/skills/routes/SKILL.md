@@ -1,6 +1,6 @@
 ---
 name: routes
-description: Route layout standards for tereo's Express routers (packages/tereo/src/routes). Use when adding, moving, renaming or reviewing a route, router, controller, route schema or route-local middleware; when deciding where a new endpoint's files go or what order to register routes in; or when routeLayout.test.ts fails.
+description: Route layout standards for tereo's Express routers (packages/tereo/src/routes). Use when adding, moving, renaming or reviewing a route, router, controller, route schema or route-local middleware; when deciding where a new endpoint's files go or what order to register routes in; or when routeLayout.unit.test.ts fails.
 paths:
   - packages/tereo/src/routes/**
 ---
@@ -8,7 +8,7 @@ paths:
 # Route Layout
 
 The folder tree under `src/routes` mirrors the URL, one folder per segment, and every folder has the
-same files. `src/tests/unit/routeLayout.test.ts` enforces the mechanical rules; registration order is
+same files. `src/tests/conventions/routeLayout.unit.test.ts` enforces the mechanical rules; registration order is
 checked in review.
 
 ## The Tree
@@ -115,9 +115,9 @@ export default apiKeyRouter;
 |---|---|---|
 | Item router without `mergeParams` | `req.params.id` is `undefined`; validation 400s | `Router({ mergeParams: true })` |
 | `/:id` mounted before `/default` | `/default` reaches the item router as an id | Statics first |
-| Guard written inline in `index.ts` | `routeLayout.test.ts`: "defines no functions in index.ts" | Move it to `middleware.ts` |
+| Guard written inline in `index.ts` | `routeLayout.unit.test.ts`: "defines no functions in index.ts" | Move it to `middleware.ts` |
 | `z.guid().safeParse(id)` in a controller | "builds Zod schemas only in schemas.ts" | Export the schema from `schemas.ts` |
-| Moving a folder and hand-fixing imports | A parent still imports the old (now leaf) router; routes 404 | Re-check every parent `index.ts` import after a move, then run the area's tests |
+| Moving a folder and hand-fixing imports | A parent still imports the old (now leaf) router; routes 404 | Re-check every parent `index.ts` import after a move, then run `npm run test:unit` and the route's tests |
 
 Related: `backend` (validation, errors, auth, db, outbox), `openapi` (spec paths for new routes),
 `test`.
