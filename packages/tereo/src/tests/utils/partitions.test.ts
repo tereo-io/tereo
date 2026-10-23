@@ -269,6 +269,13 @@ describe("dropPartition", () => {
       let writing: Promise<unknown> | undefined;
       try {
         await writer.query("BEGIN");
+        // Postgres fails the session whose deadlock check runs first. Had the
+        // drop queued behind another session's lock on the deliveries parent,
+        // its wait for notifications starts after the writer's; checking only
+        // well past the drop's lock timeout, the writer is never the one failed.
+        await writer.query(
+          `SET LOCAL deadlock_timeout = ${env.PARTITION_DDL_LOCK_TIMEOUT_MS * 5}`
+        );
         await writer.query(
           'LOCK TABLE "notifications"."notifications" IN ROW EXCLUSIVE MODE'
         );
@@ -290,10 +297,12 @@ describe("dropPartition", () => {
             { timeout: 5_000 }
           )
           .toBe(1);
-        // Waiting longer, the drop is the one Postgres picks to fail.
         writing = writer.query(
           'LOCK TABLE "notifications"."deliveries" IN ROW EXCLUSIVE MODE'
         );
+        // Handled at once, so a failed lock fails the test at `await writing`
+        // rather than as an unhandled rejection while the drop is awaited.
+        writing.catch(() => undefined);
         await expect(dropping).resolves.toBe(false);
         await writing;
       } finally {
