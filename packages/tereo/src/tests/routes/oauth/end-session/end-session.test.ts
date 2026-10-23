@@ -5,6 +5,7 @@ import { hashFlowToken, hashPassword } from "../../../../utils/crypto.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createTestUser } from "../../../support/auth/users.js";
+import { codeFlowSignIn } from "../../../support/auth/login.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { randomBytes } from "node:crypto";
 import {
@@ -337,8 +338,6 @@ describe("/oauth/end-session and /oauth/end-session/confirm", () => {
   const REDIRECT_URI = "http://localhost:3000/token-lifecycle-audit-callback";
   const SCOPE = "openid offline_access";
 
-  type TestUser = Awaited<ReturnType<typeof createTestUser>>;
-
   let client: Awaited<ReturnType<typeof createTestClient>>;
   let endpointId: string;
 
@@ -351,45 +350,7 @@ describe("/oauth/end-session and /oauth/end-session/confirm", () => {
     endpointId = endpoint.id;
   });
 
-  const exchange = (code: string, verifier: string) =>
-    fetch(`${BASE_URL}/oauth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: client.clientId,
-        code,
-        redirect_uri: REDIRECT_URI,
-        code_verifier: verifier,
-      }),
-    });
-
-  interface Tokens {
-    access_token: string;
-    refresh_token: string;
-    id_token: string;
-  }
-
-  const signIn = async (user?: TestUser, jar?: CookieJar) => {
-    const u = user ?? (await createTestUser());
-    const login = await browserLogin({
-      clientId: client.clientId,
-      redirectUri: REDIRECT_URI,
-      scope: SCOPE,
-      email: u.email,
-      password: u.plainPassword,
-      jar,
-    });
-    const res = await exchange(login.code, login.verifier);
-    expect(res.status).toBe(HTTP_STATUS.OK);
-    return {
-      user: u,
-      jar: login.jar,
-      code: login.code,
-      verifier: login.verifier,
-      tokens: (await res.json()) as Tokens,
-    };
-  };
+  const { signIn } = codeFlowSignIn(() => client, REDIRECT_URI, SCOPE);
 
   const entriesOf = (userId: string) =>
     prisma.auditLogEntry.findMany({

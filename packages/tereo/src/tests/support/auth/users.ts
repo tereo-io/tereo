@@ -1,3 +1,4 @@
+import { encryptTotpSecret, generateTotpSecret } from "../../../utils/totp.js";
 import { TEST_SERVICE, TEST_SERVICE_ID } from "../testService.js";
 import { CORE_SERVICE_ID } from "../../../definitions/index.js";
 import { hashPassword } from "../../../utils/crypto.js";
@@ -107,3 +108,17 @@ export async function createAdminUser() {
 
   return user;
 }
+
+/** Turns TOTP on for a user directly in the database; returns the secret. */
+export const enableTotp = async (userId: string) => {
+  const secret = generateTotpSecret();
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      totpSecret: encryptTotpSecret(secret),
+      totpEnabled: true,
+      totpEnabledAt: new Date(),
+    },
+  });
+  return secret;
+};

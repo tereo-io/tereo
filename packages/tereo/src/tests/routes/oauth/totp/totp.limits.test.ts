@@ -2,10 +2,10 @@
 // @module-tag auth
 // @module-tag race
 
+import { createTestUser, enableTotp } from "../../../support/auth/users.js";
 import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { generateTotpCode } from "../../../support/auth/crypto.js";
-import { createTestUser } from "../../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import {
@@ -14,29 +14,12 @@ import {
   cookieHeader,
   newPkce,
 } from "../../../support/browserLogin.js";
-import {
-  encryptTotpSecret,
-  generateTotpSecret,
-} from "../../../../utils/totp.js";
 
 const REDIRECT_URI = "http://localhost:3000/callback";
 
 const TOO_MANY_REQUESTS = 429;
 
 const MAX_FAILURES = 5;
-
-const enableTotp = async (userId: string) => {
-  const secret = generateTotpSecret();
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      totpSecret: encryptTotpSecret(secret),
-      totpEnabled: true,
-      totpEnabledAt: new Date(),
-    },
-  });
-  return secret;
-};
 
 const wrongCode = (secret: string) =>
   String((Number(generateTotpCode(secret)) + 500_000) % 1_000_000).padStart(

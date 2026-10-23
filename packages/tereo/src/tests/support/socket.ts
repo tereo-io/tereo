@@ -1,4 +1,8 @@
+import { createTestUser } from "./auth/users.js";
+import { browserLogin } from "./browserLogin.js";
 import { BASE_URL } from "./auth/constants.js";
+import { decodeJwt } from "./auth/tokens.js";
+import { expect } from "vitest";
 
 export interface TestSocket {
   /** Resolves with the connect result: null, or the handshake's error. */
@@ -85,3 +89,46 @@ export const received = (socket: TestSocket, name: string, ms = 5000) =>
     ms,
     `${name} received`
   );
+
+/**
+ * A browser login to the client `clientOf` returns, through to tokens: a
+ * session with a refresh token.
+ */
+export const signInFor =
+  (clientOf: () => { clientId: string }, redirectUri: string) =>
+  async (
+    scope = "openid core:account",
+    existing: Awaited<ReturnType<typeof createTestUser>> | null = null
+  ) => {
+    const user = existing ?? (await createTestUser());
+    const login = await browserLogin({
+      clientId: clientOf().clientId,
+      redirectUri,
+      scope,
+      email: user.email,
+      password: user.plainPassword,
+    });
+    const res = await fetch(`${BASE_URL}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: clientOf().clientId,
+        code: login.code,
+        redirect_uri: redirectUri,
+        code_verifier: login.verifier,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const { access_token, refresh_token } = (await res.json()) as {
+      access_token: string;
+      refresh_token: string;
+    };
+    const { sid } = decodeJwt(access_token) as unknown as { sid: string };
+    return {
+      user,
+      accessToken: access_token,
+      refreshToken: refresh_token,
+      sessionId: sid,
+    };
+  };

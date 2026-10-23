@@ -2,16 +2,12 @@
 // @module-tag auth
 // @module-tag race
 
+import { createTestUser, enableTotp } from "../../../../support/auth/users.js";
 import { BASE_URL, HTTP_STATUS } from "../../../../support/auth/constants.js";
 import { getUiAccessTokenForUser } from "../../../../support/auth/login.js";
 import { generateTotpCode } from "../../../../support/auth/crypto.js";
-import { createTestUser } from "../../../../support/auth/users.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { describe, it, expect } from "vitest";
-import {
-  encryptTotpSecret,
-  generateTotpSecret,
-} from "../../../../../utils/totp.js";
 
 interface TotpSetupResponse {
   secret?: string;
@@ -27,19 +23,6 @@ interface ErrorResponse {
   message?: string;
   [key: string]: unknown;
 }
-
-const enableTotp = async (userId: string) => {
-  const secret = generateTotpSecret();
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      totpSecret: encryptTotpSecret(secret),
-      totpEnabled: true,
-      totpEnabledAt: new Date(),
-    },
-  });
-  return secret;
-};
 
 describe("DELETE /v1/account/totp, POST /v1/account/totp/recovery-codes and POST /v1/account/totp/setup/verify", () => {
   const TOO_MANY_REQUESTS = 429;

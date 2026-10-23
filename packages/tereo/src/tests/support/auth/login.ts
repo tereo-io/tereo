@@ -1,7 +1,10 @@
 import { ALL_CORE_SCOPES, BASE_URL, HTTP_STATUS } from "./constants.js";
+import { browserLogin, type CookieJar } from "../browserLogin.js";
 import { LOGIN_CLIENT } from "../../../definitions/index.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { TokenResponse } from "./tokens.js";
+import { createTestUser } from "./users.js";
+import { expect } from "vitest";
 import {
   generateCodeChallenge,
   generateCodeVerifier,
@@ -221,3 +224,59 @@ export async function checkUserPermission(
   const data = (await response.json()) as { granted: boolean };
   return data.granted;
 }
+
+export interface SignedInTokens {
+  access_token: string;
+  refresh_token: string;
+  id_token: string;
+}
+
+/**
+ * A browser login to the client `clientOf` returns (set in the caller's
+ * beforeAll), then the code exchange. `signIn` creates the user unless given
+ * one, and keeps the login's cookies in `jar` when given.
+ */
+export const codeFlowSignIn = (
+  clientOf: () => { clientId: string },
+  redirectUri: string,
+  scope: string
+) => {
+  const exchange = (code: string, verifier: string) =>
+    fetch(`${BASE_URL}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: clientOf().clientId,
+        code,
+        redirect_uri: redirectUri,
+        code_verifier: verifier,
+      }),
+    });
+
+  const signIn = async (
+    user?: Awaited<ReturnType<typeof createTestUser>>,
+    jar?: CookieJar
+  ) => {
+    const u = user ?? (await createTestUser());
+    const login = await browserLogin({
+      clientId: clientOf().clientId,
+      redirectUri,
+      scope,
+      email: u.email,
+      password: u.plainPassword,
+      jar,
+    });
+    const res = await exchange(login.code, login.verifier);
+    expect(res.status).toBe(HTTP_STATUS.OK);
+    return {
+      user: u,
+      jar: login.jar,
+      code: login.code,
+      verifier: login.verifier,
+      tokens: (await res.json()) as SignedInTokens,
+    };
+  };
+
+  return { exchange, signIn };
+};

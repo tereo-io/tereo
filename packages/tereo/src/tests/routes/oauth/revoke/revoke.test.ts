@@ -1,10 +1,10 @@
 // @module-tag int
 // @module-tag auth
-import { browserLogin, type CookieJar } from "../../../support/browserLogin.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../../../definitions/index.js";
 import { TokenResponse, decodeJwt } from "../../../support/auth/tokens.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { createTestUser } from "../../../support/auth/users.js";
+import { codeFlowSignIn } from "../../../support/auth/login.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import jwt from "jsonwebtoken";
@@ -476,8 +476,6 @@ describe("POST /oauth/revoke", () => {
   const REDIRECT_URI = "http://localhost:3000/token-lifecycle-audit-callback";
   const SCOPE = "openid offline_access";
 
-  type TestUser = Awaited<ReturnType<typeof createTestUser>>;
-
   let client: Awaited<ReturnType<typeof createTestClient>>;
   let endpointId: string;
 
@@ -490,18 +488,7 @@ describe("POST /oauth/revoke", () => {
     endpointId = endpoint.id;
   });
 
-  const exchange = (code: string, verifier: string) =>
-    fetch(`${BASE_URL}/oauth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: client.clientId,
-        code,
-        redirect_uri: REDIRECT_URI,
-        code_verifier: verifier,
-      }),
-    });
+  const { signIn } = codeFlowSignIn(() => client, REDIRECT_URI, SCOPE);
 
   const revoke = (token: string) =>
     fetch(`${BASE_URL}/oauth/revoke`, {
@@ -509,33 +496,6 @@ describe("POST /oauth/revoke", () => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ token, client_id: client.clientId }),
     });
-
-  interface Tokens {
-    access_token: string;
-    refresh_token: string;
-    id_token: string;
-  }
-
-  const signIn = async (user?: TestUser, jar?: CookieJar) => {
-    const u = user ?? (await createTestUser());
-    const login = await browserLogin({
-      clientId: client.clientId,
-      redirectUri: REDIRECT_URI,
-      scope: SCOPE,
-      email: u.email,
-      password: u.plainPassword,
-      jar,
-    });
-    const res = await exchange(login.code, login.verifier);
-    expect(res.status).toBe(HTTP_STATUS.OK);
-    return {
-      user: u,
-      jar: login.jar,
-      code: login.code,
-      verifier: login.verifier,
-      tokens: (await res.json()) as Tokens,
-    };
-  };
 
   const sidOf = (accessToken: string) =>
     (decodeJwt(accessToken) as unknown as { sid: string }).sid;

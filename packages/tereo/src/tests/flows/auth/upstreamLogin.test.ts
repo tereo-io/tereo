@@ -1,7 +1,5 @@
 // @module-tag int
 // @module-tag auth
-import { encryptTotpSecret, generateTotpSecret } from "../../../utils/totp.js";
-import { createTestRole, createTestUser } from "../../support/auth/users.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestClient } from "../../support/auth/clients.js";
@@ -23,6 +21,11 @@ import {
   generateTotpCode,
   generateUniqueId,
 } from "../../support/auth/crypto.js";
+import {
+  createTestRole,
+  createTestUser,
+  enableTotp,
+} from "../../support/auth/users.js";
 
 const REDIRECT_URI = "http://localhost:3000/callback";
 const SCOPE = "openid profile email";
@@ -82,19 +85,6 @@ const linkedUser = async (provider: Provider) => {
     data: { userId: user.id, providerId: provider.id, subject },
   });
   return { user, claims: { sub: subject, email: user.email } };
-};
-
-const enableTotp = async (userId: string) => {
-  const secret = generateTotpSecret();
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      totpSecret: encryptTotpSecret(secret),
-      totpEnabled: true,
-      totpEnabledAt: new Date(),
-    },
-  });
-  return secret;
 };
 
 const withTotpPolicy = async (

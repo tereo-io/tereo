@@ -1,15 +1,12 @@
 // @module-tag int
 // @module-tag auth
 import { closeRedisEmitter } from "../../../websocket/emitters/redisEmitter.js";
-import { connect, within, type TestSocket } from "../../support/socket.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createTestClient } from "../../support/auth/clients.js";
 import { generateAccessToken } from "../../../utils/tokens.js";
-import { browserLogin } from "../../support/browserLogin.js";
 import { LOGIN_CLIENT } from "../../../definitions/index.js";
 import { createTestUser } from "../../support/auth/users.js";
 import { BASE_URL } from "../../support/auth/constants.js";
-import { decodeJwt } from "../../support/auth/tokens.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import {
   ensureTestMembership,
@@ -17,50 +14,18 @@ import {
   getTestPrincipalToken,
   testOrgId,
 } from "../../support/principals.js";
+import {
+  connect,
+  signInFor,
+  within,
+  type TestSocket,
+} from "../../support/socket.js";
 
 const REDIRECT_URI = "http://localhost:3000/websocket-reauth-callback";
 
 let client: Awaited<ReturnType<typeof createTestClient>>;
 
-type TestUser = Awaited<ReturnType<typeof createTestUser>>;
-
-/** A browser login through to tokens: a session with a refresh token. */
-const signIn = async (
-  scope = "openid core:account",
-  existing: TestUser | null = null
-) => {
-  const user = existing ?? (await createTestUser());
-  const login = await browserLogin({
-    clientId: client.clientId,
-    redirectUri: REDIRECT_URI,
-    scope,
-    email: user.email,
-    password: user.plainPassword,
-  });
-  const res = await fetch(`${BASE_URL}/oauth/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: client.clientId,
-      code: login.code,
-      redirect_uri: REDIRECT_URI,
-      code_verifier: login.verifier,
-    }),
-  });
-  expect(res.status).toBe(200);
-  const { access_token, refresh_token } = (await res.json()) as {
-    access_token: string;
-    refresh_token: string;
-  };
-  const { sid } = decodeJwt(access_token) as unknown as { sid: string };
-  return {
-    user,
-    accessToken: access_token,
-    refreshToken: refresh_token,
-    sessionId: sid,
-  };
-};
+const signIn = signInFor(() => client, REDIRECT_URI);
 
 /**
  * An access token for core's login client, with no session behind it, that
