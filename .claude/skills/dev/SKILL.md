@@ -54,7 +54,7 @@ Run with `npx nx run <project>:<target>`, or across projects with
 
 | Project | Targets |
 |---------|---------|
-| `tereo` | `generate` (prisma generate), `build` (tsc, after `^build` + `generate`), `check` (tsc --noEmit, after `^build` + `generate`), `dev` (`tsx watch ./src/index.ts`), `test` (`vitest run`), `test:docker` (`./docker/test/run.sh`), `docker` (`docker build -f docker/Dockerfile -t tereo .`, after `build`), `clean` |
+| `tereo` | `generate` (prisma generate), `build` (tsc, after `^build` + `generate`), `check` (tsc --noEmit, after `^build` + `generate`), `dev` (`tsx watch ./src/index.ts`), `test` (`vitest run`), `test:unit` (`vitest run --project unit`), `test:docker` (`./docker/test/run.sh`), `docker` (`docker build -f docker/Dockerfile -t tereo .`, after `build`), `clean` |
 | `@tereo-io/sdk` | `build`, `check` (both after `^build`), `test` (`vitest run`), `test:docker`, `clean` |
 | `tereo-ui` | `build` (`vite build` → `dist/`, base `/`), `check`, `dev` (`vite`, :4000), `clean` |
 

@@ -135,7 +135,8 @@ npm test                                            # docker/test/run.sh
 
 1. **A new admin route, `POST /v1/admin/widgets`.** The router folder is
    `routes/v1/admin/widgets/`; the test is `routes/v1/admin/widgets/widgets.test.ts`, tagged `int` and
-   `auth`. Its audit entry goes in `widgets.audit.test.ts` if the main file nears the cap.
+   `auth` (`routes/v1/admin` maps to `auth`, except `notifications` and `services`, which map to
+   `notifications` and `provisioning`; see `AREA_BY_PATH`). Its audit entry goes in `widgets.audit.test.ts` if the main file nears the cap.
 2. **A change to a Zod schema.** `routes/v1/admin/users/user/user.validation.unit.test.ts`, tagged
    `unit` and `auth`, with `it.each` against the exported schema. Keep one 400 case in `user.test.ts`.
 3. **A job, `jobs/shareSweep.ts`.** `jobs/shareSweep.test.ts`, tagged `int`, `files` and `job`.

@@ -106,26 +106,26 @@ describe("Webhook Endpoint Management", () => {
 });
 ```
 
-## Audit Entry and Outbox Fan-Out — a flow, `flows/webhooks/<flow>.test.ts` (shape)
+## Audit Entry and Outbox Fan-Out — `routes/v1/admin/roles/roles.audit.test.ts` (a route's `.audit` file)
 
 ```typescript
 // @module-tag int
-// @module-tag webhooks
-import { getTestPrincipalToken } from "../../support/principals.js";
-import { prisma } from "../../../utils/db/prisma.js";
+// @module-tag auth
+import { getTestPrincipalToken } from "../../../../support/principals.js";
+import { prisma } from "../../../../../utils/db/prisma.js";
 import { describe, it, expect } from "vitest";
 import { randomUUID } from "crypto";
 import axios from "axios";
-import { CORE_URL } from "../../support/coreUrl.js";
+import { CORE_URL } from "../../../../support/coreUrl.js";
 import {
   createTestWebhookEndpoint,
   getTestAccessToken as getWebhooksToken,
   waitFor,
-} from "../../support/webhooks.js";
+} from "../../../../support/webhooks.js";
 import {
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
-} from "../../../definitions/index.js";
+} from "../../../../../definitions/index.js";
 
 const adminToken = (perms: string[]) =>
   getTestPrincipalToken({
@@ -388,7 +388,7 @@ export async function setup() {
     data: { setupCompletedAt: new Date(), setupCompletedBy: owner.id },
   });
 
-  server = createAppServer(4001);
+  server = createAppServer(Number(process.env.PORT ?? 4001));
   await server.start();
 }
 
@@ -397,6 +397,7 @@ export async function teardown() {
     files.cleanupAllTestEntities,
     webhooks.cleanupAllTestEntities,
     audit.cleanupAllTestEntities,
+    provisioning.cleanupAllTestEntities,
   ]) {
     await cleanup().catch(() => undefined);
   }

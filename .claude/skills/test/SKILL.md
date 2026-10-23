@@ -21,7 +21,9 @@ the offending paths. Read the README first; this skill covers the parts it does 
 
 | Changing | Test |
 |----------|------|
-| a route | `routes/<URL path>/<folder>.test.ts`, beside the router folder's name |
+| a route | `routes/<URL path>/<folder>.test.ts`, named for the router folder (`routes/v1/webhooks/webhooks/webhooks.test.ts`) |
+| the root router (`routes/index.ts`) | `routes/routes.test.ts`, `routes/routes.<aspect>.test.ts` |
+| an entry point | `index.test.ts`, `app.test.ts`, `worker.test.ts` |
 | a Zod schema | `<base>.validation.unit.test.ts`, one `it.each` table |
 | a util or module | `utils/<name>.unit.test.ts` (pure) or `.test.ts` (database, Redis) |
 | a job | `jobs/<job>.test.ts` |
@@ -33,6 +35,12 @@ Filename form: `<base>[.<aspect>][.<method>][.unit].test.ts`. Aspects are `valid
 Split by aspect only when the main file nears the cap. A test that exercises one route belongs to
 that route even if it sets up state through others. The README has the full table and five worked
 cases.
+
+Tags go at the top, one `// @module-tag` per line, in this order: the tier (`unit` or `int`), the
+primary area, then any other area or detail tags. The primary area comes from `AREA_BY_PATH` in
+`src/tests/setup/tags.ts` (longest prefix wins): `routes/v1/admin` is `auth` except
+`routes/v1/admin/notifications` (`notifications`) and `routes/v1/admin/services` (`provisioning`).
+Paths with no prefix (mostly `jobs/` and `utils/`) accept any area: pick the one the code serves.
 
 ## Running tests
 
@@ -165,9 +173,9 @@ the cap):
 
 ## DO
 
-- Put each test where the README says; one tier tag (`unit` or `int`, matching `.unit`) and at least
-  one area tag per file, **one `// @module-tag` per line** (several on a line drop all but the first)
-- Keep every file under 800 lines; split by aspect, then method. A file that cannot fit goes in
+- Put each test where the README says; one tier tag (`unit` or `int`, matching `.unit`) first, then
+  the path's primary area tag, per file, **one `// @module-tag` per line** (several on a line drop all but the first)
+- Keep every file at 800 lines or fewer; split by aspect, then method. A file that cannot fit goes in
   `conventions/oversize.ts` with a ceiling and a reason
 - Put validation in `.validation.unit` tables against the route's exported Zod schema, with one 400
   case in the route's `int` file proving the schema is wired in

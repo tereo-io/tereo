@@ -182,6 +182,7 @@ The admin app is `packages/tereo-ui` (Vite + React):
 
 - [ ] `npm run format` and `npm run sort-imports`
 - [ ] `npm run lint` and `npm run check`
-- [ ] `npx vitest run` in `packages/tereo` (or `docker/test/run.sh`);
+- [ ] `npm run test:unit` plus the feature's own `int` files in `packages/tereo` (the full suite runs
+      in CI, or once at the end with `docker/test/run.sh`);
       `npx nx run @tereo-io/sdk:test` if the SDK changed
 - [ ] `npm run version-plan` if `@tereo-io/sdk`, `tereo` or `tereo-ui` changed
