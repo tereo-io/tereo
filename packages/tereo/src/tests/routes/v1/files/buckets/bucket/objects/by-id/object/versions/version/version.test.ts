@@ -295,6 +295,54 @@ describe("POST /v1/files/buckets/:name/objects/by-id/:id/versions/:versionId/res
       });
     });
 
+    describe("a version branched by PATCH", () => {
+      const auth = () => ({
+        headers: authHeader(testToken),
+        validateStatus: () => true,
+      });
+      const usage = async (bucketId: number) =>
+        (await prisma.bucket.findUniqueOrThrow({ where: { id: bucketId } }))
+          .currentUsageBytes;
+
+      it("a version branched by PATCH is charged, so deleting the old one leaves usage right", async () => {
+        const bucket = await createTestBucket(testToken);
+        const enabled = await axios.put(
+          `${BASE_URL}/buckets/${bucket.name}`,
+          { versioningEnabled: true },
+          auth()
+        );
+        expect(enabled.status).toBe(HTTP_STATUS.OK);
+        const body = `branch ${randomUUID()}`;
+        const size = BigInt(Buffer.byteLength(body));
+        const obj = await uploadTestObject(
+          testToken,
+          bucket.name,
+          "b.txt",
+          createTestFile(body, "b.txt", "text/plain")
+        );
+        expect(await usage(bucket.id)).toBe(size);
+
+        const patch = await axios.patch(
+          `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}`,
+          { tags: ["branched"], createNewVersion: true },
+          auth()
+        );
+        expect(patch.status).toBe(HTTP_STATUS.OK);
+        expect(await usage(bucket.id)).toBe(2n * size);
+
+        const [old] = await prisma.objectVersion.findMany({
+          where: { objectId: obj.id, deletedAt: null },
+          orderBy: { createdAt: "asc" },
+        });
+        const del = await axios.delete(
+          `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}/versions/${old.id}`,
+          auth()
+        );
+        expect(del.status).toBe(HTTP_STATUS.NO_CONTENT);
+        expect(await usage(bucket.id)).toBe(size);
+      });
+    });
+
     describe("GET /objects/by-id/:id/versions/:versionId/download", () => {
       it("streams a specific version's bytes by id (survives rename)", async () => {
         const bucket = await createTestBucket(testToken, { policy: "private" });
@@ -348,6 +396,117 @@ describe("POST /v1/files/buckets/:name/objects/by-id/:id/versions/:versionId/res
         );
         expect(dl.status).toBe(HTTP_STATUS.OK);
         expect(dl.data).toBe("v1 bytes");
+      });
+
+      it("marks a private bucket's version download private", async () => {
+        const bucket = await createTestBucket(testToken, { policy: "private" });
+        await axios.put(
+          `${BASE_URL}/buckets/${bucket.name}`,
+          { versioningEnabled: true },
+          { headers: { Authorization: `Bearer ${testToken}` } }
+        );
+        const object = await uploadTestObject(
+          testToken,
+          bucket.name,
+          "a.txt",
+          createTestFile(`a ${randomUUID()}`)
+        );
+        const base = `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${object.id}/versions`;
+        const auth = { headers: { Authorization: `Bearer ${testToken}` } };
+        const versions = await axios.get(base, auth);
+        const versionId = versions.data.data[0].versionId;
+        const res = await axios.get(`${base}/${versionId}/download`, auth);
+        expect(res.headers["cache-control"]).toBe(
+          "private, max-age=31536000, immutable"
+        );
+      });
+
+      describe("preconditions", () => {
+        let bucket: { id: number; name: string };
+        let objectId: string;
+        let firstVersion: { id: string; etag: string | null };
+
+        const versionUrl = (versionId: string) =>
+          `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${objectId}/versions/${versionId}/download`;
+
+        beforeAll(async () => {
+          bucket = await createTestBucket(testToken);
+          await axios.put(
+            `${BASE_URL}/buckets/${bucket.name}`,
+            { versioningEnabled: true },
+            { headers: authHeader(testToken) }
+          );
+          objectId = (
+            await uploadTestObject(
+              testToken,
+              bucket.name,
+              "doc.txt",
+              createTestFile("first one", "a.txt")
+            )
+          ).id;
+          await uploadTestObject(
+            testToken,
+            bucket.name,
+            "doc.txt",
+            createTestFile("second, longer", "a.txt")
+          );
+          const versions = await prisma.objectVersion.findMany({
+            where: { objectId },
+            orderBy: { createdAt: "asc" },
+          });
+          [firstVersion] = versions;
+        });
+
+        it("answers a version download's If-None-Match with 304 and its validators", async () => {
+          const res = await axios.get(versionUrl(firstVersion.id), {
+            headers: {
+              ...authHeader(testToken),
+              "If-None-Match": `W/"${firstVersion.etag}"`,
+            },
+            validateStatus: () => true,
+          });
+          expect(res.status).toBe(304);
+          expect(res.headers.etag).toBe(`"${firstVersion.etag}"`);
+          expect(res.headers["cache-control"]).toContain("immutable");
+          expect(res.headers["last-modified"]).toBeDefined();
+        });
+      });
+
+      describe("ranges", () => {
+        it("serves ranges of a version by id", async () => {
+          const content = Buffer.from(
+            `${randomUUID()}${randomUUID()}${randomUUID()}`.slice(0, 100)
+          );
+          const versioned = await createTestBucket(testToken);
+          await axios.put(
+            `${BASE_URL}/buckets/${versioned.name}`,
+            { versioningEnabled: true },
+            { headers: authHeader(testToken) }
+          );
+          const obj = await uploadTestObject(
+            testToken,
+            versioned.name,
+            "v.bin",
+            {
+              buffer: content,
+              filename: "f.bin",
+              contentType: "application/octet-stream",
+            }
+          );
+          const version = await prisma.objectVersion.findFirstOrThrow({
+            where: { objectId: obj.id, isCurrent: true },
+          });
+          const res = await axios.get<ArrayBuffer>(
+            `${BASE_URL}/buckets/${versioned.name}/objects/by-id/${obj.id}/versions/${version.id}/download`,
+            {
+              headers: { ...authHeader(testToken), Range: "bytes=50-59" },
+              responseType: "arraybuffer",
+              validateStatus: () => true,
+            }
+          );
+          expect(res.status).toBe(206);
+          expect(Buffer.from(res.data)).toEqual(content.subarray(50, 60));
+        });
       });
     });
   });

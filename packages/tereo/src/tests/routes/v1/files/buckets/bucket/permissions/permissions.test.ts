@@ -362,14 +362,6 @@ describe("GET and POST /v1/files/buckets/:name/permissions", () => {
         expect(grant.data.error).toBe("invalid_request");
         expect(grant.data.error_description).toEqual(expect.any(String));
 
-        const revoke = await axios.delete(
-          `${url}/not-a-uuid`,
-          as(creatorToken)
-        );
-        expect(revoke.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        expect(revoke.data.error).toBe("invalid_request");
-        expect(revoke.data.error_description).toEqual(expect.any(String));
-
         // Any hex UUID is a user id, RFC variant or not.
         await ensureTestMembership(FIXTURE_USER_IDS[2], ORG);
         const fixture = await axios.post(

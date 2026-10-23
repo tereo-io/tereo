@@ -94,6 +94,31 @@ describe("POST and DELETE /v1/files/buckets/:name/multipart/:uploadId", () => {
     await cleanupWebhookEntities();
   });
 
+  it("audits the object a complete writes, as an upload does", async () => {
+    const bucket = await createTestBucket(token);
+    const uploadId = await startMultipart(bucket.name, "audited.bin");
+    const put = await axios.put(
+      `${BASE_URL}/buckets/${bucket.name}/multipart/${uploadId}/parts/1`,
+      Buffer.from(`part ${randomUUID()}`),
+      { headers: { ...auth(), "Content-Type": "application/octet-stream" } }
+    );
+    expect(put.status).toBe(HTTP_STATUS.OK);
+    const created = await axios.post(
+      `${BASE_URL}/buckets/${bucket.name}/multipart/${uploadId}/complete`,
+      { parts: [{ partNumber: 1, etag: put.data.etag }] },
+      { headers: { ...auth(), "Idempotency-Key": randomUUID() } }
+    );
+    expect(created.status).toBe(HTTP_STATUS.CREATED);
+    const entry = await prisma.auditLogEntry.findFirst({
+      where: { entityType: "object", entityId: created.data.id },
+    });
+    expect(entry).toMatchObject({
+      action: "CREATE",
+      entityName: created.data.key,
+    });
+    expect(entry?.metadata).toMatchObject({ multipartUploadId: uploadId });
+  });
+
   it("emits object.created and version.created when a multipart upload completes", async () => {
     const bucket = await createTestBucket(token);
     await enableVersioning(bucket.name);

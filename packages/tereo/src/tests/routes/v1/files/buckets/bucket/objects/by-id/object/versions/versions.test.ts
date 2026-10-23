@@ -3,6 +3,7 @@
 import { getTestPrincipalToken } from "../../../../../../../../../support/principals.js";
 import { prisma } from "../../../../../../../../../../utils/db/prisma.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "crypto";
 import axios from "axios";
 import {
   BASE_URL,
@@ -25,6 +26,53 @@ describe("GET /v1/files/buckets/:name/objects/by-id/:id/versions", () => {
 
   afterAll(async () => {
     await cleanupTestEntities();
+  });
+
+  describe("a private bucket's versioning setting", () => {
+    // Everything a bucket creator does here, but no `file-service.admin`: object
+    // access has to come from the creator's grant.
+    const MEMBER = [
+      "file-service.buckets.delete",
+      "file-service.objects.delete",
+      "file-service.permissions.delete",
+      "file-service.shares.delete",
+    ];
+    const ORG = "bucket-access-org";
+
+    const as = (token?: string) => ({
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      validateStatus: () => true,
+    });
+    let creatorToken: string;
+    let outsiderToken: string;
+
+    beforeAll(async () => {
+      creatorToken = await getTestPrincipalToken({
+        userId: randomUUID(),
+        organizationId: ORG,
+        permissions: MEMBER,
+      });
+      outsiderToken = await getTestPrincipalToken({
+        userId: randomUUID(),
+        organizationId: ORG,
+        permissions: MEMBER,
+      });
+    });
+
+    it("hide a private bucket's versioning setting from a caller without access", async () => {
+      const bucket = await createTestBucket(creatorToken);
+      const url = `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${randomUUID()}/versions`;
+
+      expect((await axios.get(url, as(outsiderToken))).status).toBe(
+        HTTP_STATUS.FORBIDDEN
+      );
+      expect((await axios.get(url, as())).status).toBe(
+        HTTP_STATUS.UNAUTHORIZED
+      );
+      const own = await axios.get(url, as(creatorToken));
+      expect(own.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(own.data.error).toBe("versioning_disabled");
+    });
   });
 
   describe("Versioning", () => {

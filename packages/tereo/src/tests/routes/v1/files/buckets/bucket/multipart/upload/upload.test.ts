@@ -1,14 +1,14 @@
 // @module-tag int
 // @module-tag files
 // @module-tag race
-import { multipartCompleteClaim } from "../../../../../../../../routes/v1/files/buckets/bucket/multipart/utils.js";
+import { getRedisClient } from "../../../../../../../../utils/redis.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import db from "../../../../../../../../utils/db/index.js";
 import { randomBytes, randomUUID } from "crypto";
 import env from "../../../../../../../../env.js";
-import { PassThrough, Readable } from "stream";
 import { execFileSync } from "child_process";
+import { Readable } from "stream";
 import fs from "fs/promises";
 import axios from "axios";
 import path from "path";
@@ -23,10 +23,6 @@ import {
   getTestPrincipalToken,
 } from "../../../../../../../support/principals.js";
 import {
-  getRedisClient,
-  redisKey,
-} from "../../../../../../../../utils/redis.js";
-import {
   BASE_URL,
   HTTP_STATUS,
   cleanupTestEntities,
@@ -34,7 +30,6 @@ import {
   getTestAccessToken,
   grantTestPermission,
   testIdempotencyKey,
-  waitFor,
 } from "../../../../../../../support/files.js";
 
 describe("POST, GET and DELETE /v1/files/buckets/:name/multipart/:uploadId", () => {
@@ -97,31 +92,6 @@ describe("POST, GET and DELETE /v1/files/buckets/:name/multipart/:uploadId", () 
           validateStatus: () => true,
         }
       );
-
-    const uploadDir = (uploadId: string) =>
-      path.join(env.FILE_SERVICE_STORAGE_PATH, "multipart", uploadId);
-
-    const stagedFiles = (uploadId: string) =>
-      fs.readdir(uploadDir(uploadId)).catch(() => [] as string[]);
-
-    // A part PUT whose body is held open until `finish`, once the server is
-    // staging it.
-    const heldPart = async (uploadId: string, partNumber: number) => {
-      const before = (await stagedFiles(uploadId)).length;
-      const body = new PassThrough();
-      const response = putPart(uploadId, partNumber, body);
-      body.write(randomBytes(1024));
-      await waitFor(
-        async () => (await stagedFiles(uploadId)).length > before,
-        10_000
-      );
-      return {
-        finish: async () => {
-          body.end(randomBytes(1024));
-          return await response;
-        },
-      };
-    };
 
     // Re-encrypts a staged part as it was staged before parts were bound.
     const unbindPart = async (uploadId: string, partNumber: number) => {
@@ -191,58 +161,6 @@ describe("POST, GET and DELETE /v1/files/buckets/:name/multipart/:uploadId", () 
       await cleanupTestEntities();
     });
 
-    it("refuses a part whose upload was aborted while it was staged", async () => {
-      const uploadId = await initiate();
-      const held = await heldPart(uploadId, 1);
-
-      const abort = await axios.delete(
-        `${BASE_URL}/buckets/${bucketName}/multipart/${uploadId}`,
-        as()
-      );
-      expect(abort.status).toBe(HTTP_STATUS.NO_CONTENT);
-
-      const res = await held.finish();
-      expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      expect(res.data.error).toBe("upload_not_active");
-      expect(await prisma.multipartPart.count({ where: { uploadId } })).toBe(0);
-      await expect(fs.access(uploadDir(uploadId))).rejects.toThrow();
-    });
-
-    it("refuses a part whose upload was completed while it was staged", async () => {
-      const uploadId = await initiate();
-      const first = await putPart(uploadId, 1, text());
-      const held = await heldPart(uploadId, 2);
-
-      const done = await complete(uploadId, [
-        { partNumber: 1, etag: first.data.etag },
-      ]);
-      expect(done.status).toBe(HTTP_STATUS.CREATED);
-
-      const res = await held.finish();
-      expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      expect(res.data.error).toBe("upload_not_active");
-      expect(await prisma.multipartPart.count({ where: { uploadId } })).toBe(0);
-    });
-
-    it("refuses a part while a complete of the upload runs", async () => {
-      const uploadId = await initiate();
-      const first = await putPart(uploadId, 1, text());
-      const claim = redisKey(multipartCompleteClaim(uploadId));
-      await getRedisClient().set(claim, "held-by-test", "EX", 60);
-      try {
-        const res = await putPart(uploadId, 1, text());
-        expect(res.status).toBe(HTTP_STATUS.CONFLICT);
-        expect(res.data.error).toBe("multipart_complete_in_progress");
-        const [part] = await prisma.multipartPart.findMany({
-          where: { uploadId },
-        });
-        expect(part.etag).toBe(first.data.etag);
-        expect(await stagedFiles(uploadId)).toHaveLength(1);
-      } finally {
-        await getRedisClient().del(claim);
-      }
-    });
-
     it("refuses to complete with a part file moved to another part", async () => {
       const { uploadId, parts } = await twoParts();
       await swapPartFiles(uploadId);
@@ -281,23 +199,6 @@ describe("POST, GET and DELETE /v1/files/buckets/:name/multipart/:uploadId", () 
         { ...as(), responseType: "arraybuffer" }
       );
       expect(Buffer.from(download.data).equals(content)).toBe(true);
-    });
-
-    it("audits the object a complete writes, as an upload does", async () => {
-      const uploadId = await initiate();
-      const put = await putPart(uploadId, 1, text());
-      const created = await complete(uploadId, [
-        { partNumber: 1, etag: put.data.etag },
-      ]);
-      expect(created.status).toBe(HTTP_STATUS.CREATED);
-      const entry = await prisma.auditLogEntry.findFirst({
-        where: { entityType: "object", entityId: created.data.id },
-      });
-      expect(entry).toMatchObject({
-        action: "CREATE",
-        entityName: created.data.key,
-      });
-      expect(entry?.metadata).toMatchObject({ multipartUploadId: uploadId });
     });
 
     it("lists an upload's parts only for the user who initiated it", async () => {

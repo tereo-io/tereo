@@ -1,7 +1,18 @@
 // @module-tag int
 // @module-tag files
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { bucketRateLimit } from "../../middleware/bucketRateLimit.js";
+import db from "../../utils/db/index.js";
 import axios from "axios";
+import {
+  closeCacheBroadcast,
+  startCacheSubscriber,
+} from "../../utils/cacheBroadcast.js";
+import {
+  deferred,
+  fakeReq,
+  fakeRes,
+  invalidate,
+} from "../support/bucketCache.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -9,16 +20,95 @@ import {
   createTestBucket,
   getTestAccessToken,
 } from "../support/files.js";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+
+// 1 token, each request costs 1, refill negligible: the 2nd request is refused.
+const oneRequestLimit = {
+  tokensPerSecond: 0.001,
+  maxTokens: 1,
+  requestCost: 1,
+};
+
+const randomBucketId = () => 900_000_000 + Math.floor(Math.random() * 1e8);
+
+/** Sends three requests and returns how many the bucket limit refused. */
+const refusedOfThree = async (name: string) => {
+  const errors: unknown[] = [];
+  for (let i = 0; i < 3; i++) {
+    await bucketRateLimit(fakeReq(name), fakeRes().res, (err?: unknown) => {
+      if (err) errors.push(err);
+    });
+  }
+  return errors.length;
+};
 
 describe("bucketRateLimit", () => {
   let testToken: string;
 
   beforeAll(async () => {
     testToken = await getTestAccessToken();
+    await startCacheSubscriber();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   afterAll(async () => {
+    await closeCacheBroadcast();
     await cleanupTestEntities();
+  });
+
+  describe(
+    "a lookup that read the bucket before an invalidation",
+    { tags: ["race"] },
+    () => {
+      it("does not cache the old rate limit", async () => {
+        const name = `race-rl-${Date.now()}`;
+        const bucketId = randomBucketId();
+        const oldRead = deferred<unknown>();
+        const spy = vi
+          .spyOn(db.buckets, "checkByName")
+          .mockImplementationOnce(() => oldRead.promise as never);
+
+        const pending = bucketRateLimit(fakeReq(name), fakeRes().res, () => {});
+        await invalidate(name);
+        oldRead.resolve({ id: bucketId, rateLimitConfig: null });
+        await pending;
+
+        spy.mockImplementation(
+          async () =>
+            ({ id: bucketId, rateLimitConfig: oneRequestLimit }) as never
+        );
+        expect(await refusedOfThree(name)).toBe(2);
+      });
+    }
+  );
+
+  describe("a failed lookup", () => {
+    it("fails open for that request only, not as no rate limit", async () => {
+      const name = `err-rl-${Date.now()}`;
+      vi.spyOn(db.buckets, "checkByName")
+        .mockRejectedValueOnce(new Error("Connection terminated unexpectedly"))
+        .mockResolvedValue({
+          id: randomBucketId(),
+          rateLimitConfig: oneRequestLimit,
+        } as never);
+
+      const next = vi.fn();
+      await bucketRateLimit(fakeReq(name), fakeRes().res, next);
+      expect(next).toHaveBeenCalledWith();
+
+      expect(await refusedOfThree(name)).toBe(2);
+    });
   });
 
   describe("PUT /buckets/:name", () => {

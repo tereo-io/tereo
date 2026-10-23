@@ -391,6 +391,32 @@ describe("GET and HEAD /v1/files/shared/:token, POST /v1/files/shared/:token/unl
       });
     });
 
+    describe("ranges", () => {
+      it("serves ranges through a share", async () => {
+        const content = Buffer.from(
+          `${randomUUID()}${randomUUID()}${randomUUID()}`.slice(0, 100)
+        );
+        const id = await uploadTestObjectAndGetId(
+          admin,
+          bucket.name,
+          `ranges/${randomUUID()}.bin`,
+          {
+            buffer: content,
+            filename: "f.bin",
+            contentType: "application/octet-stream",
+          }
+        );
+        const share = await createShare({ kind: "OBJECT", objectId: id });
+        const shared = await axios.get<ArrayBuffer>(share.url, {
+          headers: { Range: "bytes=-3" },
+          responseType: "arraybuffer",
+          validateStatus: () => true,
+        });
+        expect(shared.status).toBe(206);
+        expect(Buffer.from(shared.data)).toEqual(content.subarray(97));
+      });
+    });
+
     describe("access logs", () => {
       it("records the object of a share download and an unlock", async () => {
         const open = await createShare({ kind: "OBJECT", objectId });

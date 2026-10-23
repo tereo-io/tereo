@@ -50,6 +50,19 @@ describe("DELETE /v1/files/buckets/:name/permissions/:userId", () => {
     });
 
     describe("DELETE /buckets/:name/permissions/:userId", () => {
+      it("rejects a non-UUID userId with core's error shape", async () => {
+        const revoke = await axios.delete(
+          `${BASE_URL}/buckets/${testBucket.name}/permissions/not-a-uuid`,
+          {
+            headers: { Authorization: `Bearer ${testToken}` },
+            validateStatus: () => true,
+          }
+        );
+        expect(revoke.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(revoke.data.error).toBe("invalid_request");
+        expect(revoke.data.error_description).toEqual(expect.any(String));
+      });
+
       it("should revoke user permission", async () => {
         const targetUserId = "00000000-0000-7001-0000-000000000006";
 

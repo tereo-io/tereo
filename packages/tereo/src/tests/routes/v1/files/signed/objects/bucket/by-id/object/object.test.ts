@@ -244,6 +244,34 @@ describe("GET, HEAD and PUT /v1/files/signed/objects/:bucket/by-id/:id", () => {
       });
     });
 
+    describe("ranges", () => {
+      it("serves ranges through a signed URL", async () => {
+        const content = Buffer.from(
+          `${randomUUID()}${randomUUID()}${randomUUID()}`.slice(0, 100)
+        );
+        const id = await uploadTestObjectAndGetId(
+          admin,
+          bucket.name,
+          `ranges/${randomUUID()}.bin`,
+          {
+            buffer: content,
+            filename: "f.bin",
+            contentType: "application/octet-stream",
+          }
+        );
+        const signed = await axios.get<ArrayBuffer>(
+          await presign(admin, "read", id),
+          {
+            headers: { Range: "bytes=1-2" },
+            responseType: "arraybuffer",
+            validateStatus: () => true,
+          }
+        );
+        expect(signed.status).toBe(206);
+        expect(Buffer.from(signed.data)).toEqual(content.subarray(1, 3));
+      });
+    });
+
     describe("access logs", () => {
       it("records a presigned download", async () => {
         const res = await axios.get(await presign(admin, "read"), anyStatus);

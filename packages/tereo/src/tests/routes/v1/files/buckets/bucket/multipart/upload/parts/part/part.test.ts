@@ -1,14 +1,19 @@
 // @module-tag int
 // @module-tag files
+import { multipartCompleteClaim } from "../../../../../../../../../../routes/v1/files/buckets/bucket/multipart/utils.js";
 import { MAX_BLOB_BYTES } from "../../../../../../../../../../utils/encryption.js";
 import { prisma } from "../../../../../../../../../../utils/db/prisma.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import env from "../../../../../../../../../../env.js";
 import { randomBytes, randomUUID } from "crypto";
-import { Readable } from "stream";
+import { PassThrough, Readable } from "stream";
 import fs from "fs/promises";
 import axios from "axios";
 import path from "path";
+import {
+  getRedisClient,
+  redisKey,
+} from "../../../../../../../../../../utils/redis.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -17,6 +22,7 @@ import {
   getTestAccessToken,
   getTestUserId,
   testIdempotencyKey,
+  waitFor,
 } from "../../../../../../../../../support/files.js";
 
 describe("PUT /v1/files/buckets/:name/multipart/:uploadId/parts/:partNumber", () => {
@@ -242,6 +248,160 @@ describe("PUT /v1/files/buckets/:name/multipart/:uploadId/parts/:partNumber", ()
       expect((await initiate(bucket.name)).status).toBe(HTTP_STATUS.CREATED);
     });
   });
+
+  describe(
+    "a part while its upload ends or completes",
+    { tags: ["race"] },
+    () => {
+      let token: string;
+      let bucketName: string;
+
+      // Content a complete's file-type check accepts, as random bytes may not be.
+      const text = () => Buffer.from(`part ${randomBytes(16).toString("hex")}`);
+
+      const as = (t = token) => ({
+        headers: { Authorization: `Bearer ${t}` },
+        validateStatus: () => true,
+      });
+
+      const initiate = async (t = token) => {
+        const res = await axios.post(
+          `${BASE_URL}/buckets/${bucketName}/multipart`,
+          {
+            objectKey: `mp-${randomBytes(4).toString("hex")}.bin`,
+            contentType: "application/octet-stream",
+          },
+          as(t)
+        );
+        expect(res.status).toBe(HTTP_STATUS.CREATED);
+        return res.data.uploadId as string;
+      };
+
+      const putPart = (
+        uploadId: string,
+        partNumber: number,
+        body: Buffer | Readable
+      ) =>
+        axios.put(
+          `${BASE_URL}/buckets/${bucketName}/multipart/${uploadId}/parts/${partNumber}`,
+          body,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/octet-stream",
+            },
+            validateStatus: () => true,
+            maxBodyLength: Infinity,
+          }
+        );
+
+      const complete = (
+        uploadId: string,
+        parts: Array<{ partNumber: number; etag: string }>
+      ) =>
+        axios.post(
+          `${BASE_URL}/buckets/${bucketName}/multipart/${uploadId}/complete`,
+          { parts },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Idempotency-Key": testIdempotencyKey(),
+            },
+            validateStatus: () => true,
+          }
+        );
+
+      const uploadDir = (uploadId: string) =>
+        path.join(env.FILE_SERVICE_STORAGE_PATH, "multipart", uploadId);
+
+      const stagedFiles = (uploadId: string) =>
+        fs.readdir(uploadDir(uploadId)).catch(() => [] as string[]);
+
+      // A part PUT whose body is held open until `finish`, once the server is
+      // staging it.
+      const heldPart = async (uploadId: string, partNumber: number) => {
+        const before = (await stagedFiles(uploadId)).length;
+        const body = new PassThrough();
+        const response = putPart(uploadId, partNumber, body);
+        body.write(randomBytes(1024));
+        await waitFor(
+          async () => (await stagedFiles(uploadId)).length > before,
+          10_000
+        );
+        return {
+          finish: async () => {
+            body.end(randomBytes(1024));
+            return await response;
+          },
+        };
+      };
+
+      beforeAll(async () => {
+        token = await getTestAccessToken();
+        bucketName = (await createTestBucket(token)).name;
+      });
+
+      afterAll(async () => {
+        await cleanupTestEntities();
+      });
+
+      it("refuses a part whose upload was aborted while it was staged", async () => {
+        const uploadId = await initiate();
+        const held = await heldPart(uploadId, 1);
+
+        const abort = await axios.delete(
+          `${BASE_URL}/buckets/${bucketName}/multipart/${uploadId}`,
+          as()
+        );
+        expect(abort.status).toBe(HTTP_STATUS.NO_CONTENT);
+
+        const res = await held.finish();
+        expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(res.data.error).toBe("upload_not_active");
+        expect(await prisma.multipartPart.count({ where: { uploadId } })).toBe(
+          0
+        );
+        await expect(fs.access(uploadDir(uploadId))).rejects.toThrow();
+      });
+
+      it("refuses a part whose upload was completed while it was staged", async () => {
+        const uploadId = await initiate();
+        const first = await putPart(uploadId, 1, text());
+        const held = await heldPart(uploadId, 2);
+
+        const done = await complete(uploadId, [
+          { partNumber: 1, etag: first.data.etag },
+        ]);
+        expect(done.status).toBe(HTTP_STATUS.CREATED);
+
+        const res = await held.finish();
+        expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(res.data.error).toBe("upload_not_active");
+        expect(await prisma.multipartPart.count({ where: { uploadId } })).toBe(
+          0
+        );
+      });
+
+      it("refuses a part while a complete of the upload runs", async () => {
+        const uploadId = await initiate();
+        const first = await putPart(uploadId, 1, text());
+        const claim = redisKey(multipartCompleteClaim(uploadId));
+        await getRedisClient().set(claim, "held-by-test", "EX", 60);
+        try {
+          const res = await putPart(uploadId, 1, text());
+          expect(res.status).toBe(HTTP_STATUS.CONFLICT);
+          expect(res.data.error).toBe("multipart_complete_in_progress");
+          const [part] = await prisma.multipartPart.findMany({
+            where: { uploadId },
+          });
+          expect(part.etag).toBe(first.data.etag);
+          expect(await stagedFiles(uploadId)).toHaveLength(1);
+        } finally {
+          await getRedisClient().del(claim);
+        }
+      });
+    }
+  );
 
   describe("streamed uploads with a parseable Content-Type", () => {
     // A body whose Content-Type a JSON or form parser would match must still be

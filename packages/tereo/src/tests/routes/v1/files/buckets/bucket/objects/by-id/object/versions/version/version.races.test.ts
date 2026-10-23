@@ -314,30 +314,6 @@ describe("POST /v1/files/buckets/:name/objects/by-id/:id/versions/:versionId/res
         ).toBe(1);
         expect(await usage(bucket.id)).toBe(before - size);
       });
-
-      it("a version branched by PATCH is charged, so deleting the old one leaves usage right", async () => {
-        const bucket = await versionedBucket();
-        const body = `branch ${randomUUID()}`;
-        const size = BigInt(Buffer.byteLength(body));
-        const obj = await upload(bucket.name, "b.txt", body);
-        expect(await usage(bucket.id)).toBe(size);
-
-        const patch = await axios.patch(
-          `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}`,
-          { tags: ["branched"], createNewVersion: true },
-          auth()
-        );
-        expect(patch.status).toBe(HTTP_STATUS.OK);
-        expect(await usage(bucket.id)).toBe(2n * size);
-
-        const [old] = await versions(obj.id);
-        const del = await axios.delete(
-          `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}/versions/${old.id}`,
-          auth()
-        );
-        expect(del.status).toBe(HTTP_STATUS.NO_CONTENT);
-        expect(await usage(bucket.id)).toBe(size);
-      });
     });
   });
 });

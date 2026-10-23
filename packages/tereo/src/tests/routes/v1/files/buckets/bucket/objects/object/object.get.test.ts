@@ -202,29 +202,6 @@ describe("GET and HEAD /v1/files/buckets/:name/objects/*objectKey", () => {
           "public, max-age=31536000, immutable"
         );
       });
-
-      it("marks a private bucket's version download private", async () => {
-        const bucket = await createTestBucket(token, { policy: "private" });
-        await axios.put(
-          `${BASE_URL}/buckets/${bucket.name}`,
-          { versioningEnabled: true },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const object = await uploadTestObject(
-          token,
-          bucket.name,
-          "a.txt",
-          createTestFile(`a ${randomUUID()}`)
-        );
-        const base = `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${object.id}/versions`;
-        const auth = { headers: { Authorization: `Bearer ${token}` } };
-        const versions = await axios.get(base, auth);
-        const versionId = versions.data.data[0].versionId;
-        const res = await axios.get(`${base}/${versionId}/download`, auth);
-        expect(res.headers["cache-control"]).toBe(
-          "private, max-age=31536000, immutable"
-        );
-      });
     });
   });
 
@@ -324,16 +301,6 @@ describe("GET and HEAD /v1/files/buckets/:name/objects/*objectKey", () => {
     describe("preconditions", () => {
       const versionUrl = (versionId: string) =>
         `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${objectId}/versions/${versionId}/download`;
-
-      it("answers a version download's If-None-Match with 304 and its validators", async () => {
-        const res = await req("get", versionUrl(firstVersion.id), {
-          "If-None-Match": `W/"${firstVersion.etag}"`,
-        });
-        expect(res.status).toBe(304);
-        expect(res.headers.etag).toBe(`"${firstVersion.etag}"`);
-        expect(res.headers["cache-control"]).toContain("immutable");
-        expect(res.headers["last-modified"]).toBeDefined();
-      });
 
       it("answers If-Modified-Since with 304 once nothing changed since", async () => {
         const later = new Date(Date.now() + 60_000).toUTCString();
@@ -520,50 +487,6 @@ describe("GET and HEAD /v1/files/buckets/:name/objects/*objectKey", () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       expect(res.headers["accept-ranges"]).toBe("bytes");
-    });
-
-    it("serves ranges of a version by id", async () => {
-      const versioned = await createTestBucket(token);
-      await axios.put(
-        `${BASE_URL}/buckets/${versioned.name}`,
-        { versioningEnabled: true },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const obj = await uploadTestObject(
-        token,
-        versioned.name,
-        "v.bin",
-        binary(content)
-      );
-      const version = await prisma.objectVersion.findFirstOrThrow({
-        where: { objectId: obj.id, isCurrent: true },
-      });
-      const res = await get(
-        `${BASE_URL}/buckets/${versioned.name}/objects/by-id/${obj.id}/versions/${version.id}/download`,
-        { Range: "bytes=50-59" }
-      );
-      expect(res.status).toBe(206);
-      expect(body(res)).toEqual(content.subarray(50, 60));
-    });
-
-    it("serves ranges through a signed URL and a share", async () => {
-      const presign = await axios.post(
-        `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${objectId}/presign`,
-        { operation: "read", expiresInSeconds: 300 },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const signed = await get(presign.data.url, { Range: "bytes=1-2" }, false);
-      expect(signed.status).toBe(206);
-      expect(body(signed)).toEqual(content.subarray(1, 3));
-
-      const share = await axios.post(
-        `${BASE_URL}/buckets/${bucket.name}/shares`,
-        { kind: "OBJECT", objectId },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const shared = await get(share.data.url, { Range: "bytes=-3" }, false);
-      expect(shared.status).toBe(206);
-      expect(body(shared)).toEqual(content.subarray(97));
     });
 
     it("serves ranges of a public bucket's object without a token", async () => {

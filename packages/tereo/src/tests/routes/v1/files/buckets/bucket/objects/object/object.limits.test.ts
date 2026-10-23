@@ -30,6 +30,39 @@ describe("PUT /v1/files/buckets/:name/objects/*objectKey", () => {
       await cleanupTestEntities();
     });
 
+    it("should return 413 for too many or oversized text fields", async () => {
+      const testBucket = await createTestBucket(testToken, {
+        policy: "private",
+      });
+      const send = async (formData: FormData) =>
+        axios.put(
+          `${BASE_URL}/buckets/${testBucket.name}/objects/fields.txt`,
+          formData,
+          {
+            headers: {
+              Authorization: `Bearer ${testToken}`,
+              "Idempotency-Key": testIdempotencyKey(),
+              ...formData.getHeaders(),
+            },
+            validateStatus: () => true,
+          }
+        );
+
+      const many = new FormData();
+      for (let i = 0; i < 50; i++) many.append(`field${i}`, "x");
+      many.append("file", Buffer.from("x"), { filename: "fields.txt" });
+      const tooMany = await send(many);
+      expect(tooMany.status).toBe(HTTP_STATUS.PAYLOAD_TOO_LARGE);
+      expect(tooMany.data.error).toBe("payload_too_large");
+
+      const big = new FormData();
+      big.append("note", "x".repeat(64 * 1024));
+      big.append("file", Buffer.from("x"), { filename: "fields.txt" });
+      const tooBig = await send(big);
+      expect(tooBig.status).toBe(HTTP_STATUS.PAYLOAD_TOO_LARGE);
+      expect(tooBig.data.error).toBe("payload_too_large");
+    });
+
     describe("Storage Quota Enforcement", () => {
       let quotaBucket: { id: number; name: string; policy: string };
 

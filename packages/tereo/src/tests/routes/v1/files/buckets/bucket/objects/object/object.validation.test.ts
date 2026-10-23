@@ -27,6 +27,25 @@ describe("PUT /v1/files/buckets/:name/objects/*objectKey", () => {
       await cleanupTestEntities();
     });
 
+    it("should return 400 when no file is provided", async () => {
+      const formData = new FormData();
+
+      const response = await axios.put(
+        `${BASE_URL}/buckets/${testBucket.name}/objects/no-file.txt`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${testToken}`,
+            "Idempotency-Key": testIdempotencyKey(),
+            ...formData.getHeaders(),
+          },
+          validateStatus: () => true,
+        }
+      );
+
+      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    });
+
     describe("Object Key Validation", () => {
       it("should reject object key with path traversal (..)", async () => {
         const file = createTestFile("test", "test.txt", "text/plain");

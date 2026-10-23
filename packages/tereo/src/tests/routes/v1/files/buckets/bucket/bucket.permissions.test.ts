@@ -265,21 +265,6 @@ describe("GET /v1/files/buckets/:name and /v1/files/buckets/:name/my-permissions
         );
         expect(res.status).toBe(HTTP_STATUS.NOT_FOUND);
       });
-
-      it("hide a private bucket's versioning setting from a caller without access", async () => {
-        const bucket = await createTestBucket(creatorToken);
-        const url = `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${randomUUID()}/versions`;
-
-        expect((await axios.get(url, as(outsiderToken))).status).toBe(
-          HTTP_STATUS.FORBIDDEN
-        );
-        expect((await axios.get(url, as())).status).toBe(
-          HTTP_STATUS.UNAUTHORIZED
-        );
-        const own = await axios.get(url, as(creatorToken));
-        expect(own.status).toBe(HTTP_STATUS.BAD_REQUEST);
-        expect(own.data.error).toBe("versioning_disabled");
-      });
     });
   });
 
