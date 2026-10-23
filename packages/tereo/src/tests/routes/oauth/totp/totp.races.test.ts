@@ -26,88 +26,91 @@ import {
 } from "../../../../utils/totp.js";
 
 describe("/oauth/totp", () => {
-  let client: Awaited<ReturnType<typeof createTestClient>>;
-  // Imported once Redis is up: the rate limiters it loads take its client.
-  let totpControllers: typeof import("../../../../routes/oauth/totp/controllers.js");
-
-  beforeAll(async () => {
-    client = await createTestClient();
-    totpControllers =
-      await import("../../../../routes/oauth/totp/controllers.js");
-  });
-
-  /**
-   * A password change that starts once the step before is consumed: it is let
-   * run until it finishes or waits on a lock, as it would between that consume
-   * and the next step's write.
-   */
-  const changePasswordAfter = <A extends unknown[]>(
-    userId: string,
-    consume: (...args: A) => Promise<boolean>
-  ) => {
-    let change: Promise<void> | undefined;
-    const consumeThenChange = async (...args: A) => {
-      const consumed = await consume(...args);
-      let pid: number | undefined;
-      let settled = false;
-      const newHash = await hashPassword("A-New-Password-456!");
-      change = prisma
-        .$transaction(
-          async (tx) => {
-            [{ pid }] = await tx.$queryRaw<
-              { pid: number }[]
-            >`SELECT pg_backend_pid() AS pid`;
-            await db.users.lockForSessionEnd(tx, { userIds: [userId] });
-            await tx.user.update({
-              where: { id: userId },
-              data: { passwordHash: newHash },
-            });
-            await db.loginFlows.deletePendingForUser(userId, null, tx);
-          },
-          { timeout: 20_000 }
-        )
-        .finally(() => (settled = true));
-      for (let i = 0; i < 500 && !settled; i++) {
-        if (pid !== undefined) {
-          const [activity] = await prisma.$queryRaw<
-            { wait_event_type: string | null }[]
-          >`SELECT wait_event_type FROM pg_stat_activity WHERE pid = ${pid}::int`;
-          if (activity?.wait_event_type === "Lock") break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      return consumed;
-    };
-    return { consumeThenChange, changed: () => change };
-  };
-
-  /** Calls a handler in-process with the browser's cookies; returns its body. */
-  const callHandler = async (
-    handler: (req: Request, res: ExpressResponse) => Promise<void>,
-    body: object,
-    jar: CookieJar
-  ) => {
-    let json: unknown;
-    const res = {
-      cookie: () => res,
-      clearCookie: () => res,
-      status: () => res,
-      json: (value: unknown) => {
-        json = value;
-        return res;
-      },
-    };
-    const req = {
-      body,
-      cookies: Object.fromEntries(jar),
-      headers: {},
-      ip: "127.0.0.1",
-    };
-    await handler(req as unknown as Request, res as unknown as ExpressResponse);
-    return json;
-  };
-
   describe("a password change during the 2FA step", () => {
+    let client: Awaited<ReturnType<typeof createTestClient>>;
+    // Imported once Redis is up: the rate limiters it loads take its client.
+    let totpControllers: typeof import("../../../../routes/oauth/totp/controllers.js");
+
+    beforeAll(async () => {
+      client = await createTestClient();
+      totpControllers =
+        await import("../../../../routes/oauth/totp/controllers.js");
+    });
+
+    /**
+     * A password change that starts once the step before is consumed: it is let
+     * run until it finishes or waits on a lock, as it would between that consume
+     * and the next step's write.
+     */
+    const changePasswordAfter = <A extends unknown[]>(
+      userId: string,
+      consume: (...args: A) => Promise<boolean>
+    ) => {
+      let change: Promise<void> | undefined;
+      const consumeThenChange = async (...args: A) => {
+        const consumed = await consume(...args);
+        let pid: number | undefined;
+        let settled = false;
+        const newHash = await hashPassword("A-New-Password-456!");
+        change = prisma
+          .$transaction(
+            async (tx) => {
+              [{ pid }] = await tx.$queryRaw<
+                { pid: number }[]
+              >`SELECT pg_backend_pid() AS pid`;
+              await db.users.lockForSessionEnd(tx, { userIds: [userId] });
+              await tx.user.update({
+                where: { id: userId },
+                data: { passwordHash: newHash },
+              });
+              await db.loginFlows.deletePendingForUser(userId, null, tx);
+            },
+            { timeout: 20_000 }
+          )
+          .finally(() => (settled = true));
+        for (let i = 0; i < 500 && !settled; i++) {
+          if (pid !== undefined) {
+            const [activity] = await prisma.$queryRaw<
+              { wait_event_type: string | null }[]
+            >`SELECT wait_event_type FROM pg_stat_activity WHERE pid = ${pid}::int`;
+            if (activity?.wait_event_type === "Lock") break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return consumed;
+      };
+      return { consumeThenChange, changed: () => change };
+    };
+
+    /** Calls a handler in-process with the browser's cookies; returns its body. */
+    const callHandler = async (
+      handler: (req: Request, res: ExpressResponse) => Promise<void>,
+      body: object,
+      jar: CookieJar
+    ) => {
+      let json: unknown;
+      const res = {
+        cookie: () => res,
+        clearCookie: () => res,
+        status: () => res,
+        json: (value: unknown) => {
+          json = value;
+          return res;
+        },
+      };
+      const req = {
+        body,
+        cookies: Object.fromEntries(jar),
+        headers: {},
+        ip: "127.0.0.1",
+      };
+      await handler(
+        req as unknown as Request,
+        res as unknown as ExpressResponse
+      );
+      return json;
+    };
+
     it("leaves no consent step from a TOTP code checked before it", async () => {
       const user = await createTestUser();
       const secret = generateTotpSecret();
@@ -209,83 +212,81 @@ describe("/oauth/totp", () => {
       ).toBe(0);
     });
   });
-});
-
-describe("/oauth/totp", () => {
-  const REDIRECT_URI = "http://localhost:3000/callback";
-
-  let client: Awaited<ReturnType<typeof createTestClient>>;
-
-  beforeAll(async () => {
-    client = await createTestClient();
-  });
-
-  const userWithTotp = async () => {
-    const user = await createTestUser();
-    const secret = generateTotpSecret();
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        totpSecret: encryptTotpSecret(secret),
-        totpEnabled: true,
-        totpEnabledAt: new Date(),
-      },
-    });
-    return { user, secret };
-  };
-
-  /** Password login up to the 2FA page; returns its session token. */
-  const startLogin = async (
-    user: { email: string; plainPassword: string },
-    jar: CookieJar
-  ) => {
-    const pkce = newPkce();
-    const params = {
-      response_type: "code",
-      client_id: client.clientId,
-      redirect_uri: REDIRECT_URI,
-      state: pkce.state,
-      scope: "openid",
-      code_challenge: pkce.challenge,
-      code_challenge_method: "S256",
-    };
-    const start = await fetch(
-      `${BASE_URL}/oauth/authorize?${new URLSearchParams(params)}`,
-      { redirect: "manual", headers: { Cookie: cookieHeader(jar) } }
-    );
-    absorbCookies(jar, start);
-    const submit = await fetch(`${BASE_URL}/oauth/authorize`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: cookieHeader(jar),
-      },
-      body: JSON.stringify({
-        ...params,
-        email: user.email,
-        password: user.plainPassword,
-      }),
-    });
-    absorbCookies(jar, submit);
-    expect(submit.status).toBe(HTTP_STATUS.OK);
-    const url = new URL(
-      ((await submit.json()) as { redirect_url: string }).redirect_url
-    );
-    expect(url.pathname).toBe("/login/2fa");
-    return url.searchParams.get("session")!;
-  };
-
-  const submitTotp = (jar: CookieJar, session: string, totp_code: string) =>
-    fetch(`${BASE_URL}/oauth/totp/verify`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: cookieHeader(jar),
-      },
-      body: JSON.stringify({ session_token: session, totp_code }),
-    });
 
   describe("TOTP replay at login", () => {
+    const REDIRECT_URI = "http://localhost:3000/callback";
+
+    let client: Awaited<ReturnType<typeof createTestClient>>;
+
+    beforeAll(async () => {
+      client = await createTestClient();
+    });
+
+    const userWithTotp = async () => {
+      const user = await createTestUser();
+      const secret = generateTotpSecret();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          totpSecret: encryptTotpSecret(secret),
+          totpEnabled: true,
+          totpEnabledAt: new Date(),
+        },
+      });
+      return { user, secret };
+    };
+
+    /** Password login up to the 2FA page; returns its session token. */
+    const startLogin = async (
+      user: { email: string; plainPassword: string },
+      jar: CookieJar
+    ) => {
+      const pkce = newPkce();
+      const params = {
+        response_type: "code",
+        client_id: client.clientId,
+        redirect_uri: REDIRECT_URI,
+        state: pkce.state,
+        scope: "openid",
+        code_challenge: pkce.challenge,
+        code_challenge_method: "S256",
+      };
+      const start = await fetch(
+        `${BASE_URL}/oauth/authorize?${new URLSearchParams(params)}`,
+        { redirect: "manual", headers: { Cookie: cookieHeader(jar) } }
+      );
+      absorbCookies(jar, start);
+      const submit = await fetch(`${BASE_URL}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookieHeader(jar),
+        },
+        body: JSON.stringify({
+          ...params,
+          email: user.email,
+          password: user.plainPassword,
+        }),
+      });
+      absorbCookies(jar, submit);
+      expect(submit.status).toBe(HTTP_STATUS.OK);
+      const url = new URL(
+        ((await submit.json()) as { redirect_url: string }).redirect_url
+      );
+      expect(url.pathname).toBe("/login/2fa");
+      return url.searchParams.get("session")!;
+    };
+
+    const submitTotp = (jar: CookieJar, session: string, totp_code: string) =>
+      fetch(`${BASE_URL}/oauth/totp/verify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookieHeader(jar),
+        },
+        body: JSON.stringify({ session_token: session, totp_code }),
+      });
+
     it("rejects a code already used to sign in, then takes the next step's", async () => {
       const { user, secret } = await userWithTotp();
       const code = generateTotpCode(secret);

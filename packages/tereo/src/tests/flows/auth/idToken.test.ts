@@ -20,19 +20,19 @@ import {
 } from "../../support/auth/tokens.js";
 
 describe("ID token", () => {
-  interface AuthorizeResponse {
-    redirect_url?: string;
-    error?: string;
-    error_description?: string;
-  }
-
-  interface ConsentResponse {
-    redirect_url?: string;
-    error?: string;
-    error_description?: string;
-  }
-
   describe("OAuth Security Tests", () => {
+    interface AuthorizeResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
+    interface ConsentResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
     let testClient: Awaited<ReturnType<typeof createTestClient>>;
     let testUser: Awaited<ReturnType<typeof createTestUser>>;
 
@@ -277,23 +277,21 @@ describe("ID token", () => {
       });
     });
   });
-});
-
-describe("ID token", () => {
-  const SCOPE = "openid profile email offline_access";
-  const REDIRECT_URI = "http://localhost:3000/callback";
-
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  let publicClient: Client;
-  let user: Awaited<ReturnType<typeof createTestUser>>;
-
-  beforeAll(async () => {
-    publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
-    user = await createTestUser();
-  });
 
   describe("ID token claims", () => {
+    const SCOPE = "openid profile email offline_access";
+    const REDIRECT_URI = "http://localhost:3000/callback";
+
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
+
+    let publicClient: Client;
+    let user: Awaited<ReturnType<typeof createTestUser>>;
+
+    beforeAll(async () => {
+      publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
+      user = await createTestUser();
+    });
+
     const exchange = async (scope: string) => {
       const { code, verifier } = await browserLogin({
         clientId: publicClient.clientId,
@@ -348,9 +346,7 @@ describe("ID token", () => {
       expect(claims).not.toHaveProperty("name");
     });
   });
-});
 
-describe("ID token", () => {
   describe("OAuth Token Endpoint", () => {
     let testClient: Awaited<ReturnType<typeof createTestClient>>;
     let testUser: Awaited<ReturnType<typeof createTestUser>>;

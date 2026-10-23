@@ -21,55 +21,55 @@ import {
 } from "../../support/auth/crypto.js";
 
 describe("ID token verification", () => {
-  /**
-   * OIDC Core 12.2: a refresh of an openid grant returns a fresh ID token for
-   * the same login, so a client always holds a usable logout hint.
-   */
-
-  const REDIRECT_URI = "http://localhost:3000/refresh-id-token-callback";
-
-  let client: Awaited<ReturnType<typeof createTestClient>>;
-
-  interface Tokens {
-    access_token: string;
-    refresh_token: string;
-    id_token?: string;
-  }
-
-  const token = async (params: Record<string, string>) => {
-    const res = await fetch(`${BASE_URL}/oauth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: client.clientId, ...params }),
-    });
-    expect(res.status).toBe(200);
-    return (await res.json()) as Tokens;
-  };
-
-  const login = async (scope: string, nonce?: string) => {
-    const user = await createTestUser();
-    const { jar, code, verifier } = await browserLogin({
-      clientId: client.clientId,
-      redirectUri: REDIRECT_URI,
-      scope,
-      nonce,
-      email: user.email,
-      password: user.plainPassword,
-    });
-    const tokens = await token({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: REDIRECT_URI,
-      code_verifier: verifier,
-    });
-    return { user, jar, tokens };
-  };
-
-  beforeAll(async () => {
-    client = await createTestClient({ redirectUris: [REDIRECT_URI] });
-  });
-
   describe("refresh_token grant ID token", () => {
+    /**
+     * OIDC Core 12.2: a refresh of an openid grant returns a fresh ID token for
+     * the same login, so a client always holds a usable logout hint.
+     */
+
+    const REDIRECT_URI = "http://localhost:3000/refresh-id-token-callback";
+
+    let client: Awaited<ReturnType<typeof createTestClient>>;
+
+    interface Tokens {
+      access_token: string;
+      refresh_token: string;
+      id_token?: string;
+    }
+
+    const token = async (params: Record<string, string>) => {
+      const res = await fetch(`${BASE_URL}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id: client.clientId, ...params }),
+      });
+      expect(res.status).toBe(200);
+      return (await res.json()) as Tokens;
+    };
+
+    const login = async (scope: string, nonce?: string) => {
+      const user = await createTestUser();
+      const { jar, code, verifier } = await browserLogin({
+        clientId: client.clientId,
+        redirectUri: REDIRECT_URI,
+        scope,
+        nonce,
+        email: user.email,
+        password: user.plainPassword,
+      });
+      const tokens = await token({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: REDIRECT_URI,
+        code_verifier: verifier,
+      });
+      return { user, jar, tokens };
+    };
+
+    beforeAll(async () => {
+      client = await createTestClient({ redirectUris: [REDIRECT_URI] });
+    });
+
     it("returns a fresh ID token with the login's sid and auth_time, and no nonce", async () => {
       const { user, tokens } = await login(
         "openid profile email offline_access",
@@ -138,9 +138,7 @@ describe("ID token verification", () => {
       expect(refreshed.id_token).toBeUndefined();
     });
   });
-});
 
-describe("ID token verification", () => {
   describe("OAuth Token Endpoint", () => {
     let testClient: Awaited<ReturnType<typeof createTestClient>>;
     let testUser: Awaited<ReturnType<typeof createTestUser>>;

@@ -28,19 +28,19 @@ import {
 } from "../../../support/auth/users.js";
 
 describe("POST /oauth/introspect", () => {
-  interface AuthorizeResponse {
-    redirect_url?: string;
-    error?: string;
-    error_description?: string;
-  }
-
-  interface ConsentResponse {
-    redirect_url?: string;
-    error?: string;
-    error_description?: string;
-  }
-
   describe("OAuth Introspect Endpoint", () => {
+    interface AuthorizeResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
+    interface ConsentResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
     let testClient: Awaited<ReturnType<typeof createTestClient>>;
     let testUser: Awaited<ReturnType<typeof createTestUser>>;
 
@@ -570,109 +570,109 @@ describe("POST /oauth/introspect", () => {
       });
     });
   });
-});
 
-describe("POST /oauth/introspect", () => {
-  const SCOPE = "openid profile email offline_access";
-  const REDIRECT_URI = "http://localhost:3000/callback";
+  describe("introspection and revocation, and permissions", () => {
+    const SCOPE = "openid profile email offline_access";
+    const REDIRECT_URI = "http://localhost:3000/callback";
 
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
 
-  const basic = (client: Client) =>
-    `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
+    const basic = (client: Client) =>
+      `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
 
-  const clientCredentialsToken = async (client: Client) => {
-    const res = await postForm(
-      "/oauth/token",
-      { grant_type: "client_credentials" },
-      { Authorization: basic(client) }
-    );
-    expect(res.status).toBe(200);
-    return ((await res.json()) as { access_token: string }).access_token;
-  };
-  let ccClient: Client;
-
-  beforeAll(async () => {
-    ccClient = await createTestClient({
-      clientType: "confidential",
-      grantTypes: ["client_credentials"],
-    });
-  });
-
-  describe("Introspection and revocation", () => {
-    it("ignores an unknown token_type_hint", async () => {
-      const token = await clientCredentialsToken(ccClient);
+    const clientCredentialsToken = async (client: Client) => {
       const res = await postForm(
-        "/oauth/introspect",
-        { token, token_type_hint: "id_token" },
-        { Authorization: basic(ccClient) }
+        "/oauth/token",
+        { grant_type: "client_credentials" },
+        { Authorization: basic(client) }
       );
       expect(res.status).toBe(200);
-      expect((await json(res)).active).toBe(true);
-    });
-  });
+      return ((await res.json()) as { access_token: string }).access_token;
+    };
+    let ccClient: Client;
 
-  describe("Introspection permissions", () => {
-    it("reports the user's live permissions", async () => {
-      const holder = await createTestUser();
-      const role = await createTestRole();
-      const permission = await createTestPermission();
-      await prisma.rolePermission.create({
-        data: { roleId: role.id, permissionId: permission.id },
+    beforeAll(async () => {
+      ccClient = await createTestClient({
+        clientType: "confidential",
+        grantTypes: ["client_credentials"],
       });
-      const assignment = await prisma.userRole.create({
-        data: { userId: holder.id, roleId: role.id },
-      });
-
-      // Introspected by a service in the login client's audience.
-      const service = await createTestClient({ clientType: "confidential" });
-      const login = await createTestClient({
-        redirectUris: [REDIRECT_URI],
-        audience: [await makeServiceOf(service.id)],
-      });
-      const { code, verifier } = await browserLogin({
-        clientId: login.clientId,
-        redirectUri: REDIRECT_URI,
-        scope: SCOPE,
-        email: holder.email,
-        password: holder.plainPassword,
-      });
-      const exchanged = await postForm("/oauth/token", {
-        grant_type: "authorization_code",
-        client_id: login.clientId,
-        code,
-        redirect_uri: REDIRECT_URI,
-        code_verifier: verifier,
-      });
-      const { access_token } = (await exchanged.json()) as {
-        access_token: string;
-      };
-      const introspect = async () =>
-        (await json(
-          await postForm(
-            "/oauth/introspect",
-            { token: access_token },
-            { Authorization: basic(service) }
-          )
-        )) as { active: boolean; permissions: string[] };
-
-      expect((await introspect()).permissions).toContain(permission.name);
-
-      await prisma.userRole.delete({ where: { id: assignment.id } });
-      const after = await introspect();
-      expect(after.active).toBe(true);
-      expect(after.permissions).not.toContain(permission.name);
-      expect(jwt.decode(access_token)).not.toHaveProperty("permissions");
     });
 
-    it("answers inactive for a token longer than 2048 characters, rather than refusing it", async () => {
-      const res = await postForm(
-        "/oauth/introspect",
-        { token: `eyJ.${"a".repeat(3000)}.sig` },
-        { Authorization: basic(ccClient) }
-      );
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ active: false });
+    describe("Introspection and revocation", () => {
+      it("ignores an unknown token_type_hint", async () => {
+        const token = await clientCredentialsToken(ccClient);
+        const res = await postForm(
+          "/oauth/introspect",
+          { token, token_type_hint: "id_token" },
+          { Authorization: basic(ccClient) }
+        );
+        expect(res.status).toBe(200);
+        expect((await json(res)).active).toBe(true);
+      });
+    });
+
+    describe("Introspection permissions", () => {
+      it("reports the user's live permissions", async () => {
+        const holder = await createTestUser();
+        const role = await createTestRole();
+        const permission = await createTestPermission();
+        await prisma.rolePermission.create({
+          data: { roleId: role.id, permissionId: permission.id },
+        });
+        const assignment = await prisma.userRole.create({
+          data: { userId: holder.id, roleId: role.id },
+        });
+
+        // Introspected by a service in the login client's audience.
+        const service = await createTestClient({ clientType: "confidential" });
+        const login = await createTestClient({
+          redirectUris: [REDIRECT_URI],
+          audience: [await makeServiceOf(service.id)],
+        });
+        const { code, verifier } = await browserLogin({
+          clientId: login.clientId,
+          redirectUri: REDIRECT_URI,
+          scope: SCOPE,
+          email: holder.email,
+          password: holder.plainPassword,
+        });
+        const exchanged = await postForm("/oauth/token", {
+          grant_type: "authorization_code",
+          client_id: login.clientId,
+          code,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: verifier,
+        });
+        const { access_token } = (await exchanged.json()) as {
+          access_token: string;
+        };
+        const introspect = async () =>
+          (await json(
+            await postForm(
+              "/oauth/introspect",
+              { token: access_token },
+              { Authorization: basic(service) }
+            )
+          )) as { active: boolean; permissions: string[] };
+
+        expect((await introspect()).permissions).toContain(permission.name);
+
+        await prisma.userRole.delete({ where: { id: assignment.id } });
+        const after = await introspect();
+        expect(after.active).toBe(true);
+        expect(after.permissions).not.toContain(permission.name);
+        expect(jwt.decode(access_token)).not.toHaveProperty("permissions");
+      });
+
+      it("answers inactive for a token longer than 2048 characters, rather than refusing it", async () => {
+        const res = await postForm(
+          "/oauth/introspect",
+          { token: `eyJ.${"a".repeat(3000)}.sig` },
+          { Authorization: basic(ccClient) }
+        );
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ active: false });
+      });
     });
   });
 });

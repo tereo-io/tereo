@@ -35,19 +35,19 @@ import {
 } from "../../../support/auth/login.js";
 
 describe("/oauth/userinfo", () => {
-  interface AuthorizeResponse {
-    redirect_url?: string;
-    error?: string;
-    error_description?: string;
-  }
-
-  interface ConsentResponse {
-    redirect_url?: string;
-    error?: string;
-    error_description?: string;
-  }
-
   describe("OAuth UserInfo Endpoint", () => {
+    interface AuthorizeResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
+    interface ConsentResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
     let testClient: Awaited<ReturnType<typeof createTestClient>>;
     let testUser: Awaited<ReturnType<typeof createTestUser>>;
     let accessToken: string;
@@ -490,41 +490,39 @@ describe("/oauth/userinfo", () => {
       });
     });
   });
-});
-
-describe("/oauth/userinfo", () => {
-  const SCOPE = "openid profile email offline_access";
-  const REDIRECT_URI = "http://localhost:3000/callback";
-
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  const basic = (client: Client) =>
-    `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
-
-  const clientCredentialsToken = async (client: Client) => {
-    const res = await postForm(
-      "/oauth/token",
-      { grant_type: "client_credentials" },
-      { Authorization: basic(client) }
-    );
-    expect(res.status).toBe(200);
-    return ((await res.json()) as { access_token: string }).access_token;
-  };
-
-  let publicClient: Client;
-  let ccClient: Client;
-  let user: Awaited<ReturnType<typeof createTestUser>>;
-
-  beforeAll(async () => {
-    publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
-    ccClient = await createTestClient({
-      clientType: "confidential",
-      grantTypes: ["client_credentials"],
-    });
-    user = await createTestUser();
-  });
 
   describe("UserInfo", () => {
+    const SCOPE = "openid profile email offline_access";
+    const REDIRECT_URI = "http://localhost:3000/callback";
+
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
+
+    const basic = (client: Client) =>
+      `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
+
+    const clientCredentialsToken = async (client: Client) => {
+      const res = await postForm(
+        "/oauth/token",
+        { grant_type: "client_credentials" },
+        { Authorization: basic(client) }
+      );
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { access_token: string }).access_token;
+    };
+
+    let publicClient: Client;
+    let ccClient: Client;
+    let user: Awaited<ReturnType<typeof createTestUser>>;
+
+    beforeAll(async () => {
+      publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
+      ccClient = await createTestClient({
+        clientType: "confidential",
+        grantTypes: ["client_credentials"],
+      });
+      user = await createTestUser();
+    });
+
     const userinfo = (token: string) =>
       fetch(`${BASE_URL}/oauth/userinfo`, {
         headers: { Authorization: `Bearer ${token}` },

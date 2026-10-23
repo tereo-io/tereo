@@ -25,19 +25,19 @@ import {
 } from "../../../support/webhooks.js";
 
 describe("POST /oauth/revoke", () => {
-  interface AuthorizeResponse {
-    redirect_url?: string;
-    error?: string;
-    error_description?: string;
-  }
-
-  interface ConsentResponse {
-    redirect_url?: string;
-    error?: string;
-    error_description?: string;
-  }
-
   describe("OAuth Revoke Endpoint", () => {
+    interface AuthorizeResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
+    interface ConsentResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
     let testClient: Awaited<ReturnType<typeof createTestClient>>;
     let testUser: Awaited<ReturnType<typeof createTestUser>>;
 
@@ -399,33 +399,31 @@ describe("POST /oauth/revoke", () => {
       });
     });
   });
-});
-
-describe("POST /oauth/revoke", () => {
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  const basic = (client: Client) =>
-    `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
-
-  const clientCredentialsToken = async (client: Client) => {
-    const res = await postForm(
-      "/oauth/token",
-      { grant_type: "client_credentials" },
-      { Authorization: basic(client) }
-    );
-    expect(res.status).toBe(200);
-    return ((await res.json()) as { access_token: string }).access_token;
-  };
-  let ccClient: Client;
-
-  beforeAll(async () => {
-    ccClient = await createTestClient({
-      clientType: "confidential",
-      grantTypes: ["client_credentials"],
-    });
-  });
 
   describe("Introspection and revocation", () => {
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
+
+    const basic = (client: Client) =>
+      `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
+
+    const clientCredentialsToken = async (client: Client) => {
+      const res = await postForm(
+        "/oauth/token",
+        { grant_type: "client_credentials" },
+        { Authorization: basic(client) }
+      );
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { access_token: string }).access_token;
+    };
+    let ccClient: Client;
+
+    beforeAll(async () => {
+      ccClient = await createTestClient({
+        clientType: "confidential",
+        grantTypes: ["client_credentials"],
+      });
+    });
+
     it("does not revoke by the jti of a forged token", async () => {
       const token = await clientCredentialsToken(ccClient);
       const {
@@ -450,104 +448,105 @@ describe("POST /oauth/revoke", () => {
       expect((await json(res)).active).toBe(true);
     });
   });
-});
 
-describe("POST /oauth/revoke", () => {
-  const REDIRECT_URI = "http://localhost:3000/token-lifecycle-audit-callback";
-  const SCOPE = "openid offline_access";
+  describe("audit of revokes", () => {
+    const REDIRECT_URI = "http://localhost:3000/token-lifecycle-audit-callback";
+    const SCOPE = "openid offline_access";
 
-  let client: Awaited<ReturnType<typeof createTestClient>>;
-  let endpointId: string;
+    let client: Awaited<ReturnType<typeof createTestClient>>;
+    let endpointId: string;
 
-  beforeAll(async () => {
-    client = await createTestClient({ redirectUris: [REDIRECT_URI] });
-    const endpoint = await createTestWebhookEndpoint(
-      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
-      { eventTypes: ["auth.user.sessions-revoked"] }
-    );
-    endpointId = endpoint.id;
-  });
-
-  const { signIn } = codeFlowSignIn(() => client, REDIRECT_URI, SCOPE);
-
-  const revoke = (token: string) =>
-    fetch(`${BASE_URL}/oauth/revoke`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ token, client_id: client.clientId }),
+    beforeAll(async () => {
+      client = await createTestClient({ redirectUris: [REDIRECT_URI] });
+      const endpoint = await createTestWebhookEndpoint(
+        await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+        { eventTypes: ["auth.user.sessions-revoked"] }
+      );
+      endpointId = endpoint.id;
     });
 
-  const sidOf = (accessToken: string) =>
-    (decodeJwt(accessToken) as unknown as { sid: string }).sid;
+    const { signIn } = codeFlowSignIn(() => client, REDIRECT_URI, SCOPE);
 
-  const entriesOf = (userId: string) =>
-    prisma.auditLogEntry.findMany({
-      where: { entityType: "User", entityId: userId },
-      orderBy: { createdAt: "asc" },
+    const revoke = (token: string) =>
+      fetch(`${BASE_URL}/oauth/revoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token, client_id: client.clientId }),
+      });
+
+    const sidOf = (accessToken: string) =>
+      (decodeJwt(accessToken) as unknown as { sid: string }).sid;
+
+    const entriesOf = (userId: string) =>
+      prisma.auditLogEntry.findMany({
+        where: { entityType: "User", entityId: userId },
+        orderBy: { createdAt: "asc" },
+      });
+
+    const revokedEventsFor = (userId: string) =>
+      prisma.webhookDelivery.count({
+        where: {
+          webhookEndpointId: endpointId,
+          eventType: "auth.user.sessions-revoked",
+          payload: { path: ["entityId"], equals: userId },
+        },
+      });
+
+    const expectRevokedEvent = (userId: string) =>
+      waitFor(async () => (await revokedEventsFor(userId)) > 0, 10_000);
+
+    it("audits a refresh-token revoke as a LOGOUT and emits it, once", async () => {
+      const { user, tokens } = await signIn();
+      const sid = sidOf(tokens.access_token);
+
+      expect((await revoke(tokens.refresh_token)).status).toBe(HTTP_STATUS.OK);
+
+      const logouts = (await entriesOf(user.id)).filter(
+        (e) => e.action === "LOGOUT"
+      );
+      expect(logouts).toHaveLength(1);
+      expect(logouts[0]).toMatchObject({ userId: user.id });
+      expect(logouts[0].metadata).toMatchObject({
+        action: "sessions_revoked",
+        method: "revoke",
+        sessionIds: [sid],
+      });
+      await expectRevokedEvent(user.id);
+
+      // Nothing left to revoke: nothing more recorded.
+      expect((await revoke(tokens.refresh_token)).status).toBe(HTTP_STATUS.OK);
+      expect(
+        (await entriesOf(user.id)).filter((e) => e.action === "LOGOUT")
+      ).toHaveLength(1);
     });
 
-  const revokedEventsFor = (userId: string) =>
-    prisma.webhookDelivery.count({
-      where: {
-        webhookEndpointId: endpointId,
-        eventType: "auth.user.sessions-revoked",
-        payload: { path: ["entityId"], equals: userId },
-      },
+    it("audits an access-token revoke in its transaction, once", async () => {
+      const { user, tokens } = await signIn();
+      const { jti } = decodeJwt(tokens.access_token) as unknown as {
+        jti: string;
+      };
+
+      expect((await revoke(tokens.access_token)).status).toBe(HTTP_STATUS.OK);
+      expect(
+        (await prisma.accessToken.findUniqueOrThrow({ where: { jti } }))
+          .revokedAt
+      ).not.toBeNull();
+      const logouts = (await entriesOf(user.id)).filter(
+        (e) => e.action === "LOGOUT"
+      );
+      expect(logouts).toHaveLength(1);
+      expect(logouts[0].metadata).toEqual({
+        action: "token_revoked",
+        method: "revoke",
+        tokenType: "access_token",
+        jti,
+        clientId: client.clientId,
+      });
+
+      expect((await revoke(tokens.access_token)).status).toBe(HTTP_STATUS.OK);
+      expect(
+        (await entriesOf(user.id)).filter((e) => e.action === "LOGOUT")
+      ).toHaveLength(1);
     });
-
-  const expectRevokedEvent = (userId: string) =>
-    waitFor(async () => (await revokedEventsFor(userId)) > 0, 10_000);
-
-  it("audits a refresh-token revoke as a LOGOUT and emits it, once", async () => {
-    const { user, tokens } = await signIn();
-    const sid = sidOf(tokens.access_token);
-
-    expect((await revoke(tokens.refresh_token)).status).toBe(HTTP_STATUS.OK);
-
-    const logouts = (await entriesOf(user.id)).filter(
-      (e) => e.action === "LOGOUT"
-    );
-    expect(logouts).toHaveLength(1);
-    expect(logouts[0]).toMatchObject({ userId: user.id });
-    expect(logouts[0].metadata).toMatchObject({
-      action: "sessions_revoked",
-      method: "revoke",
-      sessionIds: [sid],
-    });
-    await expectRevokedEvent(user.id);
-
-    // Nothing left to revoke: nothing more recorded.
-    expect((await revoke(tokens.refresh_token)).status).toBe(HTTP_STATUS.OK);
-    expect(
-      (await entriesOf(user.id)).filter((e) => e.action === "LOGOUT")
-    ).toHaveLength(1);
-  });
-
-  it("audits an access-token revoke in its transaction, once", async () => {
-    const { user, tokens } = await signIn();
-    const { jti } = decodeJwt(tokens.access_token) as unknown as {
-      jti: string;
-    };
-
-    expect((await revoke(tokens.access_token)).status).toBe(HTTP_STATUS.OK);
-    expect(
-      (await prisma.accessToken.findUniqueOrThrow({ where: { jti } })).revokedAt
-    ).not.toBeNull();
-    const logouts = (await entriesOf(user.id)).filter(
-      (e) => e.action === "LOGOUT"
-    );
-    expect(logouts).toHaveLength(1);
-    expect(logouts[0].metadata).toEqual({
-      action: "token_revoked",
-      method: "revoke",
-      tokenType: "access_token",
-      jti,
-      clientId: client.clientId,
-    });
-
-    expect((await revoke(tokens.access_token)).status).toBe(HTTP_STATUS.OK);
-    expect(
-      (await entriesOf(user.id)).filter((e) => e.action === "LOGOUT")
-    ).toHaveLength(1);
   });
 });

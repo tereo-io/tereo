@@ -194,97 +194,97 @@ describe("POST /oauth/authorize", () => {
       });
     });
   });
-});
 
-describe("POST /oauth/authorize", () => {
-  const REDIRECT_URI = "http://localhost:3000/callback";
+  describe("request and redirect URI validation", () => {
+    const REDIRECT_URI = "http://localhost:3000/callback";
 
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
 
-  let ccClient: Client;
-  let user: Awaited<ReturnType<typeof createTestUser>>;
+    let ccClient: Client;
+    let user: Awaited<ReturnType<typeof createTestUser>>;
 
-  beforeAll(async () => {
-    ccClient = await createTestClient({
-      clientType: "confidential",
-      grantTypes: ["client_credentials"],
+    beforeAll(async () => {
+      ccClient = await createTestClient({
+        clientType: "confidential",
+        grantTypes: ["client_credentials"],
+      });
+      user = await createTestUser();
     });
-    user = await createTestUser();
-  });
 
-  describe("Authorization request validation", () => {
-    it("refuses the login of a client without the authorization_code grant", async () => {
-      const pkce = newPkce();
-      const res = await fetch(`${BASE_URL}/oauth/authorize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_id: ccClient.clientId,
-          redirect_uri: REDIRECT_URI,
+    describe("Authorization request validation", () => {
+      it("refuses the login of a client without the authorization_code grant", async () => {
+        const pkce = newPkce();
+        const res = await fetch(`${BASE_URL}/oauth/authorize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            client_id: ccClient.clientId,
+            redirect_uri: REDIRECT_URI,
+            state: pkce.state,
+            code_challenge: pkce.challenge,
+            code_challenge_method: "S256",
+            email: user.email,
+            password: user.plainPassword,
+          }),
+        });
+        expect(res.status).toBe(400);
+        expect((await json(res)).error).toBe("unauthorized_client");
+      });
+    });
+
+    describe("Redirect URI schemes", () => {
+      it("refuses a script-capable redirect URI even when it is registered", async () => {
+        // Registered before the admin schema refused them.
+        const uri = "javascript://x/%0aalert(document.domain)";
+        const client = await createTestClient({ redirectUris: [uri] });
+        const pkce = newPkce();
+        const params = {
+          response_type: "code",
+          client_id: client.clientId,
+          redirect_uri: uri,
           state: pkce.state,
+          scope: "openid",
           code_challenge: pkce.challenge,
           code_challenge_method: "S256",
-          email: user.email,
-          password: user.plainPassword,
-        }),
+        };
+
+        const start = await fetch(
+          `${BASE_URL}/oauth/authorize?${new URLSearchParams(params)}`,
+          { redirect: "manual" }
+        );
+        expect(start.status).toBe(400);
+        expect((await json(start)).error).toBe("invalid_request");
+
+        const jar = new Map<string, string>([
+          [`tereo_session_${client.clientId}`, "x"],
+        ]);
+        const submit = await fetch(`${BASE_URL}/oauth/authorize`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Cookie: cookieHeader(jar),
+          },
+          body: JSON.stringify({
+            ...params,
+            email: user.email,
+            password: user.plainPassword,
+          }),
+        });
+        expect(submit.status).toBe(400);
+        expect(JSON.stringify(await json(submit))).not.toContain(
+          "redirect_url"
+        );
       });
-      expect(res.status).toBe(400);
-      expect((await json(res)).error).toBe("unauthorized_client");
     });
   });
-
-  describe("Redirect URI schemes", () => {
-    it("refuses a script-capable redirect URI even when it is registered", async () => {
-      // Registered before the admin schema refused them.
-      const uri = "javascript://x/%0aalert(document.domain)";
-      const client = await createTestClient({ redirectUris: [uri] });
-      const pkce = newPkce();
-      const params = {
-        response_type: "code",
-        client_id: client.clientId,
-        redirect_uri: uri,
-        state: pkce.state,
-        scope: "openid",
-        code_challenge: pkce.challenge,
-        code_challenge_method: "S256",
-      };
-
-      const start = await fetch(
-        `${BASE_URL}/oauth/authorize?${new URLSearchParams(params)}`,
-        { redirect: "manual" }
-      );
-      expect(start.status).toBe(400);
-      expect((await json(start)).error).toBe("invalid_request");
-
-      const jar = new Map<string, string>([
-        [`tereo_session_${client.clientId}`, "x"],
-      ]);
-      const submit = await fetch(`${BASE_URL}/oauth/authorize`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Cookie: cookieHeader(jar),
-        },
-        body: JSON.stringify({
-          ...params,
-          email: user.email,
-          password: user.plainPassword,
-        }),
-      });
-      expect(submit.status).toBe(400);
-      expect(JSON.stringify(await json(submit))).not.toContain("redirect_url");
-    });
-  });
-});
-
-describe("POST /oauth/authorize", () => {
-  interface AuthorizeResponse {
-    redirect_url?: string;
-    error?: string;
-    error_description?: string;
-  }
 
   describe("OAuth Security Tests", () => {
+    interface AuthorizeResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
     let testUser: Awaited<ReturnType<typeof createTestUser>>;
 
     beforeAll(async () => {

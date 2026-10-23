@@ -352,169 +352,167 @@ describe("POST /oauth/token", () => {
       });
     });
   });
-});
 
-describe("POST /oauth/token", () => {
-  const SCOPE = "openid profile email offline_access";
-  const REDIRECT_URI = "http://localhost:3000/callback";
+  describe("refresh scope", () => {
+    const SCOPE = "openid profile email offline_access";
+    const REDIRECT_URI = "http://localhost:3000/callback";
 
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
 
-  let publicClient: Client;
-  let user: Awaited<ReturnType<typeof createTestUser>>;
+    let publicClient: Client;
+    let user: Awaited<ReturnType<typeof createTestUser>>;
 
-  beforeAll(async () => {
-    publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
-    user = await createTestUser();
+    beforeAll(async () => {
+      publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
+      user = await createTestUser();
+    });
+
+    describe("Refresh scope", () => {
+      it("narrows to a subset of the granted scopes", async () => {
+        const tokens = await loginAndExchange(
+          publicClient,
+          user,
+          REDIRECT_URI,
+          SCOPE
+        );
+        const res = await postForm("/oauth/token", {
+          grant_type: "refresh_token",
+          client_id: publicClient.clientId,
+          refresh_token: tokens.refresh_token,
+          scope: "openid email",
+        });
+        expect(res.status).toBe(200);
+        expect((await json(res)).scope).toBe("openid email");
+      });
+
+      it("refuses a scope the refresh token was not granted", async () => {
+        const { code, verifier } = await browserLogin({
+          clientId: publicClient.clientId,
+          redirectUri: REDIRECT_URI,
+          scope: "openid offline_access",
+          email: user.email,
+          password: user.plainPassword,
+        });
+        const exchanged = await postForm("/oauth/token", {
+          grant_type: "authorization_code",
+          client_id: publicClient.clientId,
+          code,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: verifier,
+        });
+        expect(exchanged.status).toBe(200);
+        const { refresh_token } = (await exchanged.json()) as {
+          refresh_token: string;
+        };
+
+        const res = await postForm("/oauth/token", {
+          grant_type: "refresh_token",
+          client_id: publicClient.clientId,
+          refresh_token,
+          scope: "openid email",
+        });
+        expect(res.status).toBe(400);
+        expect((await json(res)).error).toBe("invalid_scope");
+      });
+    });
+
+    describe("Refresh scope rotation", () => {
+      const refresh = (refresh_token: string, scope?: string) =>
+        postForm("/oauth/token", {
+          grant_type: "refresh_token",
+          client_id: publicClient.clientId,
+          refresh_token,
+          ...(scope && { scope }),
+        });
+
+      it("keeps the whole grant on the rotated refresh token after a narrowed refresh", async () => {
+        const tokens = await loginAndExchange(
+          publicClient,
+          user,
+          REDIRECT_URI,
+          SCOPE
+        );
+        const narrowed = await refresh(tokens.refresh_token, "openid");
+        expect(narrowed.status).toBe(200);
+        const body = (await narrowed.json()) as {
+          scope: string;
+          refresh_token: string;
+        };
+        expect(body.scope).toBe("openid");
+
+        const full = await refresh(body.refresh_token);
+        expect(full.status).toBe(200);
+        expect((await json(full)).scope).toBe(SCOPE);
+      });
+
+      it("drops a scope withdrawn from the client since the grant", async () => {
+        const client = await createTestClient({ redirectUris: [REDIRECT_URI] });
+        const { code, verifier } = await browserLogin({
+          clientId: client.clientId,
+          redirectUri: REDIRECT_URI,
+          scope: "openid offline_access core:account",
+          email: user.email,
+          password: user.plainPassword,
+        });
+        const exchanged = await postForm("/oauth/token", {
+          grant_type: "authorization_code",
+          client_id: client.clientId,
+          code,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: verifier,
+        });
+        expect(exchanged.status).toBe(200);
+        const { refresh_token } = (await exchanged.json()) as {
+          refresh_token: string;
+        };
+        await prisma.oAuthClient.update({
+          where: { id: client.id },
+          data: { scopes: client.scopes.filter((s) => s !== "core:account") },
+        });
+
+        const asked = await postForm("/oauth/token", {
+          grant_type: "refresh_token",
+          client_id: client.clientId,
+          refresh_token,
+          scope: "openid core:account",
+        });
+        expect(asked.status).toBe(200);
+        const narrowed = (await asked.json()) as {
+          scope: string;
+          access_token: string;
+          refresh_token: string;
+        };
+        expect(narrowed.scope).toBe("openid");
+        const me = await fetch(`${BASE_URL}/v1/account/me`, {
+          headers: { Authorization: `Bearer ${narrowed.access_token}` },
+        });
+        expect(me.status).not.toBe(200);
+
+        const rotated = await postForm("/oauth/token", {
+          grant_type: "refresh_token",
+          client_id: client.clientId,
+          refresh_token: narrowed.refresh_token,
+        });
+        expect(rotated.status).toBe(200);
+        expect((await json(rotated)).scope).toBe("openid offline_access");
+      });
+
+      it("does not spend the refresh token on a refused scope", async () => {
+        const tokens = await loginAndExchange(
+          publicClient,
+          user,
+          REDIRECT_URI,
+          SCOPE
+        );
+        const refused = await refresh(tokens.refresh_token, "openid admin");
+        expect(refused.status).toBe(400);
+        expect((await json(refused)).error).toBe("invalid_scope");
+
+        expect((await refresh(tokens.refresh_token)).status).toBe(200);
+      });
+    });
   });
 
-  describe("Refresh scope", () => {
-    it("narrows to a subset of the granted scopes", async () => {
-      const tokens = await loginAndExchange(
-        publicClient,
-        user,
-        REDIRECT_URI,
-        SCOPE
-      );
-      const res = await postForm("/oauth/token", {
-        grant_type: "refresh_token",
-        client_id: publicClient.clientId,
-        refresh_token: tokens.refresh_token,
-        scope: "openid email",
-      });
-      expect(res.status).toBe(200);
-      expect((await json(res)).scope).toBe("openid email");
-    });
-
-    it("refuses a scope the refresh token was not granted", async () => {
-      const { code, verifier } = await browserLogin({
-        clientId: publicClient.clientId,
-        redirectUri: REDIRECT_URI,
-        scope: "openid offline_access",
-        email: user.email,
-        password: user.plainPassword,
-      });
-      const exchanged = await postForm("/oauth/token", {
-        grant_type: "authorization_code",
-        client_id: publicClient.clientId,
-        code,
-        redirect_uri: REDIRECT_URI,
-        code_verifier: verifier,
-      });
-      expect(exchanged.status).toBe(200);
-      const { refresh_token } = (await exchanged.json()) as {
-        refresh_token: string;
-      };
-
-      const res = await postForm("/oauth/token", {
-        grant_type: "refresh_token",
-        client_id: publicClient.clientId,
-        refresh_token,
-        scope: "openid email",
-      });
-      expect(res.status).toBe(400);
-      expect((await json(res)).error).toBe("invalid_scope");
-    });
-  });
-
-  describe("Refresh scope rotation", () => {
-    const refresh = (refresh_token: string, scope?: string) =>
-      postForm("/oauth/token", {
-        grant_type: "refresh_token",
-        client_id: publicClient.clientId,
-        refresh_token,
-        ...(scope && { scope }),
-      });
-
-    it("keeps the whole grant on the rotated refresh token after a narrowed refresh", async () => {
-      const tokens = await loginAndExchange(
-        publicClient,
-        user,
-        REDIRECT_URI,
-        SCOPE
-      );
-      const narrowed = await refresh(tokens.refresh_token, "openid");
-      expect(narrowed.status).toBe(200);
-      const body = (await narrowed.json()) as {
-        scope: string;
-        refresh_token: string;
-      };
-      expect(body.scope).toBe("openid");
-
-      const full = await refresh(body.refresh_token);
-      expect(full.status).toBe(200);
-      expect((await json(full)).scope).toBe(SCOPE);
-    });
-
-    it("drops a scope withdrawn from the client since the grant", async () => {
-      const client = await createTestClient({ redirectUris: [REDIRECT_URI] });
-      const { code, verifier } = await browserLogin({
-        clientId: client.clientId,
-        redirectUri: REDIRECT_URI,
-        scope: "openid offline_access core:account",
-        email: user.email,
-        password: user.plainPassword,
-      });
-      const exchanged = await postForm("/oauth/token", {
-        grant_type: "authorization_code",
-        client_id: client.clientId,
-        code,
-        redirect_uri: REDIRECT_URI,
-        code_verifier: verifier,
-      });
-      expect(exchanged.status).toBe(200);
-      const { refresh_token } = (await exchanged.json()) as {
-        refresh_token: string;
-      };
-      await prisma.oAuthClient.update({
-        where: { id: client.id },
-        data: { scopes: client.scopes.filter((s) => s !== "core:account") },
-      });
-
-      const asked = await postForm("/oauth/token", {
-        grant_type: "refresh_token",
-        client_id: client.clientId,
-        refresh_token,
-        scope: "openid core:account",
-      });
-      expect(asked.status).toBe(200);
-      const narrowed = (await asked.json()) as {
-        scope: string;
-        access_token: string;
-        refresh_token: string;
-      };
-      expect(narrowed.scope).toBe("openid");
-      const me = await fetch(`${BASE_URL}/v1/account/me`, {
-        headers: { Authorization: `Bearer ${narrowed.access_token}` },
-      });
-      expect(me.status).not.toBe(200);
-
-      const rotated = await postForm("/oauth/token", {
-        grant_type: "refresh_token",
-        client_id: client.clientId,
-        refresh_token: narrowed.refresh_token,
-      });
-      expect(rotated.status).toBe(200);
-      expect((await json(rotated)).scope).toBe("openid offline_access");
-    });
-
-    it("does not spend the refresh token on a refused scope", async () => {
-      const tokens = await loginAndExchange(
-        publicClient,
-        user,
-        REDIRECT_URI,
-        SCOPE
-      );
-      const refused = await refresh(tokens.refresh_token, "openid admin");
-      expect(refused.status).toBe(400);
-      expect((await json(refused)).error).toBe("invalid_scope");
-
-      expect((await refresh(tokens.refresh_token)).status).toBe(200);
-    });
-  });
-});
-
-describe("POST /oauth/token", () => {
   describe("OAuth Security Tests", () => {
     let confidentialClient: Awaited<ReturnType<typeof createTestClient>>;
 

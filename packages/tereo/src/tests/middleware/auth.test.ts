@@ -22,56 +22,56 @@ import {
 } from "../support/auth/login.js";
 
 describe("requireAuth", () => {
-  /**
-   * Access tokens carry `typ: at+jwt` (RFC 9068). One without it is from
-   * before the change and is accepted only if issued before the server
-   * started; an ID token is never accepted.
-   */
-
-  const me = (token: string) =>
-    fetch(`${BASE_URL}/v1/account/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-  /** A stored access token for the UI's client, signed with the given header. */
-  const legacyToken = async (iat: number, typ?: string) => {
-    const user = await createTestUser();
-    const client = await prisma.oAuthClient.findUniqueOrThrow({
-      where: { clientId: LOGIN_CLIENT.clientId },
-    });
-    const jti = randomUUID();
-    const exp = Math.floor(Date.now() / 1000) + 3600;
-    await prisma.accessToken.create({
-      data: {
-        jti,
-        clientId: client.id,
-        userId: user.id,
-        scopes: [],
-        expiresAt: new Date(exp * 1000),
-      },
-    });
-    return jwt.sign(
-      {
-        iss: env.ISSUER,
-        sub: user.id,
-        iat,
-        exp,
-        jti,
-        scope: "",
-        client_id: client.clientId,
-      },
-      currentSigningKey().privateKey,
-      {
-        algorithm: "RS256",
-        keyid: currentSigningKey().kid,
-        ...(typ !== undefined && { header: { alg: "RS256", typ } }),
-      }
-    );
-  };
-
-  const now = () => Math.floor(Date.now() / 1000);
-
   describe("access token typ", () => {
+    /**
+     * Access tokens carry `typ: at+jwt` (RFC 9068). One without it is from
+     * before the change and is accepted only if issued before the server
+     * started; an ID token is never accepted.
+     */
+
+    const me = (token: string) =>
+      fetch(`${BASE_URL}/v1/account/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+    /** A stored access token for the UI's client, signed with the given header. */
+    const legacyToken = async (iat: number, typ?: string) => {
+      const user = await createTestUser();
+      const client = await prisma.oAuthClient.findUniqueOrThrow({
+        where: { clientId: LOGIN_CLIENT.clientId },
+      });
+      const jti = randomUUID();
+      const exp = Math.floor(Date.now() / 1000) + 3600;
+      await prisma.accessToken.create({
+        data: {
+          jti,
+          clientId: client.id,
+          userId: user.id,
+          scopes: [],
+          expiresAt: new Date(exp * 1000),
+        },
+      });
+      return jwt.sign(
+        {
+          iss: env.ISSUER,
+          sub: user.id,
+          iat,
+          exp,
+          jti,
+          scope: "",
+          client_id: client.clientId,
+        },
+        currentSigningKey().privateKey,
+        {
+          algorithm: "RS256",
+          keyid: currentSigningKey().kid,
+          ...(typ !== undefined && { header: { alg: "RS256", typ } }),
+        }
+      );
+    };
+
+    const now = () => Math.floor(Date.now() / 1000);
+
     it("is at+jwt on issued access tokens", async () => {
       const token = await getTestPrincipalToken({ permissions: [] });
       expect(getJwtHeader(token).typ).toBe("at+jwt");
@@ -104,9 +104,7 @@ describe("requireAuth", () => {
       expect((await me(token)).status).toBe(HTTP_STATUS.UNAUTHORIZED);
     });
   });
-});
 
-describe("requireAuth", () => {
   describe("bearer scheme case", () => {
     let token: string;
 
@@ -142,25 +140,23 @@ describe("requireAuth", () => {
       expect(res.status).toBe(HTTP_STATUS.OK);
     });
   });
-});
-
-describe("requireAuth", () => {
-  /**
-   * ID tokens are signed with the access tokens' key and issuer, but carry no
-   * jti, client_id or scope. None of the endpoints that verify an access token
-   * may take one for an access token.
-   */
-
-  let client: Awaited<ReturnType<typeof createTestClient>>;
-
-  beforeAll(async () => {
-    client = await createTestClient();
-  });
-
-  const idTokenFor = (userId: string) =>
-    generateIdToken({ subject: userId, clientId: client.clientId }).token;
 
   describe("an ID token presented as an access token", () => {
+    /**
+     * ID tokens are signed with the access tokens' key and issuer, but carry no
+     * jti, client_id or scope. None of the endpoints that verify an access token
+     * may take one for an access token.
+     */
+
+    let client: Awaited<ReturnType<typeof createTestClient>>;
+
+    beforeAll(async () => {
+      client = await createTestClient();
+    });
+
+    const idTokenFor = (userId: string) =>
+      generateIdToken({ subject: userId, clientId: client.clientId }).token;
+
     it("revoking it at /oauth/revoke leaves other users' access tokens alone", async () => {
       const victim = await createTestUser();
       const victimToken = await getAccessTokenForUser(victim, client);
@@ -190,31 +186,29 @@ describe("requireAuth", () => {
       expect(res.status).toBe(HTTP_STATUS.UNAUTHORIZED);
     });
   });
-});
-
-describe("requireAuth", () => {
-  const SCOPE = "openid profile email offline_access";
-  const REDIRECT_URI = "http://localhost:3000/callback";
-
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  const basic = (client: Client) =>
-    `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
-
-  let publicClient: Client;
-  let ccClient: Client;
-  let user: Awaited<ReturnType<typeof createTestUser>>;
-
-  beforeAll(async () => {
-    publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
-    ccClient = await createTestClient({
-      clientType: "confidential",
-      grantTypes: ["client_credentials"],
-    });
-    user = await createTestUser();
-  });
 
   describe("Token types", () => {
+    const SCOPE = "openid profile email offline_access";
+    const REDIRECT_URI = "http://localhost:3000/callback";
+
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
+
+    const basic = (client: Client) =>
+      `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
+
+    let publicClient: Client;
+    let ccClient: Client;
+    let user: Awaited<ReturnType<typeof createTestUser>>;
+
+    beforeAll(async () => {
+      publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
+      ccClient = await createTestClient({
+        clientType: "confidential",
+        grantTypes: ["client_credentials"],
+      });
+      user = await createTestUser();
+    });
+
     it("refuses an ID token as a bearer token, and introspects it as inactive", async () => {
       const { code, verifier } = await browserLogin({
         clientId: publicClient.clientId,

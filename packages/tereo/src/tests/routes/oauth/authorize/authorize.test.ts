@@ -455,9 +455,7 @@ describe("/oauth/authorize", () => {
       });
     });
   });
-});
 
-describe("/oauth/authorize", () => {
   describe("Email case", () => {
     let client: Awaited<ReturnType<typeof createTestClient>>;
     let user: Awaited<ReturnType<typeof createTestUser>>;
@@ -490,25 +488,23 @@ describe("/oauth/authorize", () => {
       ).rejects.toThrow();
     });
   });
-});
-
-describe("/oauth/authorize", () => {
-  const legacyHash = (password: string) => {
-    const salt = randomBytes(32);
-    const key = scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 });
-    return `${salt.toString("hex")}:${key.toString("hex")}`;
-  };
-
-  let client: Awaited<ReturnType<typeof createTestClient>>;
-
-  beforeAll(async () => {
-    client = await createTestClient();
-  });
-
-  const storedHash = async (id: string) =>
-    (await prisma.user.findUniqueOrThrow({ where: { id } })).passwordHash;
 
   describe("password hash upgrade at login", () => {
+    const legacyHash = (password: string) => {
+      const salt = randomBytes(32);
+      const key = scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 });
+      return `${salt.toString("hex")}:${key.toString("hex")}`;
+    };
+
+    let client: Awaited<ReturnType<typeof createTestClient>>;
+
+    beforeAll(async () => {
+      client = await createTestClient();
+    });
+
+    const storedHash = async (id: string) =>
+      (await prisma.user.findUniqueOrThrow({ where: { id } })).passwordHash;
+
     it("rehashes a legacy hash at the current parameters on a correct login", async () => {
       const user = await createTestUser();
       const legacy = legacyHash(user.plainPassword);
@@ -533,36 +529,34 @@ describe("/oauth/authorize", () => {
       expect(await storedHash(user.id)).toBe(user.passwordHash);
     });
   });
-});
-
-describe("/oauth/authorize", () => {
-  // Test entity variables
-  let TEST_CLIENT_ID = "";
-  let TEST_CLIENT_DB_ID = "";
-  let TEST_USER_ID = "";
-  let TEST_USER_EMAIL = "";
-  const TEST_USER_PASSWORD = "TestPassword123!";
-  const TEST_REDIRECT_URI = "http://localhost:3000/test-callback";
-
-  // Helper functions
-  function generateCodeVerifier(): string {
-    return randomBytes(32)
-      .toString("base64")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=/g, "");
-  }
-
-  function generateCodeChallenge(verifier: string): string {
-    return createHash("sha256")
-      .update(verifier)
-      .digest("base64")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=/g, "");
-  }
 
   describe("OIDC Compliance", () => {
+    // Test entity variables
+    let TEST_CLIENT_ID = "";
+    let TEST_CLIENT_DB_ID = "";
+    let TEST_USER_ID = "";
+    let TEST_USER_EMAIL = "";
+    const TEST_USER_PASSWORD = "TestPassword123!";
+    const TEST_REDIRECT_URI = "http://localhost:3000/test-callback";
+
+    // Helper functions
+    function generateCodeVerifier(): string {
+      return randomBytes(32)
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=/g, "");
+    }
+
+    function generateCodeChallenge(verifier: string): string {
+      return createHash("sha256")
+        .update(verifier)
+        .digest("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=/g, "");
+    }
+
     beforeAll(async () => {
       // Check server is running
       const response = await fetch(

@@ -182,15 +182,13 @@ describe("GET /oauth/authorize", () => {
       });
     });
   });
-});
-
-describe("GET /oauth/authorize", () => {
-  // Test entity variables
-  let TEST_CLIENT_ID = "";
-  let TEST_CLIENT_DB_ID = "";
-  const TEST_REDIRECT_URI = "http://localhost:3000/test-callback";
 
   describe("OIDC Compliance", () => {
+    // Test entity variables
+    let TEST_CLIENT_ID = "";
+    let TEST_CLIENT_DB_ID = "";
+    const TEST_REDIRECT_URI = "http://localhost:3000/test-callback";
+
     beforeAll(async () => {
       // Check server is running
       const response = await fetch(

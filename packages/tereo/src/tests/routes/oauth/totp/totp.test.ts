@@ -27,16 +27,16 @@ import {
 } from "../../../../utils/totp.js";
 
 describe("/oauth/totp", () => {
-  interface TotpSetupResponse {
-    secret?: string;
-    qrCodeUri?: string;
-    setupToken?: string;
-    expiresAt?: string;
-    error?: string;
-    error_description?: string;
-  }
-
   describe("OAuth TOTP Endpoints", () => {
+    interface TotpSetupResponse {
+      secret?: string;
+      qrCodeUri?: string;
+      setupToken?: string;
+      expiresAt?: string;
+      error?: string;
+      error_description?: string;
+    }
+
     let testClient: Awaited<ReturnType<typeof createTestClient>>;
 
     beforeAll(async () => {
@@ -146,190 +146,194 @@ describe("/oauth/totp", () => {
       });
     });
   });
-});
-
-describe("/oauth/totp", () => {
-  // Test entity variables
-  let TEST_CLIENT_ID = "";
-  let TEST_CLIENT_DB_ID = "";
-  let TEST_MFA_USER_ID = "";
-  let TEST_MFA_USER_EMAIL = "";
-  const TEST_USER_PASSWORD = "TestPassword123!";
-  const TEST_REDIRECT_URI = "http://localhost:3000/mfa-callback";
-  let TOTP_SECRET = "";
-
-  interface ErrorResponse {
-    error?: string;
-    error_description?: string;
-    message?: string;
-    [key: string]: unknown;
-  }
-
-  // Helper functions
-  function generateCodeVerifier(): string {
-    return randomBytes(32)
-      .toString("base64")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=/g, "");
-  }
-
-  function generateCodeChallenge(verifier: string): string {
-    return createHash("sha256")
-      .update(verifier)
-      .digest("base64")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=/g, "");
-  }
-
-  // Type definitions
-  interface AuthorizeResponse {
-    redirect_url?: string;
-    error?: string;
-    error_description?: string;
-  }
-
-  interface MfaChallenge {
-    codeVerifier: string;
-    sessionToken: string;
-    /** The `tereo_2fa_session_{client_id}` cookie pair. */
-    cookie: string;
-  }
-
-  /**
-   * Password login for a user with TOTP: authorize answers with the 2FA page
-   * and its session, set in a cookie as well.
-   */
-  async function startMfaLogin(
-    email: string,
-    scope = "openid profile email"
-  ): Promise<MfaChallenge> {
-    const codeVerifier = generateCodeVerifier();
-    const codeChallenge = generateCodeChallenge(codeVerifier);
-    const state = randomBytes(16).toString("hex");
-    const params = {
-      response_type: "code",
-      client_id: TEST_CLIENT_ID,
-      redirect_uri: TEST_REDIRECT_URI,
-      state,
-      scope,
-      code_challenge: codeChallenge,
-      code_challenge_method: "S256",
-    };
-
-    const getResponse = await fetch(
-      `${BASE_URL}/oauth/authorize?${new URLSearchParams(params)}`,
-      { redirect: "manual" }
-    );
-    expect(getResponse.status).toBe(HTTP_STATUS.FOUND);
-    const sessionCookie =
-      (getResponse.headers.get("set-cookie") || "").match(
-        /tereo_session_[^=]+=[^;]+/
-      )?.[0] ?? "";
-    expect(sessionCookie).toBeTruthy();
-
-    const authResponse = await fetch(`${BASE_URL}/oauth/authorize`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: sessionCookie },
-      body: JSON.stringify({
-        ...params,
-        email,
-        password: TEST_USER_PASSWORD,
-      }),
-    });
-    expect(authResponse.status).toBe(HTTP_STATUS.OK);
-    const authData = (await authResponse.json()) as AuthorizeResponse;
-    const challengeUrl = new URL(authData.redirect_url!);
-    expect(challengeUrl.pathname).toBe("/login/2fa");
-    const sessionToken = challengeUrl.searchParams.get("session");
-    expect(sessionToken).toBeTruthy();
-    const cookie =
-      (authResponse.headers.get("set-cookie") || "").match(
-        /tereo_2fa_session_[^=]+=[^;]+/
-      )?.[0] ?? "";
-    expect(cookie).toBeTruthy();
-
-    return { codeVerifier, sessionToken: sessionToken!, cookie };
-  }
-
-  /** POSTs to `/oauth/totp/verify` or `/oauth/totp/recovery`. */
-  function submitSecondFactor(
-    path: "verify" | "recovery",
-    challenge: MfaChallenge,
-    body: Record<string, unknown>
-  ) {
-    return fetch(`${BASE_URL}/oauth/totp/${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: challenge.cookie },
-      body: JSON.stringify({ session_token: challenge.sessionToken, ...body }),
-    });
-  }
-
-  /**
-   * From a successful second factor through consent to tokens: the user
-   * belongs to no organization, so the next stop is the consent screen.
-   */
-  async function finishMfaLogin(
-    challenge: MfaChallenge,
-    factorResponse: Response
-  ): Promise<TokenResponse> {
-    expect(factorResponse.status).toBe(HTTP_STATUS.OK);
-    const factorData = (await factorResponse.json()) as TotpVerifyResponse;
-    const consentUrl = new URL(factorData.redirect_url!);
-    expect(consentUrl.pathname).toBe("/consent");
-    const consentCookie =
-      (factorResponse.headers.get("set-cookie") || "").match(
-        /tereo_consent_session_[^=]+=[^;]+/
-      )?.[0] ?? "";
-    expect(consentCookie).toBeTruthy();
-
-    const consentResponse = await fetch(`${BASE_URL}/oauth/consent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: consentCookie },
-      body: JSON.stringify({
-        session_token: consentUrl.searchParams.get("session"),
-        approved: true,
-      }),
-    });
-    expect(consentResponse.status).toBe(HTTP_STATUS.OK);
-    const consentData = (await consentResponse.json()) as AuthorizeResponse;
-    const code = new URL(consentData.redirect_url!).searchParams.get("code");
-    expect(code).toBeTruthy();
-
-    const tokenResponse = await fetch(`${BASE_URL}/oauth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: TEST_REDIRECT_URI,
-        client_id: TEST_CLIENT_ID,
-        code_verifier: challenge.codeVerifier,
-      }),
-    });
-    expect(tokenResponse.status).toBe(HTTP_STATUS.OK);
-    return (await tokenResponse.json()) as TokenResponse;
-  }
-
-  interface TotpVerifyResponse {
-    redirect_url?: string;
-    error?: string;
-    error_description?: string;
-  }
-
-  interface TokenResponse {
-    access_token?: string;
-    refresh_token?: string;
-    id_token?: string;
-    token_type?: string;
-    expires_in?: number;
-    scope?: string;
-    error?: string;
-    error_description?: string;
-  }
 
   describe("MFA Authentication Flow", () => {
+    // Test entity variables
+    let TEST_CLIENT_ID = "";
+    let TEST_CLIENT_DB_ID = "";
+    let TEST_MFA_USER_ID = "";
+    let TEST_MFA_USER_EMAIL = "";
+    const TEST_USER_PASSWORD = "TestPassword123!";
+    const TEST_REDIRECT_URI = "http://localhost:3000/mfa-callback";
+    let TOTP_SECRET = "";
+
+    interface ErrorResponse {
+      error?: string;
+      error_description?: string;
+      message?: string;
+      [key: string]: unknown;
+    }
+
+    // Helper functions
+    function generateCodeVerifier(): string {
+      return randomBytes(32)
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=/g, "");
+    }
+
+    function generateCodeChallenge(verifier: string): string {
+      return createHash("sha256")
+        .update(verifier)
+        .digest("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=/g, "");
+    }
+
+    // Type definitions
+    interface AuthorizeResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
+    interface MfaChallenge {
+      codeVerifier: string;
+      sessionToken: string;
+      /** The `tereo_2fa_session_{client_id}` cookie pair. */
+      cookie: string;
+    }
+
+    /**
+     * Password login for a user with TOTP: authorize answers with the 2FA page
+     * and its session, set in a cookie as well.
+     */
+    async function startMfaLogin(
+      email: string,
+      scope = "openid profile email"
+    ): Promise<MfaChallenge> {
+      const codeVerifier = generateCodeVerifier();
+      const codeChallenge = generateCodeChallenge(codeVerifier);
+      const state = randomBytes(16).toString("hex");
+      const params = {
+        response_type: "code",
+        client_id: TEST_CLIENT_ID,
+        redirect_uri: TEST_REDIRECT_URI,
+        state,
+        scope,
+        code_challenge: codeChallenge,
+        code_challenge_method: "S256",
+      };
+
+      const getResponse = await fetch(
+        `${BASE_URL}/oauth/authorize?${new URLSearchParams(params)}`,
+        { redirect: "manual" }
+      );
+      expect(getResponse.status).toBe(HTTP_STATUS.FOUND);
+      const sessionCookie =
+        (getResponse.headers.get("set-cookie") || "").match(
+          /tereo_session_[^=]+=[^;]+/
+        )?.[0] ?? "";
+      expect(sessionCookie).toBeTruthy();
+
+      const authResponse = await fetch(`${BASE_URL}/oauth/authorize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: sessionCookie },
+        body: JSON.stringify({
+          ...params,
+          email,
+          password: TEST_USER_PASSWORD,
+        }),
+      });
+      expect(authResponse.status).toBe(HTTP_STATUS.OK);
+      const authData = (await authResponse.json()) as AuthorizeResponse;
+      const challengeUrl = new URL(authData.redirect_url!);
+      expect(challengeUrl.pathname).toBe("/login/2fa");
+      const sessionToken = challengeUrl.searchParams.get("session");
+      expect(sessionToken).toBeTruthy();
+      const cookie =
+        (authResponse.headers.get("set-cookie") || "").match(
+          /tereo_2fa_session_[^=]+=[^;]+/
+        )?.[0] ?? "";
+      expect(cookie).toBeTruthy();
+
+      return { codeVerifier, sessionToken: sessionToken!, cookie };
+    }
+
+    /** POSTs to `/oauth/totp/verify` or `/oauth/totp/recovery`. */
+    function submitSecondFactor(
+      path: "verify" | "recovery",
+      challenge: MfaChallenge,
+      body: Record<string, unknown>
+    ) {
+      return fetch(`${BASE_URL}/oauth/totp/${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: challenge.cookie,
+        },
+        body: JSON.stringify({
+          session_token: challenge.sessionToken,
+          ...body,
+        }),
+      });
+    }
+
+    /**
+     * From a successful second factor through consent to tokens: the user
+     * belongs to no organization, so the next stop is the consent screen.
+     */
+    async function finishMfaLogin(
+      challenge: MfaChallenge,
+      factorResponse: Response
+    ): Promise<TokenResponse> {
+      expect(factorResponse.status).toBe(HTTP_STATUS.OK);
+      const factorData = (await factorResponse.json()) as TotpVerifyResponse;
+      const consentUrl = new URL(factorData.redirect_url!);
+      expect(consentUrl.pathname).toBe("/consent");
+      const consentCookie =
+        (factorResponse.headers.get("set-cookie") || "").match(
+          /tereo_consent_session_[^=]+=[^;]+/
+        )?.[0] ?? "";
+      expect(consentCookie).toBeTruthy();
+
+      const consentResponse = await fetch(`${BASE_URL}/oauth/consent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: consentCookie },
+        body: JSON.stringify({
+          session_token: consentUrl.searchParams.get("session"),
+          approved: true,
+        }),
+      });
+      expect(consentResponse.status).toBe(HTTP_STATUS.OK);
+      const consentData = (await consentResponse.json()) as AuthorizeResponse;
+      const code = new URL(consentData.redirect_url!).searchParams.get("code");
+      expect(code).toBeTruthy();
+
+      const tokenResponse = await fetch(`${BASE_URL}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: TEST_REDIRECT_URI,
+          client_id: TEST_CLIENT_ID,
+          code_verifier: challenge.codeVerifier,
+        }),
+      });
+      expect(tokenResponse.status).toBe(HTTP_STATUS.OK);
+      return (await tokenResponse.json()) as TokenResponse;
+    }
+
+    interface TotpVerifyResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
+    interface TokenResponse {
+      access_token?: string;
+      refresh_token?: string;
+      id_token?: string;
+      token_type?: string;
+      expires_in?: number;
+      scope?: string;
+      error?: string;
+      error_description?: string;
+    }
+
     beforeAll(async () => {
       // Check server is running
       const response = await fetch(
@@ -575,20 +579,18 @@ describe("/oauth/totp", () => {
       });
     });
   });
-});
-
-describe("/oauth/totp", () => {
-  const REDIRECT_URI = "http://localhost:3000/callback";
-
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  let publicClient: Client;
-
-  beforeAll(async () => {
-    publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
-  });
 
   describe("TOTP setup during login", () => {
+    const REDIRECT_URI = "http://localhost:3000/callback";
+
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
+
+    let publicClient: Client;
+
+    beforeAll(async () => {
+      publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
+    });
+
     // Five attempts per user (credentialFailureLimits.test.ts covers the
     // lockout): four wrong codes leave room for the right one.
     it("counts wrong codes toward the lockout, clears them on success, and audits a spent recovery code", async () => {

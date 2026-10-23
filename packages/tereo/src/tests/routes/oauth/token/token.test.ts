@@ -419,24 +419,22 @@ describe("POST /oauth/token", () => {
       });
     });
   });
-});
-
-describe("POST /oauth/token", () => {
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  const basic = (client: Client) =>
-    `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
-
-  let ccClient: Client;
-
-  beforeAll(async () => {
-    ccClient = await createTestClient({
-      clientType: "confidential",
-      grantTypes: ["client_credentials"],
-    });
-  });
 
   describe("Client authentication", () => {
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
+
+    const basic = (client: Client) =>
+      `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
+
+    let ccClient: Client;
+
+    beforeAll(async () => {
+      ccClient = await createTestClient({
+        clientType: "confidential",
+        grantTypes: ["client_credentials"],
+      });
+    });
+
     it("marks token responses uncacheable", async () => {
       const res = await postForm(
         "/oauth/token",
@@ -448,40 +446,38 @@ describe("POST /oauth/token", () => {
       expect(res.headers.get("pragma")).toBe("no-cache");
     });
   });
-});
-
-describe("POST /oauth/token", () => {
-  type Client = { clientId: string; redirectUris: string[] };
-
-  const exchange = async (client: Client) => {
-    const user = await createTestUser();
-    const redirectUri = client.redirectUris[0];
-    const { code, verifier } = await browserLogin({
-      clientId: client.clientId,
-      redirectUri,
-      scope: "openid offline_access",
-      email: user.email,
-      password: user.plainPassword,
-    });
-    const res = await fetch(`${BASE_URL}/oauth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: redirectUri,
-        client_id: client.clientId,
-        code_verifier: verifier,
-      }),
-    });
-    expect(res.status).toBe(HTTP_STATUS.OK);
-    return (await res.json()) as {
-      access_token: string;
-      refresh_token?: string;
-    };
-  };
 
   describe("refresh tokens at the code exchange", () => {
+    type Client = { clientId: string; redirectUris: string[] };
+
+    const exchange = async (client: Client) => {
+      const user = await createTestUser();
+      const redirectUri = client.redirectUris[0];
+      const { code, verifier } = await browserLogin({
+        clientId: client.clientId,
+        redirectUri,
+        scope: "openid offline_access",
+        email: user.email,
+        password: user.plainPassword,
+      });
+      const res = await fetch(`${BASE_URL}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: redirectUri,
+          client_id: client.clientId,
+          code_verifier: verifier,
+        }),
+      });
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      return (await res.json()) as {
+        access_token: string;
+        refresh_token?: string;
+      };
+    };
+
     it("are issued to a client with the refresh_token grant", async () => {
       const client = await createTestClient({
         grantTypes: ["authorization_code", "refresh_token"],
@@ -506,63 +502,61 @@ describe("POST /oauth/token", () => {
       expect((await exchange(ui)).refresh_token).toBeTruthy();
     });
   });
-});
-
-describe("POST /oauth/token", () => {
-  const REDIRECT_URI = "http://localhost:3000/token-lifecycle-audit-callback";
-  const SCOPE = "openid offline_access";
-
-  let client: Awaited<ReturnType<typeof createTestClient>>;
-  let endpointId: string;
-
-  beforeAll(async () => {
-    client = await createTestClient({ redirectUris: [REDIRECT_URI] });
-    const endpoint = await createTestWebhookEndpoint(
-      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
-      { eventTypes: ["auth.user.sessions-revoked"] }
-    );
-    endpointId = endpoint.id;
-  });
-
-  const { exchange, signIn } = codeFlowSignIn(
-    () => client,
-    REDIRECT_URI,
-    SCOPE
-  );
-
-  const refresh = (refreshToken: string) =>
-    fetch(`${BASE_URL}/oauth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: client.clientId,
-        refresh_token: refreshToken,
-      }),
-    });
-
-  const sidOf = (accessToken: string) =>
-    (decodeJwt(accessToken) as unknown as { sid: string }).sid;
-
-  const entriesOf = (userId: string) =>
-    prisma.auditLogEntry.findMany({
-      where: { entityType: "User", entityId: userId },
-      orderBy: { createdAt: "asc" },
-    });
-
-  const revokedEventsFor = (userId: string) =>
-    prisma.webhookDelivery.count({
-      where: {
-        webhookEndpointId: endpointId,
-        eventType: "auth.user.sessions-revoked",
-        payload: { path: ["entityId"], equals: userId },
-      },
-    });
-
-  const expectRevokedEvent = (userId: string) =>
-    waitFor(async () => (await revokedEventsFor(userId)) > 0, 10_000);
 
   describe("token reuse", () => {
+    const REDIRECT_URI = "http://localhost:3000/token-lifecycle-audit-callback";
+    const SCOPE = "openid offline_access";
+
+    let client: Awaited<ReturnType<typeof createTestClient>>;
+    let endpointId: string;
+
+    beforeAll(async () => {
+      client = await createTestClient({ redirectUris: [REDIRECT_URI] });
+      const endpoint = await createTestWebhookEndpoint(
+        await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+        { eventTypes: ["auth.user.sessions-revoked"] }
+      );
+      endpointId = endpoint.id;
+    });
+
+    const { exchange, signIn } = codeFlowSignIn(
+      () => client,
+      REDIRECT_URI,
+      SCOPE
+    );
+
+    const refresh = (refreshToken: string) =>
+      fetch(`${BASE_URL}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: client.clientId,
+          refresh_token: refreshToken,
+        }),
+      });
+
+    const sidOf = (accessToken: string) =>
+      (decodeJwt(accessToken) as unknown as { sid: string }).sid;
+
+    const entriesOf = (userId: string) =>
+      prisma.auditLogEntry.findMany({
+        where: { entityType: "User", entityId: userId },
+        orderBy: { createdAt: "asc" },
+      });
+
+    const revokedEventsFor = (userId: string) =>
+      prisma.webhookDelivery.count({
+        where: {
+          webhookEndpointId: endpointId,
+          eventType: "auth.user.sessions-revoked",
+          payload: { path: ["entityId"], equals: userId },
+        },
+      });
+
+    const expectRevokedEvent = (userId: string) =>
+      waitFor(async () => (await revokedEventsFor(userId)) > 0, 10_000);
+
     it("audits a replayed authorization code as core and emits the revocation", async () => {
       const { user, code, verifier, tokens } = await signIn();
 
@@ -628,23 +622,21 @@ describe("POST /oauth/token", () => {
       await expectRevokedEvent(user.id);
     });
   });
-});
-
-describe("POST /oauth/token", () => {
-  const SCOPE = "openid profile email offline_access";
-  const REDIRECT_URI = "http://localhost:3000/callback";
-
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  let publicClient: Client;
-  let user: Awaited<ReturnType<typeof createTestUser>>;
-
-  beforeAll(async () => {
-    publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
-    user = await createTestUser();
-  });
 
   describe("Refresh-token cookie", () => {
+    const SCOPE = "openid profile email offline_access";
+    const REDIRECT_URI = "http://localhost:3000/callback";
+
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
+
+    let publicClient: Client;
+    let user: Awaited<ReturnType<typeof createTestUser>>;
+
+    beforeAll(async () => {
+      publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
+      user = await createTestUser();
+    });
+
     const cookieRefresh = (cookie: string) =>
       postForm(
         "/oauth/token",

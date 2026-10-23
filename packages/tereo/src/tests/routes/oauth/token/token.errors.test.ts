@@ -395,64 +395,62 @@ describe("POST /oauth/token", () => {
       });
     });
   });
-});
-
-describe("POST /oauth/token", () => {
-  /**
-   * A refresh token issued under an organization stops working once the user
-   * loses it — deactivated, or their membership removed — including one minted
-   * by a refresh racing the deactivation.
-   */
-
-  let client: Awaited<ReturnType<typeof createTestClient>>;
-  let clientRecord: Awaited<ReturnType<typeof db.clients.getByClientId>>;
-  let adminToken: string;
-
-  beforeAll(async () => {
-    client = await createTestClient();
-    clientRecord = await db.clients.getByClientId(client.clientId);
-    adminToken = await getTestPrincipalToken({
-      permissions: ["organizations.write", "organizations.read"],
-    });
-  });
-
-  const setUp = async () => {
-    const user = await createTestUser();
-    const org = await createTestOrganization(adminToken);
-    await addTestOrgMember(adminToken, org.id, user.id);
-    const token = randomBytes(32).toString("base64url");
-    const id = await db.refreshTokens.create({
-      token,
-      clientId: clientRecord.id,
-      userId: user.id,
-      organizationId: org.id,
-      scopes: ["openid", "offline_access"],
-      expiresAt: new Date(Date.now() + 3_600_000),
-    });
-    return { user, org, token, id };
-  };
-
-  const refresh = (token: string) =>
-    handleRefreshToken(clientRecord, {
-      grant_type: "refresh_token",
-      client_id: client.clientId,
-      refresh_token: token,
-    });
-
-  const deactivate = (orgId: string) =>
-    fetch(`${BASE_URL}/v1/admin/organizations/${orgId}`, {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ isActive: false }),
-    });
-
-  const liveTokens = (organizationId: string) =>
-    prisma.refreshToken.count({ where: { organizationId, revokedAt: null } });
 
   describe("refresh tokens of an organization the user lost", () => {
+    /**
+     * A refresh token issued under an organization stops working once the user
+     * loses it — deactivated, or their membership removed — including one minted
+     * by a refresh racing the deactivation.
+     */
+
+    let client: Awaited<ReturnType<typeof createTestClient>>;
+    let clientRecord: Awaited<ReturnType<typeof db.clients.getByClientId>>;
+    let adminToken: string;
+
+    beforeAll(async () => {
+      client = await createTestClient();
+      clientRecord = await db.clients.getByClientId(client.clientId);
+      adminToken = await getTestPrincipalToken({
+        permissions: ["organizations.write", "organizations.read"],
+      });
+    });
+
+    const setUp = async () => {
+      const user = await createTestUser();
+      const org = await createTestOrganization(adminToken);
+      await addTestOrgMember(adminToken, org.id, user.id);
+      const token = randomBytes(32).toString("base64url");
+      const id = await db.refreshTokens.create({
+        token,
+        clientId: clientRecord.id,
+        userId: user.id,
+        organizationId: org.id,
+        scopes: ["openid", "offline_access"],
+        expiresAt: new Date(Date.now() + 3_600_000),
+      });
+      return { user, org, token, id };
+    };
+
+    const refresh = (token: string) =>
+      handleRefreshToken(clientRecord, {
+        grant_type: "refresh_token",
+        client_id: client.clientId,
+        refresh_token: token,
+      });
+
+    const deactivate = (orgId: string) =>
+      fetch(`${BASE_URL}/v1/admin/organizations/${orgId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ isActive: false }),
+      });
+
+    const liveTokens = (organizationId: string) =>
+      prisma.refreshToken.count({ where: { organizationId, revokedAt: null } });
+
     it("a refresh token for a deactivated organization is refused and revoked", async () => {
       const { org, token, id } = await setUp();
       // Deactivated without the revocation, as if it had missed this token.
@@ -506,34 +504,32 @@ describe("POST /oauth/token", () => {
       expect(await liveTokens(org.id)).toBe(0);
     });
   });
-});
-
-describe("POST /oauth/token", () => {
-  const SCOPE = "openid profile email offline_access";
-  const REDIRECT_URI = "http://localhost:3000/callback";
-
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  const basic = (client: Client) =>
-    `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
-
-  const clientCredentialsToken = async (client: Client) => {
-    const res = await postForm(
-      "/oauth/token",
-      { grant_type: "client_credentials" },
-      { Authorization: basic(client) }
-    );
-    expect(res.status).toBe(200);
-    return ((await res.json()) as { access_token: string }).access_token;
-  };
-
-  let publicClient: Client;
-
-  beforeAll(async () => {
-    publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
-  });
 
   describe("Organization of a code", () => {
+    const SCOPE = "openid profile email offline_access";
+    const REDIRECT_URI = "http://localhost:3000/callback";
+
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
+
+    const basic = (client: Client) =>
+      `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
+
+    const clientCredentialsToken = async (client: Client) => {
+      const res = await postForm(
+        "/oauth/token",
+        { grant_type: "client_credentials" },
+        { Authorization: basic(client) }
+      );
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { access_token: string }).access_token;
+    };
+
+    let publicClient: Client;
+
+    beforeAll(async () => {
+      publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
+    });
+
     const loginToOrg = async () => {
       const admin = await createAdminUser();
       const adminToken = await getAccessTokenForUser(admin, publicClient);

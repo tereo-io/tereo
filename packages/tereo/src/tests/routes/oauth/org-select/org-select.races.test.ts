@@ -108,124 +108,128 @@ describe("/oauth/org-select and /oauth/org-select/submit", () => {
       });
     });
   });
-});
 
-describe("/oauth/org-select and /oauth/org-select/submit", () => {
-  let orgSelectControllers: typeof import("../../../../routes/oauth/org-select/controllers.js");
+  describe("a password change during the org-select step", () => {
+    let orgSelectControllers: typeof import("../../../../routes/oauth/org-select/controllers.js");
 
-  beforeAll(async () => {
-    orgSelectControllers =
-      await import("../../../../routes/oauth/org-select/controllers.js");
-  });
-
-  const changePassword = async (userId: string) => {
-    const newHash = await hashPassword("A-New-Password-456!");
-    await prisma.$transaction(async (tx) => {
-      await db.users.lockForSessionEnd(tx, { userIds: [userId] });
-      await tx.user.update({
-        where: { id: userId },
-        data: { passwordHash: newHash },
-      });
-      await db.loginFlows.deletePendingForUser(userId, null, tx);
+    beforeAll(async () => {
+      orgSelectControllers =
+        await import("../../../../routes/oauth/org-select/controllers.js");
     });
-  };
 
-  /** Waits until `change` waits on a row lock, or settles. */
-  const untilBlockedOrDone = async (change: Promise<void>) => {
-    let settled = false;
-    void change.finally(() => (settled = true));
-    for (let i = 0; i < 500 && !settled; i++) {
-      const [{ count }] = await prisma.$queryRaw<{ count: bigint }[]>`
+    const changePassword = async (userId: string) => {
+      const newHash = await hashPassword("A-New-Password-456!");
+      await prisma.$transaction(async (tx) => {
+        await db.users.lockForSessionEnd(tx, { userIds: [userId] });
+        await tx.user.update({
+          where: { id: userId },
+          data: { passwordHash: newHash },
+        });
+        await db.loginFlows.deletePendingForUser(userId, null, tx);
+      });
+    };
+
+    /** Waits until `change` waits on a row lock, or settles. */
+    const untilBlockedOrDone = async (change: Promise<void>) => {
+      let settled = false;
+      void change.finally(() => (settled = true));
+      for (let i = 0; i < 500 && !settled; i++) {
+        const [{ count }] = await prisma.$queryRaw<{ count: bigint }[]>`
       SELECT count(*) AS count FROM pg_stat_activity
       WHERE wait_event_type = 'Lock' AND query LIKE '%FOR UPDATE%'
         AND datname = current_database()`;
-      if (count > 0n) return;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  };
-
-  /** Calls a handler in-process with the given cookies; returns its error. */
-  const callHandler = async (
-    handler: (req: Request, res: ExpressResponse) => Promise<void>,
-    body: object,
-    cookies: Record<string, string>
-  ): Promise<unknown> => {
-    const res = {
-      cookie: () => res,
-      clearCookie: () => res,
-      status: () => res,
-      json: () => res,
+        if (count > 0n) return;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
     };
-    const req = { body, cookies, headers: {}, ip: "127.0.0.1", method: "POST" };
-    try {
-      await handler(
-        req as unknown as Request,
-        res as unknown as ExpressResponse
+
+    /** Calls a handler in-process with the given cookies; returns its error. */
+    const callHandler = async (
+      handler: (req: Request, res: ExpressResponse) => Promise<void>,
+      body: object,
+      cookies: Record<string, string>
+    ): Promise<unknown> => {
+      const res = {
+        cookie: () => res,
+        clearCookie: () => res,
+        status: () => res,
+        json: () => res,
+      };
+      const req = {
+        body,
+        cookies,
+        headers: {},
+        ip: "127.0.0.1",
+        method: "POST",
+      };
+      try {
+        await handler(
+          req as unknown as Request,
+          res as unknown as ExpressResponse
+        );
+        return null;
+      } catch (err) {
+        return err;
+      }
+    };
+
+    /** Replaces one function of a db module for the length of `run`. */
+    const replacing = async <K extends keyof typeof db>(
+      key: K,
+      fn: string,
+      wrap: (original: (...args: never[]) => Promise<unknown>) => unknown,
+      run: () => Promise<unknown>
+    ) => {
+      const original = db[key];
+      const inner = (original as unknown as Record<string, never>)[fn];
+      (db as Record<K, unknown>)[key] = { ...original, [fn]: wrap(inner) };
+      try {
+        return await run();
+      } finally {
+        (db as Record<K, unknown>)[key] = original;
+      }
+    };
+
+    /**
+     * The password changes just before the code's transaction takes the user's
+     * lock: after the step was read, and after a consume made outside the lock.
+     */
+    const changingPasswordBeforeIssue = (
+      userId: string,
+      run: () => Promise<unknown>
+    ) =>
+      replacing(
+        "users",
+        "lockForTokenIssue",
+        (lock) =>
+          async (...args: never[]) => {
+            await changePassword(userId);
+            return lock(...args);
+          },
+        run
       );
-      return null;
-    } catch (err) {
-      return err;
-    }
-  };
 
-  /** Replaces one function of a db module for the length of `run`. */
-  const replacing = async <K extends keyof typeof db>(
-    key: K,
-    fn: string,
-    wrap: (original: (...args: never[]) => Promise<unknown>) => unknown,
-    run: () => Promise<unknown>
-  ) => {
-    const original = db[key];
-    const inner = (original as unknown as Record<string, never>)[fn];
-    (db as Record<K, unknown>)[key] = { ...original, [fn]: wrap(inner) };
-    try {
-      return await run();
-    } finally {
-      (db as Record<K, unknown>)[key] = original;
-    }
-  };
-
-  /**
-   * The password changes just before the code's transaction takes the user's
-   * lock: after the step was read, and after a consume made outside the lock.
-   */
-  const changingPasswordBeforeIssue = (
-    userId: string,
-    run: () => Promise<unknown>
-  ) =>
-    replacing(
-      "users",
-      "lockForTokenIssue",
-      (lock) =>
-        async (...args: never[]) => {
-          await changePassword(userId);
-          return lock(...args);
-        },
-      run
-    );
-
-  const flowFields = (redirectUri: string) => {
-    const pkce = newPkce();
-    return {
-      redirectUri,
-      scopes: ["openid"],
-      state: generateUniqueId(),
-      codeChallenge: pkce.challenge,
-      codeChallengeMethod: "S256",
-      nonce: null,
-      authTime: new Date(),
-      maxAge: null,
-      acrValues: null,
-      prompt: null,
-      authMethods: ["pwd"],
-      expiresAt: new Date(Date.now() + 120_000),
+    const flowFields = (redirectUri: string) => {
+      const pkce = newPkce();
+      return {
+        redirectUri,
+        scopes: ["openid"],
+        state: generateUniqueId(),
+        codeChallenge: pkce.challenge,
+        codeChallengeMethod: "S256",
+        nonce: null,
+        authTime: new Date(),
+        maxAge: null,
+        acrValues: null,
+        prompt: null,
+        authMethods: ["pwd"],
+        expiresAt: new Date(Date.now() + 120_000),
+      };
     };
-  };
 
-  const codesFor = (userId: string) =>
-    prisma.authorizationCode.count({ where: { userId } });
+    const codesFor = (userId: string) =>
+      prisma.authorizationCode.count({ where: { userId } });
 
-  describe("a password change during the org-select step", () => {
     const orgSelectSession = async (
       client: Awaited<ReturnType<typeof createTestClient>>
     ) => {

@@ -28,58 +28,58 @@ import {
 } from "../../../support/webhooks.js";
 
 describe("/oauth/end-session and /oauth/end-session/confirm", () => {
-  /**
-   * End-session without an id_token_hint: anything can send a browser there,
-   * so it only asks the user to confirm. The session ends on the confirm POST,
-   * and only with the token core put in this browser's cookie.
-   */
-
-  const REDIRECT_URI = "http://localhost:3000/end-session-confirm-callback";
-  const POST_LOGOUT_URI = "http://localhost:3000/end-session-confirm-logout";
-  const CONFIRM_COOKIE = "tereo_logout_confirm";
-
-  let client: Awaited<ReturnType<typeof createTestClient>>;
-
-  const signIn = async () => {
-    const user = await createTestUser();
-    const { jar } = await browserLogin({
-      clientId: client.clientId,
-      redirectUri: REDIRECT_URI,
-      scope: "openid",
-      email: user.email,
-      password: user.plainPassword,
-    });
-    return { user, jar };
-  };
-
-  const sessionsOf = (userId: string) =>
-    prisma.userSession.count({ where: { userId } });
-
-  /** A cross-site GET: the browser's cookies, no hint. */
-  const endSessionGet = (jar: CookieJar, params: Record<string, string>) =>
-    fetch(`${BASE_URL}/oauth/end-session?${new URLSearchParams(params)}`, {
-      redirect: "manual",
-      headers: { Cookie: cookieHeader(jar) },
-    });
-
-  const postConfirm = (jar: CookieJar, body: Record<string, string>) =>
-    fetch(`${BASE_URL}/oauth/end-session/confirm`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: cookieHeader(jar),
-      },
-      body: JSON.stringify(body),
-    });
-
-  beforeAll(async () => {
-    client = await createTestClient({
-      redirectUris: [REDIRECT_URI],
-      postLogoutRedirectUris: [POST_LOGOUT_URI],
-    });
-  });
-
   describe("end-session without id_token_hint", () => {
+    /**
+     * End-session without an id_token_hint: anything can send a browser there,
+     * so it only asks the user to confirm. The session ends on the confirm POST,
+     * and only with the token core put in this browser's cookie.
+     */
+
+    const REDIRECT_URI = "http://localhost:3000/end-session-confirm-callback";
+    const POST_LOGOUT_URI = "http://localhost:3000/end-session-confirm-logout";
+    const CONFIRM_COOKIE = "tereo_logout_confirm";
+
+    let client: Awaited<ReturnType<typeof createTestClient>>;
+
+    const signIn = async () => {
+      const user = await createTestUser();
+      const { jar } = await browserLogin({
+        clientId: client.clientId,
+        redirectUri: REDIRECT_URI,
+        scope: "openid",
+        email: user.email,
+        password: user.plainPassword,
+      });
+      return { user, jar };
+    };
+
+    const sessionsOf = (userId: string) =>
+      prisma.userSession.count({ where: { userId } });
+
+    /** A cross-site GET: the browser's cookies, no hint. */
+    const endSessionGet = (jar: CookieJar, params: Record<string, string>) =>
+      fetch(`${BASE_URL}/oauth/end-session?${new URLSearchParams(params)}`, {
+        redirect: "manual",
+        headers: { Cookie: cookieHeader(jar) },
+      });
+
+    const postConfirm = (jar: CookieJar, body: Record<string, string>) =>
+      fetch(`${BASE_URL}/oauth/end-session/confirm`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookieHeader(jar),
+        },
+        body: JSON.stringify(body),
+      });
+
+    beforeAll(async () => {
+      client = await createTestClient({
+        redirectUris: [REDIRECT_URI],
+        postLogoutRedirectUris: [POST_LOGOUT_URI],
+      });
+    });
+
     it("does not end the session on a GET; it sends the browser to confirm", async () => {
       const { user, jar } = await signIn();
       const ssoCookie = jar.get(userSessionCookieName(client.clientId));
@@ -332,45 +332,43 @@ describe("/oauth/end-session and /oauth/end-session/confirm", () => {
       expect(await sessionsOf(victim.id)).toBe(0);
     });
   });
-});
-
-describe("/oauth/end-session and /oauth/end-session/confirm", () => {
-  const REDIRECT_URI = "http://localhost:3000/token-lifecycle-audit-callback";
-  const SCOPE = "openid offline_access";
-
-  let client: Awaited<ReturnType<typeof createTestClient>>;
-  let endpointId: string;
-
-  beforeAll(async () => {
-    client = await createTestClient({ redirectUris: [REDIRECT_URI] });
-    const endpoint = await createTestWebhookEndpoint(
-      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
-      { eventTypes: ["auth.user.sessions-revoked"] }
-    );
-    endpointId = endpoint.id;
-  });
-
-  const { signIn } = codeFlowSignIn(() => client, REDIRECT_URI, SCOPE);
-
-  const entriesOf = (userId: string) =>
-    prisma.auditLogEntry.findMany({
-      where: { entityType: "User", entityId: userId },
-      orderBy: { createdAt: "asc" },
-    });
-
-  const revokedEventsFor = (userId: string) =>
-    prisma.webhookDelivery.count({
-      where: {
-        webhookEndpointId: endpointId,
-        eventType: "auth.user.sessions-revoked",
-        payload: { path: ["entityId"], equals: userId },
-      },
-    });
-
-  const expectRevokedEvent = (userId: string) =>
-    waitFor(async () => (await revokedEventsFor(userId)) > 0, 10_000);
 
   describe("POST /oauth/end-session", () => {
+    const REDIRECT_URI = "http://localhost:3000/token-lifecycle-audit-callback";
+    const SCOPE = "openid offline_access";
+
+    let client: Awaited<ReturnType<typeof createTestClient>>;
+    let endpointId: string;
+
+    beforeAll(async () => {
+      client = await createTestClient({ redirectUris: [REDIRECT_URI] });
+      const endpoint = await createTestWebhookEndpoint(
+        await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+        { eventTypes: ["auth.user.sessions-revoked"] }
+      );
+      endpointId = endpoint.id;
+    });
+
+    const { signIn } = codeFlowSignIn(() => client, REDIRECT_URI, SCOPE);
+
+    const entriesOf = (userId: string) =>
+      prisma.auditLogEntry.findMany({
+        where: { entityType: "User", entityId: userId },
+        orderBy: { createdAt: "asc" },
+      });
+
+    const revokedEventsFor = (userId: string) =>
+      prisma.webhookDelivery.count({
+        where: {
+          webhookEndpointId: endpointId,
+          eventType: "auth.user.sessions-revoked",
+          payload: { path: ["entityId"], equals: userId },
+        },
+      });
+
+    const expectRevokedEvent = (userId: string) =>
+      waitFor(async () => (await revokedEventsFor(userId)) > 0, 10_000);
+
     const endSession = (jar: CookieJar, idTokenHint: string) =>
       fetch(`${BASE_URL}/oauth/end-session`, {
         method: "POST",
@@ -405,22 +403,20 @@ describe("/oauth/end-session and /oauth/end-session/confirm", () => {
       expect(await revokedEventsFor(user.id)).toBe(events);
     });
   });
-});
-
-describe("/oauth/end-session and /oauth/end-session/confirm", () => {
-  // Test entity variables
-  let TEST_CLIENT_ID = "";
-  let TEST_CLIENT_DB_ID = "";
-  const TEST_REDIRECT_URI = "http://localhost:3000/test-callback";
-  const TEST_POST_LOGOUT_URI = "http://localhost:3000/test-logout";
-
-  interface EndSessionResponse {
-    success?: boolean;
-    error?: string;
-    error_description?: string;
-  }
 
   describe("OIDC Compliance", () => {
+    // Test entity variables
+    let TEST_CLIENT_ID = "";
+    let TEST_CLIENT_DB_ID = "";
+    const TEST_REDIRECT_URI = "http://localhost:3000/test-callback";
+    const TEST_POST_LOGOUT_URI = "http://localhost:3000/test-logout";
+
+    interface EndSessionResponse {
+      success?: boolean;
+      error?: string;
+      error_description?: string;
+    }
+
     beforeAll(async () => {
       // Check server is running
       const response = await fetch(
@@ -596,9 +592,7 @@ describe("/oauth/end-session and /oauth/end-session/confirm", () => {
       });
     });
   });
-});
 
-describe("/oauth/end-session and /oauth/end-session/confirm", () => {
   describe("Redirect URI schemes", () => {
     it("refuses a script-capable post_logout_redirect_uri", async () => {
       const uri = "javascript:alert(1)";

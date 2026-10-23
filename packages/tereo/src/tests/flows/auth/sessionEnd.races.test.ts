@@ -22,78 +22,78 @@ import {
 } from "../../support/auth/login.js";
 
 describe("ending sessions", () => {
-  /**
-   * A silent authorize issues a code under the browser's SSO session while a
-   * logout or sign-out-everywhere ends it. Both must take the user's row before
-   * the session rows, or they deadlock and the session end fails with its
-   * session still alive.
-   */
-  const ROUNDS = 6;
-  const SILENT_PER_ROUND = 12;
-
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-  // The rounds run back to back, above the per-IP request limit (per second).
-  const clearRequestLimits = async () => {
-    const redis = getRedisClient();
-    const keys = await redis.keys("tereo:ratelimit*");
-    if (keys.length > 0) await redis.del(keys);
-  };
-
-  let redirectUri = "";
-
-  const signIn = async () => {
-    if (!redirectUri) {
-      const loginClient = await prisma.oAuthClient.findFirstOrThrow({
-        where: { clientId: LOGIN_CLIENT.clientId },
-      });
-      redirectUri = loginClient.redirectUris[0];
-    }
-    const user = await createTestUser();
-    const { jar, code, verifier } = await browserLogin({
-      clientId: LOGIN_CLIENT.clientId,
-      redirectUri,
-      scope: "openid",
-      email: user.email,
-      password: user.plainPassword,
-    });
-    const ex = await fetch(`${BASE_URL}/oauth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: LOGIN_CLIENT.clientId,
-        code,
-        redirect_uri: redirectUri,
-        code_verifier: verifier,
-      }),
-    });
-    expect(ex.status).toBe(200);
-    const { id_token } = (await ex.json()) as { id_token: string };
-    return { user, cookies: cookieHeader(jar), idToken: id_token };
-  };
-
-  /** prompt=none requests with the SSO cookie, staggered by 1 ms. */
-  const silentBurst = (cookies: string) =>
-    Array.from({ length: SILENT_PER_ROUND }, async (_, i) => {
-      await sleep(i);
-      const pkce = newPkce();
-      await fetch(
-        `${BASE_URL}/oauth/authorize?${new URLSearchParams({
-          response_type: "code",
-          client_id: LOGIN_CLIENT.clientId,
-          redirect_uri: redirectUri,
-          state: pkce.state,
-          scope: "openid",
-          code_challenge: pkce.challenge,
-          code_challenge_method: "S256",
-          prompt: "none",
-        })}`,
-        { redirect: "manual", headers: { Cookie: cookies } }
-      );
-    });
-
   describe("session end racing a silent authorize", () => {
+    /**
+     * A silent authorize issues a code under the browser's SSO session while a
+     * logout or sign-out-everywhere ends it. Both must take the user's row before
+     * the session rows, or they deadlock and the session end fails with its
+     * session still alive.
+     */
+    const ROUNDS = 6;
+    const SILENT_PER_ROUND = 12;
+
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    // The rounds run back to back, above the per-IP request limit (per second).
+    const clearRequestLimits = async () => {
+      const redis = getRedisClient();
+      const keys = await redis.keys("tereo:ratelimit*");
+      if (keys.length > 0) await redis.del(keys);
+    };
+
+    let redirectUri = "";
+
+    const signIn = async () => {
+      if (!redirectUri) {
+        const loginClient = await prisma.oAuthClient.findFirstOrThrow({
+          where: { clientId: LOGIN_CLIENT.clientId },
+        });
+        redirectUri = loginClient.redirectUris[0];
+      }
+      const user = await createTestUser();
+      const { jar, code, verifier } = await browserLogin({
+        clientId: LOGIN_CLIENT.clientId,
+        redirectUri,
+        scope: "openid",
+        email: user.email,
+        password: user.plainPassword,
+      });
+      const ex = await fetch(`${BASE_URL}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          client_id: LOGIN_CLIENT.clientId,
+          code,
+          redirect_uri: redirectUri,
+          code_verifier: verifier,
+        }),
+      });
+      expect(ex.status).toBe(200);
+      const { id_token } = (await ex.json()) as { id_token: string };
+      return { user, cookies: cookieHeader(jar), idToken: id_token };
+    };
+
+    /** prompt=none requests with the SSO cookie, staggered by 1 ms. */
+    const silentBurst = (cookies: string) =>
+      Array.from({ length: SILENT_PER_ROUND }, async (_, i) => {
+        await sleep(i);
+        const pkce = newPkce();
+        await fetch(
+          `${BASE_URL}/oauth/authorize?${new URLSearchParams({
+            response_type: "code",
+            client_id: LOGIN_CLIENT.clientId,
+            redirect_uri: redirectUri,
+            state: pkce.state,
+            scope: "openid",
+            code_challenge: pkce.challenge,
+            code_challenge_method: "S256",
+            prompt: "none",
+          })}`,
+          { redirect: "manual", headers: { Cookie: cookies } }
+        );
+      });
+
     it("logout (end-session with id_token_hint) succeeds and leaves no SSO session", async () => {
       const statuses: number[] = [];
       const leftovers: number[] = [];
@@ -152,53 +152,51 @@ describe("ending sessions", () => {
       );
     }, 180_000);
   });
-});
-
-describe("ending sessions", () => {
-  /**
-   * Signing out everywhere must also reach the token families being created
-   * while it runs: a code obtained just before it, and a refresh in flight.
-   */
-
-  const SCOPE = "openid offline_access";
-
-  let client: Awaited<ReturnType<typeof createTestClient>>;
-
-  beforeAll(async () => {
-    client = await createTestClient();
-  });
-
-  const signOutOthers = async (bearer: string) => {
-    const res = await fetch(`${BASE_URL}/v1/account/sessions`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${bearer}` },
-    });
-    expect(res.status).toBeLessThan(300);
-  };
-
-  const exchange = (code: string, verifier: string) =>
-    fetch(`${BASE_URL}/oauth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: client.redirectUris[0],
-        client_id: client.clientId,
-        code_verifier: verifier,
-      }),
-    });
-
-  const login = (user: { email: string; plainPassword: string }) =>
-    browserLogin({
-      clientId: client.clientId,
-      redirectUri: client.redirectUris[0],
-      scope: SCOPE,
-      email: user.email,
-      password: user.plainPassword,
-    });
 
   describe("ending sessions while tokens are being issued", () => {
+    /**
+     * Signing out everywhere must also reach the token families being created
+     * while it runs: a code obtained just before it, and a refresh in flight.
+     */
+
+    const SCOPE = "openid offline_access";
+
+    let client: Awaited<ReturnType<typeof createTestClient>>;
+
+    beforeAll(async () => {
+      client = await createTestClient();
+    });
+
+    const signOutOthers = async (bearer: string) => {
+      const res = await fetch(`${BASE_URL}/v1/account/sessions`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${bearer}` },
+      });
+      expect(res.status).toBeLessThan(300);
+    };
+
+    const exchange = (code: string, verifier: string) =>
+      fetch(`${BASE_URL}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: client.redirectUris[0],
+          client_id: client.clientId,
+          code_verifier: verifier,
+        }),
+      });
+
+    const login = (user: { email: string; plainPassword: string }) =>
+      browserLogin({
+        clientId: client.clientId,
+        redirectUri: client.redirectUris[0],
+        scope: SCOPE,
+        email: user.email,
+        password: user.plainPassword,
+      });
+
     it("a code obtained before sign-out-everywhere cannot be exchanged after it", async () => {
       const user = await createTestUser();
       const { code, verifier } = await login(user);

@@ -20,19 +20,19 @@ import {
 } from "../../../support/auth/users.js";
 
 describe("POST /oauth/check-permission and /oauth/check-permission/batch", () => {
-  interface CheckPermissionResponse {
-    granted?: boolean;
-    error?: string;
-    error_description?: string;
-  }
-
-  interface CheckPermissionsResponse {
-    results?: Record<string, boolean>;
-    error?: string;
-    error_description?: string;
-  }
-
   describe("OAuth Check Permission Endpoints", () => {
+    interface CheckPermissionResponse {
+      granted?: boolean;
+      error?: string;
+      error_description?: string;
+    }
+
+    interface CheckPermissionsResponse {
+      results?: Record<string, boolean>;
+      error?: string;
+      error_description?: string;
+    }
+
     let confidentialClient: Awaited<ReturnType<typeof createTestClient>>;
     let publicClient: Awaited<ReturnType<typeof createTestClient>>;
     let testUser: Awaited<ReturnType<typeof createTestUser>>;
@@ -417,27 +417,25 @@ describe("POST /oauth/check-permission and /oauth/check-permission/batch", () =>
       });
     });
   });
-});
-
-describe("POST /oauth/check-permission and /oauth/check-permission/batch", () => {
-  // RFC-variant-0 ids, like the fixtures': z.uuid() would reject them.
-  const VARIANT_ZERO_ID = "00000000-0000-7002-0000-000000000001";
-
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  const basic = (client: Client) =>
-    `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
-
-  let ccClient: Client;
-
-  beforeAll(async () => {
-    ccClient = await createTestClient({
-      clientType: "confidential",
-      grantTypes: ["client_credentials"],
-    });
-  });
 
   describe("Check permission", () => {
+    // RFC-variant-0 ids, like the fixtures': z.uuid() would reject them.
+    const VARIANT_ZERO_ID = "00000000-0000-7002-0000-000000000001";
+
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
+
+    const basic = (client: Client) =>
+      `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
+
+    let ccClient: Client;
+
+    beforeAll(async () => {
+      ccClient = await createTestClient({
+        clientType: "confidential",
+        grantTypes: ["client_credentials"],
+      });
+    });
+
     it("accepts RFC-variant-0 user and organization ids", async () => {
       const res = await fetch(`${BASE_URL}/oauth/check-permission`, {
         method: "POST",

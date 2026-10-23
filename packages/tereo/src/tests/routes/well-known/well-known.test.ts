@@ -5,42 +5,42 @@ import { json } from "../../support/auth/login.js";
 import { describe, it, expect } from "vitest";
 
 describe("/.well-known", () => {
-  interface OIDCConfig {
-    issuer?: string;
-    authorization_endpoint?: string;
-    token_endpoint?: string;
-    userinfo_endpoint?: string;
-    jwks_uri?: string;
-    response_types_supported?: string[];
-    grant_types_supported?: string[];
-    scopes_supported?: string[];
-    token_endpoint_auth_methods_supported?: string[];
-    claims_supported?: string[];
-    code_challenge_methods_supported?: string[];
-    end_session_endpoint?: string;
-    revocation_endpoint?: string;
-    introspection_endpoint?: string;
-    introspection_endpoint_auth_methods_supported?: string[];
-    subject_types_supported?: string[];
-    id_token_signing_alg_values_supported?: string[];
-    acr_values_supported?: string[];
-    prompt_values_supported?: string[];
-    [key: string]: unknown;
-  }
-
-  interface JWKS {
-    keys: Array<{
-      kty?: string;
-      use?: string;
-      kid?: string;
-      alg?: string;
-      n?: string;
-      e?: string;
-      [key: string]: unknown;
-    }>;
-  }
-
   describe("Well-Known Endpoints", () => {
+    interface OIDCConfig {
+      issuer?: string;
+      authorization_endpoint?: string;
+      token_endpoint?: string;
+      userinfo_endpoint?: string;
+      jwks_uri?: string;
+      response_types_supported?: string[];
+      grant_types_supported?: string[];
+      scopes_supported?: string[];
+      token_endpoint_auth_methods_supported?: string[];
+      claims_supported?: string[];
+      code_challenge_methods_supported?: string[];
+      end_session_endpoint?: string;
+      revocation_endpoint?: string;
+      introspection_endpoint?: string;
+      introspection_endpoint_auth_methods_supported?: string[];
+      subject_types_supported?: string[];
+      id_token_signing_alg_values_supported?: string[];
+      acr_values_supported?: string[];
+      prompt_values_supported?: string[];
+      [key: string]: unknown;
+    }
+
+    interface JWKS {
+      keys: Array<{
+        kty?: string;
+        use?: string;
+        kid?: string;
+        alg?: string;
+        n?: string;
+        e?: string;
+        [key: string]: unknown;
+      }>;
+    }
+
     describe("GET /.well-known/openid-configuration", () => {
       it("should return 200 with OpenID Connect discovery document", async () => {
         const response = await fetch(
@@ -365,19 +365,17 @@ describe("/.well-known", () => {
       });
     });
   });
-});
-
-describe("/.well-known", () => {
-  // Type definitions
-  interface DiscoveryDocument {
-    end_session_endpoint?: string;
-    acr_values_supported?: string[];
-    prompt_values_supported?: string[];
-    claims_supported?: string[];
-    [key: string]: unknown;
-  }
 
   describe("OIDC Compliance", () => {
+    // Type definitions
+    interface DiscoveryDocument {
+      end_session_endpoint?: string;
+      acr_values_supported?: string[];
+      prompt_values_supported?: string[];
+      claims_supported?: string[];
+      [key: string]: unknown;
+    }
+
     describe("Discovery Document", () => {
       it("should include prompt_values_supported", async () => {
         const response = await fetch(
@@ -414,9 +412,7 @@ describe("/.well-known", () => {
       });
     });
   });
-});
 
-describe("/.well-known", () => {
   describe("Discovery and logout", () => {
     it("advertises no documentation URL core does not serve", async () => {
       for (const path of [

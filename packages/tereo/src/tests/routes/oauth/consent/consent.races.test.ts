@@ -53,110 +53,114 @@ describe("/oauth/consent", () => {
       await db.consent.deleteConsentSession(session.id);
     });
   });
-});
-
-describe("/oauth/consent", () => {
-  let consentControllers: typeof import("../../../../routes/oauth/consent/controllers.js");
-
-  beforeAll(async () => {
-    consentControllers =
-      await import("../../../../routes/oauth/consent/controllers.js");
-  });
-
-  const changePassword = async (userId: string) => {
-    const newHash = await hashPassword("A-New-Password-456!");
-    await prisma.$transaction(async (tx) => {
-      await db.users.lockForSessionEnd(tx, { userIds: [userId] });
-      await tx.user.update({
-        where: { id: userId },
-        data: { passwordHash: newHash },
-      });
-      await db.loginFlows.deletePendingForUser(userId, null, tx);
-    });
-  };
-
-  /** Calls a handler in-process with the given cookies; returns its error. */
-  const callHandler = async (
-    handler: (req: Request, res: ExpressResponse) => Promise<void>,
-    body: object,
-    cookies: Record<string, string>
-  ): Promise<unknown> => {
-    const res = {
-      cookie: () => res,
-      clearCookie: () => res,
-      status: () => res,
-      json: () => res,
-    };
-    const req = { body, cookies, headers: {}, ip: "127.0.0.1", method: "POST" };
-    try {
-      await handler(
-        req as unknown as Request,
-        res as unknown as ExpressResponse
-      );
-      return null;
-    } catch (err) {
-      return err;
-    }
-  };
-
-  /** Replaces one function of a db module for the length of `run`. */
-  const replacing = async <K extends keyof typeof db>(
-    key: K,
-    fn: string,
-    wrap: (original: (...args: never[]) => Promise<unknown>) => unknown,
-    run: () => Promise<unknown>
-  ) => {
-    const original = db[key];
-    const inner = (original as unknown as Record<string, never>)[fn];
-    (db as Record<K, unknown>)[key] = { ...original, [fn]: wrap(inner) };
-    try {
-      return await run();
-    } finally {
-      (db as Record<K, unknown>)[key] = original;
-    }
-  };
-
-  /**
-   * The password changes just before the code's transaction takes the user's
-   * lock: after the step was read, and after a consume made outside the lock.
-   */
-  const changingPasswordBeforeIssue = (
-    userId: string,
-    run: () => Promise<unknown>
-  ) =>
-    replacing(
-      "users",
-      "lockForTokenIssue",
-      (lock) =>
-        async (...args: never[]) => {
-          await changePassword(userId);
-          return lock(...args);
-        },
-      run
-    );
-
-  const flowFields = (redirectUri: string) => {
-    const pkce = newPkce();
-    return {
-      redirectUri,
-      scopes: ["openid"],
-      state: generateUniqueId(),
-      codeChallenge: pkce.challenge,
-      codeChallengeMethod: "S256",
-      nonce: null,
-      authTime: new Date(),
-      maxAge: null,
-      acrValues: null,
-      prompt: null,
-      authMethods: ["pwd"],
-      expiresAt: new Date(Date.now() + 120_000),
-    };
-  };
-
-  const codesFor = (userId: string) =>
-    prisma.authorizationCode.count({ where: { userId } });
 
   describe("a password change during the consent step", () => {
+    let consentControllers: typeof import("../../../../routes/oauth/consent/controllers.js");
+
+    beforeAll(async () => {
+      consentControllers =
+        await import("../../../../routes/oauth/consent/controllers.js");
+    });
+
+    const changePassword = async (userId: string) => {
+      const newHash = await hashPassword("A-New-Password-456!");
+      await prisma.$transaction(async (tx) => {
+        await db.users.lockForSessionEnd(tx, { userIds: [userId] });
+        await tx.user.update({
+          where: { id: userId },
+          data: { passwordHash: newHash },
+        });
+        await db.loginFlows.deletePendingForUser(userId, null, tx);
+      });
+    };
+
+    /** Calls a handler in-process with the given cookies; returns its error. */
+    const callHandler = async (
+      handler: (req: Request, res: ExpressResponse) => Promise<void>,
+      body: object,
+      cookies: Record<string, string>
+    ): Promise<unknown> => {
+      const res = {
+        cookie: () => res,
+        clearCookie: () => res,
+        status: () => res,
+        json: () => res,
+      };
+      const req = {
+        body,
+        cookies,
+        headers: {},
+        ip: "127.0.0.1",
+        method: "POST",
+      };
+      try {
+        await handler(
+          req as unknown as Request,
+          res as unknown as ExpressResponse
+        );
+        return null;
+      } catch (err) {
+        return err;
+      }
+    };
+
+    /** Replaces one function of a db module for the length of `run`. */
+    const replacing = async <K extends keyof typeof db>(
+      key: K,
+      fn: string,
+      wrap: (original: (...args: never[]) => Promise<unknown>) => unknown,
+      run: () => Promise<unknown>
+    ) => {
+      const original = db[key];
+      const inner = (original as unknown as Record<string, never>)[fn];
+      (db as Record<K, unknown>)[key] = { ...original, [fn]: wrap(inner) };
+      try {
+        return await run();
+      } finally {
+        (db as Record<K, unknown>)[key] = original;
+      }
+    };
+
+    /**
+     * The password changes just before the code's transaction takes the user's
+     * lock: after the step was read, and after a consume made outside the lock.
+     */
+    const changingPasswordBeforeIssue = (
+      userId: string,
+      run: () => Promise<unknown>
+    ) =>
+      replacing(
+        "users",
+        "lockForTokenIssue",
+        (lock) =>
+          async (...args: never[]) => {
+            await changePassword(userId);
+            return lock(...args);
+          },
+        run
+      );
+
+    const flowFields = (redirectUri: string) => {
+      const pkce = newPkce();
+      return {
+        redirectUri,
+        scopes: ["openid"],
+        state: generateUniqueId(),
+        codeChallenge: pkce.challenge,
+        codeChallengeMethod: "S256",
+        nonce: null,
+        authTime: new Date(),
+        maxAge: null,
+        acrValues: null,
+        prompt: null,
+        authMethods: ["pwd"],
+        expiresAt: new Date(Date.now() + 120_000),
+      };
+    };
+
+    const codesFor = (userId: string) =>
+      prisma.authorizationCode.count({ where: { userId } });
+
     it("refuses the approval and issues no code", async () => {
       const client = await createTestClient();
       const user = await createTestUser();
