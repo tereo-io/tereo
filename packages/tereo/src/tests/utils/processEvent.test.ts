@@ -92,23 +92,30 @@ describe("dispatchOutboxEvent and emitWithIdempotency", () => {
       ).toBe(1);
     });
 
-    it("fans an event out once when two workers dispatch it at the same time", async () => {
-      const ep = await createTestWebhookEndpoint(token);
-      const rowId = crypto.randomUUID();
-      const payload = event(ep.eventTypes[0]);
+    it(
+      "fans an event out once when two workers dispatch it at the same time",
+      { tags: ["race"] },
+      async () => {
+        const ep = await createTestWebhookEndpoint(token);
+        const rowId = crypto.randomUUID();
+        const payload = event(ep.eventTypes[0]);
 
-      const outcomes = await Promise.allSettled([
-        dispatchOutboxEvent(payload, rowId, new Date()),
-        dispatchOutboxEvent(payload, rowId, new Date()),
-      ]);
+        const outcomes = await Promise.allSettled([
+          dispatchOutboxEvent(payload, rowId, new Date()),
+          dispatchOutboxEvent(payload, rowId, new Date()),
+        ]);
 
-      expect(outcomes.map((o) => o.status)).toEqual(["fulfilled", "fulfilled"]);
-      expect(
-        await prisma.webhookDelivery.count({
-          where: { webhookEndpointId: ep.id },
-        })
-      ).toBe(1);
-    });
+        expect(outcomes.map((o) => o.status)).toEqual([
+          "fulfilled",
+          "fulfilled",
+        ]);
+        expect(
+          await prisma.webhookDelivery.count({
+            where: { webhookEndpointId: ep.id },
+          })
+        ).toBe(1);
+      }
+    );
 
     it("completes a row already fanned out whose event type was retired since", async () => {
       const ep = await createTestWebhookEndpoint(token);

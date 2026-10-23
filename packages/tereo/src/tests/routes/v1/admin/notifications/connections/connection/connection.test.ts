@@ -147,33 +147,38 @@ describe("/v1/admin/notifications/connections/:id", () => {
       expect(got.body.settings.allowedSenders).toEqual(["@acme.com"]);
     });
 
-    it("checks for stored secrets under the row's lock, not before it", async () => {
-      const c = await create();
-      const withSecrets = await prisma.notificationConnection.findUniqueOrThrow(
-        { where: { id: (await create({ secrets: { password: "p" } })).id } }
-      );
+    it(
+      "checks for stored secrets under the row's lock, not before it",
+      { tags: ["race"] },
+      async () => {
+        const c = await create();
+        const withSecrets =
+          await prisma.notificationConnection.findUniqueOrThrow({
+            where: { id: (await create({ secrets: { password: "p" } })).id },
+          });
 
-      let patch: ReturnType<typeof api> | undefined;
-      await prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`
+        let patch: ReturnType<typeof api> | undefined;
+        await prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`
           SELECT 1 FROM "notifications"."connections"
           WHERE "id" = ${c.id}::uuid FOR UPDATE`;
-        // Arrives while the row has no secrets, then waits for the lock.
-        patch = api("PATCH", `/connections/${c.id}`, adminToken, {
-          settings: settings(2525, { host: "smtp.elsewhere.example" }),
+          // Arrives while the row has no secrets, then waits for the lock.
+          patch = api("PATCH", `/connections/${c.id}`, adminToken, {
+            settings: settings(2525, { host: "smtp.elsewhere.example" }),
+          });
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          // A concurrent update stores secrets meanwhile.
+          await tx.notificationConnection.update({
+            where: { id: c.id },
+            data: { secrets: withSecrets.secrets },
+          });
         });
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        // A concurrent update stores secrets meanwhile.
-        await tx.notificationConnection.update({
-          where: { id: c.id },
-          data: { secrets: withSecrets.secrets },
-        });
-      });
 
-      const res = await patch!;
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe("secrets_required");
-    });
+        const res = await patch!;
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe("secrets_required");
+      }
+    );
 
     it("needs the secrets again to change where they are sent", async () => {
       const c = await create({ secrets: { password: "stored-pass" } });

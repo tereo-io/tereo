@@ -50,6 +50,7 @@ describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webh
             HTTP_STATUS.BAD_REQUEST
           );
           expect(response.data.error).toBe("invalid_request");
+          expect(response.data.error_description).toEqual(expect.any(String));
         }
       });
     });

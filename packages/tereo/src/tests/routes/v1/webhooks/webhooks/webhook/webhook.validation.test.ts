@@ -49,6 +49,7 @@ describe("/v1/webhooks/webhooks/:id", () => {
             HTTP_STATUS.BAD_REQUEST
           );
           expect(response.data.error).toBe("invalid_request");
+          expect(response.data.error_description).toEqual(expect.any(String));
         }
       });
     });

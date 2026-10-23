@@ -7,7 +7,7 @@ import {
   CHANNELS,
 } from "../../../../utils/notifications/channels/index.js";
 
-describe("channel registry", () => {
+describe("CHANNELS and getAdapter", () => {
   it("lists email and returns its adapter", () => {
     expect(CHANNELS).toEqual(["email"]);
     expect(getAdapter("email")).toBe(emailAdapter);
