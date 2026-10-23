@@ -3,6 +3,7 @@ import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes, randomUUID } from "crypto";
 import { TEST_SERVICE } from "./testService.js";
 import { CORE_URL } from "./coreUrl.js";
+import type { Request } from "express";
 import axios from "axios";
 
 export const BASE_URL = `${CORE_URL}/v1/webhooks`;
@@ -341,3 +342,81 @@ export async function waitFor(
 
   throw new Error("Timeout waiting for condition");
 }
+
+// =============================================================================
+// SHARED TEST FIXTURES
+// =============================================================================
+
+/** A request as the auth and organization middleware leave it. */
+export const request = (params: Record<string, string>, body: unknown = {}) =>
+  ({
+    auth: {
+      userId: getTestUserId(),
+      email: null,
+      permissions: ["webhooks.admin"],
+    },
+    organizationId: getTestOrgId(),
+    params,
+    body,
+    query: {},
+  }) as unknown as Request;
+
+export const response = () => {
+  const res = {
+    statusCode: 0,
+    body: undefined as unknown,
+    status(code: number) {
+      res.statusCode = code;
+      return res;
+    },
+    json(body: unknown) {
+      res.body = body;
+      return res;
+    },
+  };
+  return res;
+};
+
+export const postAs = (token: string, path: string, data: unknown = {}) =>
+  axios.post(`${BASE_URL}${path}`, data, {
+    headers: { Authorization: `Bearer ${token}` },
+    validateStatus: () => true,
+  });
+
+/** An endpoint with `count` FAILED deliveries. */
+export const withFailedDeliveries = async (token: string, count: number) => {
+  const ep = await createTestWebhookEndpoint(token);
+  const ids: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const delivery = await prisma.webhookDelivery.create({
+      data: {
+        webhookEndpointId: ep.id,
+        eventType: ep.eventTypes[0],
+        payload: { n: i },
+        status: "FAILED",
+        attempts: 10,
+        completedAt: new Date(),
+      },
+    });
+    ids.push(delivery.id);
+  }
+  return { ep, ids };
+};
+
+/**
+ * An event type and an endpoint subscribed to it, then `eventCount` emitted
+ * events, so the endpoint has delivery records.
+ */
+export const seedDeliveries = async (token: string, eventCount = 1) => {
+  const et = await createTestEventType(token);
+  const ep = await createTestWebhookEndpoint(token, {
+    eventTypes: [et.eventType],
+  });
+  for (let i = 1; i <= eventCount; i++) {
+    await emitTestEvent(token, {
+      eventType: et.eventType,
+      data: { key: `value${i}` },
+    });
+  }
+  return { eventType: et.eventType, endpointId: ep.id };
+};

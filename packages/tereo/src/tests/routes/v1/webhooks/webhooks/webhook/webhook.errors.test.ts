@@ -3,17 +3,17 @@
 import { testWebhookEndpoint } from "../../../../../../routes/v1/webhooks/webhooks/webhook/controllers.js";
 import { getWebhookDeliveryQueue } from "../../../../../../jobs/webhookQueues.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
-import type { Request, Response } from "express";
+import type { Response } from "express";
 import axios from "axios";
 import {
   BASE_URL,
   HTTP_STATUS,
   getTestAccessToken,
-  getTestOrgId,
   createTestWebhookEndpoint,
   cleanupTestEntities,
   WebhookEndpointResponse,
-  getTestUserId,
+  request,
+  response,
 } from "../../../../../support/webhooks.js";
 import {
   describe,
@@ -26,36 +26,6 @@ import {
 } from "vitest";
 
 const NON_EXISTENT_UUID = "00000000-0000-7000-8000-000000000000";
-
-/** A request as the auth and organization middleware leave it. */
-const request = (params: Record<string, string>, body: unknown = {}) =>
-  ({
-    auth: {
-      userId: getTestUserId(),
-      email: null,
-      permissions: ["webhooks.admin"],
-    },
-    organizationId: getTestOrgId(),
-    params,
-    body,
-    query: {},
-  }) as unknown as Request;
-
-const response = () => {
-  const res = {
-    statusCode: 0,
-    body: undefined as unknown,
-    status(code: number) {
-      res.statusCode = code;
-      return res;
-    },
-    json(body: unknown) {
-      res.body = body;
-      return res;
-    },
-  };
-  return res;
-};
 
 describe("/v1/webhooks/webhooks/:id", () => {
   describe("Webhook Endpoint Management", () => {

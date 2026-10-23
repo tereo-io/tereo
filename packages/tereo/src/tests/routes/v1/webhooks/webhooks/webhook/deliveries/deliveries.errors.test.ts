@@ -3,13 +3,13 @@
 import { bulkRetryDeliveries } from "../../../../../../../routes/v1/webhooks/webhooks/webhook/deliveries/controllers.js";
 import { getWebhookDeliveryQueue } from "../../../../../../../jobs/webhookQueues.js";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
-import type { Request, Response } from "express";
+import type { Response } from "express";
 import {
   getTestAccessToken,
-  getTestOrgId,
-  getTestUserId,
   createTestWebhookEndpoint,
   cleanupTestEntities,
+  request,
+  response,
 } from "../../../../../../support/webhooks.js";
 import {
   describe,
@@ -20,36 +20,6 @@ import {
   afterEach,
   vi,
 } from "vitest";
-
-/** A request as the auth and organization middleware leave it. */
-const request = (params: Record<string, string>, body: unknown = {}) =>
-  ({
-    auth: {
-      userId: getTestUserId(),
-      email: null,
-      permissions: ["webhooks.admin"],
-    },
-    organizationId: getTestOrgId(),
-    params,
-    body,
-    query: {},
-  }) as unknown as Request;
-
-const response = () => {
-  const res = {
-    statusCode: 0,
-    body: undefined as unknown,
-    status(code: number) {
-      res.statusCode = code;
-      return res;
-    },
-    json(body: unknown) {
-      res.body = body;
-      return res;
-    },
-  };
-  return res;
-};
 
 describe("POST /v1/webhooks/webhooks/:id/deliveries/retry", () => {
   // Redis refusing the job after the delivery committed: the request must still

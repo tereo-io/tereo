@@ -15,6 +15,7 @@ import {
   emitTestEvent,
   WebhookDeliveryResponse,
   PaginatedResponse,
+  seedDeliveries,
 } from "../../../../../../support/webhooks.js";
 
 const get = <T>(path: string, token: string, headers = {}) =>
@@ -32,51 +33,10 @@ describe("GET /v1/webhooks/webhooks/:id/deliveries and POST /v1/webhooks/webhook
     beforeAll(async () => {
       testToken = await getTestAccessToken();
 
-      // Set up: create an event type and endpoint, then emit an event to generate deliveries
-      const et = await createTestEventType(testToken);
-      eventTypeName = et.eventType;
-
-      const ep = await createTestWebhookEndpoint(testToken, {
-        eventTypes: [et.eventType],
-      });
-      endpointId = ep.id;
-
-      // Emit events to generate delivery records
-      await axios.post(
-        `${BASE_URL}/events`,
-        {
-          organizationId: getTestOrgId(),
-          eventType: et.eventType,
-          entityType: "TestEntity",
-          entityId: `test-entity-${generateUniqueId()}`,
-          data: { key: "value1" },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${testToken}`,
-            "Content-Type": "application/json",
-          },
-          validateStatus: () => true,
-        }
-      );
-
-      await axios.post(
-        `${BASE_URL}/events`,
-        {
-          organizationId: getTestOrgId(),
-          eventType: et.eventType,
-          entityType: "TestEntity",
-          entityId: `test-entity-${generateUniqueId()}`,
-          data: { key: "value2" },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${testToken}`,
-            "Content-Type": "application/json",
-          },
-          validateStatus: () => true,
-        }
-      );
+      // Set up: an event type and endpoint with delivery records
+      const seeded = await seedDeliveries(testToken, 2);
+      eventTypeName = seeded.eventType;
+      endpointId = seeded.endpointId;
     });
 
     afterAll(async () => {

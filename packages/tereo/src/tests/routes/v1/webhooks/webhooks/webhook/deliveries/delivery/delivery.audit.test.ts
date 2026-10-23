@@ -2,12 +2,11 @@
 // @module-tag webhooks
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import axios from "axios";
 import {
-  BASE_URL,
   getTestAccessToken,
-  createTestWebhookEndpoint,
   cleanupTestEntities,
+  postAs,
+  withFailedDeliveries,
 } from "../../../../../../../support/webhooks.js";
 
 describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webhooks/webhooks/:id/deliveries/:deliveryId/retry", () => {
@@ -23,39 +22,21 @@ describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webh
     });
 
     describe("retry guards and audit", () => {
-      const post = (path: string, data: unknown = {}) =>
-        axios.post(`${BASE_URL}${path}`, data, {
-          headers: { Authorization: `Bearer ${testToken}` },
-          validateStatus: () => true,
-        });
-
-      /** An endpoint with `count` FAILED deliveries. */
-      const withFailedDeliveries = async (count: number) => {
-        const ep = await createTestWebhookEndpoint(testToken);
-        const ids: string[] = [];
-        for (let i = 0; i < count; i++) {
-          const delivery = await prisma.webhookDelivery.create({
-            data: {
-              webhookEndpointId: ep.id,
-              eventType: ep.eventTypes[0],
-              payload: { n: i },
-              status: "FAILED",
-              attempts: 10,
-              completedAt: new Date(),
-            },
-          });
-          ids.push(delivery.id);
-        }
-        return { ep, ids };
-      };
-
       it("writes an audit entry for a retry and a bulk retry", async () => {
-        const { ep, ids } = await withFailedDeliveries(3);
+        const { ep, ids } = await withFailedDeliveries(testToken, 3);
 
         expect(
-          (await post(`/webhooks/${ep.id}/deliveries/${ids[0]}/retry`)).status
+          (
+            await postAs(
+              testToken,
+              `/webhooks/${ep.id}/deliveries/${ids[0]}/retry`
+            )
+          ).status
         ).toBe(202);
-        const bulk = await post(`/webhooks/${ep.id}/deliveries/retry`);
+        const bulk = await postAs(
+          testToken,
+          `/webhooks/${ep.id}/deliveries/retry`
+        );
         expect(bulk.data.retriedCount).toBe(2);
 
         const single = await prisma.auditLogEntry.findFirst({

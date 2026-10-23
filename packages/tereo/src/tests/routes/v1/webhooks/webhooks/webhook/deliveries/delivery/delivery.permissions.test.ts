@@ -7,11 +7,8 @@ import {
   BASE_URL,
   HTTP_STATUS,
   getTestAccessToken,
-  getTestOrgId,
-  createTestEventType,
-  createTestWebhookEndpoint,
   cleanupTestEntities,
-  generateUniqueId,
+  seedDeliveries,
 } from "../../../../../../../support/webhooks.js";
 
 describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webhooks/webhooks/:id/deliveries/:deliveryId/retry", () => {
@@ -22,32 +19,8 @@ describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webh
     beforeAll(async () => {
       testToken = await getTestAccessToken();
 
-      // Set up: create an event type and endpoint, then emit an event to generate deliveries
-      const et = await createTestEventType(testToken);
-
-      const ep = await createTestWebhookEndpoint(testToken, {
-        eventTypes: [et.eventType],
-      });
-      endpointId = ep.id;
-
-      // Emit an event to generate a delivery record
-      await axios.post(
-        `${BASE_URL}/events`,
-        {
-          organizationId: getTestOrgId(),
-          eventType: et.eventType,
-          entityType: "TestEntity",
-          entityId: `test-entity-${generateUniqueId()}`,
-          data: { key: "value1" },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${testToken}`,
-            "Content-Type": "application/json",
-          },
-          validateStatus: () => true,
-        }
-      );
+      // Set up: an event type and endpoint with delivery records
+      ({ endpointId } = await seedDeliveries(testToken, 1));
     });
 
     afterAll(async () => {

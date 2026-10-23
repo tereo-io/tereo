@@ -3,18 +3,19 @@
 import { retryDelivery } from "../../../../../../../../routes/v1/webhooks/webhooks/webhook/deliveries/delivery/controllers.js";
 import { getWebhookDeliveryQueue } from "../../../../../../../../jobs/webhookQueues.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
-import type { Request, Response } from "express";
+import type { Response } from "express";
 import axios from "axios";
 import {
   BASE_URL,
   HTTP_STATUS,
   getTestAccessToken,
-  getTestOrgId,
-  createTestEventType,
   createTestWebhookEndpoint,
   cleanupTestEntities,
-  generateUniqueId,
-  getTestUserId,
+  request,
+  response,
+  postAs,
+  withFailedDeliveries,
+  seedDeliveries,
 } from "../../../../../../../support/webhooks.js";
 import {
   describe,
@@ -26,36 +27,6 @@ import {
   vi,
 } from "vitest";
 
-/** A request as the auth and organization middleware leave it. */
-const request = (params: Record<string, string>, body: unknown = {}) =>
-  ({
-    auth: {
-      userId: getTestUserId(),
-      email: null,
-      permissions: ["webhooks.admin"],
-    },
-    organizationId: getTestOrgId(),
-    params,
-    body,
-    query: {},
-  }) as unknown as Request;
-
-const response = () => {
-  const res = {
-    statusCode: 0,
-    body: undefined as unknown,
-    status(code: number) {
-      res.statusCode = code;
-      return res;
-    },
-    json(body: unknown) {
-      res.body = body;
-      return res;
-    },
-  };
-  return res;
-};
-
 describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webhooks/webhooks/:id/deliveries/:deliveryId/retry", () => {
   describe("Webhook Deliveries", () => {
     let testToken: string;
@@ -64,32 +35,8 @@ describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webh
     beforeAll(async () => {
       testToken = await getTestAccessToken();
 
-      // Set up: create an event type and endpoint, then emit an event to generate deliveries
-      const et = await createTestEventType(testToken);
-
-      const ep = await createTestWebhookEndpoint(testToken, {
-        eventTypes: [et.eventType],
-      });
-      endpointId = ep.id;
-
-      // Emit an event to generate a delivery record
-      await axios.post(
-        `${BASE_URL}/events`,
-        {
-          organizationId: getTestOrgId(),
-          eventType: et.eventType,
-          entityType: "TestEntity",
-          entityId: `test-entity-${generateUniqueId()}`,
-          data: { key: "value1" },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${testToken}`,
-            "Content-Type": "application/json",
-          },
-          validateStatus: () => true,
-        }
-      );
+      // Set up: an event type and endpoint with delivery records
+      ({ endpointId } = await seedDeliveries(testToken, 1));
     });
 
     afterAll(async () => {
@@ -122,34 +69,8 @@ describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webh
     });
 
     describe("retry guards and audit", () => {
-      const post = (path: string, data: unknown = {}) =>
-        axios.post(`${BASE_URL}${path}`, data, {
-          headers: { Authorization: `Bearer ${testToken}` },
-          validateStatus: () => true,
-        });
-
-      /** An endpoint with `count` FAILED deliveries. */
-      const withFailedDeliveries = async (count: number) => {
-        const ep = await createTestWebhookEndpoint(testToken);
-        const ids: string[] = [];
-        for (let i = 0; i < count; i++) {
-          const delivery = await prisma.webhookDelivery.create({
-            data: {
-              webhookEndpointId: ep.id,
-              eventType: ep.eventTypes[0],
-              payload: { n: i },
-              status: "FAILED",
-              attempts: 10,
-              completedAt: new Date(),
-            },
-          });
-          ids.push(delivery.id);
-        }
-        return { ep, ids };
-      };
-
       it("returns 400 invalid_endpoint_status for a paused or disabled endpoint", async () => {
-        const { ep, ids } = await withFailedDeliveries(1);
+        const { ep, ids } = await withFailedDeliveries(testToken, 1);
         for (const status of ["PAUSED", "DISABLED"] as const) {
           await prisma.webhookEndpoint.update({
             where: { id: ep.id },
@@ -159,7 +80,7 @@ describe("GET /v1/webhooks/webhooks/:id/deliveries/:deliveryId and POST /v1/webh
             `/webhooks/${ep.id}/deliveries/${ids[0]}/retry`,
             `/webhooks/${ep.id}/deliveries/retry`,
           ]) {
-            const response = await post(path);
+            const response = await postAs(testToken, path);
             expect(response.status, `${status} ${path}`).toBe(400);
             expect(response.data.error).toBe("invalid_endpoint_status");
           }
