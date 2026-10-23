@@ -8,6 +8,7 @@ import {
   BASE_URL,
   HTTP_STATUS,
   getTestAccessToken,
+  createTestEventType,
   createTestWebhookEndpoint,
   cleanupTestEntities,
 } from "../../../../../support/webhooks.js";
@@ -24,6 +25,28 @@ describe("/v1/webhooks/webhooks/:id", () => {
 
     afterAll(async () => {
       await cleanupTestEntities();
+    });
+
+    describe("PATCH /webhooks/:id", () => {
+      it("returns 400 on create and update (PATCH /webhooks/:id)", async () => {
+        const et = await createTestEventType(testToken);
+        const auth = {
+          headers: { Authorization: `Bearer ${testToken}` },
+          validateStatus: () => true,
+        };
+        const endpoint = await createTestWebhookEndpoint(testToken, {
+          eventTypes: [et.eventType],
+        });
+
+        const update = await axios.patch(
+          `${BASE_URL}/webhooks/${endpoint.id}`,
+          { customHeaders: { expect: "100-continue" } },
+          auth
+        );
+        expect(update.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(update.data.error).toBe("invalid_request");
+        expect(update.data.error_description).toEqual(expect.any(String));
+      });
     });
 
     describe("GET /webhooks/:id", () => {

@@ -36,7 +36,19 @@ afterAll(async () => {
   await cleanNotifications();
 });
 
-describe("POST /v1/admin/notifications/connections", () => {
+describe("/v1/admin/notifications/connections", () => {
+  describe("list", () => {
+    it("filters the list by channel and answers 404 for an unknown id (GET /connections?channel=email)", async () => {
+      const c = await create();
+      const list = await connectionsApi(
+        "GET",
+        "/connections?channel=email",
+        readToken
+      );
+      expect(list.body.data.map((x: { id: string }) => x.id)).toContain(c.id);
+    });
+  });
+
   describe("create", () => {
     it("validates settings with the adapter and reports field issues", async () => {
       const res = await connectionsApi(

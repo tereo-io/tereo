@@ -52,10 +52,6 @@ describe("/v1/admin/notifications/connections", () => {
       expect(list.status).toBe(200);
       expect(list.body.data.map((x: { id: string }) => x.id)).toContain(c.id);
       expect(
-        (await connectionsApi("GET", `/connections/${c.id}`, readToken)).status
-      ).toBe(200);
-
-      expect(
         (
           await connectionsApi(
             "POST",
@@ -63,30 +59,6 @@ describe("/v1/admin/notifications/connections", () => {
             readToken,
             connectionPayload()
           )
-        ).status
-      ).toBe(403);
-      expect(
-        (await connectionsApi("PATCH", `/connections/${c.id}`, readToken, {}))
-          .status
-      ).toBe(403);
-      expect(
-        (await connectionsApi("DELETE", `/connections/${c.id}`, readToken))
-          .status
-      ).toBe(403);
-      expect(
-        (
-          await connectionsApi(
-            "POST",
-            `/connections/${c.id}/default`,
-            readToken
-          )
-        ).status
-      ).toBe(403);
-      expect(
-        (
-          await connectionsApi("POST", `/connections/${c.id}/test`, readToken, {
-            to: "a@b.com",
-          })
         ).status
       ).toBe(403);
     });

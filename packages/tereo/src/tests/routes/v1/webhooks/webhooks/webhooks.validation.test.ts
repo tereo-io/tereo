@@ -8,7 +8,6 @@ import {
   HTTP_STATUS,
   getTestAccessToken,
   createTestEventType,
-  createTestWebhookEndpoint,
   cleanupTestEntities,
   generateUniqueId,
   type WebhookEndpointResponse,
@@ -165,9 +164,6 @@ describe("GET /v1/webhooks/webhooks and POST /v1/webhooks/webhooks", () => {
         headers: { Authorization: `Bearer ${token}` },
         validateStatus: () => true,
       };
-      const endpoint = await createTestWebhookEndpoint(token, {
-        eventTypes: [et.eventType],
-      });
 
       const create = await axios.post(
         `${BASE_URL}/webhooks`,
@@ -181,15 +177,6 @@ describe("GET /v1/webhooks/webhooks and POST /v1/webhooks/webhooks", () => {
       expect(create.status).toBe(HTTP_STATUS.BAD_REQUEST);
       expect(create.data.error).toBe("invalid_request");
       expect(create.data.error_description).toEqual(expect.any(String));
-
-      const update = await axios.patch(
-        `${BASE_URL}/webhooks/${endpoint.id}`,
-        { customHeaders: { expect: "100-continue" } },
-        auth
-      );
-      expect(update.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      expect(update.data.error).toBe("invalid_request");
-      expect(update.data.error_description).toEqual(expect.any(String));
     });
   });
 });

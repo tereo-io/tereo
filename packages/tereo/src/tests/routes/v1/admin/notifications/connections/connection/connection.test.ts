@@ -52,14 +52,7 @@ afterAll(async () => {
 
 describe("/v1/admin/notifications/connections/:id", () => {
   describe("get, list, update", () => {
-    it("filters the list by channel and answers 404 for an unknown id", async () => {
-      const c = await create();
-      const list = await connectionsApi(
-        "GET",
-        "/connections?channel=email",
-        readToken
-      );
-      expect(list.body.data.map((x: { id: string }) => x.id)).toContain(c.id);
+    it("answers 404 for an unknown id and 400 for a non-uuid", async () => {
       expect(
         (await connectionsApi("GET", `/connections/${randomUUID()}`, readToken))
           .status
