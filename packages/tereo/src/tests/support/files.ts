@@ -398,3 +398,76 @@ const grant = (
  * members hold, and their helpers, shared by every file that uses them.
  */
 export const bucketOwnerAccess = { MEMBER, ORG, as, member, grant };
+
+/**
+ * Waits for the fan-out of one event to a webhook endpoint and returns the
+ * delivered payloads for that entity.
+ */
+export async function deliveredPayloads(
+  endpointId: string,
+  eventType: string,
+  entityId: string
+): Promise<Record<string, unknown>[]> {
+  const where = {
+    webhookEndpointId: endpointId,
+    eventType,
+    payload: { path: ["entityId"], equals: entityId },
+  };
+  await waitFor(
+    async () => (await prisma.webhookDelivery.count({ where })) > 0,
+    10_000
+  );
+  const deliveries = await prisma.webhookDelivery.findMany({ where });
+  return deliveries.map((d) => d.payload as Record<string, unknown>);
+}
+
+/**
+ * A versioned bucket holding `o.txt` with two versions; `first` is the older
+ * one, `firstBody` its content.
+ */
+export async function versionedObject(token: string) {
+  const auth = () => ({
+    headers: { Authorization: `Bearer ${token}` },
+    validateStatus: () => true,
+  });
+  const bucket = (await createTestBucket(token)) as {
+    id: number;
+    name: string;
+  };
+  await axios.put(
+    `${BASE_URL}/buckets/${bucket.name}`,
+    { versioningEnabled: true },
+    auth()
+  );
+  const firstBody = `v1 ${randomUUID()}`;
+  const obj = await uploadTestObject(
+    token,
+    bucket.name,
+    "o.txt",
+    createTestFile(firstBody)
+  );
+  await uploadTestObject(
+    token,
+    bucket.name,
+    "o.txt",
+    createTestFile(`v2 ${randomUUID()}`)
+  );
+  const [first] = await prisma.objectVersion.findMany({
+    where: { objectId: obj.id, deletedAt: null },
+    orderBy: { createdAt: "asc" },
+  });
+  return { bucket, objectId: obj.id, first, firstBody };
+}
+
+/** The access log is written after the response is sent. */
+export async function waitForAccessLog(where: Record<string, unknown>) {
+  let row: Awaited<ReturnType<typeof prisma.accessLog.findFirst>> = null;
+  await waitFor(async () => {
+    row = await prisma.accessLog.findFirst({
+      where,
+      orderBy: { timestamp: "desc" },
+    });
+    return row !== null;
+  }, 5000);
+  return row!;
+}

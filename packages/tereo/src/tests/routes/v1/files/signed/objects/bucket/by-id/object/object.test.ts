@@ -18,7 +18,7 @@ import {
   grantTestPermission,
   uploadTestObject,
   uploadTestObjectAndGetId,
-  waitFor,
+  waitForAccessLog,
 } from "../../../../../../../../support/files.js";
 
 describe("GET, HEAD and PUT /v1/files/signed/objects/:bucket/by-id/:id", () => {
@@ -32,18 +32,6 @@ describe("GET, HEAD and PUT /v1/files/signed/objects/:bucket/by-id/:id", () => {
       "file-service.shares.write",
     ];
 
-    // The access log is written after the response is sent.
-    const waitForAccessLog = async (where: Record<string, unknown>) => {
-      let row: Awaited<ReturnType<typeof prisma.accessLog.findFirst>> = null;
-      await waitFor(async () => {
-        row = await prisma.accessLog.findFirst({
-          where,
-          orderBy: { timestamp: "desc" },
-        });
-        return row !== null;
-      }, 5000);
-      return row!;
-    };
     let admin: string;
     let bucket: { id: number; name: string };
     let objectId: string;

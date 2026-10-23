@@ -15,7 +15,6 @@ import {
   cleanupTestEntities as cleanupWebhookEntities,
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
-  waitFor,
 } from "../../../../../../support/webhooks.js";
 import {
   BASE_URL,
@@ -27,6 +26,7 @@ import {
   getTestAccessToken,
   uploadTestObject,
   bucketOwnerAccess,
+  deliveredPayloads,
 } from "../../../../../../support/files.js";
 
 describe("PUT /v1/files/buckets/:name/owner", () => {
@@ -280,19 +280,8 @@ describe("PUT /v1/files/buckets/:name/owner", () => {
 
     // Waits for the fan-out of one event to the test endpoint and returns the
     // delivered payload.
-    const delivered = async (eventType: string, entityId: string) => {
-      const where = {
-        webhookEndpointId: endpointId,
-        eventType,
-        payload: { path: ["entityId"], equals: entityId },
-      };
-      await waitFor(
-        async () => (await prisma.webhookDelivery.count({ where })) > 0,
-        10_000
-      );
-      const deliveries = await prisma.webhookDelivery.findMany({ where });
-      return deliveries.map((d) => d.payload as Record<string, unknown>);
-    };
+    const delivered = (eventType: string, entityId: string) =>
+      deliveredPayloads(endpointId, eventType, entityId);
 
     beforeAll(async () => {
       token = await getTestPrincipalToken({

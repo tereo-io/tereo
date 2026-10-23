@@ -17,6 +17,7 @@ import {
   createTestFile,
   getTestAccessToken,
   uploadTestObject,
+  versionedObject as sharedVersionedObject,
 } from "../../../../../../../../support/files.js";
 
 describe("PATCH /v1/files/buckets/:name/objects/by-id/:id", () => {
@@ -71,35 +72,7 @@ describe("PATCH /v1/files/buckets/:name/objects/by-id/:id", () => {
       await cleanupTestEntities();
     });
 
-    const versionedObject = async () => {
-      const bucket = (await createTestBucket(token)) as {
-        id: number;
-        name: string;
-      };
-      await axios.put(
-        `${BASE_URL}/buckets/${bucket.name}`,
-        { versioningEnabled: true },
-        auth()
-      );
-      const firstBody = `v1 ${randomUUID()}`;
-      const obj = await uploadTestObject(
-        token,
-        bucket.name,
-        "o.txt",
-        createTestFile(firstBody)
-      );
-      await uploadTestObject(
-        token,
-        bucket.name,
-        "o.txt",
-        createTestFile(`v2 ${randomUUID()}`)
-      );
-      const [first] = await prisma.objectVersion.findMany({
-        where: { objectId: obj.id, deletedAt: null },
-        orderBy: { createdAt: "asc" },
-      });
-      return { bucket, objectId: obj.id, first, firstBody };
-    };
+    const versionedObject = () => sharedVersionedObject(token);
 
     it("a branching PATCH waits for the bucket before it locks the blob", async () => {
       const { bucket, objectId } = await versionedObject();

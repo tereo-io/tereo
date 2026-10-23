@@ -15,6 +15,7 @@ import {
   getTestUserId,
   testIdempotencyKey,
   uploadTestObject,
+  versionedObject as sharedVersionedObject,
 } from "../../../../../../support/files.js";
 
 describe("GET /v1/files/buckets/:name/objects and /objects/prefixes, POST /objects/bulk-delete and /objects/purge-non-current-versions", () => {
@@ -685,35 +686,7 @@ describe("GET /v1/files/buckets/:name/objects and /objects/prefixes, POST /objec
       );
     };
 
-    const versionedObject = async () => {
-      const bucket = (await createTestBucket(token)) as {
-        id: number;
-        name: string;
-      };
-      await axios.put(
-        `${BASE_URL}/buckets/${bucket.name}`,
-        { versioningEnabled: true },
-        auth()
-      );
-      const firstBody = `v1 ${randomUUID()}`;
-      const obj = await uploadTestObject(
-        token,
-        bucket.name,
-        "o.txt",
-        createTestFile(firstBody)
-      );
-      await uploadTestObject(
-        token,
-        bucket.name,
-        "o.txt",
-        createTestFile(`v2 ${randomUUID()}`)
-      );
-      const [first] = await prisma.objectVersion.findMany({
-        where: { objectId: obj.id, deletedAt: null },
-        orderBy: { createdAt: "asc" },
-      });
-      return { bucket, objectId: obj.id, first, firstBody };
-    };
+    const versionedObject = () => sharedVersionedObject(token);
 
     describe("releasing a version's ref locks the bucket before the blob", () => {
       /**

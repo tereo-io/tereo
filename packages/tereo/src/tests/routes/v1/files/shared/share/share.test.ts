@@ -13,8 +13,8 @@ import {
   getTestAccessToken,
   uploadTestObject,
   uploadTestObjectAndGetId,
-  waitFor,
   bucketOwnerAccess,
+  waitForAccessLog,
 } from "../../../../../support/files.js";
 
 describe("GET and HEAD /v1/files/shared/:token, POST /v1/files/shared/:token/unlock", () => {
@@ -303,18 +303,6 @@ describe("GET and HEAD /v1/files/shared/:token, POST /v1/files/shared/:token/unl
   describe("signed URLs", () => {
     const anyStatus = { validateStatus: () => true, maxRedirects: 0 };
 
-    // The access log is written after the response is sent.
-    const waitForAccessLog = async (where: Record<string, unknown>) => {
-      let row: Awaited<ReturnType<typeof prisma.accessLog.findFirst>> = null;
-      await waitFor(async () => {
-        row = await prisma.accessLog.findFirst({
-          where,
-          orderBy: { timestamp: "desc" },
-        });
-        return row !== null;
-      }, 5000);
-      return row!;
-    };
     let admin: string;
     let bucket: { id: number; name: string };
     let objectId: string;
