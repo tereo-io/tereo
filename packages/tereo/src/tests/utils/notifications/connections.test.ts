@@ -1,57 +1,20 @@
 // @module-tag int
 // @module-tag notifications
 import { openConnectionSecrets } from "../../../utils/notifications/connections.js";
+import { createConnection } from "../../support/notificationConnections.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
+import { cleanNotifications } from "../../support/notifications.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../utils/db/prisma.js";
 import { currentKek } from "../../../utils/keys.js";
-import { CORE_URL } from "../../support/coreUrl.js";
-import { fetchJson } from "../../support/http.js";
-import { randomBytes, randomUUID } from "crypto";
-
-const BASE = `${CORE_URL}/v1/admin/notifications`;
+import { randomUUID } from "crypto";
 
 let adminToken: string;
 
 let adminUserId: string;
 
-const rand = () => randomBytes(4).toString("hex");
-
-const api = (
-  method: string,
-  path: string,
-  token: string | null,
-  body?: unknown
-) => fetchJson(method, `${BASE}${path}`, token, body);
-
-const settings = (port = 2525, over: Record<string, unknown> = {}) => ({
-  host: "127.0.0.1",
-  port,
-  security: "none",
-  defaultFrom: { address: "billing@acme.com" },
-  allowedSenders: ["@acme.com"],
-  ...over,
-});
-
-const payload = (over: Record<string, unknown> = {}) => ({
-  channel: "email",
-  slug: `c-${rand()}`,
-  displayName: "Main",
-  settings: settings(),
-  ...over,
-});
-
-const create = async (over: Record<string, unknown> = {}) => {
-  const res = await api("POST", "/connections", adminToken, payload(over));
-  expect(res.status, JSON.stringify(res.body)).toBe(201);
-  return res.body;
-};
-
-const clean = async () => {
-  await prisma.notificationDelivery.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.notificationConnection.deleteMany();
-};
+const create = (over: Record<string, unknown> = {}) =>
+  createConnection(adminToken, over);
 
 beforeAll(async () => {
   adminUserId = randomUUID();
@@ -60,11 +23,11 @@ beforeAll(async () => {
     permissions: ["notifications.admin", "notifications.read"],
   });
 
-  await clean();
+  await cleanNotifications();
 });
 
 afterAll(async () => {
-  await clean();
+  await cleanNotifications();
 });
 
 describe("openConnectionSecrets", () => {

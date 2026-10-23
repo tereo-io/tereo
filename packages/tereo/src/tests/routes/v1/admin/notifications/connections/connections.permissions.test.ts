@@ -1,56 +1,22 @@
 // @module-tag int
 // @module-tag notifications
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
+import { cleanNotifications } from "../../../../../support/notifications.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { prisma } from "../../../../../../utils/db/prisma.js";
-import { CORE_URL } from "../../../../../support/coreUrl.js";
-import { fetchJson } from "../../../../../support/http.js";
-import { randomBytes, randomUUID } from "crypto";
-
-const BASE = `${CORE_URL}/v1/admin/notifications`;
+import { randomUUID } from "crypto";
+import {
+  connectionsApi,
+  connectionPayload,
+  createConnection,
+} from "../../../../../support/notificationConnections.js";
 
 let adminToken: string;
 let readToken: string;
 let sendOnlyToken: string;
 let adminUserId: string;
 
-const rand = () => randomBytes(4).toString("hex");
-
-const api = (
-  method: string,
-  path: string,
-  token: string | null,
-  body?: unknown
-) => fetchJson(method, `${BASE}${path}`, token, body);
-
-const settings = (port = 2525, over: Record<string, unknown> = {}) => ({
-  host: "127.0.0.1",
-  port,
-  security: "none",
-  defaultFrom: { address: "billing@acme.com" },
-  allowedSenders: ["@acme.com"],
-  ...over,
-});
-
-const payload = (over: Record<string, unknown> = {}) => ({
-  channel: "email",
-  slug: `c-${rand()}`,
-  displayName: "Main",
-  settings: settings(),
-  ...over,
-});
-
-const create = async (over: Record<string, unknown> = {}) => {
-  const res = await api("POST", "/connections", adminToken, payload(over));
-  expect(res.status, JSON.stringify(res.body)).toBe(201);
-  return res.body;
-};
-
-const clean = async () => {
-  await prisma.notificationDelivery.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.notificationConnection.deleteMany();
-};
+const create = (over: Record<string, unknown> = {}) =>
+  createConnection(adminToken, over);
 
 beforeAll(async () => {
   adminUserId = randomUUID();
@@ -64,46 +30,61 @@ beforeAll(async () => {
   sendOnlyToken = await getTestPrincipalToken({
     permissions: ["notifications.send"],
   });
-  await clean();
+  await cleanNotifications();
 });
 
 afterAll(async () => {
-  await clean();
+  await cleanNotifications();
 });
 
 describe("/v1/admin/notifications/connections", () => {
   describe("authorization", () => {
     it("refuses a caller with neither read nor admin", async () => {
-      expect((await api("GET", "/connections", sendOnlyToken)).status).toBe(
-        403
-      );
+      expect(
+        (await connectionsApi("GET", "/connections", sendOnlyToken)).status
+      ).toBe(403);
     });
 
     it("lets .read list and get, but not write", async () => {
-      await clean();
+      await cleanNotifications();
       const c = await create();
-      const list = await api("GET", "/connections", readToken);
+      const list = await connectionsApi("GET", "/connections", readToken);
       expect(list.status).toBe(200);
       expect(list.body.data.map((x: { id: string }) => x.id)).toContain(c.id);
-      expect((await api("GET", `/connections/${c.id}`, readToken)).status).toBe(
-        200
-      );
+      expect(
+        (await connectionsApi("GET", `/connections/${c.id}`, readToken)).status
+      ).toBe(200);
 
       expect(
-        (await api("POST", "/connections", readToken, payload())).status
+        (
+          await connectionsApi(
+            "POST",
+            "/connections",
+            readToken,
+            connectionPayload()
+          )
+        ).status
       ).toBe(403);
       expect(
-        (await api("PATCH", `/connections/${c.id}`, readToken, {})).status
+        (await connectionsApi("PATCH", `/connections/${c.id}`, readToken, {}))
+          .status
       ).toBe(403);
       expect(
-        (await api("DELETE", `/connections/${c.id}`, readToken)).status
-      ).toBe(403);
-      expect(
-        (await api("POST", `/connections/${c.id}/default`, readToken)).status
+        (await connectionsApi("DELETE", `/connections/${c.id}`, readToken))
+          .status
       ).toBe(403);
       expect(
         (
-          await api("POST", `/connections/${c.id}/test`, readToken, {
+          await connectionsApi(
+            "POST",
+            `/connections/${c.id}/default`,
+            readToken
+          )
+        ).status
+      ).toBe(403);
+      expect(
+        (
+          await connectionsApi("POST", `/connections/${c.id}/test`, readToken, {
             to: "a@b.com",
           })
         ).status

@@ -2,60 +2,26 @@
 // @module-tag notifications
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../../../definitions/index.js";
 import { getTestPrincipalToken } from "../../../../../../support/principals.js";
+import { cleanNotifications } from "../../../../../../support/notifications.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
-import { CORE_URL } from "../../../../../../support/coreUrl.js";
-import { fetchJson } from "../../../../../../support/http.js";
-import { randomBytes, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
+import {
+  connectionsApi,
+  createConnection,
+} from "../../../../../../support/notificationConnections.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../../../../../support/webhooks.js";
 
-const BASE = `${CORE_URL}/v1/admin/notifications`;
-
 let adminToken: string;
 
 let adminUserId: string;
 
-const rand = () => randomBytes(4).toString("hex");
-
-const api = (
-  method: string,
-  path: string,
-  token: string | null,
-  body?: unknown
-) => fetchJson(method, `${BASE}${path}`, token, body);
-
-const settings = (port = 2525, over: Record<string, unknown> = {}) => ({
-  host: "127.0.0.1",
-  port,
-  security: "none",
-  defaultFrom: { address: "billing@acme.com" },
-  allowedSenders: ["@acme.com"],
-  ...over,
-});
-
-const payload = (over: Record<string, unknown> = {}) => ({
-  channel: "email",
-  slug: `c-${rand()}`,
-  displayName: "Main",
-  settings: settings(),
-  ...over,
-});
-
-const create = async (over: Record<string, unknown> = {}) => {
-  const res = await api("POST", "/connections", adminToken, payload(over));
-  expect(res.status, JSON.stringify(res.body)).toBe(201);
-  return res.body;
-};
-
-const clean = async () => {
-  await prisma.notificationDelivery.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.notificationConnection.deleteMany();
-};
+const create = (over: Record<string, unknown> = {}) =>
+  createConnection(adminToken, over);
 
 beforeAll(async () => {
   adminUserId = randomUUID();
@@ -64,11 +30,11 @@ beforeAll(async () => {
     permissions: ["notifications.admin", "notifications.read"],
   });
 
-  await clean();
+  await cleanNotifications();
 });
 
 afterAll(async () => {
-  await clean();
+  await cleanNotifications();
 });
 
 describe("/v1/admin/notifications/connections/:id", () => {
@@ -111,11 +77,11 @@ describe("/v1/admin/notifications/connections/:id", () => {
 
     it("records and emits create, update and delete without secrets", async () => {
       const c = await create({ secrets: { password: "audit-secret-pw" } });
-      await api("PATCH", `/connections/${c.id}`, adminToken, {
+      await connectionsApi("PATCH", `/connections/${c.id}`, adminToken, {
         displayName: "Audited",
         secrets: { password: "audit-secret-pw-2" },
       });
-      await api("DELETE", `/connections/${c.id}`, adminToken);
+      await connectionsApi("DELETE", `/connections/${c.id}`, adminToken);
 
       const entries = await audit(c.id);
       expect(entries.map((e) => e.action)).toEqual([
@@ -136,13 +102,13 @@ describe("/v1/admin/notifications/connections/:id", () => {
 
     it("notes a secrets change in the update's audit entry, never the values", async () => {
       const c = await create({ secrets: { password: "rotate-me-1" } });
-      await api("PATCH", `/connections/${c.id}`, adminToken, {
+      await connectionsApi("PATCH", `/connections/${c.id}`, adminToken, {
         secrets: { password: "rotate-me-2" },
       });
-      await api("PATCH", `/connections/${c.id}`, adminToken, {
+      await connectionsApi("PATCH", `/connections/${c.id}`, adminToken, {
         secrets: null,
       });
-      await api("PATCH", `/connections/${c.id}`, adminToken, {
+      await connectionsApi("PATCH", `/connections/${c.id}`, adminToken, {
         displayName: "Renamed",
       });
 
@@ -156,10 +122,10 @@ describe("/v1/admin/notifications/connections/:id", () => {
     });
 
     it("audits a default change", async () => {
-      await clean();
+      await cleanNotifications();
       await create();
       const b = await create();
-      await api("POST", `/connections/${b.id}/default`, adminToken);
+      await connectionsApi("POST", `/connections/${b.id}/default`, adminToken);
       const entries = await audit(b.id);
       expect(entries.map((e) => e.action)).toEqual(["CREATE", "UPDATE"]);
       await findEvent("notification.connection.updated", b.id);

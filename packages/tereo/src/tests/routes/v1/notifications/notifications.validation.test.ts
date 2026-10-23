@@ -5,9 +5,15 @@ import { getTestPrincipalToken } from "../../../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { SYSTEM_USER_ID } from "../../../../definitions/index.js";
 import { prisma } from "../../../../utils/db/prisma.js";
-import { CORE_URL } from "../../../support/coreUrl.js";
-import { fetchJson } from "../../../support/http.js";
 import { randomBytes, randomUUID } from "crypto";
+import {
+  cleanNotifications,
+  createNotificationConnection,
+  notificationMessage,
+  sendNotification,
+  expectError,
+  currentVersion,
+} from "../../../support/notifications.js";
 import {
   cleanupTestEntities,
   createTestBucket,
@@ -17,43 +23,7 @@ import {
   uploadTestObjectAndGetId,
 } from "../../../support/files.js";
 
-const BASE = `${CORE_URL}/v1/notifications`;
-
 const rand = () => randomBytes(4).toString("hex");
-
-const api = (
-  method: string,
-  path: string,
-  token: string | null,
-  body?: unknown
-) => fetchJson(method, `${BASE}${path}`, token, body);
-
-const settings = {
-  host: "127.0.0.1",
-  port: 2525,
-  security: "none",
-  defaultFrom: { address: "billing@acme.com" },
-  allowedSenders: ["@acme.com"],
-};
-
-const clean = async () => {
-  await prisma.notificationDelivery.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.notificationConnection.deleteMany();
-};
-
-const createConnection = (over: Record<string, unknown> = {}) =>
-  prisma.notificationConnection.create({
-    data: {
-      channel: "email",
-      slug: `c-${rand()}`,
-      displayName: "Test",
-      settings,
-      createdBy: SYSTEM_USER_ID,
-      updatedBy: SYSTEM_USER_ID,
-      ...over,
-    },
-  });
 
 let senderToken: string;
 let senderId: string;
@@ -69,36 +39,16 @@ let versionId: string;
 let otherObjectId: string;
 let otherVersionId: string;
 
-const currentVersion = async (id: string) =>
-  (await prisma.objectVersion.findFirstOrThrow({
-    where: { objectId: id, isCurrent: true },
-    include: { contentBlob: true },
-  }))!;
-
-const message = (over: Record<string, unknown> = {}) => ({
-  channel: "email",
-  connection: connectionSlug,
-  recipients: [{ address: "ops@example.com" }],
-  content: { subject: "Invoice 1042", text: "Hello" },
-  ...over,
-});
+const message = (over: Record<string, unknown> = {}) =>
+  notificationMessage(connectionSlug, over);
 
 const send = (body: unknown, token = senderToken) =>
-  api("POST", "", token, body);
-
-const expectError = (
-  res: { status: number; body: { error?: string } },
-  status: number,
-  code: string
-) => {
-  expect(res.status, JSON.stringify(res.body)).toBe(status);
-  expect(res.body.error).toBe(code);
-};
+  sendNotification(token, body);
 
 beforeAll(async () => {
   await ensureDailyPartitions("notifications", 0, 1);
   await ensureDailyPartitions("notificationDeliveries", 0, 1);
-  await clean();
+  await cleanNotifications();
 
   senderId = randomUUID();
   senderToken = await getTestPrincipalToken({
@@ -106,10 +56,11 @@ beforeAll(async () => {
     permissions: ["notifications.send", "file-service.objects.read"],
   });
 
-  const connection = await createConnection({ isDefault: true });
+  const connection = await createNotificationConnection({ isDefault: true });
   connectionSlug = connection.slug;
 
-  disabledSlug = (await createConnection({ isEnabled: false })).slug;
+  disabledSlug = (await createNotificationConnection({ isEnabled: false }))
+    .slug;
 
   const filesToken = await getTestAccessToken();
   readableBucket = (await createTestBucket(filesToken)).name;
@@ -137,7 +88,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await clean();
+  await cleanNotifications();
   await cleanupTestEntities();
 });
 

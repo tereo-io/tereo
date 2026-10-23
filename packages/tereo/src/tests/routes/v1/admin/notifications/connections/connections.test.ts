@@ -1,56 +1,23 @@
 // @module-tag int
 // @module-tag notifications
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
+import { cleanNotifications } from "../../../../../support/notifications.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../../../utils/db/prisma.js";
-import { CORE_URL } from "../../../../../support/coreUrl.js";
-import { fetchJson } from "../../../../../support/http.js";
-import { randomBytes, randomUUID } from "crypto";
-
-const BASE = `${CORE_URL}/v1/admin/notifications`;
+import { randomUUID } from "crypto";
+import {
+  connectionsApi,
+  connectionPayload,
+  createConnection,
+} from "../../../../../support/notificationConnections.js";
 
 let adminToken: string;
 let readToken: string;
 
 let adminUserId: string;
 
-const rand = () => randomBytes(4).toString("hex");
-
-const api = (
-  method: string,
-  path: string,
-  token: string | null,
-  body?: unknown
-) => fetchJson(method, `${BASE}${path}`, token, body);
-
-const settings = (port = 2525, over: Record<string, unknown> = {}) => ({
-  host: "127.0.0.1",
-  port,
-  security: "none",
-  defaultFrom: { address: "billing@acme.com" },
-  allowedSenders: ["@acme.com"],
-  ...over,
-});
-
-const payload = (over: Record<string, unknown> = {}) => ({
-  channel: "email",
-  slug: `c-${rand()}`,
-  displayName: "Main",
-  settings: settings(),
-  ...over,
-});
-
-const create = async (over: Record<string, unknown> = {}) => {
-  const res = await api("POST", "/connections", adminToken, payload(over));
-  expect(res.status, JSON.stringify(res.body)).toBe(201);
-  return res.body;
-};
-
-const clean = async () => {
-  await prisma.notificationDelivery.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.notificationConnection.deleteMany();
-};
+const create = (over: Record<string, unknown> = {}) =>
+  createConnection(adminToken, over);
 
 beforeAll(async () => {
   adminUserId = randomUUID();
@@ -62,21 +29,21 @@ beforeAll(async () => {
     permissions: ["notifications.read"],
   });
 
-  await clean();
+  await cleanNotifications();
 });
 
 afterAll(async () => {
-  await clean();
+  await cleanNotifications();
 });
 
 describe("POST /v1/admin/notifications/connections", () => {
   describe("create", () => {
     it("validates settings with the adapter and reports field issues", async () => {
-      const res = await api(
+      const res = await connectionsApi(
         "POST",
         "/connections",
         adminToken,
-        payload({ settings: { host: "", port: 99999 } })
+        connectionPayload({ settings: { host: "", port: 99999 } })
       );
       expect(res.status).toBe(400);
       expect(res.body.error).toBe("invalid_settings");
@@ -87,33 +54,33 @@ describe("POST /v1/admin/notifications/connections", () => {
     });
 
     it("validates secrets with the adapter", async () => {
-      const res = await api(
+      const res = await connectionsApi(
         "POST",
         "/connections",
         adminToken,
-        payload({ secrets: { password: 42 } })
+        connectionPayload({ secrets: { password: 42 } })
       );
       expect(res.status).toBe(400);
       expect(res.body.error).toBe("invalid_secrets");
     });
 
     it("rejects an unknown channel and a bad slug", async () => {
-      const res = await api(
+      const res = await connectionsApi(
         "POST",
         "/connections",
         adminToken,
-        payload({ channel: "sms" })
+        connectionPayload({ channel: "sms" })
       );
       expect(res.status).toBe(400);
       expect(res.body.error).toBe("invalid_request");
       expect(res.body.error_description).toEqual(expect.any(String));
       expect(
         (
-          await api(
+          await connectionsApi(
             "POST",
             "/connections",
             adminToken,
-            payload({ slug: "Bad Slug" })
+            connectionPayload({ slug: "Bad Slug" })
           )
         ).status
       ).toBe(400);
@@ -132,10 +99,14 @@ describe("POST /v1/admin/notifications/connections", () => {
       expect(row.secrets).toMatch(/^kek1:/);
       expect(row.secrets).not.toContain("hunter2-secret");
 
-      const got = await api("GET", `/connections/${c.id}`, readToken);
+      const got = await connectionsApi(
+        "GET",
+        `/connections/${c.id}`,
+        readToken
+      );
       expect(got.body.hasSecrets).toBe(true);
       expect(got.body).not.toHaveProperty("secrets");
-      const list = await api("GET", "/connections", readToken);
+      const list = await connectionsApi("GET", "/connections", readToken);
       expect(JSON.stringify(list.body)).not.toContain("hunter2-secret");
       expect(JSON.stringify(list.body)).not.toContain("kek1:");
     });
@@ -147,17 +118,17 @@ describe("POST /v1/admin/notifications/connections", () => {
 
     it("conflicts on a duplicate slug within a channel", async () => {
       const c = await create();
-      const res = await api(
+      const res = await connectionsApi(
         "POST",
         "/connections",
         adminToken,
-        payload({ slug: c.slug })
+        connectionPayload({ slug: c.slug })
       );
       expect(res.status).toBe(409);
     });
 
     it("makes the first connection of a channel the default", async () => {
-      await clean();
+      await cleanNotifications();
       const first = await create();
       const second = await create();
       expect(first.isDefault).toBe(true);

@@ -2,16 +2,21 @@
 // @module-tag notifications
 import { ensureDailyPartitions } from "../../../../utils/partitions.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { SYSTEM_USER_ID } from "../../../../definitions/index.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { waitFor } from "../../../support/webhooks.js";
-import { CORE_URL } from "../../../support/coreUrl.js";
-import { fetchJson } from "../../../support/http.js";
 import { randomBytes, randomUUID } from "crypto";
 import {
   closeNotificationQueues,
   getNotificationQueue,
 } from "../../../../jobs/notificationQueues.js";
+import {
+  cleanNotifications,
+  createNotificationConnection,
+  notificationMessage,
+  sendNotification,
+  expectError,
+  currentVersion,
+} from "../../../support/notifications.js";
 import {
   ensureTestUser,
   getTestPrincipalToken,
@@ -25,8 +30,6 @@ import {
   uploadTestObjectAndGetId,
 } from "../../../support/files.js";
 
-const BASE = `${CORE_URL}/v1/notifications`;
-
 // The delivery worker does not run under test, so a dispatched job waits.
 const waitForDeliveryJob = async (deliveryId: string) => {
   const queue = getNotificationQueue("email");
@@ -35,40 +38,6 @@ const waitForDeliveryJob = async (deliveryId: string) => {
 };
 
 const rand = () => randomBytes(4).toString("hex");
-
-const api = (
-  method: string,
-  path: string,
-  token: string | null,
-  body?: unknown
-) => fetchJson(method, `${BASE}${path}`, token, body);
-
-const settings = {
-  host: "127.0.0.1",
-  port: 2525,
-  security: "none",
-  defaultFrom: { address: "billing@acme.com" },
-  allowedSenders: ["@acme.com"],
-};
-
-const clean = async () => {
-  await prisma.notificationDelivery.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.notificationConnection.deleteMany();
-};
-
-const createConnection = (over: Record<string, unknown> = {}) =>
-  prisma.notificationConnection.create({
-    data: {
-      channel: "email",
-      slug: `c-${rand()}`,
-      displayName: "Test",
-      settings,
-      createdBy: SYSTEM_USER_ID,
-      updatedBy: SYSTEM_USER_ID,
-      ...over,
-    },
-  });
 
 let senderToken: string;
 let senderId: string;
@@ -85,36 +54,16 @@ let versionId: string;
 
 let objectSize: number;
 
-const currentVersion = async (id: string) =>
-  (await prisma.objectVersion.findFirstOrThrow({
-    where: { objectId: id, isCurrent: true },
-    include: { contentBlob: true },
-  }))!;
-
-const message = (over: Record<string, unknown> = {}) => ({
-  channel: "email",
-  connection: connectionSlug,
-  recipients: [{ address: "ops@example.com" }],
-  content: { subject: "Invoice 1042", text: "Hello" },
-  ...over,
-});
+const message = (over: Record<string, unknown> = {}) =>
+  notificationMessage(connectionSlug, over);
 
 const send = (body: unknown, token = senderToken) =>
-  api("POST", "", token, body);
-
-const expectError = (
-  res: { status: number; body: { error?: string } },
-  status: number,
-  code: string
-) => {
-  expect(res.status, JSON.stringify(res.body)).toBe(status);
-  expect(res.body.error).toBe(code);
-};
+  sendNotification(token, body);
 
 beforeAll(async () => {
   await ensureDailyPartitions("notifications", 0, 1);
   await ensureDailyPartitions("notificationDeliveries", 0, 1);
-  await clean();
+  await cleanNotifications();
 
   senderId = randomUUID();
   senderToken = await getTestPrincipalToken({
@@ -122,7 +71,7 @@ beforeAll(async () => {
     permissions: ["notifications.send", "file-service.objects.read"],
   });
 
-  const connection = await createConnection({ isDefault: true });
+  const connection = await createNotificationConnection({ isDefault: true });
   connectionSlug = connection.slug;
   connectionId = connection.id;
 
@@ -150,7 +99,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await clean();
+  await cleanNotifications();
   await cleanupTestEntities();
   await closeNotificationQueues();
 });
@@ -300,7 +249,7 @@ describe("POST /v1/notifications", () => {
     });
 
     it("replays the first result after the named connection is disabled", async () => {
-      const connection = await createConnection();
+      const connection = await createNotificationConnection();
       const body = message({
         idempotencyKey: randomUUID(),
         connection: connection.slug,
@@ -325,7 +274,7 @@ describe("POST /v1/notifications", () => {
 
   describe("with no connection", () => {
     it("still accepts a send when the channel has no default and none is named", async () => {
-      await clean();
+      await cleanNotifications();
       const res = await send(message({ connection: undefined }));
       expect(res.status, JSON.stringify(res.body)).toBe(202);
       const row = await prisma.notification.findFirstOrThrow({
