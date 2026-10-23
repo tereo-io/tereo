@@ -4,6 +4,9 @@
 #
 #   docker/test/run.sh                # build, run, tear down
 #   TEST_SHARDS=1 docker/test/run.sh  # the whole suite in one stack
+#   TEST_STACK_PREFIX=tereo-test-x docker/test/run.sh
+#                                     # name the stacks `<prefix>-<shard>` and the image `<prefix>-runner`
+#                                     # (default `tereo-test`), so worktrees can run at once
 #   docker/test/run.sh <compose args> # passthrough to every shard's stack, e.g. `logs -f runner`
 #
 # Needs nothing but Docker: the runner builds from source, and core generates
@@ -13,11 +16,19 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHARDS="${TEST_SHARDS:-4}"
+export TEST_STACK_PREFIX="${TEST_STACK_PREFIX:-tereo-test}"
+
+# Compose project names: lowercase letters, digits, `-` and `_`, starting with
+# a letter or digit. The prefix becomes the start of every stack's name.
+if [[ ! "$TEST_STACK_PREFIX" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+  echo "TEST_STACK_PREFIX='$TEST_STACK_PREFIX' is not a valid compose project name: use lowercase letters, digits, '-' and '_', starting with a letter or digit" >&2
+  exit 1
+fi
 
 compose() {
   local shard=$1
   shift
-  docker compose -f "$SCRIPT_DIR/docker-compose.yml" -p "tereo-test-$shard" "$@"
+  docker compose -f "$SCRIPT_DIR/docker-compose.yml" -p "$TEST_STACK_PREFIX-$shard" "$@"
 }
 
 # `compose <shard> "$@"` for every shard at once, each line prefixed with its

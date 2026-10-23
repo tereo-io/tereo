@@ -3,9 +3,11 @@
 Condensed from the tereo suite (`packages/tereo/src/tests/`), mostly the webhook
 endpoints tests.
 
-## Integration Test — `tests/webhooks/webhooks.test.ts`
+## Integration Test — `routes/v1/webhooks/webhooks/webhooks.test.ts`
 
 ```typescript
+// @module-tag int
+// @module-tag webhooks
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import axios from "axios";
 import {
@@ -18,7 +20,7 @@ import {
   cleanupTestEntities,
   generateUniqueId,
   WebhookEndpointResponse,
-} from "./utils/test-helpers.js";
+} from "../../../../support/webhooks.js";
 
 describe("Webhook Endpoint Management", () => {
   let testToken: string;
@@ -101,59 +103,29 @@ describe("Webhook Endpoint Management", () => {
       expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
     });
   });
-
-  describe("GET /webhooks/:id", () => {
-    it("should return 404 for non-existent endpoint", async () => {
-      const response = await axios.get(
-        `${BASE_URL}/webhooks/00000000-0000-0000-0000-000000000000`,
-        {
-          headers: { Authorization: `Bearer ${testToken}` },
-          validateStatus: () => true,
-        }
-      );
-
-      expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
-    });
-
-    it("should return 403 for endpoint belonging to different client", async () => {
-      const ep = await createTestWebhookEndpoint(testToken);
-
-      // A different fixture user, in an organization named by label.
-      const otherToken = await getTestAccessToken(
-        "00000000-0000-7001-0000-000000000002",
-        "other-org-1"
-      );
-
-      const response = await axios.get(`${BASE_URL}/webhooks/${ep.id}`, {
-        headers: { Authorization: `Bearer ${otherToken}` },
-        validateStatus: () => true,
-      });
-
-      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-    });
-  });
 });
 ```
 
-## Audit Entry and Outbox Fan-Out — `tests/integration.test.ts`
+## Audit Entry and Outbox Fan-Out — `routes/v1/admin/roles/roles.audit.test.ts` (a route's `.audit` file)
 
 ```typescript
-import { getTestPrincipalToken } from "./utils/principals.js";
-import { prisma } from "../utils/db/prisma.js";
+// @module-tag int
+// @module-tag auth
+import { getTestPrincipalToken } from "../../../../support/principals.js";
+import { prisma } from "../../../../../utils/db/prisma.js";
 import { describe, it, expect } from "vitest";
 import { randomUUID } from "crypto";
 import axios from "axios";
+import { CORE_URL } from "../../../../support/coreUrl.js";
 import {
   createTestWebhookEndpoint,
   getTestAccessToken as getWebhooksToken,
   waitFor,
-} from "./webhooks/utils/test-helpers.js";
+} from "../../../../support/webhooks.js";
 import {
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
-} from "../definitions/index.js";
-
-const BASE_URL = "http://localhost:4001";
+} from "../../../../../definitions/index.js";
 
 const adminToken = (perms: string[]) =>
   getTestPrincipalToken({
@@ -163,7 +135,7 @@ const adminToken = (perms: string[]) =>
 
 it("records auth's audit entries in the same transaction", async () => {
   const response = await axios.post(
-    `${BASE_URL}/admin/roles`,
+    `${CORE_URL}/v1/admin/roles`,
     { name: `test_role_${randomUUID().slice(0, 8)}`, displayName: "Test" },
     { headers: { Authorization: `Bearer ${await adminToken(["roles.write"])}` } }
   );
@@ -188,12 +160,12 @@ it("fans an auth event out to subscribed webhook endpoints", async () => {
 
   const token = await adminToken(["roles.write", "roles.read"]);
   const role = await axios.post(
-    `${BASE_URL}/admin/roles`,
+    `${CORE_URL}/v1/admin/roles`,
     { name: `test_role_${randomUUID().slice(0, 8)}`, displayName: "Before" },
     { headers: { Authorization: `Bearer ${token}` } }
   );
   await axios.patch(
-    `${BASE_URL}/admin/roles/${role.data.id}`,
+    `${CORE_URL}/v1/admin/roles/${role.data.id}`,
     { displayName: "After" },
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -209,15 +181,16 @@ it("fans an auth event out to subscribed webhook endpoints", async () => {
 });
 ```
 
-## Area Helpers — `tests/webhooks/utils/test-helpers.ts` (key exports)
+## Area Helpers — `support/webhooks.ts` (key exports)
 
 ```typescript
-import { getTestPrincipalToken } from "../../utils/principals.js";
-import { TEST_SERVICE } from "../../utils/testService.js";
-import { prisma } from "../../../utils/db/prisma.js";
+import { getTestPrincipalToken } from "./principals.js";
+import { TEST_SERVICE } from "./testService.js";
+import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes } from "crypto";
+import { CORE_URL } from "./coreUrl.js";
 
-export const BASE_URL = "http://localhost:4001/v1/webhooks";
+export const BASE_URL = `${CORE_URL}/v1/webhooks`;
 
 export const HTTP_STATUS = {
   OK: 200,
@@ -296,7 +269,7 @@ export async function cleanupTestEntities() {
 // ...plus createTestWebhookEndpoint, emitTestEvent, waitFor, cleanupAllTestEntities
 ```
 
-## Principals — `tests/utils/principals.ts` (core of it)
+## Principals — `support/principals.ts` (core of it)
 
 ```typescript
 export interface TestPrincipalOptions {
@@ -342,7 +315,7 @@ const mintToken = async (
 };
 ```
 
-## Test Service — `tests/utils/testService.ts`
+## Test Service — `support/testService.ts`
 
 ```typescript
 /**
@@ -368,14 +341,15 @@ export const ensurePermission = (name: string, displayName = name) =>
   });
 ```
 
-## Per-File Setup — `tests/setup.ts`
+## Per-File Setup — `setup/setup.ts`
 
 ```typescript
-import { getRedisClient, initializeRedis } from "../utils/redis.js";
-import { prisma } from "../utils/db/prisma.js";
+import { initializeRedis } from "../../utils/redis.js";
+import { resetRateLimits } from "../support/redis.js";
+import { prisma } from "../../utils/db/prisma.js";
 import { beforeAll, beforeEach } from "vitest";
-import { loadKeys } from "../utils/keys.js";
-import env from "../env.js";
+import { loadKeys } from "../../utils/keys.js";
+import env from "../../env.js";
 
 beforeAll(async () => {
   await initializeRedis(env);
@@ -384,17 +358,14 @@ beforeAll(async () => {
   await loadKeys();
 });
 
-// Earlier tests would otherwise exhaust rate limits for later ones.
+// Earlier tests would otherwise exhaust rate limits or leave idempotency
+// claims behind for later ones.
 beforeEach(async () => {
-  const redis = getRedisClient();
-  for (const pattern of ["rl:*", "tereo:ratelimit*"]) {
-    const keys = await redis.keys(pattern);
-    if (keys.length > 0) await redis.del(keys);
-  }
+  await resetRateLimits();
 });
 ```
 
-## Global Setup — `tests/globalSetup.ts` (condensed)
+## Global Setup — `setup/globalSetup.ts` (condensed)
 
 ```typescript
 export async function setup() {
@@ -411,13 +382,13 @@ export async function setup() {
   await registerCore();
   await seedTestFixtures(); // test service, FIXTURE_USER_IDS, FIXTURE_ORGANIZATION_IDS
 
-  // Mark first-launch setup complete (tests/setup/ resets it around its own cases).
+  // Mark first-launch setup complete (routes/v1/setup/ resets it around its own cases).
   await prisma.instance.update({
     where: { id: 1 },
     data: { setupCompletedAt: new Date(), setupCompletedBy: owner.id },
   });
 
-  server = createAppServer(4001);
+  server = createAppServer(Number(process.env.PORT ?? 4001));
   await server.start();
 }
 
@@ -426,6 +397,7 @@ export async function teardown() {
     files.cleanupAllTestEntities,
     webhooks.cleanupAllTestEntities,
     audit.cleanupAllTestEntities,
+    provisioning.cleanupAllTestEntities,
   ]) {
     await cleanup().catch(() => undefined);
   }
@@ -436,34 +408,48 @@ export async function teardown() {
 ## Vitest Config — `packages/tereo/vitest.config.ts`
 
 ```typescript
-import { loadTestEnv } from "./src/tests/testEnv.js";
+import { loadTestEnv, loadUnitTestEnv } from "./src/tests/setup/testEnv.js";
+import { TAGS } from "./src/tests/setup/tags.js";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    globals: true,
-    environment: "node",
-    testTimeout: 30000,
-    hookTimeout: 60000,
-    slowTestThreshold: 1000,
-    include: ["src/**/*.test.ts"],
-    setupFiles: ["src/tests/setup.ts"],
-    globalSetup: ["src/tests/globalSetup.ts"],
-    env: loadTestEnv(),
-    // Serial across files: every file shares one server and database.
-    pool: "forks",
-    fileParallelism: false,
+    tags: TAGS,
+    strictTags: true,
+    projects: [
+      {
+        test: {
+          name: "unit",
+          include: ["src/tests/**/*.unit.test.ts"],
+          env: loadUnitTestEnv(), // unreachable database and Redis
+        },
+      },
+      {
+        test: {
+          name: "int",
+          include: ["src/tests/**/*.test.ts"],
+          exclude: ["src/tests/**/*.unit.test.ts"],
+          env: loadTestEnv(), // `intEnv()` in the real file tolerates a missing .env
+          setupFiles: ["src/tests/setup/setup.ts"],
+          globalSetup: ["src/tests/setup/globalSetup.ts"],
+          // Serial across files: every file shares one server and database.
+          pool: "forks",
+          fileParallelism: false,
+        },
+      },
+    ],
   },
 });
 ```
 
-## Unit Test — `packages/tereo/src/tests/unit/errorHandler.test.ts`
+## Unit Test — `utils/errors.unit.test.ts`
 
-Unit tests call the function directly and need no server, though core's still run under the suite's
-`globalSetup`. The SDK's (`packages/tereo-sdk/src/tests/`) follow the same shape with no
+`.unit` tests call the function directly: no server, database or Redis, and no `globalSetup`. The SDK's (`packages/tereo-sdk/src/tests/`) follow the same shape with no
 database at all.
 
 ```typescript
+// @module-tag unit
+// @module-tag platform
 import { NotFoundError, errorHandler } from "../../utils/errors.js";
 import { NextFunction, Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
@@ -489,12 +475,6 @@ describe("errorHandler", () => {
       status: 404,
       body: { error: "not_found", error_description: "No such bucket" },
     });
-  });
-
-  it("still maps a Prisma conflict, which has a code but no status", () => {
-    expect(
-      handle(Object.assign(new Error("lost race"), { code: "P2025" }))
-    ).toMatchObject({ status: 409, body: { error: "version_conflict" } });
   });
 });
 ```

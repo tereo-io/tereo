@@ -1,0 +1,400 @@
+// @module-tag int
+// @module-tag auth
+// @module-tag provisioning
+import { ensurePermission } from "../../../../../support/testService.js";
+import { removeServices } from "../../../../../support/provisioning.js";
+import { tokenResponse } from "../../../../../support/clientToken.js";
+import { customRole } from "../../../../../support/integrations.js";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { prisma } from "../../../../../../utils/db/prisma.js";
+import { CORE_URL } from "../../../../../support/coreUrl.js";
+import { fetchJson } from "../../../../../support/http.js";
+import { randomBytes } from "crypto";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../../../../../support/principals.js";
+
+const createdSlugs: string[] = [];
+
+const createdRoleIds: string[] = [];
+
+let adminToken: string;
+
+let orgId: string;
+
+const rand = () => randomBytes(5).toString("hex");
+
+const api = (
+  method: string,
+  path: string,
+  body?: unknown,
+  token = adminToken
+) => fetchJson(method, `${CORE_URL}${path}`, token, body);
+
+interface Created {
+  id: string;
+  slug: string;
+  credentials: { clientId: string; clientSecret: string };
+}
+
+const createIntegration = async (
+  body: { organizationId?: string } = {}
+): Promise<Created> => {
+  const slug = `int-${rand()}`;
+  createdSlugs.push(slug);
+  const res = await api("POST", "/v1/admin/integrations", {
+    name: `Integration ${slug}`,
+    slug,
+    ...body,
+  });
+  expect(res.status).toBe(201);
+  return res.body as Created;
+};
+
+const tokenOf = async ({ credentials }: Created) => {
+  const response = await tokenResponse(
+    credentials.clientId,
+    credentials.clientSecret
+  );
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { access_token: string }).access_token;
+};
+
+const claimsOf = (token: string) =>
+  JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()) as {
+    jti: string;
+    org_id?: string;
+    aud?: string | string[];
+  };
+
+/** The live permissions of the integration's token, as introspection reports them. */
+const permissionsOf = async ({ credentials }: Created) => {
+  const { clientId, clientSecret } = credentials;
+  const res = await fetch(`${CORE_URL}/oauth/introspect`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      token: await tokenOf({ credentials } as Created),
+    }).toString(),
+  });
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { permissions?: string[] }).permissions ?? [];
+};
+
+const isRevoked = async (token: string) =>
+  (
+    await prisma.accessToken.findUniqueOrThrow({
+      where: { jti: claimsOf(token).jti },
+    })
+  ).revokedAt !== null;
+
+/** A custom role granting these permissions. */
+beforeAll(async () => {
+  adminToken = await getTestPrincipalToken({
+    permissions: [
+      "integrations.read",
+      "integrations.write",
+      "services.read",
+      "services.write",
+      "services.approve",
+      "webhooks.read",
+    ],
+  });
+  orgId = await ensureTestOrganization("integrations-org");
+});
+
+afterAll(async () => {
+  await removeServices(createdSlugs);
+  await prisma.userRole.deleteMany({
+    where: { roleId: { in: createdRoleIds } },
+  });
+  await prisma.rolePermission.deleteMany({
+    where: { roleId: { in: createdRoleIds } },
+  });
+  await prisma.role.deleteMany({ where: { id: { in: createdRoleIds } } });
+});
+
+describe("/v1/admin/integrations/:id", () => {
+  describe("roles", () => {
+    it("refuses an org-bound integration a role with a global-only permission", async () => {
+      const created = await createIntegration({ organizationId: orgId });
+      const roleId = await customRole(["users.read"], createdRoleIds);
+      const res = await api(
+        "PUT",
+        `/v1/admin/integrations/${created.id}/roles`,
+        {
+          roleIds: [roleId],
+        }
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("grants org roles to an org-bound integration, in its tokens, revoking the old ones", async () => {
+      const created = await createIntegration({ organizationId: orgId });
+      const before = await tokenOf(created);
+      const roleId = await customRole(["webhooks.read"], createdRoleIds);
+      const res = await api(
+        "PUT",
+        `/v1/admin/integrations/${created.id}/roles`,
+        {
+          roleIds: [roleId],
+        }
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.roles.map((r: { id: string }) => r.id)).toEqual([roleId]);
+      expect(await isRevoked(before)).toBe(true);
+
+      expect(await permissionsOf(created)).toContain("webhooks.read");
+
+      const row = await prisma.service.findUniqueOrThrow({
+        where: { id: created.id },
+        include: { client: { include: { serviceAccountUser: true } } },
+      });
+      const assignments = await prisma.userRole.findMany({
+        where: { userId: row.client!.serviceAccountUser!.id },
+      });
+      expect(assignments).toEqual([
+        expect.objectContaining({ roleId, organizationId: orgId }),
+      ]);
+    });
+
+    it(
+      "refuses a role carrying admin, even to an approver holding it",
+      { tags: ["security"] },
+      async () => {
+        const created = await createIntegration();
+        const roleId = await customRole(["admin"], createdRoleIds);
+        const granter = await getTestPrincipalToken({
+          permissions: ["integrations.write", "admin"],
+        });
+        const res = await api(
+          "PUT",
+          `/v1/admin/integrations/${created.id}/roles`,
+          { roleIds: [roleId] },
+          granter
+        );
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe("role_not_allowed_for_integration");
+        const got = await api("GET", `/v1/admin/integrations/${created.id}`);
+        expect(got.body.roles).toEqual([]);
+      }
+    );
+
+    it(
+      "refuses adding admin to a role an integration holds",
+      { tags: ["security"] },
+      async () => {
+        const created = await createIntegration();
+        const roleId = await customRole(["users.read"], createdRoleIds);
+        const granter = await getTestPrincipalToken({
+          permissions: ["integrations.write", "users.read"],
+        });
+        const granted = await api(
+          "PUT",
+          `/v1/admin/integrations/${created.id}/roles`,
+          { roleIds: [roleId] },
+          granter
+        );
+        expect(granted.status).toBe(200);
+
+        const roleAdmin = await getTestPrincipalToken({
+          permissions: ["admin"],
+        });
+        const permissionIds = [
+          (await ensurePermission("users.read")).id,
+          (
+            await prisma.permission.findFirstOrThrow({
+              where: { name: "admin", retiredAt: null },
+            })
+          ).id,
+        ];
+        const res = await api(
+          "PUT",
+          `/v1/admin/roles/${roleId}/permissions`,
+          { permissionIds },
+          roleAdmin
+        );
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe("role_not_allowed_for_integration");
+        expect(res.body.error_description).toContain(created.slug);
+        expect(await permissionsOf(created)).not.toContain("admin");
+      }
+    );
+
+    it(
+      "refuses reactivating an admin role an integration holds",
+      { tags: ["security"] },
+      async () => {
+        const created = await createIntegration();
+        const userId = (
+          await api("GET", `/v1/admin/integrations/${created.id}`)
+        ).body.serviceAccountUserId as string;
+        const roleId = await customRole(["admin"], createdRoleIds);
+        await prisma.role.update({
+          where: { id: roleId },
+          data: { isActive: false },
+        });
+        // Held while inactive, as only a direct write can leave it.
+        await prisma.userRole.create({ data: { userId, roleId } });
+
+        const roleAdmin = await getTestPrincipalToken({
+          permissions: ["admin"],
+        });
+        const res = await api(
+          "PATCH",
+          `/v1/admin/roles/${roleId}`,
+          { isActive: true },
+          roleAdmin
+        );
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe("role_not_allowed_for_integration");
+        expect(
+          (await prisma.role.findUniqueOrThrow({ where: { id: roleId } }))
+            .isActive
+        ).toBe(false);
+      }
+    );
+
+    it("grants global roles to a platform integration", async () => {
+      const created = await createIntegration();
+      const roleId = await customRole(["users.read"], createdRoleIds);
+      const granter = await getTestPrincipalToken({
+        permissions: ["integrations.write", "users.read"],
+      });
+      const res = await api(
+        "PUT",
+        `/v1/admin/integrations/${created.id}/roles`,
+        { roleIds: [roleId] },
+        granter
+      );
+      expect(res.status).toBe(200);
+      expect(await permissionsOf(created)).toContain("users.read");
+      const got = await api("GET", `/v1/admin/integrations/${created.id}`);
+      expect(got.body.roles).toEqual([
+        expect.objectContaining({
+          id: roleId,
+          displayName: "Integration test role",
+        }),
+      ]);
+    });
+  });
+
+  describe("audiences", () => {
+    it("puts the services named in its tokens' aud, and refuses anything else", async () => {
+      const serviceSlug = `int-svc-${rand()}`;
+      createdSlugs.push(serviceSlug);
+      const service = await api("POST", "/v1/admin/services", {
+        name: serviceSlug,
+        slug: serviceSlug,
+      });
+      expect(service.status).toBe(201);
+
+      const created = await createIntegration();
+      const before = await tokenOf(created);
+      const res = await api(
+        "PUT",
+        `/v1/admin/integrations/${created.id}/audiences`,
+        { slugs: [serviceSlug] }
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.audience).toEqual([serviceSlug]);
+      expect(await isRevoked(before)).toBe(true);
+      expect([claimsOf(await tokenOf(created)).aud].flat()).toContain(
+        serviceSlug
+      );
+
+      const other = await createIntegration();
+      const refused = await api(
+        "PUT",
+        `/v1/admin/integrations/${created.id}/audiences`,
+        { slugs: [other.slug] }
+      );
+      expect(refused.status).toBe(422);
+    });
+  });
+
+  describe("updating", () => {
+    it("renames, and deactivation revokes tokens and refuses new ones", async () => {
+      const created = await createIntegration({ organizationId: orgId });
+      const token = await tokenOf(created);
+
+      const renamed = await api(
+        "PATCH",
+        `/v1/admin/integrations/${created.id}`,
+        {
+          name: "Renamed",
+        }
+      );
+      expect(renamed.status).toBe(200);
+      expect(renamed.body.name).toBe("Renamed");
+
+      const off = await api("PATCH", `/v1/admin/integrations/${created.id}`, {
+        isActive: false,
+      });
+      expect(off.status).toBe(200);
+      expect(off.body.isActive).toBe(false);
+      expect(await isRevoked(token)).toBe(true);
+      const refused = await tokenResponse(
+        created.credentials.clientId,
+        created.credentials.clientSecret
+      );
+      expect(refused.status).not.toBe(200);
+
+      const on = await api("PATCH", `/v1/admin/integrations/${created.id}`, {
+        isActive: true,
+      });
+      expect(on.status).toBe(200);
+      await tokenOf(created);
+    });
+
+    it("regenerates the secret with an overlap, and ends the overlap", async () => {
+      const created = await createIntegration();
+      const res = await api(
+        "POST",
+        `/v1/admin/integrations/${created.id}/regenerate-secret`
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.clientId).toBe(created.credentials.clientId);
+      const next = {
+        ...created,
+        credentials: {
+          clientId: created.credentials.clientId,
+          clientSecret: res.body.clientSecret as string,
+        },
+      };
+      await tokenOf(created);
+      await tokenOf(next);
+
+      const ended = await api(
+        "POST",
+        `/v1/admin/integrations/${created.id}/revoke-previous-secret`
+      );
+      expect(ended.status).toBe(200);
+      expect(
+        (
+          await tokenResponse(
+            created.credentials.clientId,
+            created.credentials.clientSecret
+          )
+        ).status
+      ).toBe(401);
+      await tokenOf(next);
+    });
+
+    it("does not treat a service as an integration", async () => {
+      const serviceSlug = `int-svc-${rand()}`;
+      createdSlugs.push(serviceSlug);
+      const service = await api("POST", "/v1/admin/services", {
+        name: serviceSlug,
+        slug: serviceSlug,
+      });
+      expect(
+        (await api("GET", `/v1/admin/integrations/${service.body.id}`)).status
+      ).toBe(404);
+    });
+  });
+});

@@ -1,0 +1,678 @@
+// @module-tag int
+// @module-tag auth
+import { createTestClient } from "../../../support/auth/clients.js";
+import { json, postForm } from "../../../support/auth/login.js";
+import { makeServiceOf } from "../../../support/testService.js";
+import { browserLogin } from "../../../support/browserLogin.js";
+import { describe, it, expect, beforeAll } from "vitest";
+import { prisma } from "../../../../utils/db/prisma.js";
+import jwt from "jsonwebtoken";
+import {
+  BASE_URL,
+  HTTP_STATUS,
+  OAUTH_ERRORS,
+} from "../../../support/auth/constants.js";
+import {
+  generateCodeVerifier,
+  generateCodeChallenge,
+  generateUniqueId,
+} from "../../../support/auth/crypto.js";
+import {
+  TokenResponse,
+  IntrospectResponse,
+} from "../../../support/auth/tokens.js";
+import {
+  createTestUser,
+  createTestPermission,
+  createTestRole,
+} from "../../../support/auth/users.js";
+
+describe("POST /oauth/introspect", () => {
+  describe("OAuth Introspect Endpoint", () => {
+    interface AuthorizeResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
+    interface ConsentResponse {
+      redirect_url?: string;
+      error?: string;
+      error_description?: string;
+    }
+
+    let testClient: Awaited<ReturnType<typeof createTestClient>>;
+    let testUser: Awaited<ReturnType<typeof createTestUser>>;
+
+    beforeAll(async () => {
+      testClient = await createTestClient({ clientType: "confidential" });
+      testUser = await createTestUser();
+    });
+
+    const testClientHeaders = () => ({
+      "Content-Type": "application/json",
+      Authorization: `Basic ${Buffer.from(
+        `${testClient.clientId}:${testClient.plainSecret}`
+      ).toString("base64")}`,
+    });
+
+    // Helper to get tokens
+    async function getTokens(): Promise<TokenResponse> {
+      const codeVerifier = generateCodeVerifier();
+      const codeChallenge = generateCodeChallenge(codeVerifier);
+      const state = generateUniqueId();
+      const redirectUri = testClient.redirectUris[0];
+
+      // Step 1: GET to get session cookie
+      const authorizeUrl = new URL(`${BASE_URL}/oauth/authorize`);
+      authorizeUrl.searchParams.set("response_type", "code");
+      authorizeUrl.searchParams.set("client_id", testClient.clientId);
+      authorizeUrl.searchParams.set("redirect_uri", redirectUri);
+      authorizeUrl.searchParams.set("state", state);
+      authorizeUrl.searchParams.set(
+        "scope",
+        "openid profile email offline_access"
+      );
+      authorizeUrl.searchParams.set("code_challenge", codeChallenge);
+      authorizeUrl.searchParams.set("code_challenge_method", "S256");
+
+      const getResponse = await fetch(authorizeUrl.toString(), {
+        method: "GET",
+        redirect: "manual",
+      });
+
+      const setCookieHeader = getResponse.headers.get("set-cookie") || "";
+      const sessionCookieMatch = setCookieHeader.match(
+        /tereo_session_[^=]+=([^;]+)/
+      );
+      const sessionCookie = sessionCookieMatch ? sessionCookieMatch[0] : "";
+
+      // Step 2: POST credentials
+      const authResponse = await fetch(`${BASE_URL}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: sessionCookie,
+        },
+        body: JSON.stringify({
+          response_type: "code",
+          client_id: testClient.clientId,
+          redirect_uri: redirectUri,
+          state,
+          scope: "openid profile email offline_access",
+          code_challenge: codeChallenge,
+          code_challenge_method: "S256",
+          email: testUser.email,
+          password: testUser.plainPassword,
+        }),
+        redirect: "manual",
+      });
+
+      const authData = (await authResponse.json()) as AuthorizeResponse;
+
+      expect(authData.redirect_url).toContain("/consent");
+      const consentUrl = new URL(authData.redirect_url!);
+      const sessionId = consentUrl.searchParams.get("session");
+
+      expect(sessionId).toBeTruthy();
+      const authCookieHeader = authResponse.headers.get("set-cookie") || "";
+      const consentCookieMatch = authCookieHeader.match(
+        /tereo_consent_session_[^=]+=([^;]+)/
+      );
+      const consentCookie = consentCookieMatch ? consentCookieMatch[0] : "";
+
+      const consentResponse = await fetch(`${BASE_URL}/oauth/consent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: consentCookie,
+        },
+        body: JSON.stringify({ session_token: sessionId, approved: true }),
+        redirect: "manual",
+      });
+
+      const consentData = (await consentResponse.json()) as ConsentResponse;
+      expect(consentData.redirect_url).toContain("code=");
+      const code = new URL(consentData.redirect_url!).searchParams.get("code");
+
+      const tokenResponse = await fetch(`${BASE_URL}/oauth/token`, {
+        method: "POST",
+        headers: testClientHeaders(),
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: redirectUri,
+          code_verifier: codeVerifier,
+        }),
+      });
+
+      return (await tokenResponse.json()) as TokenResponse;
+    }
+
+    describe("POST /oauth/introspect", () => {
+      it("should return 200 with active=true for valid access token", async () => {
+        const tokens = await getTokens();
+
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: testClientHeaders(),
+          body: JSON.stringify({
+            token: tokens.access_token,
+          }),
+        });
+
+        const data = (await response.json()) as IntrospectResponse;
+
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(data.active).toBe(true);
+      });
+
+      it("should return complete token metadata per RFC 7662 for valid token", async () => {
+        const tokens = await getTokens();
+
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: testClientHeaders(),
+          body: JSON.stringify({
+            token: tokens.access_token,
+          }),
+        });
+
+        const data = (await response.json()) as IntrospectResponse;
+
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(data.active).toBe(true);
+
+        // RFC 7662 recommended fields
+        expect(data.scope).toBeDefined();
+        expect(typeof data.scope).toBe("string");
+        expect(data.scope).toContain("openid");
+
+        expect(data.client_id).toBe(testClient.clientId);
+
+        // Timing claims
+        expect(data.exp).toBeDefined();
+        expect(typeof data.exp).toBe("number");
+        expect(data.exp).toBeGreaterThan(Date.now() / 1000); // Not expired
+
+        expect(data.iat).toBeDefined();
+        expect(typeof data.iat).toBe("number");
+        expect(data.iat).toBeLessThanOrEqual(Date.now() / 1000 + 5); // Issued recently (within 5 seconds tolerance)
+
+        // Identity claims
+        expect(data.sub).toBeDefined();
+        expect(typeof data.sub).toBe("string");
+
+        expect(data.iss).toBeDefined();
+        expect(typeof data.iss).toBe("string");
+      });
+
+      it("should return 200 with active=false for invalid token per RFC 7662", async () => {
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: testClientHeaders(),
+          body: JSON.stringify({
+            token: "invalid-token",
+          }),
+        });
+
+        const data = (await response.json()) as IntrospectResponse;
+
+        // Per RFC 7662 Section 2.2, introspection returns 200 even for invalid tokens
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(data.active).toBe(false);
+        // Invalid tokens should not have metadata
+        expect(data.scope).toBeUndefined();
+        expect(data.client_id).toBeUndefined();
+        expect(data.exp).toBeUndefined();
+      });
+
+      it("should return 200 with active=false for revoked token", async () => {
+        const tokens = await getTokens();
+
+        // Revoke the token
+        const revokeResponse = await fetch(`${BASE_URL}/oauth/revoke`, {
+          method: "POST",
+          headers: testClientHeaders(),
+          body: JSON.stringify({
+            token: tokens.access_token,
+          }),
+        });
+        expect(revokeResponse.status).toBe(HTTP_STATUS.OK);
+
+        // Introspect the revoked token
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: testClientHeaders(),
+          body: JSON.stringify({
+            token: tokens.access_token,
+          }),
+        });
+
+        const data = (await response.json()) as IntrospectResponse;
+
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(data.active).toBe(false);
+      });
+
+      it("should accept token_type_hint=access_token parameter", async () => {
+        const tokens = await getTokens();
+
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: testClientHeaders(),
+          body: JSON.stringify({
+            token: tokens.access_token,
+            token_type_hint: "access_token",
+          }),
+        });
+
+        const data = (await response.json()) as IntrospectResponse;
+
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(data.active).toBe(true);
+      });
+
+      it("should return active=false for refresh tokens", async () => {
+        const tokens = await getTokens();
+        expect(tokens.refresh_token).toBeDefined();
+
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: testClientHeaders(),
+          body: JSON.stringify({
+            token: tokens.refresh_token,
+            token_type_hint: "refresh_token",
+          }),
+        });
+
+        const data = (await response.json()) as IntrospectResponse;
+
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(data.active).toBe(false);
+      });
+
+      it("should return 400 with invalid_request error when token parameter is missing", async () => {
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: testClientHeaders(),
+          body: JSON.stringify({}),
+        });
+
+        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+
+        const data = (await response.json()) as {
+          error?: string;
+          error_description?: string;
+        };
+        expect(data.error).toBe(OAUTH_ERRORS.INVALID_REQUEST);
+        expect(data.error_description).toBeDefined();
+      });
+
+      it("should support Basic Auth for client authentication", async () => {
+        const confidentialClient = await createTestClient({
+          clientType: "confidential",
+          scopes: ["openid", "profile", "email", "offline_access"],
+        });
+
+        // Get tokens for confidential client
+        const codeVerifier = generateCodeVerifier();
+        const codeChallenge = generateCodeChallenge(codeVerifier);
+        const state = generateUniqueId();
+        const redirectUri = confidentialClient.redirectUris[0];
+
+        const authorizeUrl = new URL(`${BASE_URL}/oauth/authorize`);
+        authorizeUrl.searchParams.set("response_type", "code");
+        authorizeUrl.searchParams.set("client_id", confidentialClient.clientId);
+        authorizeUrl.searchParams.set("redirect_uri", redirectUri);
+        authorizeUrl.searchParams.set("state", state);
+        authorizeUrl.searchParams.set("scope", "openid");
+        authorizeUrl.searchParams.set("code_challenge", codeChallenge);
+        authorizeUrl.searchParams.set("code_challenge_method", "S256");
+
+        const getResponse = await fetch(authorizeUrl.toString(), {
+          method: "GET",
+          redirect: "manual",
+        });
+
+        const setCookieHeader = getResponse.headers.get("set-cookie") || "";
+        const sessionCookieMatch = setCookieHeader.match(
+          /tereo_session_[^=]+=([^;]+)/
+        );
+        const sessionCookie = sessionCookieMatch ? sessionCookieMatch[0] : "";
+
+        const authResponse = await fetch(`${BASE_URL}/oauth/authorize`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Cookie: sessionCookie,
+          },
+          body: JSON.stringify({
+            response_type: "code",
+            client_id: confidentialClient.clientId,
+            redirect_uri: redirectUri,
+            state,
+            scope: "openid",
+            code_challenge: codeChallenge,
+            code_challenge_method: "S256",
+            email: testUser.email,
+            password: testUser.plainPassword,
+          }),
+          redirect: "manual",
+        });
+
+        const authData = (await authResponse.json()) as AuthorizeResponse;
+
+        expect(authData.redirect_url).toContain("/consent");
+        const consentUrl = new URL(authData.redirect_url!);
+        const sessionId = consentUrl.searchParams.get("session");
+
+        expect(sessionId).toBeTruthy();
+        const authCookieHeader = authResponse.headers.get("set-cookie") || "";
+        const consentCookieMatch = authCookieHeader.match(
+          /tereo_consent_session_[^=]+=([^;]+)/
+        );
+        const consentCookie = consentCookieMatch ? consentCookieMatch[0] : "";
+
+        const consentResponse = await fetch(`${BASE_URL}/oauth/consent`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Cookie: consentCookie,
+          },
+          body: JSON.stringify({ session_token: sessionId, approved: true }),
+          redirect: "manual",
+        });
+
+        const consentData = (await consentResponse.json()) as ConsentResponse;
+        expect(consentData.redirect_url).toContain("code=");
+        const code = new URL(consentData.redirect_url!).searchParams.get(
+          "code"
+        );
+
+        // Server requires Basic Auth for confidential clients
+        const tokenCredentials = Buffer.from(
+          `${confidentialClient.clientId}:${confidentialClient.plainSecret}`
+        ).toString("base64");
+
+        const tokenResponse = await fetch(`${BASE_URL}/oauth/token`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${tokenCredentials}`,
+          },
+          body: JSON.stringify({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: redirectUri,
+            code_verifier: codeVerifier,
+          }),
+        });
+
+        const tokens = (await tokenResponse.json()) as TokenResponse;
+
+        // Introspect with Basic Auth
+        const credentials = Buffer.from(
+          `${confidentialClient.clientId}:${confidentialClient.plainSecret}`
+        ).toString("base64");
+
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${credentials}`,
+          },
+          body: JSON.stringify({
+            token: tokens.access_token,
+          }),
+        });
+
+        const data = (await response.json()) as IntrospectResponse;
+
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(data.active).toBe(true);
+      });
+
+      it("refuses a public client, which sends only its client_id: 401 invalid_client", async () => {
+        const publicClient = await createTestClient({ clientType: "public" });
+        const tokens = await getTokens();
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token: tokens.access_token,
+            client_id: publicClient.clientId,
+          }),
+        });
+
+        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+        expect(response.headers.get("www-authenticate")).toContain("Basic");
+        const data = (await response.json()) as { error?: string };
+        expect(data.error).toBe(OAUTH_ERRORS.INVALID_CLIENT);
+      });
+
+      it("should return 200 with active=false for malformed JWT token per RFC 7662", async () => {
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: testClientHeaders(),
+          body: JSON.stringify({
+            token: "not.a.valid.jwt.token",
+          }),
+        });
+
+        const data = (await response.json()) as IntrospectResponse;
+
+        // RFC 7662: Invalid tokens return 200 with active=false
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(data.active).toBe(false);
+      });
+
+      it("should return 200 with active=false for token with invalid signature per RFC 7662", async () => {
+        // Using a structurally valid but tampered JWT with invalid signature
+        const fakeToken =
+          "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0.invalid-signature";
+
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: testClientHeaders(),
+          body: JSON.stringify({
+            token: fakeToken,
+          }),
+        });
+
+        const data = (await response.json()) as IntrospectResponse;
+
+        // RFC 7662: Tokens with invalid signatures are treated as invalid
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(data.active).toBe(false);
+      });
+
+      it("should identify the user by sub, with no username claim", async () => {
+        const tokens = await getTokens();
+
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: testClientHeaders(),
+          body: JSON.stringify({
+            token: tokens.access_token,
+          }),
+        });
+
+        const data = (await response.json()) as IntrospectResponse;
+
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(data.active).toBe(true);
+        // RFC 7662's username is optional; core names the user by sub only.
+        expect(data.sub).toBe(testUser.id);
+        expect(data.user_id).toBe(testUser.id);
+        expect(data.username).toBeUndefined();
+      });
+
+      it("should name a client_credentials token's service account in user_id, its client in sub", async () => {
+        const client = await createTestClient({
+          clientType: "confidential",
+          grantTypes: ["client_credentials"],
+          scopes: [],
+        });
+        await makeServiceOf(client.id);
+        const account = await prisma.user.findFirstOrThrow({
+          where: { oauthClientId: client.id },
+        });
+        const basic = `Basic ${Buffer.from(
+          `${client.clientId}:${client.plainSecret}`
+        ).toString("base64")}`;
+
+        const tokenRes = await fetch(`${BASE_URL}/oauth/token`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: basic,
+          },
+          body: new URLSearchParams({ grant_type: "client_credentials" }),
+        });
+        expect(tokenRes.status).toBe(HTTP_STATUS.OK);
+        const { access_token } = (await tokenRes.json()) as TokenResponse;
+
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: basic,
+          },
+          body: new URLSearchParams({ token: access_token! }),
+        });
+        const data = (await response.json()) as IntrospectResponse;
+
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(data.active).toBe(true);
+        expect(data.sub).toBe(client.clientId);
+        expect(data.user_id).toBe(account.id);
+      });
+
+      it("should return 401 invalid_client for non-existent client_id", async () => {
+        const response = await fetch(`${BASE_URL}/oauth/introspect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token: "any-token",
+            client_id: "non-existent-client-123",
+          }),
+        });
+
+        const data = (await response.json()) as {
+          error?: string;
+          error_description?: string;
+        };
+
+        expect(response.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+        expect(data.error).toBe(OAUTH_ERRORS.INVALID_CLIENT);
+        expect(data.error_description).toBeDefined();
+      });
+    });
+  });
+
+  describe("introspection and revocation, and permissions", () => {
+    const SCOPE = "openid profile email offline_access";
+    const REDIRECT_URI = "http://localhost:3000/callback";
+
+    type Client = Awaited<ReturnType<typeof createTestClient>>;
+
+    const basic = (client: Client) =>
+      `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
+
+    const clientCredentialsToken = async (client: Client) => {
+      const res = await postForm(
+        "/oauth/token",
+        { grant_type: "client_credentials" },
+        { Authorization: basic(client) }
+      );
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { access_token: string }).access_token;
+    };
+    let ccClient: Client;
+
+    beforeAll(async () => {
+      ccClient = await createTestClient({
+        clientType: "confidential",
+        grantTypes: ["client_credentials"],
+      });
+    });
+
+    describe("Introspection and revocation", () => {
+      it("ignores an unknown token_type_hint", async () => {
+        const token = await clientCredentialsToken(ccClient);
+        const res = await postForm(
+          "/oauth/introspect",
+          { token, token_type_hint: "id_token" },
+          { Authorization: basic(ccClient) }
+        );
+        expect(res.status).toBe(200);
+        expect((await json(res)).active).toBe(true);
+      });
+    });
+
+    describe("Introspection permissions", () => {
+      it("reports the user's live permissions", async () => {
+        const holder = await createTestUser();
+        const role = await createTestRole();
+        const permission = await createTestPermission();
+        await prisma.rolePermission.create({
+          data: { roleId: role.id, permissionId: permission.id },
+        });
+        const assignment = await prisma.userRole.create({
+          data: { userId: holder.id, roleId: role.id },
+        });
+
+        // Introspected by a service in the login client's audience.
+        const service = await createTestClient({ clientType: "confidential" });
+        const login = await createTestClient({
+          redirectUris: [REDIRECT_URI],
+          audience: [await makeServiceOf(service.id)],
+        });
+        const { code, verifier } = await browserLogin({
+          clientId: login.clientId,
+          redirectUri: REDIRECT_URI,
+          scope: SCOPE,
+          email: holder.email,
+          password: holder.plainPassword,
+        });
+        const exchanged = await postForm("/oauth/token", {
+          grant_type: "authorization_code",
+          client_id: login.clientId,
+          code,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: verifier,
+        });
+        const { access_token } = (await exchanged.json()) as {
+          access_token: string;
+        };
+        const introspect = async () =>
+          (await json(
+            await postForm(
+              "/oauth/introspect",
+              { token: access_token },
+              { Authorization: basic(service) }
+            )
+          )) as { active: boolean; permissions: string[] };
+
+        expect((await introspect()).permissions).toContain(permission.name);
+
+        await prisma.userRole.delete({ where: { id: assignment.id } });
+        const after = await introspect();
+        expect(after.active).toBe(true);
+        expect(after.permissions).not.toContain(permission.name);
+        expect(jwt.decode(access_token)).not.toHaveProperty("permissions");
+      });
+
+      it("answers inactive for a token longer than 2048 characters, rather than refusing it", async () => {
+        const res = await postForm(
+          "/oauth/introspect",
+          { token: `eyJ.${"a".repeat(3000)}.sig` },
+          { Authorization: basic(ccClient) }
+        );
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ active: false });
+      });
+    });
+  });
+});

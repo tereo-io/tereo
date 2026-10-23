@@ -52,7 +52,7 @@ One ordinary package, shared by every area:
 | `src/websocket/` | socket.io on `/ws` (Redis adapter): pushes permission changes to signed-in users |
 | `src/cli/` | Operator commands, `npm run cli -- <command>` (e.g. `rewrap-master-key`) |
 | `src/scripts/seed.ts` | Idempotent seed, run after every migrate |
-| `src/tests/` | One suite against one server; area subfolders |
+| `src/tests/` | Mirrors `src/`: `<base>[.<aspect>][.unit].test.ts`, `flows/`, `conventions/`; `setup/`, `support/`, `fixtures/` are not tests. Two projects, `unit` (no server) and `int` (one real server). Rules and a "where does my test go" list: [src/tests/README.md](packages/tereo/src/tests/README.md) |
 | `docs/` | Per-area reference notes |
 
 ## Key conventions
@@ -64,7 +64,7 @@ One ordinary package, shared by every area:
   version plan (`npm run version-plan`).
 - **ESM only.** Every package is `"type": "module"` with `.js` extensions on all relative imports,
   including directory imports (`./oauth/index.js`, not `./oauth`).
-- **Route layout** (`routes` skill; `tests/unit/routeLayout.test.ts`): folders mirror the URL; each
+- **Route layout** (`routes` skill; `tests/conventions/routeLayout.unit.test.ts`): folders mirror the URL; each
   `index.ts` is one router and only wires routes; handlers in `controllers.ts`, Zod in `schemas.ts`,
   route-local middleware in `middleware.ts`; every `:param` is mounted from its own singular folder
   (`/webhooks/:id` → `webhooks/webhook/`); register static paths, then `:param` mounts, then `/`.
@@ -74,11 +74,11 @@ One ordinary package, shared by every area:
 - **Auth**: `requireAuth` + `requirePermission()` from `middleware/auth.ts` on all protected routes.
   Tokens are verified in-process. Permissions are hierarchical (`utils/permissions.ts`) — `write`
   includes `read`, `archive` includes `write`, `delete` includes `archive`, `admin` includes all. There is no test-mode shortcut: tests use real users and
-  tokens from `tests/utils/principals.ts`.
+  tokens from `src/tests/support/principals.ts`.
 - **Declared, not seeded**: core's permissions, system roles, buckets and event types live in
   `definitions/` and are registered on start (`registerCore()`); removing one there retires it a day
   later. Admins never create permissions or edit system roles. Tests make their own under the test
-  service (`tests/utils/testService.ts`), never under core, whose declaration would retire them.
+  service (`src/tests/support/testService.ts`), never under core, whose declaration would retire them.
 - **Actors**: every "who" column (`created_by`, `user_id`, `writer_user_id`, …) is a foreign key into
   `auth.users`. Clients act as their service-account user; core acts as `SYSTEM_USER_ID`
   (`definitions/systemUser.ts`). Users and organizations are deactivated or archived, never deleted.
@@ -104,7 +104,9 @@ cp packages/tereo/.env.example packages/tereo/.env   # no keys needed
 cd packages/tereo
 npx prisma generate && npx prisma migrate deploy && npx tsx src/scripts/seed.ts
 npm run dev                                   # http://localhost:4001
-npx vitest run                                # uses <db>_test and Redis db 1 (TEST_DATABASE_URL overrides)
+npm run test:unit                             # no database or Redis needed
+npm run test:int                              # uses <db>_test and Redis db 1 (TEST_DATABASE_URL overrides)
+npm run test:local -- --tags-filter "auth && race"   # a tag expression; npx vitest --list-tags
 ```
 
 The admin UI in development (core's `UI_BASE_URL` defaults to :4000 outside production):
