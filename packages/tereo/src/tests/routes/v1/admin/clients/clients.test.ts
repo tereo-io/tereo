@@ -6,12 +6,14 @@ import { getTestPrincipalToken } from "../../../../support/principals.js";
 import { getAccessTokenForUser } from "../../../../support/auth/login.js";
 import { createTestClient } from "../../../../support/auth/clients.js";
 import { generateUniqueId } from "../../../../support/auth/crypto.js";
-import { createAdminUser } from "../../../../support/auth/users.js";
-import { LOGIN_CLIENT } from "../../../../../definitions/index.js";
 import { makeServiceOf } from "../../../../support/testService.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { createHash } from "node:crypto";
+import {
+  createAdminUser,
+  createTestUser,
+} from "../../../../support/auth/users.js";
 
 interface ServiceAccountUser {
   id: string;
@@ -72,6 +74,22 @@ describe("GET /v1/admin/clients", () => {
     expect(response.status).toBe(HTTP_STATUS.OK);
     // Response uses "data" key for the array
     expect(Array.isArray(data.data || data.clients)).toBe(true);
+  });
+
+  it("lists only the clients they own", async () => {
+    const owner = await createTestUser();
+    const ownerToken = await getTestPrincipalToken({
+      userId: owner.id,
+      permissions: ["clients.read"],
+    });
+    const own = await createTestClient({ ownerId: owner.id });
+
+    const response = await fetch(`${BASE_URL}/v1/admin/clients?limit=200`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    expect(response.status).toBe(HTTP_STATUS.OK);
+    const data = (await response.json()) as ClientsListResponse;
+    expect(data.data?.map((c) => c.id)).toEqual([own.id]);
   });
 });
 
@@ -266,10 +284,9 @@ describe("POST /v1/admin/clients", () => {
   });
 });
 
-describe("POST /v1/admin/clients and PATCH /v1/admin/clients/:id: audience and the login client's locked fields", () => {
+describe("POST /v1/admin/clients and PATCH /v1/admin/clients/:id: audience", () => {
   let approver: string;
   let writer: string;
-  let clientsAdmin: string;
   let slugA: string;
   let slugB: string;
 
@@ -297,9 +314,6 @@ describe("POST /v1/admin/clients and PATCH /v1/admin/clients/:id: audience and t
     });
     writer = await getTestPrincipalToken({
       permissions: ["clients.write", "clients.read"],
-    });
-    clientsAdmin = await getTestPrincipalToken({
-      permissions: ["clients.admin"],
     });
     slugA = await makeServiceOf((await createTestClient()).id);
     slugB = await makeServiceOf((await createTestClient()).id);
@@ -384,20 +398,5 @@ describe("POST /v1/admin/clients and PATCH /v1/admin/clients/:id: audience and t
       audience: [slugA],
     });
     expect(unchanged.status).toBe(HTTP_STATUS.OK);
-  });
-
-  it("refuses to edit consentRequired or audience on core's login client", async () => {
-    const loginClient = await prisma.oAuthClient.findUniqueOrThrow({
-      where: { clientId: LOGIN_CLIENT.clientId },
-    });
-    for (const body of [{ consentRequired: false }, { audience: [slugA] }]) {
-      const response = await send(
-        clientsAdmin,
-        "PATCH",
-        `/${loginClient.id}`,
-        body
-      );
-      expect(response.status).toBe(HTTP_STATUS.CONFLICT);
-    }
   });
 });

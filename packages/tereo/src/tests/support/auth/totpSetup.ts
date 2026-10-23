@@ -1,3 +1,5 @@
+import { encryptTotpSecret, generateTotpSecret } from "../../../utils/totp.js";
+import { getAccessTokenForUser, getUiAccessTokenForUser } from "./login.js";
 import { createTestRole, createTestUser } from "./users.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { BASE_URL } from "./constants.js";
@@ -108,3 +110,31 @@ export function startTotpSetup(
     body: JSON.stringify(body),
   });
 }
+
+// Tokens first: once 2FA is on, a login needs the second factor. It is
+// switched on directly, since enabling it through the API ends the other
+// sessions.
+export const createUserWithTotp = async (client: {
+  clientId: string;
+  id: string;
+  redirectUris?: string[];
+}) => {
+  const user = await createTestUser();
+  const token = await getUiAccessTokenForUser(user);
+  const otherUiToken = await getUiAccessTokenForUser(user);
+  const thirdPartyToken = await getAccessTokenForUser(user, client);
+  const secret = generateTotpSecret();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      totpSecret: encryptTotpSecret(secret),
+      totpEnabled: true,
+      totpEnabledAt: new Date(),
+    },
+  });
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+  return { user, headers, secret, otherUiToken, thirdPartyToken };
+};

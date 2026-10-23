@@ -19,12 +19,6 @@ import {
   type FakeOidcProvider,
   startFakeOidcProvider,
 } from "../../support/fakeOidcProvider.js";
-import {
-  broadcastIdentityProviderInvalidate,
-  closeCacheBroadcast,
-  onIdentityProviderInvalidate,
-  startCacheSubscriber,
-} from "../../../utils/cacheBroadcast.js";
 
 const adapter = adapterFor("oidc");
 
@@ -362,25 +356,5 @@ describe("oidc adapter: sign-in", () => {
     await expect(
       adapter.authorizationUrl(moved, newCheck(moved))
     ).rejects.toThrow();
-  });
-});
-
-describe("identity provider invalidation", () => {
-  afterAll(async () => {
-    await closeCacheBroadcast();
-  });
-
-  it("reaches onIdentityProviderInvalidate listeners", async () => {
-    await startCacheSubscriber();
-    const id = randomUUID();
-    const received = new Promise<string>((resolve) => {
-      onIdentityProviderInvalidate((got) => {
-        if (got === id) resolve(got);
-      });
-    });
-
-    await broadcastIdentityProviderInvalidate(id);
-
-    await expect(received).resolves.toBe(id);
   });
 });

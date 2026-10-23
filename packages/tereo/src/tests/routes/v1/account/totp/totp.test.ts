@@ -3,6 +3,7 @@
 
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../definitions/index.js";
 import { BASE_URL, HTTP_STATUS } from "../../../../support/auth/constants.js";
+import { createUserWithTotp } from "../../../../support/auth/totpSetup.js";
 import { getTestPrincipalToken } from "../../../../support/principals.js";
 import { createTestClient } from "../../../../support/auth/clients.js";
 import { generateTotpCode } from "../../../../support/auth/crypto.js";
@@ -272,6 +273,14 @@ describe("POST /v1/account/totp/recovery-codes", () => {
 });
 
 describe("DELETE /v1/account/totp", () => {
+  let testClient: Awaited<ReturnType<typeof createTestClient>>;
+
+  beforeAll(async () => {
+    testClient = await createTestClient();
+  });
+
+  const userWithTotp = () => createUserWithTotp(testClient);
+
   it("should return 401 with error for request without auth token", async () => {
     const response = await fetch(`${BASE_URL}/v1/account/totp`, {
       method: "DELETE",
@@ -369,6 +378,42 @@ describe("DELETE /v1/account/totp", () => {
       data: { userId: totpUser.id, email: totpUser.email },
     });
   });
+
+  it("ends the other sessions with the disable, keeping this one", async () => {
+    const { user, headers, secret, otherUiToken } = await userWithTotp();
+    const other = otherUiToken;
+    const before = await prisma.refreshToken.count({
+      where: { userId: user.id, revokedAt: null },
+    });
+    expect(before).toBeGreaterThanOrEqual(2);
+
+    const response = await fetch(`${BASE_URL}/v1/account/totp`, {
+      method: "DELETE",
+      headers,
+      body: JSON.stringify({ totpCode: generateTotpCode(secret) }),
+    });
+    expect(response.status).toBe(HTTP_STATUS.OK);
+    expect(
+      await prisma.refreshToken.count({
+        where: { userId: user.id, revokedAt: null },
+      })
+    ).toBe(1);
+    const me = await fetch(`${BASE_URL}/v1/account/me`, {
+      headers: { Authorization: `Bearer ${other}` },
+    });
+    expect(me.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    expect((await fetch(`${BASE_URL}/v1/account/me`, { headers })).status).toBe(
+      HTTP_STATUS.OK
+    );
+    const revoked = await prisma.auditLogEntry.findFirst({
+      where: {
+        entityId: user.id,
+        metadata: { path: ["action"], equals: "sessions_revoked" },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(revoked).not.toBeNull();
+  });
 });
 
 describe("POST /v1/account/totp/setup and /setup/verify under the disabled policy", () => {
@@ -429,5 +474,92 @@ describe("POST /v1/account/totp/setup and /setup/verify under the disabled polic
       where: { id: setupUser.id },
     });
     expect(user.totpEnabled).toBe(false);
+  });
+});
+
+describe("/v1/account/totp", () => {
+  describe("TOTP replay on /account/totp", () => {
+    const enable = async () => {
+      const user = await createTestUser();
+      const token = await getUiAccessTokenForUser(user);
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      };
+      const setup = (await (
+        await fetch(`${BASE_URL}/v1/account/totp/setup`, {
+          method: "POST",
+          headers,
+        })
+      ).json()) as { secret: string; setupToken: string };
+      const code = generateTotpCode(setup.secret);
+      const verify = await fetch(`${BASE_URL}/v1/account/totp/setup/verify`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ setupToken: setup.setupToken, totpCode: code }),
+      });
+      expect(verify.status).toBe(HTTP_STATUS.OK);
+      return { user, headers, secret: setup.secret, code };
+    };
+
+    it("rejects the code that enabled TOTP when it is used again", async () => {
+      const { user, headers, secret, code } = await enable();
+
+      const regenerate = await fetch(
+        `${BASE_URL}/v1/account/totp/recovery-codes`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ totpCode: code }),
+        }
+      );
+      expect(regenerate.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(((await regenerate.json()) as { error: string }).error).toBe(
+        "invalid_code"
+      );
+
+      const disable = (totpCode: string) =>
+        fetch(`${BASE_URL}/v1/account/totp`, {
+          method: "DELETE",
+          headers,
+          body: JSON.stringify({ totpCode }),
+        });
+      expect((await disable(code)).status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(
+        (await prisma.user.findUniqueOrThrow({ where: { id: user.id } }))
+          .totpEnabled
+      ).toBe(true);
+
+      expect((await disable(generateTotpCode(secret, 1))).status).toBe(
+        HTTP_STATUS.OK
+      );
+      const stored = await prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+      });
+      expect(stored.totpEnabled).toBe(false);
+      expect(stored.totpLastWindow).toBeNull();
+    });
+
+    it("rejects a code used for one account action on the next", async () => {
+      const { headers, secret } = await enable();
+      const next = generateTotpCode(secret, 1);
+
+      const regenerate = await fetch(
+        `${BASE_URL}/v1/account/totp/recovery-codes`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ totpCode: next }),
+        }
+      );
+      expect(regenerate.status).toBe(HTTP_STATUS.OK);
+
+      const disable = await fetch(`${BASE_URL}/v1/account/totp`, {
+        method: "DELETE",
+        headers,
+        body: JSON.stringify({ totpCode: next }),
+      });
+      expect(disable.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    });
   });
 });

@@ -1,8 +1,12 @@
 // @module-tag int
 // @module-tag auth
 import { expectAuthorizeErrorRedirect } from "../../../support/pure/authorizeErrors.js";
+import { fetchDiscoveryDocument } from "../../../support/auth/tokens.js";
 import { createTestClient } from "../../../support/auth/clients.js";
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { hashPassword } from "../../../../utils/crypto.js";
+import { prisma } from "../../../../utils/db/prisma.js";
+import { randomBytes } from "node:crypto";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -174,6 +178,121 @@ describe("GET /oauth/authorize", () => {
         );
         expect(params.get("error_description")).toBe(
           "Client not authorized for authorization code grant"
+        );
+      });
+    });
+  });
+});
+
+describe("GET /oauth/authorize", () => {
+  // Test entity variables
+  let TEST_CLIENT_ID = "";
+  let TEST_CLIENT_DB_ID = "";
+  const TEST_REDIRECT_URI = "http://localhost:3000/test-callback";
+
+  describe("OIDC Compliance", () => {
+    beforeAll(async () => {
+      // Check server is running
+      const response = await fetch(
+        `${BASE_URL}/.well-known/openid-configuration`
+      );
+      if (!response.ok) {
+        throw new Error(`Server not running at ${BASE_URL}`);
+      }
+
+      // Create test entities
+      const uniqueId = randomBytes(8).toString("hex");
+      TEST_CLIENT_ID = `test-oidc-client-${uniqueId}`;
+
+      // Create test owner user
+      const ownerPasswordHash = await hashPassword("TestPassword123!");
+      const testOwner = await prisma.user.create({
+        data: {
+          email: `test-oidc-owner-${uniqueId}@test.local`,
+          passwordHash: ownerPasswordHash,
+          name: "OIDC Test Owner",
+          isActive: true,
+        },
+      });
+
+      const client = await prisma.oAuthClient.create({
+        data: {
+          clientId: TEST_CLIENT_ID,
+          clientSecret: null,
+          clientType: "public",
+          name: `OIDC Test Client ${uniqueId}`,
+          redirectUris: [TEST_REDIRECT_URI],
+          postLogoutRedirectUris: [],
+          scopes: ["openid", "profile", "email", "offline_access"],
+          grantTypes: ["authorization_code", "refresh_token"],
+          audience: [],
+          ownerId: testOwner.id,
+        },
+      });
+      TEST_CLIENT_DB_ID = client.id;
+    });
+
+    afterAll(async () => {
+      // Cleanup test entities
+      if (TEST_CLIENT_DB_ID) {
+        await prisma.oAuthClient
+          .delete({ where: { id: TEST_CLIENT_DB_ID } })
+          .catch(() => {});
+      }
+    });
+
+    describe("Authorize Endpoint - response_mode parameter", () => {
+      it("should reject response_mode=fragment, which it does not advertise", async () => {
+        const discovery = await fetchDiscoveryDocument();
+        expect(discovery.response_modes_supported).toEqual(["query"]);
+
+        const codeVerifier = generateCodeVerifier();
+        const codeChallenge = generateCodeChallenge(codeVerifier);
+
+        const url = new URL(`${BASE_URL}/oauth/authorize`);
+        url.searchParams.set("response_type", "code");
+        url.searchParams.set("client_id", TEST_CLIENT_ID);
+        url.searchParams.set("redirect_uri", TEST_REDIRECT_URI);
+        url.searchParams.set("state", "test-state");
+        url.searchParams.set("scope", "openid");
+        url.searchParams.set("code_challenge", codeChallenge);
+        url.searchParams.set("code_challenge_method", "S256");
+        url.searchParams.set("response_mode", "fragment");
+
+        const response = await fetch(url.toString(), { redirect: "manual" });
+
+        expectAuthorizeErrorRedirect(
+          response,
+          TEST_REDIRECT_URI,
+          "invalid_request",
+          "test-state"
+        );
+      });
+
+      it("should reject response_mode=form_post, which it does not advertise", async () => {
+        const discovery = await fetchDiscoveryDocument();
+        expect(discovery.response_modes_supported).toEqual(["query"]);
+
+        const codeVerifier = generateCodeVerifier();
+        const codeChallenge = generateCodeChallenge(codeVerifier);
+
+        const url = new URL(`${BASE_URL}/oauth/authorize`);
+        url.searchParams.set("response_type", "code");
+        url.searchParams.set("client_id", TEST_CLIENT_ID);
+        url.searchParams.set("redirect_uri", TEST_REDIRECT_URI);
+        url.searchParams.set("state", "test-state");
+        url.searchParams.set("scope", "openid");
+        url.searchParams.set("code_challenge", codeChallenge);
+        url.searchParams.set("code_challenge_method", "S256");
+        url.searchParams.set("response_mode", "form_post");
+
+        const response = await fetch(url.toString(), { redirect: "manual" });
+
+        expectAuthorizeErrorRedirect(
+          response,
+          TEST_REDIRECT_URI,
+          "invalid_request",
+          "test-state"
         );
       });
     });

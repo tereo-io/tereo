@@ -2,20 +2,12 @@
 // @module-tag auth
 
 import { BASE_URL, HTTP_STATUS } from "../../../../support/auth/constants.js";
+import { createUserWithTotp } from "../../../../support/auth/totpSetup.js";
 import { getTestPrincipalToken } from "../../../../support/principals.js";
 import { createTestClient } from "../../../../support/auth/clients.js";
 import { generateTotpCode } from "../../../../support/auth/crypto.js";
-import { createTestUser } from "../../../../support/auth/users.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
-import {
-  getAccessTokenForUser,
-  getUiAccessTokenForUser,
-} from "../../../../support/auth/login.js";
-import {
-  encryptTotpSecret,
-  generateTotpSecret,
-} from "../../../../../utils/totp.js";
 
 interface ErrorResponse {
   error?: string;
@@ -36,29 +28,7 @@ describe("POST /v1/account/totp/recovery-codes and DELETE /v1/account/totp", () 
     { method: "DELETE", path: "/v1/account/totp" },
   ];
 
-  // Tokens first: once 2FA is on, a login needs the second factor. It is
-  // switched on directly, since enabling it through the API ends the other
-  // sessions.
-  const userWithTotp = async () => {
-    const user = await createTestUser();
-    const token = await getUiAccessTokenForUser(user);
-    const otherUiToken = await getUiAccessTokenForUser(user);
-    const thirdPartyToken = await getAccessTokenForUser(user, testClient);
-    const secret = generateTotpSecret();
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        totpSecret: encryptTotpSecret(secret),
-        totpEnabled: true,
-        totpEnabledAt: new Date(),
-      },
-    });
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    };
-    return { user, headers, secret, otherUiToken, thirdPartyToken };
-  };
+  const userWithTotp = () => createUserWithTotp(testClient);
 
   for (const { method, path } of routes) {
     it(`refuses ${method} ${path} from a third-party client`, async () => {
@@ -114,41 +84,5 @@ describe("POST /v1/account/totp/recovery-codes and DELETE /v1/account/totp", () 
       body: JSON.stringify({ totpCode: generateTotpCode(secret) }),
     });
     expect(response.status).toBe(HTTP_STATUS.OK);
-  });
-
-  it("ends the other sessions with the disable, keeping this one", async () => {
-    const { user, headers, secret, otherUiToken } = await userWithTotp();
-    const other = otherUiToken;
-    const before = await prisma.refreshToken.count({
-      where: { userId: user.id, revokedAt: null },
-    });
-    expect(before).toBeGreaterThanOrEqual(2);
-
-    const response = await fetch(`${BASE_URL}/v1/account/totp`, {
-      method: "DELETE",
-      headers,
-      body: JSON.stringify({ totpCode: generateTotpCode(secret) }),
-    });
-    expect(response.status).toBe(HTTP_STATUS.OK);
-    expect(
-      await prisma.refreshToken.count({
-        where: { userId: user.id, revokedAt: null },
-      })
-    ).toBe(1);
-    const me = await fetch(`${BASE_URL}/v1/account/me`, {
-      headers: { Authorization: `Bearer ${other}` },
-    });
-    expect(me.status).toBe(HTTP_STATUS.UNAUTHORIZED);
-    expect((await fetch(`${BASE_URL}/v1/account/me`, { headers })).status).toBe(
-      HTTP_STATUS.OK
-    );
-    const revoked = await prisma.auditLogEntry.findFirst({
-      where: {
-        entityId: user.id,
-        metadata: { path: ["action"], equals: "sessions_revoked" },
-      },
-      orderBy: { createdAt: "desc" },
-    });
-    expect(revoked).not.toBeNull();
   });
 });

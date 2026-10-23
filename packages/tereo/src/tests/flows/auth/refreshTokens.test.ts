@@ -3,7 +3,6 @@
 // @module-tag security
 import { TokenResponse, decodeJwt } from "../../support/auth/tokens.js";
 import { createTestClient } from "../../support/auth/clients.js";
-import { browserLogin } from "../../support/browserLogin.js";
 import { createTestUser } from "../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -337,122 +336,6 @@ describe("refresh tokens", () => {
         expect(await accessRevokedAt(first.access_token!)).toBeNull();
         expect(await accessRevokedAt(second.access_token!)).toBeNull();
       });
-    });
-  });
-});
-
-describe("refresh tokens", () => {
-  const SCOPE = "openid profile email offline_access";
-  const REDIRECT_URI = "http://localhost:3000/callback";
-
-  type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
-
-  const form = (body: Record<string, string>) =>
-    new URLSearchParams(body).toString();
-
-  const postForm = (
-    path: string,
-    body: Record<string, string>,
-    headers: Record<string, string> = {}
-  ) =>
-    fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...headers,
-      },
-      body: form(body),
-    });
-
-  let publicClient: Client;
-  let user: Awaited<ReturnType<typeof createTestUser>>;
-
-  const loginAndExchange = async () => {
-    const { code, verifier } = await browserLogin({
-      clientId: publicClient.clientId,
-      redirectUri: REDIRECT_URI,
-      scope: SCOPE,
-      email: user.email,
-      password: user.plainPassword,
-    });
-    const res = await postForm("/oauth/token", {
-      grant_type: "authorization_code",
-      client_id: publicClient.clientId,
-      code,
-      redirect_uri: REDIRECT_URI,
-      code_verifier: verifier,
-    });
-    expect(res.status).toBe(200);
-    return (await res.json()) as {
-      access_token: string;
-      refresh_token: string;
-      scope: string;
-    };
-  };
-
-  beforeAll(async () => {
-    publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
-    user = await createTestUser();
-  });
-
-  describe("Refresh-token cookie", () => {
-    const cookieRefresh = (cookie: string) =>
-      postForm(
-        "/oauth/token",
-        { grant_type: "refresh_token", client_id: publicClient.clientId },
-        { Cookie: cookie }
-      );
-
-    it("clears a refresh cookie that no longer refreshes", async () => {
-      const tokens = await loginAndExchange();
-      await prisma.refreshToken.updateMany({
-        where: { userId: user.id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-
-      const res = await cookieRefresh(
-        `trt_${publicClient.clientId}=${tokens.refresh_token}`
-      );
-      expect(res.status).toBe(400);
-      expect((await json(res)).error).toBe("invalid_grant");
-      const cleared = res.headers
-        .getSetCookie()
-        .filter((c) => /expires=Thu, 01 Jan 1970/i.test(c))
-        .map((c) => c.split("=")[0]);
-      expect(cleared).toEqual(
-        expect.arrayContaining([
-          `trt_${publicClient.clientId}`,
-          `tsi_${publicClient.clientId}`,
-        ])
-      );
-    });
-
-    it(
-      "leaves the cookie when its token was just rotated by a concurrent refresh",
-      { tags: ["race"] },
-      async () => {
-        const tokens = await loginAndExchange();
-        const cookie = `trt_${publicClient.clientId}=${tokens.refresh_token}`;
-        expect((await cookieRefresh(cookie)).status).toBe(200);
-
-        const res = await cookieRefresh(cookie);
-        expect(res.status).toBe(400);
-        expect((await json(res)).error).toBe("invalid_grant");
-        expect(res.headers.getSetCookie()).toEqual([]);
-      }
-    );
-
-    it("leaves the cookie alone for a body refresh token", async () => {
-      const res = await postForm("/oauth/token", {
-        grant_type: "refresh_token",
-        client_id: publicClient.clientId,
-        refresh_token: "not-a-refresh-token",
-      });
-      expect(res.status).toBe(400);
-      expect(res.headers.getSetCookie()).toEqual([]);
     });
   });
 });

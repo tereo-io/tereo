@@ -2,6 +2,7 @@
 // @module-tag auth
 
 import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { createTestClient } from "../../../../../support/auth/clients.js";
 import { generateUniqueId } from "../../../../../support/auth/crypto.js";
 import { LOGIN_CLIENT } from "../../../../../../definitions/index.js";
@@ -110,6 +111,26 @@ describe("GET /v1/admin/clients/:id", () => {
 });
 
 describe("PATCH /v1/admin/clients/:id", () => {
+  let clientsAdmin: string;
+  let slugA: string;
+
+  const send = (token: string, method: string, path: string, body?: unknown) =>
+    fetch(`${BASE_URL}/v1/admin/clients${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+  beforeAll(async () => {
+    clientsAdmin = await getTestPrincipalToken({
+      permissions: ["clients.admin"],
+    });
+    slugA = await makeServiceOf((await createTestClient()).id);
+  });
+
   it("should update client name", async () => {
     const response = await fetch(
       `${BASE_URL}/v1/admin/clients/${managedClient.id}`,
@@ -372,6 +393,31 @@ describe("PATCH /v1/admin/clients/:id", () => {
     expect(data.error).toBe("invalid_request");
   });
 
+  it("still gets 400 invalid_owner from an admin moving ownership to a non-human", async () => {
+    const serviceAccount = await prisma.user.create({
+      data: {
+        email: `svc-${generateUniqueId()}@test.local`,
+        userType: "service_account",
+        passwordHash: "!",
+      },
+    });
+    const response = await fetch(
+      `${BASE_URL}/v1/admin/clients/${managedClient.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ownerId: serviceAccount.id }),
+      }
+    );
+
+    expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    const data = (await response.json()) as ErrorResponse;
+    expect(data.error).toBe("invalid_owner");
+  });
+
   it("transfers ownership to an active human", async () => {
     const owner = await createTestUser();
     const client = await createTestClient({ clientType: "confidential" });
@@ -405,6 +451,21 @@ describe("PATCH /v1/admin/clients/:id", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
+  });
+
+  it("refuses to edit consentRequired or audience on core's login client", async () => {
+    const loginClient = await prisma.oAuthClient.findUniqueOrThrow({
+      where: { clientId: LOGIN_CLIENT.clientId },
+    });
+    for (const body of [{ consentRequired: false }, { audience: [slugA] }]) {
+      const response = await send(
+        clientsAdmin,
+        "PATCH",
+        `/${loginClient.id}`,
+        body
+      );
+      expect(response.status).toBe(HTTP_STATUS.CONFLICT);
+    }
   });
 });
 

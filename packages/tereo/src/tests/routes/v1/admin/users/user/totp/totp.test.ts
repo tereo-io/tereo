@@ -13,6 +13,7 @@ import {
   NON_EXISTENT_UUID,
 } from "../../../../../../support/auth/constants.js";
 import {
+  CORE_SERVICE_ID,
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
 } from "../../../../../../../definitions/index.js";
@@ -342,5 +343,34 @@ describe("POST /v1/admin/users/:id/totp/reset", () => {
       },
     });
     expect(entry.userId).toBe(adminUserId);
+  });
+
+  describe("a target holding admin", () => {
+    let globalAdmin: Awaited<ReturnType<typeof createTestUser>>;
+
+    beforeAll(async () => {
+      globalAdmin = await createTestUser();
+      const adminRoleId = (
+        await prisma.role.findFirstOrThrow({
+          where: { name: "admin", serviceId: CORE_SERVICE_ID },
+        })
+      ).id;
+      await prisma.userRole.create({
+        data: { userId: globalAdmin.id, roleId: adminRoleId },
+      });
+    });
+
+    it.each([["globally", () => globalAdmin]])(
+      "refuses a users.write caller a two-factor reset of an admin %s",
+      async (_scope, target) => {
+        await enrolTotp(target().id);
+        const response = await resetTotp(writerToken, target().id);
+        expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+        const row = await prisma.user.findUniqueOrThrow({
+          where: { id: target().id },
+        });
+        expect(row.totpEnabled).toBe(true);
+      }
+    );
   });
 });

@@ -141,19 +141,6 @@ describe("PATCH /v1/admin/users/:id and POST /v1/admin/users/:id/totp/reset", ()
     );
 
     it.each([["globally", () => globalAdmin]])(
-      "refuses a users.write caller a two-factor reset of an admin %s",
-      async (_scope, target) => {
-        await enrolTotp(target().id);
-        const response = await resetTotp(writerToken, target().id);
-        expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
-        const row = await prisma.user.findUniqueOrThrow({
-          where: { id: target().id },
-        });
-        expect(row.totpEnabled).toBe(true);
-      }
-    );
-
-    it.each([["globally", () => globalAdmin]])(
       "refuses a users.write caller an email change of an admin %s",
       async (_scope, target) => {
         const response = await patchUser(writerToken, target().id, {
