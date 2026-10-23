@@ -38,7 +38,7 @@ afterAll(async () => {
 
 describe("/v1/admin/notifications/connections", () => {
   describe("list", () => {
-    it("filters the list by channel and answers 404 for an unknown id (GET /connections?channel=email)", async () => {
+    it("filters the list by channel (GET /connections?channel=email)", async () => {
       const c = await create();
       const list = await connectionsApi(
         "GET",
