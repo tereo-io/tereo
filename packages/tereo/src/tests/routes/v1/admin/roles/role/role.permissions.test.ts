@@ -6,6 +6,7 @@ import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
 import { createTestClient } from "../../../../../support/auth/clients.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { randomBytes } from "crypto";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -189,5 +190,38 @@ describe("POST /v1/admin/roles/:id/archive and /restore", () => {
       });
       expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
     }
+  });
+});
+
+describe("PATCH /v1/admin/roles/:id, PUT /v1/admin/roles/:id/permissions and POST /v1/admin/roles/:id/duplicate", () => {
+  it("keeps system roles read-only and lets admins duplicate them", async () => {
+    const role = await prisma.role.findFirstOrThrow({
+      where: { serviceId: CORE_SERVICE_ID, name: "webhook_publisher" },
+    });
+    const call = (method: string, path: string, body: unknown) =>
+      fetch(`${BASE_URL}/v1/admin/roles/${role.id}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    expect((await call("PATCH", "", { displayName: "Renamed" })).status).toBe(
+      403
+    );
+    expect(
+      (await call("PUT", "/permissions", { permissionIds: [] })).status
+    ).toBe(403);
+
+    const copy = await call("POST", "/duplicate", {
+      name: `publisher-copy-x${randomBytes(5).toString("hex")}`,
+    });
+    expect(copy.status).toBe(201);
+    const body = await copy.json();
+    expect(body.isSystem).toBe(false);
+    expect(body.permissions.map((p: { name: string }) => p.name)).toEqual([
+      "webhooks.emit",
+    ]);
   });
 });

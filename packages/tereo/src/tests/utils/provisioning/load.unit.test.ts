@@ -1,8 +1,8 @@
 // @module-tag unit
 // @module-tag provisioning
+import { generateClientSecret, hashFlowToken } from "../../../utils/crypto.js";
 import { newClientSecretValue } from "../../../utils/secretRules.js";
 import { mkdir, mkdtemp, symlink, writeFile } from "fs/promises";
-import { hashFlowToken } from "../../../utils/crypto.js";
 import { describe, expect, it } from "vitest";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -17,6 +17,13 @@ const SECRET_A = newClientSecretValue();
 const SECRET_B = newClientSecretValue();
 
 const SECRET_C = newClientSecretValue();
+
+const ORG_ID = "00000000-0000-4000-8000-000000000001";
+
+const newSecret = () => {
+  const { plainSecret, hashedSecret } = generateClientSecret();
+  return { plain: plainSecret, hash: hashedSecret };
+};
 
 const baseEnv = (): NodeJS.ProcessEnv => ({
   INVENTORY_SECRET: SECRET_A,
@@ -490,5 +497,62 @@ describe("parseDocuments", () => {
       "a.json": doc({ service: service({ secretFrom: SECRET_A }) }),
     });
     expect(pasted.join("\n")).not.toContain(SECRET_A);
+  });
+
+  describe("integrations in documents", () => {
+    it("parses an integrations section, enough on its own", () => {
+      const secret = newSecret();
+      const set = parseDocuments(
+        [
+          {
+            file: "integrations.json",
+            text: JSON.stringify({
+              version: "1.0.0",
+              integrations: [
+                {
+                  slug: "acme-3pl",
+                  name: "Acme 3PL",
+                  organizationId: ORG_ID,
+                  secretFrom: "ACME_SECRET",
+                  roles: ["shipper"],
+                },
+              ],
+            }),
+          },
+        ],
+        { ACME_SECRET: secret.plain }
+      );
+      expect(set.documents[0].integrations).toEqual([
+        {
+          slug: "acme-3pl",
+          name: "Acme 3PL",
+          organizationId: ORG_ID,
+          clientId: "acme-3pl",
+          secretEnv: "ACME_SECRET",
+          secretHash: secret.hash,
+          roles: ["shipper"],
+          audiences: [],
+        },
+      ]);
+    });
+
+    it("requires the integration's secret", () => {
+      expect(() =>
+        parseDocuments(
+          [
+            {
+              file: "integrations.json",
+              text: JSON.stringify({
+                version: "1.0.0",
+                integrations: [
+                  { slug: "acme-3pl", name: "Acme", secretFrom: "MISSING_X" },
+                ],
+              }),
+            },
+          ],
+          {}
+        )
+      ).toThrow(/integrations\[acme-3pl\]: MISSING_X is not set/);
+    });
   });
 });

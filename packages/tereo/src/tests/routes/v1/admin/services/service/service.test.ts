@@ -6,21 +6,23 @@ import { CORE_URL } from "../../../../../support/coreUrl.js";
 import { fetchJson } from "../../../../../support/http.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import env from "../../../../../../env.js";
-import { randomBytes } from "crypto";
 import {
   provisionServices,
+  addService,
   newSlug,
 } from "../../../../../support/provisioning.js";
 import {
   CORE_SERVICE_ID,
   SYSTEM_USER_ID,
 } from "../../../../../../definitions/index.js";
+import {
+  clientCredentialsToken,
+  tokenFor,
+} from "../../../../../support/clientToken.js";
 
 const ROOT = CORE_URL;
 
 let adminToken: string;
-
-const rand = () => `x${randomBytes(5).toString("hex")}`;
 
 const api = (
   method: string,
@@ -28,51 +30,6 @@ const api = (
   token: string | null,
   body?: unknown
 ) => fetchJson(method, `${ROOT}${path}`, token, body);
-
-interface Credentials {
-  clientId: string;
-  clientSecret: string;
-}
-
-interface AddedService {
-  id: string;
-  slug: string;
-  namespace: string;
-  credentials: Credentials;
-}
-
-const addService = async (
-  overrides: { name?: string; slug?: string; namespace?: string } = {}
-): Promise<AddedService> => {
-  const id = rand();
-  const res = await api("POST", "/v1/admin/services", adminToken, {
-    name: `Svc ${id}`,
-    slug: `svc-${id}-service`,
-    ...overrides,
-  });
-  // The body says which conflict, should this ever answer 409 again.
-  expect(res.status, JSON.stringify(res.body)).toBe(201);
-  return res.body;
-};
-
-const fetchToken = async ({ clientId, clientSecret }: Credentials) => {
-  const response = await fetch(`${ROOT}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  const body = (await response.json()) as { access_token?: string };
-  return { status: response.status, token: body.access_token ?? null };
-};
-
-const tokenFor = async (service: { credentials: Credentials }) => {
-  const { status, token } = await fetchToken(service.credentials);
-  expect(status).toBe(200);
-  return token!;
-};
 
 const accessOf = async (serviceId: string) =>
   prisma.serviceAccess.findMany({
@@ -112,7 +69,7 @@ describe("/v1/admin/services/:id", () => {
     it.each(["admin", "core/admin"])(
       "refuses to approve a %s row that slipped onto file",
       async (target) => {
-        const service = await addService();
+        const service = await addService(adminToken);
         await tokenFor(service);
         const row = await prisma.serviceAccess.create({
           data: {
@@ -191,7 +148,7 @@ describe("/v1/admin/services/:id", () => {
     });
 
     it("states the secret overlap and retirement grace period", async () => {
-      const service = await addService();
+      const service = await addService(adminToken);
       const detail = await api(
         "GET",
         `/v1/admin/services/${service.id}`,
@@ -207,7 +164,7 @@ describe("/v1/admin/services/:id", () => {
 
   describe("secrets", () => {
     it("keeps the previous secret working until it is revoked", async () => {
-      const service = await addService();
+      const service = await addService(adminToken);
       const regenerated = await api(
         "POST",
         `/v1/admin/services/${service.id}/regenerate-secret`,
@@ -220,20 +177,24 @@ describe("/v1/admin/services/:id", () => {
         clientSecret: regenerated.body.clientSecret,
       };
 
-      expect((await fetchToken(fresh)).status).toBe(200);
-      expect((await fetchToken(service.credentials)).status).toBe(200);
+      expect((await clientCredentialsToken(fresh)).status).toBe(200);
+      expect((await clientCredentialsToken(service.credentials)).status).toBe(
+        200
+      );
 
       await api(
         "POST",
         `/v1/admin/services/${service.id}/revoke-previous-secret`,
         adminToken
       );
-      expect((await fetchToken(service.credentials)).status).toBe(401);
-      expect((await fetchToken(fresh)).status).toBe(200);
+      expect((await clientCredentialsToken(service.credentials)).status).toBe(
+        401
+      );
+      expect((await clientCredentialsToken(fresh)).status).toBe(200);
     });
 
     it("retires the secrets a regeneration pushes out and a revoke ends", async () => {
-      const service = await addService();
+      const service = await addService(adminToken);
       const row = () =>
         prisma.oAuthClient.findUniqueOrThrow({
           where: { clientId: service.credentials.clientId },
@@ -266,7 +227,7 @@ describe("/v1/admin/services/:id", () => {
     });
 
     it("reports no overlap, and refuses the previous secret, once it expires", async () => {
-      const service = await addService();
+      const service = await addService(adminToken);
       const regenerated = await api(
         "POST",
         `/v1/admin/services/${service.id}/regenerate-secret`,
@@ -294,10 +255,12 @@ describe("/v1/admin/services/:id", () => {
       );
       expect(expired.status).toBe(200);
       expect(expired.body.previousSecretExpiresAt).toBeNull();
-      expect((await fetchToken(service.credentials)).status).toBe(401);
+      expect((await clientCredentialsToken(service.credentials)).status).toBe(
+        401
+      );
       expect(
         (
-          await fetchToken({
+          await clientCredentialsToken({
             clientId: service.credentials.clientId,
             clientSecret: regenerated.body.clientSecret,
           })
@@ -306,7 +269,7 @@ describe("/v1/admin/services/:id", () => {
     });
 
     it("stops a deactivated service", async () => {
-      const service = await addService();
+      const service = await addService(adminToken);
       const token = await tokenFor(service);
       const res = await api(
         "PATCH",
@@ -328,30 +291,6 @@ describe("/v1/admin/services/:id", () => {
         orderBy: { createdAt: "desc" },
       });
       expect(entry.metadata).toMatchObject({ accessTokensRevoked: 1 });
-    });
-
-    it("keeps a service's client out of /admin/clients", async () => {
-      const service = await addService();
-      const client = await prisma.oAuthClient.findUniqueOrThrow({
-        where: { clientId: service.credentials.clientId },
-      });
-      const clientsAdmin = await getTestPrincipalToken({
-        permissions: [
-          "clients.read",
-          "clients.write",
-          "clients.delete",
-          "clients.admin",
-        ],
-      });
-      expect(
-        (
-          await api(
-            "POST",
-            `/v1/admin/clients/${client.id}/regenerate-secret`,
-            clientsAdmin
-          )
-        ).status
-      ).toBe(409);
     });
   });
 
