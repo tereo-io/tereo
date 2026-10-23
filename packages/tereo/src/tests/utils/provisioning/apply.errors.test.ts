@@ -3,6 +3,7 @@
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
 import { type CustomRoleEntry } from "../../../utils/provisioning/schema.js";
 import { applyProvisioning } from "../../../utils/provisioning/index.js";
+import { clientCredentialsToken } from "../../support/clientToken.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateClientSecret } from "../../../utils/crypto.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -23,6 +24,8 @@ import {
   removeLoginClients,
   removeRoles,
   removeServices,
+  provisionRand as rand,
+  newClientSpec,
 } from "../../support/provisioning.js";
 import {
   ensureTestOrganization,
@@ -35,9 +38,13 @@ const createdSlugs: string[] = [];
 
 const createdClientIds: string[] = [];
 
-const createdRoleNames: string[] = [];
+const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
+  const spec = newClientSpec(extra);
+  createdClientIds.push(spec.clientId);
+  return spec;
+};
 
-const rand = () => `p${randomBytes(5).toString("hex")}`;
+const createdRoleNames: string[] = [];
 
 const newSecret = () => {
   const { plainSecret, hashedSecret } = generateClientSecret();
@@ -88,27 +95,6 @@ const withService = (
   doc: { file?: string; version?: string } = {}
 ): ServiceDoc => ({ ...d, ...doc, service: { ...d.service, ...extra } });
 
-const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
-  const spec: ResolvedClient = {
-    clientId: `prov-client-${rand()}`,
-    name: "Provisioned app",
-    description: null,
-    clientType: "public",
-    secretEnv: null,
-    secretHash: null,
-    redirectUris: ["https://app.example.com/callback"],
-    postLogoutRedirectUris: [],
-    scopes: ["openid", "profile"],
-    grantTypes: ["authorization_code", "refresh_token"],
-    audience: [],
-    consentRequired: true,
-    trustedCoreScopes: [],
-    ...extra,
-  };
-  createdClientIds.push(spec.clientId);
-  return spec;
-};
-
 const clientsDoc = (...clients: ResolvedClient[]): LoadedDocument => ({
   file: "clients.json",
   version: "1.0.0",
@@ -139,17 +125,8 @@ const problemsOf = async (...docs: LoadedDocument[]): Promise<string[]> => {
   throw new Error("expected a ProvisioningError");
 };
 
-const fetchToken = async (clientId: string, clientSecret: string) => {
-  const response = await fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  return response.status;
-};
+const fetchToken = async (clientId: string, clientSecret: string) =>
+  (await clientCredentialsToken({ clientId, clientSecret })).status;
 
 const api = (method: string, path: string, body?: unknown) =>
   fetchJson(method, `${CORE_URL}${path}`, adminToken, body);

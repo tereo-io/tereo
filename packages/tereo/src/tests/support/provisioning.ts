@@ -1,11 +1,18 @@
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
-import type { ResolvedService } from "../../utils/provisioning/load.js";
 import { applyProvisioning } from "../../utils/provisioning/index.js";
 import { generateClientSecret } from "../../utils/crypto.js";
+import type { Credentials } from "./clientToken.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { removeBuckets } from "./files.js";
+import { CORE_URL } from "./coreUrl.js";
+import { fetchJson } from "./http.js";
 import { randomBytes } from "crypto";
+import { expect } from "vitest";
 import type { z } from "zod";
+import type {
+  ResolvedClient,
+  ResolvedService,
+} from "../../utils/provisioning/load.js";
 import {
   bucketItem,
   eventTypeItem,
@@ -215,6 +222,33 @@ const rand = () => `x${randomBytes(5).toString("hex")}`;
 
 export const newSlug = () => `reg-${rand()}`;
 
+export interface AddedService {
+  id: string;
+  slug: string;
+  namespace: string;
+  credentials: Credentials;
+}
+
+export const addService = async (
+  adminToken: string,
+  overrides: { name?: string; slug?: string; namespace?: string } = {}
+): Promise<AddedService> => {
+  const id = rand();
+  const res = await fetchJson(
+    "POST",
+    `${CORE_URL}/v1/admin/services`,
+    adminToken,
+    {
+      name: `Svc ${id}`,
+      slug: `svc-${id}-service`,
+      ...overrides,
+    }
+  );
+  // The body says which conflict, should this ever answer 409 again.
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+  return res.body;
+};
+
 export type Declaration = NonNullable<ProvisionSpec["declaration"]>;
 
 /** A small valid declaration under the namespace. */
@@ -252,3 +286,43 @@ export const provisionDeclared = (
     declaration: declarationFor(spec.namespace ?? slug, extra),
   });
 };
+
+export const provisionRand = () => `p${randomBytes(5).toString("hex")}`;
+
+/** A resolved client with a fresh id; the caller removes it afterwards. */
+export const newClientSpec = (
+  extra: Partial<ResolvedClient> = {}
+): ResolvedClient => ({
+  clientId: `prov-client-${provisionRand()}`,
+  name: "Provisioned app",
+  description: null,
+  clientType: "public",
+  secretEnv: null,
+  secretHash: null,
+  redirectUris: ["https://app.example.com/callback"],
+  postLogoutRedirectUris: [],
+  scopes: ["openid", "profile"],
+  grantTypes: ["authorization_code", "refresh_token"],
+  audience: [],
+  consentRequired: true,
+  trustedCoreScopes: [],
+  ...extra,
+});
+
+/** A declaration with one role, `<ns>_item_reader`, granting `grants`. */
+export const ownerDeclaration = (ns: string, grants: string[] = ["read"]) => ({
+  permissions: ["read", "write"].map((verb) => ({
+    name: `${ns}.items.${verb}`,
+    displayName: `${verb} items`,
+    description: "",
+    orgAssignable: false,
+  })),
+  systemRoles: [
+    {
+      name: `${ns}_item_reader`,
+      displayName: "Item reader",
+      description: "",
+      permissions: grants.map((verb) => `${ns}.items.${verb}`),
+    },
+  ],
+});

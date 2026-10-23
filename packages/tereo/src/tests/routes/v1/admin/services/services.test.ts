@@ -10,6 +10,7 @@ import { randomBytes } from "crypto";
 import {
   provisionService,
   provisionServices,
+  addService,
   newSlug,
   provisionDeclared,
 } from "../../../../support/provisioning.js";
@@ -26,32 +27,6 @@ const api = (
   token: string | null,
   body?: unknown
 ) => fetchJson(method, `${ROOT}${path}`, token, body);
-
-interface Credentials {
-  clientId: string;
-  clientSecret: string;
-}
-
-interface AddedService {
-  id: string;
-  slug: string;
-  namespace: string;
-  credentials: Credentials;
-}
-
-const addService = async (
-  overrides: { name?: string; slug?: string; namespace?: string } = {}
-): Promise<AddedService> => {
-  const id = rand();
-  const res = await api("POST", "/v1/admin/services", adminToken, {
-    name: `Svc ${id}`,
-    slug: `svc-${id}-service`,
-    ...overrides,
-  });
-  // The body says which conflict, should this ever answer 409 again.
-  expect(res.status, JSON.stringify(res.body)).toBe(201);
-  return res.body;
-};
 
 const accessOf = async (serviceId: string) =>
   prisma.serviceAccess.findMany({
@@ -117,7 +92,7 @@ describe("POST /v1/admin/services, GET /v1/admin/services and GET /v1/admin/serv
     });
 
     it("refuses a taken slug or an overlapping namespace", async () => {
-      const service = await addService();
+      const service = await addService(adminToken);
       expect(
         (
           await api("POST", "/v1/admin/services", adminToken, {

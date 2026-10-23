@@ -3,6 +3,7 @@
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
 import { type CustomRoleEntry } from "../../../utils/provisioning/schema.js";
 import { applyProvisioning } from "../../../utils/provisioning/index.js";
+import { clientCredentialsToken } from "../../support/clientToken.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateClientSecret } from "../../../utils/crypto.js";
@@ -11,7 +12,6 @@ import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
 import { fetchJson } from "../../support/http.js";
 import db from "../../../utils/db/index.js";
-import { randomBytes } from "crypto";
 import {
   type LoadedDocument,
   type ProvisioningSet,
@@ -22,6 +22,9 @@ import {
   removeLoginClients,
   removeRoles,
   removeServices,
+  provisionRand as rand,
+  newClientSpec,
+  ownerDeclaration,
 } from "../../support/provisioning.js";
 
 let adminToken: string;
@@ -30,9 +33,13 @@ const createdSlugs: string[] = [];
 
 const createdClientIds: string[] = [];
 
-const createdRoleNames: string[] = [];
+const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
+  const spec = newClientSpec(extra);
+  createdClientIds.push(spec.clientId);
+  return spec;
+};
 
-const rand = () => `p${randomBytes(5).toString("hex")}`;
+const createdRoleNames: string[] = [];
 
 const newSecret = () => {
   const { plainSecret, hashedSecret } = generateClientSecret();
@@ -95,27 +102,6 @@ const setOf = (...docs: LoadedDocument[]): ProvisioningSet => ({
 
 const apply = (...docs: LoadedDocument[]) => applyProvisioning(setOf(...docs));
 
-const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
-  const spec: ResolvedClient = {
-    clientId: `prov-client-${rand()}`,
-    name: "Provisioned app",
-    description: null,
-    clientType: "public",
-    secretEnv: null,
-    secretHash: null,
-    redirectUris: ["https://app.example.com/callback"],
-    postLogoutRedirectUris: [],
-    scopes: ["openid", "profile"],
-    grantTypes: ["authorization_code", "refresh_token"],
-    audience: [],
-    consentRequired: true,
-    trustedCoreScopes: [],
-    ...extra,
-  };
-  createdClientIds.push(spec.clientId);
-  return spec;
-};
-
 const clientsDoc = (...clients: ResolvedClient[]): LoadedDocument => ({
   file: "clients.json",
   version: "1.0.0",
@@ -124,35 +110,8 @@ const clientsDoc = (...clients: ResolvedClient[]): LoadedDocument => ({
   roles: [],
 });
 
-const fetchToken = async (clientId: string, clientSecret: string) => {
-  const response = await fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  return response.status;
-};
-
-/** A declaration with one role, `<ns>_item_reader`, granting `grants`. */
-const ownerDeclaration = (ns: string, grants: string[] = ["read"]) => ({
-  permissions: ["read", "write"].map((verb) => ({
-    name: `${ns}.items.${verb}`,
-    displayName: `${verb} items`,
-    description: "",
-    orgAssignable: false,
-  })),
-  systemRoles: [
-    {
-      name: `${ns}_item_reader`,
-      displayName: "Item reader",
-      description: "",
-      permissions: grants.map((verb) => `${ns}.items.${verb}`),
-    },
-  ],
-});
+const fetchToken = async (clientId: string, clientSecret: string) =>
+  (await clientCredentialsToken({ clientId, clientSecret })).status;
 
 const roleTarget = (owner: ServiceDoc) =>
   `${owner.service.slug}/${owner.service.namespace}_item_reader`;

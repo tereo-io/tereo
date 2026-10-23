@@ -6,7 +6,6 @@ import { applyProvisioning } from "../../../utils/provisioning/index.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateClientSecret } from "../../../utils/crypto.js";
 import { prisma } from "../../../utils/db/prisma.js";
-import { randomBytes } from "crypto";
 import {
   type LoadedDocument,
   type ProvisioningSet,
@@ -16,13 +15,20 @@ import {
 import {
   removeLoginClients,
   removeServices,
+  provisionRand as rand,
+  newClientSpec,
+  ownerDeclaration,
 } from "../../support/provisioning.js";
 
 const createdSlugs: string[] = [];
 
 const createdClientIds: string[] = [];
 
-const rand = () => `p${randomBytes(5).toString("hex")}`;
+const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
+  const spec = newClientSpec(extra);
+  createdClientIds.push(spec.clientId);
+  return spec;
+};
 
 const newSecret = () => {
   const { plainSecret, hashedSecret } = generateClientSecret();
@@ -66,27 +72,6 @@ const serviceDoc = (
   };
 };
 
-const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
-  const spec: ResolvedClient = {
-    clientId: `prov-client-${rand()}`,
-    name: "Provisioned app",
-    description: null,
-    clientType: "public",
-    secretEnv: null,
-    secretHash: null,
-    redirectUris: ["https://app.example.com/callback"],
-    postLogoutRedirectUris: [],
-    scopes: ["openid", "profile"],
-    grantTypes: ["authorization_code", "refresh_token"],
-    audience: [],
-    consentRequired: true,
-    trustedCoreScopes: [],
-    ...extra,
-  };
-  createdClientIds.push(spec.clientId);
-  return spec;
-};
-
 const clientsDoc = (...clients: ResolvedClient[]): LoadedDocument => ({
   file: "clients.json",
   version: "1.0.0",
@@ -103,24 +88,6 @@ const setOf = (...docs: LoadedDocument[]): ProvisioningSet => ({
     clients,
     roles,
   })),
-});
-
-/** A declaration with one role, `<ns>_item_reader`, granting `grants`. */
-const ownerDeclaration = (ns: string, grants: string[] = ["read"]) => ({
-  permissions: ["read", "write"].map((verb) => ({
-    name: `${ns}.items.${verb}`,
-    displayName: `${verb} items`,
-    description: "",
-    orgAssignable: false,
-  })),
-  systemRoles: [
-    {
-      name: `${ns}_item_reader`,
-      displayName: "Item reader",
-      description: "",
-      permissions: grants.map((verb) => `${ns}.items.${verb}`),
-    },
-  ],
 });
 
 const roleTarget = (owner: ServiceDoc) =>

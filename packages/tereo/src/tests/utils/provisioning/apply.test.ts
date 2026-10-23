@@ -4,6 +4,7 @@ import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js
 import { type CustomRoleEntry } from "../../../utils/provisioning/schema.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { openEndpointSecrets } from "../../../utils/webhookSecrets.js";
+import { clientCredentialsToken } from "../../support/clientToken.js";
 import { generateClientSecret } from "../../../utils/crypto.js";
 import { retireMissing } from "../../../utils/registry.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -39,6 +40,9 @@ import {
   removeServices,
   newSlug,
   provisionDeclared,
+  provisionRand as rand,
+  newClientSpec,
+  ownerDeclaration,
 } from "../../support/provisioning.js";
 import {
   ensureTestOrganization,
@@ -56,9 +60,13 @@ const createdSlugs: string[] = [];
 
 const createdClientIds: string[] = [];
 
-const createdRoleNames: string[] = [];
+const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
+  const spec = newClientSpec(extra);
+  createdClientIds.push(spec.clientId);
+  return spec;
+};
 
-const rand = () => `p${randomBytes(5).toString("hex")}`;
+const createdRoleNames: string[] = [];
 
 /** Waits for a delivery of `eventType` about `entityId` whose data has `fields`. */
 const waitForDelivered = (
@@ -130,27 +138,6 @@ const withService = (
   doc: { file?: string; version?: string } = {}
 ): ServiceDoc => ({ ...d, ...doc, service: { ...d.service, ...extra } });
 
-const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
-  const spec: ResolvedClient = {
-    clientId: `prov-client-${rand()}`,
-    name: "Provisioned app",
-    description: null,
-    clientType: "public",
-    secretEnv: null,
-    secretHash: null,
-    redirectUris: ["https://app.example.com/callback"],
-    postLogoutRedirectUris: [],
-    scopes: ["openid", "profile"],
-    grantTypes: ["authorization_code", "refresh_token"],
-    audience: [],
-    consentRequired: true,
-    trustedCoreScopes: [],
-    ...extra,
-  };
-  createdClientIds.push(spec.clientId);
-  return spec;
-};
-
 const clientsDoc = (...clients: ResolvedClient[]): LoadedDocument => ({
   file: "clients.json",
   version: "1.0.0",
@@ -171,35 +158,8 @@ const setOf = (...docs: LoadedDocument[]): ProvisioningSet => ({
 
 const apply = (...docs: LoadedDocument[]) => applyProvisioning(setOf(...docs));
 
-/** A declaration with one role, `<ns>_item_reader`, granting `grants`. */
-const ownerDeclaration = (ns: string, grants: string[] = ["read"]) => ({
-  permissions: ["read", "write"].map((verb) => ({
-    name: `${ns}.items.${verb}`,
-    displayName: `${verb} items`,
-    description: "",
-    orgAssignable: false,
-  })),
-  systemRoles: [
-    {
-      name: `${ns}_item_reader`,
-      displayName: "Item reader",
-      description: "",
-      permissions: grants.map((verb) => `${ns}.items.${verb}`),
-    },
-  ],
-});
-
-const fetchToken = async (clientId: string, clientSecret: string) => {
-  const response = await fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  return response.status;
-};
+const fetchToken = async (clientId: string, clientSecret: string) =>
+  (await clientCredentialsToken({ clientId, clientSecret })).status;
 
 const api = (method: string, path: string, body?: unknown) =>
   fetchJson(method, `${CORE_URL}${path}`, adminToken, body);

@@ -25,6 +25,8 @@ import {
   removeLoginClients,
   removeRoles,
   removeServices,
+  provisionRand as rand,
+  newClientSpec,
 } from "../../support/provisioning.js";
 import {
   createTestWebhookEndpoint,
@@ -36,9 +38,13 @@ const createdSlugs: string[] = [];
 
 const createdClientIds: string[] = [];
 
-const createdRoleNames: string[] = [];
+const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
+  const spec = newClientSpec(extra);
+  createdClientIds.push(spec.clientId);
+  return spec;
+};
 
-const rand = () => `p${randomBytes(5).toString("hex")}`;
+const createdRoleNames: string[] = [];
 
 /** Waits for a delivery of `eventType` about `entityId` whose data has `fields`. */
 const waitForDelivered = (
@@ -109,27 +115,6 @@ const withService = (
   extra: Partial<ResolvedService>,
   doc: { file?: string; version?: string } = {}
 ): ServiceDoc => ({ ...d, ...doc, service: { ...d.service, ...extra } });
-
-const clientSpec = (extra: Partial<ResolvedClient> = {}): ResolvedClient => {
-  const spec: ResolvedClient = {
-    clientId: `prov-client-${rand()}`,
-    name: "Provisioned app",
-    description: null,
-    clientType: "public",
-    secretEnv: null,
-    secretHash: null,
-    redirectUris: ["https://app.example.com/callback"],
-    postLogoutRedirectUris: [],
-    scopes: ["openid", "profile"],
-    grantTypes: ["authorization_code", "refresh_token"],
-    audience: [],
-    consentRequired: true,
-    trustedCoreScopes: [],
-    ...extra,
-  };
-  createdClientIds.push(spec.clientId);
-  return spec;
-};
 
 const clientsDoc = (...clients: ResolvedClient[]): LoadedDocument => ({
   file: "clients.json",

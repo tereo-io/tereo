@@ -2,6 +2,7 @@
 // @module-tag provisioning
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { tokenFor } from "../../support/clientToken.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
 import { fetchJson } from "../../support/http.js";
@@ -28,30 +29,6 @@ const api = (
   token: string | null,
   body?: unknown
 ) => fetchJson(method, `${ROOT}${path}`, token, body);
-
-interface Credentials {
-  clientId: string;
-  clientSecret: string;
-}
-
-const fetchToken = async ({ clientId, clientSecret }: Credentials) => {
-  const response = await fetch(`${ROOT}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  const body = (await response.json()) as { access_token?: string };
-  return { status: response.status, token: body.access_token ?? null };
-};
-
-const tokenFor = async (service: { credentials: Credentials }) => {
-  const { status, token } = await fetchToken(service.credentials);
-  expect(status).toBe(200);
-  return token!;
-};
 
 const accessOf = async (serviceId: string) =>
   prisma.serviceAccess.findMany({

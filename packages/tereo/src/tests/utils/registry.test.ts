@@ -6,6 +6,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { uploadTestObject, waitFor } from "../support/files.js";
 import { TEST_SERVICE_ID } from "../support/testService.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import { tokenFor } from "../support/clientToken.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { CORE_URL } from "../support/coreUrl.js";
 import db from "../../utils/db/index.js";
@@ -22,30 +23,6 @@ import {
 const ROOT = CORE_URL;
 
 const rand = () => `x${randomBytes(5).toString("hex")}`;
-
-interface Credentials {
-  clientId: string;
-  clientSecret: string;
-}
-
-const fetchToken = async ({ clientId, clientSecret }: Credentials) => {
-  const response = await fetch(`${ROOT}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  const body = (await response.json()) as { access_token?: string };
-  return { status: response.status, token: body.access_token ?? null };
-};
-
-const tokenFor = async (service: { credentials: Credentials }) => {
-  const { status, token } = await fetchToken(service.credentials);
-  expect(status).toBe(200);
-  return token!;
-};
 
 describe("retireMissing", () => {
   describe("retirement", () => {
