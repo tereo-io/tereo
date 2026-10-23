@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag files
+// @module-tag job
 import { getBlobPath, saveBlobBuffer } from "../../../utils/storage.js";
 import { SYSTEM_USER_ID } from "../../../definitions/systemUser.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

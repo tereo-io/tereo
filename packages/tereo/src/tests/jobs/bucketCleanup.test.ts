@@ -140,82 +140,86 @@ describe("processBucketCleanup", () => {
     expect(liveCount).toBe(0);
   });
 
-  it("comes back for versions another writer holds locked", async () => {
-    const bucket = await createTestBucket(token, { policy: "private" });
-    for (let i = 0; i < 3; i++) {
-      await uploadTestObject(
-        token,
-        bucket.name,
-        `locked-${i}.txt`,
-        createTestFile(
-          `locked ${i} ${Date.now()}`,
+  it(
+    "comes back for versions another writer holds locked",
+    { tags: ["race"] },
+    async () => {
+      const bucket = await createTestBucket(token, { policy: "private" });
+      for (let i = 0; i < 3; i++) {
+        await uploadTestObject(
+          token,
+          bucket.name,
           `locked-${i}.txt`,
-          "text/plain"
-        )
-      );
-    }
-    const deletedBy = "00000000-0000-7001-0000-000000000001";
-    await prisma.bucket.update({
-      where: { id: bucket.id },
-      data: { deletedAt: new Date(), deletedBy },
-    });
-    const versions = await prisma.objectVersion.findMany({
-      where: { object: { bucketId: bucket.id } },
-      orderBy: { id: "asc" },
-    });
+          createTestFile(
+            `locked ${i} ${Date.now()}`,
+            `locked-${i}.txt`,
+            "text/plain"
+          )
+        );
+      }
+      const deletedBy = "00000000-0000-7001-0000-000000000001";
+      await prisma.bucket.update({
+        where: { id: bucket.id },
+        data: { deletedAt: new Date(), deletedBy },
+      });
+      const versions = await prisma.objectVersion.findMany({
+        where: { object: { bucketId: bucket.id } },
+        orderBy: { id: "asc" },
+      });
 
-    let release!: () => void;
-    const released = new Promise<void>((r) => (release = r));
-    let locked!: () => void;
-    const lockHeld = new Promise<void>((r) => (locked = r));
-    const holder = prisma.$transaction(
-      async (tx) => {
-        await tx.$queryRaw`
+      let release!: () => void;
+      const released = new Promise<void>((r) => (release = r));
+      let locked!: () => void;
+      const lockHeld = new Promise<void>((r) => (locked = r));
+      const holder = prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`
           SELECT 1 FROM "files"."object_versions"
           WHERE "id" = ${versions[0].id}::uuid
           FOR UPDATE
         `;
-        locked();
-        await released;
-      },
-      { timeout: 20_000 }
-    );
-    await lockHeld;
-    try {
-      await processBucketCleanup(
-        fakeJob({ bucketId: bucket.id, deletedBy, continuation: 0 })
+          locked();
+          await released;
+        },
+        { timeout: 20_000 }
       );
-    } finally {
-      release();
-      await holder;
-    }
+      await lockHeld;
+      try {
+        await processBucketCleanup(
+          fakeJob({ bucketId: bucket.id, deletedBy, continuation: 0 })
+        );
+      } finally {
+        release();
+        await holder;
+      }
 
-    const continuations = (
-      await getBucketCleanupQueue().getJobs(["delayed", "wait"], 0, -1)
-    ).filter((j) => (j.data as { bucketId: number }).bucketId === bucket.id);
-    expect(continuations).toHaveLength(1);
-    expect(continuations[0].data).toEqual({
-      bucketId: bucket.id,
-      deletedBy,
-      continuation: 1,
-    });
+      const continuations = (
+        await getBucketCleanupQueue().getJobs(["delayed", "wait"], 0, -1)
+      ).filter((j) => (j.data as { bucketId: number }).bucketId === bucket.id);
+      expect(continuations).toHaveLength(1);
+      expect(continuations[0].data).toEqual({
+        bucketId: bucket.id,
+        deletedBy,
+        continuation: 1,
+      });
 
-    // The released versions' blobs are queued for cleanup already.
-    const orphanJobs = await getOrphanBlobCleanupQueue().getJobs(
-      ["wait", "delayed", "active", "completed"],
-      0,
-      -1
-    );
-    const queued = new Set(orphanJobs.map((j) => j.data.hash));
-    for (const v of versions.slice(1)) {
-      expect(queued.has(v.contentBlobHash)).toBe(true);
-    }
-    for (const j of orphanJobs) {
-      if (versions.some((v) => v.contentBlobHash === j.data.hash)) {
-        await j.remove().catch(() => undefined);
+      // The released versions' blobs are queued for cleanup already.
+      const orphanJobs = await getOrphanBlobCleanupQueue().getJobs(
+        ["wait", "delayed", "active", "completed"],
+        0,
+        -1
+      );
+      const queued = new Set(orphanJobs.map((j) => j.data.hash));
+      for (const v of versions.slice(1)) {
+        expect(queued.has(v.contentBlobHash)).toBe(true);
+      }
+      for (const j of orphanJobs) {
+        if (versions.some((v) => v.contentBlobHash === j.data.hash)) {
+          await j.remove().catch(() => undefined);
+        }
       }
     }
-  });
+  );
 
   it("releases nothing in a bucket that is not deleted", async () => {
     const bucket = await createTestBucket(token, { policy: "private" });

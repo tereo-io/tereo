@@ -35,7 +35,7 @@ import {
   vi,
 } from "vitest";
 
-describe("lifecycle sweep", () => {
+describe("processLifecycleSweepOrchestrator, processLifecycleSweepPerObjectTtl and processLifecycleSweepPolicy", () => {
   describe("lifecycle sweep fan-out", () => {
     /**
      * Build a minimal `Job` stand-in. We only need `data`, `id`, and
