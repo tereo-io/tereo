@@ -1,3 +1,37 @@
+## 0.7.0 (2026-10-23)
+
+### ⚠️  Breaking Changes
+
+- An audit of the server and websocket. Sign-out everywhere (and password, TOTP and admin resets) also revokes the pre-refresh tokens of each ended login and closes their sockets; every node re-checks its sockets every `WEBSOCKET_REVALIDATE_INTERVAL_SECONDS` (default 60); sockets receive only the events their token reaches, the per-user cap is exact and pings are rate-limited. Token reuse, `/oauth/revoke`, end-session, repeated wrong passwords, TOTP setup starts, consents, registry retirement, the archive sweep, share expiry backfills, exhausted share unlocks and HTTP-emitted events are audited, and revocations run in their mutation's transaction. New event types `webhook.endpoint.*` (their `url`, like webhook audit entries', is the endpoint URL's origin only), `auth.identity-provider.domain-*` and `auth.user.identity-invite-*`; buckets without an organization (app-service buckets) emit file events to all-organizations endpoints and their service's endpoints. `DELETE` of a bucket grant or an organization member takes `revokeShares=true` to revoke that user's shares. Bodies are parsed after authentication (1 MB default), non-upload requests get 60s, unauthenticated `/v1/files` rejections write no access log, and access logs are kept for `ACCESS_LOG_RETENTION_DAYS` (default 90). New `HTTP_MAX_CONNECTIONS` and `SHUTDOWN_TIMEOUT_SECONDS` (migration `login_step_provider`). ([#31](https://github.com/tereo-io/tereo/pull/31))
+
+  Breaking changes:
+
+  - Regenerating or revoking an integration's or service's secret needs every permission its account holds.
+  - Changing a webhook endpoint's `url` or `customHeaders` while it has `file-service.*` subscriptions, and retrying those deliveries, needs its creator or `webhooks.admin`.
+  - Loosening a share (password removed, download cap removed or raised, expiry extended) needs its creator, a bucket manager or `file-service.admin`; grants are capped at the granter's own grant; `GET …/my-permissions` without a grant on a private bucket is a 403.
+  - Org admins can only remove org roles they could grant; `GET /v1/admin/clients` lists only the caller's clients without `clients.admin`.
+  - `/oauth/userinfo` and `/oauth/introspect` cap a delegated token's permissions to its scopes (no roles; organizations only with an account or organizations scope); `/oauth/check-permission` answers 403 for an unknown user.
+  - A wrong code on the account TOTP routes is 400, not 401; duplicate slugs and names answer `slug_taken` / `name_taken` (organization codes `code_taken`) instead of `conflict`.
+  - New input limits (400): webhook `eventTypes` ≤ 100, event `entityId` ≤ 500 and `data` ≤ 256 KiB, audit `changes`/`metadata` ≤ 64 KiB, list filter values ≤ 500 and `in` lists ≤ 100, provisioning webhook `events` ≤ 100.
+  - `/health` no longer returns `version`; requests whose body takes over 60s answer 408 (uploads keep 10 minutes).
+  - Core events nobody subscribes to no longer write a "no matching endpoints" audit entry; a provider sign-in writes one `LOGIN` at code issue instead of one before the second factor.
+
+- A triage of authentication. Cookie-authenticated `/oauth` requests are bound to their client: a page may use only the cookies of a client with a redirect URI at its origin (core's own origin and the admin UI's excepted), and credentialed CORS is sent only on the API, never on `GET /oauth/authorize` or the UI. Credential cookies use the `__Host-` prefix when Secure and `COOKIE_DOMAIN` is unset. Changes that open a new way into existing accounts — SSO-only domains and repointing a provider that has one — and relaxing the 2FA policy need a global `admin`; credential resets and reactivation of an organization owner or admin need `organizations.write`; tightening 2FA requirements revokes affected access tokens. An SSO-only domain's provider is the only way in, provider sign-ins forward `prompt=login`/`max_age` and use the provider's `auth_time`, and a forced link commits only after the second factor (migration `pending_identity_links`). Deactivated services and integrations can no longer authenticate at introspect, revoke or check-permission; `immediate` key rotation retires the old key at once; the plaintext refresh-token prefix is dropped (migration `drop_refresh_token_prefix`). Sign-out everywhere also ends account-page TOTP setups, pending links and unexchanged codes; login 2FA uses a 24-hour backoff; passwords use a self-describing scrypt format, rehashed at login; SSO sessions end after `USER_SESSION_IDLE_TTL` (default 3 days) without use (migration `user_session_idle`). `ISSUER` and production CORS origins are validated, and authorize errors after a valid `redirect_uri` redirect to the client. ([#26](https://github.com/tereo-io/tereo/pull/26))
+
+  Breaking changes:
+
+  - Every browser is signed out once (renamed cookies).
+  - Cookie-mode refresh, login and consent from an origin outside the client's redirect URIs are refused, even when CORS-listed.
+  - `/oauth/introspect` refuses public clients; discovery advertises `client_secret_basic` only.
+  - Authorize errors are redirects to the client, not JSON 400s; `GET /oauth/end-session` with a hint and no `post_logout_redirect_uri` redirects.
+  - Users at an SSO-only domain cannot sign in, link or claim invites through any other provider.
+  - Integrations and other non-app-service accounts can no longer write audit entries, emit events or send notifications without an organization; audit `source` values of core or another service are refused (`422 source_reserved`).
+  - Production refuses `http://` CORS origins other than loopback and a non-https or malformed `ISSUER`.
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.6.1 (2026-10-21)
 
 ### 🩹 Fixes
