@@ -10,7 +10,7 @@ import {
   getRequestIpAddress,
 } from "../../utils/requestId.js";
 
-describe("request context IP", () => {
+describe("clientIp and getRequestIpAddress", () => {
   let server: Server;
   let url: string;
 

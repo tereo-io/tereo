@@ -132,177 +132,181 @@ describe("ensureCurrentPartitions", () => {
   });
 });
 
-describe("creating a partition while its parent is in use", () => {
-  afterAll(dropFar);
+describe("ensureDailyPartitions", () => {
+  describe("creating a partition while its parent is in use", () => {
+    afterAll(dropFar);
 
-  const cases = [
-    {
-      table: "audit" as const,
-      parent: '"audit"."audit_log_entries"',
-    },
-    {
-      table: "webhooks" as const,
-      parent: '"webhooks"."webhook_deliveries"',
-    },
-    {
-      table: "notificationDeliveries" as const,
-      parent: '"notifications"."deliveries"',
-    },
-  ];
+    const cases = [
+      {
+        table: "audit" as const,
+        parent: '"audit"."audit_log_entries"',
+      },
+      {
+        table: "webhooks" as const,
+        parent: '"webhooks"."webhook_deliveries"',
+      },
+      {
+        table: "notificationDeliveries" as const,
+        parent: '"notifications"."deliveries"',
+      },
+    ];
 
-  it.each(cases)(
-    "gives up on $parent instead of queueing, and creates it once free",
-    async ({ table, parent }) => {
-      await dropFar();
+    it.each(cases)(
+      "gives up on $parent instead of queueing, and creates it once free",
+      async ({ table, parent }) => {
+        await dropFar();
+        await ensureCurrentPartitions(FAR_DAY);
+        await db.notifications.dropPartition(
+          "notificationDeliveries",
+          partitionName("notificationDeliveries", FAR_DAY)
+        );
+        await db.auditLogEntries.dropPartition(partitionName("audit", FAR_DAY));
+        await db.webhookDeliveries.dropPartition(
+          partitionName("webhooks", FAR_DAY)
+        );
+        const name = partitionName(table, FAR_DAY);
+
+        const release = await holdParent(parent);
+        let pending: Promise<number> | undefined;
+        try {
+          pending = ensureDailyPartitions(table, 0, 0, FAR_DAY);
+          await expect(within(pending, 10_000)).resolves.toBe(0);
+        } finally {
+          await release();
+          await pending;
+        }
+        expect(Object.values(await names()).flat()).not.toContain(name);
+
+        await expect(ensureDailyPartitions(table, 0, 0, FAR_DAY)).resolves.toBe(
+          1
+        );
+        expect(Object.values(await names()).flat()).toContain(name);
+      },
+      30_000
+    );
+
+    it("does not wait on a partition that already exists", async () => {
       await ensureCurrentPartitions(FAR_DAY);
-      await db.notifications.dropPartition(
-        "notificationDeliveries",
-        partitionName("notificationDeliveries", FAR_DAY)
-      );
-      await db.auditLogEntries.dropPartition(partitionName("audit", FAR_DAY));
-      await db.webhookDeliveries.dropPartition(
-        partitionName("webhooks", FAR_DAY)
-      );
-      const name = partitionName(table, FAR_DAY);
-
-      const release = await holdParent(parent);
-      let pending: Promise<number> | undefined;
+      const release = await holdParent('"audit"."audit_log_entries"');
       try {
-        pending = ensureDailyPartitions(table, 0, 0, FAR_DAY);
-        await expect(within(pending, 10_000)).resolves.toBe(0);
+        await expect(
+          within(ensureDailyPartitions("audit", 0, 1, FAR_DAY), 2_000)
+        ).resolves.toBe(2);
       } finally {
         await release();
-        await pending;
       }
-      expect(Object.values(await names()).flat()).not.toContain(name);
+    });
 
-      await expect(ensureDailyPartitions(table, 0, 0, FAR_DAY)).resolves.toBe(
-        1
-      );
-      expect(Object.values(await names()).flat()).toContain(name);
-    },
-    30_000
-  );
-
-  it("does not wait on a partition that already exists", async () => {
-    await ensureCurrentPartitions(FAR_DAY);
-    const release = await holdParent('"audit"."audit_log_entries"');
-    try {
-      await expect(
-        within(ensureDailyPartitions("audit", 0, 1, FAR_DAY), 2_000)
-      ).resolves.toBe(2);
-    } finally {
-      await release();
-    }
+    it("retries on start until a lock held past one timeout is released", async () => {
+      await dropFar();
+      const release = await holdParent('"audit"."audit_log_entries"');
+      // Past the first attempt's timeout, well before the last one's.
+      const releasing = new Promise((r) =>
+        setTimeout(r, env.PARTITION_DDL_LOCK_TIMEOUT_MS * 1.4)
+      ).then(release);
+      try {
+        await ensureCurrentPartitions(FAR_DAY);
+      } finally {
+        await releasing;
+      }
+      const { audit } = await names();
+      expect(audit).toContain(partitionName("audit", FAR_DAY));
+      expect(audit).toContain(partitionName("audit", FAR_NEXT));
+    }, 30_000);
   });
-
-  it("retries on start until a lock held past one timeout is released", async () => {
-    await dropFar();
-    const release = await holdParent('"audit"."audit_log_entries"');
-    // Past the first attempt's timeout, well before the last one's.
-    const releasing = new Promise((r) =>
-      setTimeout(r, env.PARTITION_DDL_LOCK_TIMEOUT_MS * 1.4)
-    ).then(release);
-    try {
-      await ensureCurrentPartitions(FAR_DAY);
-    } finally {
-      await releasing;
-    }
-    const { audit } = await names();
-    expect(audit).toContain(partitionName("audit", FAR_DAY));
-    expect(audit).toContain(partitionName("audit", FAR_NEXT));
-  }, 30_000);
 });
 
-describe("dropping a partition while its parent is in use", () => {
-  afterAll(dropFar);
+describe("dropPartition", () => {
+  describe("dropping a partition while its parent is in use", () => {
+    afterAll(dropFar);
 
-  const cases = [
-    {
-      parent: '"audit"."audit_log_entries"',
-      name: partitionName("audit", FAR_DAY),
-      drop: (name: string) => db.auditLogEntries.dropPartition(name),
-    },
-    {
-      parent: '"webhooks"."webhook_deliveries"',
-      name: partitionName("webhooks", FAR_DAY),
-      drop: (name: string) => db.webhookDeliveries.dropPartition(name),
-    },
-    {
-      parent: '"notifications"."deliveries"',
-      name: partitionName("notificationDeliveries", FAR_DAY),
-      drop: (name: string) =>
-        db.notifications.dropPartition("notificationDeliveries", name),
-    },
-  ];
+    const cases = [
+      {
+        parent: '"audit"."audit_log_entries"',
+        name: partitionName("audit", FAR_DAY),
+        drop: (name: string) => db.auditLogEntries.dropPartition(name),
+      },
+      {
+        parent: '"webhooks"."webhook_deliveries"',
+        name: partitionName("webhooks", FAR_DAY),
+        drop: (name: string) => db.webhookDeliveries.dropPartition(name),
+      },
+      {
+        parent: '"notifications"."deliveries"',
+        name: partitionName("notificationDeliveries", FAR_DAY),
+        drop: (name: string) =>
+          db.notifications.dropPartition("notificationDeliveries", name),
+      },
+    ];
 
-  it.each(cases)(
-    "gives up on $parent instead of queueing, and drops it once free",
-    async ({ parent, name, drop }) => {
+    it.each(cases)(
+      "gives up on $parent instead of queueing, and drops it once free",
+      async ({ parent, name, drop }) => {
+        await ensureCurrentPartitions(FAR_DAY);
+        const release = await holdParent(parent);
+        try {
+          await expect(drop(name)).resolves.toBe(false);
+        } finally {
+          await release();
+        }
+        const all = Object.values(await names()).flat();
+        expect(all).toContain(name);
+
+        await expect(drop(name)).resolves.toBe(true);
+        expect(Object.values(await names()).flat()).not.toContain(name);
+      },
+      20_000
+    );
+
+    // Dropping a deliveries partition also locks the notifications table its
+    // foreign key references, after the deliveries parent; a writer locking the
+    // two the other way round deadlocks with it.
+    it("gives up on a deadlock instead of failing, and drops it once free", async () => {
       await ensureCurrentPartitions(FAR_DAY);
-      const release = await holdParent(parent);
+      const name = partitionName("notificationDeliveries", FAR_DAY);
+      const writer = new Client({ connectionString: process.env.DATABASE_URL });
+      await writer.connect();
+      let writing: Promise<unknown> | undefined;
       try {
-        await expect(drop(name)).resolves.toBe(false);
-      } finally {
-        await release();
-      }
-      const all = Object.values(await names()).flat();
-      expect(all).toContain(name);
-
-      await expect(drop(name)).resolves.toBe(true);
-      expect(Object.values(await names()).flat()).not.toContain(name);
-    },
-    20_000
-  );
-
-  // Dropping a deliveries partition also locks the notifications table its
-  // foreign key references, after the deliveries parent; a writer locking the
-  // two the other way round deadlocks with it.
-  it("gives up on a deadlock instead of failing, and drops it once free", async () => {
-    await ensureCurrentPartitions(FAR_DAY);
-    const name = partitionName("notificationDeliveries", FAR_DAY);
-    const writer = new Client({ connectionString: process.env.DATABASE_URL });
-    await writer.connect();
-    let writing: Promise<unknown> | undefined;
-    try {
-      await writer.query("BEGIN");
-      await writer.query(
-        'LOCK TABLE "notifications"."notifications" IN ROW EXCLUSIVE MODE'
-      );
-      const dropping = db.notifications.dropPartition(
-        "notificationDeliveries",
-        name
-      );
-      // Polled outside the writer's transaction, which would keep seeing the
-      // same snapshot of pg_stat_activity.
-      await expect
-        .poll(
-          async () =>
-            (
-              await prisma.$queryRaw<unknown[]>`
+        await writer.query("BEGIN");
+        await writer.query(
+          'LOCK TABLE "notifications"."notifications" IN ROW EXCLUSIVE MODE'
+        );
+        const dropping = db.notifications.dropPartition(
+          "notificationDeliveries",
+          name
+        );
+        // Polled outside the writer's transaction, which would keep seeing the
+        // same snapshot of pg_stat_activity.
+        await expect
+          .poll(
+            async () =>
+              (
+                await prisma.$queryRaw<unknown[]>`
                 SELECT 1 FROM pg_stat_activity
                 WHERE wait_event_type = 'Lock'
                   AND query ILIKE '%' || ${name} || '%'`
-            ).length,
-          { timeout: 5_000 }
-        )
-        .toBe(1);
-      // Waiting longer, the drop is the one Postgres picks to fail.
-      writing = writer.query(
-        'LOCK TABLE "notifications"."deliveries" IN ROW EXCLUSIVE MODE'
-      );
-      await expect(dropping).resolves.toBe(false);
-      await writing;
-    } finally {
-      await writing?.catch(() => undefined);
-      await writer.query("ROLLBACK");
-      await writer.end();
-    }
-    expect(Object.values(await names()).flat()).toContain(name);
+              ).length,
+            { timeout: 5_000 }
+          )
+          .toBe(1);
+        // Waiting longer, the drop is the one Postgres picks to fail.
+        writing = writer.query(
+          'LOCK TABLE "notifications"."deliveries" IN ROW EXCLUSIVE MODE'
+        );
+        await expect(dropping).resolves.toBe(false);
+        await writing;
+      } finally {
+        await writing?.catch(() => undefined);
+        await writer.query("ROLLBACK");
+        await writer.end();
+      }
+      expect(Object.values(await names()).flat()).toContain(name);
 
-    await expect(
-      db.notifications.dropPartition("notificationDeliveries", name)
-    ).resolves.toBe(true);
-    expect(Object.values(await names()).flat()).not.toContain(name);
-  }, 20_000);
+      await expect(
+        db.notifications.dropPartition("notificationDeliveries", name)
+      ).resolves.toBe(true);
+      expect(Object.values(await names()).flat()).not.toContain(name);
+    }, 20_000);
+  });
 });

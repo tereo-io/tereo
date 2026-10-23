@@ -4,7 +4,7 @@ import { openRowSecret, sealRowSecret } from "../../utils/sealedSecrets.js";
 import { currentKek } from "../../utils/keys.js";
 import { describe, expect, it } from "vitest";
 
-describe("row secrets", () => {
+describe("sealRowSecret and openRowSecret", () => {
   it("round-trips without resealing", async () => {
     const sealed = await sealRowSecret("test-row:1", "hunter2");
 

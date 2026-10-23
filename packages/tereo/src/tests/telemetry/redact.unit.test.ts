@@ -19,7 +19,7 @@ import {
 
 const SECRET = "c0ffee-credential-value-1234567890";
 
-describe("span redaction", () => {
+describe("redactUrl, redactHttpSpan and redactClientSpan", () => {
   describe("credentials kept out of spans", () => {
     it("strips query strings and share tokens from URLs", () => {
       expect(redactUrl(`/files/signed/objects/a/b?sig=${SECRET}&exp=1`)).toBe(

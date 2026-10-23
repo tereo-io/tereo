@@ -25,7 +25,7 @@ const mint = (signer: ReturnType<typeof signerOn>) =>
     id: "row-1",
   });
 
-describe("cursor list binding", () => {
+describe("createCursorSigner", () => {
   it("reads a cursor back on the list that minted it", () => {
     const list = { path: "/webhooks/v1/webhooks/a/deliveries" };
     const signer = signerOn(list);

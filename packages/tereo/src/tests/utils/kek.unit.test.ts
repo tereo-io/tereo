@@ -17,7 +17,7 @@ const envKek = () => {
   return aesGcmKek(key, kekIdOf(key));
 };
 
-describe("KEK envelope", () => {
+describe("aesGcmKek, sealSecret and openSecret", () => {
   it("round-trips a value and records the KEK id", async () => {
     const kek = envKek();
     const sealed = await sealSecret(kek, "TOTP_ENCRYPTION_KEY", "secret");
