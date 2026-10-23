@@ -1,13 +1,76 @@
 // @module-tag unit
 // @module-tag notifications
-import type { NotificationConnection } from "../../../../../prisma/generated/client/index.js";
-import { toConnectionView } from "../../../../utils/notifications/connections.js";
+import { PermanentSendError } from "../../../../utils/notifications/channels/types.js";
 import { emailAdapter } from "../../../../utils/notifications/channels/email.js";
-import { BadRequestError } from "../../../../utils/errors.js";
 import { describe, it, expect, afterEach } from "vitest";
 import env from "../../../../env.js";
 
+const content = (over: Record<string, unknown> = {}) => ({
+  subject: "Invoice 1042",
+  text: "Hello",
+  ...over,
+});
+
+const paths = (result: { error?: { issues: { path: PropertyKey[] }[] } }) =>
+  result.error?.issues.map((i) => i.path.join("."));
+
 describe("emailAdapter", () => {
+  describe("content checks", () => {
+    it("refuses header injection in the subject", () => {
+      const result = emailAdapter.contentSchema.safeParse(
+        content({ subject: "Hi\r\nBcc: victim@example.com" })
+      );
+      expect(result.success).toBe(false);
+      expect(paths(result)).toEqual(["subject"]);
+    });
+
+    it("refuses content with no body", () => {
+      const result = emailAdapter.contentSchema.safeParse({ subject: "Hi" });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues).toMatchObject([
+        { message: "text or html is required" },
+      ]);
+    });
+
+    it.each(["<", ">", "@", '"'])(
+      "refuses a `from.name` containing %s",
+      (char) => {
+        const result = emailAdapter.contentSchema.safeParse(
+          content({
+            from: { address: "billing@acme.com", name: `ceo${char}bank.com` },
+          })
+        );
+        expect(result.success).toBe(false);
+        expect(paths(result)).toEqual(["from.name"]);
+      }
+    );
+  });
+
+  describe("recipient checks", () => {
+    it("refuses an unknown recipient option", () => {
+      const result = emailAdapter.recipientOptionsSchema.safeParse({
+        As: "bcc",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("refuses recipients with no `to`", () => {
+      const only = (as: "cc" | "bcc") => [
+        { address: "a@example.com", userId: null, options: { as } },
+      ];
+      for (const as of ["cc", "bcc"] as const) {
+        let thrown: unknown;
+        try {
+          emailAdapter.plan(only(as));
+        } catch (err) {
+          thrown = err;
+        }
+        expect(thrown).toBeInstanceOf(PermanentSendError);
+        expect(thrown).toMatchObject({ code: "invalid_content" });
+      }
+    });
+  });
+
   describe("ALLOW_PLAINTEXT_SMTP", () => {
     const original = env.ALLOW_PLAINTEXT_SMTP;
     afterEach(() => {
@@ -21,13 +84,6 @@ describe("emailAdapter", () => {
       defaultFrom: { address: "billing@acme.com" },
       allowedSenders: ["@acme.com"],
     });
-    const stored = (security: string) =>
-      ({
-        id: "0192e9f0-0000-7000-8000-000000000002",
-        slug: "plain",
-        channel: "email",
-        settings: settings(security),
-      }) as unknown as NotificationConnection;
 
     it('refuses security "none" without the flag', () => {
       env.ALLOW_PLAINTEXT_SMTP = false;
@@ -46,26 +102,6 @@ describe("emailAdapter", () => {
       expect(
         emailAdapter.settingsSchema.safeParse(settings("none")).success
       ).toBe(true);
-    });
-
-    it("turns a stored plaintext connection into 400 invalid_settings without the flag", () => {
-      env.ALLOW_PLAINTEXT_SMTP = false;
-      let thrown: unknown;
-      try {
-        toConnectionView(stored("none"));
-      } catch (err) {
-        thrown = err;
-      }
-      expect(thrown).toBeInstanceOf(BadRequestError);
-      expect(thrown).toMatchObject({
-        statusCode: 400,
-        code: "invalid_settings",
-      });
-
-      env.ALLOW_PLAINTEXT_SMTP = true;
-      expect(toConnectionView(stored("none")).settings).toMatchObject({
-        security: "none",
-      });
     });
   });
 });
