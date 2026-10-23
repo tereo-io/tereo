@@ -132,9 +132,7 @@ describe("bucketCors", () => {
       expect(headers["access-control-allow-origin"]).toBe(ORIGIN);
     });
   });
-});
 
-describe("bucketCors", () => {
   const FIRST = "https://first.bucket-cors.test";
   const SECOND = "https://second.bucket-cors.test";
   let token: string;

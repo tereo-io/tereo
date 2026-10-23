@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag files
 import { processMultipartSweepTick } from "../../../../../../../../jobs/multipartSweep.js";
+import { multipartClient } from "../../../../../../../support/multipart.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHash, randomUUID } from "crypto";
@@ -41,6 +42,11 @@ describe("POST and DELETE /v1/files/buckets/:name/multipart/:uploadId", () => {
   ];
   let token: string;
   let endpointId: string;
+  let bucketName: string;
+  const { text, initiate, putPart, complete } = multipartClient(() => ({
+    token,
+    bucketName,
+  }));
 
   const auth = () => ({ Authorization: `Bearer ${token}` });
 
@@ -76,6 +82,7 @@ describe("POST and DELETE /v1/files/buckets/:name/multipart/:uploadId", () => {
       { eventTypes: EVENT_TYPES }
     );
     endpointId = endpoint.id;
+    bucketName = (await createTestBucket(token)).name;
   });
 
   afterAll(async () => {
@@ -84,19 +91,11 @@ describe("POST and DELETE /v1/files/buckets/:name/multipart/:uploadId", () => {
   });
 
   it("audits the object a complete writes, as an upload does", async () => {
-    const bucket = await createTestBucket(token);
-    const uploadId = await startMultipart(bucket.name, "audited.bin");
-    const put = await axios.put(
-      `${BASE_URL}/buckets/${bucket.name}/multipart/${uploadId}/parts/1`,
-      Buffer.from(`part ${randomUUID()}`),
-      { headers: { ...auth(), "Content-Type": "application/octet-stream" } }
-    );
-    expect(put.status).toBe(HTTP_STATUS.OK);
-    const created = await axios.post(
-      `${BASE_URL}/buckets/${bucket.name}/multipart/${uploadId}/complete`,
-      { parts: [{ partNumber: 1, etag: put.data.etag }] },
-      { headers: { ...auth(), "Idempotency-Key": randomUUID() } }
-    );
+    const uploadId = await initiate();
+    const put = await putPart(uploadId, 1, text());
+    const created = await complete(uploadId, [
+      { partNumber: 1, etag: put.data.etag },
+    ]);
     expect(created.status).toBe(HTTP_STATUS.CREATED);
     const entry = await prisma.auditLogEntry.findFirst({
       where: { entityType: "object", entityId: created.data.id },

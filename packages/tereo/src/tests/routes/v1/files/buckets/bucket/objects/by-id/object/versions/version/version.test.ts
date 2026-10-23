@@ -42,21 +42,6 @@ describe("POST /v1/files/buckets/:name/objects/by-id/:id/versions/:versionId/res
     });
 
     describe("Undelete by restoring a version", () => {
-      const versionedBucket = async () => {
-        const bucket = await createTestBucket(testToken, { policy: "private" });
-        await axios.put(
-          `${BASE_URL}/buckets/${bucket.name}`,
-          { versioningEnabled: true },
-          {
-            headers: {
-              ...authHeader(testToken),
-              "Content-Type": "application/json",
-            },
-          }
-        );
-        return bucket as { id: number; name: string };
-      };
-
       // Uploads one version under `key`, deletes the object (a delete marker
       // in a versioned bucket) and returns its id and the content version.
       const deletedObject = async (bucketName: string, key: string) => {
@@ -296,6 +281,21 @@ describe("POST /v1/files/buckets/:name/objects/by-id/:id/versions/:versionId/res
       });
     });
 
+    const versionedBucket = async () => {
+      const bucket = await createTestBucket(testToken, { policy: "private" });
+      await axios.put(
+        `${BASE_URL}/buckets/${bucket.name}`,
+        { versioningEnabled: true },
+        {
+          headers: {
+            ...authHeader(testToken),
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      return bucket as { id: number; name: string };
+    };
+
     describe("a version branched by PATCH", () => {
       const auth = () => ({
         headers: authHeader(testToken),
@@ -306,13 +306,7 @@ describe("POST /v1/files/buckets/:name/objects/by-id/:id/versions/:versionId/res
           .currentUsageBytes;
 
       it("a version branched by PATCH is charged, so deleting the old one leaves usage right", async () => {
-        const bucket = await createTestBucket(testToken);
-        const enabled = await axios.put(
-          `${BASE_URL}/buckets/${bucket.name}`,
-          { versioningEnabled: true },
-          auth()
-        );
-        expect(enabled.status).toBe(HTTP_STATUS.OK);
+        const bucket = await versionedBucket();
         const body = `branch ${randomUUID()}`;
         const size = BigInt(Buffer.byteLength(body));
         const obj = await uploadTestObject(

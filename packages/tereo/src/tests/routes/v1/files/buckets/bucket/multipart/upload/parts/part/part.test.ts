@@ -2,6 +2,7 @@
 // @module-tag files
 import { multipartCompleteClaim } from "../../../../../../../../../../routes/v1/files/buckets/bucket/multipart/utils.js";
 import { MAX_BLOB_BYTES } from "../../../../../../../../../../utils/encryption.js";
+import { multipartClient } from "../../../../../../../../../support/multipart.js";
 import { prisma } from "../../../../../../../../../../utils/db/prisma.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import env from "../../../../../../../../../../env.js";
@@ -256,60 +257,10 @@ describe("PUT /v1/files/buckets/:name/multipart/:uploadId/parts/:partNumber", ()
       let token: string;
       let bucketName: string;
 
-      // Content a complete's file-type check accepts, as random bytes may not be.
-      const text = () => Buffer.from(`part ${randomBytes(16).toString("hex")}`);
-
-      const as = (t = token) => ({
-        headers: { Authorization: `Bearer ${t}` },
-        validateStatus: () => true,
-      });
-
-      const initiate = async (t = token) => {
-        const res = await axios.post(
-          `${BASE_URL}/buckets/${bucketName}/multipart`,
-          {
-            objectKey: `mp-${randomBytes(4).toString("hex")}.bin`,
-            contentType: "application/octet-stream",
-          },
-          as(t)
-        );
-        expect(res.status).toBe(HTTP_STATUS.CREATED);
-        return res.data.uploadId as string;
-      };
-
-      const putPart = (
-        uploadId: string,
-        partNumber: number,
-        body: Buffer | Readable
-      ) =>
-        axios.put(
-          `${BASE_URL}/buckets/${bucketName}/multipart/${uploadId}/parts/${partNumber}`,
-          body,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/octet-stream",
-            },
-            validateStatus: () => true,
-            maxBodyLength: Infinity,
-          }
-        );
-
-      const complete = (
-        uploadId: string,
-        parts: Array<{ partNumber: number; etag: string }>
-      ) =>
-        axios.post(
-          `${BASE_URL}/buckets/${bucketName}/multipart/${uploadId}/complete`,
-          { parts },
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Idempotency-Key": testIdempotencyKey(),
-            },
-            validateStatus: () => true,
-          }
-        );
+      const { text, as, initiate, putPart, complete } = multipartClient(() => ({
+        token,
+        bucketName,
+      }));
 
       const uploadDir = (uploadId: string) =>
         path.join(env.FILE_SERVICE_STORAGE_PATH, "multipart", uploadId);
