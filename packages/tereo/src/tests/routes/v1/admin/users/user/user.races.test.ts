@@ -1,10 +1,10 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag race
-
 import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrganization.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { type AuthContext } from "../../../../../../middleware/auth.js";
+import { waitForLockWait } from "../../../../../support/dbLocks.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { ForbiddenError } from "../../../../../../utils/errors.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
@@ -56,18 +56,6 @@ const roleGranting = async (permission: string) => {
 };
 
 /** Resolves once some backend waits on a lock in a query matching `like`. */
-const waitForLockWait = async (like: string, timeoutMs = 10_000) => {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const rows = await prisma.$queryRaw<{ n: bigint }[]>`
-      SELECT count(*)::bigint AS n FROM pg_stat_activity
-      WHERE wait_event_type = 'Lock' AND query ILIKE ${like}`;
-    if (Number(rows[0].n) > 0) return;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  throw new Error(`No backend waited on a lock for ${like}`);
-};
-
 let adminToken: string;
 
 beforeAll(async () => {

@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag auth
 import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { json } from "../../support/auth/login.js";
 import { describe, it, expect } from "vitest";
 
 describe("/.well-known", () => {
@@ -416,9 +417,6 @@ describe("/.well-known", () => {
 });
 
 describe("/.well-known", () => {
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
-
   describe("Discovery and logout", () => {
     it("advertises no documentation URL core does not serve", async () => {
       for (const path of [

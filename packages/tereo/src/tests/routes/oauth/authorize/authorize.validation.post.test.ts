@@ -4,6 +4,7 @@ import { cookieHeader, newPkce } from "../../../support/browserLogin.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { createTestUser } from "../../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { json } from "../../../support/auth/login.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -199,9 +200,6 @@ describe("POST /oauth/authorize", () => {
   const REDIRECT_URI = "http://localhost:3000/callback";
 
   type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
 
   let ccClient: Client;
   let user: Awaited<ReturnType<typeof createTestUser>>;

@@ -3,7 +3,6 @@
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
 import { type CustomRoleEntry } from "../../../utils/provisioning/schema.js";
 import { applyProvisioning } from "../../../utils/provisioning/index.js";
-import { clientCredentialsToken } from "../../support/clientToken.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateClientSecret } from "../../../utils/crypto.js";
@@ -26,6 +25,10 @@ import {
   newClientSpec,
   ownerDeclaration,
 } from "../../support/provisioning.js";
+import {
+  clientCredentialsToken,
+  serviceToken,
+} from "../../support/clientToken.js";
 
 let adminToken: string;
 
@@ -127,19 +130,6 @@ const serviceRow = (slug: string) =>
 
 const clientRow = (clientId: string) =>
   prisma.oAuthClient.findUniqueOrThrow({ where: { clientId } });
-
-const serviceToken = async (d: ServiceDoc) => {
-  const response = await fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${d.service.clientId}:${d.plainSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  expect(response.status).toBe(200);
-  return ((await response.json()) as { access_token: string }).access_token;
-};
 
 const accessRow = async (
   serviceId: string,

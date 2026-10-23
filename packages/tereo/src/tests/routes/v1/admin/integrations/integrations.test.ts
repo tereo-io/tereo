@@ -2,6 +2,7 @@
 // @module-tag auth
 // @module-tag provisioning
 import { removeServices } from "../../../../support/provisioning.js";
+import { tokenResponse } from "../../../../support/clientToken.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../support/coreUrl.js";
@@ -48,16 +49,6 @@ const createIntegration = async (
   expect(res.status).toBe(201);
   return res.body as Created;
 };
-
-const tokenResponse = (clientId: string, clientSecret: string) =>
-  fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
 
 const tokenOf = async ({ credentials }: Created) => {
   const response = await tokenResponse(

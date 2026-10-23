@@ -1,6 +1,5 @@
-import { encryptTotpSecret, generateTotpSecret } from "../../../utils/totp.js";
 import { getAccessTokenForUser, getUiAccessTokenForUser } from "./login.js";
-import { createTestRole, createTestUser } from "./users.js";
+import { createTestRole, createTestUser, enableTotp } from "./users.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { BASE_URL } from "./constants.js";
 import {
@@ -123,15 +122,7 @@ export const createUserWithTotp = async (client: {
   const token = await getUiAccessTokenForUser(user);
   const otherUiToken = await getUiAccessTokenForUser(user);
   const thirdPartyToken = await getAccessTokenForUser(user, client);
-  const secret = generateTotpSecret();
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      totpSecret: encryptTotpSecret(secret),
-      totpEnabled: true,
-      totpEnabledAt: new Date(),
-    },
-  });
+  const secret = await enableTotp(user.id);
   const headers = {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",

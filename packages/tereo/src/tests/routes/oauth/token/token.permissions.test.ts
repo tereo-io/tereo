@@ -16,6 +16,11 @@ import {
   generateCodeChallenge,
   generateUniqueId,
 } from "../../../support/auth/crypto.js";
+import {
+  json,
+  postForm,
+  loginAndExchange,
+} from "../../../support/auth/login.js";
 
 describe("POST /oauth/token", () => {
   describe("OAuth Token Endpoint", () => {
@@ -355,51 +360,8 @@ describe("POST /oauth/token", () => {
 
   type Client = Awaited<ReturnType<typeof createTestClient>>;
 
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
-
-  const form = (body: Record<string, string>) =>
-    new URLSearchParams(body).toString();
-
-  const postForm = (
-    path: string,
-    body: Record<string, string>,
-    headers: Record<string, string> = {}
-  ) =>
-    fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...headers,
-      },
-      body: form(body),
-    });
-
   let publicClient: Client;
   let user: Awaited<ReturnType<typeof createTestUser>>;
-
-  const loginAndExchange = async () => {
-    const { code, verifier } = await browserLogin({
-      clientId: publicClient.clientId,
-      redirectUri: REDIRECT_URI,
-      scope: SCOPE,
-      email: user.email,
-      password: user.plainPassword,
-    });
-    const res = await postForm("/oauth/token", {
-      grant_type: "authorization_code",
-      client_id: publicClient.clientId,
-      code,
-      redirect_uri: REDIRECT_URI,
-      code_verifier: verifier,
-    });
-    expect(res.status).toBe(200);
-    return (await res.json()) as {
-      access_token: string;
-      refresh_token: string;
-      scope: string;
-    };
-  };
 
   beforeAll(async () => {
     publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
@@ -408,7 +370,12 @@ describe("POST /oauth/token", () => {
 
   describe("Refresh scope", () => {
     it("narrows to a subset of the granted scopes", async () => {
-      const tokens = await loginAndExchange();
+      const tokens = await loginAndExchange(
+        publicClient,
+        user,
+        REDIRECT_URI,
+        SCOPE
+      );
       const res = await postForm("/oauth/token", {
         grant_type: "refresh_token",
         client_id: publicClient.clientId,
@@ -460,7 +427,12 @@ describe("POST /oauth/token", () => {
       });
 
     it("keeps the whole grant on the rotated refresh token after a narrowed refresh", async () => {
-      const tokens = await loginAndExchange();
+      const tokens = await loginAndExchange(
+        publicClient,
+        user,
+        REDIRECT_URI,
+        SCOPE
+      );
       const narrowed = await refresh(tokens.refresh_token, "openid");
       expect(narrowed.status).toBe(200);
       const body = (await narrowed.json()) as {
@@ -527,7 +499,12 @@ describe("POST /oauth/token", () => {
     });
 
     it("does not spend the refresh token on a refused scope", async () => {
-      const tokens = await loginAndExchange();
+      const tokens = await loginAndExchange(
+        publicClient,
+        user,
+        REDIRECT_URI,
+        SCOPE
+      );
       const refused = await refresh(tokens.refresh_token, "openid admin");
       expect(refused.status).toBe(400);
       expect((await json(refused)).error).toBe("invalid_scope");

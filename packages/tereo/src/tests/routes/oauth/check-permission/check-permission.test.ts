@@ -6,6 +6,7 @@ import { FIXTURE_USER_IDS } from "../../../support/principals.js";
 import { makeServiceOf } from "../../../support/testService.js";
 import { hashFlowToken } from "../../../../utils/crypto.js";
 import { prisma } from "../../../../utils/db/prisma.js";
+import { json } from "../../../support/auth/login.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -427,8 +428,6 @@ describe("POST /oauth/check-permission and /oauth/check-permission/batch", () =>
   const basic = (client: Client) =>
     `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
 
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
   let ccClient: Client;
 
   beforeAll(async () => {

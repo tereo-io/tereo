@@ -27,3 +27,22 @@ export const tokenFor = async (service: { credentials: Credentials }) => {
   expect(status).toBe(200);
   return token!;
 };
+
+export const tokenResponse = (clientId: string, clientSecret: string) =>
+  fetch(`${CORE_URL}/oauth/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+
+/** A provisioned service document: its client id is on `service`, its secret beside it. */
+export const serviceToken = (d: {
+  service: { clientId: string };
+  plainSecret: string;
+}) =>
+  tokenFor({
+    credentials: { clientId: d.service.clientId, clientSecret: d.plainSecret },
+  });

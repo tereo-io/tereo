@@ -3,6 +3,7 @@
 // @module-tag provisioning
 import { getTestPrincipalToken } from "../../../../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { tokenFor } from "../../../../support/clientToken.js";
 import { CORE_URL } from "../../../../support/coreUrl.js";
 import axios from "axios";
 import {
@@ -24,20 +25,6 @@ const api = axios.create({ validateStatus: () => true });
 const get = (token: string) =>
   api.get(URL, { headers: { Authorization: `Bearer ${token}` } });
 
-const clientToken = async (service: ProvisionedService) => {
-  const { clientId, clientSecret } = service.credentials;
-  const response = await fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  expect(response.status).toBe(200);
-  return ((await response.json()) as { access_token: string }).access_token;
-};
-
 describe("GET /v1/account/service", () => {
   const slugs: string[] = [];
   let service: ProvisionedService;
@@ -56,7 +43,7 @@ describe("GET /v1/account/service", () => {
   });
 
   it("returns the caller's own service, its declaration and access", async () => {
-    const response = await get(await clientToken(service));
+    const response = await get(await tokenFor(service));
     expect(response.status).toBe(200);
     expect(response.data).toMatchObject({
       id: service.id,
@@ -98,7 +85,7 @@ describe("GET /v1/account/service", () => {
   });
 
   it("follows a re-provision that changes only the version", async () => {
-    const token = await clientToken(service);
+    const token = await tokenFor(service);
     const before = (await get(token)).data;
     await provisionService({
       slug: service.slug,

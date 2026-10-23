@@ -5,6 +5,7 @@ import { createTestClient } from "../../support/auth/clients.js";
 import { browserLogin } from "../../support/browserLogin.js";
 import { createTestUser } from "../../support/auth/users.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { postForm } from "../../support/auth/login.js";
 import jwt from "jsonwebtoken";
 import {
   generateCodeVerifier,
@@ -283,23 +284,6 @@ describe("ID token", () => {
   const REDIRECT_URI = "http://localhost:3000/callback";
 
   type Client = Awaited<ReturnType<typeof createTestClient>>;
-
-  const form = (body: Record<string, string>) =>
-    new URLSearchParams(body).toString();
-
-  const postForm = (
-    path: string,
-    body: Record<string, string>,
-    headers: Record<string, string> = {}
-  ) =>
-    fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...headers,
-      },
-      body: form(body),
-    });
 
   let publicClient: Client;
   let user: Awaited<ReturnType<typeof createTestUser>>;

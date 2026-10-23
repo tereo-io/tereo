@@ -2,8 +2,8 @@
 // @module-tag audit
 import { cleanup as cleanupIntegrations } from "../../../../../../../support/integrations.js";
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { tokenFor } from "../../../../../../../support/clientToken.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
-import { CORE_URL } from "../../../../../../../support/coreUrl.js";
 import axios from "axios";
 import {
   provisionService,
@@ -391,20 +391,6 @@ describe("GET /v1/audit/entries/entity/:entityType/:entityId", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    const clientToken = async (service: ProvisionedService) => {
-      const { clientId, clientSecret } = service.credentials;
-      const response = await fetch(`${CORE_URL}/oauth/token`, {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: "grant_type=client_credentials",
-      });
-      expect(response.status).toBe(200);
-      return ((await response.json()) as { access_token: string }).access_token;
-    };
-
     const accountOf = async (service: ProvisionedService) => {
       const row = await prisma.service.findUniqueOrThrow({
         where: { id: service.id },
@@ -457,7 +443,7 @@ describe("GET /v1/audit/entries/entity/:entityType/:entityId", () => {
       reader = await provisionService({ access: { roles: ["audit_reader"] } });
       writer = await provisionService({ access: { roles: ["audit_writer"] } });
       slugs.push(reader.slug, writer.slug);
-      readerToken = await clientToken(reader);
+      readerToken = await tokenFor(reader);
       org1 = await ensureTestOrganization(`svc-scope-1-${runId}`);
       org2 = await ensureTestOrganization(`svc-scope-2-${runId}`);
       userId = await ensureTestUser(

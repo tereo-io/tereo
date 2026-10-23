@@ -10,6 +10,7 @@ import { generateClientSecret } from "../../../utils/crypto.js";
 import { removeServices } from "../../support/provisioning.js";
 import { SYSTEM_USER_ID } from "../../../definitions/index.js";
 import { createHmac, randomBytes, randomUUID } from "crypto";
+import { serviceToken } from "../../support/clientToken.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
 import db from "../../../utils/db/index.js";
@@ -63,19 +64,6 @@ const serviceDoc = (extra: Partial<ResolvedService>): ServiceDoc => {
     roles: [],
     plainSecret,
   };
-};
-
-const serviceToken = async (d: ServiceDoc) => {
-  const response = await fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${d.service.clientId}:${d.plainSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  expect(response.status).toBe(200);
-  return ((await response.json()) as { access_token: string }).access_token;
 };
 
 let receiver: http.Server;

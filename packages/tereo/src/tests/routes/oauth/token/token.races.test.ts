@@ -1,10 +1,10 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag race
+import { postForm, loginAndExchange } from "../../../support/auth/login.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { browserLogin } from "../../../support/browserLogin.js";
 import { createTestUser } from "../../../support/auth/users.js";
-import { BASE_URL } from "../../../support/auth/constants.js";
 import { describe, it, expect, beforeAll } from "vitest";
 
 const SCOPE = "openid profile email offline_access";
@@ -12,48 +12,8 @@ const REDIRECT_URI = "http://localhost:3000/callback";
 
 type Client = Awaited<ReturnType<typeof createTestClient>>;
 
-const form = (body: Record<string, string>) =>
-  new URLSearchParams(body).toString();
-
-const postForm = (
-  path: string,
-  body: Record<string, string>,
-  headers: Record<string, string> = {}
-) =>
-  fetch(`${BASE_URL}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      ...headers,
-    },
-    body: form(body),
-  });
-
 let publicClient: Client;
 let user: Awaited<ReturnType<typeof createTestUser>>;
-
-const loginAndExchange = async () => {
-  const { code, verifier } = await browserLogin({
-    clientId: publicClient.clientId,
-    redirectUri: REDIRECT_URI,
-    scope: SCOPE,
-    email: user.email,
-    password: user.plainPassword,
-  });
-  const res = await postForm("/oauth/token", {
-    grant_type: "authorization_code",
-    client_id: publicClient.clientId,
-    code,
-    redirect_uri: REDIRECT_URI,
-    code_verifier: verifier,
-  });
-  expect(res.status).toBe(200);
-  return (await res.json()) as {
-    access_token: string;
-    refresh_token: string;
-    scope: string;
-  };
-};
 
 beforeAll(async () => {
   publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
@@ -85,7 +45,12 @@ describe("POST /oauth/token", () => {
     });
 
     it("rotates a refresh token once when two refreshes race", async () => {
-      const tokens = await loginAndExchange();
+      const tokens = await loginAndExchange(
+        publicClient,
+        user,
+        REDIRECT_URI,
+        SCOPE
+      );
       const refresh = () =>
         postForm("/oauth/token", {
           grant_type: "refresh_token",

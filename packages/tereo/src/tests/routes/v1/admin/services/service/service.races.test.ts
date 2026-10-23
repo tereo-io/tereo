@@ -1,8 +1,10 @@
 // @module-tag int
 // @module-tag provisioning
 // @module-tag race
+import { clientCredentialsToken } from "../../../../../support/clientToken.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { CORE_SERVICE_ID } from "../../../../../../definitions/index.js";
+import { waitForLockWait } from "../../../../../support/dbLocks.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../support/coreUrl.js";
 import { fetchJson } from "../../../../../support/http.js";
@@ -47,19 +49,6 @@ const addService = async (adminToken: string): Promise<AddedService> => {
   return res.body;
 };
 
-const fetchToken = async ({ clientId, clientSecret }: Credentials) => {
-  const response = await fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  const body = (await response.json()) as { access_token?: string };
-  return { status: response.status, token: body.access_token ?? null };
-};
-
 const accountUserId = async (serviceId: string) => {
   const row = await prisma.service.findUniqueOrThrow({
     where: { id: serviceId },
@@ -69,18 +58,6 @@ const accountUserId = async (serviceId: string) => {
 };
 
 /** Resolves once some backend waits on a lock in a query matching `like`. */
-const waitForLockWait = async (like: string, timeoutMs = 10_000) => {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const rows = await prisma.$queryRaw<{ n: bigint }[]>`
-      SELECT count(*)::bigint AS n FROM pg_stat_activity
-      WHERE wait_event_type = 'Lock' AND query ILIKE ${like}`;
-    if (Number(rows[0].n) > 0) return;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  throw new Error(`No backend waited on a lock for ${like}`);
-};
-
 let adminToken: string;
 
 const accessOf = async (serviceId: string) =>
@@ -281,7 +258,7 @@ describe("/v1/admin/services/:id", () => {
         expect(a.status).toBe(200);
         expect(b.status).toBe(200);
         for (const secret of [a.body.clientSecret, b.body.clientSecret]) {
-          const { status } = await fetchToken({
+          const { status } = await clientCredentialsToken({
             clientId: service.credentials.clientId,
             clientSecret: secret,
           });

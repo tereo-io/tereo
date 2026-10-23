@@ -1,10 +1,10 @@
 // @module-tag int
 // @module-tag auth
+import { codeFlowSignIn, json, postForm } from "../../../support/auth/login.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../../../definitions/index.js";
 import { TokenResponse, decodeJwt } from "../../../support/auth/tokens.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { createTestUser } from "../../../support/auth/users.js";
-import { codeFlowSignIn } from "../../../support/auth/login.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import jwt from "jsonwebtoken";
@@ -406,26 +406,6 @@ describe("POST /oauth/revoke", () => {
 
   const basic = (client: Client) =>
     `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
-
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
-
-  const form = (body: Record<string, string>) =>
-    new URLSearchParams(body).toString();
-
-  const postForm = (
-    path: string,
-    body: Record<string, string>,
-    headers: Record<string, string> = {}
-  ) =>
-    fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...headers,
-      },
-      body: form(body),
-    });
 
   const clientCredentialsToken = async (client: Client) => {
     const res = await postForm(

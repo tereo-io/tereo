@@ -1,8 +1,8 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag provisioning
-import { ensurePermission } from "../../../../../support/testService.js";
 import { removeServices } from "../../../../../support/provisioning.js";
+import { customRole } from "../../../../../support/integrations.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../support/coreUrl.js";
@@ -51,22 +51,6 @@ const createIntegration = async (
 };
 
 /** A custom role granting these permissions. */
-const customRole = async (permissions: string[]) => {
-  const ids = [];
-  for (const name of permissions) ids.push((await ensurePermission(name)).id);
-  const role = await prisma.role.create({
-    data: {
-      name: `int-role-${rand()}`,
-      displayName: "Integration test role",
-      rolePermissions: {
-        create: ids.map((permissionId) => ({ permissionId })),
-      },
-    },
-  });
-  createdRoleIds.push(role.id);
-  return role.id;
-};
-
 beforeAll(async () => {
   adminToken = await getTestPrincipalToken({
     permissions: [
@@ -96,7 +80,7 @@ describe("/v1/admin/integrations/:id", () => {
   describe("roles", () => {
     it("refuses a role whose permissions the approver lacks", async () => {
       const created = await createIntegration({ organizationId: orgId });
-      const roleId = await customRole(["webhooks.write"]);
+      const roleId = await customRole(["webhooks.write"], createdRoleIds);
       const res = await api(
         "PUT",
         `/v1/admin/integrations/${created.id}/roles`,
@@ -107,7 +91,7 @@ describe("/v1/admin/integrations/:id", () => {
       expect(res.status).toBe(403);
 
       const platform = await createIntegration();
-      const globalRole = await customRole(["users.read"]);
+      const globalRole = await customRole(["users.read"], createdRoleIds);
       const refused = await api(
         "PUT",
         `/v1/admin/integrations/${platform.id}/roles`,
@@ -144,7 +128,7 @@ describe("/v1/admin/integrations/:id", () => {
       await prisma.userRole.create({
         data: {
           userId: row.client!.serviceAccountUser!.id,
-          roleId: await customRole(["users.read"]),
+          roleId: await customRole(["users.read"], createdRoleIds),
         },
       });
       const before = await prisma.oAuthClient.findUniqueOrThrow({

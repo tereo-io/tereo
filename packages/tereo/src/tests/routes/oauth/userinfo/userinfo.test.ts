@@ -29,6 +29,9 @@ import {
 import {
   getAccessTokenForUser,
   getUiAccessTokenForUser,
+  json,
+  postForm,
+  loginAndExchange,
 } from "../../../support/auth/login.js";
 
 describe("/oauth/userinfo", () => {
@@ -498,26 +501,6 @@ describe("/oauth/userinfo", () => {
   const basic = (client: Client) =>
     `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
 
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
-
-  const form = (body: Record<string, string>) =>
-    new URLSearchParams(body).toString();
-
-  const postForm = (
-    path: string,
-    body: Record<string, string>,
-    headers: Record<string, string> = {}
-  ) =>
-    fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...headers,
-      },
-      body: form(body),
-    });
-
   const clientCredentialsToken = async (client: Client) => {
     const res = await postForm(
       "/oauth/token",
@@ -531,29 +514,6 @@ describe("/oauth/userinfo", () => {
   let publicClient: Client;
   let ccClient: Client;
   let user: Awaited<ReturnType<typeof createTestUser>>;
-
-  const loginAndExchange = async () => {
-    const { code, verifier } = await browserLogin({
-      clientId: publicClient.clientId,
-      redirectUri: REDIRECT_URI,
-      scope: SCOPE,
-      email: user.email,
-      password: user.plainPassword,
-    });
-    const res = await postForm("/oauth/token", {
-      grant_type: "authorization_code",
-      client_id: publicClient.clientId,
-      code,
-      redirect_uri: REDIRECT_URI,
-      code_verifier: verifier,
-    });
-    expect(res.status).toBe(200);
-    return (await res.json()) as {
-      access_token: string;
-      refresh_token: string;
-      scope: string;
-    };
-  };
 
   beforeAll(async () => {
     publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
@@ -608,7 +568,12 @@ describe("/oauth/userinfo", () => {
     });
 
     it("refuses the access token of a revoked session", async () => {
-      const tokens = await loginAndExchange();
+      const tokens = await loginAndExchange(
+        publicClient,
+        user,
+        REDIRECT_URI,
+        SCOPE
+      );
       const revoked = await postForm("/oauth/revoke", {
         client_id: publicClient.clientId,
         token: tokens.refresh_token,

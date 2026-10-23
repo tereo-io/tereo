@@ -3,6 +3,8 @@
 // @module-tag provisioning
 import { ensurePermission } from "../../../../../support/testService.js";
 import { removeServices } from "../../../../../support/provisioning.js";
+import { tokenResponse } from "../../../../../support/clientToken.js";
+import { customRole } from "../../../../../support/integrations.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../support/coreUrl.js";
@@ -50,16 +52,6 @@ const createIntegration = async (
   return res.body as Created;
 };
 
-const tokenResponse = (clientId: string, clientSecret: string) =>
-  fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-
 const tokenOf = async ({ credentials }: Created) => {
   const response = await tokenResponse(
     credentials.clientId,
@@ -101,22 +93,6 @@ const isRevoked = async (token: string) =>
   ).revokedAt !== null;
 
 /** A custom role granting these permissions. */
-const customRole = async (permissions: string[]) => {
-  const ids = [];
-  for (const name of permissions) ids.push((await ensurePermission(name)).id);
-  const role = await prisma.role.create({
-    data: {
-      name: `int-role-${rand()}`,
-      displayName: "Integration test role",
-      rolePermissions: {
-        create: ids.map((permissionId) => ({ permissionId })),
-      },
-    },
-  });
-  createdRoleIds.push(role.id);
-  return role.id;
-};
-
 beforeAll(async () => {
   adminToken = await getTestPrincipalToken({
     permissions: [
@@ -146,7 +122,7 @@ describe("/v1/admin/integrations/:id", () => {
   describe("roles", () => {
     it("refuses an org-bound integration a role with a global-only permission", async () => {
       const created = await createIntegration({ organizationId: orgId });
-      const roleId = await customRole(["users.read"]);
+      const roleId = await customRole(["users.read"], createdRoleIds);
       const res = await api(
         "PUT",
         `/v1/admin/integrations/${created.id}/roles`,
@@ -160,7 +136,7 @@ describe("/v1/admin/integrations/:id", () => {
     it("grants org roles to an org-bound integration, in its tokens, revoking the old ones", async () => {
       const created = await createIntegration({ organizationId: orgId });
       const before = await tokenOf(created);
-      const roleId = await customRole(["webhooks.read"]);
+      const roleId = await customRole(["webhooks.read"], createdRoleIds);
       const res = await api(
         "PUT",
         `/v1/admin/integrations/${created.id}/roles`,
@@ -191,7 +167,7 @@ describe("/v1/admin/integrations/:id", () => {
       { tags: ["security"] },
       async () => {
         const created = await createIntegration();
-        const roleId = await customRole(["admin"]);
+        const roleId = await customRole(["admin"], createdRoleIds);
         const granter = await getTestPrincipalToken({
           permissions: ["integrations.write", "admin"],
         });
@@ -213,7 +189,7 @@ describe("/v1/admin/integrations/:id", () => {
       { tags: ["security"] },
       async () => {
         const created = await createIntegration();
-        const roleId = await customRole(["users.read"]);
+        const roleId = await customRole(["users.read"], createdRoleIds);
         const granter = await getTestPrincipalToken({
           permissions: ["integrations.write", "users.read"],
         });
@@ -257,7 +233,7 @@ describe("/v1/admin/integrations/:id", () => {
         const userId = (
           await api("GET", `/v1/admin/integrations/${created.id}`)
         ).body.serviceAccountUserId as string;
-        const roleId = await customRole(["admin"]);
+        const roleId = await customRole(["admin"], createdRoleIds);
         await prisma.role.update({
           where: { id: roleId },
           data: { isActive: false },
@@ -285,7 +261,7 @@ describe("/v1/admin/integrations/:id", () => {
 
     it("grants global roles to a platform integration", async () => {
       const created = await createIntegration();
-      const roleId = await customRole(["users.read"]);
+      const roleId = await customRole(["users.read"], createdRoleIds);
       const granter = await getTestPrincipalToken({
         permissions: ["integrations.write", "users.read"],
       });

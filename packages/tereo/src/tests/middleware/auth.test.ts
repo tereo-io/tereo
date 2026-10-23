@@ -3,7 +3,6 @@
 // @module-tag security
 import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { getTestPrincipalToken } from "../support/principals.js";
-import { getAccessTokenForUser } from "../support/auth/login.js";
 import { createTestClient } from "../support/auth/clients.js";
 import { LOGIN_CLIENT } from "../../definitions/index.js";
 import { browserLogin } from "../support/browserLogin.js";
@@ -16,6 +15,11 @@ import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "node:crypto";
 import env from "../../env.js";
 import jwt from "jsonwebtoken";
+import {
+  getAccessTokenForUser,
+  json,
+  postForm,
+} from "../support/auth/login.js";
 
 describe("requireAuth", () => {
   /**
@@ -196,26 +200,6 @@ describe("requireAuth", () => {
 
   const basic = (client: Client) =>
     `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
-
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
-
-  const form = (body: Record<string, string>) =>
-    new URLSearchParams(body).toString();
-
-  const postForm = (
-    path: string,
-    body: Record<string, string>,
-    headers: Record<string, string> = {}
-  ) =>
-    fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...headers,
-      },
-      body: form(body),
-    });
 
   let publicClient: Client;
   let ccClient: Client;

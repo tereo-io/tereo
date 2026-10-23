@@ -4,7 +4,6 @@ import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js
 import { type CustomRoleEntry } from "../../../utils/provisioning/schema.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { openEndpointSecrets } from "../../../utils/webhookSecrets.js";
-import { clientCredentialsToken } from "../../support/clientToken.js";
 import { generateClientSecret } from "../../../utils/crypto.js";
 import { retireMissing } from "../../../utils/registry.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -44,6 +43,10 @@ import {
   newClientSpec,
   ownerDeclaration,
 } from "../../support/provisioning.js";
+import {
+  clientCredentialsToken,
+  serviceToken,
+} from "../../support/clientToken.js";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
@@ -175,19 +178,6 @@ const clientRow = (clientId: string) =>
 
 const auditCount = (entityIds: string[]) =>
   prisma.auditLogEntry.count({ where: { entityId: { in: entityIds } } });
-
-const serviceToken = async (d: ServiceDoc) => {
-  const response = await fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${d.service.clientId}:${d.plainSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  expect(response.status).toBe(200);
-  return ((await response.json()) as { access_token: string }).access_token;
-};
 
 beforeAll(async () => {
   // Events are written in this process, outside the server.

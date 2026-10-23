@@ -1,10 +1,10 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag security
-
 import { describe, it, expect, beforeEach, beforeAll } from "vitest";
 import { type TokenResponse } from "../support/auth/tokens.js";
 import { createTestClient } from "../support/auth/clients.js";
+import { json, postForm } from "../support/auth/login.js";
 import { makeServiceOf } from "../support/testService.js";
 import { createTestUser } from "../support/auth/users.js";
 import { prisma } from "../../utils/db/prisma.js";
@@ -173,26 +173,6 @@ describe("authenticateClient", () => {
   };
 
   const REDIRECT_URI = "http://localhost:3000/callback";
-
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
-
-  const form = (body: Record<string, string>) =>
-    new URLSearchParams(body).toString();
-
-  const postForm = (
-    path: string,
-    body: Record<string, string>,
-    headers: Record<string, string> = {}
-  ) =>
-    fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...headers,
-      },
-      body: form(body),
-    });
 
   let publicClient: Client;
   let ccClient: Client;

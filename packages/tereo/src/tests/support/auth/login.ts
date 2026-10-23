@@ -280,3 +280,51 @@ export const codeFlowSignIn = (
 
   return { exchange, signIn };
 };
+
+export const json = async (res: Response) =>
+  (await res.json()) as Record<string, unknown>;
+
+export const form = (body: Record<string, string>) =>
+  new URLSearchParams(body).toString();
+
+export const postForm = (
+  path: string,
+  body: Record<string, string>,
+  headers: Record<string, string> = {}
+) =>
+  fetch(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      ...headers,
+    },
+    body: form(body),
+  });
+
+export const loginAndExchange = async (
+  publicClient: { clientId: string },
+  user: { email: string; plainPassword: string },
+  REDIRECT_URI: string,
+  SCOPE: string
+) => {
+  const { code, verifier } = await browserLogin({
+    clientId: publicClient.clientId,
+    redirectUri: REDIRECT_URI,
+    scope: SCOPE,
+    email: user.email,
+    password: user.plainPassword,
+  });
+  const res = await postForm("/oauth/token", {
+    grant_type: "authorization_code",
+    client_id: publicClient.clientId,
+    code,
+    redirect_uri: REDIRECT_URI,
+    code_verifier: verifier,
+  });
+  expect(res.status).toBe(200);
+  return (await res.json()) as {
+    access_token: string;
+    refresh_token: string;
+    scope: string;
+  };
+};

@@ -1,8 +1,8 @@
 // @module-tag int
 // @module-tag audit
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { tokenFor } from "../../../../support/clientToken.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
-import { CORE_URL } from "../../../../support/coreUrl.js";
 import crypto from "crypto";
 import axios from "axios";
 import {
@@ -452,20 +452,6 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    const clientToken = async (service: ProvisionedService) => {
-      const { clientId, clientSecret } = service.credentials;
-      const response = await fetch(`${CORE_URL}/oauth/token`, {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: "grant_type=client_credentials",
-      });
-      expect(response.status).toBe(200);
-      return ((await response.json()) as { access_token: string }).access_token;
-    };
-
     const accountOf = async (service: ProvisionedService) => {
       const row = await prisma.service.findUniqueOrThrow({
         where: { id: service.id },
@@ -532,8 +518,8 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
       reader = await provisionService({ access: { roles: ["audit_reader"] } });
       writer = await provisionService({ access: { roles: ["audit_writer"] } });
       slugs.push(reader.slug, writer.slug);
-      readerToken = await clientToken(reader);
-      writerToken = await clientToken(writer);
+      readerToken = await tokenFor(reader);
+      writerToken = await tokenFor(writer);
       org1 = await ensureTestOrganization(`svc-scope-1-${runId}`);
       org2 = await ensureTestOrganization(`svc-scope-2-${runId}`);
       userId = await ensureTestUser(
@@ -612,7 +598,7 @@ describe("GET /v1/audit/entries and /v1/audit/entries/facets", () => {
     it("refuses a service with neither role", async () => {
       const bare = await provisionService();
       slugs.push(bare.slug);
-      const result = await list(await clientToken(bare));
+      const result = await list(await tokenFor(bare));
       expect(result.status).toBe(HTTP_STATUS.FORBIDDEN);
     });
 

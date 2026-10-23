@@ -1,6 +1,7 @@
+import { ensurePermission, TEST_SERVICE } from "./testService.js";
 import { removeServices } from "./provisioning.js";
 import { prisma } from "../../utils/db/prisma.js";
-import { TEST_SERVICE } from "./testService.js";
+import { tokenFor } from "./clientToken.js";
 import { CORE_URL } from "./coreUrl.js";
 import { fetchJson } from "./http.js";
 import { randomBytes } from "crypto";
@@ -53,20 +54,30 @@ export const createIntegration = async (
   };
 };
 
-export const integrationToken = async ({
+export const integrationToken = ({
   clientId,
   clientSecret,
-}: TestIntegration): Promise<string> => {
-  const response = await fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+}: TestIntegration): Promise<string> =>
+  tokenFor({ credentials: { clientId, clientSecret } });
+
+/** A role holding `permissions`, its id pushed to `createdRoleIds` for the caller's cleanup. */
+export const customRole = async (
+  permissions: string[],
+  createdRoleIds: string[]
+) => {
+  const ids = [];
+  for (const name of permissions) ids.push((await ensurePermission(name)).id);
+  const role = await prisma.role.create({
+    data: {
+      name: `int-role-${rand()}`,
+      displayName: "Integration test role",
+      rolePermissions: {
+        create: ids.map((permissionId) => ({ permissionId })),
+      },
     },
-    body: "grant_type=client_credentials",
   });
-  expect(response.status).toBe(200);
-  return ((await response.json()) as { access_token: string }).access_token;
+  createdRoleIds.push(role.id);
+  return role.id;
 };
 
 /** Grants `permissions` to the integration: in its organization, or globally. */

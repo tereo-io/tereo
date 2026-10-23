@@ -21,6 +21,9 @@ import {
 import {
   codeFlowSignIn,
   type SignedInTokens as Tokens,
+  json,
+  postForm,
+  loginAndExchange,
 } from "../../../support/auth/login.js";
 import {
   createTestWebhookEndpoint,
@@ -424,22 +427,6 @@ describe("POST /oauth/token", () => {
   const basic = (client: Client) =>
     `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
 
-  const form = (body: Record<string, string>) =>
-    new URLSearchParams(body).toString();
-
-  const postForm = (
-    path: string,
-    body: Record<string, string>,
-    headers: Record<string, string> = {}
-  ) =>
-    fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...headers,
-      },
-      body: form(body),
-    });
   let ccClient: Client;
 
   beforeAll(async () => {
@@ -649,51 +636,8 @@ describe("POST /oauth/token", () => {
 
   type Client = Awaited<ReturnType<typeof createTestClient>>;
 
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
-
-  const form = (body: Record<string, string>) =>
-    new URLSearchParams(body).toString();
-
-  const postForm = (
-    path: string,
-    body: Record<string, string>,
-    headers: Record<string, string> = {}
-  ) =>
-    fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...headers,
-      },
-      body: form(body),
-    });
-
   let publicClient: Client;
   let user: Awaited<ReturnType<typeof createTestUser>>;
-
-  const loginAndExchange = async () => {
-    const { code, verifier } = await browserLogin({
-      clientId: publicClient.clientId,
-      redirectUri: REDIRECT_URI,
-      scope: SCOPE,
-      email: user.email,
-      password: user.plainPassword,
-    });
-    const res = await postForm("/oauth/token", {
-      grant_type: "authorization_code",
-      client_id: publicClient.clientId,
-      code,
-      redirect_uri: REDIRECT_URI,
-      code_verifier: verifier,
-    });
-    expect(res.status).toBe(200);
-    return (await res.json()) as {
-      access_token: string;
-      refresh_token: string;
-      scope: string;
-    };
-  };
 
   beforeAll(async () => {
     publicClient = await createTestClient({ redirectUris: [REDIRECT_URI] });
@@ -709,7 +653,12 @@ describe("POST /oauth/token", () => {
       );
 
     it("clears a refresh cookie that no longer refreshes", async () => {
-      const tokens = await loginAndExchange();
+      const tokens = await loginAndExchange(
+        publicClient,
+        user,
+        REDIRECT_URI,
+        SCOPE
+      );
       await prisma.refreshToken.updateMany({
         where: { userId: user.id, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -736,7 +685,12 @@ describe("POST /oauth/token", () => {
       "leaves the cookie when its token was just rotated by a concurrent refresh",
       { tags: ["race"] },
       async () => {
-        const tokens = await loginAndExchange();
+        const tokens = await loginAndExchange(
+          publicClient,
+          user,
+          REDIRECT_URI,
+          SCOPE
+        );
         const cookie = `trt_${publicClient.clientId}=${tokens.refresh_token}`;
         expect((await cookieRefresh(cookie)).status).toBe(200);
 

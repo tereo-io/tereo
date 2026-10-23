@@ -1,7 +1,6 @@
 // @module-tag int
 // @module-tag auth
 import { getTestPrincipalToken } from "../../../support/principals.js";
-import { getAccessTokenForUser } from "../../../support/auth/login.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { InvalidGrantError } from "../../../../utils/errors.js";
 import { browserLogin } from "../../../support/browserLogin.js";
@@ -25,6 +24,11 @@ import {
   generateCodeChallenge,
   generateUniqueId,
 } from "../../../support/auth/crypto.js";
+import {
+  getAccessTokenForUser,
+  json,
+  postForm,
+} from "../../../support/auth/login.js";
 import {
   createTestUser,
   createAdminUser,
@@ -512,26 +516,6 @@ describe("POST /oauth/token", () => {
 
   const basic = (client: Client) =>
     `Basic ${Buffer.from(`${client.clientId}:${client.plainSecret}`).toString("base64")}`;
-
-  const json = async (res: Response) =>
-    (await res.json()) as Record<string, unknown>;
-
-  const form = (body: Record<string, string>) =>
-    new URLSearchParams(body).toString();
-
-  const postForm = (
-    path: string,
-    body: Record<string, string>,
-    headers: Record<string, string> = {}
-  ) =>
-    fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        ...headers,
-      },
-      body: form(body),
-    });
 
   const clientCredentialsToken = async (client: Client) => {
     const res = await postForm(

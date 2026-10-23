@@ -2,8 +2,9 @@
 // @module-tag provisioning
 // @module-tag security
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { ensurePermission } from "../../support/testService.js";
 import { removeServices } from "../../support/provisioning.js";
+import { tokenResponse } from "../../support/clientToken.js";
+import { customRole } from "../../support/integrations.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
 import { fetchJson } from "../../support/http.js";
@@ -50,16 +51,6 @@ const createIntegration = async (
   return res.body as Created;
 };
 
-const tokenResponse = (clientId: string, clientSecret: string) =>
-  fetch(`${CORE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-
 const tokenOf = async ({ credentials }: Created) => {
   const response = await tokenResponse(
     credentials.clientId,
@@ -77,22 +68,6 @@ const claimsOf = (token: string) =>
   };
 
 /** A custom role granting these permissions. */
-const customRole = async (permissions: string[]) => {
-  const ids = [];
-  for (const name of permissions) ids.push((await ensurePermission(name)).id);
-  const role = await prisma.role.create({
-    data: {
-      name: `int-role-${rand()}`,
-      displayName: "Integration test role",
-      rolePermissions: {
-        create: ids.map((permissionId) => ({ permissionId })),
-      },
-    },
-  });
-  createdRoleIds.push(role.id);
-  return role.id;
-};
-
 beforeAll(async () => {
   adminToken = await getTestPrincipalToken({
     permissions: [
@@ -150,7 +125,7 @@ describe("other admin routes", () => {
       include: { client: { include: { serviceAccountUser: true } } },
     });
     const userId = row.client!.serviceAccountUser!.id;
-    const roleId = await customRole(["webhooks.read"]);
+    const roleId = await customRole(["webhooks.read"], createdRoleIds);
     const admin = await getTestPrincipalToken({
       permissions: ["users.write", "clients.write", "roles.delete"],
     });
@@ -176,7 +151,7 @@ describe("other admin routes", () => {
     const granted = await api(
       "PUT",
       `/v1/admin/integrations/${created.id}/roles`,
-      { roleIds: [await customRole(["webhooks.emit"])] },
+      { roleIds: [await customRole(["webhooks.emit"], createdRoleIds)] },
       granter
     );
     expect(granted.status).toBe(200);
