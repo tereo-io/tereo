@@ -258,7 +258,7 @@ describe("initializeWebSocket", () => {
       }
     });
 
-    it("caps handshakes in flight together", async () => {
+    it("caps handshakes in flight together", { tags: ["race"] }, async () => {
       const { accessToken } = await signIn();
       const sockets = Array.from({ length: 25 }, () => connect(accessToken));
       try {

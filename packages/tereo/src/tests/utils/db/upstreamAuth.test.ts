@@ -52,7 +52,7 @@ describe("db.upstreamAuth", () => {
       );
     });
 
-    it("is single-use under concurrency", async () => {
+    it("is single-use under concurrency", { tags: ["race"] }, async () => {
       const provider = await makeProvider();
       const stateHash = unique();
       await makeSession(provider.id, stateHash);

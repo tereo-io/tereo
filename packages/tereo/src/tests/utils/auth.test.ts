@@ -96,22 +96,26 @@ describe("verifyClientSecretLimited", () => {
     expect(other.status).toBe(HTTP_STATUS.OK);
   });
 
-  it("lets any number of concurrent correct secrets from one address through", async () => {
-    const confidential = await createTestClient({
-      clientType: "confidential",
-      grantTypes: ["client_credentials"],
-    });
-    const ip = freshIp();
+  it(
+    "lets any number of concurrent correct secrets from one address through",
+    { tags: ["race"] },
+    async () => {
+      const confidential = await createTestClient({
+        clientType: "confidential",
+        grantTypes: ["client_credentials"],
+      });
+      const ip = freshIp();
 
-    const results = await Promise.all(
-      Array.from({ length: CLIENT_SECRET_FAILURES + 5 }, () =>
-        introspect(confidential.clientId, confidential.plainSecret!, ip)
-      )
-    );
-    expect(results.map((r) => r.status)).toEqual(
-      results.map(() => HTTP_STATUS.OK)
-    );
-  });
+      const results = await Promise.all(
+        Array.from({ length: CLIENT_SECRET_FAILURES + 5 }, () =>
+          introspect(confidential.clientId, confidential.plainSecret!, ip)
+        )
+      );
+      expect(results.map((r) => r.status)).toEqual(
+        results.map(() => HTTP_STATUS.OK)
+      );
+    }
+  );
 
   it("clears the count on a successful authentication", async () => {
     const confidential = await createTestClient({

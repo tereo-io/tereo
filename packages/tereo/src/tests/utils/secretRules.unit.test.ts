@@ -1,6 +1,5 @@
 // @module-tag unit
 // @module-tag auth
-import { generateClientSecret, hashFlowToken } from "../../utils/crypto.js";
 import { describe, expect, it } from "vitest";
 import {
   CLIENT_SECRET_PATTERN,
@@ -8,16 +7,10 @@ import {
   secretStrengthProblem,
 } from "../../utils/secretRules.js";
 
-describe("client secret rules", () => {
+describe("newClientSecretValue and secretStrengthProblem", () => {
   it("generates secrets in the documented format", () => {
     for (let i = 0; i < 100; i++)
       expect(newClientSecretValue()).toMatch(CLIENT_SECRET_PATTERN);
-  });
-
-  it("generateClientSecret returns a formatted secret and its SHA-256 hash", () => {
-    const { plainSecret, hashedSecret } = generateClientSecret();
-    expect(plainSecret).toMatch(CLIENT_SECRET_PATTERN);
-    expect(hashedSecret).toBe(hashFlowToken(plainSecret));
   });
 
   it("accepts generated secrets", () => {

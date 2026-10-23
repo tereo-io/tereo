@@ -1,6 +1,5 @@
 // @module-tag int
 // @module-tag auth
-// @module-tag race
 
 import { createTestUser, enableTotp } from "../../../support/auth/users.js";
 import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";

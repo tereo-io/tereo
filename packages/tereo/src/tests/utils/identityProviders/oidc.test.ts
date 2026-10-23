@@ -108,7 +108,7 @@ const rejectsWith = async (promise: Promise<unknown>, code: string) => {
 const rejectsWithBadRequest = async (promise: Promise<unknown>, code: string) =>
   expect(promise).rejects.toMatchObject({ statusCode: 400, code });
 
-describe("oidc adapter: validateConfig", () => {
+describe("oidcAdapter.validateConfig", () => {
   let allowPrivate: boolean;
   beforeAll(() => {
     allowPrivate = env.OIDC_ALLOW_PRIVATE_ISSUERS;
@@ -174,7 +174,7 @@ describe("oidc adapter: validateConfig", () => {
   });
 });
 
-describe("oidc adapter: sign-in", () => {
+describe("oidcAdapter.authorizationUrl and oidcAdapter.complete", () => {
   it("builds an authorization URL carrying state, nonce and S256", async () => {
     const provider = await providerFor(fake);
     const check = newCheck(provider);

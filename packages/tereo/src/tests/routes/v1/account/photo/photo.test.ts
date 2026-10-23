@@ -195,43 +195,47 @@ describe("POST /v1/account/photo", () => {
     await waitFor(async () => (await updates()) === 2, 10_000);
   });
 
-  it("leaves exactly one photo after concurrent uploads of different types", async () => {
-    const photoUser = await createTestUser();
-    const token = await getAccessTokenForUser(photoUser, testClient);
-    const upload = (type: string, name: string) => {
-      const form = new FormData();
-      form.append(
-        "file",
-        new Blob([crypto.getRandomValues(new Uint8Array(64))], { type }),
-        name
-      );
-      return fetch(`${BASE_URL}/v1/account/photo`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-    };
+  it(
+    "leaves exactly one photo after concurrent uploads of different types",
+    { tags: ["race"] },
+    async () => {
+      const photoUser = await createTestUser();
+      const token = await getAccessTokenForUser(photoUser, testClient);
+      const upload = (type: string, name: string) => {
+        const form = new FormData();
+        form.append(
+          "file",
+          new Blob([crypto.getRandomValues(new Uint8Array(64))], { type }),
+          name
+        );
+        return fetch(`${BASE_URL}/v1/account/photo`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+      };
 
-    for (let round = 0; round < 3; round++) {
-      const statuses = (
-        await Promise.all([
-          upload("image/png", "me.png"),
-          upload("image/jpeg", "me.jpg"),
-        ])
-      ).map((r) => r.status);
-      expect(statuses).toEqual([HTTP_STATUS.CREATED, HTTP_STATUS.CREATED]);
+      for (let round = 0; round < 3; round++) {
+        const statuses = (
+          await Promise.all([
+            upload("image/png", "me.png"),
+            upload("image/jpeg", "me.jpg"),
+          ])
+        ).map((r) => r.status);
+        expect(statuses).toEqual([HTTP_STATUS.CREATED, HTTP_STATUS.CREATED]);
 
-      const stored = await prisma.user.findUniqueOrThrow({
-        where: { id: photoUser.id },
-      });
-      const live = await prisma.object.findMany({
-        where: {
-          bucket: { name: "auth-service-user-photos" },
-          objectKey: { startsWith: `users/${photoUser.id}/` },
-          deletedAt: null,
-        },
-      });
-      expect(live.map((o) => o.id)).toEqual([stored.photoObjectId]);
+        const stored = await prisma.user.findUniqueOrThrow({
+          where: { id: photoUser.id },
+        });
+        const live = await prisma.object.findMany({
+          where: {
+            bucket: { name: "auth-service-user-photos" },
+            objectKey: { startsWith: `users/${photoUser.id}/` },
+            deletedAt: null,
+          },
+        });
+        expect(live.map((o) => o.id)).toEqual([stored.photoObjectId]);
+      }
     }
-  });
+  );
 });

@@ -1,9 +1,11 @@
 // @module-tag unit
 // @module-tag auth
+import { CLIENT_SECRET_PATTERN } from "../../utils/secretRules.js";
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import {
   generateClientSecret,
+  hashFlowToken,
   verifyClientSecret,
 } from "../../utils/crypto.js";
 
@@ -17,6 +19,12 @@ const client = (
 ) => ({ clientSecret, previousSecretHash, previousSecretExpiresAt });
 
 describe("generateClientSecret and verifyClientSecret", () => {
+  it("generateClientSecret returns a formatted secret and its SHA-256 hash", () => {
+    const { plainSecret, hashedSecret } = generateClientSecret();
+    expect(plainSecret).toMatch(CLIENT_SECRET_PATTERN);
+    expect(hashedSecret).toBe(hashFlowToken(plainSecret));
+  });
+
   it("are stored as the SHA-256 hex of the plain secret", () => {
     const { plainSecret, hashedSecret } = generateClientSecret();
     expect(plainSecret).toMatch(/^tereo_sk_[A-Za-z0-9_-]{43}$/);

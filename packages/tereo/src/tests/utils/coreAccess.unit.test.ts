@@ -56,7 +56,7 @@ describe("resolveCoreAccess", () => {
   });
 });
 
-describe("core:events and core:organizations", () => {
+describe("allowsArea and effectivePermissions for core:events and core:organizations", () => {
   it("open only their own areas", () => {
     const events = delegated("core:events");
     expect(allowsArea(events, "events")).toBe(true);

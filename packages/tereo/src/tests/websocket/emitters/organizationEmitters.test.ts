@@ -82,7 +82,7 @@ const orgChange = async (socket: TestSocket) => {
   return find()!.payload;
 };
 
-describe("organizationEmitters", () => {
+describe("notifyOrgMembershipChanged, notifyOrgRolesChanged and notifyOrgDeactivated", () => {
   describe("Organization change events", () => {
     const call = async (method: string, path: string, body?: unknown) =>
       fetch(`${BASE_URL}/v1/admin/organizations/${path}`, {
