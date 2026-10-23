@@ -2,6 +2,7 @@ import useRestoreObjectVersion from "@/features/file-storage/api/objects/useRest
 import useDeleteObjectVersion from "@/features/file-storage/api/objects/useDeleteObjectVersion";
 import useBucketPermissions from "@/features/file-storage/api/buckets/useBucketPermissions";
 import { faTrash } from "@fortawesome/free-solid-svg-icons";
+import { formatDateTime } from "@/utils/formatDate";
 import formatBytes from "@/utils/formatBytes";
 import { useMemo, useState } from "react";
 import { userLabel } from "@/lib/refs";
@@ -114,7 +115,7 @@ const ObjectVersionsModal = ({
       {
         title: "Created",
         dataKey: "createdAt",
-        cellElement: (v) => new Date(v.createdAt).toLocaleString(),
+        cellElement: (v) => formatDateTime(v.createdAt),
       },
       {
         title: "Created by",

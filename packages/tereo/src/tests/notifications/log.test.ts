@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
+import { SYSTEM_USER, SYSTEM_USER_ID } from "../../definitions/index.js";
 import { ensureDailyPartitions } from "../../utils/partitions.js";
 import { getTestPrincipalToken } from "../utils/principals.js";
-import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { waitFor } from "../webhooks/utils/test-helpers.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes, randomUUID } from "crypto";
@@ -267,6 +267,7 @@ describe("notifications log", () => {
       channel: "email",
       status: "sent",
       senderUserId: SYSTEM_USER_ID,
+      sender: SYSTEM_USER,
     });
     expect(row).not.toHaveProperty("content");
   });
@@ -319,6 +320,7 @@ describe("notifications log", () => {
       status: "partial",
       content: { subject: "Kept", text: "Body" },
       attachments: [],
+      sender: SYSTEM_USER,
     });
     expect(res.body.deliveries).toHaveLength(2);
     const byStatus = Object.fromEntries(

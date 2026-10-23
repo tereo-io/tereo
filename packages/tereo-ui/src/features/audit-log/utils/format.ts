@@ -32,16 +32,3 @@ export const formatChangeValue = (value: unknown): string => {
   if (typeof value === "object") return JSON.stringify(value, null, 2);
   return String(value);
 };
-
-const timestampFormat = new Intl.DateTimeFormat("en-US", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-});
-
-/** Audit timestamps need seconds; the app-wide `formatDate` stops at minutes. */
-export const formatTimestamp = (iso: string) =>
-  timestampFormat.format(new Date(iso));

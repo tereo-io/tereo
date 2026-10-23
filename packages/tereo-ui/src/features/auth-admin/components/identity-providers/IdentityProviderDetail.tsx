@@ -3,6 +3,7 @@ import ToggleProviderActiveButton from "./buttons/ToggleProviderActiveButton";
 import EditIdentityProviderButton from "./buttons/EditIdentityProviderButton";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import { PageHeader } from "@/components/PageHeader";
+import { formatDateTime } from "@/utils/formatDate";
 import { ProviderDomains } from "./ProviderDomains";
 import { useParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
@@ -100,7 +101,7 @@ export const IdentityProviderDetail = () => {
               },
               {
                 label: "Created",
-                value: new Date(provider.createdAt).toLocaleString(),
+                value: formatDateTime(provider.createdAt),
               },
             ]}
           />

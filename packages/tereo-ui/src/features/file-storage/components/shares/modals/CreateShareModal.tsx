@@ -3,6 +3,7 @@ import useCreateShare from "@/features/file-storage/api/shares/useCreateShare";
 import useBucket from "@/features/file-storage/api/buckets/useBucket";
 import { faCopy } from "@fortawesome/free-solid-svg-icons";
 import { useEffect, useMemo, useState } from "react";
+import { formatDateTime } from "@/utils/formatDate";
 import { toast } from "react-toastify";
 import "../styles.css";
 import type {
@@ -382,7 +383,7 @@ const CreateShareModal = ({
                       .filter((v) => !v.isDeleteMarker)
                       .map((v) => ({
                         value: v.versionId,
-                        label: `${v.isCurrent ? "★ current — " : ""}${new Date(v.createdAt).toLocaleString()}`,
+                        label: `${v.isCurrent ? "★ current — " : ""}${formatDateTime(v.createdAt)}`,
                       })),
                   ]}
                 />

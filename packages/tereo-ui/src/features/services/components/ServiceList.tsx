@@ -1,6 +1,7 @@
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import useInfiniteServices from "../api/useInfiniteServices";
 import CreateServiceModal from "./modals/CreateServiceModal";
+import { formatDateTime } from "@/utils/formatDate";
 import { ServiceStatusBadge } from "./StatusBadges";
 import type { ServiceListItem } from "../api/types";
 import { useNavigate } from "react-router-dom";
@@ -62,7 +63,7 @@ export const ServiceList = () => {
         dataKey: "declaredAt",
         cellElement: (s) =>
           s.declaredAt ? (
-            new Date(s.declaredAt).toLocaleString()
+            formatDateTime(s.declaredAt)
           ) : (
             <span className="v-muted-text">Never</span>
           ),

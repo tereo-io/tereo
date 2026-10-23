@@ -1,10 +1,12 @@
-import type { NotificationLogFilters, NotificationLogListItem } from "../types";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useAuth, useAxios } from "@/lib/auth";
+import type {
+  NotificationLogFilters,
+  NotificationLogListItem,
+  NotificationLogOrder,
+} from "../types";
 
 export const LOG_KEY = "notification-log";
-
-const PAGE_SIZE = 25;
 
 interface LogPage {
   data: NotificationLogListItem[];
@@ -13,8 +15,16 @@ interface LogPage {
   nextCursor: string | null;
 }
 
-const queryString = (filters: NotificationLogFilters, cursor?: string) => {
-  const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+const queryString = (
+  filters: NotificationLogFilters,
+  order: NotificationLogOrder,
+  cursor?: string
+) => {
+  const params = new URLSearchParams({
+    limit: String(order.limit),
+    sort: "createdAt",
+    sortDir: order.sortDir,
+  });
   if (filters.channel) params.set("filter[channel]", filters.channel);
   if (filters.status) params.set("filter[status]", filters.status);
   if (filters.senderUserId)
@@ -28,24 +38,27 @@ const queryString = (filters: NotificationLogFilters, cursor?: string) => {
 };
 
 /**
- * `GET /v1/admin/notifications` — newest first, cursor-paged
+ * `GET /v1/admin/notifications` — by `createdAt`, cursor-paged
  * (`{ data, hasMore, limit, nextCursor }`). Core takes several filters by
  * equality only (a free-text search is a 400), so the log has its own filter
  * bar instead of the generic InfiniteScroll menu.
  */
-const useInfiniteNotificationLog = (filters: NotificationLogFilters) => {
+const useInfiniteNotificationLog = (
+  filters: NotificationLogFilters,
+  order: NotificationLogOrder
+) => {
   const { hasPermission } = useAuth();
   const axios = useAxios("auth");
 
   return useInfiniteQuery<LogPage, Error>({
-    queryKey: [LOG_KEY, "list", filters],
+    queryKey: [LOG_KEY, "list", filters, order],
     enabled: hasPermission("notifications.read"),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) =>
       last.hasMore && last.nextCursor ? last.nextCursor : undefined,
     queryFn: async ({ pageParam }) => {
       const res = await axios.get<LogPage>(
-        `/v1/admin/notifications?${queryString(filters, pageParam as string | undefined)}`
+        `/v1/admin/notifications?${queryString(filters, order, pageParam as string | undefined)}`
       );
       return res.data;
     },

@@ -9,6 +9,7 @@ import RemoveMemberButton from "./buttons/RemoveMemberButton";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import AddMemberModal from "./modals/AddMemberModal";
 import { PageHeader } from "@/components/PageHeader";
+import { formatDateTime } from "@/utils/formatDate";
 import { useParams, Link } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -192,11 +193,11 @@ export const OrganizationDetail = () => {
               },
               {
                 label: "Created",
-                value: new Date(organization.createdAt).toLocaleString(),
+                value: formatDateTime(organization.createdAt),
               },
               {
                 label: "Updated",
-                value: new Date(organization.updatedAt).toLocaleString(),
+                value: formatDateTime(organization.updatedAt),
               },
             ]}
           />

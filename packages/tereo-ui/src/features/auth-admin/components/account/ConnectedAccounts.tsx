@@ -3,6 +3,7 @@ import type { ConnectedIdentity } from "../../api/identity-providers/types";
 import { identityErrorMessage } from "../../api/identity-providers/errors";
 import useAccountIdentities from "../../api/account/useAccountIdentities";
 import useConnectIdentity from "../../api/account/useConnectIdentity";
+import { formatDateTime } from "@/utils/formatDate";
 import { useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { toast } from "react-toastify";
@@ -92,8 +93,7 @@ export const ConnectedAccounts = () => {
     {
       title: "Last used",
       dataKey: "lastLoginAt",
-      cellElement: (i) =>
-        i.lastLoginAt ? new Date(i.lastLoginAt).toLocaleString() : "-",
+      cellElement: (i) => (i.lastLoginAt ? formatDateTime(i.lastLoginAt) : "-"),
     },
     {
       title: "Actions",

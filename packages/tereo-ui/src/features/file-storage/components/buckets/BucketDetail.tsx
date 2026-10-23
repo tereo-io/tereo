@@ -6,6 +6,7 @@ import useBucketPermissions from "../../api/buckets/useBucketPermissions";
 import { useParams, useSearchParams } from "react-router-dom";
 import EditBucketButton from "./buttons/EditBucketButton";
 import BucketOriginBadges from "./BucketOriginBadges";
+import { formatDateTime } from "@/utils/formatDate";
 import useBucket from "../../api/buckets/useBucket";
 import LifecycleTab from "./tabs/LifecycleTab";
 import formatBytes from "@/utils/formatBytes";
@@ -31,17 +32,6 @@ import {
 } from "@kosmeo-ui/react";
 
 type Tab = "details" | "objects" | "permissions" | "shares";
-
-const formatDate = (dateString: string): string => {
-  const date = new Date(dateString);
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-};
 
 const isValidTab = (tab: string | null): tab is Tab => {
   return (
@@ -264,7 +254,7 @@ export const BucketDetail = () => {
                     </span>
                   ),
                 },
-                { label: "Created", value: formatDate(bucket.createdAt) },
+                { label: "Created", value: formatDateTime(bucket.createdAt) },
               ]}
               headerActions={
                 <>

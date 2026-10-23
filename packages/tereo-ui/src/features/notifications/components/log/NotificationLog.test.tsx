@@ -14,6 +14,11 @@ const entry = (over: Record<string, unknown>) => ({
   channel: "email",
   connectionId: null,
   senderUserId: "11111111-1111-4111-8111-111111111111",
+  sender: {
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "ada@example.com",
+    name: "Ada Lovelace",
+  },
   organizationId: null,
   status: "sent",
   summary: "Invoice 1042",
@@ -74,8 +79,11 @@ describe("NotificationLog", () => {
       screen.getByText("b@example.com, c@example.com")
     ).toBeInTheDocument();
     const table = within(screen.getByRole("table"));
-    expect(table.getByText("failed")).toBeInTheDocument();
-    expect(table.getByText("sent")).toBeInTheDocument();
+    expect(table.getByText("Failed")).toBeInTheDocument();
+    // Scoped to the row: "Sent" is also a column header.
+    const sentRow = table.getByText("Invoice 1042").closest("tr")!;
+    expect(within(sentRow).getByText("Sent")).toBeInTheDocument();
+    expect(table.getAllByText("Ada Lovelace")).toHaveLength(2);
     expect(urls()[0]).toContain("/v1/admin/notifications?");
   });
 
@@ -141,6 +149,19 @@ describe("NotificationLog", () => {
     expect(
       screen.queryByText("Enter a user ID (UUID)")
     ).not.toBeInTheDocument();
+  });
+
+  it("puts the order and page size in the query, newest first by default", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NotificationLog />);
+    await screen.findByText("a@example.com");
+    expect(urls()[0]).toContain("limit=25&sort=createdAt&sortDir=desc");
+
+    await user.selectOptions(screen.getByLabelText("Order"), "asc");
+    await waitFor(() => expect(urls().at(-1)).toContain("sortDir=asc"));
+
+    await user.selectOptions(screen.getByLabelText("Page size"), "100");
+    await waitFor(() => expect(urls().at(-1)).toContain("limit=100"));
   });
 
   it("loads the next page with the cursor", async () => {

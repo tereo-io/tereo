@@ -7,6 +7,7 @@ import DisableTotpButton from "./buttons/DisableTotpButton";
 import EnableTotpButton from "./buttons/EnableTotpButton";
 import { ConnectedAccounts } from "./ConnectedAccounts";
 import { PageHeader } from "@/components/PageHeader";
+import { formatDateTime } from "@/utils/formatDate";
 import RevokeButton from "./buttons/RevokeButton";
 import ProfilePhoto from "./ProfilePhoto";
 import { useState } from "react";
@@ -78,7 +79,7 @@ export const MyAccountPage = () => {
                   },
                   {
                     label: "Created",
-                    value: new Date(profile.createdAt).toLocaleString(),
+                    value: formatDateTime(profile.createdAt),
                   },
                 ]}
                 footerButtons={
@@ -114,11 +115,11 @@ export const MyAccountPage = () => {
                           <Col size="sm">
                             <span>
                               Created:
-                              {new Date(session.createdAt).toLocaleString()}
+                              {formatDateTime(session.createdAt)}
                             </span>
                             <span>
                               Expires:
-                              {new Date(session.expiresAt).toLocaleString()}
+                              {formatDateTime(session.expiresAt)}
                             </span>
                           </Col>
                         </div>
@@ -164,7 +165,7 @@ export const MyAccountPage = () => {
                 ? [
                     {
                       label: "Enabled On",
-                      value: new Date(profile.totp.enabledAt).toLocaleString(),
+                      value: formatDateTime(profile.totp.enabledAt),
                     },
                   ]
                 : []),

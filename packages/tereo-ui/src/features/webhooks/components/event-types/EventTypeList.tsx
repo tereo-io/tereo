@@ -1,4 +1,5 @@
 import useInfiniteEventTypes from "../../api/event-types/useInfiniteEventTypes";
+import { formatDate, formatDateTime } from "@/utils/formatDate";
 import type { EventTypeRow } from "../../api/types";
 import { useAuth } from "@/lib/auth";
 import { useMemo } from "react";
@@ -51,7 +52,7 @@ export const EventTypeList = () => {
               size="sm"
               variant="danger"
               subtle
-              ariaLabel={`Retired ${new Date(et.retiredAt).toLocaleString()}`}
+              ariaLabel={`Retired ${formatDateTime(et.retiredAt)}`}
             >
               Retired
             </Badge>
@@ -69,7 +70,7 @@ export const EventTypeList = () => {
         title: "Registered",
         dataKey: "createdAt",
         width: "9rem",
-        cellElement: (et) => new Date(et.createdAt).toLocaleDateString(),
+        cellElement: (et) => formatDate(et.createdAt),
       },
     ],
     []

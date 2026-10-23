@@ -8,6 +8,7 @@ import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import { PageHeader } from "@/components/PageHeader";
 import { userLabel, type UserRef } from "@/lib/refs";
+import { formatDateTime } from "@/utils/formatDate";
 import { Link, useParams } from "react-router-dom";
 import useIntegration from "../api/useIntegration";
 import { useAuth } from "@/lib/auth";
@@ -127,7 +128,7 @@ export const IntegrationDetail = () => {
             <Col>
               <span>
                 The secret replaced by the last regeneration keeps working until{" "}
-                {overlapUntil.toLocaleString()}. End the overlap once the
+                {formatDateTime(overlapUntil)}. End the overlap once the
                 external party uses the new secret.
               </span>
               {canEndOverlap && (
@@ -188,7 +189,7 @@ export const IntegrationDetail = () => {
                 },
                 {
                   label: "Created",
-                  value: new Date(integration.createdAt).toLocaleString(),
+                  value: formatDateTime(integration.createdAt),
                 },
               ]}
             />

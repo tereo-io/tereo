@@ -3,6 +3,7 @@ import ArchiveRestoreRoleButton from "./buttons/ArchiveRestoreRoleButton";
 import ManagePermissionsButton from "./buttons/ManagePermissionsButton";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
+import { formatDate, formatDateTime } from "@/utils/formatDate";
 import DuplicateRoleButton from "./buttons/DuplicateRoleButton";
 import { faLock } from "@fortawesome/free-solid-svg-icons";
 import DeleteRoleButton from "./buttons/DeleteRoleButton";
@@ -94,7 +95,7 @@ export const RoleDetail = () => {
         title: "Expires",
         dataKey: "expiresAt",
         cellElement: (user) =>
-          user.expiresAt ? new Date(user.expiresAt).toLocaleDateString() : "-",
+          user.expiresAt ? formatDate(user.expiresAt) : "-",
       },
       ...(canRemoveUsers
         ? [
@@ -208,7 +209,7 @@ export const RoleDetail = () => {
                 ? [
                     {
                       label: "Retired",
-                      value: new Date(role.retiredAt).toLocaleString(),
+                      value: formatDateTime(role.retiredAt),
                     },
                   ]
                 : []),
@@ -236,11 +237,11 @@ export const RoleDetail = () => {
               },
               {
                 label: "Created",
-                value: new Date(role.createdAt).toLocaleString(),
+                value: formatDateTime(role.createdAt),
               },
               {
                 label: "Updated",
-                value: new Date(role.updatedAt).toLocaleString(),
+                value: formatDateTime(role.updatedAt),
               },
             ]}
           />

@@ -4,6 +4,7 @@ import type { Share } from "@/features/file-storage/api/shares/types";
 import { faCopy, faEdit } from "@fortawesome/free-solid-svg-icons";
 import RevokeShareButton from "../buttons/RevokeShareButton";
 import EditShareModal from "../modals/EditShareModal";
+import { formatDateTime } from "@/utils/formatDate";
 import { useMemo, useState } from "react";
 import { toast } from "react-toastify";
 import { userLabel } from "@/lib/refs";
@@ -114,7 +115,7 @@ const ShareManager = ({ bucketName }: ShareManagerProps) => {
         width: "12rem",
         cellElement: (share) =>
           share.expiresAt
-            ? new Date(share.expiresAt).toLocaleString()
+            ? formatDateTime(share.expiresAt)
             : // Only shares from before expiries were required, until the
               // share sweep gives them one.
               "not yet set",
@@ -123,7 +124,7 @@ const ShareManager = ({ bucketName }: ShareManagerProps) => {
         title: "Created",
         dataKey: "createdAt",
         width: "12rem",
-        cellElement: (share) => new Date(share.createdAt).toLocaleString(),
+        cellElement: (share) => formatDateTime(share.createdAt),
       },
       {
         title: "Created By",

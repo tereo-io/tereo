@@ -15,6 +15,7 @@ import ObjectVersionsModal from "../modals/ObjectVersionsModal";
 import DeleteObjectButton from "../buttons/DeleteObjectButton";
 import DeleteFolderButton from "../buttons/DeleteFolderButton";
 import EditObjectButton from "../buttons/EditObjectButton";
+import { formatDateTime } from "@/utils/formatDate";
 import ObjectThumbnail from "./ObjectThumbnail";
 import formatBytes from "@/utils/formatBytes";
 import { toast } from "react-toastify";
@@ -285,9 +286,7 @@ const ObjectListTable = ({
         align: "right",
         width: "12rem",
         cellElement: (entry) =>
-          entry.type === "prefix"
-            ? "—"
-            : new Date(entry.updatedAt).toLocaleString(),
+          entry.type === "prefix" ? "—" : formatDateTime(entry.updatedAt),
       },
       {
         title: "Actions",

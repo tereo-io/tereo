@@ -28359,6 +28359,7 @@ components:
         - channel
         - connectionId
         - senderUserId
+        - sender
         - organizationId
         - status
         - summary
@@ -28380,6 +28381,9 @@ components:
         senderUserId:
           type: string
           format: uuid
+        sender:
+          description: The user `senderUserId` names.
+          $ref: '#/components/schemas/UserRef'
         organizationId:
           type:
             - string

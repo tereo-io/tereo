@@ -1,6 +1,8 @@
 // Shapes returned by core's notifications admin area
 // (`/v1/admin/notifications/...`). See packages/tereo/openapi/components/notifications.
 
+import type { UserRef } from "@/lib/refs";
+
 export type NotificationChannel = "email";
 
 export type EmailSecurity = "tls" | "starttls" | "none";
@@ -97,6 +99,7 @@ export interface NotificationLogEntry {
   channel: NotificationChannel;
   connectionId: string | null;
   senderUserId: string;
+  sender: UserRef;
   organizationId: string | null;
   status: NotificationStatus;
   /** One line from the channel (email: the subject); kept after the content is dropped. */
@@ -140,4 +143,10 @@ export interface NotificationLogFilters {
   /** ISO date-times. */
   createdFrom?: string;
   createdTo?: string;
+}
+
+/** How the log list is paged and ordered; core sorts it by `createdAt` only. */
+export interface NotificationLogOrder {
+  limit: number;
+  sortDir: "asc" | "desc";
 }

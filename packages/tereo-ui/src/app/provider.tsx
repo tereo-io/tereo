@@ -1,14 +1,32 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { AuthProvider, AxiosProvider } from "@/lib/auth";
+import { ThemeProvider, useTheme } from "@/lib/theme";
 import { ToastContainer } from "react-toastify";
-import { ThemeProvider } from "@/lib/theme";
 import type { ReactNode } from "react";
 import env from "@/lib/env";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
 });
+
+// Its own component so it can read the theme from ThemeProvider.
+const ThemedToastContainer = () => {
+  const { resolvedTheme } = useTheme();
+  return (
+    <ToastContainer
+      position="top-right"
+      autoClose={5000}
+      hideProgressBar={false}
+      newestOnTop
+      closeOnClick
+      pauseOnFocusLoss
+      draggable
+      pauseOnHover
+      theme={resolvedTheme}
+    />
+  );
+};
 
 interface AppProviderProps {
   children: ReactNode;
@@ -28,16 +46,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
         <AuthProvider>
           <ThemeProvider>
             {children}
-            <ToastContainer
-              position="top-right"
-              autoClose={5000}
-              hideProgressBar={false}
-              newestOnTop
-              closeOnClick
-              pauseOnFocusLoss
-              draggable
-              pauseOnHover
-            />
+            <ThemedToastContainer />
           </ThemeProvider>
         </AuthProvider>
         <ReactQueryDevtools initialIsOpen={false} />

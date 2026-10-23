@@ -4,6 +4,7 @@ import useClients from "../../api/dashboard/useClients";
 import { PageHeader } from "@/components/PageHeader";
 import useUsers from "../../api/dashboard/useUsers";
 import useRoles from "../../api/dashboard/useRoles";
+import { formatDate } from "@/utils/formatDate";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import env from "@/lib/env";
@@ -135,7 +136,7 @@ export const Dashboard = () => {
                           <Link to={`/auth-admin/users/${u.id}`}>
                             <span className="t-recent-name">{u.email}</span>
                             <span className="v-help-text">
-                              {new Date(u.createdAt).toLocaleDateString()}
+                              {formatDate(u.createdAt)}
                             </span>
                           </Link>
                         </li>
