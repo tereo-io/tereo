@@ -138,4 +138,14 @@ describe("GET /v1/admin/identity-providers and POST /v1/admin/identity-providers
     const response = await createProvider({ slug: provider.slug });
     expect(response.status).toBe(409);
   });
+
+  it("lets only a global admin turn countsAsMfa on (POST /v1/admin/identity-providers)", async () => {
+    expect((await createProvider({ countsAsMfa: true })).status).toBe(403);
+  });
+
+  it("needs a global admin to move an MFA-counting provider to another issuer or client (POST /v1/admin/identity-providers)", async () => {
+    const created = await createProvider({ countsAsMfa: true });
+    // createProvider posts with writeToken, which may not set the flag.
+    expect(created.status).toBe(403);
+  });
 });

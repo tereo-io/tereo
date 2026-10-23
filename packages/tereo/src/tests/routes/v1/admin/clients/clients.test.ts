@@ -284,7 +284,7 @@ describe("POST /v1/admin/clients", () => {
   });
 });
 
-describe("POST /v1/admin/clients and PATCH /v1/admin/clients/:id: audience", () => {
+describe("POST /v1/admin/clients: audience", () => {
   let approver: string;
   let writer: string;
   let slugA: string;
@@ -329,14 +329,6 @@ describe("POST /v1/admin/clients and PATCH /v1/admin/clients/:id: audience", () 
     expect(created.status).toBe(HTTP_STATUS.CREATED);
     const client = (await created.json()) as ClientResponse;
     expect(client.audience).toEqual([slugA, slugB].sort());
-
-    const patched = await send(approver, "PATCH", `/${client.id}`, {
-      audience: [slugA],
-    });
-    expect(patched.status).toBe(HTTP_STATUS.OK);
-    expect(((await patched.json()) as ClientResponse).audience).toEqual([
-      slugA,
-    ]);
   });
 
   it("defaults the audience to empty", async () => {
@@ -376,27 +368,5 @@ describe("POST /v1/admin/clients and PATCH /v1/admin/clients/:id: audience", () 
       loginClientBody({ audience: [slugA] })
     );
     expect(refused.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const created = await send(
-      approver,
-      "POST",
-      "",
-      loginClientBody({ audience: [slugA] })
-    );
-    const client = (await created.json()) as ClientResponse;
-    const owned = await getTestPrincipalToken({
-      permissions: ["clients.admin"],
-    });
-
-    const change = await send(owned, "PATCH", `/${client.id}`, {
-      audience: [slugB],
-    });
-    expect(change.status).toBe(HTTP_STATUS.FORBIDDEN);
-
-    const unchanged = await send(owned, "PATCH", `/${client.id}`, {
-      name: "Renamed",
-      audience: [slugA],
-    });
-    expect(unchanged.status).toBe(HTTP_STATUS.OK);
   });
 });

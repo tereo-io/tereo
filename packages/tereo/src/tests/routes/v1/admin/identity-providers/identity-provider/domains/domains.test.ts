@@ -209,4 +209,19 @@ describe("GET and POST /v1/admin/identity-providers/:id/domains", () => {
     });
     expect(response.status).toBe(403);
   });
+
+  it("lets only a global admin make a domain SSO-only (POST /v1/admin/identity-providers/:id/domains)", async () => {
+    const provider = await newProvider();
+    const name = `ssoadm-${generateUniqueId().toLowerCase()}.com`;
+    const refused = await postDomain(writeToken, provider.id, {
+      domain: name,
+      ssoOnly: true,
+    });
+    expect(refused.status).toBe(403);
+    expect(
+      await prisma.identityProviderDomain.findUnique({
+        where: { domain: name },
+      })
+    ).toBeNull();
+  });
 });

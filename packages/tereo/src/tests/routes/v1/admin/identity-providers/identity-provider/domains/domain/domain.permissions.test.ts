@@ -76,7 +76,7 @@ const newProvider = async () => {
   return (await response.json()) as { id: string; slug: string };
 };
 
-describe("POST /v1/admin/identity-providers/:id/domains and PATCH and DELETE /v1/admin/identity-providers/:id/domains/:domainId", () => {
+describe("PATCH and DELETE /v1/admin/identity-providers/:id/domains/:domainId", () => {
   const postDomain = (token: string, providerId: string, body: object) =>
     call(token, "POST", `/${providerId}/domains`, {
       organizationId: orgId,
@@ -89,17 +89,6 @@ describe("POST /v1/admin/identity-providers/:id/domains and PATCH and DELETE /v1
   it("lets only a global admin make a domain SSO-only", async () => {
     const provider = await newProvider();
     const name = `ssoadm-${generateUniqueId().toLowerCase()}.com`;
-    const refused = await postDomain(writeToken, provider.id, {
-      domain: name,
-      ssoOnly: true,
-    });
-    expect(refused.status).toBe(403);
-    expect(
-      await prisma.identityProviderDomain.findUnique({
-        where: { domain: name },
-      })
-    ).toBeNull();
-
     const created = await postDomain(writeToken, provider.id, {
       domain: name,
     });

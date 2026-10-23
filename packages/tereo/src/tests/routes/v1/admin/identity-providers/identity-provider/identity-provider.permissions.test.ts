@@ -73,14 +73,13 @@ const newProvider = async () => {
   return (await response.json()) as { id: string; slug: string };
 };
 
-describe("POST /v1/admin/identity-providers and PATCH /v1/admin/identity-providers/:id", () => {
+describe("PATCH /v1/admin/identity-providers/:id", () => {
   it("lets only a global admin turn countsAsMfa on", async () => {
     const provider = await newProvider();
     const refused = await call(writeToken, "PATCH", `/${provider.id}`, {
       countsAsMfa: true,
     });
     expect(refused.status).toBe(403);
-    expect((await createProvider({ countsAsMfa: true })).status).toBe(403);
 
     const adminToken = await getTestPrincipalToken({
       permissions: ["admin"],
@@ -102,9 +101,6 @@ describe("POST /v1/admin/identity-providers and PATCH /v1/admin/identity-provide
     const adminToken = await getTestPrincipalToken({
       permissions: ["admin"],
     });
-    const created = await createProvider({ countsAsMfa: true });
-    // createProvider posts with writeToken, which may not set the flag.
-    expect(created.status).toBe(403);
     const provider = (await (
       await call(adminToken, "POST", "", {
         slug: `mfa-${generateUniqueId().toLowerCase()}`.slice(0, 40),

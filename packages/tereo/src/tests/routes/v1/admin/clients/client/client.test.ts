@@ -111,8 +111,10 @@ describe("GET /v1/admin/clients/:id", () => {
 });
 
 describe("PATCH /v1/admin/clients/:id", () => {
+  let approver: string;
   let clientsAdmin: string;
   let slugA: string;
+  let slugB: string;
 
   const send = (token: string, method: string, path: string, body?: unknown) =>
     fetch(`${BASE_URL}/v1/admin/clients${path}`, {
@@ -124,11 +126,23 @@ describe("PATCH /v1/admin/clients/:id", () => {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
+  const loginClientBody = (extra: Record<string, unknown> = {}) => ({
+    name: `Login ${generateUniqueId()}`,
+    clientType: "public",
+    redirectUris: ["http://localhost:3000/callback"],
+    grantTypes: ["authorization_code"],
+    ...extra,
+  });
+
   beforeAll(async () => {
+    approver = await getTestPrincipalToken({
+      permissions: ["clients.write", "clients.read", "services.approve"],
+    });
     clientsAdmin = await getTestPrincipalToken({
       permissions: ["clients.admin"],
     });
     slugA = await makeServiceOf((await createTestClient()).id);
+    slugB = await makeServiceOf((await createTestClient()).id);
   });
 
   it("should update client name", async () => {
@@ -451,6 +465,47 @@ describe("PATCH /v1/admin/clients/:id", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
+  });
+
+  it("sets a login client's audience to existing services (PATCH /v1/admin/clients/:id)", async () => {
+    const created = await send(
+      approver,
+      "POST",
+      "",
+      loginClientBody({ audience: [slugB, slugA, slugB] })
+    );
+    const client = (await created.json()) as ClientResponse;
+    const patched = await send(approver, "PATCH", `/${client.id}`, {
+      audience: [slugA],
+    });
+    expect(patched.status).toBe(HTTP_STATUS.OK);
+    expect(((await patched.json()) as ClientResponse).audience).toEqual([
+      slugA,
+    ]);
+  });
+
+  it("requires services.approve to set or change an audience (PATCH /v1/admin/clients/:id)", async () => {
+    const created = await send(
+      approver,
+      "POST",
+      "",
+      loginClientBody({ audience: [slugA] })
+    );
+    const client = (await created.json()) as ClientResponse;
+    const owned = await getTestPrincipalToken({
+      permissions: ["clients.admin"],
+    });
+
+    const change = await send(owned, "PATCH", `/${client.id}`, {
+      audience: [slugB],
+    });
+    expect(change.status).toBe(HTTP_STATUS.FORBIDDEN);
+
+    const unchanged = await send(owned, "PATCH", `/${client.id}`, {
+      name: "Renamed",
+      audience: [slugA],
+    });
+    expect(unchanged.status).toBe(HTTP_STATUS.OK);
   });
 
   it("refuses to edit consentRequired or audience on core's login client", async () => {
