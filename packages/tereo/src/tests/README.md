@@ -30,7 +30,7 @@ A test that exercises one route belongs to that route even if it sets up state t
 ```
 
 - `<base>`: the router folder's name or the source file's name, camelCase as in `src/`.
-- `.unit`: pure; no database, server, Redis or network. Absent means `int`.
+- `.unit`: pure; no database, server, Redis or outside network; a loopback listener the test itself starts and closes is fine. Absent means `int`.
 - `<aspect>`, from the list in `setup/tags.ts`:
 
   | Aspect        | Holds                                                                |
@@ -118,6 +118,7 @@ requires (`AREA_BY_PATH` in `tags.ts`, longest prefix wins). Detail tags are opt
 
 - The top-level `describe` names the route (`"PATCH /v1/admin/users/:id"`) or the exported function
   (`"processEntryRetention"`); `it` names state the behaviour (`"returns 409 when the slug is taken"`).
+- A file covering several methods of one route may name its top-level `describe` by the path alone (`"/v1/audit/entries"`); otherwise use `"METHOD /path"`.
 - Helpers come from `support/` (`http.ts`, `principals.ts`, `testService.ts`, `<area>.ts`).
 - Unique names, cleanup in `afterAll`.
 
