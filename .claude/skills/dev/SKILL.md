@@ -20,8 +20,10 @@ There is no project CLI. Everything is a root npm script, an Nx target from a
 | Run core locally (watch, telemetry loaded) | `npm run dev` | `packages/tereo` |
 | Run the admin UI's dev server (:4000) | `npm run dev` | `packages/tereo-ui` |
 | Build the admin UI (base `/`, served by core) | `npm run build -w tereo-ui` | root |
-| Run the test suite against local Postgres/Redis | `npx vitest run` | `packages/tereo` |
-| Run one test file | `npx vitest run src/tests/auth/admin-users.test.ts` | `packages/tereo` |
+| Run the unit tests (no database, Redis or server) | `npm run test:unit` | `packages/tereo` |
+| Run the integration tests against local Postgres/Redis | `npm run test:int` | `packages/tereo` |
+| Run one test file | `npx vitest run --project int src/tests/routes/v1/admin/users/users.test.ts` | `packages/tereo` |
+| Run tests by tag | `npm run test:local -- --tags-filter "auth && race"` (`npx vitest --list-tags`) | `packages/tereo` |
 | Run the suite in an isolated Docker stack | `docker/test/run.sh` | root |
 | Regenerate the Prisma client | `npx prisma generate` | `packages/tereo` |
 | Create a migration (don't apply yet) | `npm run db:migrate -- --name <name>` | `packages/tereo` |
@@ -52,7 +54,7 @@ Run with `npx nx run <project>:<target>`, or across projects with
 
 | Project | Targets |
 |---------|---------|
-| `tereo` | `generate` (prisma generate), `build` (tsc, after `^build` + `generate`), `check` (tsc --noEmit, after `^build` + `generate`), `dev` (`tsx watch ./src/index.ts`), `test` (`vitest run`), `test:docker` (`./docker/test/run.sh`), `docker` (`docker build -f docker/Dockerfile -t tereo .`, after `build`), `clean` |
+| `tereo` | `generate` (prisma generate), `build` (tsc, after `^build` + `generate`), `check` (tsc --noEmit, after `^build` + `generate`), `dev` (`tsx watch ./src/index.ts`), `test` (`vitest run`), `test:unit` (`vitest run --project unit`), `test:docker` (`./docker/test/run.sh`), `docker` (`docker build -f docker/Dockerfile -t tereo .`, after `build`), `clean` |
 | `@tereo-io/sdk` | `build`, `check` (both after `^build`), `test` (`vitest run`), `test:docker`, `clean` |
 | `tereo-ui` | `build` (`vite build` → `dist/`, base `/`), `check`, `dev` (`vite`, :4000), `clean` |
 
@@ -66,7 +68,8 @@ The Nx `dev` target starts core **without** the telemetry `--import`; prefer
 |--------|------|
 | `dev` | `tsx watch --import ./src/telemetry/register.ts src/index.ts` |
 | `test` | `../../docker/test/run.sh` — the **Docker** suite, not local vitest |
-| `test:local` | `vitest run` (same as `npx vitest run`) |
+| `test:unit` / `test:int` | `vitest run --project unit` / `--project int` |
+| `test:local` | `vitest run` (both projects) |
 | `test:watch` / `test:coverage` | `vitest` / `vitest run --coverage` |
 | `test:logs` / `test:clean` | `docker/test/run.sh logs -f runner` / `docker/test/run.sh down -v` |
 | `db:generate`, `db:migrate:deploy`, `db:seed`, `db:studio` | `prisma generate`, `prisma migrate deploy`, `tsx src/scripts/seed.ts`, `prisma studio` |
@@ -128,16 +131,18 @@ first admin always comes from setup.
 
 ### Running tests
 
-- `npx vitest run` (in `packages/tereo`) reads `.env` and points it at
+- `npm run test:int` (in `packages/tereo`) reads `.env` and points it at
   a separate database and Redis db: `DATABASE_URL` with `_test` appended to the
   database name, and Redis db `1`. `TEST_DATABASE_URL` / `TEST_REDIS_URL` (shell
-  or `.env`) override them. `globalSetup` migrates and seeds that database itself.
-- The suite starts its **own server on port 4001** — stop `npm run dev` or the
+  or `.env`) override them, and `TEST_PORT` moves the server. `globalSetup` migrates and seeds that
+  database itself. `npm run test:unit` needs no `.env`, database or Redis.
+- The `int` project starts its **own server on port 4001** — stop `npm run dev` or the
   compose `core` container first.
-- Files run serially (shared server and database); expect a few minutes.
+- `int` files run serially (shared server and database); expect a few minutes. Where a test
+  goes and how it is tagged: `packages/tereo/src/tests/README.md`.
 - `docker/test/run.sh` needs only Docker: it builds a runner, splits the suite
   into `TEST_SHARDS` shards (default 4) run at once, each in its own throwaway
-  stack, and tears them down. Compose args pass through to every shard's
+  stack (`TEST_STACK_PREFIX` names them), and tears them down. Compose args pass through to every shard's
   stack, e.g. `docker/test/run.sh logs -f runner`.
 - SDK tests: `npx nx run @tereo-io/sdk:test`.
 
@@ -153,7 +158,7 @@ first admin always comes from setup.
 4. `npm run db:migrate:deploy`, then `npx prisma generate` if the client didn't
    regenerate.
 5. Re-run the seed if the change touches seeded rows. The test database is
-   migrated by `globalSetup` on the next `npx vitest run`.
+   migrated by `globalSetup` on the next `npm run test:int`.
 
 ### After changing permissions, roles, buckets or event types
 
@@ -171,7 +176,7 @@ The same checks CI runs:
 4. `npm run check`
 5. `npm run openapi:lint` in `packages/tereo` if a spec changed
    (`npm run openapi:build` to re-bundle)
-6. `npx vitest run` in `packages/tereo` (or `docker/test/run.sh`), plus
+6. `npm run test:unit` and the focused `int` tests in `packages/tereo` (or `docker/test/run.sh`), plus
    `npx nx run @tereo-io/sdk:test` if the SDK changed
 7. `npm run version-plan` if `@tereo-io/sdk`, `tereo` or `tereo-ui` changed — commit the file in
    `.nx/version-plans/`.
@@ -229,7 +234,7 @@ one.
 ## DON'T
 
 - Don't run `npm test` in `packages/tereo` expecting local vitest — it's
-  the Docker suite; use `npx vitest run`.
+  the Docker suite; use `npm run test:unit` / `test:int`.
 - Don't point tests at the dev database; `TEST_DATABASE_URL` exists to move the
   test database, not to share one.
 - Don't run `prisma migrate reset`, `db push --force-reset` or

@@ -20,4 +20,4 @@ COPY packages/tereo ./packages/tereo
 WORKDIR /app/packages/tereo
 
 # globalSetup migrates and seeds the database itself.
-CMD ["sh", "-c", "exec npx vitest run ${TEST_SHARD:+--shard=$TEST_SHARD}"]
+CMD ["sh", "-c", "exec npx vitest run --project int ${TEST_SHARD:+--shard=$TEST_SHARD}"]

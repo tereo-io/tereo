@@ -443,5 +443,5 @@ npm run db:migrate         # Create a migration from schema.prisma (doesn't appl
 npm run db:migrate:deploy  # Apply migrations
 npm run db:seed            # Seed (idempotent)
 npm run cli -- rewrap-master-key   # Re-wrap DEKs after a master-key rotation
-npm test                   # Tests in Docker (npm run test:local for local vitest)
+npm test                   # Tests in Docker (npm run test:unit / test:int for local vitest)
 ```

@@ -30,8 +30,9 @@ services:
       retries: 30
 
   runner:
-    # Tagged, so every shard's stack runs the one image built for the run.
-    image: tereo-test-runner
+    # Tagged, so every shard's stack runs the one image built for the run. The
+    # prefix keeps concurrent runs (one per worktree) from retagging each other's.
+    image: ${TEST_STACK_PREFIX:-tereo-test}-runner
     build:
       context: ../..
       dockerfile: docker/test/Dockerfile

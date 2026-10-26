@@ -85,6 +85,10 @@ jobs:
       - name: Build
         run: npx nx $NX_SCOPE -t build --parallel=4
 
+      # tereo's unit tests need no database, Redis or server.
+      - name: Unit tests
+        run: npx nx $NX_SCOPE -t test:unit --parallel=4
+
       # tereo's suite runs in TEST_SHARDS isolated stacks at once
       # (docker/test/run.sh), one per core of the runner.
       - name: Test

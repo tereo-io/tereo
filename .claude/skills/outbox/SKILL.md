@@ -355,4 +355,4 @@ Same claim query, backoff, dead-lettering and replay as core's, with these diffe
   `undefined`, not `{}`, when nothing else changed. Pass it straight through.
 - **The reaper runs under test too** — `NODE_ENV=test` skips only the webhook-delivery and
   partition workers. Fan-out is asynchronous, so a test polls for its effect:
-  `src/tests/integration.test.ts` waits (`waitFor`) for the `WebhookDelivery` row an `emitTx` leads to.
+  `src/tests/flows/webhooks/` (e.g. `endpointEvents.test.ts`) waits (`waitFor`) for the `WebhookDelivery` row an `emitTx` leads to.

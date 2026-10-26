@@ -119,7 +119,8 @@ callback to the login client and keeps the other's localhost callbacks, so both 
 Redis db 1, so stop `npm run dev` first. From the repo root:
 
 ```sh
-npm run test:local -w tereo                  # against your local Postgres and Redis
+npm run test:unit -w tereo                   # no database needed
+npm run test:int -w tereo                    # against your local Postgres and Redis
 docker/test/run.sh                                     # or: throwaway Docker stacks, one per shard
 npx nx run @tereo-io/sdk:test                    # the SDK's own tests
 npm run e2e                                            # browser workflows: UI + core on :4501 (packages/tereo-e2e)
