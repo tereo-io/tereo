@@ -70,11 +70,7 @@ export interface UpdateConnectionInput {
 export type TestConnectionResult =
   { ok: true; providerResponse: string | null } | { ok: false; error: string };
 
-export interface FieldIssue {
-  /** Dotted path to the field; empty for the object itself. */
-  path: string;
-  message: string;
-}
+export type { FieldIssue } from "@/utils/apiErrors";
 
 export type NotificationStatus = "pending" | "sent" | "partial" | "failed";
 export type DeliveryStatus = "pending" | "sending" | "sent" | "failed";

@@ -20588,6 +20588,20 @@ components:
               error_description:
                 description: A human-readable explanation of the error
                 type: string
+              issues:
+                description: On `invalid_request`, each failed check, for showing under its field
+                type: array
+                items:
+                  type: object
+                  required:
+                    - path
+                    - message
+                  properties:
+                    path:
+                      description: The dotted field (`roleIds.0`); empty for the whole value
+                      type: string
+                    message:
+                      type: string
     OAuth2ErrorResponse:
       description: |
         OAuth2 error response. The operation's description says which codes it

@@ -1,0 +1,7 @@
+/* kosmeo-ui's Modal overlay is z-index 9999, react-toastify's default too,
+   and the modal is portalled later in the page: without this a toast raised
+   from a modal shows behind its overlay. :root twice, because react-toastify
+   injects its own :root rule at runtime, after this sheet. */
+:root:root {
+  --toastify-z-index: 10000;
+}

@@ -114,6 +114,23 @@ describe("POST /v1/admin/roles", () => {
     expect(data.displayName).toBe(newRoleData.displayName);
   });
 
+  it("names the field a validation error is about", async () => {
+    const response = await fetch(`${BASE_URL}/v1/admin/roles`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: "isaac admin", displayName: "Isaac" }),
+    });
+
+    expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    expect(await response.json()).toMatchObject({
+      error: "invalid_request",
+      issues: [{ path: "name", message: expect.stringMatching(/^Role name/) }],
+    });
+  });
+
   it("should reject duplicate role name", async () => {
     const response = await fetch(`${BASE_URL}/v1/admin/roles`, {
       method: "POST",

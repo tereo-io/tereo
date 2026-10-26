@@ -2,7 +2,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Role, UpdateRoleInput } from "./types";
 import { toast } from "react-toastify";
 import { useAxios } from "@/lib/auth";
-import { AxiosError } from "axios";
 
 const useUpdateRole = () => {
   const queryClient = useQueryClient();
@@ -29,11 +28,6 @@ const useUpdateRole = () => {
       await queryClient.invalidateQueries({ queryKey: ["roles-infinite"] });
       await queryClient.invalidateQueries({ queryKey: ["allRoles"] });
       toast.success("Role updated successfully");
-    },
-    onError: (error: AxiosError<{ error_description?: string }>) => {
-      toast.error(
-        error.response?.data?.error_description || "Failed to update role"
-      );
     },
   });
 };

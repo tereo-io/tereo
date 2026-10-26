@@ -3,8 +3,8 @@ import { emitTx, logAuditTx, type AuditLogInput } from "../outbox.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { connectionSecretName } from "./connections.js";
 import { sealRowSecret } from "../sealedSecrets.js";
+import { AppError, issuesOf } from "../errors.js";
 import type { Prisma } from "../db/prisma.js";
-import { AppError } from "../errors.js";
 import type { z } from "zod";
 
 type Tx = Prisma.TransactionClient;
@@ -44,9 +44,6 @@ export const auditView = (c: NotificationConnection) => {
   void updatedAt;
   return rest as Record<string, unknown>;
 };
-
-const issuesOf = (error: z.ZodError) =>
-  error.issues.map((i) => ({ path: i.path.join("."), message: i.message }));
 
 export const parseWith = <T>(
   schema: z.ZodType<T>,

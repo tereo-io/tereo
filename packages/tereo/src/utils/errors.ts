@@ -31,9 +31,20 @@ export class AppError extends Error {
   }
 }
 
+/** One failed check: `path` is the field, dotted (`roleIds.0`), "" for the whole value. */
+export interface ValidationIssue {
+  path: string;
+  message: string;
+}
+
+export const issuesOf = (error: ZodError): ValidationIssue[] =>
+  error.issues.map((i) => ({ path: i.path.join("."), message: i.message }));
+
 export class ValidationError extends AppError {
-  constructor(message: string) {
-    super(400, "invalid_request", message);
+  constructor(message: string, issues?: ValidationIssue[]) {
+    super(400, "invalid_request", message, {
+      details: issues ? { issues } : undefined,
+    });
     this.name = "ValidationError";
   }
 }
@@ -326,6 +337,7 @@ const errorResponse = (err: Error): ErrorResponse => {
       message: err.issues
         .map((e) => `${e.path.join(".")}: ${e.message}`)
         .join(", "),
+      details: { issues: issuesOf(err) },
     };
   }
 
