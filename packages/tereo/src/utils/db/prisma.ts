@@ -19,21 +19,27 @@ export const poolConfig: PoolConfig = {
 // `utils/db/prisma.ts` re-exports these.
 const pool = new Pool(poolConfig);
 
+// /health's own connection: with every pool slot busy, a probe queued behind
+// the requests would report Postgres down while it answers them.
+const probePool = new Pool({
+  ...poolConfig,
+  max: 1,
+  min: 0,
+  connectionTimeoutMillis: 2000,
+});
+
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 export const disconnectDatabase = async (): Promise<void> => {
   await prisma.$disconnect();
   await pool.end();
+  await probePool.end();
 };
 
-/**
- * Liveness probe against the database. Issues a trivial query so a caller can
- * distinguish "Prisma client exists" from "the pool can actually reach
- * Postgres". Throws on any connectivity failure.
- */
+/** Throws unless Postgres answers a query on the probe's own connection. */
 export const healthCheck = async (): Promise<void> => {
-  await prisma.$queryRaw`SELECT 1`;
+  await probePool.query("SELECT 1");
 };
 
 export type { Prisma } from "../../../prisma/generated/client/index.js";

@@ -1,11 +1,8 @@
-import { probeDependenciesCached } from "../../utils/health.js";
+import { probeDependenciesCached, readiness } from "../../utils/health.js";
 import type { Request, Response } from "express";
 import env from "../../env.js";
 
-/**
- * Liveness and readiness: 503 `degraded` when Postgres or Redis is down.
- * Public, so it names no version; an admin finds core's on its service row.
- */
+// Public, so it names no version; an admin finds core's on its service row.
 export const getHealth = async (_req: Request, res: Response) => {
   const { dbOk, redisOk } = await probeDependenciesCached();
   const healthy = dbOk && redisOk;
@@ -16,4 +13,9 @@ export const getHealth = async (_req: Request, res: Response) => {
     ...(dbOk ? {} : { db: "fail" }),
     ...(redisOk ? {} : { redis: "fail" }),
   });
+};
+
+export const getReady = (_req: Request, res: Response) => {
+  const report = readiness();
+  res.status(report.status === "ok" ? 200 : 503).json(report);
 };

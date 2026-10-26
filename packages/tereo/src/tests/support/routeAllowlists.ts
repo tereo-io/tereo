@@ -15,6 +15,11 @@ export const PUBLIC: Allowlist = [
   ],
   [
     "get",
+    "/health/ready",
+    "Readiness probe; load balancers and orchestrators send no token",
+  ],
+  [
+    "get",
     "/.well-known/oauth-authorization-server",
     "OAuth server metadata (RFC 8414), read before a client holds a token",
   ],

@@ -46,16 +46,25 @@ Run at least one process with `all` or `worker`, or nothing delivers webhooks or
 
 `all` and `api` answer `GET /health` on `PORT`: 200 with `status: "ok"` when Postgres and Redis
 answer, 503 and `"degraded"` (naming `db` or `redis` as `"fail"`) when either does not. The
-probe result is shared for one second, and requests are rate-limited per client IP (1000 a second
-from an internal network address, 300 otherwise), so point probes at it directly rather than
-through a proxy that sets `X-Forwarded-For`. It names no version; an admin finds core's as the
-core service's `declarationVersion` (`GET /v1/admin/services`).
+Postgres ping runs on a connection of its own, outside the request pool (one more connection per
+process), so a busy pool does not read as Postgres being down. The probe result is shared for one
+second, and requests are rate-limited per client IP (1000 a second from an internal network
+address, 300 otherwise), so point probes at it directly rather than through a proxy that sets
+`X-Forwarded-For`. It names no version; an admin finds core's as the core service's
+`declarationVersion` (`GET /v1/admin/services`).
+
+`GET /health/ready` is for readiness probes and load balancer health checks: 200 with
+`status: "ok"` while core serves, 503 and `"draining"` from the moment shutdown starts. It does not
+ping Postgres or Redis: a dependency that slows under load slows every replica at once, and a
+readiness check that failed on it would take them all out of rotation together, turning slow
+into down. Use `/health` for monitoring and alerts, and for a startup probe, which should wait
+for the dependencies. The chart's probes are set up this way.
 
 A `worker` serves no API, so it listens on `WORKER_HEALTH_PORT` (default `4002`) for `GET` (or `HEAD`)
 `/health` alone. Besides the Postgres and Redis pings, it is degraded when no BullMQ worker is running or any is
 closing or stopped; `workers.total` counts them and `workers.stopped` names the queues of those that
 are not running. The image's `HEALTHCHECK` probes `PORT` or `WORKER_HEALTH_PORT` according to
-`ROLE`; point a Kubernetes probe at the same port.
+`ROLE`; point a Kubernetes probe at the same port. It answers `/health/ready` too, as `PORT` does.
 
 ## HTTP limits
 

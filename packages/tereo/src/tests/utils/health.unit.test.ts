@@ -49,3 +49,31 @@ describe("probeDependenciesCached", () => {
     expect(healthCheck).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("readiness", () => {
+  afterEach(() => {
+    vi.doUnmock("../../utils/db/prisma.js");
+    vi.doUnmock("../../utils/redis.js");
+    healthCheck.mockClear();
+  });
+
+  it.each([
+    [false, "ok"],
+    [true, "draining"],
+  ])("with draining %s reports %s", async (draining, status) => {
+    const { readiness, setDraining } = await import("../../utils/health.js");
+    setDraining(draining);
+
+    expect(readiness().status).toBe(status);
+  });
+
+  it("ignores a failing dependency", async () => {
+    healthCheck.mockRejectedValueOnce(new Error("pool exhausted"));
+    const { probeDependencies, readiness, setDraining } = await loadHealth();
+    setDraining(false);
+
+    await probeDependencies();
+
+    expect(readiness().status).toBe("ok");
+  });
+});

@@ -937,12 +937,14 @@ paths:
         - Health
       summary: Health check
       description: |
-        Probes Postgres and Redis (500 ms timeout each). Returns `200` with
-        `status: ok` when both answer, `503` with `status: degraded` and the
-        failing dependency marked `fail` otherwise. Public, so it names no
-        version. The probe result is shared for one second, and requests are
-        limited per client IP (300 a second, 1000 for a direct connection from
-        an internal network address).
+        Probes Postgres and Redis (500 ms timeout each; Postgres on a
+        connection outside the request pool). Returns `200` with `status: ok`
+        when both answer, `503` with `status: degraded` and the failing
+        dependency marked `fail` otherwise. For monitoring and startup probes;
+        readiness probes use `/health/ready`. Public, so it names no version.
+        The probe result is shared for one second, and requests are limited per
+        client IP (300 a second, 1000 for a direct connection from an internal
+        network address).
       operationId: getHealth
       security: []
       responses:
@@ -960,6 +962,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthStatus'
+  /health/ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness check
+      description: |
+        For readiness probes and load balancer health checks. Returns `200`
+        with `status: ok` while core serves, and `503` with `status: draining`
+        once shutdown has started. It does not probe Postgres or Redis, so a
+        dependency that slows under load does not take every replica out of
+        rotation at once; `/health` reports them. Rate-limited as `/health`.
+      operationId: getReady
+      security: []
+      responses:
+        '200':
+          description: Core is serving
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessStatus'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '503':
+          description: Core is shutting down
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessStatus'
   /v1/setup/status:
     get:
       tags:
@@ -28545,6 +28575,24 @@ components:
           type: string
           format: date-time
         updatedAt:
+          type: string
+          format: date-time
+    ReadinessStatus:
+      type: object
+      required:
+        - status
+        - service
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - draining
+        service:
+          type: string
+          description: '`SERVICE_NAME`'
+        timestamp:
           type: string
           format: date-time
     UpstreamProviderSummary:

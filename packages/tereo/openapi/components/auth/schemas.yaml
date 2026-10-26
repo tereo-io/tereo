@@ -3183,6 +3183,23 @@ HealthStatus:
       enum: [fail]
       description: Present only when Redis did not answer
 
+ReadinessStatus:
+  type: object
+  required:
+    - status
+    - service
+    - timestamp
+  properties:
+    status:
+      type: string
+      enum: [ok, draining]
+    service:
+      type: string
+      description: '`SERVICE_NAME`'
+    timestamp:
+      type: string
+      format: date-time
+
 SigningKeyList:
   type: object
   required: [keys]
