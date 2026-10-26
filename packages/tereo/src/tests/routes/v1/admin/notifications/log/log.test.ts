@@ -4,10 +4,6 @@ import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrgani
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { ensureDailyPartitions } from "../../../../../../utils/partitions.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
-import {
-  SYSTEM_USER,
-  SYSTEM_USER_ID,
-} from "../../../../../../definitions/index.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../support/coreUrl.js";
 import { fetchJson } from "../../../../../support/http.js";
@@ -16,6 +12,10 @@ import {
   closeNotificationQueues,
   getNotificationQueue,
 } from "../../../../../../jobs/notificationQueues.js";
+import {
+  SYSTEM_USER,
+  SYSTEM_USER_ID,
+} from "../../../../../../definitions/index.js";
 
 const BASE = `${CORE_URL}/v1/admin/notifications`;
 const rand = () => randomBytes(4).toString("hex");
