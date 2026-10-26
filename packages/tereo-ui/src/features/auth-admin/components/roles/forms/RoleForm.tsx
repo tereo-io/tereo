@@ -1,3 +1,4 @@
+import { Checkbox, Col, Form, Input, Select, TextArea } from "@kosmeo-ui/react";
 import { useState } from "react";
 import "../styles.css";
 import type {
@@ -11,18 +12,10 @@ import {
   issuesOf,
   type FieldIssue,
 } from "@/utils/apiErrors";
-import {
-  Checkbox,
-  Col,
-  Form,
-  FormError,
-  Input,
-  Select,
-  TextArea,
-} from "@kosmeo-ui/react";
 
-// Core's rule for a role name (routes/v1/admin/roles/schemas.ts).
-const ROLE_NAME = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
+// Core's rule for a role name (routes/v1/admin/roles/schemas.ts). The "-"
+// is escaped: browsers compile `pattern` with the v flag, which needs it.
+const ROLE_NAME_PATTERN = "[a-zA-Z][a-zA-Z0-9_\\-]*";
 const ROLE_NAME_RULE =
   "Starts with a letter; letters, numbers, underscores and hyphens only.";
 
@@ -75,18 +68,12 @@ export const RoleForm = ({
   const [isActive, setIsActive] = useState(
     role?.isActive !== undefined ? String(role.isActive) : "true"
   );
-  const [nameError, setNameError] = useState<string | null>(null);
 
   const issueAt = (path: string) =>
     issues.find((i) => i.path === path)?.message;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!role?.isSystem && !ROLE_NAME.test(name)) {
-      setNameError(ROLE_NAME_RULE);
-      return;
-    }
-    setNameError(null);
     if (role) {
       // Update mode. A system role is declared in code; core accepts only
       // its 2FA policy and 403s any other field.
@@ -113,9 +100,8 @@ export const RoleForm = ({
   };
 
   return (
-    <Form onSubmit={handleSubmit} id={formId}>
+    <Form onSubmit={handleSubmit} id={formId} error={error}>
       <Col>
-        {error && <FormError>{error}</FormError>}
         {role?.isSystem && (
           <p className="v-help-text">
             This system role is declared in code by its service. Only its
@@ -127,15 +113,13 @@ export const RoleForm = ({
           label="Name"
           type="text"
           value={name}
-          onChange={(e) => {
-            setName(e.target.value);
-            setNameError(null);
-          }}
+          onChange={(e) => setName(e.target.value)}
           required
+          pattern={ROLE_NAME_PATTERN}
           disabled={role?.isSystem}
           placeholder="e.g., admin, editor, viewer"
           helperText={ROLE_NAME_RULE}
-          error={nameError ?? issueAt("name")}
+          error={issueAt("name")}
         />
         <Input
           label="Display Name"

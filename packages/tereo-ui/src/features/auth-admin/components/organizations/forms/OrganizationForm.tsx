@@ -13,8 +13,9 @@ interface OrganizationFormProps {
   formId?: string;
 }
 
-// Core's rule for a slug (routes/v1/admin/organizations/schemas.ts).
-const SLUG = /^[a-z0-9][a-z0-9-]*$/;
+// Core's rule for a slug (routes/v1/admin/organizations/schemas.ts). The "-"
+// is escaped: browsers compile `pattern` with the v flag, which needs it.
+const SLUG_PATTERN = "[a-z0-9][a-z0-9\\-]*";
 const SLUG_RULE =
   "Starts with a letter or number; lowercase letters, numbers and hyphens only.";
 
@@ -41,7 +42,6 @@ export const OrganizationForm = ({
       : "true"
   );
   const [autoSlug, setAutoSlug] = useState(!organization);
-  const [slugError, setSlugError] = useState<string | null>(null);
   // Activating and deactivating is the platform's call, not an owner's.
   const canSetStatus = useAuth().hasPermission("organizations.write");
 
@@ -54,16 +54,10 @@ export const OrganizationForm = ({
   const handleSlugChange = (value: string) => {
     setAutoSlug(false);
     setSlug(value);
-    setSlugError(null);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!SLUG.test(slug)) {
-      setSlugError(SLUG_RULE);
-      return;
-    }
-    setSlugError(null);
     if (organization) {
       const updates: UpdateOrganizationInput = {};
       if (name !== organization.name) updates.name = name;
@@ -93,8 +87,8 @@ export const OrganizationForm = ({
           onChange={(e) => handleSlugChange(e.target.value)}
           required
           placeholder="auto-generated-from-name"
+          pattern={SLUG_PATTERN}
           helperText={SLUG_RULE}
-          error={slugError ?? undefined}
         />
         <Input
           label="Code"

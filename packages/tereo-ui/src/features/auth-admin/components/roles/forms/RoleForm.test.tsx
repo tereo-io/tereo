@@ -25,7 +25,7 @@ const coreError = (status: number, data: object) =>
   } as never);
 
 describe("RoleForm", () => {
-  it("refuses a name core would reject, saying why under the field", async () => {
+  it("refuses a name core would reject", async () => {
     const user = userEvent.setup();
     const onSubmit = renderForm();
     await user.type(screen.getByLabelText(/^Name/), "isaac admin");
@@ -34,21 +34,38 @@ describe("RoleForm", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByText(/^Starts with a letter/)).toBeVisible();
   });
 
-  it("submits a valid name", async () => {
+  it("marks a refused name invalid, described by the rule", async () => {
     const user = userEvent.setup();
-    const onSubmit = renderForm();
-    await user.type(screen.getByLabelText(/^Name/), "isaac_admin");
+    renderForm();
+    await user.type(screen.getByLabelText(/^Name/), "isaac admin");
     await user.type(screen.getByLabelText(/^Display Name/), "Isaac");
 
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "isaac_admin" })
+    expect(screen.getByLabelText(/^Name/)).toHaveAttribute(
+      "aria-invalid",
+      "true"
+    );
+    expect(screen.getByLabelText(/^Name/)).toHaveAccessibleDescription(
+      /^Starts with a letter/
     );
   });
+
+  it.each(["isaac_admin", "isaac-admin"])(
+    "submits the valid name %s",
+    async (name) => {
+      const user = userEvent.setup();
+      const onSubmit = renderForm();
+      await user.type(screen.getByLabelText(/^Name/), name);
+      await user.type(screen.getByLabelText(/^Display Name/), "Isaac");
+
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ name }));
+    }
+  );
 
   it("shows core's issue under its field", () => {
     renderForm({ issues: [{ path: "displayName", message: "Too long" }] });
