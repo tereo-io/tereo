@@ -11,6 +11,41 @@ export const list = (filter: { channel?: NotificationChannel } = {}) =>
     orderBy: [{ channel: "asc" }, { slug: "asc" }],
   });
 
+/**
+ * Each connection's newest delivery attempt from the last day, when it
+ * failed or is waiting to retry: what broke a connection's sends, without
+ * opening a notification.
+ */
+export const latestDeliveryErrors = async (
+  ids: string[]
+): Promise<Map<string, { message: string; at: Date }>> => {
+  if (ids.length === 0) return new Map();
+  // notification_created_at bounds the scan to the last two day partitions.
+  const rows = await prisma.$queryRaw<
+    {
+      connection_id: string;
+      status: string;
+      last_error: string | null;
+      updated_at: Date;
+    }[]
+  >`
+    SELECT DISTINCT ON ("connection_id")
+      "connection_id", "status", "last_error", "updated_at"
+    FROM "notifications"."deliveries"
+    WHERE "connection_id" = ANY(${ids}::uuid[])
+      AND "notification_created_at" > NOW() - INTERVAL '1 day'
+      AND "attempts" > 0
+    ORDER BY "connection_id", "updated_at" DESC, "id" DESC`;
+  return new Map(
+    rows
+      .filter((r) => r.status !== "sent" && r.last_error)
+      .map((r) => [
+        r.connection_id,
+        { message: r.last_error!, at: r.updated_at },
+      ])
+  );
+};
+
 export const get = async (id: string, tx: Tx = prisma) => {
   const connection = await tx.notificationConnection.findUnique({
     where: { id },

@@ -21,6 +21,22 @@ export const assertNotSystemUser = (id: string) => {
   }
 };
 
+export type UserManager =
+  | { kind: "system" }
+  | { kind: "service" | "integration"; id: string; name: string };
+
+/** What owns a user the admin API refuses to change, or null when it can. */
+export const managerOf = async (user: {
+  id: string;
+  oauthClientId: string | null;
+}): Promise<UserManager | null> => {
+  if (user.id === SYSTEM_USER_ID) return { kind: "system" };
+  const owner = user.oauthClientId
+    ? await db.services.getByClientId(user.oauthClientId)
+    : null;
+  return owner ? { kind: owner.kind, id: owner.id, name: owner.name } : null;
+};
+
 /**
  * A service's or an integration's account is managed with it, under
  * /admin/services or /admin/integrations.

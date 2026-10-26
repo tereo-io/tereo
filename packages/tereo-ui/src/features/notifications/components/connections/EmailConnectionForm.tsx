@@ -1,6 +1,7 @@
 import { useState } from "react";
 import "../styles.css";
 import {
+  Alert,
   Badge,
   Col,
   Form,
@@ -45,6 +46,12 @@ const SECURITY_LABELS: Record<string, string> = {
 
 const DEFAULT_SECURITY: EmailSecurity[] = ["tls", "starttls", "none"];
 
+// Ports whose security is fixed; core refuses the other mode on them.
+const PORT_SECURITY: Record<string, EmailSecurity> = {
+  "465": "tls",
+  "587": "starttls",
+};
+
 // Issue paths with a field of their own; the rest are listed below the form.
 const FIELD_PATHS = [
   "host",
@@ -77,6 +84,8 @@ export const EmailConnectionForm = ({
   const [host, setHost] = useState(str(s.host));
   const [port, setPort] = useState(String(s.port ?? 587));
   const [security, setSecurity] = useState(str(s.security, "starttls"));
+  // Until security is picked by hand, it follows the port.
+  const [securityPicked, setSecurityPicked] = useState(false);
   const [username, setUsername] = useState(str(s.username));
   const [password, setPassword] = useState("");
   const [removePassword, setRemovePassword] = useState(false);
@@ -101,6 +110,21 @@ export const EmailConnectionForm = ({
       Number(port) !== s.port ||
       security !== str(s.security) ||
       username.trim() !== str(s.username));
+
+  const expectedSecurity = PORT_SECURITY[port.trim()];
+  const securityMismatch =
+    !!expectedSecurity &&
+    security !== "none" &&
+    security !== expectedSecurity &&
+    securityOptions.includes(expectedSecurity);
+
+  const changePort = (value: string) => {
+    setPort(value);
+    const expected = PORT_SECURITY[value.trim()];
+    if (!securityPicked && expected && securityOptions.includes(expected)) {
+      setSecurity(expected);
+    }
+  };
 
   const issueAt = (...paths: string[]) =>
     issues.find((i) => paths.includes(i.path))?.message;
@@ -131,6 +155,12 @@ export const EmailConnectionForm = ({
     const portNumber = Number(port);
     if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
       setError("The port must be a whole number from 1 to 65535.");
+      return;
+    }
+    if (securityMismatch) {
+      setError(
+        `Port ${portNumber} needs ${expectedSecurity === "tls" ? "TLS" : "STARTTLS"} security.`
+      );
       return;
     }
     if (passwordRequired && !password) {
@@ -209,7 +239,7 @@ export const EmailConnectionForm = ({
             label="Port"
             type="number"
             value={port}
-            onChange={(e) => setPort(e.target.value)}
+            onChange={(e) => changePort(e.target.value)}
             required
             min={1}
             max={65535}
@@ -219,12 +249,23 @@ export const EmailConnectionForm = ({
         <Select
           label="Security"
           value={security}
-          onChange={(v) => v && setSecurity(v)}
+          onChange={(v) => {
+            if (!v) return;
+            setSecurity(v);
+            setSecurityPicked(true);
+          }}
           options={securityOptions.map((value) => ({
             value,
             label: SECURITY_LABELS[value] ?? value,
           }))}
         />
+        {securityMismatch && (
+          <Alert variant="warning" size="sm">
+            {expectedSecurity === "tls"
+              ? "Port 465 expects TLS from the first byte: with STARTTLS every send fails. Pick TLS, or the port your provider gives for STARTTLS (usually 587)."
+              : "Port 587 expects STARTTLS: with TLS every send fails. Pick STARTTLS, or the port your provider gives for TLS (usually 465)."}
+          </Alert>
+        )}
         {issueAt("security") && <FormError>{issueAt("security")}</FormError>}
         <Row>
           <Input

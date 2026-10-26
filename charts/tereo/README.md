@@ -74,8 +74,11 @@ non-https `publicUrl`, `trustProxy: "true"`, or no secret.
 - **Uninstall** leaves the files claim, and with `secrets.externalSecret` the ExternalSecret and its
   Secret, since Helm does not delete hooks. A reinstall picks them up again; delete them by hand to
   remove the app for good.
-- **Probes.** Readiness is `/health`, which reports 503 while Postgres or Redis is down; liveness
-  only checks the port, so an outage does not restart core.
+- **Probes.** The startup probe is `/health`, which waits for Postgres and Redis. Readiness is
+  `/health/ready`, which drops only once core starts shutting down: a Postgres slowed by load
+  would otherwise fail every pod at once and empty the Service. Liveness only checks the port, so
+  an outage does not restart core. Point an external load balancer's health check at
+  `/health/ready` too.
 - **Stopping.** An API pod sleeps `preStopSleepSeconds` (5) before core gets SIGTERM, so the ingress
   has stopped routing to it before it shuts down. Raise it if your ingress is slower to notice.
   Core then has 30 seconds: it drains requests and stops its jobs for up to

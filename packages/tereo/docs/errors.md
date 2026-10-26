@@ -8,7 +8,10 @@ Every error core returns has one shape:
 
 `error` is the code to branch on; `error_description` is for people and may change. A few codes add
 fields after these two (`retry_after` on a `429`, `requiresPassword` on a share's
-`password_required`). The full list per operation is in the OpenAPI spec (`openapi/`); this page is
+`password_required`). A validation failure (`invalid_request`, and a notification connection's
+`invalid_settings` / `invalid_secrets`) lists each failed check in `issues`, as
+`{ path, message }` with `path` the dotted field (`roleIds.0`, `""` for the whole value), so a form
+can show each message under its field. The full list per operation is in the OpenAPI spec (`openapi/`); this page is
 the rule set the codes follow.
 
 In code, every error is one of the classes in `src/utils/errors.ts`, thrown to the error handler.

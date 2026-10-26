@@ -278,7 +278,7 @@ Shown alongside `customer.json` above, whose `customer-service` it names as an a
 |-------|------|
 | `slug` | Required, as a service slug; shares the slug space of services (never `core` or `tereo`). It is also the integration's client ID |
 | `name` | Required, max 100 |
-| `organizationId` | Optional UUID. Set: **org-bound**, its tokens carry this organization. Absent: **platform**. Fixed once created; the organization must exist and not be archived |
+| `organizationId` | Optional UUID. Set: **org-bound**, its tokens carry this organization. Absent: **platform**. Fixed once created; the organization must exist and not be archived. Documents do not create organizations: make it first ([order of creation](integrations.md#order-of-creation)) |
 | `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)); rotates as a service's does |
 | `roles` | Role names it holds. Org-bound: `orgAssignable` custom roles of the set. Platform: also core's roles and `<slug>/<name>` system roles of services in the set. A bare name is the set's custom role when it declares one, else core's role, never a custom role an admin made. Never a role carrying `admin` |
 | `audiences` | Services of the set whose APIs it may call (introspectable by them); not core, not an integration |

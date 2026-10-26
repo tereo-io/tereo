@@ -7,6 +7,17 @@ import axios from "axios";
 
 const BASE_URL = CORE_URL;
 
+describe("GET /health/ready", () => {
+  it("is ok while the server is up", async () => {
+    const response = await axios.get(`${BASE_URL}/health/ready`, {
+      validateStatus: () => true,
+    });
+
+    expect(response.status).toBe(HTTP_STATUS.OK);
+    expect(response.data).toMatchObject({ status: "ok", service: "tereo" });
+  });
+});
+
 describe("GET /health", () => {
   it("should return 200 with service status", async () => {
     const response = await axios.get(`${BASE_URL}/health`, {

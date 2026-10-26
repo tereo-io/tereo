@@ -5,14 +5,15 @@ import RevokeSessionButton from "./buttons/RevokeSessionButton";
 import { UserConnectedAccounts } from "./UserConnectedAccounts";
 import useUserSessions from "../../api/users/useUserSessions";
 import ManageRolesButton from "./buttons/ManageRolesButton";
+import type { UserManager } from "../../api/users/types";
 import ResetTotpButton from "./buttons/ResetTotpButton";
 import useUserRoles from "../../api/users/useUserRoles";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import EditUserButton from "./buttons/EditUserButton";
 import { PageHeader } from "@/components/PageHeader";
 import { formatDateTime } from "@/utils/formatDate";
+import { Link, useParams } from "react-router-dom";
 import useUser from "../../api/users/useUser";
-import { useParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import "./sessions.css";
 import {
@@ -30,6 +31,27 @@ import {
   Spinner,
   TagCard,
 } from "@kosmeo-ui/react";
+
+const ManagedNotice = ({ manager }: { manager: UserManager }) => {
+  if (manager.kind === "system") {
+    return (
+      <Alert variant="secondary">
+        Core&apos;s own system user. Core manages it, so it cannot be edited
+        here.
+      </Alert>
+    );
+  }
+  const section = manager.kind === "integration" ? "integrations" : "services";
+  return (
+    <Alert variant="secondary">
+      The account of the {manager.kind}{" "}
+      <Link to={`/${section}/${manager.id}`} className="v-link">
+        {manager.name}
+      </Link>
+      . Its status, roles and secret are managed there.
+    </Alert>
+  );
+};
 
 export const UserDetail = () => {
   const { userId } = useParams<{ userId: string }>();
@@ -67,13 +89,16 @@ export const UserDetail = () => {
     );
   }
 
+  // Core refuses to update, re-role, reset 2FA for or invite these accounts.
+  const editable = canWrite && !user.managedBy;
+
   return (
     <Page padded fillHeight>
       <PageHeader
         title={user.email}
         subtitle={`User ID: ${user.id}`}
         actions={
-          canWrite
+          editable
             ? [
                 // Users are deactivated (Edit → Status), never deleted.
                 <EditUserButton key="edit" user={user} />,
@@ -82,6 +107,7 @@ export const UserDetail = () => {
             : []
         }
       />
+      {user.managedBy && <ManagedNotice manager={user.managedBy} />}
       <Row>
         <Col>
           <ListCard
@@ -244,12 +270,14 @@ export const UserDetail = () => {
               },
             ]}
             footerButtons={
-              totpStatus?.totpEnabled && canWrite ? (
-                <Row>{canWrite && <ResetTotpButton user={user} />}</Row>
+              totpStatus?.totpEnabled && editable ? (
+                <Row>
+                  <ResetTotpButton user={user} />
+                </Row>
               ) : null
             }
           />
-          {user.userType === "human" && (
+          {user.userType === "human" && !user.managedBy && (
             <UserConnectedAccounts userId={id} email={user.email} />
           )}
           <TagCard

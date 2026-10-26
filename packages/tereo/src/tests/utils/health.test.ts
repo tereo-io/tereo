@@ -79,7 +79,15 @@ describe("startWorkerHealthServer", () => {
     expect(workerStatus()).toEqual({ total: 0, stopped: [] });
   });
 
-  it("answers nothing but GET and HEAD /health", async () => {
+  it("is ready with no BullMQ workers running", async () => {
+    const res = await axios.get(`${url}/health/ready`, {
+      validateStatus: () => true,
+    });
+    expect(res.status).toBe(200);
+    expect(res.data).toMatchObject({ status: "ok", service: "tereo" });
+  });
+
+  it("answers nothing but GET and HEAD /health and /health/ready", async () => {
     const other = await axios.get(`${url}/`, { validateStatus: () => true });
     expect(other.status).toBe(404);
     const post = await axios.post(`${url}/health`, undefined, {

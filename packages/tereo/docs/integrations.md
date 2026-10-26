@@ -27,6 +27,49 @@ Integrations.
 The organization cannot be changed. A platform integration given a global role holds it
 everywhere, so grant sparingly: the admin UI warns when you do.
 
+## Order of creation
+
+An integration is the last thing made: it names an organization (when org-bound), holds roles,
+which hold permissions, and may name services as audiences. Each of those must exist first.
+
+| Step | What | Through | Needs first |
+|------|------|---------|-------------|
+| 1 | **Services** and their **permissions** | Provisioning documents only; core's own permissions are built in | — |
+| 2 | **Organization** (org-bound only) | Admin UI or `POST /v1/admin/organizations`; never provisioned | — |
+| 3 | **Custom roles** | Admin UI or `POST /v1/admin/roles` then `PUT /v1/admin/roles/:id/permissions`; or the documents' `roles` | 1 |
+| 4 | **Integration** | Admin UI or `POST /v1/admin/integrations` (`organizationId` for org-bound); or the documents' `integrations` | 2 |
+| 5 | Its **roles** | `PUT /v1/admin/integrations/:id/roles`; or the entry's `roles` | 3, 4 |
+| 6 | Its **audiences** | `PUT /v1/admin/integrations/:id/audiences`; or the entry's `audiences` | 1, 4 |
+| 7 | Its **webhook endpoints** | `/v1/webhooks/webhooks` with the integration's own token | 4, 5 (delivery is gated on what its roles let it read) |
+
+**By hand** (admin UI or API) each step is its own request, so the order above is the order to make
+them. Two things decide whether step 5 succeeds:
+
+- For an **org-bound** integration, every permission of every role must be org-assignable (step 1
+  decides which are), or step 5 answers `400 not_org_assignable`. A system role is refused (`403`)
+  and so is any role carrying `admin`.
+- You must hold every permission the roles carry ([Roles](#roles)), and step 6 needs
+  `services.approve` as well.
+
+**In provisioning documents** steps 1 and 3–6 are one transaction: references resolve within the
+set, so the order of documents and entries does not matter ([provisioning](provisioning.md#applying)).
+The organization is the exception: documents do not create organizations, and an org-bound entry
+whose `organizationId` names none (or an archived one) fails the whole apply, which at start stops
+core from starting. So for an org-bound integration:
+
+1. Deploy core with the services, and create the organization in the admin UI or API.
+2. Add the custom roles and the integration, with that organization's id, to the documents, and
+   redeploy (or run `npm run cli -- provision`).
+
+A provisioned integration holds only roles of the set (its custom roles, core's roles and services'
+`<slug>/<name>` system roles), never a custom role an admin made. Make the role in the documents, not
+by hand, when a provisioned integration is to hold it.
+
+**What cannot change later**: an integration's organization (org-bound or platform is fixed at
+creation; make a new integration instead), its slug, and a role's
+permissions once the role is assigned in an organization, where adding a non-org-assignable one is
+refused (`409 role_assigned_in_org`).
+
 ## Roles
 
 An integration holds roles; it has no permission list of its own. Setting them

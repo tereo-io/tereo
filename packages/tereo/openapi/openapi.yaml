@@ -1011,6 +1011,8 @@ paths:
   # Auth
   /health:
     $ref: './paths/auth/health.yaml#/~1health'
+  /health/ready:
+    $ref: './paths/auth/health.yaml#/~1health~1ready'
   /v1/setup/status:
     $ref: './paths/auth/setup.yaml#/~1setup~1status'
   /v1/setup:

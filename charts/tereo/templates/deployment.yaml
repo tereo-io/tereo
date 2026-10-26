@@ -68,6 +68,8 @@ spec:
               containerPort: {{ .port }}
           # Liveness only asks whether the process answers: /health reports
           # 503 while Postgres or Redis is down, which a restart cannot fix.
+          # Readiness drops only for shutdown: a dependency slow under load
+          # would fail every pod at once and pull them all from the Service.
           startupProbe:
             httpGet:
               path: /health
@@ -81,7 +83,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/ready
               port: http
             periodSeconds: 10
             timeoutSeconds: 5

@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
+import type { UserDetail } from "./types";
 import { useAxios } from "@/lib/auth";
-import type { User } from "./types";
 
 const useUser = (id: string) => {
   const axios = useAxios("auth");
 
-  const queryFn = async (): Promise<User> => {
+  const queryFn = async (): Promise<UserDetail> => {
     const res = await axios.get(`/v1/admin/users/${id}`);
     return res.data;
   };

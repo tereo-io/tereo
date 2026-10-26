@@ -937,12 +937,14 @@ paths:
         - Health
       summary: Health check
       description: |
-        Probes Postgres and Redis (500 ms timeout each). Returns `200` with
-        `status: ok` when both answer, `503` with `status: degraded` and the
-        failing dependency marked `fail` otherwise. Public, so it names no
-        version. The probe result is shared for one second, and requests are
-        limited per client IP (300 a second, 1000 for a direct connection from
-        an internal network address).
+        Probes Postgres and Redis (500 ms timeout each; Postgres on a
+        connection outside the request pool). Returns `200` with `status: ok`
+        when both answer, `503` with `status: degraded` and the failing
+        dependency marked `fail` otherwise. For monitoring and startup probes;
+        readiness probes use `/health/ready`. Public, so it names no version.
+        The probe result is shared for one second, and requests are limited per
+        client IP (300 a second, 1000 for a direct connection from an internal
+        network address).
       operationId: getHealth
       security: []
       responses:
@@ -960,6 +962,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthStatus'
+  /health/ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness check
+      description: |
+        For readiness probes and load balancer health checks. Returns `200`
+        with `status: ok` while core serves, and `503` with `status: draining`
+        once shutdown has started. It does not probe Postgres or Redis, so a
+        dependency that slows under load does not take every replica out of
+        rotation at once; `/health` reports them. Rate-limited as `/health`.
+      operationId: getReady
+      security: []
+      responses:
+        '200':
+          description: Core is serving
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessStatus'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '503':
+          description: Core is shutting down
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessStatus'
   /v1/setup/status:
     get:
       tags:
@@ -4474,7 +4504,7 @@ paths:
       tags:
         - Admin - Users
       summary: Get user by ID
-      description: Returns detailed information about a specific user
+      description: Returns a user, and what manages it when the admin API cannot change it
       operationId: getAdminUser
       security:
         - BearerAuth:
@@ -4494,7 +4524,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/AdminUserDetail'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
           description: Invalid user id
@@ -20558,6 +20588,20 @@ components:
               error_description:
                 description: A human-readable explanation of the error
                 type: string
+              issues:
+                description: On `invalid_request`, each failed check, for showing under its field
+                type: array
+                items:
+                  type: object
+                  required:
+                    - path
+                    - message
+                  properties:
+                    path:
+                      description: The dotted field (`roleIds.0`); empty for the whole value
+                      type: string
+                    message:
+                      type: string
     OAuth2ErrorResponse:
       description: |
         OAuth2 error response. The operation's description says which codes it
@@ -28076,7 +28120,29 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/NotificationConnection'
+            allOf:
+              - $ref: '#/components/schemas/NotificationConnection'
+              - type: object
+                required:
+                  - lastDeliveryError
+                properties:
+                  lastDeliveryError:
+                    description: |
+                      The error of the connection's newest delivery attempt in the last day, when that
+                      attempt failed or is waiting to retry; null once a later one is sent, or when
+                      none was attempted.
+                    oneOf:
+                      - type: 'null'
+                      - type: object
+                        required:
+                          - message
+                          - at
+                        properties:
+                          message:
+                            type: string
+                          at:
+                            type: string
+                            format: date-time
     CreateNotificationConnectionRequest:
       type: object
       additionalProperties: false
@@ -28547,6 +28613,24 @@ components:
         updatedAt:
           type: string
           format: date-time
+    ReadinessStatus:
+      type: object
+      required:
+        - status
+        - service
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - draining
+        service:
+          type: string
+          description: '`SERVICE_NAME`'
+        timestamp:
+          type: string
+          format: date-time
     UpstreamProviderSummary:
       type: object
       description: An active identity provider, as the login page lists it
@@ -28761,6 +28845,46 @@ components:
           type: string
           format: uri
           description: The provider's authorization endpoint. Navigate the browser there.
+    AdminUserDetail:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          required:
+            - managedBy
+          properties:
+            managedBy:
+              description: |
+                What owns an account the admin API will not change, or `null` when
+                it can. `system` is core's own system user; `service` and
+                `integration` are the account of that service or integration,
+                managed under `/v1/admin/services` or `/v1/admin/integrations`.
+                Updating such a user, its roles, 2FA or identity invites is refused.
+              oneOf:
+                - type: 'null'
+                - type: object
+                  required:
+                    - kind
+                  properties:
+                    kind:
+                      type: string
+                      enum:
+                        - system
+                - type: object
+                  required:
+                    - kind
+                    - id
+                    - name
+                  properties:
+                    kind:
+                      type: string
+                      enum:
+                        - service
+                        - integration
+                    id:
+                      type: string
+                      format: uuid
+                    name:
+                      type: string
     UserIdentityInvite:
       type: object
       description: An invite to sign in with a provider, as an admin sees it. It stays listed after `expiresAt` until the hourly cleanup removes it.

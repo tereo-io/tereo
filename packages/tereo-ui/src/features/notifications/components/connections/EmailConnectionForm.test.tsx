@@ -129,6 +129,49 @@ describe("EmailConnectionForm", () => {
     expect(values.maxPerMinute).toBeNull();
   });
 
+  describe("port and security", () => {
+    const security = () => screen.getByRole("combobox", { name: "Security" });
+
+    it.each([
+      ["465", "tls"],
+      ["587", "starttls"],
+    ])("follows port %s with %s", async (port, expected) => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.clear(screen.getByLabelText(/^Port/));
+      await user.type(screen.getByLabelText(/^Port/), port);
+
+      expect(security()).toHaveValue(expected);
+    });
+
+    it("stops following the port once security is picked", async () => {
+      const user = userEvent.setup();
+      renderForm();
+      await user.selectOptions(security(), "starttls");
+
+      await user.clear(screen.getByLabelText(/^Port/));
+      await user.type(screen.getByLabelText(/^Port/), "465");
+
+      expect(security()).toHaveValue("starttls");
+    });
+
+    it("warns about 465 with STARTTLS and refuses to save", async () => {
+      const user = userEvent.setup();
+      const onSubmit = renderForm({
+        connection: {
+          ...stored,
+          settings: { ...stored.settings, port: 465, security: "starttls" },
+        },
+      });
+
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(screen.getByText(/Port 465 expects TLS/)).toBeVisible();
+    });
+  });
+
   it("shows the server's field issues under the fields", () => {
     renderForm({
       connection: stored,

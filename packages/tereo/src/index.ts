@@ -4,11 +4,11 @@ import { ProvisioningError, provision } from "./utils/provisioning/index.js";
 import { closeRedisEmitter } from "./websocket/emitters/redisEmitter.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
 import { closeWorkerQueues, startWorker, stopWorker } from "./worker.js";
+import { setDraining, startWorkerHealthServer } from "./utils/health.js";
 import { prepareAndRegisterCore } from "./utils/coreRegistration.js";
 import { loadKeys, startSigningKeyRefresh } from "./utils/keys.js";
 import { resealRowSecrets } from "./utils/resealRowSecrets.js";
 import { sealWebhookSecrets } from "./utils/webhookSecrets.js";
-import { startWorkerHealthServer } from "./utils/health.js";
 import { ensureLoginClient } from "./utils/loginClient.js";
 import { announceSetupIfPending } from "./utils/setup.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
@@ -73,6 +73,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
     start: async () => {
       if (running) throw new Error("Server is already running");
       running = true;
+      setDraining(false);
       const stale = stalePathWarnings({
         ...env,
         PROVISIONING_FILE: process.env.PROVISIONING_FILE,
@@ -154,6 +155,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
       // A second signal mid-shutdown waits on the first instead of closing
       // everything twice.
       stopping ??= (async () => {
+        setDraining(true);
         // Every step runs even if an earlier one fails, so a failed start
         // or a broken step still releases Redis and the database.
         const failures: unknown[] = [];

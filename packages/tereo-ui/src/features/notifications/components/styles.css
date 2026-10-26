@@ -16,6 +16,17 @@
   word-break: break-all;
 }
 
+.t-notif-last-error {
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--k-danger-color-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
 .t-notif-code {
   margin: 0;
   padding: 0.5rem 0.75rem;

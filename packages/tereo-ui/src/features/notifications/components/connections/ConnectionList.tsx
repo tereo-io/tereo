@@ -5,6 +5,7 @@ import type { NotificationConnection } from "../../api/types";
 import { ConnectionFormModal } from "./ConnectionFormModal";
 import { TestConnectionModal } from "./TestConnectionModal";
 import { PageHeader } from "@/components/PageHeader";
+import { formatDateTime } from "@/utils/formatDate";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import "../styles.css";
@@ -63,7 +64,18 @@ export const ConnectionList = () => {
         title: "Server",
         dataKey: "settings",
         cellElement: (c) => (
-          <span className="t-notif-mono">{endpointOf(c)}</span>
+          <div>
+            <span className="t-notif-mono">{endpointOf(c)}</span>
+            {c.lastDeliveryError && (
+              <div
+                className="t-notif-last-error"
+                title={c.lastDeliveryError.message}
+              >
+                Last send failed {formatDateTime(c.lastDeliveryError.at)}:{" "}
+                {c.lastDeliveryError.message}
+              </div>
+            )}
+          </div>
         ),
       },
       {

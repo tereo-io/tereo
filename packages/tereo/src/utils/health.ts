@@ -1,12 +1,33 @@
+import { createServer, type Server, type ServerResponse } from "node:http";
 import { healthCheck as dbHealthCheck } from "./db/prisma.js";
 import { workerStatus } from "../jobs/workerRegistry.js";
-import { createServer, type Server } from "node:http";
 import { getRedisClient } from "./redis.js";
 import { CORE_VERSION } from "./version.js";
 import { logger } from "./logger.js";
 import env from "../env.js";
 
 const HEALTH_PROBE_TIMEOUT_MS = 500;
+
+let draining = false;
+
+/** Set as shutdown starts, so readiness drops before the drain ends. */
+export const setDraining = (value: boolean) => {
+  draining = value;
+};
+
+export interface ReadinessReport {
+  status: "ok" | "draining";
+  service: string;
+  timestamp: string;
+}
+
+// Deliberately not the dependency probe: a Postgres slow under load would
+// take every replica out of rotation at once, turning slow into down.
+export const readiness = (): ReadinessReport => ({
+  status: draining ? "draining" : "ok",
+  service: env.SERVICE_NAME,
+  timestamp: new Date().toISOString(),
+});
 
 const withTimeout = <T>(p: Promise<T>): Promise<T | "timeout"> => {
   let handle: NodeJS.Timeout | undefined;
@@ -87,26 +108,32 @@ async function workerHealth(): Promise<WorkerHealthReport> {
   };
 }
 
+const sendJson = (res: ServerResponse, ok: boolean, body: object) => {
+  res
+    .writeHead(ok ? 200 : 503, { "Content-Type": "application/json" })
+    .end(JSON.stringify(body));
+};
+
 /**
- * A worker process serves no API, so it answers `GET /health` on its own
- * port for the container and orchestrator probes (HEAD too: the image's
- * `wget --spider` sends one). Anything else is a 404.
+ * A worker process serves no API, so it answers `GET /health` and
+ * `/health/ready` on its own port for the container and orchestrator probes
+ * (HEAD too: the image's `wget --spider` sends one). Anything else is a 404.
  */
 export async function startWorkerHealthServer(port: number): Promise<Server> {
   const server = createServer((req, res) => {
     const probe = req.method === "GET" || req.method === "HEAD";
-    if (!probe || req.url?.split("?")[0] !== "/health") {
+    const path = req.url?.split("?")[0];
+    if (!probe || (path !== "/health" && path !== "/health/ready")) {
       res.writeHead(404).end();
       return;
     }
+    if (path === "/health/ready") {
+      const report = readiness();
+      sendJson(res, report.status === "ok", report);
+      return;
+    }
     workerHealth().then(
-      (report) => {
-        res
-          .writeHead(report.status === "ok" ? 200 : 503, {
-            "Content-Type": "application/json",
-          })
-          .end(JSON.stringify(report));
-      },
+      (report) => sendJson(res, report.status === "ok", report),
       (err: unknown) => {
         logger.error({ err }, "Worker health check failed");
         res.writeHead(503).end();

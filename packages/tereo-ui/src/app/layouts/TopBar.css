@@ -1,4 +1,5 @@
 .t-topbar {
+  position: relative;
   display: flex;
   align-items: center;
   height: 3rem;
@@ -71,4 +72,69 @@
 
 .t-topbar-right .v-button {
   padding: 0.35rem 0.75rem;
+}
+
+/* ===== Narrow screens (NARROW_SCREEN in useMediaQuery.ts) ===== */
+.t-topbar-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-right: 0.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: none;
+  color: var(--k-text-color-light);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.t-topbar-menu-btn:hover {
+  background-color: var(--k-overlay-light-weak);
+}
+
+.t-topbar-menu-btn:focus-visible {
+  outline: 2px solid var(--k-text-color-light);
+  outline-offset: -2px;
+}
+
+.t-topbar-nav[hidden] {
+  display: none;
+}
+
+/* Above the sidebar drawer (150) and its backdrop, below the user menu. */
+.t-topbar-nav-menu {
+  position: absolute;
+  top: 3rem;
+  left: 0;
+  right: 0;
+  z-index: 190;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0.25rem 0;
+  background-color: var(--k-primary-color-dark);
+  box-shadow: 0 0.5rem 1rem var(--k-shadow-color-hover);
+}
+
+.t-topbar-nav-menu .t-topbar-link {
+  height: auto;
+  padding: 0.75rem 1.25rem;
+  border-bottom: none;
+  border-left: 3px solid transparent;
+}
+
+.t-topbar-nav-menu .t-topbar-link.active {
+  border-left-color: var(--k-text-color-light);
+}
+
+@media (max-width: 768px) {
+  .t-topbar {
+    padding: 0 0.5rem;
+  }
+
+  .t-topbar-brand {
+    margin-right: 0.5rem;
+  }
 }

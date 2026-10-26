@@ -29,6 +29,8 @@ describe("EnvSchema", () => {
     ["AUDIT_RETENTION_DAYS", "3651"],
     ["OUTBOX_DEAD_LETTER_RETENTION_DAYS", "3651"],
     ["WEBHOOK_STALE_DELIVERY_SECONDS", "86401"],
+    ["DB_POOL_MAX", "1001"],
+    ["DB_POOL_CONNECTION_TIMEOUT_MS", "600001"],
   ])("rejects %s above its maximum (%s)", (name, value) => {
     expect(parse({ [name]: value }).success).toBe(false);
   });
@@ -45,6 +47,7 @@ describe("EnvSchema", () => {
     "PROFILE_PHOTO_MAX_SIZE_MB",
     "FILE_SERVICE_MAX_UPLOAD_SIZE_MB",
     "OUTBOX_DEAD_LETTER_RETENTION_DAYS",
+    "DB_POOL_MAX",
   ])("rejects %s of 0, negative or fractional", (name) => {
     for (const value of ["0", "-1"]) {
       expect(parse({ [name]: value }).success).toBe(false);
@@ -58,6 +61,10 @@ describe("EnvSchema", () => {
     expect(parse({ SETUP_TOKEN: "x".repeat(24) }).success).toBe(true);
   });
 
+  it("rejects a DB_POOL_MIN above DB_POOL_MAX", () => {
+    expect(parse({ DB_POOL_MAX: "10", DB_POOL_MIN: "11" }).success).toBe(false);
+  });
+
   it("accepts values at the limits", () => {
     expect(
       parse({
@@ -67,6 +74,8 @@ describe("EnvSchema", () => {
         USER_SESSION_TTL: String(365 * 86400),
         AUTHORIZATION_CODE_TTL: "600",
         LOGIN_FLOW_TTL: "3600",
+        DB_POOL_MAX: "1000",
+        DB_POOL_MIN: "1000",
       }).success
     ).toBe(true);
   });

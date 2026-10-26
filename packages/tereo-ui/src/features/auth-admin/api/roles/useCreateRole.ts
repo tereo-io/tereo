@@ -2,7 +2,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Role, CreateRoleInput } from "./types";
 import { toast } from "react-toastify";
 import { useAxios } from "@/lib/auth";
-import { AxiosError } from "axios";
 
 const useCreateRole = () => {
   const queryClient = useQueryClient();
@@ -20,11 +19,6 @@ const useCreateRole = () => {
       await queryClient.invalidateQueries({ queryKey: ["roles-infinite"] });
       await queryClient.invalidateQueries({ queryKey: ["allRoles"] });
       toast.success("Role created successfully");
-    },
-    onError: (error: AxiosError<{ error_description?: string }>) => {
-      toast.error(
-        error.response?.data?.error_description || "Failed to create role"
-      );
     },
   });
 };

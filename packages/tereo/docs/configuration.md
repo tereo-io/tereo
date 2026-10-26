@@ -46,16 +46,25 @@ Run at least one process with `all` or `worker`, or nothing delivers webhooks or
 
 `all` and `api` answer `GET /health` on `PORT`: 200 with `status: "ok"` when Postgres and Redis
 answer, 503 and `"degraded"` (naming `db` or `redis` as `"fail"`) when either does not. The
-probe result is shared for one second, and requests are rate-limited per client IP (1000 a second
-from an internal network address, 300 otherwise), so point probes at it directly rather than
-through a proxy that sets `X-Forwarded-For`. It names no version; an admin finds core's as the
-core service's `declarationVersion` (`GET /v1/admin/services`).
+Postgres ping runs on a connection of its own, outside the request pool (one more connection per
+process), so a busy pool does not read as Postgres being down. The probe result is shared for one
+second, and requests are rate-limited per client IP (1000 a second from an internal network
+address, 300 otherwise), so point probes at it directly rather than through a proxy that sets
+`X-Forwarded-For`. It names no version; an admin finds core's as the core service's
+`declarationVersion` (`GET /v1/admin/services`).
+
+`GET /health/ready` is for readiness probes and load balancer health checks: 200 with
+`status: "ok"` while core serves, 503 and `"draining"` from the moment shutdown starts. It does not
+ping Postgres or Redis: a dependency that slows under load slows every replica at once, and a
+readiness check that failed on it would take them all out of rotation together, turning slow
+into down. Use `/health` for monitoring and alerts, and for a startup probe, which should wait
+for the dependencies. The chart's probes are set up this way.
 
 A `worker` serves no API, so it listens on `WORKER_HEALTH_PORT` (default `4002`) for `GET` (or `HEAD`)
 `/health` alone. Besides the Postgres and Redis pings, it is degraded when no BullMQ worker is running or any is
 closing or stopped; `workers.total` counts them and `workers.stopped` names the queues of those that
 are not running. The image's `HEALTHCHECK` probes `PORT` or `WORKER_HEALTH_PORT` according to
-`ROLE`; point a Kubernetes probe at the same port.
+`ROLE`; point a Kubernetes probe at the same port. It answers `/health/ready` too, as `PORT` does.
 
 ## HTTP limits
 
@@ -96,6 +105,9 @@ notes as a range; a value outside its range stops core at startup with the varia
 | `WORKER_HEALTH_PORT` | `4002` | 0–65535. `ROLE=worker` only: its `/health` listener. See [Health checks](#health-checks) |
 | `PUBLIC_URL` | `http://localhost:4001` outside production | Required in production, and `https://` there |
 | `DATABASE_URL` | — | Required. Sessions run with `timezone=UTC` whatever the server default; an `options` parameter in the URL replaces that |
+| `DB_POOL_MAX` | `20` | 1–1000. Postgres connections each process keeps at most. A `connection_limit` in `DATABASE_URL` has no effect. Every replica (and every `api` and `worker`) has its own pool, so keep replicas × `DB_POOL_MAX` under Postgres's `max_connections` (or the pooler's limit), with room for migrations and the seed |
+| `DB_POOL_MIN` | `5` | 0–1000, at most `DB_POOL_MAX`. Connections kept open while idle |
+| `DB_POOL_CONNECTION_TIMEOUT_MS` | `10000` | 100–600000. How long a query waits for a free connection before it fails with a 500. Under load, a full pool shows as latency up to this long |
 | `REDIS_URL` | — | Required unless Sentinel is configured |
 | `REDIS_SENTINELS` | — | Comma-separated `host:port` (port defaults to 26379) |
 | `REDIS_MASTER_NAME` | — | Sentinel master group |

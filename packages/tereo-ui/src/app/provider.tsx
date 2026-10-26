@@ -5,6 +5,7 @@ import { ThemeProvider, useTheme } from "@/lib/theme";
 import { ToastContainer } from "react-toastify";
 import type { ReactNode } from "react";
 import env from "@/lib/env";
+import "./toasts.css";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },

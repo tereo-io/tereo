@@ -5,7 +5,6 @@ import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
 import { createTestClient } from "../../../../../support/auth/clients.js";
 import { generateUniqueId } from "../../../../../support/auth/crypto.js";
-import { makeServiceOf } from "../../../../../support/testService.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
@@ -17,6 +16,10 @@ import {
   DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
 } from "../../../../../../definitions/index.js";
+import {
+  createAppServiceAccount,
+  makeServiceOf,
+} from "../../../../../support/testService.js";
 import {
   createTestUser,
   createAdminUser,
@@ -111,6 +114,36 @@ describe("GET /v1/admin/users/:id", () => {
     );
 
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
+  });
+
+  describe("managedBy", () => {
+    const managedBy = async (id: string) => {
+      const response = await fetch(`${BASE_URL}/v1/admin/users/${id}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      return ((await response.json()) as UserResponse).managedBy;
+    };
+
+    it("is null for a person", async () => {
+      expect(await managedBy(regularUser.id)).toBeNull();
+    });
+
+    it("names core for the system user", async () => {
+      expect(await managedBy(SYSTEM_USER_ID)).toEqual({ kind: "system" });
+    });
+
+    it("names the service that owns a service account", async () => {
+      const { userId, slug } = await createAppServiceAccount("managed-by");
+      const service = await prisma.service.findUniqueOrThrow({
+        where: { slug },
+      });
+
+      expect(await managedBy(userId)).toEqual({
+        kind: "service",
+        id: service.id,
+        name: service.name,
+      });
+    });
   });
 });
 
