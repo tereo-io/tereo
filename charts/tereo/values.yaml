@@ -45,7 +45,8 @@ otelExporterEndpoint: ""
 
 logLevel: info
 
-# Further plain settings, as NAME: value (see docs/configuration.md).
+# Further plain settings, as NAME: value (see docs/configuration.md), e.g.
+# DB_POOL_MAX: "40" for a bigger Postgres pool per pod.
 env: {}
 
 # Further env sources, e.g. a ConfigMap or Secret of your own.

@@ -9,10 +9,10 @@ import env from "../../env.js";
 export const poolConfig: PoolConfig = {
   connectionString: env.DATABASE_URL,
   options: "-c timezone=UTC",
-  max: 20,
-  min: 5,
+  max: env.DB_POOL_MAX,
+  min: env.DB_POOL_MIN,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
+  connectionTimeoutMillis: env.DB_POOL_CONNECTION_TIMEOUT_MS,
 };
 
 // One pool and one client for every module. Each module's

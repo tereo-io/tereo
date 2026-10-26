@@ -310,6 +310,12 @@ const EnvFields = z
     // Required in production; http://localhost:4001 otherwise.
     PUBLIC_URL: z.string().url().optional(),
     DATABASE_URL: z.string(),
+    // Postgres connections per process. `connection_limit` in DATABASE_URL has
+    // no effect: the pool is built with these.
+    DB_POOL_MAX: int(1, 1000, 20),
+    DB_POOL_MIN: int(0, 1000, 5),
+    // How long a query waits for a free connection before it fails.
+    DB_POOL_CONNECTION_TIMEOUT_MS: int(100, 600_000, 10_000),
     ...redisEnvFields(),
     // Express `trust proxy` setting. Controls how `req.ip` is resolved from
     // X-Forwarded-For. Without this, the credential/TOTP failure limiters and
@@ -549,6 +555,13 @@ const EnvFields = z
       });
     }
     refineKeyEnv(val, ctx);
+    if (val.DB_POOL_MIN > val.DB_POOL_MAX) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["DB_POOL_MIN"],
+        message: "DB_POOL_MIN must not exceed DB_POOL_MAX",
+      });
+    }
     if (
       val.USER_SESSION_IDLE_TTL !== undefined &&
       val.USER_SESSION_IDLE_TTL > val.USER_SESSION_TTL
