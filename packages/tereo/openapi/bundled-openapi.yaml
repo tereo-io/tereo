@@ -28106,7 +28106,29 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/NotificationConnection'
+            allOf:
+              - $ref: '#/components/schemas/NotificationConnection'
+              - type: object
+                required:
+                  - lastDeliveryError
+                properties:
+                  lastDeliveryError:
+                    description: |
+                      The error of the connection's newest delivery attempt in the last day, when that
+                      attempt failed or is waiting to retry; null once a later one is sent, or when
+                      none was attempted.
+                    oneOf:
+                      - type: 'null'
+                      - type: object
+                        required:
+                          - message
+                          - at
+                        properties:
+                          message:
+                            type: string
+                          at:
+                            type: string
+                            format: date-time
     CreateNotificationConnectionRequest:
       type: object
       additionalProperties: false

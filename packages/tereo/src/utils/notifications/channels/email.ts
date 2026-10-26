@@ -48,6 +48,13 @@ const address = z.object({
   name: displayName.optional(),
 });
 
+// Ports whose transport security is fixed: the other mode never connects
+// (465 + STARTTLS fails with "Connection closed unexpectedly").
+const PORT_SECURITY: Record<number, "tls" | "starttls"> = {
+  465: "tls",
+  587: "starttls",
+};
+
 const settingsSchema = z
   .object({
     host: z.string().min(1).max(255),
@@ -63,6 +70,17 @@ const settingsSchema = z
         code: "custom",
         path: ["defaultFrom"],
         message: "defaultFrom must match allowedSenders",
+      });
+    }
+    const expected = PORT_SECURITY[s.port];
+    if (expected && s.security !== "none" && s.security !== expected) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["security"],
+        message:
+          expected === "tls"
+            ? 'port 465 expects TLS from the first byte: use security "tls"'
+            : 'port 587 expects STARTTLS: use security "starttls"',
       });
     }
     if (s.security === "none" && !env.ALLOW_PLAINTEXT_SMTP) {

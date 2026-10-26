@@ -37,6 +37,8 @@ export interface NotificationConnection {
   updatedBy: string;
   createdAt: string;
   updatedAt: string;
+  /** List only: the newest delivery attempt's error from the last day, while it failed or is retrying. */
+  lastDeliveryError?: { message: string; at: string } | null;
 }
 
 export interface NotificationChannelInfo {

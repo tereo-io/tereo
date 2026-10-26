@@ -23,7 +23,20 @@ import {
 export const listConnections = async (req: Request, res: Response) => {
   const query = validateQuery(ListConnectionsQuerySchema, req);
   const rows = await db.notificationConnections.list(query);
-  res.json({ data: rows.map(formatConnection) });
+  const errors = await db.notificationConnections.latestDeliveryErrors(
+    rows.map((r) => r.id)
+  );
+  res.json({
+    data: rows.map((r) => {
+      const error = errors.get(r.id);
+      return {
+        ...formatConnection(r),
+        lastDeliveryError: error
+          ? { message: error.message, at: error.at.toISOString() }
+          : null,
+      };
+    }),
+  });
 };
 
 export const createConnection = async (req: Request, res: Response) => {

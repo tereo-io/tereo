@@ -71,6 +71,40 @@ describe("emailAdapter", () => {
     });
   });
 
+  describe("port and security", () => {
+    const settings = (port: number, security: string) => ({
+      host: "smtp.acme.com",
+      port,
+      security,
+      defaultFrom: { address: "billing@acme.com" },
+      allowedSenders: ["@acme.com"],
+    });
+
+    it.each([
+      [465, "starttls"],
+      [587, "tls"],
+    ])("refuses port %i with %s", (port, security) => {
+      const parsed = emailAdapter.settingsSchema.safeParse(
+        settings(port, security)
+      );
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues.map((i) => i.path.join("."))).toEqual([
+        "security",
+      ]);
+    });
+
+    it.each([
+      [465, "tls"],
+      [587, "starttls"],
+      [25, "starttls"],
+      [2525, "tls"],
+    ])("accepts port %i with %s", (port, security) => {
+      expect(
+        emailAdapter.settingsSchema.safeParse(settings(port, security)).success
+      ).toBe(true);
+    });
+  });
+
   describe("ALLOW_PLAINTEXT_SMTP", () => {
     const original = env.ALLOW_PLAINTEXT_SMTP;
     afterEach(() => {

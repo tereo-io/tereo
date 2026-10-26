@@ -43,6 +43,10 @@ describe("ConnectionList", () => {
               displayName: "Bulk",
               isDefault: false,
               isEnabled: false,
+              lastDeliveryError: {
+                message: "Connection closed unexpectedly",
+                at: "2026-10-22T19:00:00Z",
+              },
             }),
           ],
         },
@@ -60,6 +64,17 @@ describe("ConnectionList", () => {
     expect(authMock.axios.get).toHaveBeenCalledWith(
       "/v1/admin/notifications/connections"
     );
+  });
+
+  it("shows a connection's latest delivery error", async () => {
+    authMock.permissions = ["notifications.read"];
+    renderWithProviders(<ConnectionList />);
+
+    expect(
+      await screen.findByText(
+        /Last send failed .*Connection closed unexpectedly/
+      )
+    ).toBeVisible();
   });
 
   it("hides the admin controls without notifications.admin", async () => {

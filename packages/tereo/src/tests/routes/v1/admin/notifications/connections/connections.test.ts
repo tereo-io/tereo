@@ -47,6 +47,66 @@ describe("/v1/admin/notifications/connections", () => {
       );
       expect(list.body.data.map((x: { id: string }) => x.id)).toContain(c.id);
     });
+
+    describe("lastDeliveryError", () => {
+      const deliver = async (
+        connectionId: string,
+        delivery: { status: "pending" | "sent" | "failed"; lastError?: string }
+      ) => {
+        const notification = await prisma.notification.create({
+          data: {
+            channel: "email",
+            connectionId,
+            senderUserId: adminUserId,
+            recipients: [],
+            attachments: [],
+          },
+        });
+        await prisma.notificationDelivery.create({
+          data: {
+            notificationId: notification.id,
+            notificationCreatedAt: notification.createdAt,
+            connectionId,
+            recipients: [],
+            attempts: 1,
+            ...delivery,
+          },
+        });
+      };
+
+      const lastErrorOf = async (id: string) => {
+        const list = await connectionsApi("GET", "/connections", readToken);
+        return list.body.data.find((x: { id: string }) => x.id === id)
+          .lastDeliveryError;
+      };
+
+      it("is null for a connection that has not sent", async () => {
+        const c = await create();
+
+        expect(await lastErrorOf(c.id)).toBeNull();
+      });
+
+      it("reports a delivery waiting to retry after an error", async () => {
+        const c = await create();
+        await deliver(c.id, {
+          status: "pending",
+          lastError: "Connection closed unexpectedly",
+        });
+
+        expect(await lastErrorOf(c.id)).toEqual({
+          message: "Connection closed unexpectedly",
+          at: expect.any(String),
+        });
+      });
+
+      it("clears once a later delivery is sent", async () => {
+        const c = await create();
+        await deliver(c.id, { status: "failed", lastError: "refused" });
+        await deliver(c.id, { status: "sent" });
+
+        expect(await lastErrorOf(c.id)).toBeNull();
+      });
+    });
   });
 
   describe("create", () => {

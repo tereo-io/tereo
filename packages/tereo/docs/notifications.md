@@ -42,7 +42,11 @@ Sent over SMTP with nodemailer.
   `defaultFrom` must match). `security: "none"` (plaintext, the password included) is refused
   unless `ALLOW_PLAINTEXT_SMTP=true` ([configuration.md](configuration.md)): on create and update,
   and for a stored connection, which then reads as `400 invalid_settings` and fails its deliveries
-  with `invalid_settings`.
+  with `invalid_settings`. So are port 465 with `starttls` and port 587 with `tls`, which never
+  connect (465 expects TLS from the first byte), the same way, stored connections included.
+- `GET /v1/admin/notifications/connections` gives each connection a `lastDeliveryError`
+  (`{ message, at }`): the error of its newest delivery attempt in the last day when that attempt
+  failed or is waiting to retry, so a broken connection shows without opening a notification.
 - Secrets: `password`, optional.
 - Content: `subject` (1-998 characters, no line breaks), `text` and/or `html` (one is required), and
   optional `from` (`{ address, name? }`) and `replyTo`. A `from` address and a `replyTo` must each
