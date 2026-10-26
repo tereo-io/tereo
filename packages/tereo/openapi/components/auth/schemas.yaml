@@ -1294,6 +1294,39 @@ User:
       type: string
       format: date-time
 
+AdminUserDetail:
+  allOf:
+    - $ref: '#/User'
+    - type: object
+      required: [managedBy]
+      properties:
+        managedBy:
+          description: |
+            What owns an account the admin API will not change, or `null` when
+            it can. `system` is core's own system user; `service` and
+            `integration` are the account of that service or integration,
+            managed under `/v1/admin/services` or `/v1/admin/integrations`.
+            Updating such a user, its roles, 2FA or identity invites is refused.
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [kind]
+              properties:
+                kind:
+                  type: string
+                  enum: [system]
+            - type: object
+              required: [kind, id, name]
+              properties:
+                kind:
+                  type: string
+                  enum: [service, integration]
+                id:
+                  type: string
+                  format: uuid
+                name:
+                  type: string
+
 CreateUserRequest:
   type: object
   required:

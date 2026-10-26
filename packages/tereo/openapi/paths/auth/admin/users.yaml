@@ -128,7 +128,7 @@
     tags:
       - Admin - Users
     summary: Get user by ID
-    description: Returns detailed information about a specific user
+    description: Returns a user, and what manages it when the admin API cannot change it
     operationId: getAdminUser
     security:
       - BearerAuth: [users.read]
@@ -147,7 +147,7 @@
         content:
           application/json:
             schema:
-              $ref: '../../../components/auth/schemas.yaml#/User'
+              $ref: '../../../components/auth/schemas.yaml#/AdminUserDetail'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
         description: Invalid user id

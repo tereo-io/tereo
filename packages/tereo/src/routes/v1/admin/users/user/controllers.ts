@@ -46,12 +46,13 @@ import {
   assertMayResetCredentials,
   assertNotServiceAccount,
   assertNotSystemUser,
+  managerOf,
 } from "./guards.js";
 
 export const getUser = async (req: Request, res: Response) => {
   const { id } = validateParams(UserIdParamSchema, req);
   const user = await db.users.get(id);
-  res.json(formatUser(user));
+  res.json({ ...formatUser(user), managedBy: await managerOf(user) });
 };
 
 export const updateUser = async (req: Request, res: Response) => {

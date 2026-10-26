@@ -10,6 +10,15 @@ export interface User {
   updatedAt: string;
 }
 
+/** What owns an account the admin API refuses to change. */
+export type UserManager =
+  | { kind: "system" }
+  | { kind: "service" | "integration"; id: string; name: string };
+
+export interface UserDetail extends User {
+  managedBy: UserManager | null;
+}
+
 export interface UserRole {
   id: string;
   name: string;

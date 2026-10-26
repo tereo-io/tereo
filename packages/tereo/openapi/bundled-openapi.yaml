@@ -4504,7 +4504,7 @@ paths:
       tags:
         - Admin - Users
       summary: Get user by ID
-      description: Returns detailed information about a specific user
+      description: Returns a user, and what manages it when the admin API cannot change it
       operationId: getAdminUser
       security:
         - BearerAuth:
@@ -4524,7 +4524,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/AdminUserDetail'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
           description: Invalid user id
@@ -28809,6 +28809,46 @@ components:
           type: string
           format: uri
           description: The provider's authorization endpoint. Navigate the browser there.
+    AdminUserDetail:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          required:
+            - managedBy
+          properties:
+            managedBy:
+              description: |
+                What owns an account the admin API will not change, or `null` when
+                it can. `system` is core's own system user; `service` and
+                `integration` are the account of that service or integration,
+                managed under `/v1/admin/services` or `/v1/admin/integrations`.
+                Updating such a user, its roles, 2FA or identity invites is refused.
+              oneOf:
+                - type: 'null'
+                - type: object
+                  required:
+                    - kind
+                  properties:
+                    kind:
+                      type: string
+                      enum:
+                        - system
+                - type: object
+                  required:
+                    - kind
+                    - id
+                    - name
+                  properties:
+                    kind:
+                      type: string
+                      enum:
+                        - service
+                        - integration
+                    id:
+                      type: string
+                      format: uuid
+                    name:
+                      type: string
     UserIdentityInvite:
       type: object
       description: An invite to sign in with a provider, as an admin sees it. It stays listed after `expiresAt` until the hourly cleanup removes it.
