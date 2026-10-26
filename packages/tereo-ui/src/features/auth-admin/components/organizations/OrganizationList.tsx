@@ -84,6 +84,7 @@ export const OrganizationList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Organizations",
+      titleAs: "h1",
       filters: [
         {
           type: "SEARCH",

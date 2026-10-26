@@ -79,6 +79,7 @@ export const UserList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Users",
+      titleAs: "h1",
       filters: [
         {
           type: "SEARCH",

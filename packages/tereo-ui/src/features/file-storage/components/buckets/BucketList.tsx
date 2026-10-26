@@ -79,6 +79,7 @@ export const BucketList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Buckets",
+      titleAs: "h1",
       filters: [
         {
           type: "SEARCH",

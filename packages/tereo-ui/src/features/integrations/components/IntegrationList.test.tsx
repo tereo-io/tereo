@@ -68,6 +68,20 @@ describe("IntegrationList", () => {
     expect(screen.getByText("Managed by provisioning")).toBeVisible();
   });
 
+  it("titles the page with an h1", async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <IntegrationList />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Integrations" })
+    ).toBeVisible();
+  });
+
   it("links each integration's name to its page", async () => {
     render(
       <QueryClientProvider client={new QueryClient()}>

@@ -62,6 +62,7 @@ export const PermissionList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Permissions",
+      titleAs: "h1",
       filters: [
         {
           type: "SEARCH",

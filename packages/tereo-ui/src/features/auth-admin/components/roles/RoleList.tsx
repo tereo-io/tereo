@@ -103,6 +103,7 @@ export const RoleList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Roles",
+      titleAs: "h1",
       filters: [
         {
           type: "SEARCH",

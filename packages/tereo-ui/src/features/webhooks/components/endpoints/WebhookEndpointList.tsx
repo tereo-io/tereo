@@ -82,6 +82,7 @@ export const WebhookEndpointList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Webhook Endpoints",
+      titleAs: "h1",
       filters: [
         { type: "SEARCH", title: "URL", dataKey: "url" },
         { type: "SEARCH", title: "Description", dataKey: "description" },

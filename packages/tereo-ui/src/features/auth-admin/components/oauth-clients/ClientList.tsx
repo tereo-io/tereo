@@ -111,6 +111,7 @@ export const ClientList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: isClientsAdmin ? "OAuth Clients" : "Your OAuth Clients",
+      titleAs: "h1",
       filters: [
         {
           type: "SEARCH",

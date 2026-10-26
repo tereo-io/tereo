@@ -71,6 +71,7 @@ export const IntegrationList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Integrations",
+      titleAs: "h1",
       filters: [
         { type: "SEARCH", title: "Name", dataKey: "name" },
         { type: "SEARCH", title: "Slug", dataKey: "slug" },

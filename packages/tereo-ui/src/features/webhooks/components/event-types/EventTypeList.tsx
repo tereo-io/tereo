@@ -79,6 +79,7 @@ export const EventTypeList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Event Types",
+      titleAs: "h1",
       filters: [
         { type: "SEARCH", title: "Event Type", dataKey: "eventType" },
         {

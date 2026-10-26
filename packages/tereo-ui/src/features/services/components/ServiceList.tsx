@@ -85,6 +85,7 @@ export const ServiceList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Services",
+      titleAs: "h1",
       filters: [
         { type: "SEARCH", title: "Name", dataKey: "name" },
         { type: "SEARCH", title: "Slug", dataKey: "slug" },
