@@ -26,6 +26,7 @@ const EntityHistoryTable = ({
 }: EntityHistoryTableProps) => {
   const { data, hasMore, isLoading, onQueryChange, reload } = history;
   const [selected, setSelected] = useState<AuditLogEntry | null>(null);
+  const columns = useMemo(() => entityHistoryColumns(setSelected), []);
 
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
@@ -53,7 +54,7 @@ const EntityHistoryTable = ({
         isLoading={isLoading}
         onQueryChange={onQueryChange}
         onReload={reload}
-        columns={entityHistoryColumns}
+        columns={columns}
         onRowClick={setSelected}
         emptyMessage="No audit log entries for this entity"
         hideSelectColumn

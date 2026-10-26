@@ -1,7 +1,7 @@
 import useInfiniteUsers from "../../api/users/useInfiniteUsers";
 import CreateUserModal from "./modals/CreateUserModal";
+import { Link, useNavigate } from "react-router-dom";
 import { formatDate } from "@/utils/formatDate";
-import { useNavigate } from "react-router-dom";
 import { User } from "../../api/users/types";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -9,6 +9,7 @@ import {
   Badge,
   InfiniteScroll,
   Page,
+  TableCellLink,
   type TableColumn,
   type InfiniteScrollMenu,
 } from "@kosmeo-ui/react";
@@ -22,7 +23,15 @@ export const UserList = () => {
 
   const columns: TableColumn<User>[] = useMemo(
     () => [
-      { title: "Email", dataKey: "email" },
+      {
+        title: "Email",
+        dataKey: "email",
+        cellElement: (user) => (
+          <TableCellLink as={Link} to={`/auth-admin/users/${user.id}`}>
+            {user.email}
+          </TableCellLink>
+        ),
+      },
       {
         title: "Name",
         dataKey: "name",

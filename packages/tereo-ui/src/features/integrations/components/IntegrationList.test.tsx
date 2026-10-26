@@ -67,4 +67,18 @@ describe("IntegrationList", () => {
     expect(screen.getByText("Platform")).toBeVisible();
     expect(screen.getByText("Managed by provisioning")).toBeVisible();
   });
+
+  it("links each integration's name to its page", async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <IntegrationList />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(
+      await screen.findByRole("link", { name: "Acme 3PL" })
+    ).toHaveAttribute("href", "/integrations/i1");
+  });
 });

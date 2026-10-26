@@ -1,7 +1,7 @@
 import useIdentityProviders from "../../api/identity-providers/useIdentityProviders";
 import CreateIdentityProviderModal from "./modals/CreateIdentityProviderModal";
 import type { IdentityProvider } from "../../api/identity-providers/types";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 import {
@@ -12,11 +12,20 @@ import {
   SectionHeader,
   Spinner,
   Table,
+  TableCellLink,
   type TableColumn,
 } from "@kosmeo-ui/react";
 
 const columns: TableColumn<IdentityProvider>[] = [
-  { title: "Name", dataKey: "displayName" },
+  {
+    title: "Name",
+    dataKey: "displayName",
+    cellElement: (p) => (
+      <TableCellLink as={Link} to={`/auth-admin/identity-providers/${p.id}`}>
+        {p.displayName}
+      </TableCellLink>
+    ),
+  },
   {
     title: "Slug",
     dataKey: "slug",

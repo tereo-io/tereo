@@ -5,7 +5,7 @@ import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { OAuthClient } from "../../api/oauth-clients/types";
 import CreateClientModal from "./modals/CreateClientModal";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import "./styles.css";
@@ -13,6 +13,7 @@ import {
   Badge,
   InfiniteScroll,
   Page,
+  TableCellLink,
   type TableColumn,
   type InfiniteScrollMenu,
 } from "@kosmeo-ui/react";
@@ -37,7 +38,12 @@ export const ClientList = () => {
         dataKey: "name",
         cellElement: (client) => (
           <>
-            {client.name}{" "}
+            <TableCellLink
+              as={Link}
+              to={`/auth-admin/oauth-clients/${client.id}`}
+            >
+              {client.name}
+            </TableCellLink>{" "}
             {client.service && (
               <Badge variant="primary">service: {client.service.name}</Badge>
             )}

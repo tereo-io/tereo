@@ -1,10 +1,10 @@
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import useInfiniteServices from "../api/useInfiniteServices";
 import CreateServiceModal from "./modals/CreateServiceModal";
+import { Link, useNavigate } from "react-router-dom";
 import { formatDateTime } from "@/utils/formatDate";
 import { ServiceStatusBadge } from "./StatusBadges";
 import type { ServiceListItem } from "../api/types";
-import { useNavigate } from "react-router-dom";
 import { CORE_SERVICE_ID } from "../constants";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -12,6 +12,7 @@ import {
   Badge,
   InfiniteScroll,
   Page,
+  TableCellLink,
   type InfiniteScrollMenu,
   type TableColumn,
 } from "@kosmeo-ui/react";
@@ -30,7 +31,9 @@ export const ServiceList = () => {
         dataKey: "name",
         cellElement: (s) => (
           <span>
-            {s.name}
+            <TableCellLink as={Link} to={`/services/${s.id}`}>
+              {s.name}
+            </TableCellLink>
             {s.id === CORE_SERVICE_ID && (
               <>
                 {" "}

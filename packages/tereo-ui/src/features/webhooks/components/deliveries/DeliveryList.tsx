@@ -11,6 +11,7 @@ import "../styles.css";
 import {
   Button,
   InfiniteScroll,
+  TableCellButton,
   type InfiniteScrollMenu,
   type TableColumn,
 } from "@kosmeo-ui/react";
@@ -45,7 +46,11 @@ export const DeliveryList = ({ endpoint }: DeliveryListProps) => {
       {
         title: "Event Type",
         dataKey: "eventType",
-        cellElement: (d) => <span className="v-mono">{d.eventType}</span>,
+        cellElement: (d) => (
+          <TableCellButton onClick={() => setOpenDeliveryId(d.id)}>
+            <span className="v-mono">{d.eventType}</span>
+          </TableCellButton>
+        ),
       },
       {
         title: "Attempts",

@@ -4,7 +4,7 @@ import DeleteBucketButton from "./buttons/DeleteBucketButton";
 import CreateBucketModal from "./modals/CreateBucketModal";
 import BucketOriginBadges from "./BucketOriginBadges";
 import type { Bucket } from "../../api/buckets/types";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import formatBytes from "@/utils/formatBytes";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -12,6 +12,7 @@ import {
   Badge,
   InfiniteScroll,
   Page,
+  TableCellLink,
   type TableColumn,
   type InfiniteScrollMenu,
 } from "@kosmeo-ui/react";
@@ -30,7 +31,10 @@ export const BucketList = () => {
         dataKey: "name",
         cellElement: (b) => (
           <>
-            {b.name} <BucketOriginBadges bucket={b} />
+            <TableCellLink as={Link} to={`/file-storage/buckets/${b.name}`}>
+              {b.name}
+            </TableCellLink>{" "}
+            <BucketOriginBadges bucket={b} />
           </>
         ),
       },
