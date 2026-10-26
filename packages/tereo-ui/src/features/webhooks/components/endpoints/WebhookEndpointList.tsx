@@ -4,6 +4,7 @@ import useWebhooksOrganization from "../../hooks/useWebhooksOrganization";
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import type { WebhookEndpoint } from "../../api/types";
 import { EndpointStatusBadges } from "../badges";
+import { formatDate } from "@/utils/formatDate";
 import { useNavigate } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -65,7 +66,7 @@ export const WebhookEndpointList = () => {
         title: "Created",
         dataKey: "createdAt",
         width: "9rem",
-        cellElement: (ep) => new Date(ep.createdAt).toLocaleDateString(),
+        cellElement: (ep) => formatDate(ep.createdAt),
       },
     ],
     []

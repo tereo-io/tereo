@@ -1,5 +1,6 @@
 import useInfiniteUsers from "../../api/users/useInfiniteUsers";
 import CreateUserModal from "./modals/CreateUserModal";
+import { formatDate } from "@/utils/formatDate";
 import { useNavigate } from "react-router-dom";
 import { User } from "../../api/users/types";
 import { useMemo, useState } from "react";
@@ -45,7 +46,7 @@ export const UserList = () => {
       {
         title: "Created",
         dataKey: "createdAt",
-        cellElement: (user) => new Date(user.createdAt).toLocaleDateString(),
+        cellElement: (user) => formatDate(user.createdAt),
       },
       {
         title: "Status",

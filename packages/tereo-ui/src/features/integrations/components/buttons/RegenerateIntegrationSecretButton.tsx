@@ -1,6 +1,7 @@
 import useRegenerateIntegrationSecret from "../../api/useRegenerateIntegrationSecret";
 import { IntegrationCredentialsDisplay } from "../IntegrationCredentialsDisplay";
 import { Alert, Button, Col, Modal } from "@kosmeo-ui/react";
+import { formatDateTime } from "@/utils/formatDate";
 import { toast } from "react-toastify";
 import { useState } from "react";
 import type {
@@ -93,7 +94,7 @@ const RegenerateIntegrationSecretButton = ({
             {result.previousSecretExpiresAt ? (
               <Alert variant="primary">
                 The previous secret keeps working until{" "}
-                {new Date(result.previousSecretExpiresAt).toLocaleString()}.
+                {formatDateTime(result.previousSecretExpiresAt)}.
               </Alert>
             ) : (
               <Alert variant="danger">

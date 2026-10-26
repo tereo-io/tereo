@@ -6,6 +6,7 @@ import RevokePermissionButton from "../buttons/RevokePermissionButton";
 import { faCheck, faTimes } from "@fortawesome/free-solid-svg-icons";
 import GrantPermissionModal from "../modals/GrantPermissionModal";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { formatDateTime } from "@/utils/formatDate";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import {
@@ -89,8 +90,7 @@ export const PermissionManager = ({
         title: "Granted At",
         dataKey: "grantedAt",
         width: "12rem",
-        cellElement: (permission) =>
-          new Date(permission.grantedAt).toLocaleString(),
+        cellElement: (permission) => formatDateTime(permission.grantedAt),
       },
       {
         title: "Actions",

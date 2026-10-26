@@ -2,6 +2,7 @@ import ArchiveRestoreOrganizationListButton from "./buttons/ArchiveRestoreOrgani
 import useInfiniteOrganizations from "../../api/organizations/useInfiniteOrganizations";
 import CreateOrganizationModal from "./modals/CreateOrganizationModal";
 import type { Organization } from "../../api/organizations/types";
+import { formatDate } from "@/utils/formatDate";
 import { useNavigate } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -62,7 +63,7 @@ export const OrganizationList = () => {
       {
         title: "Created",
         dataKey: "createdAt",
-        cellElement: (org) => new Date(org.createdAt).toLocaleDateString(),
+        cellElement: (org) => formatDate(org.createdAt),
       },
       {
         title: "Actions",

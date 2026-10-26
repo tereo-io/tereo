@@ -10,6 +10,7 @@ import useUserRoles from "../../api/users/useUserRoles";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import EditUserButton from "./buttons/EditUserButton";
 import { PageHeader } from "@/components/PageHeader";
+import { formatDateTime } from "@/utils/formatDate";
 import useUser from "../../api/users/useUser";
 import { useParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
@@ -118,11 +119,11 @@ export const UserDetail = () => {
                 : []),
               {
                 label: "Created",
-                value: new Date(user.createdAt).toLocaleString(),
+                value: formatDateTime(user.createdAt),
               },
               {
                 label: "Updated",
-                value: new Date(user.updatedAt).toLocaleString(),
+                value: formatDateTime(user.updatedAt),
               },
             ]}
           />
@@ -154,11 +155,11 @@ export const UserDetail = () => {
                           <Col size="sm">
                             <span>
                               Created:
-                              {new Date(session.createdAt).toLocaleString()}
+                              {formatDateTime(session.createdAt)}
                             </span>
                             <span>
                               Expires:
-                              {new Date(session.expiresAt).toLocaleString()}
+                              {formatDateTime(session.expiresAt)}
                             </span>
                           </Col>
                         </div>
@@ -208,9 +209,7 @@ export const UserDetail = () => {
                 ? [
                     {
                       label: "Enabled On",
-                      value: new Date(
-                        totpStatus.totpEnabledAt
-                      ).toLocaleString(),
+                      value: formatDateTime(totpStatus.totpEnabledAt),
                     },
                   ]
                 : []),

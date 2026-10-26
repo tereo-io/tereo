@@ -1,3 +1,4 @@
+import { formatTimestamp } from "@/utils/formatDate";
 import type { TableColumn } from "@kosmeo-ui/react";
 import type { AuditLogEntry } from "../types";
 import { Badge } from "@kosmeo-ui/react";
@@ -5,7 +6,6 @@ import {
   actionVariant,
   formatEntityType,
   formatOrganization,
-  formatTimestamp,
   formatUser,
 } from "../utils/format";
 

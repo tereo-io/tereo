@@ -8,6 +8,7 @@ import useClient from "../../api/oauth-clients/useClient";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import { CORE_LOGIN_CLIENT_ID } from "../../constants";
 import { PageHeader } from "@/components/PageHeader";
+import { formatDateTime } from "@/utils/formatDate";
 import { useParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import "./styles.css";
@@ -135,11 +136,11 @@ export const ClientDetail = () => {
                   ]),
               {
                 label: "Created",
-                value: new Date(client.createdAt).toLocaleString(),
+                value: formatDateTime(client.createdAt),
               },
               {
                 label: "Updated",
-                value: new Date(client.updatedAt).toLocaleString(),
+                value: formatDateTime(client.updatedAt),
               },
             ]}
           />

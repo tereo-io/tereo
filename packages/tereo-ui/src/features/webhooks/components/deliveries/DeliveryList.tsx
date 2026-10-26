@@ -3,6 +3,7 @@ import BulkRetryDeliveriesModal from "./modals/BulkRetryDeliveriesModal";
 import type { WebhookDelivery, WebhookEndpoint } from "../../api/types";
 import RetryDeliveryButton from "./buttons/RetryDeliveryButton";
 import DeliveryDetailModal from "./modals/DeliveryDetailModal";
+import { formatDateTime } from "@/utils/formatDate";
 import { DeliveryStatusBadge } from "../badges";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -63,21 +64,21 @@ export const DeliveryList = ({ endpoint }: DeliveryListProps) => {
         title: "Created",
         dataKey: "createdAt",
         width: "12rem",
-        cellElement: (d) => new Date(d.createdAt).toLocaleString(),
+        cellElement: (d) => formatDateTime(d.createdAt),
       },
       {
         title: "Last Attempt",
         dataKey: "lastAttemptAt",
         width: "12rem",
         cellElement: (d) =>
-          d.lastAttemptAt ? new Date(d.lastAttemptAt).toLocaleString() : dash,
+          d.lastAttemptAt ? formatDateTime(d.lastAttemptAt) : dash,
       },
       {
         title: "Completed",
         dataKey: "completedAt",
         width: "12rem",
         cellElement: (d) =>
-          d.completedAt ? new Date(d.completedAt).toLocaleString() : dash,
+          d.completedAt ? formatDateTime(d.completedAt) : dash,
       },
       {
         title: "Actions",

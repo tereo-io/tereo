@@ -467,6 +467,7 @@ NotificationLogEntry:
     - channel
     - connectionId
     - senderUserId
+    - sender
     - organizationId
     - status
     - summary
@@ -486,6 +487,9 @@ NotificationLogEntry:
     senderUserId:
       type: string
       format: uuid
+    sender:
+      description: The user `senderUserId` names.
+      $ref: '../schemas.yaml#/UserRef'
     organizationId:
       type: [string, 'null']
       format: uuid

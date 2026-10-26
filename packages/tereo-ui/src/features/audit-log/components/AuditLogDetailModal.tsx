@@ -1,5 +1,6 @@
 import { auditLogHref, entityHistoryHref } from "../utils/urlFilters";
 import useAuditLogEntry from "../api/useAuditLogEntry";
+import { formatTimestamp } from "@/utils/formatDate";
 import { Link, useNavigate } from "react-router-dom";
 import type { AuditLogEntry } from "../types";
 import type { ReactNode } from "react";
@@ -23,7 +24,6 @@ import {
   formatChangeValue,
   formatEntityType,
   formatOrganization,
-  formatTimestamp,
   formatUser,
 } from "../utils/format";
 

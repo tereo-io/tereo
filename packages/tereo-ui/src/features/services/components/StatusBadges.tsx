@@ -1,4 +1,5 @@
 import type { Retirable, ServiceAccessStatus } from "../api/types";
+import { formatDateTime } from "@/utils/formatDate";
 import { Badge, Tooltip } from "@kosmeo-ui/react";
 
 export const ServiceStatusBadge = ({ isActive }: { isActive: boolean }) =>
@@ -16,7 +17,7 @@ export const ServiceStatusBadge = ({ isActive }: { isActive: boolean }) =>
 export const RetirementBadge = ({ item }: { item: Retirable }) => {
   if (item.retiredAt) {
     return (
-      <Tooltip content={`Retired ${new Date(item.retiredAt).toLocaleString()}`}>
+      <Tooltip content={`Retired ${formatDateTime(item.retiredAt)}`}>
         <Badge size="sm" subtle variant="danger">
           Retired
         </Badge>
@@ -26,7 +27,7 @@ export const RetirementBadge = ({ item }: { item: Retirable }) => {
   if (item.missingSince) {
     return (
       <Tooltip
-        content={`Not declared since ${new Date(item.missingSince).toLocaleString()}; retires after the grace period unless declared again`}
+        content={`Not declared since ${formatDateTime(item.missingSince)}; retires after the grace period unless declared again`}
       >
         <Badge size="sm" subtle variant="warning">
           Missing

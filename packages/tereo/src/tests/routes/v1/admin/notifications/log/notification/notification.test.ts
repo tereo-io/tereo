@@ -4,7 +4,6 @@ import { ensureDefaultOrganization } from "../../../../../../../utils/defaultOrg
 import { ensureDailyPartitions } from "../../../../../../../utils/partitions.js";
 import { getTestPrincipalToken } from "../../../../../../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { SYSTEM_USER_ID } from "../../../../../../../definitions/index.js";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { waitFor } from "../../../../../../support/webhooks.js";
 import { CORE_URL } from "../../../../../../support/coreUrl.js";
@@ -23,6 +22,10 @@ import {
   startFakeSmtpServer,
   type FakeSmtpServer,
 } from "../../../../../../support/fakeSmtpServer.js";
+import {
+  SYSTEM_USER,
+  SYSTEM_USER_ID,
+} from "../../../../../../../definitions/index.js";
 
 const BASE = `${CORE_URL}/v1/admin/notifications`;
 const rand = () => randomBytes(4).toString("hex");
@@ -158,6 +161,7 @@ describe("/v1/admin/notifications/:id", () => {
         status: "partial",
         content: { subject: "Kept", text: "Body" },
         attachments: [],
+        sender: SYSTEM_USER,
       });
       expect(res.body.deliveries).toHaveLength(2);
       const byStatus = Object.fromEntries(

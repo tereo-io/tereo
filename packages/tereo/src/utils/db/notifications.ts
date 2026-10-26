@@ -1,5 +1,6 @@
 import { Prisma } from "../../../prisma/generated/client/index.js";
 import { runPartitionDdl } from "./partitionDdl.js";
+import { userRefSelect } from "../refs.js";
 import { prisma } from "./prisma.js";
 
 type Tx = Prisma.TransactionClient;
@@ -35,7 +36,10 @@ export const get = (id: string, createdAt?: Date) =>
 export const getWithDeliveries = (id: string) =>
   prisma.notification.findFirst({
     where: { id },
-    include: { deliveries: { orderBy: { createdAt: "asc" } } },
+    include: {
+      deliveries: { orderBy: { createdAt: "asc" } },
+      sender: userRefSelect,
+    },
   });
 
 export interface ListOptions {
@@ -60,6 +64,7 @@ export const list = async (options: ListOptions) => {
         orderBy: { sentAt: { sort: "desc", nulls: "last" } },
         take: 1,
       },
+      sender: userRefSelect,
     },
   });
   const hasMore = rows.length > options.take;

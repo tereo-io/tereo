@@ -1,9 +1,11 @@
 import useInfiniteNotificationLog from "../../api/log/useInfiniteNotificationLog";
 import { NotificationDetailModal } from "./NotificationDetailModal";
-import { NotificationStatusBadge } from "./badges";
+import { NotificationStatusBadge, STATUS_LABEL } from "./badges";
+import { PageHeader } from "@/components/PageHeader";
+import { formatDateTime } from "@/utils/formatDate";
 import { recipientsText } from "./recipients";
-import formatDate from "@/utils/formatDate";
 import { useMemo, useState } from "react";
+import { userLabel } from "@/lib/refs";
 import "../styles.css";
 import {
   Alert,
@@ -21,20 +23,26 @@ import type {
   NotificationChannel,
   NotificationLogFilters,
   NotificationLogListItem,
+  NotificationLogOrder,
   NotificationStatus,
 } from "../../api/types";
 
 const STATUSES: NotificationStatus[] = ["pending", "sent", "partial", "failed"];
+const PAGE_SIZES = ["25", "50", "100"] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The notification log: every send, newest first, with filters and a detail dialog. */
+/** The notification log: every send, newest first by default, with filters and a detail dialog. */
 export const NotificationLog = () => {
   const [filters, setFilters] = useState<NotificationLogFilters>({});
   const [recipient, setRecipient] = useState("");
   const [sender, setSender] = useState("");
   const [senderError, setSenderError] = useState<string>();
   const [openId, setOpenId] = useState<string | null>(null);
-  const log = useInfiniteNotificationLog(filters);
+  const [order, setOrder] = useState<NotificationLogOrder>({
+    limit: 25,
+    sortDir: "desc",
+  });
+  const log = useInfiniteNotificationLog(filters, order);
 
   const rows = useMemo(
     () => log.data?.pages.flatMap((p) => p.data) ?? [],
@@ -69,9 +77,7 @@ export const NotificationLog = () => {
         title: "Sender",
         dataKey: "senderUserId",
         cellElement: (n) => (
-          <span className="t-notif-mono" title={n.senderUserId}>
-            {n.senderUserId.slice(0, 8)}
-          </span>
+          <span title={n.sender.email}>{userLabel(n.sender)}</span>
         ),
       },
       {
@@ -87,13 +93,13 @@ export const NotificationLog = () => {
         title: "Created",
         dataKey: "createdAt",
         width: "14rem",
-        cellElement: (n) => formatDate(n.createdAt),
+        cellElement: (n) => formatDateTime(n.createdAt),
       },
       {
         title: "Sent",
         dataKey: "sentAt",
         width: "14rem",
-        cellElement: (n) => (n.sentAt ? formatDate(n.sentAt) : "—"),
+        cellElement: (n) => (n.sentAt ? formatDateTime(n.sentAt) : "—"),
       },
     ],
     []
@@ -101,7 +107,7 @@ export const NotificationLog = () => {
 
   return (
     <Page padded fillHeight>
-      <h2>Log</h2>
+      <PageHeader title="Notification Log" />
       <form className="t-notif-filters" onSubmit={applyText}>
         <Select<NotificationChannel | "">
           label="Channel"
@@ -114,7 +120,7 @@ export const NotificationLog = () => {
           label="Status"
           placeholder="All"
           value={filters.status ?? ""}
-          options={STATUSES.map((s) => ({ value: s, label: s }))}
+          options={STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
           onChange={(v) => update({ status: v || undefined })}
         />
         <Input
@@ -144,6 +150,21 @@ export const NotificationLog = () => {
         <Button type="submit" variant="secondary">
           Apply
         </Button>
+        <Select<NotificationLogOrder["sortDir"]>
+          label="Order"
+          value={order.sortDir}
+          options={[
+            { value: "desc", label: "Newest first" },
+            { value: "asc", label: "Oldest first" },
+          ]}
+          onChange={(v) => v && setOrder((o) => ({ ...o, sortDir: v }))}
+        />
+        <Select<(typeof PAGE_SIZES)[number]>
+          label="Page size"
+          value={String(order.limit) as (typeof PAGE_SIZES)[number]}
+          options={PAGE_SIZES.map((n) => ({ value: n, label: n }))}
+          onChange={(v) => v && setOrder((o) => ({ ...o, limit: Number(v) }))}
+        />
       </form>
 
       {log.isLoading ? (

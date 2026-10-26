@@ -9,12 +9,21 @@ const VARIANT = {
   failed: "danger",
 } as const;
 
+export const STATUS_LABEL: Record<NotificationStatus | DeliveryStatus, string> =
+  {
+    pending: "Pending",
+    sending: "Sending",
+    sent: "Sent",
+    partial: "Partial",
+    failed: "Failed",
+  };
+
 export const NotificationStatusBadge = ({
   status,
 }: {
   status: NotificationStatus | DeliveryStatus;
 }) => (
   <Badge size="sm" subtle variant={VARIANT[status]}>
-    {status}
+    {STATUS_LABEL[status]}
   </Badge>
 );

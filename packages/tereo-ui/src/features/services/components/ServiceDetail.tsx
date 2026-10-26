@@ -8,6 +8,7 @@ import { DeclaredItemsSection } from "./DeclaredItemsSection";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import { PageHeader } from "@/components/PageHeader";
 import { userLabel, type UserRef } from "@/lib/refs";
+import { formatDateTime } from "@/utils/formatDate";
 import { ServiceStatusBadge } from "./StatusBadges";
 import { Link, useParams } from "react-router-dom";
 import { CORE_SERVICE_ID } from "../constants";
@@ -129,7 +130,7 @@ export const ServiceDetail = () => {
             <Col>
               <span>
                 The secret replaced by the last regeneration keeps working until{" "}
-                {overlapUntil.toLocaleString()}, so running copies keep calling
+                {formatDateTime(overlapUntil)}, so running copies keep calling
                 core while the new one rolls out. End the overlap once every
                 copy uses the new secret.
               </span>
@@ -181,12 +182,12 @@ export const ServiceDetail = () => {
                 {
                   label: "Last Applied",
                   value: service.declaredAt
-                    ? new Date(service.declaredAt).toLocaleString()
+                    ? formatDateTime(service.declaredAt)
                     : muted("Never"),
                 },
                 {
                   label: "Created",
-                  value: new Date(service.createdAt).toLocaleString(),
+                  value: formatDateTime(service.createdAt),
                 },
               ]}
             />

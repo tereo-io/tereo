@@ -1,7 +1,7 @@
 import useRevokePreviousWebhookSecret from "../../../api/endpoints/useRevokePreviousWebhookSecret";
 import { Button, ConfirmationModal } from "@kosmeo-ui/react";
 import type { WebhookEndpoint } from "../../../api/types";
-import formatDate from "@/utils/formatDate";
+import { formatDateTime } from "@/utils/formatDate";
 import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 
@@ -47,7 +47,7 @@ const RevokePreviousSecretButton = ({
         handleHide={() => setShowConfirm(false)}
         handleConfirm={handleRevoke}
         title="Revoke Previous Signing Secret"
-        body={`The previous secret signs deliveries until ${formatDate(endpoint.previousSecretExpiresAt)}. Revoke it now? Receivers still verifying with it will start rejecting deliveries at once.`}
+        body={`The previous secret signs deliveries until ${formatDateTime(endpoint.previousSecretExpiresAt)}. Revoke it now? Receivers still verifying with it will start rejecting deliveries at once.`}
         confirmButtonText={revokeMutation.isPending ? "Revoking..." : "Revoke"}
       />
     </>

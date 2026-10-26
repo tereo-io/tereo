@@ -1,3 +1,4 @@
+import { formatDateTime } from "@/utils/formatDate";
 import type { ServiceAccess } from "../api/types";
 
 /** When an access row was decided and by whom; a dash while pending. */
@@ -7,7 +8,7 @@ export const AccessDecision = ({ access }: { access: ServiceAccess }) => {
     access.decidedByName ?? access.decidedByEmail ?? access.decidedBy ?? null;
   return (
     <span title={access.decidedByEmail ?? undefined}>
-      {new Date(access.decidedAt).toLocaleString()}
+      {formatDateTime(access.decidedAt)}
       {who && <span className="v-muted-text"> by {who}</span>}
     </span>
   );

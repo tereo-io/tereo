@@ -1,8 +1,8 @@
 import type { WebhookDelivery, WebhookEndpoint } from "../../../api/types";
 import RetryDeliveryButton from "../buttons/RetryDeliveryButton";
 import useDelivery from "../../../api/deliveries/useDelivery";
+import { formatDateTime } from "@/utils/formatDate";
 import { DeliveryStatusBadge } from "../../badges";
-import formatDate from "@/utils/formatDate";
 import "../../styles.css";
 import {
   Button,
@@ -91,19 +91,22 @@ const DeliveryDetail = ({ delivery }: { delivery: WebhookDelivery }) => (
         label="Response Status"
         value={delivery.httpStatus ?? <span className="v-muted-text">—</span>}
       />
-      <InfoRow label="Created" value={formatDate(delivery.createdAt)} />
+      <InfoRow label="Created" value={formatDateTime(delivery.createdAt)} />
       <InfoRow
         label="Last Attempt"
         value={
           delivery.lastAttemptAt ? (
-            formatDate(delivery.lastAttemptAt)
+            formatDateTime(delivery.lastAttemptAt)
           ) : (
             <span className="v-muted-text">Not attempted yet</span>
           )
         }
       />
       {delivery.completedAt && (
-        <InfoRow label="Completed" value={formatDate(delivery.completedAt)} />
+        <InfoRow
+          label="Completed"
+          value={formatDateTime(delivery.completedAt)}
+        />
       )}
     </Col>
 

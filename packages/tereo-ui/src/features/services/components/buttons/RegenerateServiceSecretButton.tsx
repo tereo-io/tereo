@@ -2,6 +2,7 @@ import useRegenerateServiceSecret from "../../api/useRegenerateServiceSecret";
 import { ServiceCredentialsDisplay } from "../ServiceCredentialsDisplay";
 import type { RegeneratedSecret, ServiceDetail } from "../../api/types";
 import { Alert, Button, Col, Modal } from "@kosmeo-ui/react";
+import { formatDateTime } from "@/utils/formatDate";
 import formatHours from "../../formatHours";
 import { toast } from "react-toastify";
 import { useState } from "react";
@@ -109,7 +110,7 @@ const RegenerateServiceSecretButton = ({
             {result.previousSecretExpiresAt ? (
               <Alert variant="primary">
                 The previous secret keeps working until{" "}
-                {new Date(result.previousSecretExpiresAt).toLocaleString()}.
+                {formatDateTime(result.previousSecretExpiresAt)}.
               </Alert>
             ) : (
               <Alert variant="danger">

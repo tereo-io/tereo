@@ -4,6 +4,7 @@ import useConnections from "../../api/connections/useConnections";
 import type { NotificationConnection } from "../../api/types";
 import { ConnectionFormModal } from "./ConnectionFormModal";
 import { TestConnectionModal } from "./TestConnectionModal";
+import { PageHeader } from "@/components/PageHeader";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import "../styles.css";
@@ -150,14 +151,23 @@ export const ConnectionList = () => {
 
   return (
     <Page padded fillHeight>
-      <Row align="center" justify="between">
-        <h2>Connections</h2>
-        {canAdmin && (
-          <IconButton icon={faPlus} size="sm" onClick={() => setCreating(true)}>
-            New connection
-          </IconButton>
-        )}
-      </Row>
+      <PageHeader
+        title="Notification Connections"
+        actions={
+          canAdmin
+            ? [
+                <IconButton
+                  key="new"
+                  icon={faPlus}
+                  size="sm"
+                  onClick={() => setCreating(true)}
+                >
+                  New connection
+                </IconButton>,
+              ]
+            : undefined
+        }
+      />
       {error && <Alert variant="danger">Failed to load the connections.</Alert>}
       {isLoading ? (
         <Spinner size="lg" />

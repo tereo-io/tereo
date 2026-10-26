@@ -1,9 +1,9 @@
 import useNotificationLogEntry from "../../api/log/useNotificationLogEntry";
 import useRetryNotification from "../../api/log/useRetryNotification";
 import type { NotificationLogDetail } from "../../api/types";
+import { formatDateTime } from "@/utils/formatDate";
 import { NotificationStatusBadge } from "./badges";
 import { recipientsText } from "./recipients";
-import formatDate from "@/utils/formatDate";
 import { useAuth } from "@/lib/auth";
 import "../styles.css";
 import {
@@ -101,10 +101,16 @@ const Detail = ({
         <InfoRow label="Channel" value={n.channel} />
         <InfoRow
           label="Sender"
-          value={<span className="t-notif-mono">{n.senderUserId}</span>}
+          value={
+            <span title={n.senderUserId}>
+              {n.sender.name
+                ? `${n.sender.name} (${n.sender.email})`
+                : n.sender.email}
+            </span>
+          }
         />
         <InfoRow label="Recipients" value={recipientsText(n.recipients)} />
-        <InfoRow label="Created" value={formatDate(n.createdAt)} />
+        <InfoRow label="Created" value={formatDateTime(n.createdAt)} />
       </Col>
 
       <SectionHeader title="Content" as="h4" dense />
@@ -148,7 +154,7 @@ const Detail = ({
           <InfoRow label="Attempts" value={d.attempts} />
           <InfoRow
             label="Sent"
-            value={d.sentAt ? formatDate(d.sentAt) : dash}
+            value={d.sentAt ? formatDateTime(d.sentAt) : dash}
           />
           {d.lastError && (
             <InfoRow

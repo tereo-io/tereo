@@ -1,5 +1,6 @@
 import { Badge, Button, ListCard, Modal } from "@kosmeo-ui/react";
 import type { Permission } from "../../../api/permissions/types";
+import { formatDateTime } from "@/utils/formatDate";
 
 interface PermissionDetailModalProps {
   permission: Permission | null;
@@ -57,7 +58,7 @@ const PermissionDetailModal = ({
             ? [
                 {
                   label: "Missing Since",
-                  value: new Date(permission.missingSince).toLocaleString(),
+                  value: formatDateTime(permission.missingSince),
                 },
               ]
             : []),
@@ -65,13 +66,13 @@ const PermissionDetailModal = ({
             ? [
                 {
                   label: "Retired",
-                  value: new Date(permission.retiredAt).toLocaleString(),
+                  value: formatDateTime(permission.retiredAt),
                 },
               ]
             : []),
           {
             label: "Registered",
-            value: new Date(permission.createdAt).toLocaleString(),
+            value: formatDateTime(permission.createdAt),
           },
         ]}
       />

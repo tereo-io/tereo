@@ -29,6 +29,11 @@ const detail = (over: Record<string, unknown> = {}) => ({
   channel: "email",
   connectionId: "c1",
   senderUserId: "11111111-1111-4111-8111-111111111111",
+  sender: {
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "ada@example.com",
+    name: "Ada Lovelace",
+  },
   organizationId: null,
   status: "failed",
   recipients: [{ address: "a@example.com", as: "to" }],
@@ -67,6 +72,9 @@ describe("NotificationDetailModal", () => {
     open(detail());
     expect(await screen.findByText("Your invoice")).toBeInTheDocument();
     expect(screen.getByText("Hello there")).toBeInTheDocument();
+    expect(
+      screen.getByText("Ada Lovelace (ada@example.com)")
+    ).toBeInTheDocument();
     expect(screen.getByText(/invoice\.pdf/)).toBeInTheDocument();
     expect(screen.getByText("550 mailbox unavailable")).toBeInTheDocument();
     expect(screen.getByText("550 5.1.1 no such user")).toBeInTheDocument();

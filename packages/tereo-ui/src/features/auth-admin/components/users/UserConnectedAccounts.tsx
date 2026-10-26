@@ -3,6 +3,7 @@ import type { ConnectedIdentity } from "../../api/identity-providers/types";
 import useUserIdentityInvite from "../../api/users/useUserIdentityInvite";
 import useUnlinkUserIdentity from "../../api/users/useUnlinkUserIdentity";
 import useUserIdentities from "../../api/users/useUserIdentities";
+import { formatDateTime } from "@/utils/formatDate";
 import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 import {
@@ -56,7 +57,7 @@ export const UserConnectedAccounts = ({
               <div>
                 Last used:{" "}
                 {identity.lastLoginAt
-                  ? new Date(identity.lastLoginAt).toLocaleString()
+                  ? formatDateTime(identity.lastLoginAt)
                   : "never"}
               </div>
               {canWrite && (
@@ -76,7 +77,7 @@ export const UserConnectedAccounts = ({
               <Badge size="sm" subtle variant="warning">
                 Invited
               </Badge>
-              <div>Expires: {new Date(pending.expiresAt).toLocaleString()}</div>
+              <div>Expires: {formatDateTime(pending.expiresAt)}</div>
               {canWrite && (
                 <Button
                   variant="secondary"

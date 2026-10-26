@@ -1,5 +1,6 @@
 import { faClockRotateLeft } from "@fortawesome/free-solid-svg-icons";
 import ObjectVersionsModal from "../modals/ObjectVersionsModal";
+import { formatDateTime } from "@/utils/formatDate";
 import { useMemo, useState } from "react";
 import useInfiniteDeletedObjects, {
   type DeletedObject,
@@ -43,7 +44,7 @@ const DeletedObjectsTable = ({
         title: "Deleted",
         dataKey: "deletedAt",
         width: "14rem",
-        cellElement: (o) => new Date(o.deletedAt).toLocaleString(),
+        cellElement: (o) => formatDateTime(o.deletedAt),
       },
       {
         title: "Actions",

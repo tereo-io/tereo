@@ -13,8 +13,8 @@ import { DeliveryList } from "../deliveries/DeliveryList";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import type { WebhookEndpoint } from "../../api/types";
 import { PageHeader } from "@/components/PageHeader";
+import { formatDateTime } from "@/utils/formatDate";
 import { EndpointStatusBadges } from "../badges";
-import formatDate from "@/utils/formatDate";
 import { userLabel } from "@/lib/refs";
 import { useAuth } from "@/lib/auth";
 import "../styles.css";
@@ -147,15 +147,15 @@ export const WebhookEndpointDetail = () => {
 
       {endpoint.archivedAt && (
         <Alert variant="warning">
-          Archived {formatDate(endpoint.archivedAt)}. It receives no deliveries
-          and is read-only until restored.
+          Archived {formatDateTime(endpoint.archivedAt)}. It receives no
+          deliveries and is read-only until restored.
         </Alert>
       )}
       {!endpoint.archivedAt && endpoint.previousSecretExpiresAt && (
         <Alert variant="primary">
           Secret rotation in progress: deliveries are signed with both the new
           and the previous secret until{" "}
-          {formatDate(endpoint.previousSecretExpiresAt)}.
+          {formatDateTime(endpoint.previousSecretExpiresAt)}.
         </Alert>
       )}
       {!endpoint.archivedAt && endpoint.status === "DISABLED" && (
@@ -270,7 +270,7 @@ const EndpointDetails = ({ endpoint }: { endpoint: WebhookEndpoint }) => {
                 ? [
                     {
                       label: "Previous Secret Signs Until",
-                      value: formatDate(endpoint.previousSecretExpiresAt),
+                      value: formatDateTime(endpoint.previousSecretExpiresAt),
                     },
                   ]
                 : []),
@@ -286,8 +286,8 @@ const EndpointDetails = ({ endpoint }: { endpoint: WebhookEndpoint }) => {
                   </span>
                 ),
               },
-              { label: "Created", value: formatDate(endpoint.createdAt) },
-              { label: "Updated", value: formatDate(endpoint.updatedAt) },
+              { label: "Created", value: formatDateTime(endpoint.createdAt) },
+              { label: "Updated", value: formatDateTime(endpoint.updatedAt) },
             ]}
           />
         </Col>
