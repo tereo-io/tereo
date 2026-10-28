@@ -1,6 +1,10 @@
 // @module-tag unit
 // @module-tag platform
-import { exporterConfigured, initOtel } from "../../telemetry/index.js";
+import {
+  exporterConfigured,
+  initOtel,
+  isHealthProbe,
+} from "../../telemetry/index.js";
 import { afterEach, describe, expect, it } from "vitest";
 
 describe("exporterConfigured", () => {
@@ -34,4 +38,20 @@ describe("initOtel", () => {
     delete process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT;
     expect(initOtel({ serviceName: "tereo" })).toBeNull();
   });
+});
+
+describe("isHealthProbe", () => {
+  it.each(["/health", "/health/ready", "/HEALTH", "/health?probe=1"])(
+    "is true for %s",
+    (url) => {
+      expect(isHealthProbe(url)).toBe(true);
+    }
+  );
+
+  it.each(["/", "/healthz", "/v1/health", "/v1/files/health", undefined])(
+    "is false for %s",
+    (url) => {
+      expect(isHealthProbe(url)).toBe(false);
+    }
+  );
 });
