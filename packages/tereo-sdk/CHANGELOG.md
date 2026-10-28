@@ -1,3 +1,25 @@
+## 0.5.0 (2026-10-28)
+
+### ⚠️  Breaking Changes
+
+- The audit outbox validates entries like core: `changes` and `metadata` up to 64 KiB, ids as GUIDs. Docs cover the new event and bucket-permission limits. ([#31](https://github.com/tereo-io/tereo/pull/31))
+
+  Breaking changes:
+
+  - `FileServiceHealth` no longer has `version`.
+
+- `req.auth` carries the token's `clientId`, `scope` and `audience`; `requireScope(...scopes)` refuses a token missing any of them (`403 insufficient_scope`), and `auth.allowedClients` limits which clients' tokens `requireAuth` accepts. `oauthClientId` is deprecated in favour of `clientId`. ([#26](https://github.com/tereo-io/tereo/pull/26))
+
+  Breaking changes:
+
+  - `testMode` throws unless `NODE_ENV` is `test` or `development`.
+  - `introspectionCacheTtlSeconds` must be between 0 and 300.
+  - `AuthContext` gains required fields `clientId`, `scope` and `audience`; hand-built contexts must set them.
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.4.1 (2026-10-21)
 
 ### 🚀 Features
