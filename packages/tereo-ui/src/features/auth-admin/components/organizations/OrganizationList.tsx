@@ -2,8 +2,8 @@ import ArchiveRestoreOrganizationListButton from "./buttons/ArchiveRestoreOrgani
 import useInfiniteOrganizations from "../../api/organizations/useInfiniteOrganizations";
 import CreateOrganizationModal from "./modals/CreateOrganizationModal";
 import type { Organization } from "../../api/organizations/types";
+import { Link, useNavigate } from "react-router-dom";
 import { formatDate } from "@/utils/formatDate";
-import { useNavigate } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import {
@@ -11,6 +11,7 @@ import {
   InfiniteScroll,
   Page,
   Row,
+  TableCellLink,
   type TableColumn,
   type InfiniteScrollMenu,
 } from "@kosmeo-ui/react";
@@ -29,7 +30,9 @@ export const OrganizationList = () => {
         dataKey: "name",
         cellElement: (org) => (
           <Row size="sm" align="center" wrap>
-            <span>{org.name}</span>
+            <TableCellLink as={Link} to={`/auth-admin/organizations/${org.id}`}>
+              {org.name}
+            </TableCellLink>
             {org.archivedAt !== null && (
               <Badge size="sm" variant="warning">
                 Archived
@@ -81,6 +84,7 @@ export const OrganizationList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Organizations",
+      titleAs: "h1",
       filters: [
         {
           type: "SEARCH",

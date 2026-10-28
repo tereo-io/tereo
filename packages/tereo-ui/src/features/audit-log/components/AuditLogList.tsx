@@ -105,10 +105,21 @@ export const AuditLogList = () => {
     [data, selectedId]
   );
 
+  const entryLink = useCallback(
+    (entry: AuditLogEntry) => {
+      const next = new URLSearchParams(searchParams);
+      next.set("entry", entry.id);
+      return { search: next.toString() };
+    },
+    [searchParams]
+  );
+  const columns = useMemo(
+    () => (isAdmin ? adminAuditLogColumns : auditLogColumns)(entryLink),
+    [isAdmin, entryLink]
+  );
+
   const openEntry = (entry: AuditLogEntry) => {
-    const next = new URLSearchParams(searchParams);
-    next.set("entry", entry.id);
-    setSearchParams(next);
+    setSearchParams(entryLink(entry).search);
   };
 
   const closeEntry = () => {
@@ -127,7 +138,7 @@ export const AuditLogList = () => {
         isLoading={isLoading}
         onQueryChange={handleQueryChange}
         onReload={reload}
-        columns={isAdmin ? adminAuditLogColumns : auditLogColumns}
+        columns={columns}
         onRowClick={openEntry}
         emptyMessage="No audit log entries match these filters"
         hideSelectColumn

@@ -17,6 +17,7 @@ import {
   Select,
   Spinner,
   Table,
+  TableCellButton,
   type TableColumn,
 } from "@kosmeo-ui/react";
 import type {
@@ -83,7 +84,11 @@ export const NotificationLog = () => {
       {
         title: "Subject",
         dataKey: "summary",
-        cellElement: (n) => n.summary ?? "—",
+        cellElement: (n) => (
+          <TableCellButton onClick={() => setOpenId(n.id)}>
+            {n.summary ?? "No subject"}
+          </TableCellButton>
+        ),
       },
       {
         title: "Recipients",

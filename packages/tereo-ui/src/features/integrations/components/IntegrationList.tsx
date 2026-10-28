@@ -2,13 +2,14 @@ import useInfiniteIntegrations from "../api/useInfiniteIntegrations";
 import CreateIntegrationModal from "./modals/CreateIntegrationModal";
 import { IntegrationStatusBadge, ScopeBadge } from "./StatusBadges";
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
+import { Link, useNavigate } from "react-router-dom";
 import type { Integration } from "../api/types";
-import { useNavigate } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import {
   InfiniteScroll,
   Page,
+  TableCellLink,
   type InfiniteScrollMenu,
   type TableColumn,
 } from "@kosmeo-ui/react";
@@ -27,7 +28,9 @@ export const IntegrationList = () => {
         dataKey: "name",
         cellElement: (i) => (
           <span>
-            {i.name}
+            <TableCellLink as={Link} to={`/integrations/${i.id}`}>
+              {i.name}
+            </TableCellLink>
             {i.provisioned && (
               <>
                 {" "}
@@ -68,6 +71,7 @@ export const IntegrationList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Integrations",
+      titleAs: "h1",
       filters: [
         { type: "SEARCH", title: "Name", dataKey: "name" },
         { type: "SEARCH", title: "Slug", dataKey: "slug" },

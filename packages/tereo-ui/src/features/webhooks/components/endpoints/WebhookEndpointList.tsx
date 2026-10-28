@@ -3,15 +3,16 @@ import CreateWebhookEndpointModal from "./modals/CreateWebhookEndpointModal";
 import useWebhooksOrganization from "../../hooks/useWebhooksOrganization";
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import type { WebhookEndpoint } from "../../api/types";
+import { Link, useNavigate } from "react-router-dom";
 import { EndpointStatusBadges } from "../badges";
 import { formatDate } from "@/utils/formatDate";
-import { useNavigate } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import "../styles.css";
 import {
   InfiniteScroll,
   Page,
+  TableCellLink,
   type TableColumn,
   type InfiniteScrollMenu,
 } from "@kosmeo-ui/react";
@@ -37,7 +38,13 @@ export const WebhookEndpointList = () => {
         minWidth: "16rem",
         cellElement: (ep) => (
           <span className="t-webhook-url">
-            {ep.url} {ep.provisioned && <ProvisionedBadge />}
+            <TableCellLink
+              as={Link}
+              to={{ pathname: `/webhooks/endpoints/${ep.id}`, search }}
+            >
+              {ep.url}
+            </TableCellLink>{" "}
+            {ep.provisioned && <ProvisionedBadge />}
           </span>
         ),
       },
@@ -69,12 +76,13 @@ export const WebhookEndpointList = () => {
         cellElement: (ep) => formatDate(ep.createdAt),
       },
     ],
-    []
+    [search]
   );
 
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Webhook Endpoints",
+      titleAs: "h1",
       filters: [
         { type: "SEARCH", title: "URL", dataKey: "url" },
         { type: "SEARCH", title: "Description", dataKey: "description" },

@@ -152,6 +152,7 @@ export const menuFromSearchParams = (
 
   return {
     title: "Audit Log",
+    titleAs: "h1",
     limitOptions: [
       { value: 25, selected: false },
       { value: 50, selected: true },

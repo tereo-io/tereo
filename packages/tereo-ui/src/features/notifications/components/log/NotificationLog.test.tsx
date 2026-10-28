@@ -87,6 +87,14 @@ describe("NotificationLog", () => {
     expect(urls()[0]).toContain("/v1/admin/notifications?");
   });
 
+  it("opens a notification from its subject, a button a keyboard reaches", async () => {
+    renderWithProviders(<NotificationLog />);
+
+    expect(
+      await screen.findByRole("button", { name: "Invoice 1042" })
+    ).toBeVisible();
+  });
+
   it("shows each send's subject and when it was sent, in place of Updated", async () => {
     renderWithProviders(<NotificationLog />);
     await screen.findByText("a@example.com");

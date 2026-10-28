@@ -4,8 +4,8 @@ import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import useInfiniteRoles from "../../api/roles/useInfiniteRoles";
 import { faLock } from "@fortawesome/free-solid-svg-icons";
 import CreateRoleModal from "./modals/CreateRoleModal";
+import { Link, useNavigate } from "react-router-dom";
 import { useServices } from "@/features/services";
-import { useNavigate } from "react-router-dom";
 import { Role } from "../../api/roles/types";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -14,6 +14,7 @@ import {
   Badge,
   InfiniteScroll,
   Page,
+  TableCellLink,
   type TableColumn,
   type InfiniteScrollMenu,
 } from "@kosmeo-ui/react";
@@ -34,7 +35,9 @@ export const RoleList = () => {
         dataKey: "name",
         cellElement: (role) => (
           <span className="t-role-name">
-            {role.name}
+            <TableCellLink as={Link} to={`/auth-admin/roles/${role.id}`}>
+              {role.name}
+            </TableCellLink>
             {role.isSystem && (
               <FontAwesomeIcon
                 icon={faLock}
@@ -100,6 +103,7 @@ export const RoleList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Roles",
+      titleAs: "h1",
       filters: [
         {
           type: "SEARCH",

@@ -10,6 +10,7 @@ import PermissionDetailModal, {
 import {
   InfiniteScroll,
   Page,
+  TableCellButton,
   type TableColumn,
   type InfiniteScrollMenu,
 } from "@kosmeo-ui/react";
@@ -28,7 +29,11 @@ export const PermissionList = () => {
       {
         title: "Name",
         dataKey: "name",
-        cellElement: (p) => <span className="v-mono">{p.name}</span>,
+        cellElement: (p) => (
+          <TableCellButton onClick={() => setPermission(p)}>
+            <span className="v-mono">{p.name}</span>
+          </TableCellButton>
+        ),
       },
       { title: "Display Name", dataKey: "displayName" },
       {
@@ -57,6 +62,7 @@ export const PermissionList = () => {
   const menu: InfiniteScrollMenu = useMemo(
     () => ({
       title: "Permissions",
+      titleAs: "h1",
       filters: [
         {
           type: "SEARCH",
