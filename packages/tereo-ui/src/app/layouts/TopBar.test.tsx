@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { NARROW_SCREEN } from "@/hooks/useMediaQuery";
 import userEvent from "@testing-library/user-event";
+import { NARROW_SCREEN } from "@kosmeo-ui/react";
 import { MemoryRouter } from "react-router-dom";
 import { TopBar } from "./TopBar";
 

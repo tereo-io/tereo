@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, NavLink, Route, Routes } from "react-router-dom";
 import { render, screen } from "@testing-library/react";
-import { NARROW_SCREEN } from "@/hooks/useMediaQuery";
 import userEvent from "@testing-library/user-event";
+import { NARROW_SCREEN } from "@kosmeo-ui/react";
 import { SectionLayout } from "./SectionLayout";
 
 const stubScreen = (narrow: boolean) =>
@@ -40,7 +40,10 @@ const renderLayout = () =>
 const toggle = () => screen.getByRole("button", { name: "Auth Admin" });
 
 describe("SectionLayout", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
 
   describe("on a wide screen", () => {
     beforeEach(() => stubScreen(false));
@@ -52,6 +55,21 @@ describe("SectionLayout", () => {
       expect(
         screen.queryByRole("button", { name: "Auth Admin" })
       ).not.toBeInTheDocument();
+    });
+
+    it("renders the matched page beside the sidebar", () => {
+      renderLayout();
+
+      expect(screen.getByRole("main")).toHaveTextContent("Users page");
+    });
+
+    it("keeps a sidebar collapsed under the key tereo already stored", () => {
+      localStorage.setItem("t-sidebar-collapsed", "true");
+      renderLayout();
+
+      expect(
+        screen.getByRole("button", { name: "Expand sidebar" })
+      ).toBeInTheDocument();
     });
   });
 
