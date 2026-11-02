@@ -253,7 +253,7 @@
               $ref: '../../../components/auth/schemas.yaml#/AdminService'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
-        description: Validation error, or neither `name` nor `isActive` given
+        description: Validation error, or none of `name`, `isActive` or `rateLimitPerSecond` given
       '401':
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':

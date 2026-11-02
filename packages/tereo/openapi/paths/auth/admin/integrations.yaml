@@ -163,7 +163,8 @@
 
       `rateLimitPerSecond` sets the rate limit of the integration's
       service-account user (`null` clears it); a change is audited against
-      that user and emits `auth.user.rate-limit-changed`.
+      that user and emits `auth.user.rate-limit-changed`, and sent alone it
+      emits no `core.integration.updated`.
 
       An audit log entry is created for this action. A
       `core.integration.deactivated` webhook event is emitted on deactivation,

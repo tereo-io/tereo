@@ -1,10 +1,17 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { UserDetail as UserDetailData } from "../../api/users/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import useUpdateSettings from "../../api/settings/useUpdateSettings";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { authMock } from "@/test/authMock";
 import { UserDetail } from "./UserDetail";
+import {
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 
 const denied = vi.hoisted(() => new Set<string>());
 
@@ -33,7 +40,11 @@ const account: UserDetailData = {
   userType: "service_account",
 };
 
-const renderDetail = (user: UserDetailData) => {
+const renderDetail = (
+  user: UserDetailData,
+  client: QueryClient = new QueryClient(),
+  settings: object = { rateLimits: { preAuthPerSecond: 300 } }
+) => {
   authMock.axios.get.mockImplementation(async (path: string) => {
     const url = String(path);
     if (url.endsWith("/roles")) return { data: { roles: [] } };
@@ -43,12 +54,11 @@ const renderDetail = (user: UserDetailData) => {
     if (url.endsWith("/identities"))
       return { data: { identities: [], invites: [] } };
     if (url.endsWith("/identity-providers")) return { data: { data: [] } };
-    if (url.endsWith("/settings"))
-      return { data: { rateLimits: { preAuthPerSecond: 300 } } };
+    if (url.endsWith("/settings")) return { data: settings };
     return { data: user };
   });
   render(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/users/u1"]}>
         <Routes>
           <Route path="/users/:userId" element={<UserDetail />} />
@@ -118,6 +128,26 @@ describe("UserDetail", () => {
     expect(
       await screen.findByRole("link", { name: "Billing" })
     ).toHaveAttribute("href", href);
+  });
+
+  it("renders after a settings save whose response has no rate limits", async () => {
+    const client = new QueryClient();
+    authMock.axios.patch.mockResolvedValue({
+      data: { totpPolicy: "optional", totpRecoveryCodeCount: 10 },
+    });
+    const { result } = renderHook(() => useUpdateSettings(), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    await result.current.mutateAsync({ totpRecoveryCodeCount: 10 });
+
+    renderDetail({ ...person, rateLimitPerSecond: 400 }, client, {
+      totpPolicy: "optional",
+      totpRecoveryCodeCount: 10,
+    });
+
+    expect(await screen.findByText("User Details")).toBeVisible();
   });
 
   describe("rate limit", () => {

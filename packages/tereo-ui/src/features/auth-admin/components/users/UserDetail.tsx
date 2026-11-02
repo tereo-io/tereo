@@ -164,7 +164,7 @@ export const UserDetail = () => {
             <RateLimitField
               value={user.rateLimitPerSecond}
               readOnly={!editable}
-              preAuthLimit={settings?.rateLimits.preAuthPerSecond}
+              preAuthLimit={settings?.rateLimits?.preAuthPerSecond}
               onSave={async (rateLimitPerSecond) => {
                 await updateUser.mutateAsync({
                   id,

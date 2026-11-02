@@ -169,6 +169,27 @@ describe("GET /v1/admin/settings and PATCH /v1/admin/settings", () => {
       expect(data.totpRecoveryCodeCount).toBe(10);
     });
 
+    it("returns the same shape as GET, rate limits included", async () => {
+      const response = await fetch(`${BASE_URL}/v1/admin/settings`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ totpRecoveryCodeCount: 10 }),
+      });
+
+      const data = (await response.json()) as SettingsResponse;
+
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(data.rateLimits).toEqual({
+        perSecond: env.RATE_LIMIT_PER_SECOND,
+        internalPerSecond: env.RATE_LIMIT_INTERNAL_PER_SECOND,
+        preAuthPerSecond: env.RATE_LIMIT_PRE_AUTH_PER_SECOND,
+        preAuthInternalPerSecond: env.RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND,
+      });
+    });
+
     it("should update multiple settings at once", async () => {
       const response = await fetch(`${BASE_URL}/v1/admin/settings`, {
         method: "PATCH",

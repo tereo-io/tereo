@@ -7922,7 +7922,8 @@ paths:
 
         `rateLimitPerSecond` sets the rate limit of the integration's
         service-account user (`null` clears it); a change is audited against
-        that user and emits `auth.user.rate-limit-changed`.
+        that user and emits `auth.user.rate-limit-changed`, and sent alone it
+        emits no `core.integration.updated`.
 
         An audit log entry is created for this action. A
         `core.integration.deactivated` webhook event is emitted on deactivation,
@@ -8454,7 +8455,7 @@ paths:
                 $ref: '#/components/schemas/AdminService'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
-          description: Validation error, or neither `name` nor `isActive` given
+          description: Validation error, or none of `name`, `isActive` or `rateLimitPerSecond` given
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
@@ -8774,7 +8775,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SystemSettings'
+                $ref: '#/components/schemas/SystemSettingsWithRateLimits'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -24045,6 +24046,7 @@ components:
           description: How many recovery codes are generated at enrolment and on regeneration
     UpdateSettingsRequest:
       type: object
+      additionalProperties: false
       properties:
         totpPolicy:
           type: string

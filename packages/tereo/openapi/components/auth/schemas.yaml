@@ -2373,6 +2373,7 @@ SystemSettingsWithRateLimits:
 
 UpdateSettingsRequest:
   type: object
+  additionalProperties: false
   properties:
     totpPolicy:
       type: string

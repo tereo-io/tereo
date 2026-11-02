@@ -71,7 +71,7 @@
         content:
           application/json:
             schema:
-              $ref: '../../../components/auth/schemas.yaml#/SystemSettings'
+              $ref: '../../../components/auth/schemas.yaml#/SystemSettingsWithRateLimits'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
       '401':
