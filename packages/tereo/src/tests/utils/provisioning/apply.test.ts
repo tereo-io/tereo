@@ -315,6 +315,40 @@ describe("applyProvisioning", () => {
     expect((await clientRow(client.clientId)).updatedAt).toEqual(updatedAt);
   });
 
+  it("sets a service account's rate limit on create, changes it, and clears it when the document drops it", async () => {
+    const d = withService(serviceDoc(), { rateLimitPerSecond: 250 });
+    const limit = async () =>
+      (await serviceRow(d.service.slug)).client!.serviceAccountUser!
+        .rateLimitPerSecond;
+
+    const created = await apply(d);
+    expect(created.created).toContain(`service:${d.service.slug}`);
+    expect(await limit()).toBe(250);
+
+    const changed = await apply(withService(d, { rateLimitPerSecond: 300 }));
+    expect(changed.access).toContain(`service:${d.service.slug} rate limit`);
+    expect(await limit()).toBe(300);
+
+    const unchanged = await apply(withService(d, { rateLimitPerSecond: 300 }));
+    expect(unchanged.access).toEqual([]);
+
+    const dropped = await apply(withService(d, { rateLimitPerSecond: null }));
+    expect(dropped.access).toContain(`service:${d.service.slug} rate limit`);
+    expect(await limit()).toBeNull();
+
+    const row = await serviceRow(d.service.slug);
+    const accountId = row.client!.serviceAccountUser!.id;
+    const audits = await prisma.auditLogEntry.findMany({
+      where: { entityId: accountId, entityType: "User" },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(audits.map((a) => a.metadata)).toMatchObject([
+      { rateLimitPerSecond: { from: null, to: 250 } },
+      { rateLimitPerSecond: { from: 250, to: 300 } },
+      { rateLimitPerSecond: { from: 300, to: null } },
+    ]);
+  });
+
   it("updates a changed name, redirect URIs, audience or consent setting", async () => {
     const d = serviceDoc();
     const other = serviceDoc();
@@ -1342,6 +1376,31 @@ describe("applyProvisioning", () => {
       expect(again.created).toEqual([]);
       expect(again.updated).toEqual([]);
       expect(again.access).toEqual([]);
+    });
+
+    it("sets an integration account's rate limit, and clears it when the document drops it", async () => {
+      const spec = integrationSpec({ rateLimitPerSecond: 250 });
+      const { plainSecret: _secret, ...integration } = spec;
+      const limit = async () =>
+        (
+          await prisma.service.findUniqueOrThrow({
+            where: { slug: spec.slug },
+            include: { client: { include: { serviceAccountUser: true } } },
+          })
+        ).client!.serviceAccountUser!.rateLimitPerSecond;
+
+      await applyProvisioning({
+        documents: [doc({ integrations: [integration] })],
+      });
+      expect(await limit()).toBe(250);
+
+      const dropped = await applyProvisioning({
+        documents: [
+          doc({ integrations: [{ ...integration, rateLimitPerSecond: null }] }),
+        ],
+      });
+      expect(dropped.access).toContain(`integration:${spec.slug} rate limit`);
+      expect(await limit()).toBeNull();
     });
 
     it("creates a platform integration with a core role", async () => {

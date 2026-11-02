@@ -127,6 +127,8 @@ export interface ResolvedService {
   internalHost: string | null;
   secretEnv: string;
   secretHash: string;
+  /** The service account's override; null (the tier default) when omitted. */
+  rateLimitPerSecond?: number | null;
   access: ServiceOutput["access"];
   permissions: ServiceOutput["permissions"];
   systemRoles: ServiceOutput["systemRoles"];
@@ -159,6 +161,7 @@ export interface ResolvedIntegration {
   clientId: string;
   secretEnv: string;
   secretHash: string;
+  rateLimitPerSecond?: number | null;
   roles: string[];
   audiences: string[];
 }
@@ -394,6 +397,7 @@ export const parseDocuments = (
             internalHost: internalHosts.get(file) ?? null,
             secretEnv: data.service.secretFrom,
             secretHash: hashOf(data.service.secretFrom),
+            rateLimitPerSecond: data.service.rateLimitPerSecond ?? null,
             access: data.service.access,
             permissions: data.service.permissions,
             systemRoles: data.service.systemRoles,
@@ -436,6 +440,7 @@ export const parseDocuments = (
         clientId: i.slug,
         secretEnv: i.secretFrom,
         secretHash: hashOf(i.secretFrom),
+        rateLimitPerSecond: i.rateLimitPerSecond ?? null,
         roles: i.roles,
         audiences: i.audiences,
       })),

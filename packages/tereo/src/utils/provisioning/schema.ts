@@ -24,6 +24,9 @@ const ClientId = Text.max(64);
 
 const Description = z.string().max(500);
 
+// Applied to the service account's user; omitted clears it.
+const RateLimit = z.number().int().min(1).max(100_000).optional();
+
 const ClientEntry = z
   .object({
     clientId: ClientId,
@@ -66,6 +69,7 @@ const ServiceEntry = z
     // Checked and normalized by load (parseInternalHost).
     internalHost: z.string().max(253).optional(),
     secretFrom: EnvName,
+    rateLimitPerSecond: RateLimit,
     access: z
       .object({
         roles: z.array(Text).default([]),
@@ -88,6 +92,7 @@ const IntegrationEntry = z
     // Org-bound when set: its tokens carry this org_id. Fixed once created.
     organizationId: z.guid().optional(),
     secretFrom: EnvName,
+    rateLimitPerSecond: RateLimit,
     // Role names: org-assignable custom roles of the set when org-bound;
     // otherwise also core's roles and `<slug>/<name>` services' system roles.
     roles: z.array(Text).default([]),

@@ -12,6 +12,7 @@ const full: ProvisioningDocument = {
     namespace: "billing",
     clientId: "billing-service",
     secretFrom: "BILLING_CLIENT_SECRET",
+    rateLimitPerSecond: 250,
     access: { roles: ["file_user"], audiences: ["reports"] },
     permissions: [
       {
@@ -87,6 +88,7 @@ const full: ProvisioningDocument = {
       name: "Acme 3PL",
       organizationId: "6f1c1d62-3a4b-4c58-9d0e-1f2a3b4c5d6e",
       secretFrom: "ACME_3PL_SECRET",
+      rateLimitPerSecond: 50,
       roles: ["auditor"],
       audiences: ["billing"],
     },
@@ -161,6 +163,24 @@ describe("provisioning schema", () => {
       validate({
         version: "1.0.0",
         integrations: [{ slug: "a", name: "A", secretFrom: "A", extra: 1 }],
+      })
+    ).toBe(false);
+  });
+
+  it("bounds rateLimitPerSecond and keeps it off clients", () => {
+    const service = (rateLimitPerSecond: number) => ({
+      version: "1.0.0",
+      service: { slug: "a", name: "A", secretFrom: "A", rateLimitPerSecond },
+    });
+    expect(validate(service(1))).toBe(true);
+    expect(validate(service(100_000))).toBe(true);
+    expect(validate(service(0))).toBe(false);
+    expect(validate(service(100_001))).toBe(false);
+    expect(validate(service(1.5))).toBe(false);
+    expect(
+      validate({
+        version: "1.0.0",
+        clients: [{ clientId: "a", name: "A", rateLimitPerSecond: 5 }],
       })
     ).toBe(false);
   });
