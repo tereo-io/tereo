@@ -76,7 +76,9 @@ download limit.
 `initiateMultipart(bucket, key, input)` → `uploadPart(bucket, uploadId, partNumber, input)` per part →
 `completeMultipart(bucket, uploadId, input)`; `listMultipartParts(bucket, uploadId)` and
 `abortMultipart(bucket, uploadId)` along the way. Parts are sent as `application/octet-stream`; the
-object's type is the `contentType` given to `initiateMultipart`.
+object's type is the `contentType` given to `initiateMultipart`. `initiateMultipart` and
+`completeMultipart` accept `ifMatch` and `ifNoneMatch`. Driving them by hand, a `412` at complete
+leaves the upload open: abort it, or retry the complete, or it stays until it expires.
 
 ### Automatic multipart in `uploadObject`
 
@@ -90,11 +92,12 @@ completes. Set the options under `createCoreClient({ files: { … } })`:
 | `partSizeBytes` | 16 MiB | At least core's `FILE_SERVICE_MIN_PART_SIZE_MB` (5 by default); the client throws below 5 MiB |
 | `partConcurrency` | 4 | Parts in flight; an integer of at least 1 |
 
-The client throws at creation if the part size is under 5 MiB, the threshold is below the part size, or
-the concurrency is not an integer of at least 1.
+`createCoreClient` throws on a part size under 5 MiB, a threshold below the part size, or a concurrency
+that is not an integer of at least 1.
 
 - `ifMatch` and `ifNoneMatch` apply on both paths. Multipart checks them at initiate (advisory) and at
-  complete (authoritative); a `412` at complete leaves the upload open until it is aborted or expires.
+  complete (authoritative). `uploadObject` aborts the upload on a `412` at complete, like any failure
+  after initiate.
 - Memory for a stream: the head read (up to the threshold plus 1 byte) plus up to `partConcurrency`
   parts while the head is consumed, then about `partSizeBytes × (partConcurrency + 1)`. A `Buffer`
   is already in memory.
