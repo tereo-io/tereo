@@ -11,7 +11,13 @@ const withClient = {
       audience: true,
       previousSecretExpiresAt: true,
       serviceAccountUser: {
-        select: { id: true, email: true, name: true, isActive: true },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          isActive: true,
+          rateLimitPerSecond: true,
+        },
       },
     },
   },
@@ -90,6 +96,7 @@ const integrationInclude = {
           email: true,
           name: true,
           isActive: true,
+          rateLimitPerSecond: true,
           userRoles: {
             select: {
               organizationId: true,

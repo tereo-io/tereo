@@ -162,4 +162,23 @@ describe("/v1/admin/services/:id", () => {
       expect(regenerated.status).toBe(200);
     });
   });
+
+  describe("rateLimitPerSecond", () => {
+    it("needs services.write to change and services.read only to see", async () => {
+      const service = await addService(adminToken);
+      const reader = await getTestPrincipalToken({
+        permissions: ["services.read"],
+      });
+      const refused = await api(
+        "PATCH",
+        `/v1/admin/services/${service.id}`,
+        reader,
+        { rateLimitPerSecond: 50 }
+      );
+      expect(refused.status).toBe(403);
+      const read = await api("GET", `/v1/admin/services/${service.id}`, reader);
+      expect(read.status).toBe(200);
+      expect(read.body.rateLimitPerSecond).toBeNull();
+    });
+  });
 });

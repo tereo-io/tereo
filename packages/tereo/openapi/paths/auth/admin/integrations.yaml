@@ -136,7 +136,7 @@
         content:
           application/json:
             schema:
-              $ref: '../../../components/auth/schemas.yaml#/Integration'
+              $ref: '../../../components/auth/schemas.yaml#/AdminIntegration'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
       '401':
@@ -160,6 +160,10 @@
       service-account user and revokes its tokens; no new token is issued
       until it is reactivated. A provisioned integration is `409
       managed_by_provisioning`.
+
+      `rateLimitPerSecond` sets the rate limit of the integration's
+      service-account user (`null` clears it); a change is audited against
+      that user and emits `auth.user.rate-limit-changed`.
 
       An audit log entry is created for this action. A
       `core.integration.deactivated` webhook event is emitted on deactivation,
@@ -188,7 +192,7 @@
         content:
           application/json:
             schema:
-              $ref: '../../../components/auth/schemas.yaml#/Integration'
+              $ref: '../../../components/auth/schemas.yaml#/AdminIntegration'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
       '401':

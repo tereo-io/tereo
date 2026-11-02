@@ -397,4 +397,75 @@ describe("/v1/admin/integrations/:id", () => {
       ).toBe(404);
     });
   });
+
+  describe("rateLimitPerSecond", () => {
+    const patchLimit = (id: string, body: object) =>
+      api("PATCH", `/v1/admin/integrations/${id}`, body);
+    const getLimit = async (id: string) =>
+      (await api("GET", `/v1/admin/integrations/${id}`)).body
+        .rateLimitPerSecond;
+    const accountOf = (id: string) =>
+      prisma.user.findFirstOrThrow({
+        where: { oauthClient: { service: { id } } },
+      });
+
+    it("is set on its own, read back, held by the service account, and cleared with null", async () => {
+      const created = await createIntegration();
+      expect(await getLimit(created.id)).toBeNull();
+
+      const set = await patchLimit(created.id, { rateLimitPerSecond: 50 });
+      expect(set.status).toBe(200);
+      expect(set.body.rateLimitPerSecond).toBe(50);
+      expect(await getLimit(created.id)).toBe(50);
+      const account = await accountOf(created.id);
+      expect(account.rateLimitPerSecond).toBe(50);
+
+      const entries = await prisma.auditLogEntry.findMany({
+        where: { entityId: account.id, entityType: "User", action: "UPDATE" },
+      });
+      expect(entries).toHaveLength(1);
+      expect(entries[0].metadata).toMatchObject({
+        rateLimitPerSecond: { from: null, to: 50 },
+      });
+
+      const cleared = await patchLimit(created.id, {
+        rateLimitPerSecond: null,
+      });
+      expect(cleared.status).toBe(200);
+      expect(await getLimit(created.id)).toBeNull();
+      expect((await accountOf(created.id)).rateLimitPerSecond).toBeNull();
+    });
+
+    it.each([0, 100_001, 1.5, "50"])("refuses %s", async (value) => {
+      const created = await createIntegration();
+      const res = await patchLimit(created.id, { rateLimitPerSecond: value });
+      expect(res.status).toBe(400);
+      expect(await getLimit(created.id)).toBeNull();
+    });
+
+    it("changes with the name in one request", async () => {
+      const created = await createIntegration();
+      const res = await patchLimit(created.id, {
+        name: "Renamed",
+        rateLimitPerSecond: 30,
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        name: "Renamed",
+        rateLimitPerSecond: 30,
+      });
+    });
+
+    it("is refused for a provisioned integration", async () => {
+      const created = await createIntegration();
+      await prisma.service.update({
+        where: { id: created.id },
+        data: { provisioned: true },
+      });
+      const res = await patchLimit(created.id, { rateLimitPerSecond: 50 });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("managed_by_provisioning");
+      expect((await accountOf(created.id)).rateLimitPerSecond).toBeNull();
+    });
+  });
 });

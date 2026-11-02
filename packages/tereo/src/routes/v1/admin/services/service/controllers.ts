@@ -1,10 +1,10 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { disconnectTokenSockets } from "../../../../../websocket/emitters/index.js";
+import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { prisma, type Prisma } from "../../../../../utils/db/prisma.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { CORE_SERVICE_ID } from "../../../../../definitions/index.js";
 import { assertMayTakeOverAccount } from "../../users/user/guards.js";
-import { formatService } from "../../../../../utils/transformers.js";
 import { emitTx, logAuditTx } from "../../../../../utils/outbox.js";
 import { updateServiceTx } from "../../../../../utils/services.js";
 import { validateUser } from "../../../../../utils/auth.js";
@@ -18,6 +18,10 @@ import {
   revokeAccessTx,
   withDeciders,
 } from "../../../../../utils/serviceAccess.js";
+import {
+  formatAdminService,
+  formatService,
+} from "../../../../../utils/transformers.js";
 import {
   validateBody,
   validateParams,
@@ -129,7 +133,7 @@ export const getService = async (req: Request, res: Response) => {
     ]);
 
   res.json({
-    ...formatService(service),
+    ...formatAdminService(service),
     declared: {
       permissions,
       systemRoles: systemRoles.map(({ rolePermissions, ...role }) => ({
@@ -147,31 +151,49 @@ export const getService = async (req: Request, res: Response) => {
   });
 };
 
-/** Rename, deactivate or reactivate. A deactivated service's tokens stop. */
+/**
+ * Rename, deactivate or reactivate, or set its service account's rate limit.
+ * A deactivated service's tokens stop.
+ */
 export const updateService = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const body = validateBody(UpdateServiceSchema, req);
   const existing = await getEditableAppService(req);
 
   const { updated, revokedJtis } = await db.$transaction(async (tx) => {
+    const { rateLimitPerSecond, ...fields } = body;
     const revokedJtis =
-      body.isActive === false
+      fields.isActive === false
         ? await db.accessTokens.revokeByClientId(existing.client.id, tx)
         : [];
-    const updated = await updateServiceTx(
-      tx,
-      existing,
-      body,
-      auth,
-      revokedJtis.length > 0
-        ? { accessTokensRevoked: revokedJtis.length }
-        : undefined
-    );
-    return { updated, revokedJtis };
+    // A limit on its own is not a change to the service, so no service event.
+    if (fields.name !== undefined || fields.isActive !== undefined) {
+      await updateServiceTx(
+        tx,
+        existing,
+        fields,
+        auth,
+        revokedJtis.length > 0
+          ? { accessTokensRevoked: revokedJtis.length }
+          : undefined
+      );
+    }
+    if (rateLimitPerSecond !== undefined) {
+      await setRateLimitTx(
+        tx,
+        auth,
+        existing.accountUserId,
+        rateLimitPerSecond
+      );
+    }
+    return {
+      updated: await db.services.get(existing.id, tx),
+      revokedJtis,
+    };
   });
 
   disconnectTokenSockets(revokedJtis);
-  res.json(formatService(updated));
+  res.json(formatAdminService(updated));
 };
 
 /**

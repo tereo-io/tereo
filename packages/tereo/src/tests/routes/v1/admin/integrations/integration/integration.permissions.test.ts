@@ -160,4 +160,28 @@ describe("/v1/admin/integrations/:id", () => {
       expect(res.status).toBe(200);
     });
   });
+
+  describe("rateLimitPerSecond", () => {
+    it("needs integrations.write to change and integrations.read only to see", async () => {
+      const created = await createIntegration();
+      const reader = await getTestPrincipalToken({
+        permissions: ["integrations.read"],
+      });
+      const refused = await api(
+        "PATCH",
+        `/v1/admin/integrations/${created.id}`,
+        { rateLimitPerSecond: 50 },
+        reader
+      );
+      expect(refused.status).toBe(403);
+      const read = await api(
+        "GET",
+        `/v1/admin/integrations/${created.id}`,
+        undefined,
+        reader
+      );
+      expect(read.status).toBe(200);
+      expect(read.body.rateLimitPerSecond).toBeNull();
+    });
+  });
 });

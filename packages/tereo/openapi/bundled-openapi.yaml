@@ -7895,7 +7895,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Integration'
+                $ref: '#/components/schemas/AdminIntegration'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -7919,6 +7919,10 @@ paths:
         service-account user and revokes its tokens; no new token is issued
         until it is reactivated. A provisioned integration is `409
         managed_by_provisioning`.
+
+        `rateLimitPerSecond` sets the rate limit of the integration's
+        service-account user (`null` clears it); a change is audited against
+        that user and emits `auth.user.rate-limit-changed`.
 
         An audit log entry is created for this action. A
         `core.integration.deactivated` webhook event is emitted on deactivation,
@@ -7948,7 +7952,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Integration'
+                $ref: '#/components/schemas/AdminIntegration'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -8415,6 +8419,11 @@ paths:
         with `409 managed_by_provisioning`: its name and secret come from the
         provisioning documents.
 
+        `rateLimitPerSecond` sets the rate limit of the service's service
+        account (`null` clears it); a change is audited against that user and
+        emits `auth.user.rate-limit-changed`, and sent alone it emits no
+        `core.service.updated`.
+
         An audit log entry is created for this action.
         A `core.service.updated` webhook event is emitted.
       operationId: updateAdminService
@@ -8442,7 +8451,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Service'
+                $ref: '#/components/schemas/AdminService'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
           description: Validation error, or neither `name` nor `isActive` given
@@ -24458,9 +24467,24 @@ components:
             default 24).
           examples:
             - 24
-    ServiceDetail:
+    AdminService:
+      description: A service as `GET` and `PATCH /v1/admin/services/{id}` return it. Webhook payloads and the other service responses carry `Service`, without the rate limit.
       allOf:
         - $ref: '#/components/schemas/Service'
+        - type: object
+          required:
+            - rateLimitPerSecond
+          properties:
+            rateLimitPerSecond:
+              type:
+                - integer
+                - 'null'
+              minimum: 1
+              maximum: 100000
+              description: Requests per second its service account may make, replacing the default for its tier. `null` uses the default.
+    ServiceDetail:
+      allOf:
+        - $ref: '#/components/schemas/AdminService'
         - type: object
           required:
             - declared
@@ -24641,6 +24665,13 @@ components:
         isActive:
           type: boolean
           description: '`false` deactivates the service and its service account and revokes its tokens.'
+        rateLimitPerSecond:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 100000
+          description: Requests per second its service account may make, replacing the default for its tier. `null` clears it.
     RegenerateServiceSecretResponse:
       type: object
       required:
@@ -29434,6 +29465,21 @@ components:
           properties:
             credentials:
               $ref: '#/components/schemas/ServiceCredentials'
+    AdminIntegration:
+      description: An integration as `GET` and `PATCH /v1/admin/integrations/{id}` return it. Webhook payloads and the other integration responses carry `Integration`, without the rate limit.
+      allOf:
+        - $ref: '#/components/schemas/Integration'
+        - type: object
+          required:
+            - rateLimitPerSecond
+          properties:
+            rateLimitPerSecond:
+              type:
+                - integer
+                - 'null'
+              minimum: 1
+              maximum: 100000
+              description: Requests per second its service account may make, replacing the default for its tier. `null` uses the default.
     UpdateIntegrationRequest:
       type: object
       minProperties: 1
@@ -29446,6 +29492,13 @@ components:
         isActive:
           type: boolean
           description: '`false` deactivates the integration and its service account and revokes its tokens.'
+        rateLimitPerSecond:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 100000
+          description: Requests per second its service account may make, replacing the default for its tier. `null` clears it.
     SetIntegrationRolesRequest:
       type: object
       required:

@@ -13,12 +13,18 @@ import {
 } from "../../../../../support/provisioning.js";
 import {
   CORE_SERVICE_ID,
+  DEFAULT_ORGANIZATION_ID,
   SYSTEM_USER_ID,
 } from "../../../../../../definitions/index.js";
 import {
   clientCredentialsToken,
   tokenFor,
 } from "../../../../../support/clientToken.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../../../../../support/webhooks.js";
 
 const ROOT = CORE_URL;
 
@@ -308,6 +314,100 @@ describe("/v1/admin/services/:id", () => {
           )
         ).status
       ).toBe(403);
+    });
+  });
+
+  describe("rateLimitPerSecond", () => {
+    const patchLimit = (id: string, body: object) =>
+      api("PATCH", `/v1/admin/services/${id}`, adminToken, body);
+    const getLimit = async (id: string) =>
+      (await api("GET", `/v1/admin/services/${id}`, adminToken)).body
+        .rateLimitPerSecond;
+    const accountOf = (serviceId: string) =>
+      prisma.user.findFirstOrThrow({
+        where: { oauthClient: { service: { id: serviceId } } },
+      });
+
+    it("is set on its own, read back, held by the service account, and cleared with null", async () => {
+      const service = await addService(adminToken);
+      expect(await getLimit(service.id)).toBeNull();
+
+      const set = await patchLimit(service.id, { rateLimitPerSecond: 50 });
+      expect(set.status).toBe(200);
+      expect(set.body.rateLimitPerSecond).toBe(50);
+      expect(await getLimit(service.id)).toBe(50);
+      expect((await accountOf(service.id)).rateLimitPerSecond).toBe(50);
+
+      const cleared = await patchLimit(service.id, {
+        rateLimitPerSecond: null,
+      });
+      expect(cleared.status).toBe(200);
+      expect(await getLimit(service.id)).toBeNull();
+      expect((await accountOf(service.id)).rateLimitPerSecond).toBeNull();
+    });
+
+    it.each([0, 100_001, 1.5, "50"])("refuses %s", async (value) => {
+      const service = await addService(adminToken);
+      const res = await patchLimit(service.id, { rateLimitPerSecond: value });
+      expect(res.status).toBe(400);
+      expect(await getLimit(service.id)).toBeNull();
+    });
+
+    it("is refused for a provisioned service", async () => {
+      const [service] = await provisionServices([{}]);
+      const res = await patchLimit(service.id, { rateLimitPerSecond: 50 });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("managed_by_provisioning");
+      expect((await accountOf(service.id)).rateLimitPerSecond).toBeNull();
+    });
+
+    it("is audited and emitted against the service account, with other fields in the same request", async () => {
+      const endpoint = await createTestWebhookEndpoint(
+        await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+        { eventTypes: ["auth.user.rate-limit-changed", "core.service.updated"] }
+      );
+      const service = await addService(adminToken);
+      const account = await accountOf(service.id);
+      const deliveries = (eventType: string, entityId: string) =>
+        prisma.webhookDelivery.findMany({
+          where: {
+            webhookEndpointId: endpoint.id,
+            eventType,
+            payload: { path: ["entityId"], equals: entityId },
+          },
+        });
+
+      const res = await patchLimit(service.id, {
+        name: "Renamed",
+        rateLimitPerSecond: 40,
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.name).toBe("Renamed");
+
+      await waitFor(
+        async () =>
+          (await deliveries("auth.user.rate-limit-changed", account.id))
+            .length === 1 &&
+          (await deliveries("core.service.updated", service.id)).length === 1,
+        10_000
+      );
+      const [limit] = await deliveries(
+        "auth.user.rate-limit-changed",
+        account.id
+      );
+      expect(limit.payload).toMatchObject({
+        data: { userId: account.id, rateLimitPerSecond: 40 },
+      });
+      const [updated] = await deliveries("core.service.updated", service.id);
+      expect(JSON.stringify(updated.payload)).not.toContain(
+        "rateLimitPerSecond"
+      );
+      const entry = await prisma.auditLogEntry.findFirstOrThrow({
+        where: { entityId: account.id, entityType: "User", action: "UPDATE" },
+      });
+      expect(entry.metadata).toMatchObject({
+        rateLimitPerSecond: { from: null, to: 40 },
+      });
     });
   });
 });

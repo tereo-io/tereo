@@ -2728,9 +2728,22 @@ ServiceSettings:
       examples:
         - 24
 
-ServiceDetail:
+AdminService:
+  description: A service as `GET` and `PATCH /v1/admin/services/{id}` return it. Webhook payloads and the other service responses carry `Service`, without the rate limit.
   allOf:
     - $ref: '#/Service'
+    - type: object
+      required: [rateLimitPerSecond]
+      properties:
+        rateLimitPerSecond:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 100000
+          description: Requests per second its service account may make, replacing the default for its tier. `null` uses the default.
+
+ServiceDetail:
+  allOf:
+    - $ref: '#/AdminService'
     - type: object
       required: [declared, access, settings]
       properties:
@@ -2863,6 +2876,11 @@ UpdateServiceRequest:
     isActive:
       type: boolean
       description: '`false` deactivates the service and its service account and revokes its tokens.'
+    rateLimitPerSecond:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 100000
+      description: Requests per second its service account may make, replacing the default for its tier. `null` clears it.
 
 RegenerateServiceSecretResponse:
   type: object
@@ -3066,6 +3084,19 @@ IntegrationRole:
       type: boolean
       description: A system role (core's or a service's), not a custom role.
 
+AdminIntegration:
+  description: An integration as `GET` and `PATCH /v1/admin/integrations/{id}` return it. Webhook payloads and the other integration responses carry `Integration`, without the rate limit.
+  allOf:
+    - $ref: '#/Integration'
+    - type: object
+      required: [rateLimitPerSecond]
+      properties:
+        rateLimitPerSecond:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 100000
+          description: Requests per second its service account may make, replacing the default for its tier. `null` uses the default.
+
 IntegrationWithCredentials:
   allOf:
     - $ref: '#/Integration'
@@ -3108,6 +3139,11 @@ UpdateIntegrationRequest:
     isActive:
       type: boolean
       description: '`false` deactivates the integration and its service account and revokes its tokens.'
+    rateLimitPerSecond:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 100000
+      description: Requests per second its service account may make, replacing the default for its tier. `null` clears it.
 
 SetIntegrationRolesRequest:
   type: object

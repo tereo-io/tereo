@@ -219,6 +219,11 @@
       with `409 managed_by_provisioning`: its name and secret come from the
       provisioning documents.
 
+      `rateLimitPerSecond` sets the rate limit of the service's service
+      account (`null` clears it); a change is audited against that user and
+      emits `auth.user.rate-limit-changed`, and sent alone it emits no
+      `core.service.updated`.
+
       An audit log entry is created for this action.
       A `core.service.updated` webhook event is emitted.
     operationId: updateAdminService
@@ -245,7 +250,7 @@
         content:
           application/json:
             schema:
-              $ref: '../../../components/auth/schemas.yaml#/Service'
+              $ref: '../../../components/auth/schemas.yaml#/AdminService'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
         description: Validation error, or neither `name` nor `isActive` given

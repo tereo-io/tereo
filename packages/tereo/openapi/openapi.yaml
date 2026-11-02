@@ -1715,6 +1715,8 @@ components:
       $ref: './components/auth/schemas.yaml#/ServiceAccessListItem'
     ServiceSettings:
       $ref: './components/auth/schemas.yaml#/ServiceSettings'
+    AdminService:
+      $ref: './components/auth/schemas.yaml#/AdminService'
     ServiceDetail:
       $ref: './components/auth/schemas.yaml#/ServiceDetail'
     CreateServiceRequest:
