@@ -79,6 +79,13 @@ export const uploadObject = async (
   key: string,
   input: UploadObjectInput
 ): Promise<FileServiceObject> => {
+  // One PUT needs the whole body in hand to retry it. A stream goes through
+  // `FileServiceClient.uploadObject`, which buffers it or sends it as multipart.
+  if (!Buffer.isBuffer(input.file)) {
+    throw new InvalidRequestInputError(
+      "@tereo-io/sdk: requests.files.uploadObject takes a Buffer; pass a stream to core.files.uploadObject"
+    );
+  }
   const form = new FormData();
   form.append("file", input.file, {
     filename: key,

@@ -1,3 +1,5 @@
+import type { Readable } from "stream";
+
 /**
  * Custom object metadata.
  *
@@ -127,7 +129,11 @@ export interface PurgeNonCurrentVersionsResponse {
 }
 
 export interface UploadObjectInput {
-  file: Buffer;
+  /**
+   * The content. `core.files.uploadObject` sends one PUT up to its multipart
+   * threshold and a multipart upload above it; a stream is read once.
+   */
+  file: Buffer | Readable;
   contentType?: string;
   metadata?: FileServiceObjectMetadata;
   /**

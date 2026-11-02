@@ -1,7 +1,9 @@
 import { getOriginalStatus, requests } from "../handler.js";
 import { FileCache } from "../utils/fileCache.js";
 import {
+  readUpTo,
   resolveUploadOptions,
+  uploadMultipart,
   type UploadOptions,
 } from "../utils/multipartUpload.js";
 import type {
@@ -88,14 +90,40 @@ export class FileServiceClient {
     key: string,
     data: UploadObjectInput
   ): Promise<FileServiceObject> {
+    const { file, ...input } = data;
     if (this.testMode) {
-      return this.makeMockObject(bucket, key, data);
+      let sizeBytes = 0;
+      if (Buffer.isBuffer(file)) sizeBytes = file.length;
+      else for await (const chunk of file) sizeBytes += chunk.length;
+      return this.makeMockObject(bucket, key, input, sizeBytes);
     }
-    const result = (await requests.files.uploadObject(
-      bucket,
-      key,
-      data
-    )) as unknown as FileServiceObject;
+    const options = this.uploadOptions;
+    let result: FileServiceObject;
+    if (Buffer.isBuffer(file)) {
+      result =
+        file.length <= options.thresholdBytes
+          ? await this.putObject(bucket, key, { ...input, file })
+          : await uploadMultipart(
+              bucket,
+              key,
+              { buffer: file },
+              input,
+              options
+            );
+    } else {
+      // One byte past the threshold tells a stream of exactly the threshold
+      // (one PUT) from a longer one.
+      const { head, ended } = await readUpTo(file, options.thresholdBytes + 1);
+      result = ended
+        ? await this.putObject(bucket, key, { ...input, file: head })
+        : await uploadMultipart(
+            bucket,
+            key,
+            { head, rest: file },
+            input,
+            options
+          );
+    }
     // Drop any cached per-object metadata locally. The server also broadcasts
     // an invalidation for the rest of the fleet.
     await this.cache.del(objectCacheKey(bucket, key));
@@ -800,16 +828,29 @@ export class FileServiceClient {
   // Internals
   // ---------------------------------------------------------------------------
 
+  private async putObject(
+    bucket: string,
+    key: string,
+    data: UploadObjectInput & { file: Buffer }
+  ): Promise<FileServiceObject> {
+    return (await requests.files.uploadObject(
+      bucket,
+      key,
+      data
+    )) as unknown as FileServiceObject;
+  }
+
   private makeMockObject(
     bucket: string,
     key: string,
-    data: UploadObjectInput
+    data: Omit<UploadObjectInput, "file">,
+    sizeBytes: number
   ): FileServiceObject {
     return {
       id: "00000000-0000-4000-8000-000000000000",
       key,
       contentType: data.contentType ?? "application/octet-stream",
-      sizeBytes: String(data.file.length),
+      sizeBytes: String(sizeBytes),
       etag: `test-etag-${bucket}-${key}`,
       metadata: data.metadata ?? null,
       tags: data.tags ?? [],
