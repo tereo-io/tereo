@@ -161,3 +161,8 @@ export interface UploadObjectInput {
    */
   idempotencyKey?: string;
 }
+
+/** `requests.files.uploadObject`'s input: one PUT, so the whole body in hand. */
+export type RawUploadObjectInput = Omit<UploadObjectInput, "file"> & {
+  file: Buffer;
+};

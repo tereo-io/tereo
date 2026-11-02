@@ -46,6 +46,7 @@ import type {
   PresignObjectInput,
   PresignObjectResponse,
   PurgeNonCurrentVersionsResponse,
+  RawUploadObjectInput,
   RestoreObjectVersionResponse,
   ListSharesOptions,
   ListSharesResponse,
@@ -842,7 +843,7 @@ export class FileServiceClient {
   private async putObject(
     bucket: string,
     key: string,
-    data: UploadObjectInput & { file: Buffer }
+    data: RawUploadObjectInput
   ): Promise<FileServiceObject> {
     return (await requests.files.uploadObject(
       bucket,

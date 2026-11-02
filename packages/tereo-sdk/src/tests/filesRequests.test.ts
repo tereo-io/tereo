@@ -10,6 +10,7 @@ import { getUser } from "../requests/auth/users/index.js";
 import { describe, expect, it, vi } from "vitest";
 import { readdirSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
+import { Readable } from "stream";
 import { join } from "path";
 import {
   completeMultipart,
@@ -46,6 +47,18 @@ describe("object key paths", () => {
     await expect(
       uploadObject("b", "../x", { file: Buffer.from("x") })
     ).rejects.toThrow(InvalidRequestInputError);
+    expect(tryHandleRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("raw uploadObject", () => {
+  it("refuses a stream from a JavaScript caller without sending", async () => {
+    tryHandleRequest.mockReset();
+    const file = Readable.from([Buffer.from("x")]);
+    // @ts-expect-error the raw request takes only a Buffer
+    await expect(uploadObject("b", "k", { file })).rejects.toThrow(
+      InvalidRequestInputError
+    );
     expect(tryHandleRequest).not.toHaveBeenCalled();
   });
 });
