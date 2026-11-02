@@ -6,6 +6,7 @@ import { BlockList, isIPv4, isIPv6 } from "node:net";
 import { createHash, randomUUID } from "node:crypto";
 import { redactUrl } from "../telemetry/redact.js";
 import { logger } from "./logger.js";
+import env from "../env.js";
 
 // When Redis is unreachable:
 // - Credential limiters (createFailureLimiter, createBackoffLimiter and the
@@ -17,12 +18,6 @@ import { logger } from "./logger.js";
 // All of them give up at once while the client is not "ready", rather than
 // waiting in ioredis's offline queue for Redis to come back.
 
-const EXTERNAL_POINTS = 100;
-const INTERNAL_POINTS = 1000;
-// Per IP, before authentication: above the per-user limit, so a NAT shared by
-// several users reaches their own limits first.
-const PRE_AUTH_EXTERNAL_POINTS = 300;
-const PRE_AUTH_INTERNAL_POINTS = 1000;
 const DURATION_SECONDS = 1;
 const UNAVAILABLE_RETRY_AFTER_SECONDS = 5;
 
@@ -272,8 +267,8 @@ export function createRateLimitMiddleware(
 ): RequestHandler {
   return createTieredLimiter({
     keyPrefix: `${serviceName}:ratelimit`,
-    externalPoints: EXTERNAL_POINTS,
-    internalPoints: INTERNAL_POINTS,
+    externalPoints: env.RATE_LIMIT_PER_SECOND,
+    internalPoints: env.RATE_LIMIT_INTERNAL_PER_SECOND,
     headersOnPass: true,
     getCost: opts.getCost,
     classify: (req) => {
@@ -303,8 +298,8 @@ export function createPreAuthRateLimitMiddleware(
 ): RequestHandler {
   return createTieredLimiter({
     keyPrefix: `${serviceName}:ratelimit:${scope}`,
-    externalPoints: PRE_AUTH_EXTERNAL_POINTS,
-    internalPoints: PRE_AUTH_INTERNAL_POINTS,
+    externalPoints: env.RATE_LIMIT_PRE_AUTH_PER_SECOND,
+    internalPoints: env.RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND,
     headersOnPass: false,
     classify: (req) => ({
       internal: isInternalByNetwork(req),
