@@ -48,7 +48,9 @@ logLevel: info
 # Requests per second; empty uses core's default (100 / 1000 / 300 / 1000).
 # perSecond is per user (per IP when unauthenticated); internalPerSecond is the
 # tier for service accounts on an internal network address. The preAuth pair
-# is per IP before authentication and must not be below its counterpart.
+# is per IP before authentication and must not be below its counterpart:
+# core refuses to start otherwise, so raising perSecond above 300 also needs
+# preAuthPerSecond raised (likewise the internal pair above 1000).
 rateLimits:
   perSecond: ""
   internalPerSecond: ""
