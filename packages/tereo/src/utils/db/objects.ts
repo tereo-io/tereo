@@ -6,6 +6,10 @@ import * as contentBlobs from "./contentBlobs.js";
 import { escapeLike } from "./like.js";
 import { prisma } from "./prisma.js";
 import {
+  assertWritePreconditions,
+  type EtagPreconditions,
+} from "../writePreconditions.js";
+import {
   BadRequestError,
   ConflictError,
   NotFoundError,
@@ -45,11 +49,7 @@ export interface UpsertWithBlobInput {
    * `*`), checked under the object's row lock so a write committed after the
    * caller's early check can't slip past them.
    */
-  preconditions?: {
-    ifMatch: string[] | null;
-    ifNoneMatch?: string[] | null;
-    ifNoneMatchWildcard: boolean;
-  };
+  preconditions?: EtagPreconditions;
   /**
    * When supplied, marks the given multipart upload as completed inside the
    * same transaction that writes the object + version. Ensures completion +
@@ -169,6 +169,26 @@ const checkByKeyForUpdate = async (
     FOR UPDATE
   `;
   return result.length === 0 ? null : { id: result[0].id };
+};
+
+/**
+ * What a write to `objectKey` would overwrite, read without locks: a snapshot
+ * for an early, advisory precondition check. `upsertWithBlob` decides.
+ */
+export const getWriteState = async (
+  bucketId: number,
+  objectKey: string
+): Promise<{ existing: boolean; currentEtag: string | null }> => {
+  const object = await prisma.object.findFirst({
+    where: { bucketId, objectKey, deletedAt: null, thumbnailFor: null },
+    select: { id: true },
+  });
+  if (!object) return { existing: false, currentEtag: null };
+  const current = await prisma.objectVersion.findFirst({
+    where: { objectId: object.id, isCurrent: true, deletedAt: null },
+    select: { etag: true },
+  });
+  return { existing: true, currentEtag: current?.etag ?? null };
 };
 
 /**
@@ -465,34 +485,26 @@ export const upsertWithBlob = async (
     const releasedBlobHashes: string[] = [];
     const completingUploadId = data.markMultipartCompleted?.uploadId;
 
-    if (data.preconditions?.ifNoneMatchWildcard && existingRow) {
-      throw new PreconditionFailedError(
-        "Object already exists (If-None-Match: *)"
+    const preconditions = data.preconditions;
+    if (preconditions) {
+      const needsCurrent =
+        preconditions.ifMatch || preconditions.ifNoneMatch?.length;
+      const current =
+        needsCurrent && existingRow
+          ? await tx.objectVersion.findFirst({
+              where: {
+                objectId: existingRow.id,
+                isCurrent: true,
+                deletedAt: null,
+              },
+              select: { etag: true },
+            })
+          : null;
+      assertWritePreconditions(
+        preconditions,
+        Boolean(existingRow),
+        current?.etag ?? null
       );
-    }
-    const ifMatch = data.preconditions?.ifMatch;
-    const ifNoneMatch = data.preconditions?.ifNoneMatch;
-    if (ifMatch || ifNoneMatch?.length) {
-      const current = existingRow
-        ? await tx.objectVersion.findFirst({
-            where: {
-              objectId: existingRow.id,
-              isCurrent: true,
-              deletedAt: null,
-            },
-            select: { etag: true },
-          })
-        : null;
-      if (
-        ifMatch &&
-        (!current?.etag ||
-          !(ifMatch.includes("*") || ifMatch.includes(current.etag)))
-      ) {
-        throw new PreconditionFailedError("ETag mismatch (If-Match)");
-      }
-      if (current?.etag && ifNoneMatch?.includes(current.etag)) {
-        throw new PreconditionFailedError("ETag matches (If-None-Match)");
-      }
     }
 
     const priorCurrent = existingRow

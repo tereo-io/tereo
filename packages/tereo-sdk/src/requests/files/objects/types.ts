@@ -1,3 +1,5 @@
+import type { Readable } from "stream";
+
 /**
  * Custom object metadata.
  *
@@ -127,7 +129,11 @@ export interface PurgeNonCurrentVersionsResponse {
 }
 
 export interface UploadObjectInput {
-  file: Buffer;
+  /**
+   * The content. `core.files.uploadObject` sends one PUT up to its multipart
+   * threshold and a multipart upload above it; a stream is read once.
+   */
+  file: Buffer | Readable;
   contentType?: string;
   metadata?: FileServiceObjectMetadata;
   /**
@@ -151,7 +157,15 @@ export interface UploadObjectInput {
    * this header on every upload PUT — if omitted here, the SDK generates a
    * UUIDv7. Pass a deterministic, content-bound value (e.g.
    * `invoice:{invoiceNumber}:pdf`) when you want retries across process
-   * boundaries to dedupe to the first successful upload.
+   * boundaries to dedupe to the first successful upload. Above the multipart
+   * threshold it dedupes only retries of the complete: a repeated
+   * `uploadObject` starts a new upload, so dedupe across processes there
+   * needs `ifNoneMatch: "*"` or `ifMatch`.
    */
   idempotencyKey?: string;
 }
+
+/** `requests.files.uploadObject`'s input: one PUT, so the whole body in hand. */
+export type RawUploadObjectInput = Omit<UploadObjectInput, "file"> & {
+  file: Buffer;
+};

@@ -10,8 +10,10 @@ import { getUser } from "../requests/auth/users/index.js";
 import { describe, expect, it, vi } from "vitest";
 import { readdirSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
+import { Readable } from "stream";
 import { join } from "path";
 import {
+  completeMultipart,
   initiateMultipart,
   uploadPart,
 } from "../requests/files/multipart/index.js";
@@ -45,6 +47,18 @@ describe("object key paths", () => {
     await expect(
       uploadObject("b", "../x", { file: Buffer.from("x") })
     ).rejects.toThrow(InvalidRequestInputError);
+    expect(tryHandleRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("raw uploadObject", () => {
+  it("refuses a stream from a JavaScript caller without sending", async () => {
+    tryHandleRequest.mockReset();
+    const file = Readable.from([Buffer.from("x")]);
+    // @ts-expect-error the raw request takes only a Buffer
+    await expect(uploadObject("b", "k", { file })).rejects.toThrow(
+      InvalidRequestInputError
+    );
     expect(tryHandleRequest).not.toHaveBeenCalled();
   });
 });
@@ -190,6 +204,47 @@ describe("upload headers", () => {
       ).rejects.toThrow(InvalidRequestInputError);
     }
     expect(tryHandleRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("multipart preconditions", () => {
+  const lastRequest = () =>
+    tryHandleRequest.mock.calls.at(-1)?.[0] as {
+      headers?: Record<string, string>;
+      data: Record<string, unknown>;
+    };
+
+  it("initiateMultipart sends ifMatch / ifNoneMatch as headers", async () => {
+    tryHandleRequest.mockReset();
+    tryHandleRequest.mockResolvedValue({ data: {} });
+    await initiateMultipart("b", "k", {
+      contentType: "text/plain",
+      ifMatch: '"abc"',
+      ifNoneMatch: "*",
+    });
+    const req = lastRequest();
+    expect(req.headers).toEqual({ "If-Match": '"abc"', "If-None-Match": "*" });
+    expect(req.data).not.toHaveProperty("ifMatch");
+    expect(req.data).not.toHaveProperty("ifNoneMatch");
+  });
+
+  it("completeMultipart sends ifMatch / ifNoneMatch as headers beside the idempotency key", async () => {
+    tryHandleRequest.mockReset();
+    tryHandleRequest.mockResolvedValue({ data: {} });
+    await completeMultipart("b", "u", {
+      parts: [],
+      idempotencyKey: "idem",
+      ifMatch: '"abc"',
+      ifNoneMatch: "*",
+    });
+    const req = lastRequest();
+    expect(req.headers).toEqual({
+      "Idempotency-Key": "idem",
+      "If-Match": '"abc"',
+      "If-None-Match": "*",
+    });
+    expect(req.data).not.toHaveProperty("ifMatch");
+    expect(req.data).not.toHaveProperty("ifNoneMatch");
   });
 });
 

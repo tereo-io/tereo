@@ -102,6 +102,7 @@ export type {
   PresignObjectInput,
   PresignObjectResponse,
   PresignOperation,
+  RawUploadObjectInput,
   LifecyclePolicy,
   UpsertLifecyclePolicyInput,
   InitiateMultipartInput,

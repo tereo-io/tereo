@@ -14,6 +14,16 @@ import {
 
 export * from "./types.js";
 
+const preconditionHeaders = (input: {
+  ifMatch?: string;
+  ifNoneMatch?: string;
+}): Record<string, string> => ({
+  ...(input.ifMatch !== undefined && { "If-Match": input.ifMatch }),
+  ...(input.ifNoneMatch !== undefined && {
+    "If-None-Match": input.ifNoneMatch,
+  }),
+});
+
 /**
  * Initiate a multipart upload. Sent to the bucket-level `/multipart` route;
  * the object key travels in the body so the URL has no splat. Downstream
@@ -38,6 +48,7 @@ export const initiateMultipart = async (
         metadata: input.metadata,
         tags: input.tags,
       },
+      headers: preconditionHeaders(input),
     },
     "FS_0100",
     `Failed to initiate multipart upload for ${bucket}/${key}`
@@ -102,7 +113,7 @@ export const completeMultipart = async (
   uploadId: string,
   input: CompleteMultipartInput
 ): Promise<CompleteMultipartResponse> => {
-  const { idempotencyKey, ...body } = input;
+  const { idempotencyKey, ifMatch, ifNoneMatch, ...body } = input;
   const res = await tryHandleRequest<CompleteMultipartResponse>(
     {
       clientName: CORE_CLIENT,
@@ -112,6 +123,7 @@ export const completeMultipart = async (
       data: body,
       headers: {
         "Idempotency-Key": idempotencyKey ?? randomUUID(),
+        ...preconditionHeaders({ ifMatch, ifNoneMatch }),
       },
     },
     "FS_0103",

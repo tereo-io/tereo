@@ -1,4 +1,6 @@
+import { resolveUploadOptions } from "./utils/multipartUpload.js";
 import { NotificationsClient } from "./clients/notifications.js";
+import type { FileServiceClientConfig } from "./types/files.js";
 import type { AuthServiceClientConfig } from "./types/auth.js";
 import { assertTestModeAllowed } from "./utils/testTokens.js";
 import { WebhookServiceClient } from "./clients/webhooks.js";
@@ -38,6 +40,8 @@ export interface CoreClientOptions {
   production?: boolean;
   /** Public routes, test-token permissions and introspection caching for `auth`. */
   auth?: AuthServiceClientConfig;
+  /** Multipart upload thresholds and part sizing for `files.uploadObject`. */
+  files?: FileServiceClientConfig;
   /**
    * For an app service's tests: `auth` accepts forged `test-token-…` tokens
    * and stubs user and organization lookups, and `files` answers with stubs.
@@ -118,6 +122,8 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
   ) {
     throw new Error("@tereo-io/sdk: testServiceUserId must be a UUID");
   }
+  // Before createHandler, which claims the one-client-per-process slot.
+  resolveUploadOptions(options.files);
   const url = option(options.url, "CORE_URL", "url");
   const clientId = option(options.clientId, "CORE_CLIENT_ID", "clientId");
   const handler = createHandler({
@@ -155,7 +161,7 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
       testMode,
       options.testServiceUserId
     ),
-    files: new FileServiceClient(undefined, testMode),
+    files: new FileServiceClient(options.files, testMode),
     webhooks,
     audit,
     notifications,

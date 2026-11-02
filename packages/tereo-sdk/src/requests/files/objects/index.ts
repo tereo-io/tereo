@@ -16,7 +16,7 @@ import {
   ListObjectsResponse,
   PatchObjectInput,
   PurgeNonCurrentVersionsResponse,
-  UploadObjectInput,
+  RawUploadObjectInput,
 } from "./types.js";
 
 export * from "./types.js";
@@ -77,8 +77,16 @@ const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 export const uploadObject = async (
   bucket: string,
   key: string,
-  input: UploadObjectInput
+  input: RawUploadObjectInput
 ): Promise<FileServiceObject> => {
+  // One PUT needs the whole body in hand to retry it. A stream goes through
+  // `FileServiceClient.uploadObject`, which buffers it or sends it as multipart.
+  // Checked at runtime too, for JavaScript callers.
+  if (!Buffer.isBuffer(input.file)) {
+    throw new InvalidRequestInputError(
+      "@tereo-io/sdk: requests.files.uploadObject takes a Buffer; pass a stream to core.files.uploadObject"
+    );
+  }
   const form = new FormData();
   form.append("file", input.file, {
     filename: key,

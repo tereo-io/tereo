@@ -1,5 +1,13 @@
 import { getOriginalStatus, requests } from "../handler.js";
 import { FileCache } from "../utils/fileCache.js";
+import type { Readable } from "stream";
+import {
+  asUploadSource,
+  readUpTo,
+  resolveUploadOptions,
+  uploadMultipart,
+  type UploadOptions,
+} from "../utils/multipartUpload.js";
 import type {
   Bucket,
   BucketPermission,
@@ -38,6 +46,7 @@ import type {
   PresignObjectInput,
   PresignObjectResponse,
   PurgeNonCurrentVersionsResponse,
+  RawUploadObjectInput,
   RestoreObjectVersionResponse,
   ListSharesOptions,
   ListSharesResponse,
@@ -61,6 +70,7 @@ const TEST_USER = { id: "test", email: "test@example.com", name: "Test" };
 
 export class FileServiceClient {
   private readonly cache: FileCache = new FileCache();
+  private readonly uploadOptions: UploadOptions;
 
   /**
    * Cache prefix, TTL and Redis are standardized. `testMode` answers every
@@ -68,9 +78,11 @@ export class FileServiceClient {
    * own `testMode`.
    */
   constructor(
-    _config?: FileServiceClientConfig,
+    config?: FileServiceClientConfig,
     private readonly testMode = false
-  ) {}
+  ) {
+    this.uploadOptions = resolveUploadOptions(config);
+  }
 
   // ---------------------------------------------------------------------------
   // Objects (no byte caching)
@@ -81,14 +93,30 @@ export class FileServiceClient {
     key: string,
     data: UploadObjectInput
   ): Promise<FileServiceObject> {
+    const { file: given, ...input } = data;
+    const file = asUploadSource(given);
     if (this.testMode) {
-      return this.makeMockObject(bucket, key, data);
+      let sizeBytes = 0;
+      if (Buffer.isBuffer(file)) sizeBytes = file.length;
+      else for await (const chunk of file) sizeBytes += chunk.length;
+      return this.makeMockObject(bucket, key, input, sizeBytes);
     }
-    const result = (await requests.files.uploadObject(
-      bucket,
-      key,
-      data
-    )) as unknown as FileServiceObject;
+    const options = this.uploadOptions;
+    let result: FileServiceObject;
+    if (Buffer.isBuffer(file)) {
+      result =
+        file.length <= options.thresholdBytes
+          ? await this.putObject(bucket, key, { ...input, file })
+          : await uploadMultipart(
+              bucket,
+              key,
+              { buffer: file },
+              input,
+              options
+            );
+    } else {
+      result = await this.uploadStream(bucket, key, file, input);
+    }
     // Drop any cached per-object metadata locally. The server also broadcasts
     // an invalidation for the rest of the fleet.
     await this.cache.del(objectCacheKey(bucket, key));
@@ -793,16 +821,48 @@ export class FileServiceClient {
   // Internals
   // ---------------------------------------------------------------------------
 
+  /**
+   * Returns the upload's promise without awaiting it, so this frame, and the
+   * head read from the stream, is gone while the parts upload.
+   */
+  private async uploadStream(
+    bucket: string,
+    key: string,
+    file: Readable,
+    input: Omit<UploadObjectInput, "file">
+  ): Promise<FileServiceObject> {
+    const options = this.uploadOptions;
+    // One byte past the threshold tells a stream of exactly the threshold
+    // (one PUT) from a longer one.
+    const { head, ended } = await readUpTo(file, options.thresholdBytes + 1);
+    return ended
+      ? this.putObject(bucket, key, { ...input, file: head })
+      : uploadMultipart(bucket, key, { head, rest: file }, input, options);
+  }
+
+  private async putObject(
+    bucket: string,
+    key: string,
+    data: RawUploadObjectInput
+  ): Promise<FileServiceObject> {
+    return (await requests.files.uploadObject(
+      bucket,
+      key,
+      data
+    )) as unknown as FileServiceObject;
+  }
+
   private makeMockObject(
     bucket: string,
     key: string,
-    data: UploadObjectInput
+    data: Omit<UploadObjectInput, "file">,
+    sizeBytes: number
   ): FileServiceObject {
     return {
       id: "00000000-0000-4000-8000-000000000000",
       key,
       contentType: data.contentType ?? "application/octet-stream",
-      sizeBytes: String(data.file.length),
+      sizeBytes: String(sizeBytes),
       etag: `test-etag-${bucket}-${key}`,
       metadata: data.metadata ?? null,
       tags: data.tags ?? [],

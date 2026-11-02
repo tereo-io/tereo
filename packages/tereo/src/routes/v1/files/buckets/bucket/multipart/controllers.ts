@@ -1,9 +1,9 @@
+import { assertWritePreconditions } from "../../../../../../utils/writePreconditions.js";
 import { getAccessibleBucket } from "../../../../../../utils/bucketAccess.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { initiateBodySchema, initiateParamsSchema } from "./schemas.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { assertMultipartFits, assertStagingFits } from "./utils.js";
-import { assertObjectKeyNotReserved } from "../objects/utils.js";
 import db from "../../../../../../utils/db/index.js";
 import { Request, Response } from "express";
 import env from "../../../../../../env.js";
@@ -16,6 +16,10 @@ import {
   logAuditTx,
   emitTx,
 } from "../../../../../../utils/outbox.js";
+import {
+  assertObjectKeyNotReserved,
+  parseEtagPreconditions,
+} from "../objects/utils.js";
 
 export const initiateMultipart = async (req: Request, res: Response) => {
   const auth = validateUser(req);
@@ -26,6 +30,16 @@ export const initiateMultipart = async (req: Request, res: Response) => {
   assertObjectKeyNotReserved(body.objectKey);
   if (body.expectedSize !== undefined) {
     assertMultipartFits({ expectedSize: null }, bucket, body.expectedSize);
+  }
+  // Advisory: complete re-checks under lock. Failing here spares the caller
+  // sending every part first.
+  if (req.header("If-Match") || req.header("If-None-Match")) {
+    const state = await db.objects.getWriteState(bucket.id, body.objectKey);
+    assertWritePreconditions(
+      parseEtagPreconditions(req),
+      state.existing,
+      state.currentEtag
+    );
   }
 
   const upload = await db.$transaction(async (tx) => {

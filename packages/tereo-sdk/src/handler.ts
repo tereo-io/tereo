@@ -148,6 +148,7 @@ export type {
   ListObjectsResponse,
   PatchObjectInput,
   PurgeNonCurrentVersionsResponse,
+  RawUploadObjectInput,
   UploadObjectInput,
 } from "./requests/files/objects/types.js";
 
