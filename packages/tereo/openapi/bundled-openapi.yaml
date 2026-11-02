@@ -11217,7 +11217,9 @@ paths:
         only, `If-Match: "<etag>"` replaces only that version. They are checked
         when the object is written, after the parts are assembled. A failed
         precondition is `412 precondition_failed` and leaves the upload active,
-        to be retried or aborted.
+        to be retried or aborted. A replay of a completed request, under the
+        same idempotency key, returns the stored result without re-checking
+        preconditions.
 
         An audit log entry is created. For a bucket in an organization a
         `file-service.multipart.completed` webhook event is emitted, plus
