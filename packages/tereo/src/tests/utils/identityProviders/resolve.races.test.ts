@@ -161,6 +161,29 @@ describe("resolveLoginIdentity", () => {
         findInvite.mockRestore();
       }
     });
+
+    it("signs in a subject whose invite a concurrent sign-in claimed before its invite check", async () => {
+      const provider = await makeProvider();
+      const user = await createTestUser();
+      await invite(user.id, provider.id);
+      const id = identity({ email: user.email });
+      expect(await resolveLoginIdentity(provider, id)).toEqual({
+        userId: user.id,
+      });
+
+      // As if the other sign-in committed its link, and with it deleted the
+      // invite, between this one's lookup by subject and its invite check.
+      const lookup = vi
+        .spyOn(db.userIdentities, "getByProviderSubject")
+        .mockResolvedValueOnce(null);
+      try {
+        expect(await resolveLoginIdentity(provider, id)).toEqual({
+          userId: user.id,
+        });
+      } finally {
+        lookup.mockRestore();
+      }
+    });
   });
 
   describe("concurrent first sign-ins of two subjects with one email", () => {
