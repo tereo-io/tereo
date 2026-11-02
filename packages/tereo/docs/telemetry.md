@@ -63,12 +63,14 @@ defaults to `none` in that case); metrics also need `OTEL_METRICS_EXPORTER=otlp`
 
 ## Instrumentations
 
-`getNodeAutoInstrumentations()` is enabled with four exclusions:
+`getNodeAutoInstrumentations()` is enabled with four instrumentations disabled:
 
 - `@opentelemetry/instrumentation-pg` — **disabled**. Prisma owns DB span semantics; pg-level spans would double-count.
 - `@opentelemetry/instrumentation-fs` — **disabled**. Floods traces with low-value file reads.
 - `@opentelemetry/instrumentation-dns` — **disabled**. Same noise issue.
 - `@opentelemetry/instrumentation-router` — **disabled**. It adds a `finish` listener per Express layer, tripping Node's MaxListeners warning on every response; `instrumentation-express` covers the same ground.
+
+`@opentelemetry/instrumentation-http` skips health probes (`/health` and `/health/ready`, any case, any query) through `ignoreIncomingRequestHook` and `isHealthProbe`. Load balancers and the kubelet probe every few seconds per pod, and each probe used to trace a request span and its Prisma queries, which was most of an idle install's span volume. The instrumentation runs an ignored request with tracing suppressed, so the probe's Prisma queries start no root traces either. A failing probe still shows in the access log and the probe's own status, not in traces.
 
 `PrismaInstrumentation` is registered explicitly. Pino auto-instrumentation injects `trace_id` / `span_id` / `trace_flags` into every log record during a traced request.
 

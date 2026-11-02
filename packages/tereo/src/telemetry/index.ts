@@ -187,6 +187,12 @@ export const exporterConfigured = (
   env: NodeJS.ProcessEnv = process.env
 ): boolean => EXPORTER_ENDPOINT_VARS.some((name) => !!env[name]?.trim());
 
+// Case-insensitive because Express routes `/HEALTH` to the same handler.
+export const isHealthProbe = (url: string | undefined): boolean => {
+  const path = (url ?? "").split(/[?#]/, 1)[0].toLowerCase();
+  return path === "/health" || path.startsWith("/health/");
+};
+
 const tracesEndpointConfigured = (): boolean =>
   !!process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim() ||
   !!process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT?.trim();
@@ -248,8 +254,13 @@ export function initOtel(opts: InitOtelOptions): NodeSDK | null {
         // Node's MaxListeners=10 warning on every response. Coverage overlaps
         // with instrumentation-express, so dropping it is cheap.
         "@opentelemetry/instrumentation-router": { enabled: false },
-        // Credentials travel in URLs and Redis keys; see redact.ts.
-        "@opentelemetry/instrumentation-http": { requestHook: redactHttpSpan },
+        // Credentials travel in URLs and Redis keys; see redact.ts. An ignored
+        // request runs with tracing suppressed, so its Prisma queries start no
+        // root traces either.
+        "@opentelemetry/instrumentation-http": {
+          requestHook: redactHttpSpan,
+          ignoreIncomingRequestHook: (request) => isHealthProbe(request.url),
+        },
         // Outbound global fetch (webhook deliveries, OIDC discovery).
         "@opentelemetry/instrumentation-undici": {
           requestHook: redactClientSpan,
