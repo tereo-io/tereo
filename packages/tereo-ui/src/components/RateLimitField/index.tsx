@@ -6,12 +6,14 @@ const MAX = 100_000;
 const INVALID = "Enter a whole number from 1 to 100,000.";
 
 interface RateLimitFieldProps {
-  /** The account's own limit; null means it follows the default. */
-  value: number | null;
+  /** The account's own limit; null or missing means it follows the default. */
+  value?: number | null;
   onSave: (value: number | null) => Promise<void>;
   readOnly?: boolean;
   /** The per-IP limit before sign-in; set only when the viewer can read it. */
   preAuthLimit?: number;
+  /** The account's callers are on the internal network, so the pre-sign-in cap reaches only others. */
+  internalCaller?: boolean;
 }
 
 /** Null for an empty input, NaN for anything that is not a valid limit. */
@@ -22,15 +24,27 @@ const parse = (text: string): number | null => {
   return n >= 1 && n <= MAX ? n : NaN;
 };
 
+const toText = (value: number | null) => (value === null ? "" : String(value));
+
 export const RateLimitField = ({
-  value,
+  value: given,
   onSave,
   readOnly,
   preAuthLimit,
+  internalCaller,
 }: RateLimitFieldProps) => {
-  const [text, setText] = useState(value === null ? "" : String(value));
+  const value = given ?? null;
+  const [text, setText] = useState(toText(value));
+  const [seen, setSeen] = useState(value);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // A value changed elsewhere replaces what the input shows.
+  if (value !== seen) {
+    setSeen(value);
+    setText(toText(value));
+    setError(null);
+  }
 
   if (readOnly) {
     return (
@@ -88,7 +102,8 @@ export const RateLimitField = ({
         {warn && (
           <Alert variant="warning" size="sm">
             Above the per-IP limit of {preAuthLimit}/s before sign-in, so a
-            caller from a single IP is capped there first.
+            caller {internalCaller && "outside the internal network "}from a
+            single IP is capped there first.
           </Alert>
         )}
       </Col>

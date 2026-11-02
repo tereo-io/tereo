@@ -24,7 +24,7 @@ export interface Integration {
   serviceAccountUserId: string | null;
   serviceAccountUser: UserRef | null;
   /** Requests per second its service account may make; null follows the default. */
-  rateLimitPerSecond: number | null;
+  rateLimitPerSecond?: number | null;
   /** Org roles in its organization when org-bound, global roles otherwise. */
   roles: IntegrationRole[];
   audience: string[];

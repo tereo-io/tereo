@@ -203,7 +203,8 @@ export const ServiceDetail = () => {
               <RateLimitField
                 value={service.rateLimitPerSecond}
                 readOnly={!canWrite}
-                preAuthLimit={settings?.rateLimits.preAuthPerSecond}
+                preAuthLimit={settings?.rateLimits?.preAuthPerSecond}
+                internalCaller
                 onSave={async (rateLimitPerSecond) => {
                   await updateService.mutateAsync({
                     id: service.id,

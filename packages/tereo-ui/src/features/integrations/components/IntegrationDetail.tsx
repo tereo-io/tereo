@@ -205,7 +205,8 @@ export const IntegrationDetail = () => {
               <RateLimitField
                 value={integration.rateLimitPerSecond}
                 readOnly={!canWrite}
-                preAuthLimit={settings?.rateLimits.preAuthPerSecond}
+                preAuthLimit={settings?.rateLimits?.preAuthPerSecond}
+                internalCaller
                 onSave={async (rateLimitPerSecond) => {
                   await updateIntegration.mutateAsync({
                     id: integration.id,

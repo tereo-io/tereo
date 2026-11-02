@@ -18,6 +18,41 @@ describe("RateLimitField", () => {
     ).toHaveAttribute("placeholder", "Default");
   });
 
+  it("shows a value that changes after mounting", () => {
+    const { rerender } = render(
+      <RateLimitField value={null} onSave={vi.fn()} />
+    );
+
+    rerender(<RateLimitField value={400} onSave={vi.fn()} />);
+
+    expect(screen.getByLabelText("Rate limit (requests/second)")).toHaveValue(
+      "400"
+    );
+  });
+
+  it("treats a missing value as the default", () => {
+    render(<RateLimitField value={undefined} onSave={vi.fn()} readOnly />);
+
+    expect(screen.getByText("Default")).toBeVisible();
+  });
+
+  it("words the warning for internal callers", () => {
+    render(
+      <RateLimitField
+        value={400}
+        onSave={vi.fn()}
+        preAuthLimit={300}
+        internalCaller
+      />
+    );
+
+    expect(
+      screen.getByText(
+        "Above the per-IP limit of 300/s before sign-in, so a caller outside the internal network from a single IP is capped there first."
+      )
+    ).toBeVisible();
+  });
+
   it("saves null when the input is emptied", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<RateLimitField value={500} onSave={onSave} />);
