@@ -187,13 +187,7 @@ export const exporterConfigured = (
   env: NodeJS.ProcessEnv = process.env
 ): boolean => EXPORTER_ENDPOINT_VARS.some((name) => !!env[name]?.trim());
 
-/**
- * Whether an incoming request is a health probe (`/health`, `/health/ready`).
- * Load balancers and the kubelet probe every few seconds per pod, and each
- * probe traced a request span plus its Prisma queries: on an idle install that
- * was most of the span volume, and none of it actionable. Express routes
- * case-insensitively, so this matches the same way.
- */
+// Case-insensitive because Express routes `/HEALTH` to the same handler.
 export const isHealthProbe = (url: string | undefined): boolean => {
   const path = (url ?? "").split(/[?#]/, 1)[0].toLowerCase();
   return path === "/health" || path.startsWith("/health/");
@@ -261,8 +255,8 @@ export function initOtel(opts: InitOtelOptions): NodeSDK | null {
         // with instrumentation-express, so dropping it is cheap.
         "@opentelemetry/instrumentation-router": { enabled: false },
         // Credentials travel in URLs and Redis keys; see redact.ts. An ignored
-        // request runs with tracing suppressed, so a probe's Prisma queries
-        // start no traces of their own either.
+        // request runs with tracing suppressed, so its Prisma queries start no
+        // root traces either.
         "@opentelemetry/instrumentation-http": {
           requestHook: redactHttpSpan,
           ignoreIncomingRequestHook: (request) => isHealthProbe(request.url),

@@ -1,11 +1,11 @@
 // @module-tag unit
 // @module-tag platform
+import { afterEach, describe, expect, it } from "vitest";
 import {
   exporterConfigured,
   initOtel,
   isHealthProbe,
 } from "../../telemetry/index.js";
-import { afterEach, describe, expect, it } from "vitest";
 
 describe("exporterConfigured", () => {
   it("is false with no endpoint", () => {
