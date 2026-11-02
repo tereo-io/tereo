@@ -85,6 +85,7 @@ type ReqWithAuth = Request & {
     userId?: string;
     userType?: "human" | "service_account";
     oauthClientId?: string | null;
+    rateLimitPerSecond?: number | null;
   };
 };
 
@@ -185,7 +186,12 @@ interface TieredLimiterConfig {
   internalPoints: number;
   /** Set X-RateLimit-* on requests that pass, not only on a 429. */
   headersOnPass: boolean;
-  classify: (req: Request) => { internal: boolean; key: string };
+  /** `points` replaces the default of whichever tier applies. */
+  classify: (req: Request) => {
+    internal: boolean;
+    key: string;
+    points?: number;
+  };
   getCost?: (req: Request) => number;
 }
 
@@ -198,21 +204,32 @@ function createTieredLimiter(config: TieredLimiterConfig): RequestHandler {
     duration: DURATION_SECONDS,
     rejectIfRedisNotReady: true,
   };
-  const limiterExternal = new RateLimiterRedis({
-    ...options,
-    keyPrefix,
-    points: externalPoints,
-  });
-  const limiterInternal = new RateLimiterRedis({
-    ...options,
-    keyPrefix: `${keyPrefix}:internal`,
-    points: internalPoints,
-  });
+  // One limiter per points value per tier, all on the tier's key prefix, so
+  // a changed limit meets the count already held rather than a fresh one.
+  const limiters = {
+    external: new Map<number, RateLimiterRedis>(),
+    internal: new Map<number, RateLimiterRedis>(),
+  };
+  const limiterFor = (internal: boolean, points: number) => {
+    const tier = internal ? limiters.internal : limiters.external;
+    let limiter = tier.get(points);
+    if (!limiter) {
+      limiter = new RateLimiterRedis({
+        ...options,
+        keyPrefix: internal ? `${keyPrefix}:internal` : keyPrefix,
+        points,
+      });
+      tier.set(points, limiter);
+    }
+    return limiter;
+  };
+  limiterFor(false, externalPoints);
+  limiterFor(true, internalPoints);
 
   return async (req: Request, res: Response, next: NextFunction) => {
-    const { internal, key } = classify(req);
-    const limiter = internal ? limiterInternal : limiterExternal;
-    const points = internal ? internalPoints : externalPoints;
+    const { internal, key, points: override } = classify(req);
+    const points = override ?? (internal ? internalPoints : externalPoints);
+    const limiter = limiterFor(internal, points);
 
     let cost = 1;
     if (getCost) {
@@ -279,7 +296,8 @@ export function createRateLimitMiddleware(
         : auth?.userId
           ? `user:${auth.userId}`
           : `ip:${getIpIdentifier(req)}`;
-      return { internal, key };
+      // Only an authenticated request carries an override.
+      return { internal, key, points: auth?.rateLimitPerSecond ?? undefined };
     },
   });
 }

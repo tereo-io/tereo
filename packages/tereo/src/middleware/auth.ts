@@ -32,6 +32,8 @@ export interface AuthContext {
    */
   ceiling?: string[];
   currentSessionId: string | null;
+  /** The user's own limit for the general rate limiter; null uses the default. */
+  rateLimitPerSecond: number | null;
   /** The access token's own id. */
   jti: string;
   /** The client the token was issued to (its client_id). */
@@ -160,6 +162,7 @@ const authenticate = async (
     name: user.name,
     userType: user.userType,
     permissions,
+    rateLimitPerSecond: user.rateLimitPerSecond,
     ...(access.kind === "delegated" && {
       ceiling: access.scopes.flatMap((s) => s.ceiling),
     }),

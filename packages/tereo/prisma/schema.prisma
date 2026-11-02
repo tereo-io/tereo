@@ -79,24 +79,26 @@ model OrganizationMember {
 }
 
 model User {
-  id             String    @id @default(uuid(7)) @db.Uuid
-  email          String    @unique @db.VarChar(255)
-  passwordHash   String?   @map("password_hash") @db.VarChar(255)
-  name           String?   @db.VarChar(100)
-  firstName      String?   @map("first_name") @db.VarChar(100)
-  lastName       String?   @map("last_name") @db.VarChar(100)
-  userType       UserType  @default(human) @map("user_type")
-  oauthClientId  String?   @unique @map("oauth_client_id") @db.Uuid
-  isActive       Boolean   @default(true) @map("is_active")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
-  totpSecret     String?   @map("totp_secret") @db.VarChar(255)
-  totpEnabled    Boolean   @default(false) @map("totp_enabled")
-  totpEnabledAt  DateTime? @map("totp_enabled_at")
+  id                 String    @id @default(uuid(7)) @db.Uuid
+  email              String    @unique @db.VarChar(255)
+  passwordHash       String?   @map("password_hash") @db.VarChar(255)
+  name               String?   @db.VarChar(100)
+  firstName          String?   @map("first_name") @db.VarChar(100)
+  lastName           String?   @map("last_name") @db.VarChar(100)
+  userType           UserType  @default(human) @map("user_type")
+  oauthClientId      String?   @unique @map("oauth_client_id") @db.Uuid
+  isActive           Boolean   @default(true) @map("is_active")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  totpSecret         String?   @map("totp_secret") @db.VarChar(255)
+  totpEnabled        Boolean   @default(false) @map("totp_enabled")
+  totpEnabledAt      DateTime? @map("totp_enabled_at")
   // The 30-second step of the last TOTP code accepted for the current secret;
   // a code from this step or an earlier one is refused as a replay.
-  totpLastWindow Int?      @map("totp_last_window")
-  photoObjectId  String?   @map("photo_object_id") @db.Uuid
+  totpLastWindow     Int?      @map("totp_last_window")
+  photoObjectId      String?   @map("photo_object_id") @db.Uuid
+  // Requests per second for the general limiter; null uses the tier default.
+  rateLimitPerSecond Int?      @map("rate_limit_per_second")
 
   authCodes               AuthorizationCode[]
   refreshTokens           RefreshToken[]

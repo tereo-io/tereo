@@ -3,7 +3,10 @@
 // @module-tag security
 
 import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
+import { getTestPrincipalToken } from "../support/principals.js";
+import { prisma } from "../../utils/db/prisma.js";
 import { describe, it, expect } from "vitest";
+import { randomUUID } from "node:crypto";
 
 const TOO_MANY_REQUESTS = 429;
 
@@ -52,5 +55,50 @@ describe("rateLimitPreAuth", () => {
       headers: { "X-Forwarded-For": freshIp() },
     });
     expect(other.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+  });
+});
+
+describe("rateLimit per-user override", () => {
+  const me = (token: string) =>
+    fetch(`${BASE_URL}/v1/account/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+  const setLimit = (userId: string, rateLimitPerSecond: number | null) =>
+    prisma.user.update({ where: { id: userId }, data: { rateLimitPerSecond } });
+
+  const newUser = async (rateLimitPerSecond: number | null) => {
+    const userId = randomUUID();
+    const token = await getTestPrincipalToken({ userId, permissions: [] });
+    await setLimit(userId, rateLimitPerSecond);
+    return { userId, token };
+  };
+
+  it("applies the user's own limit and reports it", async () => {
+    const { token } = await newUser(3);
+    for (let i = 0; i < 3; i++) {
+      const res = await me(token);
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      expect(res.headers.get("x-ratelimit-limit")).toBe("3");
+    }
+    const refused = await me(token);
+    await expectTooMany(refused);
+    expect(refused.headers.get("x-ratelimit-limit")).toBe("3");
+  });
+
+  it("falls back to the default when the override is null", async () => {
+    const { token } = await newUser(null);
+    const res = await me(token);
+    expect(res.status).toBe(HTTP_STATUS.OK);
+    expect(res.headers.get("x-ratelimit-limit")).toBe("100");
+  });
+
+  it("refuses the next request when the limit is lowered below the count held", async () => {
+    const { userId, token } = await newUser(10);
+    for (let i = 0; i < 6; i++) {
+      expect((await me(token)).status).toBe(HTTP_STATUS.OK);
+    }
+    await setLimit(userId, 5);
+    await expectTooMany(await me(token));
   });
 });
