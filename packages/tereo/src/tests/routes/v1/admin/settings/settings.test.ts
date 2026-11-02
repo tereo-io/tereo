@@ -9,10 +9,12 @@ import { createAdminUser } from "../../../../support/auth/users.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { makeServiceOf } from "../../../../support/testService.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
+import env from "../../../../../env.js";
 
 interface SettingsResponse {
   totpPolicy?: "disabled" | "optional" | "required";
   totpRecoveryCodeCount?: number;
+  rateLimits?: Record<string, number>;
   error?: string;
   error_description?: string;
 }
@@ -69,6 +71,22 @@ describe("GET /v1/admin/settings and PATCH /v1/admin/settings", () => {
       expect(data.totpPolicy).toBeDefined();
       expect(["disabled", "optional", "required"]).toContain(data.totpPolicy);
       expect(typeof data.totpRecoveryCodeCount).toBe("number");
+    });
+
+    it("returns the active rate limits", async () => {
+      const response = await fetch(`${BASE_URL}/v1/admin/settings`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+
+      const data = (await response.json()) as SettingsResponse;
+
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(data.rateLimits).toEqual({
+        perSecond: env.RATE_LIMIT_PER_SECOND,
+        internalPerSecond: env.RATE_LIMIT_INTERNAL_PER_SECOND,
+        preAuthPerSecond: env.RATE_LIMIT_PRE_AUTH_PER_SECOND,
+        preAuthInternalPerSecond: env.RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND,
+      });
     });
   });
 
@@ -182,6 +200,27 @@ describe("GET /v1/admin/settings and PATCH /v1/admin/settings", () => {
       });
 
       expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+    });
+
+    it("rejects rateLimits: they are read-only", async () => {
+      for (const body of [
+        { rateLimits: { perSecond: 5 } },
+        { totpPolicy: "optional", rateLimits: { perSecond: 5 } },
+      ]) {
+        const response = await fetch(`${BASE_URL}/v1/admin/settings`, {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+
+        expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        const error = (await response.json()) as SettingsResponse;
+        expect(error.error).toBe("invalid_request");
+        expect(error.error_description).toMatch(/^Invalid request body\. /);
+      }
     });
 
     it("should reject invalid TOTP policy value", async () => {

@@ -9,6 +9,7 @@ import { logger } from "../../../../utils/logger.js";
 import { UpdateSettingsSchema } from "./schemas.js";
 import type { Request, Response } from "express";
 import db from "../../../../utils/db/index.js";
+import env from "../../../../env.js";
 import {
   computeChanges,
   emitTx,
@@ -27,6 +28,12 @@ export const getSettings = async (_req: Request, res: Response) => {
   res.json({
     totpPolicy: settings.totpPolicy,
     totpRecoveryCodeCount: settings.totpRecoveryCodeCount,
+    rateLimits: {
+      perSecond: env.RATE_LIMIT_PER_SECOND,
+      internalPerSecond: env.RATE_LIMIT_INTERNAL_PER_SECOND,
+      preAuthPerSecond: env.RATE_LIMIT_PRE_AUTH_PER_SECOND,
+      preAuthInternalPerSecond: env.RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND,
+    },
   });
 };
 

@@ -2342,6 +2342,35 @@ SystemSettings:
       maximum: 20
       description: How many recovery codes are generated at enrolment and on regeneration
 
+SystemSettingsWithRateLimits:
+  allOf:
+    - $ref: '#/SystemSettings'
+    - type: object
+      required: [rateLimits]
+      properties:
+        rateLimits:
+          type: object
+          readOnly: true
+          description: |
+            The default per-second rate limits this deployment runs with, set
+            by environment variables. Read-only: `PATCH` rejects it with 400.
+            A per-user `rateLimitPerSecond` above `preAuthPerSecond` is not
+            reached by requests that carry no token.
+          required: [perSecond, internalPerSecond, preAuthPerSecond, preAuthInternalPerSecond]
+          properties:
+            perSecond:
+              type: integer
+              description: Default limit for authenticated requests (`RATE_LIMIT_PER_SECOND`)
+            internalPerSecond:
+              type: integer
+              description: Default limit for internal callers (`RATE_LIMIT_INTERNAL_PER_SECOND`)
+            preAuthPerSecond:
+              type: integer
+              description: Limit for requests before authentication (`RATE_LIMIT_PRE_AUTH_PER_SECOND`)
+            preAuthInternalPerSecond:
+              type: integer
+              description: Pre-authentication limit for internal callers (`RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND`)
+
 UpdateSettingsRequest:
   type: object
   properties:
