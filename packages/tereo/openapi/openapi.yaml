@@ -1619,6 +1619,8 @@ components:
       $ref: './components/auth/schemas.yaml#/ChangePasswordRequest'
     User:
       $ref: './components/auth/schemas.yaml#/User'
+    AdminUser:
+      $ref: './components/auth/schemas.yaml#/AdminUser'
     CreateUserRequest:
       $ref: './components/auth/schemas.yaml#/CreateUserRequest'
     UpdateUserRequest:

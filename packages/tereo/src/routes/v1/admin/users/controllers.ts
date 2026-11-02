@@ -1,8 +1,8 @@
 import { getDefaultOrganizationId } from "../../../../utils/defaultOrganization.js";
+import { formatAdminUser, formatUser } from "../../../../utils/transformers.js";
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
 import { CreateUserSchema, ListUsersQuerySchema } from "./schemas.js";
 import { emitTx, logAuditTx } from "../../../../utils/outbox.js";
-import { formatUser } from "../../../../utils/transformers.js";
 import { ConflictError } from "../../../../utils/errors.js";
 import { validateUser } from "../../../../utils/auth.js";
 import type { Request, Response } from "express";
@@ -43,7 +43,7 @@ export const createUser = async (req: Request, res: Response) => {
     return created;
   });
 
-  res.status(201).json(formatUser(user));
+  res.status(201).json(formatAdminUser(user));
 };
 
 export const listUsers = async (req: Request, res: Response) => {
@@ -58,5 +58,5 @@ export const listUsers = async (req: Request, res: Response) => {
   });
 
   const page = buildCursorPageResponse(result, query);
-  res.json({ ...page, data: page.data.map(formatUser) });
+  res.json({ ...page, data: page.data.map((u) => formatAdminUser(u)) });
 };

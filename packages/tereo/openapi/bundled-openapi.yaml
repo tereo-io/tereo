@@ -4484,7 +4484,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/AdminUser'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -4607,7 +4607,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/AdminUser'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
           description: Invalid body or user id (`invalid_request`), the target is the system user (`system_user`), or the caller is deactivating their own account (`self_deactivation`)
@@ -22906,7 +22906,6 @@ components:
         - isActive
         - userType
         - hasPassword
-        - rateLimitPerSecond
         - createdAt
         - updatedAt
       properties:
@@ -22930,19 +22929,27 @@ components:
         hasPassword:
           type: boolean
           description: Whether the user has a password. False for a user created without one, who can sign in only through a linked identity provider (or an invite's first sign-in).
-        rateLimitPerSecond:
-          type:
-            - integer
-            - 'null'
-          minimum: 1
-          maximum: 100000
-          description: Requests per second this user may make, replacing the default for its tier. `null` uses the default.
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+    AdminUser:
+      description: A user as the admin API returns it. Webhook payloads and `/v1/account` carry `User`, without the rate limit.
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          required:
+            - rateLimitPerSecond
+          properties:
+            rateLimitPerSecond:
+              type:
+                - integer
+                - 'null'
+              minimum: 1
+              maximum: 100000
+              description: Requests per second this user may make, replacing the default for its tier. `null` uses the default.
     CreateUserRequest:
       type: object
       required:
@@ -23013,7 +23020,7 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/User'
+            $ref: '#/components/schemas/AdminUser'
         hasMore:
           type: boolean
           description: Whether more pages exist beyond this one.
@@ -28910,7 +28917,7 @@ components:
           description: The provider's authorization endpoint. Navigate the browser there.
     AdminUserDetail:
       allOf:
-        - $ref: '#/components/schemas/User'
+        - $ref: '#/components/schemas/AdminUser'
         - type: object
           required:
             - managedBy

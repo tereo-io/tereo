@@ -2,7 +2,6 @@ import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganizati
 import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
-import { formatUser } from "../../../../../utils/transformers.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
@@ -11,6 +10,10 @@ import {
   disconnectTokenSockets,
   notifyUserRolesChanged,
 } from "../../../../../websocket/emitters/index.js";
+import {
+  formatAdminUser,
+  formatUser,
+} from "../../../../../utils/transformers.js";
 import {
   validateBody,
   validateParams,
@@ -53,7 +56,7 @@ import {
 export const getUser = async (req: Request, res: Response) => {
   const { id } = validateParams(UserIdParamSchema, req);
   const user = await db.users.get(id);
-  res.json({ ...formatUser(user), managedBy: await managerOf(user) });
+  res.json({ ...formatAdminUser(user), managedBy: await managerOf(user) });
 };
 
 export const updateUser = async (req: Request, res: Response) => {
@@ -111,9 +114,6 @@ export const updateUser = async (req: Request, res: Response) => {
         ...(body.password && { passwordReset: true }),
         ...(invitesWithdrawn > 0 && { invitesWithdrawn }),
       };
-      // The rate limit has its own entry and event, from setRateLimitTx.
-      const { rateLimitPerSecond: _before, ...before } = formatUser(existing);
-      const { rateLimitPerSecond: _after, ...after } = formatUser(updated);
       await logAuditTx(tx, {
         auth,
         action: "UPDATE",
@@ -121,7 +121,7 @@ export const updateUser = async (req: Request, res: Response) => {
         entityId: updated.id,
         entityName: updated.email,
         // Never the rows themselves: they carry the password hash.
-        changes: computeChanges(before, after),
+        changes: computeChanges(formatUser(existing), formatUser(updated)),
         ...(Object.keys(metadata).length > 0 && { metadata }),
       });
       await emitTx(tx, {
@@ -175,7 +175,7 @@ export const updateUser = async (req: Request, res: Response) => {
     });
   }
 
-  res.json(formatUser(newUser));
+  res.json(formatAdminUser(newUser));
 };
 
 export const getUserPermissions = async (req: Request, res: Response) => {

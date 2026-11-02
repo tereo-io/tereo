@@ -388,6 +388,52 @@ describe("PATCH /v1/admin/users/:id", () => {
       expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
     });
 
+    it("audits a combined change twice, without the limit in the profile entry", async () => {
+      const target = await createTestUser();
+      const response = await patchLimit(target.id, {
+        name: "Both Changed",
+        rateLimitPerSecond: 30,
+      });
+      expect(response.status).toBe(HTTP_STATUS.OK);
+
+      const entries = await prisma.auditLogEntry.findMany({
+        where: { entityId: target.id, entityType: "User", action: "UPDATE" },
+      });
+      expect(entries).toHaveLength(2);
+      const limit = await limitEntries(target.id);
+      expect(limit).toHaveLength(1);
+      const profile = entries.find((entry) => entry.id !== limit[0].id);
+      expect(profile?.changes).toMatchObject({ name: { new: "Both Changed" } });
+      expect(JSON.stringify(profile?.changes)).not.toContain(
+        "rateLimitPerSecond"
+      );
+    });
+
+    it("sends no auth.user.updated for a limit alone, and none carry the limit", async () => {
+      const endpoint = await createTestWebhookEndpoint(
+        await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+        { eventTypes: ["auth.user.updated"] }
+      );
+      const target = await createTestUser();
+      const deliveries = () =>
+        prisma.webhookDelivery.findMany({
+          where: {
+            webhookEndpointId: endpoint.id,
+            eventType: "auth.user.updated",
+            payload: { path: ["entityId"], equals: target.id },
+          },
+        });
+
+      await patchLimit(target.id, { rateLimitPerSecond: 15 });
+      await patchLimit(target.id, { name: "Renamed Later" });
+      await waitFor(async () => (await deliveries()).length >= 1, 10_000);
+      const all = await deliveries();
+      expect(all).toHaveLength(1);
+      expect(JSON.stringify(all[0].payload)).not.toContain(
+        "rateLimitPerSecond"
+      );
+    });
+
     it("is audited and emitted on a change, and neither when unchanged", async () => {
       const endpoint = await createTestWebhookEndpoint(
         await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),

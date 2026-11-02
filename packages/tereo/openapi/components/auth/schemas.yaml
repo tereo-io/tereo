@@ -1269,7 +1269,7 @@ ChangePasswordRequest:
 # Admin - User Schemas
 User:
   type: object
-  required: [id, email, name, isActive, userType, hasPassword, rateLimitPerSecond, createdAt, updatedAt]
+  required: [id, email, name, isActive, userType, hasPassword, createdAt, updatedAt]
   properties:
     id:
       type: string
@@ -1287,11 +1287,6 @@ User:
     hasPassword:
       type: boolean
       description: Whether the user has a password. False for a user created without one, who can sign in only through a linked identity provider (or an invite's first sign-in).
-    rateLimitPerSecond:
-      type: [integer, 'null']
-      minimum: 1
-      maximum: 100000
-      description: Requests per second this user may make, replacing the default for its tier. `null` uses the default.
     createdAt:
       type: string
       format: date-time
@@ -1299,9 +1294,22 @@ User:
       type: string
       format: date-time
 
-AdminUserDetail:
+AdminUser:
+  description: A user as the admin API returns it. Webhook payloads and `/v1/account` carry `User`, without the rate limit.
   allOf:
     - $ref: '#/User'
+    - type: object
+      required: [rateLimitPerSecond]
+      properties:
+        rateLimitPerSecond:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 100000
+          description: Requests per second this user may make, replacing the default for its tier. `null` uses the default.
+
+AdminUserDetail:
+  allOf:
+    - $ref: '#/AdminUser'
     - type: object
       required: [managedBy]
       properties:
@@ -1401,7 +1409,7 @@ PaginatedUsersResponse:
     data:
       type: array
       items:
-        $ref: '#/User'
+        $ref: '#/AdminUser'
     hasMore:
       type: boolean
       description: Whether more pages exist beyond this one.

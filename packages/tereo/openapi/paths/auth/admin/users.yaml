@@ -108,7 +108,7 @@
         content:
           application/json:
             schema:
-              $ref: '../../../components/auth/schemas.yaml#/User'
+              $ref: '../../../components/auth/schemas.yaml#/AdminUser'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
       '401':
@@ -229,7 +229,7 @@
         content:
           application/json:
             schema:
-              $ref: '../../../components/auth/schemas.yaml#/User'
+              $ref: '../../../components/auth/schemas.yaml#/AdminUser'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
         description: Invalid body or user id (`invalid_request`), the target is the system user (`system_user`), or the caller is deactivating their own account (`self_deactivation`)
