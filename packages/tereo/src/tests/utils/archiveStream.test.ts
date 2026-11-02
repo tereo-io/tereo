@@ -85,9 +85,11 @@ describe("buildArchiveStream", () => {
   }
   const COUNT = 20;
   // Incompressible, and larger than the archive's buffers: an entry stays
-  // open until the archive is read.
-  const contents = Array.from({ length: COUNT }, () =>
-    randomBytes(192 * 1024).toString("base64")
+  // open until the archive is read. The fixed prefix keeps random base64 from
+  // starting with `MZ`, which upload refuses as an executable.
+  const contents = Array.from(
+    { length: COUNT },
+    (_, i) => `entry ${i}\n${randomBytes(192 * 1024).toString("base64")}`
   );
   let objects: ObjectForArchiveStream[];
 
