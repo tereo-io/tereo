@@ -87,6 +87,7 @@ One per process — a second call throws until the first client is stopped.
 | `eventTypes` | any type | Event types `webhooks.emit` and `outbox.emit` accept |
 | `outbox` | none | The transactional outbox — see [outbox](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/outbox.md). Without it, reading `core.outbox` throws |
 | `channelPrefix` | none | Core's `REDIS_KEY_PREFIX`, when it sets one: the file cache hears core's invalidations on channels under it |
+| `files` | 64 MiB / 16 MiB / 4 | `{ multipartThresholdBytes, partSizeBytes, partConcurrency }`: `uploadObject` goes multipart above the threshold — see [files](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/files.md#automatic-multipart-in-uploadobject) |
 | `testMode` | `false` | For an app's tests: accept `test-token-…` tokens and stub `auth` lookups and `files` — see [testing](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/testing.md). Throws unless `NODE_ENV` is `test` or `development`, and with `production: true` |
 
 A missing `url`, `clientId`, `clientSecret` or `requestHandlerKey` (option and env both) throws at

@@ -232,6 +232,8 @@ initiate body so no splat is needed:
 3. `POST /buckets/:name/multipart/:uploadId/complete` `{ parts: [{partNumber, etag}] }` — when `expectedSize` was given at initiate, parts totalling any other size are `400 size_mismatch` (the upload stays active)
 4. `DELETE /buckets/:name/multipart/:uploadId` — abort. Takes `file-service.objects.delete` and the bucket's delete grant (not the write grant), and works on a retired bucket, where deletes go on
 
+**Preconditions.** `If-Match` and `If-None-Match` on initiate and complete are the same as on `PUT`. Initiate checks them early as an advisory check: a `412` comes back before any upload row is created. Complete enforces them authoritatively inside the commit transaction, and a `412` there leaves the upload open until it is aborted or expires.
+
 **Limits.** A part is capped at `FILE_SERVICE_MAX_UPLOAD_SIZE_MB`, and the bytes staged for an
 upload are capped as each part arrives, not only at complete: a part that would take the
 upload's parts (the others plus this one; a part sent again replaces itself) past its
