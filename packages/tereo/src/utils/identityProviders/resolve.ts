@@ -166,6 +166,11 @@ const resolveOnce = async (
     return { userId: invite.userId };
   }
 
+  // Claiming deletes the invite: a concurrent sign-in of this subject may have
+  // claimed it since the lookup by subject above.
+  const claimed = await signInLinked(provider, identity);
+  if (claimed) return claimed;
+
   const domain = await db.identityProviders.findDomain(emailDomain(email));
   if (!domain || domain.providerId !== provider.id || !domain.autoAccept) {
     return { error: "no_account" };
