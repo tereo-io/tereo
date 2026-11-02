@@ -137,21 +137,22 @@ files: blobs live on the volume, so every core pod must share it.
 {{- end }}
 - name: LOG_LEVEL
   value: {{ .Values.logLevel | quote }}
-{{- if and (not (kindIs "invalid" .Values.rateLimits.perSecond)) (ne (toString .Values.rateLimits.perSecond) "") }}
+{{- $rl := .Values.rateLimits | default dict }}
+{{- if and (not (kindIs "invalid" $rl.perSecond)) (ne (toString $rl.perSecond) "") }}
 - name: RATE_LIMIT_PER_SECOND
-  value: {{ .Values.rateLimits.perSecond | toString | quote }}
+  value: {{ $rl.perSecond | toString | quote }}
 {{- end }}
-{{- if and (not (kindIs "invalid" .Values.rateLimits.internalPerSecond)) (ne (toString .Values.rateLimits.internalPerSecond) "") }}
+{{- if and (not (kindIs "invalid" $rl.internalPerSecond)) (ne (toString $rl.internalPerSecond) "") }}
 - name: RATE_LIMIT_INTERNAL_PER_SECOND
-  value: {{ .Values.rateLimits.internalPerSecond | toString | quote }}
+  value: {{ $rl.internalPerSecond | toString | quote }}
 {{- end }}
-{{- if and (not (kindIs "invalid" .Values.rateLimits.preAuthPerSecond)) (ne (toString .Values.rateLimits.preAuthPerSecond) "") }}
+{{- if and (not (kindIs "invalid" $rl.preAuthPerSecond)) (ne (toString $rl.preAuthPerSecond) "") }}
 - name: RATE_LIMIT_PRE_AUTH_PER_SECOND
-  value: {{ .Values.rateLimits.preAuthPerSecond | toString | quote }}
+  value: {{ $rl.preAuthPerSecond | toString | quote }}
 {{- end }}
-{{- if and (not (kindIs "invalid" .Values.rateLimits.preAuthInternalPerSecond)) (ne (toString .Values.rateLimits.preAuthInternalPerSecond) "") }}
+{{- if and (not (kindIs "invalid" $rl.preAuthInternalPerSecond)) (ne (toString $rl.preAuthInternalPerSecond) "") }}
 - name: RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND
-  value: {{ .Values.rateLimits.preAuthInternalPerSecond | toString | quote }}
+  value: {{ $rl.preAuthInternalPerSecond | toString | quote }}
 {{- end }}
 {{- range $name, $value := .Values.env }}
 - name: {{ $name }}
