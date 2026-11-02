@@ -96,6 +96,18 @@ const partBodies = (): Buffer[] =>
     (call) => (call[3] as { body: Buffer }).body
   );
 
+/** Hands out the first `bytes` of `source`, then never pushes again. */
+const stallingStreamOf = (source: Buffer, bytes: number): Readable => {
+  let offset = 0;
+  return new Readable({
+    read() {
+      if (offset >= bytes) return;
+      this.push(source.subarray(offset, offset + 64 * 1024));
+      offset += 64 * 1024;
+    },
+  });
+};
+
 const client = () =>
   new FileServiceClient({
     multipartThresholdBytes: 10 * MiB,
@@ -328,6 +340,112 @@ describe("FileServiceClient.uploadObject", () => {
     expect(await settled).toBe(err);
     expect(mockRequests.files.uploadPart).toHaveBeenCalledTimes(2);
     expect(mockRequests.files.abortMultipart).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed part rejects even while a stream read is stalled", async () => {
+    const err = new Error("part failed");
+    mockRequests.files.uploadPart.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      throw err;
+    });
+    const stream = stallingStreamOf(pattern(20 * MiB), 11 * MiB);
+    const upload = new FileServiceClient({
+      multipartThresholdBytes: 10 * MiB,
+      partSizeBytes: 5 * MiB,
+      partConcurrency: 3,
+    }).uploadObject("b", "k", { file: stream });
+
+    const outcome = await Promise.race([
+      upload.then(
+        () => "resolved",
+        (e: unknown) => e
+      ),
+      new Promise((r) => setTimeout(() => r("pending"), 1000)),
+    ]);
+    expect(outcome).toBe(err);
+    expect(mockRequests.files.abortMultipart).toHaveBeenCalledTimes(1);
+    expect(mockRequests.files.completeMultipart).not.toHaveBeenCalled();
+    expect(stream.destroyed).toBe(true);
+  });
+
+  it("a malformed part response takes the failure path", async () => {
+    const part2 = deferred<void>();
+    mockRequests.files.uploadPart.mockImplementation(
+      async (_b: string, _u: string, n: number, input: { body: Buffer }) => {
+        if (n === 1) return undefined;
+        await part2.promise;
+        return partResponse(n, input.body);
+      }
+    );
+
+    const settled = client()
+      .uploadObject("b", "k", { file: pattern(12 * MiB) })
+      .catch((e: unknown) => e);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(mockRequests.files.uploadPart).toHaveBeenCalledTimes(2);
+    expect(mockRequests.files.abortMultipart).not.toHaveBeenCalled();
+
+    part2.resolve();
+    expect(await settled).toBeInstanceOf(TypeError);
+    expect(mockRequests.files.uploadPart).toHaveBeenCalledTimes(2);
+    expect(mockRequests.files.abortMultipart).toHaveBeenCalledTimes(1);
+    expect(mockRequests.files.completeMultipart).not.toHaveBeenCalled();
+  });
+
+  it("a stream source is read only when a part slot is free", async () => {
+    const source = pattern(30 * MiB);
+    let delivered = 0;
+    const stream = new Readable({
+      read() {
+        if (delivered >= source.length) {
+          this.push(null);
+          return;
+        }
+        this.push(source.subarray(delivered, delivered + 64 * 1024));
+        delivered += 64 * 1024;
+      },
+    });
+    const gates: (() => void)[] = [];
+    mockRequests.files.uploadPart.mockImplementation(
+      async (_b: string, _u: string, n: number, input: { body: Buffer }) => {
+        await new Promise<void>((r) => gates.push(r));
+        return partResponse(n, input.body);
+      }
+    );
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+
+    const upload = client().uploadObject("b", "k", { file: stream });
+    await tick();
+    // Parts 1 and 2 come from the 10 MiB + 1 head; with both slots busy the
+    // stream gives no more than its own small read-ahead.
+    expect(mockRequests.files.uploadPart).toHaveBeenCalledTimes(2);
+    expect(delivered).toBeLessThan(10 * MiB + 1 + 512 * 1024);
+
+    gates.shift()!();
+    await tick();
+    expect(mockRequests.files.uploadPart).toHaveBeenCalledTimes(3);
+    expect(delivered).toBeGreaterThanOrEqual(15 * MiB);
+    expect(delivered).toBeLessThan(15 * MiB + 512 * 1024);
+
+    while (
+      mockRequests.files.uploadPart.mock.calls.length < 6 ||
+      gates.length
+    ) {
+      gates.shift()?.();
+      await tick();
+    }
+    await upload;
+    expect(Buffer.concat(partBodies()).equals(source)).toBe(true);
+  });
+
+  it("parts cut from the head do not share its allocation", async () => {
+    await client().uploadObject("b", "k", {
+      file: streamOf(pattern(12 * MiB), 12 * MiB),
+    });
+    const [p1, p2] = partBodies();
+    expect(p1.buffer).not.toBe(p2.buffer);
+    expect(p1.byteLength).toBe(p1.buffer.byteLength);
   });
 
   it("a failed initiate rethrows without aborting", async () => {

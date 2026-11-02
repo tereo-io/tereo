@@ -1,5 +1,6 @@
 import { getOriginalStatus, requests } from "../handler.js";
 import { FileCache } from "../utils/fileCache.js";
+import type { Readable } from "stream";
 import {
   readUpTo,
   resolveUploadOptions,
@@ -111,18 +112,7 @@ export class FileServiceClient {
               options
             );
     } else {
-      // One byte past the threshold tells a stream of exactly the threshold
-      // (one PUT) from a longer one.
-      const { head, ended } = await readUpTo(file, options.thresholdBytes + 1);
-      result = ended
-        ? await this.putObject(bucket, key, { ...input, file: head })
-        : await uploadMultipart(
-            bucket,
-            key,
-            { head, rest: file },
-            input,
-            options
-          );
+      result = await this.uploadStream(bucket, key, file, input);
     }
     // Drop any cached per-object metadata locally. The server also broadcasts
     // an invalidation for the rest of the fleet.
@@ -827,6 +817,25 @@ export class FileServiceClient {
   // ---------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the upload's promise without awaiting it, so this frame, and the
+   * head read from the stream, is gone while the parts upload.
+   */
+  private async uploadStream(
+    bucket: string,
+    key: string,
+    file: Readable,
+    input: Omit<UploadObjectInput, "file">
+  ): Promise<FileServiceObject> {
+    const options = this.uploadOptions;
+    // One byte past the threshold tells a stream of exactly the threshold
+    // (one PUT) from a longer one.
+    const { head, ended } = await readUpTo(file, options.thresholdBytes + 1);
+    return ended
+      ? this.putObject(bucket, key, { ...input, file: head })
+      : uploadMultipart(bucket, key, { head, rest: file }, input, options);
+  }
 
   private async putObject(
     bucket: string,

@@ -44,8 +44,6 @@ export const resolveUploadOptions = (
   return { thresholdBytes, partSizeBytes, partConcurrency };
 };
 
-const EMPTY = Buffer.alloc(0);
-
 /**
  * Stands in for a consumer between `readUpTo` returning and `uploadMultipart`
  * attaching its own listener, so an error emitted in that gap is not thrown
@@ -99,6 +97,12 @@ class StreamReader {
     return chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, length);
   }
 
+  /** Fails the pending and every later `read` with `err`. */
+  fail(err: unknown): void {
+    this.error ??= { err };
+    this.onSignal();
+  }
+
   dispose(): void {
     this.stream.off("error", this.onError);
     this.stream.off("end", this.onEnd);
@@ -134,7 +138,9 @@ class StreamReader {
 
 /**
  * Collects up to `limit` bytes from `stream`. `ended` is true when the stream
- * finished within them; otherwise the unread data stays readable from it.
+ * finished within them; otherwise the unread data stays readable from it, and
+ * its errors are held until a `StreamReader` takes it over, so the caller must
+ * hand it to `uploadMultipart` (or destroy it).
  */
 export const readUpTo = async (
   stream: Readable,
@@ -153,31 +159,39 @@ export const readUpTo = async (
 
 type MultipartSource = { buffer: Buffer } | { head: Buffer; rest: Readable };
 
-/** Yields the next part's bytes, or null when the source is exhausted. */
-const partSource = (
-  source: MultipartSource,
-  partSize: number,
-  reader: StreamReader | undefined
-): (() => Promise<Buffer | null>) => {
-  if ("buffer" in source) {
-    let offset = 0;
-    return async () => {
-      if (offset >= source.buffer.length) return null;
-      const part = source.buffer.subarray(offset, offset + partSize);
-      offset += part.length;
-      return part;
-    };
-  }
-  let head = source.head;
+type NextPart = () => Promise<Buffer | null>;
+
+const bufferParts = (buffer: Buffer, partSize: number): NextPart => {
+  let offset = 0;
   return async () => {
-    if (head.length >= partSize) {
-      const part = head.subarray(0, partSize);
-      head = head.subarray(partSize);
+    if (offset >= buffer.length) return null;
+    const part = buffer.subarray(offset, offset + partSize);
+    offset += part.length;
+    return part;
+  };
+};
+
+/**
+ * Parts from `head`, then from the reader. Head bytes are copied into each
+ * part and `head` is dropped once used up, so an uploaded part does not keep
+ * the whole head's allocation alive.
+ */
+const streamParts = (
+  initialHead: Buffer,
+  reader: StreamReader,
+  partSize: number
+): NextPart => {
+  let head: Buffer | undefined = initialHead;
+  return async () => {
+    if (head && head.length >= partSize) {
+      const part = Buffer.from(head.subarray(0, partSize));
+      head = head.length > partSize ? head.subarray(partSize) : undefined;
       return part;
     }
-    const more = await reader!.read(partSize - head.length);
-    const part = head.length > 0 ? Buffer.concat([head, more]) : more;
-    head = EMPTY;
+    const rest = head;
+    head = undefined;
+    const more = await reader.read(partSize - (rest?.length ?? 0));
+    const part = rest ? Buffer.concat([rest, more]) : more;
     return part.length > 0 ? part : null;
   };
 };
@@ -185,13 +199,21 @@ const partSource = (
 const uploadParts = async (
   bucket: string,
   uploadId: string,
-  nextPart: () => Promise<Buffer | null>,
-  partConcurrency: number
+  nextPart: NextPart,
+  partConcurrency: number,
+  reader: StreamReader | undefined
 ): Promise<{ partNumber: number; etag: string }[]> => {
   const uploaded: { partNumber: number; etag: string }[] = [];
   const inFlight = new Set<Promise<void>>();
   let failure: { err: unknown } | undefined;
   let partNumber = 0;
+
+  const fail = (err: unknown) => {
+    failure ??= { err };
+    // Wakes a read parked on a stalled source, which would otherwise keep
+    // the loop from ever seeing the failure.
+    reader?.fail(failure.err);
+  };
 
   while (!failure) {
     // The source is read only once a slot is free, so at most
@@ -204,21 +226,20 @@ const uploadParts = async (
     try {
       body = await nextPart();
     } catch (err) {
-      failure ??= { err };
+      fail(err);
       break;
     }
-    if (!body) break;
+    if (!body || failure) break;
     const n = ++partNumber;
-    const pending: Promise<void> = requests.files
-      .uploadPart(bucket, uploadId, n, { body })
-      .then(
-        (res) => {
-          uploaded.push({ partNumber: n, etag: res.etag });
-        },
-        (err: unknown) => {
-          failure ??= { err };
-        }
+    const part = body;
+    const pending: Promise<void> = Promise.resolve()
+      .then(() =>
+        requests.files.uploadPart(bucket, uploadId, n, { body: part })
       )
+      .then((res) => {
+        uploaded.push({ partNumber: n, etag: res.etag });
+      })
+      .catch(fail)
       .finally(() => inFlight.delete(pending));
     inFlight.add(pending);
   }
@@ -243,33 +264,60 @@ const abortQuietly = async (bucket: string, uploadId: string) => {
  * Initiates, uploads the parts `partConcurrency` at a time and completes. Any
  * failure after initiate aborts the upload and rethrows the first error.
  */
-export const uploadMultipart = async (
+export const uploadMultipart = (
   bucket: string,
   key: string,
   source: MultipartSource,
   input: Omit<UploadObjectInput, "file">,
   options: UploadOptions
 ): Promise<FileServiceObject> => {
-  // Attached before the first await, so a stream error during initiate is held.
-  const reader = "rest" in source ? new StreamReader(source.rest) : undefined;
+  // Not async: `source` stays in this frame only, so the upload does not
+  // hold the stream's head past the parts cut from it. The reader is
+  // attached here, before any await, so a stream error during initiate is held.
+  if ("buffer" in source) {
+    return runMultipart(bucket, key, input, options, {
+      nextPart: bufferParts(source.buffer, options.partSizeBytes),
+      expectedSize: source.buffer.length,
+    });
+  }
+  const reader = new StreamReader(source.rest);
+  return runMultipart(bucket, key, input, options, {
+    nextPart: streamParts(source.head, reader, options.partSizeBytes),
+    stream: { rest: source.rest, reader },
+  });
+};
+
+const runMultipart = async (
+  bucket: string,
+  key: string,
+  input: Omit<UploadObjectInput, "file">,
+  options: UploadOptions,
+  parts: {
+    nextPart: NextPart;
+    expectedSize?: number;
+    stream?: { rest: Readable; reader: StreamReader };
+  }
+): Promise<FileServiceObject> => {
+  const { nextPart, expectedSize, stream } = parts;
   try {
     const { uploadId } = await requests.files.initiateMultipart(bucket, key, {
       contentType: input.contentType ?? "application/octet-stream",
       metadata: input.metadata,
       tags: input.tags,
-      expectedSize: "buffer" in source ? source.buffer.length : undefined,
+      expectedSize,
       ifMatch: input.ifMatch,
       ifNoneMatch: input.ifNoneMatch,
     });
     try {
-      const parts = await uploadParts(
+      const uploaded = await uploadParts(
         bucket,
         uploadId,
-        partSource(source, options.partSizeBytes, reader),
-        options.partConcurrency
+        nextPart,
+        options.partConcurrency,
+        stream?.reader
       );
       return await requests.files.completeMultipart(bucket, uploadId, {
-        parts,
+        parts: uploaded,
         idempotencyKey: input.idempotencyKey,
         ifMatch: input.ifMatch,
         ifNoneMatch: input.ifNoneMatch,
@@ -280,9 +328,9 @@ export const uploadMultipart = async (
     }
   } catch (err) {
     // Releases the source (a file descriptor, a socket) the upload gave up on.
-    if ("rest" in source) source.rest.destroy();
+    stream?.rest.destroy();
     throw err;
   } finally {
-    reader?.dispose();
+    stream?.reader.dispose();
   }
 };
