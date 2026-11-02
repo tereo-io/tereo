@@ -1,14 +1,16 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { UserDetail as UserDetailData } from "../../api/users/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
 import { authMock } from "@/test/authMock";
 import { UserDetail } from "./UserDetail";
 
+const denied = vi.hoisted(() => new Set<string>());
+
 vi.mock("@/lib/auth", async () => ({
   ...(await import("@/test/authMock")).mockAuthModule(),
-  useAuth: () => ({ hasPermission: () => true }),
+  useAuth: () => ({ hasPermission: (p: string) => !denied.has(p) }),
   useLogout: () => vi.fn(),
 }));
 
@@ -22,6 +24,7 @@ const person: UserDetailData = {
   createdAt: "2026-10-01T00:00:00Z",
   updatedAt: "2026-10-01T00:00:00Z",
   managedBy: null,
+  rateLimitPerSecond: null,
 };
 
 const account: UserDetailData = {
@@ -40,6 +43,8 @@ const renderDetail = (user: UserDetailData) => {
     if (url.endsWith("/identities"))
       return { data: { identities: [], invites: [] } };
     if (url.endsWith("/identity-providers")) return { data: { data: [] } };
+    if (url.endsWith("/settings"))
+      return { data: { rateLimits: { preAuthPerSecond: 300 } } };
     return { data: user };
   });
   render(
@@ -53,7 +58,16 @@ const renderDetail = (user: UserDetailData) => {
   );
 };
 
-beforeEach(() => authMock.axios.get.mockReset());
+beforeEach(() => {
+  authMock.axios.get.mockReset();
+  authMock.axios.patch.mockReset();
+  denied.clear();
+});
+
+const settingsCalls = () =>
+  authMock.axios.get.mock.calls.filter(([path]) =>
+    String(path).endsWith("/settings")
+  );
 
 describe("UserDetail", () => {
   it("offers Edit and Manage Roles for a person", async () => {
@@ -104,5 +118,59 @@ describe("UserDetail", () => {
     expect(
       await screen.findByRole("link", { name: "Billing" })
     ).toHaveAttribute("href", href);
+  });
+
+  describe("rate limit", () => {
+    const field = () => screen.getByLabelText("Rate limit (requests/second)");
+
+    it("saves a new limit for a person", async () => {
+      authMock.axios.patch.mockResolvedValue({ data: person });
+      renderDetail(person);
+
+      await screen.findByText("User Details");
+      fireEvent.change(field(), { target: { value: "250" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(authMock.axios.patch).toHaveBeenCalledWith(
+          "/v1/admin/users/u1",
+          { rateLimitPerSecond: 250 }
+        )
+      );
+    });
+
+    it("warns above the pre-sign-in limit when settings are readable", async () => {
+      renderDetail({ ...person, rateLimitPerSecond: 400 });
+
+      expect(
+        await screen.findByText(/Above the per-IP limit of 300\/s/)
+      ).toBeVisible();
+    });
+
+    it("leaves the warning out and skips settings without settings.read", async () => {
+      denied.add("settings.read");
+      renderDetail({ ...person, rateLimitPerSecond: 400 });
+
+      await screen.findByText("User Details");
+      expect(field()).toHaveValue("400");
+      expect(
+        screen.queryByText(/Above the per-IP limit/)
+      ).not.toBeInTheDocument();
+      expect(settingsCalls()).toHaveLength(0);
+    });
+
+    it("is read-only for a managed account", async () => {
+      renderDetail({
+        ...account,
+        rateLimitPerSecond: 50,
+        managedBy: { kind: "system" },
+      });
+
+      await screen.findByText("User Details");
+      expect(
+        screen.queryByLabelText("Rate limit (requests/second)")
+      ).toBeNull();
+      expect(screen.getByText("50")).toBeVisible();
+    });
   });
 });

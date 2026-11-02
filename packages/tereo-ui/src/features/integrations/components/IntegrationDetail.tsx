@@ -5,9 +5,12 @@ import ToggleIntegrationActiveButton from "./buttons/ToggleIntegrationActiveButt
 import RenameIntegrationButton from "./buttons/RenameIntegrationButton";
 import { IntegrationStatusBadge, ScopeBadge } from "./StatusBadges";
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
+import useUpdateIntegration from "../api/useUpdateIntegration";
+import { RateLimitField } from "@/components/RateLimitField";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import { PageHeader } from "@/components/PageHeader";
 import { userLabel, type UserRef } from "@/lib/refs";
+import { useSettings } from "@/features/auth-admin";
 import { formatDateTime } from "@/utils/formatDate";
 import { Link, useParams } from "react-router-dom";
 import useIntegration from "../api/useIntegration";
@@ -17,6 +20,7 @@ import EditIntegrationRolesButton, {
 } from "./buttons/EditIntegrationRolesButton";
 import {
   Alert,
+  Card,
   Centered,
   Col,
   EmptyState,
@@ -33,6 +37,10 @@ export const IntegrationDetail = () => {
   const { integrationId } = useParams<{ integrationId: string }>();
   const { hasPermission } = useAuth();
   const { data: integration, isLoading } = useIntegration(integrationId ?? "");
+  const { data: settings } = useSettings({
+    enabled: hasPermission("settings.read"),
+  });
+  const updateIntegration = useUpdateIntegration();
 
   useDocumentTitle(integration?.name);
 
@@ -193,6 +201,19 @@ export const IntegrationDetail = () => {
                 },
               ]}
             />
+            <Card>
+              <RateLimitField
+                value={integration.rateLimitPerSecond}
+                readOnly={!canWrite}
+                preAuthLimit={settings?.rateLimits.preAuthPerSecond}
+                onSave={async (rateLimitPerSecond) => {
+                  await updateIntegration.mutateAsync({
+                    id: integration.id,
+                    data: { rateLimitPerSecond },
+                  });
+                }}
+              />
+            </Card>
           </Col>
           <Col>
             <TagCard

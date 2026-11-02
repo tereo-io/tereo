@@ -17,6 +17,8 @@ export type UserManager =
 
 export interface UserDetail extends User {
   managedBy: UserManager | null;
+  /** Requests per second this account may make; null follows the default. */
+  rateLimitPerSecond: number | null;
 }
 
 export interface UserRole {
@@ -49,4 +51,6 @@ export interface UpdateUserInput {
   password?: string;
   name?: string;
   isActive?: boolean;
+  /** Null returns the account to the default. */
+  rateLimitPerSecond?: number | null;
 }

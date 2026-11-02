@@ -4,7 +4,10 @@ import useUserTotpStatus from "../../api/users/useUserTotpStatus";
 import RevokeSessionButton from "./buttons/RevokeSessionButton";
 import { UserConnectedAccounts } from "./UserConnectedAccounts";
 import useUserSessions from "../../api/users/useUserSessions";
+import { RateLimitField } from "@/components/RateLimitField";
 import ManageRolesButton from "./buttons/ManageRolesButton";
+import useUpdateUser from "../../api/users/useUpdateUser";
+import useSettings from "../../api/settings/useSettings";
 import type { UserManager } from "../../api/users/types";
 import ResetTotpButton from "./buttons/ResetTotpButton";
 import useUserRoles from "../../api/users/useUserRoles";
@@ -63,7 +66,11 @@ export const UserDetail = () => {
   const canWrite = hasPermission("users.write");
   const canDelete = hasPermission("users.delete");
 
+  const canReadSettings = hasPermission("settings.read");
+
   const { data: user, isLoading: userLoading } = useUser(id);
+  const { data: settings } = useSettings({ enabled: canReadSettings });
+  const updateUser = useUpdateUser();
   const { data: rolesData } = useUserRoles(id);
   const { data: permissionsData } = useUserPermissions(id);
   const { data: sessionsData } = useUserSessions(id);
@@ -153,6 +160,19 @@ export const UserDetail = () => {
               },
             ]}
           />
+          <Card>
+            <RateLimitField
+              value={user.rateLimitPerSecond}
+              readOnly={!editable}
+              preAuthLimit={settings?.rateLimits.preAuthPerSecond}
+              onSave={async (rateLimitPerSecond) => {
+                await updateUser.mutateAsync({
+                  id,
+                  updateData: { rateLimitPerSecond },
+                });
+              }}
+            />
+          </Card>
           <Card>
             <SectionHeader
               title="Active Sessions"

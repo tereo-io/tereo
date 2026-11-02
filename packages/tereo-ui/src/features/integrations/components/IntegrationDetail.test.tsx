@@ -1,7 +1,7 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
 import { IntegrationDetail } from "./IntegrationDetail";
 import type { Integration } from "../api/types";
 import { authMock } from "@/test/authMock";
@@ -25,6 +25,7 @@ const orgBound: Integration = {
   serviceAccountUser: null,
   roles: [{ id: "r1", name: "picker", displayName: "Picker", system: false }],
   audience: ["files"],
+  rateLimitPerSecond: null,
   previousSecretExpiresAt: null,
   createdBy: "u1",
   creator: null,
@@ -39,7 +40,11 @@ const platform: Integration = {
 };
 
 const renderDetail = (data: Integration) => {
-  authMock.axios.get.mockResolvedValue({ data });
+  authMock.axios.get.mockImplementation(async (path: string) =>
+    String(path).endsWith("/settings")
+      ? { data: { rateLimits: { preAuthPerSecond: 300 } } }
+      : { data }
+  );
   render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={["/integrations/i1"]}>
@@ -54,7 +59,10 @@ const renderDetail = (data: Integration) => {
   );
 };
 
-beforeEach(() => authMock.axios.get.mockReset());
+beforeEach(() => {
+  authMock.axios.get.mockReset();
+  authMock.axios.patch.mockReset();
+});
 
 describe("IntegrationDetail", () => {
   it("offers every change on a hand-made org-bound integration, without the global-role warning", async () => {
@@ -110,5 +118,48 @@ describe("IntegrationDetail", () => {
     expect(
       screen.getByRole("button", { name: /end overlap/i })
     ).toBeInTheDocument();
+  });
+
+  describe("rate limit", () => {
+    const label = "Rate limit (requests/second)";
+
+    it("saves a new limit", async () => {
+      authMock.axios.patch.mockResolvedValue({ data: orgBound });
+      renderDetail(orgBound);
+
+      fireEvent.change(await screen.findByLabelText(label), {
+        target: { value: "250" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(authMock.axios.patch).toHaveBeenCalledWith(
+          "/v1/admin/integrations/i1",
+          { rateLimitPerSecond: 250 }
+        )
+      );
+    });
+
+    it("warns above the pre-sign-in limit", async () => {
+      renderDetail({ ...orgBound, rateLimitPerSecond: 400 });
+
+      expect(
+        await screen.findByText(/Above the per-IP limit of 300\/s/)
+      ).toBeVisible();
+    });
+
+    it("shows a provisioned integration's limit read-only", async () => {
+      renderDetail({ ...orgBound, provisioned: true, rateLimitPerSecond: 50 });
+
+      expect(await screen.findByText("50")).toBeVisible();
+      expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+      expect(screen.getByText(label)).toBeVisible();
+    });
+
+    it("shows Default for a provisioned integration with no limit", async () => {
+      renderDetail({ ...orgBound, provisioned: true });
+
+      expect(await screen.findByText("Default")).toBeVisible();
+    });
   });
 });

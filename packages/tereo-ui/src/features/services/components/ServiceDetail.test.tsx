@@ -1,8 +1,8 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ServiceDetail as ServiceDetailData } from "../api/types";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
 import { ServiceDetail } from "./ServiceDetail";
 import { authMock } from "@/test/authMock";
 
@@ -23,6 +23,7 @@ const service: ServiceDetailData = {
   serviceAccountUserId: null,
   serviceAccountUser: null,
   audience: [],
+  rateLimitPerSecond: null,
   previousSecretExpiresAt: null,
   declarationHash: null,
   declarationVersion: "1.2.0",
@@ -64,7 +65,11 @@ const service: ServiceDetailData = {
 };
 
 const renderDetail = (data: ServiceDetailData) => {
-  authMock.axios.get.mockResolvedValue({ data });
+  authMock.axios.get.mockImplementation(async (path: string) =>
+    String(path).endsWith("/settings")
+      ? { data: { rateLimits: { preAuthPerSecond: 300 } } }
+      : { data }
+  );
   render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={["/services/s1"]}>
@@ -76,7 +81,10 @@ const renderDetail = (data: ServiceDetailData) => {
   );
 };
 
-beforeEach(() => authMock.axios.get.mockReset());
+beforeEach(() => {
+  authMock.axios.get.mockReset();
+  authMock.axios.patch.mockReset();
+});
 
 describe("ServiceDetail", () => {
   it("offers rename, regenerate and deactivate on a hand-made service", async () => {
@@ -142,5 +150,48 @@ describe("ServiceDetail", () => {
     expect(
       screen.getByRole("button", { name: /end overlap/i })
     ).toBeInTheDocument();
+  });
+
+  describe("rate limit", () => {
+    const label = "Rate limit (requests/second)";
+
+    it("saves a new limit", async () => {
+      authMock.axios.patch.mockResolvedValue({ data: service });
+      renderDetail(service);
+
+      fireEvent.change(await screen.findByLabelText(label), {
+        target: { value: "250" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(authMock.axios.patch).toHaveBeenCalledWith(
+          "/v1/admin/services/s1",
+          { rateLimitPerSecond: 250 }
+        )
+      );
+    });
+
+    it("warns above the pre-sign-in limit", async () => {
+      renderDetail({ ...service, rateLimitPerSecond: 400 });
+
+      expect(
+        await screen.findByText(/Above the per-IP limit of 300\/s/)
+      ).toBeVisible();
+    });
+
+    it("shows a provisioned service's limit read-only", async () => {
+      renderDetail({ ...service, provisioned: true, rateLimitPerSecond: 50 });
+
+      expect(await screen.findByText("50")).toBeVisible();
+      expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+      expect(screen.getByText(label)).toBeVisible();
+    });
+
+    it("shows Default for a provisioned service with no limit", async () => {
+      renderDetail({ ...service, provisioned: true });
+
+      expect(await screen.findByText("Default")).toBeVisible();
+    });
   });
 });

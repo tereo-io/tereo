@@ -18,6 +18,8 @@ export interface Service extends ServiceSummary {
   clientId: string | null;
   serviceAccountUserId: string | null;
   serviceAccountUser: UserRef | null;
+  /** Requests per second its service account may make; null follows the default. */
+  rateLimitPerSecond: number | null;
   audience: string[];
   /** Set while a regenerated secret's predecessor still works. */
   previousSecretExpiresAt: string | null;
@@ -114,6 +116,8 @@ export interface CreateServiceInput {
 export interface UpdateServiceInput {
   name?: string;
   isActive?: boolean;
+  /** Null returns the service account to the default. */
+  rateLimitPerSecond?: number | null;
 }
 
 export interface ServiceCredentials {
