@@ -1,3 +1,17 @@
+## 0.8.0 (2026-11-02)
+
+### 🚀 Features
+
+- Multipart uploads honour `If-Match` and `If-None-Match`. Initiate checks them early and answers `412` before creating an upload; complete enforces them authoritatively in the commit transaction, and a `412` there leaves the upload open until it is aborted or expires. ([#46](https://github.com/tereo-io/tereo/pull/46))
+
+### ⚠️  Breaking Changes
+
+- Request rate limits are configurable. `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_INTERNAL_PER_SECOND`, `RATE_LIMIT_PRE_AUTH_PER_SECOND` and `RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND` (and the chart's `rateLimits`) set the defaults, and a pre-auth value below its general counterpart stops core from starting. A person, service or integration can also carry its own `rateLimitPerSecond`, set in the admin API and UI, or in the provisioning document for provisioned ones; changes are audited and emitted as `auth.user.rate-limit-changed`. `GET /v1/admin/settings` reports the active limits, and `PATCH /v1/admin/settings` now answers 400 to an unknown key instead of ignoring it. ([#45](https://github.com/tereo-io/tereo/pull/45))
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.7.0 (2026-11-02)
 
 ### 🚀 Features

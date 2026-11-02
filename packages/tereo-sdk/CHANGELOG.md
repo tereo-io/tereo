@@ -1,3 +1,14 @@
+## 0.5.1 (2026-11-02)
+
+### 🚀 Features
+
+- `core.files.uploadObject` now takes a `Buffer` or a `Readable`, and switches to a multipart upload on its own above `multipartThresholdBytes` (64 MiB by default), sending parts concurrently and aborting the upload if anything fails. Tune it with `createCoreClient({ files: { multipartThresholdBytes, partSizeBytes, partConcurrency } })`. `initiateMultipart` and `completeMultipart` accept `ifMatch` and `ifNoneMatch`. `UploadObjectInput.file` is now `Buffer | Readable`, so code that reads `input.file` as a Buffer needs a type narrowing. ([#46](https://github.com/tereo-io/tereo/pull/46))
+- Provisioning documents accept `rateLimitPerSecond` on `service` and on each of `integrations`, an integer from 1 to 100000 that replaces the account's default request limit; omitting it clears the value. The types and `provisioning.schema.json` carry it. ([#45](https://github.com/tereo-io/tereo/pull/45))
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.5.0 (2026-11-02)
 
 ### 🩹 Fixes
