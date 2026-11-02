@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileServiceClient } from "../clients/files.js";
 import { useCacheRedis } from "../utils/cache.js";
+import { RequestError } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import type { Redis } from "ioredis";
 import { Readable } from "stream";
 import {
+  COMPLETE_IN_PROGRESS_MAX_WAIT_MS,
   readUpTo,
   resolveUploadOptions,
   uploadMultipart,
@@ -626,5 +628,100 @@ describe("FileServiceClient.uploadObject", () => {
     expect(stream.readableEnded).toBe(true);
     expect(mockRequests.files.uploadObject).not.toHaveBeenCalled();
     expect(mockRequests.files.initiateMultipart).not.toHaveBeenCalled();
+  });
+});
+
+const completeInProgress = () =>
+  new RequestError("FS_0103", "Failed to complete multipart upload", {
+    httpStatus: 409,
+    coreCode: "multipart_complete_in_progress",
+  });
+
+describe("complete still in progress", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("retries a 409 in-progress complete with the same key and returns its result", async () => {
+    mockRequests.files.completeMultipart
+      .mockRejectedValueOnce(completeInProgress())
+      .mockResolvedValueOnce(OBJECT);
+
+    const upload = client().uploadObject("b", "k", {
+      file: pattern(12 * MiB),
+    });
+    const settled = expect(upload).resolves.toEqual(OBJECT);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await settled;
+    expect(mockRequests.files.abortMultipart).not.toHaveBeenCalled();
+    const calls = mockRequests.files.completeMultipart.mock.calls;
+    expect(calls).toHaveLength(2);
+    const keys = calls.map(
+      (call) => (call[2] as { idempotencyKey?: string }).idempotencyKey
+    );
+    expect(keys[0]).toEqual(expect.any(String));
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("keeps a caller's idempotencyKey across the retries", async () => {
+    mockRequests.files.completeMultipart
+      .mockRejectedValueOnce(completeInProgress())
+      .mockResolvedValueOnce(OBJECT);
+
+    const upload = client().uploadObject("b", "k", {
+      file: pattern(12 * MiB),
+      idempotencyKey: "k1",
+    });
+    const settled = expect(upload).resolves.toEqual(OBJECT);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await settled;
+    for (const call of mockRequests.files.completeMultipart.mock.calls) {
+      expect(call[2]).toMatchObject({ idempotencyKey: "k1" });
+    }
+  });
+
+  it("aborts and rethrows once the 409 outlasts the bound", async () => {
+    const err = completeInProgress();
+    mockRequests.files.completeMultipart.mockRejectedValue(err);
+
+    const upload = client().uploadObject("b", "k", {
+      file: pattern(12 * MiB),
+    });
+    const settled = expect(upload).rejects.toBe(err);
+    await vi.advanceTimersByTimeAsync(
+      COMPLETE_IN_PROGRESS_MAX_WAIT_MS + 60_000
+    );
+
+    await settled;
+    expect(
+      mockRequests.files.completeMultipart.mock.calls.length
+    ).toBeGreaterThan(2);
+    expect(mockRequests.files.abortMultipart).toHaveBeenCalledWith(
+      "b",
+      UPLOAD_ID
+    );
+  });
+
+  it("a 409 with another code aborts without retrying", async () => {
+    const err = new RequestError("FS_0103", "conflict", {
+      httpStatus: 409,
+      coreCode: "idempotency_key_conflict",
+    });
+    mockRequests.files.completeMultipart.mockRejectedValue(err);
+
+    await expect(
+      client().uploadObject("b", "k", { file: pattern(12 * MiB) })
+    ).rejects.toBe(err);
+    expect(mockRequests.files.completeMultipart).toHaveBeenCalledTimes(1);
+    expect(mockRequests.files.abortMultipart).toHaveBeenCalledWith(
+      "b",
+      UPLOAD_ID
+    );
   });
 });

@@ -1,6 +1,9 @@
+import type { CompleteMultipartInput } from "../requests/files/multipart/types.js";
+import { RequestError } from "./errors.js";
 import { requests } from "../handler.js";
 import type { Readable } from "stream";
 import { logger } from "./logger.js";
+import { v7 as uuidv7 } from "uuid";
 import type {
   FileServiceClientConfig,
   FileServiceObject,
@@ -11,6 +14,14 @@ export const MIN_PART_SIZE_BYTES = 5 * 1024 * 1024;
 export const DEFAULT_MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024;
 export const DEFAULT_PART_SIZE_BYTES = 16 * 1024 * 1024;
 export const DEFAULT_PART_CONCURRENCY = 4;
+
+/**
+ * How long a complete answered `409 multipart_complete_in_progress` is
+ * retried: as long as one upload request may take.
+ */
+export const COMPLETE_IN_PROGRESS_MAX_WAIT_MS = 10 * 60 * 1000;
+const COMPLETE_RETRY_INITIAL_DELAY_MS = 1000;
+const COMPLETE_RETRY_MAX_DELAY_MS = 30 * 1000;
 
 export interface UploadOptions {
   thresholdBytes: number;
@@ -249,6 +260,36 @@ const uploadParts = async (
   return uploaded.sort((a, b) => a.partNumber - b.partNumber);
 };
 
+const isCompleteInProgress = (err: unknown): boolean =>
+  err instanceof RequestError &&
+  err.httpStatus === 409 &&
+  err.coreCode === "multipart_complete_in_progress";
+
+/**
+ * Completes, retrying while core reports an earlier attempt still assembling
+ * (a transport retry after a dropped connection lands on its claim), until
+ * that attempt's stored result comes back as a replay.
+ */
+const completeWhenSettled = async (
+  bucket: string,
+  uploadId: string,
+  input: CompleteMultipartInput
+): Promise<FileServiceObject> => {
+  const deadline = Date.now() + COMPLETE_IN_PROGRESS_MAX_WAIT_MS;
+  let delay = COMPLETE_RETRY_INITIAL_DELAY_MS;
+  for (;;) {
+    try {
+      return await requests.files.completeMultipart(bucket, uploadId, input);
+    } catch (err) {
+      const remaining = deadline - Date.now();
+      if (!isCompleteInProgress(err) || remaining <= 0) throw err;
+      const wait = Math.min(delay, remaining);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      delay = Math.min(delay * 2, COMPLETE_RETRY_MAX_DELAY_MS);
+    }
+  }
+};
+
 const abortQuietly = async (bucket: string, uploadId: string) => {
   try {
     await requests.files.abortMultipart(bucket, uploadId);
@@ -299,6 +340,8 @@ const runMultipart = async (
   }
 ): Promise<FileServiceObject> => {
   const { nextPart, expectedSize, stream } = parts;
+  // One key for every attempt at complete, so a retry replays the first.
+  const idempotencyKey = input.idempotencyKey ?? uuidv7();
   try {
     const { uploadId } = await requests.files.initiateMultipart(bucket, key, {
       contentType: input.contentType ?? "application/octet-stream",
@@ -316,9 +359,9 @@ const runMultipart = async (
         options.partConcurrency,
         stream?.reader
       );
-      return await requests.files.completeMultipart(bucket, uploadId, {
+      return await completeWhenSettled(bucket, uploadId, {
         parts: uploaded,
-        idempotencyKey: input.idempotencyKey,
+        idempotencyKey,
         ifMatch: input.ifMatch,
         ifNoneMatch: input.ifNoneMatch,
       });
