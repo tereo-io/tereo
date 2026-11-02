@@ -146,9 +146,10 @@ export const assertMayTakeOverAccount = async (
 };
 
 /**
- * Refuses deactivating, removing roles from or ending any session of a user
- * holding any permission the caller does not: `users.write` or `users.delete`
- * must not be enough to lock out or strip an administrator. Acting on yourself
+ * Refuses deactivating, changing the rate limit of, removing roles from or
+ * ending any session of a user holding any permission the caller does not:
+ * `users.write` or `users.delete` must not be enough to lock out, throttle or
+ * strip an administrator. Acting on yourself
  * is not checked. Takes the target's authority lock, as
  * assertMayResetCredentials does.
  */
@@ -157,6 +158,7 @@ export const assertMayDisempower = async (
   targetId: string,
   action:
     | "deactivate"
+    | "change the rate limit of"
     | "remove roles from"
     | "end a session of"
     | "end all sessions of",

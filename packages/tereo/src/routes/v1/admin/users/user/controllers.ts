@@ -91,6 +91,9 @@ export const updateUser = async (req: Request, res: Response) => {
     }
     if (deactivating) await assertMayDisempower(auth, id, "deactivate", tx);
     if (reactivating) await assertMayReactivate(auth, id, tx);
+    if (body.rateLimitPerSecond !== undefined) {
+      await assertMayDisempower(auth, id, "change the rate limit of", tx);
+    }
   };
 
   const update = async (tx: Prisma.TransactionClient) => {
