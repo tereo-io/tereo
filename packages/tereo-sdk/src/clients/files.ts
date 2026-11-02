@@ -1,5 +1,9 @@
 import { getOriginalStatus, requests } from "../handler.js";
 import { FileCache } from "../utils/fileCache.js";
+import {
+  resolveUploadOptions,
+  type UploadOptions,
+} from "../utils/multipartUpload.js";
 import type {
   Bucket,
   BucketPermission,
@@ -61,6 +65,7 @@ const TEST_USER = { id: "test", email: "test@example.com", name: "Test" };
 
 export class FileServiceClient {
   private readonly cache: FileCache = new FileCache();
+  private readonly uploadOptions: UploadOptions;
 
   /**
    * Cache prefix, TTL and Redis are standardized. `testMode` answers every
@@ -68,9 +73,11 @@ export class FileServiceClient {
    * own `testMode`.
    */
   constructor(
-    _config?: FileServiceClientConfig,
+    config?: FileServiceClientConfig,
     private readonly testMode = false
-  ) {}
+  ) {
+    this.uploadOptions = resolveUploadOptions(config);
+  }
 
   // ---------------------------------------------------------------------------
   // Objects (no byte caching)

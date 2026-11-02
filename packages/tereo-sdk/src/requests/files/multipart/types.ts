@@ -8,6 +8,10 @@ export interface InitiateMultipartInput {
   expectedSize?: string | number | bigint;
   metadata?: FileServiceObjectMetadata;
   tags?: string[];
+  /** Sent as `If-Match`: an ETag the object must currently have. */
+  ifMatch?: string;
+  /** Sent as `If-None-Match`: an ETag it must not have, or `*` for "must not exist". */
+  ifNoneMatch?: string | "*";
 }
 
 export interface InitiateMultipartResponse {
@@ -60,6 +64,10 @@ export interface CompleteMultipartInput {
    * dedupe across process boundaries.
    */
   idempotencyKey?: string;
+  /** Sent as `If-Match`: an ETag the object must currently have. */
+  ifMatch?: string;
+  /** Sent as `If-None-Match`: an ETag it must not have, or `*` for "must not exist". */
+  ifNoneMatch?: string | "*";
 }
 
 export type CompleteMultipartResponse = FileServiceObject;

@@ -156,6 +156,22 @@ describe("createCoreClient", () => {
     await second.stop();
   });
 
+  it("refuses upload options that cannot work, and accepts none", () => {
+    const MiB = 1024 * 1024;
+    expect(() => createCoreClient(options)).not.toThrow();
+    for (const [files, name] of [
+      [{ partSizeBytes: 4 * MiB }, /partSizeBytes/],
+      [
+        { multipartThresholdBytes: 8 * MiB, partSizeBytes: 16 * MiB },
+        /multipartThresholdBytes/,
+      ],
+      [{ partConcurrency: 0 }, /partConcurrency/],
+      [{ partConcurrency: 1.5 }, /partConcurrency/],
+    ] as const) {
+      expect(() => createCoreClient({ ...options, files })).toThrow(name);
+    }
+  });
+
   it("passes channelPrefix to the file cache", async () => {
     const core = createCoreClient({ ...options, channelPrefix: "app1:" });
     await core.start();
