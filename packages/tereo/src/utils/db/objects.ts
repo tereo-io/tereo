@@ -172,6 +172,26 @@ const checkByKeyForUpdate = async (
 };
 
 /**
+ * What a write to `objectKey` would overwrite, read without locks: a snapshot
+ * for an early, advisory precondition check. `upsertWithBlob` decides.
+ */
+export const getWriteState = async (
+  bucketId: number,
+  objectKey: string
+): Promise<{ existing: boolean; currentEtag: string | null }> => {
+  const object = await prisma.object.findFirst({
+    where: { bucketId, objectKey, deletedAt: null, thumbnailFor: null },
+    select: { id: true },
+  });
+  if (!object) return { existing: false, currentEtag: null };
+  const current = await prisma.objectVersion.findFirst({
+    where: { objectId: object.id, isCurrent: true, deletedAt: null },
+    select: { etag: true },
+  });
+  return { existing: true, currentEtag: current?.etag ?? null };
+};
+
+/**
  * Row-lock the Object by (bucketId, id). Used as the first step in every
  * id-addressed mutation transaction (DELETE, PATCH, version ops). Returns the
  * current objectKey so callers can invalidate caches/audit without another
