@@ -48,8 +48,8 @@ Run at least one process with `all` or `worker`, or nothing delivers webhooks or
 answer, 503 and `"degraded"` (naming `db` or `redis` as `"fail"`) when either does not. The
 Postgres ping runs on a connection of its own, outside the request pool (one more connection per
 process), so a busy pool does not read as Postgres being down. The probe result is shared for one
-second, and requests are rate-limited per client IP (1000 a second from an internal network
-address, 300 otherwise), so point probes at it directly rather than through a proxy that sets
+second, and requests are rate-limited per client IP (the pre-auth limit: 1000 a second from an
+internal network address, 300 otherwise, by default; see `RATE_LIMIT_PRE_AUTH_*`), so point probes at it directly rather than through a proxy that sets
 `X-Forwarded-For`. It names no version; an admin finds core's as the core service's
 `declarationVersion` (`GET /v1/admin/services`).
 
@@ -119,6 +119,10 @@ notes as a range; a value outside its range stops core at startup with the varia
 | `SETUP_TOKEN` | generated and logged | 24 characters or more. Core accepts it as the first-boot setup token until setup completes, so setup can run unattended; it is never logged. Set it in production: a generated token is printed in core's log until setup completes, and logs are often shipped where more people can read them than should create the first admin. It replaces any other setup token, so changing or unsetting it before setup completes retires the old one. Compared case-insensitively, ignoring whitespace and hyphens |
 | `PROVISIONING_PATH` | unset | Path of a JSON file, or a directory of `*.json` files, declaring the app services (with what they own and their access and webhooks), login clients and custom roles core applies at every start, as `provisioned` rows. Documents that cannot be applied stop core from starting. Secrets are read from environment variables the documents name, never from the documents. See [provisioning](provisioning.md) |
 | `INTERNAL_NETWORK_CIDRS` | RFC 1918, loopback, `fc00::/7`, `fe80::/10` | Comma-separated CIDRs whose service-account callers, connecting directly (no proxy header), get the general rate limit's internal tier, keyed per client, instead of the external one. Read straight from the environment by `utils/rateLimit.ts`, outside the schema, so a bad entry is logged and skipped rather than refused |
+| `RATE_LIMIT_PER_SECOND` | `100` | 1–100000. The general limit: requests per second per user, per client IP when anonymous. A user's own `rateLimitPerSecond` replaces it (see [auth.md](auth.md#rate-limits)) |
+| `RATE_LIMIT_INTERNAL_PER_SECOND` | `1000` | 1–100000. The general limit for service accounts connecting from `INTERNAL_NETWORK_CIDRS`, per client |
+| `RATE_LIMIT_PRE_AUTH_PER_SECOND` | `300` | 1–100000. Per client IP, before authentication. Core refuses to start if it is below `RATE_LIMIT_PER_SECOND`, so raising that above 300 means raising this too |
+| `RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND` | `1000` | 1–100000. The pre-auth limit for internal addresses. Must be at least `RATE_LIMIT_INTERNAL_PER_SECOND` |
 
 ### Keys
 

@@ -151,6 +151,7 @@ describe("PUT /v1/admin/users/:id/roles and PATCH /v1/admin/users/:id", () => {
     userType: "human",
     permissions: [],
     currentSessionId: null,
+    rateLimitPerSecond: null,
     jti: randomUUID(),
     clientId: "test",
     oauthClientId: null,

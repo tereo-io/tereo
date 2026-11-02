@@ -1,7 +1,7 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
+import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
-import { formatUser } from "../../../../../utils/transformers.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
@@ -10,6 +10,10 @@ import {
   disconnectTokenSockets,
   notifyUserRolesChanged,
 } from "../../../../../websocket/emitters/index.js";
+import {
+  formatAdminUser,
+  formatUser,
+} from "../../../../../utils/transformers.js";
 import {
   validateBody,
   validateParams,
@@ -52,7 +56,7 @@ import {
 export const getUser = async (req: Request, res: Response) => {
   const { id } = validateParams(UserIdParamSchema, req);
   const user = await db.users.get(id);
-  res.json({ ...formatUser(user), managedBy: await managerOf(user) });
+  res.json({ ...formatAdminUser(user), managedBy: await managerOf(user) });
 };
 
 export const updateUser = async (req: Request, res: Response) => {
@@ -87,39 +91,54 @@ export const updateUser = async (req: Request, res: Response) => {
     }
     if (deactivating) await assertMayDisempower(auth, id, "deactivate", tx);
     if (reactivating) await assertMayReactivate(auth, id, tx);
+    if (body.rateLimitPerSecond !== undefined) {
+      await assertMayDisempower(auth, id, "change the rate limit of", tx);
+    }
   };
 
   const update = async (tx: Prisma.TransactionClient) => {
     if (deactivating) {
       await assertAdminRemains((a) => a.userId !== id, tx);
     }
-    const updated = await db.users.update(id, body, tx);
+    const { rateLimitPerSecond, ...profile } = body;
+    // A body of only a rate limit is not a profile update.
+    const profileChanged =
+      rateLimitPerSecond === undefined || Object.keys(profile).length > 0;
+    let updated = profileChanged
+      ? await db.users.update(id, profile, tx)
+      : await db.users.get(id, tx);
     // An invite is matched by email: it must not follow the account to an
     // address the admin who issued it never saw.
     const invitesWithdrawn = newEmail
       ? await db.userIdentities.deleteInvitesForUser(id, tx)
       : 0;
-    const metadata = {
-      ...(body.password && { passwordReset: true }),
-      ...(invitesWithdrawn > 0 && { invitesWithdrawn }),
-    };
-    await logAuditTx(tx, {
-      auth,
-      action: "UPDATE",
-      entityType: "User",
-      entityId: updated.id,
-      entityName: updated.email,
-      // Never the rows themselves: they carry the password hash.
-      changes: computeChanges(formatUser(existing), formatUser(updated)),
-      ...(Object.keys(metadata).length > 0 && { metadata }),
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.user.updated",
-      entityType: "User",
-      entityId: updated.id,
-      data: formatUser(updated) as unknown as Record<string, unknown>,
-    });
+    if (profileChanged) {
+      const metadata = {
+        ...(body.password && { passwordReset: true }),
+        ...(invitesWithdrawn > 0 && { invitesWithdrawn }),
+      };
+      await logAuditTx(tx, {
+        auth,
+        action: "UPDATE",
+        entityType: "User",
+        entityId: updated.id,
+        entityName: updated.email,
+        // Never the rows themselves: they carry the password hash.
+        changes: computeChanges(formatUser(existing), formatUser(updated)),
+        ...(Object.keys(metadata).length > 0 && { metadata }),
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.user.updated",
+        entityType: "User",
+        entityId: updated.id,
+        data: formatUser(updated) as unknown as Record<string, unknown>,
+      });
+    }
+    if (rateLimitPerSecond !== undefined) {
+      await setRateLimitTx(tx, auth, id, rateLimitPerSecond);
+      updated = await db.users.get(id, tx);
+    }
     return updated;
   };
 
@@ -159,7 +178,7 @@ export const updateUser = async (req: Request, res: Response) => {
     });
   }
 
-  res.json(formatUser(newUser));
+  res.json(formatAdminUser(newUser));
 };
 
 export const getUserPermissions = async (req: Request, res: Response) => {

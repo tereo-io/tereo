@@ -126,6 +126,10 @@ export const formatUser = (user: {
   updatedAt: user.updatedAt.toISOString(),
 });
 
+export const formatAdminUser = (
+  user: Parameters<typeof formatUser>[0] & { rateLimitPerSecond: number | null }
+) => ({ ...formatUser(user), rateLimitPerSecond: user.rateLimitPerSecond });
+
 export const formatOrganization = (
   org: Awaited<ReturnType<typeof db.organizations.get>>
 ) => {
@@ -214,6 +218,13 @@ export const formatService = (service: ServiceWithClient) => ({
   updatedAt: service.updatedAt,
 });
 
+/** A service as the admin API returns it, with its account's rate limit. */
+export const formatAdminService = (service: ServiceWithClient) => ({
+  ...formatService(service),
+  rateLimitPerSecond:
+    service.client?.serviceAccountUser?.rateLimitPerSecond ?? null,
+});
+
 /**
  * A service as `GET /v1/account/service` shows it to itself: the declaration
  * core last applied and the access it holds. Its account, creator and secret
@@ -277,6 +288,13 @@ export const formatIntegration = (integration: IntegrationRow) => {
     updatedAt: integration.updatedAt,
   };
 };
+
+/** An integration as the admin API returns it, with its account's rate limit. */
+export const formatAdminIntegration = (integration: IntegrationRow) => ({
+  ...formatIntegration(integration),
+  rateLimitPerSecond:
+    integration.client?.serviceAccountUser?.rateLimitPerSecond ?? null,
+});
 
 type WebhookEndpointRow = Awaited<
   ReturnType<typeof db.webhookEndpoints.getById>

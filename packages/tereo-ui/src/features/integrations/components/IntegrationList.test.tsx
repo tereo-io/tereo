@@ -25,6 +25,7 @@ const base: Integration = {
   serviceAccountUser: null,
   roles: [],
   audience: [],
+  rateLimitPerSecond: null,
   previousSecretExpiresAt: null,
   createdBy: "u1",
   creator: null,

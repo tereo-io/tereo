@@ -136,6 +136,60 @@ describe("loadProvisioningSet", () => {
   });
 });
 
+describe("rateLimitPerSecond", () => {
+  const limitOf = (body: Record<string, unknown>) =>
+    parse({ "a.json": doc(body) }).documents[0]!;
+
+  it("is carried on a service and an integration, null when omitted", () => {
+    expect(
+      limitOf({ service: service({ rateLimitPerSecond: 250 }) }).service!
+        .rateLimitPerSecond
+    ).toBe(250);
+    expect(
+      limitOf({ service: service() }).service!.rateLimitPerSecond
+    ).toBeNull();
+    const integration = {
+      slug: "acme-3pl",
+      name: "Acme",
+      organizationId: ORG_ID,
+      secretFrom: "ACME_SECRET",
+    };
+    const env = { ...baseEnv(), ACME_SECRET: newClientSecretValue() };
+    const withLimit = parseDocuments(
+      [
+        {
+          file: "a.json",
+          text: doc({
+            integrations: [{ ...integration, rateLimitPerSecond: 7 }],
+          }),
+        },
+      ],
+      env
+    );
+    expect(withLimit.documents[0]!.integrations![0]!.rateLimitPerSecond).toBe(
+      7
+    );
+  });
+
+  it.each([0, 100_001, 1.5, "10"])("refuses %s", (value) => {
+    const problems = problemsOf({
+      "a.json": doc({ service: service({ rateLimitPerSecond: value }) }),
+    });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("rateLimitPerSecond");
+  });
+
+  it("refuses it on a login client", () => {
+    const problems = problemsOf({
+      "a.json": doc({
+        clients: [{ clientId: "web", name: "Web", rateLimitPerSecond: 5 }],
+      }),
+    });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/unknown key/);
+  });
+});
+
 describe("parseDocuments", () => {
   it("reports JSON syntax errors with the file name", () => {
     const problems = problemsOf({ "bad.json": '{"version": "1.0.0",}' });
@@ -530,6 +584,7 @@ describe("parseDocuments", () => {
           clientId: "acme-3pl",
           secretEnv: "ACME_SECRET",
           secretHash: secret.hash,
+          rateLimitPerSecond: null,
           roles: ["shipper"],
           audiences: [],
         },

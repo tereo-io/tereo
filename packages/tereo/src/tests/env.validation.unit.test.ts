@@ -79,4 +79,59 @@ describe("EnvSchema", () => {
       }).success
     ).toBe(true);
   });
+
+  describe("rate limits", () => {
+    const messages = (overrides: Record<string, string>) => {
+      const result = parse(overrides);
+      return result.success ? [] : result.error.issues.map((i) => i.message);
+    };
+
+    it("defaults to 100 / 1000 / 300 / 1000", () => {
+      const result = parse({});
+      if (!result.success) throw new Error("defaults must parse");
+      expect(result.data).toMatchObject({
+        RATE_LIMIT_PER_SECOND: 100,
+        RATE_LIMIT_INTERNAL_PER_SECOND: 1000,
+        RATE_LIMIT_PRE_AUTH_PER_SECOND: 300,
+        RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND: 1000,
+      });
+    });
+
+    it.each([
+      "RATE_LIMIT_PER_SECOND",
+      "RATE_LIMIT_INTERNAL_PER_SECOND",
+      "RATE_LIMIT_PRE_AUTH_PER_SECOND",
+      "RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND",
+    ])("rejects %s of 0 or 100001", (name) => {
+      expect(parse({ [name]: "0" }).success).toBe(false);
+      expect(parse({ [name]: "100001" }).success).toBe(false);
+    });
+
+    it("rejects a pre-auth limit below the general one, naming both", () => {
+      const [message] = messages({
+        RATE_LIMIT_PER_SECOND: "100",
+        RATE_LIMIT_PRE_AUTH_PER_SECOND: "50",
+      });
+      expect(message).toContain("RATE_LIMIT_PRE_AUTH_PER_SECOND");
+      expect(message).toContain("RATE_LIMIT_PER_SECOND");
+    });
+
+    it("rejects a pre-auth internal limit below the internal one, naming both", () => {
+      const [message] = messages({
+        RATE_LIMIT_INTERNAL_PER_SECOND: "1000",
+        RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND: "50",
+      });
+      expect(message).toContain("RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND");
+      expect(message).toContain("RATE_LIMIT_INTERNAL_PER_SECOND");
+    });
+
+    it("accepts equal pre-auth and general limits", () => {
+      expect(
+        parse({
+          RATE_LIMIT_PER_SECOND: "300",
+          RATE_LIMIT_PRE_AUTH_PER_SECOND: "300",
+        }).success
+      ).toBe(true);
+    });
+  });
 });

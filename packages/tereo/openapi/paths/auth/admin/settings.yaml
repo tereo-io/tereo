@@ -3,7 +3,7 @@
     tags:
       - Admin - Settings
     summary: Get system settings
-    description: Returns the system-wide 2FA settings.
+    description: Returns the system-wide 2FA settings and the active default rate limits (read-only).
     operationId: getAdminSettings
     security:
       - BearerAuth: [settings.read]
@@ -20,7 +20,7 @@
         content:
           application/json:
             schema:
-              $ref: '../../../components/auth/schemas.yaml#/SystemSettings'
+              $ref: '../../../components/auth/schemas.yaml#/SystemSettingsWithRateLimits'
       '401':
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
@@ -71,7 +71,7 @@
         content:
           application/json:
             schema:
-              $ref: '../../../components/auth/schemas.yaml#/SystemSettings'
+              $ref: '../../../components/auth/schemas.yaml#/SystemSettingsWithRateLimits'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
       '401':

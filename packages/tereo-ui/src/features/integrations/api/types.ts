@@ -23,6 +23,8 @@ export interface Integration {
   clientId: string | null;
   serviceAccountUserId: string | null;
   serviceAccountUser: UserRef | null;
+  /** Requests per second its service account may make; null follows the default. */
+  rateLimitPerSecond?: number | null;
   /** Org roles in its organization when org-bound, global roles otherwise. */
   roles: IntegrationRole[];
   audience: string[];
@@ -43,6 +45,8 @@ export interface CreateIntegrationInput {
 export interface UpdateIntegrationInput {
   name?: string;
   isActive?: boolean;
+  /** Null returns the service account to the default. */
+  rateLimitPerSecond?: number | null;
 }
 
 export interface IntegrationCredentials {

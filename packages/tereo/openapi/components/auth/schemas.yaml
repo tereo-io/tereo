@@ -1294,9 +1294,22 @@ User:
       type: string
       format: date-time
 
-AdminUserDetail:
+AdminUser:
+  description: A user as the admin API returns it. Webhook payloads and `/v1/account` carry `User`, without the rate limit.
   allOf:
     - $ref: '#/User'
+    - type: object
+      required: [rateLimitPerSecond]
+      properties:
+        rateLimitPerSecond:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 100000
+          description: Requests per second this user may make, replacing the default for its tier. `null` uses the default.
+
+AdminUserDetail:
+  allOf:
+    - $ref: '#/AdminUser'
     - type: object
       required: [managedBy]
       properties:
@@ -1379,6 +1392,11 @@ UpdateUserRequest:
       maxLength: 100
     isActive:
       type: boolean
+    rateLimitPerSecond:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 100000
+      description: Requests per second this user may make, replacing the default for its tier. `null` clears it. Allowed for a deactivated user; it applies once reactivated.
 
 PaginatedUsersResponse:
   type: object
@@ -1391,7 +1409,7 @@ PaginatedUsersResponse:
     data:
       type: array
       items:
-        $ref: '#/User'
+        $ref: '#/AdminUser'
     hasMore:
       type: boolean
       description: Whether more pages exist beyond this one.
@@ -2324,8 +2342,38 @@ SystemSettings:
       maximum: 20
       description: How many recovery codes are generated at enrolment and on regeneration
 
+SystemSettingsWithRateLimits:
+  allOf:
+    - $ref: '#/SystemSettings'
+    - type: object
+      required: [rateLimits]
+      properties:
+        rateLimits:
+          type: object
+          readOnly: true
+          description: |
+            The default per-second rate limits this deployment runs with, set
+            by environment variables. Read-only: `PATCH` rejects it with 400.
+            A per-user `rateLimitPerSecond` above `preAuthPerSecond` is not
+            reached by requests that carry no token.
+          required: [perSecond, internalPerSecond, preAuthPerSecond, preAuthInternalPerSecond]
+          properties:
+            perSecond:
+              type: integer
+              description: Default limit for authenticated requests (`RATE_LIMIT_PER_SECOND`)
+            internalPerSecond:
+              type: integer
+              description: Default limit for internal callers (`RATE_LIMIT_INTERNAL_PER_SECOND`)
+            preAuthPerSecond:
+              type: integer
+              description: Limit for requests before authentication (`RATE_LIMIT_PRE_AUTH_PER_SECOND`)
+            preAuthInternalPerSecond:
+              type: integer
+              description: Pre-authentication limit for internal callers (`RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND`)
+
 UpdateSettingsRequest:
   type: object
+  additionalProperties: false
   properties:
     totpPolicy:
       type: string
@@ -2710,9 +2758,22 @@ ServiceSettings:
       examples:
         - 24
 
-ServiceDetail:
+AdminService:
+  description: A service as `GET` and `PATCH /v1/admin/services/{id}` return it. Webhook payloads and the other service responses carry `Service`, without the rate limit.
   allOf:
     - $ref: '#/Service'
+    - type: object
+      required: [rateLimitPerSecond]
+      properties:
+        rateLimitPerSecond:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 100000
+          description: Requests per second its service account may make, replacing the default for its tier. `null` uses the default.
+
+ServiceDetail:
+  allOf:
+    - $ref: '#/AdminService'
     - type: object
       required: [declared, access, settings]
       properties:
@@ -2845,6 +2906,11 @@ UpdateServiceRequest:
     isActive:
       type: boolean
       description: '`false` deactivates the service and its service account and revokes its tokens.'
+    rateLimitPerSecond:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 100000
+      description: Requests per second its service account may make, replacing the default for its tier. `null` clears it.
 
 RegenerateServiceSecretResponse:
   type: object
@@ -3048,6 +3114,19 @@ IntegrationRole:
       type: boolean
       description: A system role (core's or a service's), not a custom role.
 
+AdminIntegration:
+  description: An integration as `GET` and `PATCH /v1/admin/integrations/{id}` return it. Webhook payloads and the other integration responses carry `Integration`, without the rate limit.
+  allOf:
+    - $ref: '#/Integration'
+    - type: object
+      required: [rateLimitPerSecond]
+      properties:
+        rateLimitPerSecond:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 100000
+          description: Requests per second its service account may make, replacing the default for its tier. `null` uses the default.
+
 IntegrationWithCredentials:
   allOf:
     - $ref: '#/Integration'
@@ -3090,6 +3169,11 @@ UpdateIntegrationRequest:
     isActive:
       type: boolean
       description: '`false` deactivates the integration and its service account and revokes its tokens.'
+    rateLimitPerSecond:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 100000
+      description: Requests per second its service account may make, replacing the default for its tier. `null` clears it.
 
 SetIntegrationRolesRequest:
   type: object

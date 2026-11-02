@@ -9,6 +9,7 @@ import { logger } from "../../../../utils/logger.js";
 import { UpdateSettingsSchema } from "./schemas.js";
 import type { Request, Response } from "express";
 import db from "../../../../utils/db/index.js";
+import env from "../../../../env.js";
 import {
   computeChanges,
   emitTx,
@@ -21,13 +22,22 @@ const POLICY_STRENGTH: Record<TotpPolicy, number> = {
   required: 2,
 };
 
-export const getSettings = async (_req: Request, res: Response) => {
-  const settings = await db.settings.getTotpSettings();
+const settingsResponse = (settings: {
+  totpPolicy: TotpPolicy;
+  totpRecoveryCodeCount: number;
+}) => ({
+  totpPolicy: settings.totpPolicy,
+  totpRecoveryCodeCount: settings.totpRecoveryCodeCount,
+  rateLimits: {
+    perSecond: env.RATE_LIMIT_PER_SECOND,
+    internalPerSecond: env.RATE_LIMIT_INTERNAL_PER_SECOND,
+    preAuthPerSecond: env.RATE_LIMIT_PRE_AUTH_PER_SECOND,
+    preAuthInternalPerSecond: env.RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND,
+  },
+});
 
-  res.json({
-    totpPolicy: settings.totpPolicy,
-    totpRecoveryCodeCount: settings.totpRecoveryCodeCount,
-  });
+export const getSettings = async (_req: Request, res: Response) => {
+  res.json(settingsResponse(await db.settings.getTotpSettings()));
 };
 
 export const updateSettings = async (req: Request, res: Response) => {
@@ -102,8 +112,5 @@ export const updateSettings = async (req: Request, res: Response) => {
     "Settings updated"
   );
 
-  res.json({
-    totpPolicy: updatedSettings.totpPolicy,
-    totpRecoveryCodeCount: updatedSettings.totpRecoveryCodeCount,
-  });
+  res.json(settingsResponse(updatedSettings));
 };

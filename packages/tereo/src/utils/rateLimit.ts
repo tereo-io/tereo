@@ -6,6 +6,7 @@ import { BlockList, isIPv4, isIPv6 } from "node:net";
 import { createHash, randomUUID } from "node:crypto";
 import { redactUrl } from "../telemetry/redact.js";
 import { logger } from "./logger.js";
+import env from "../env.js";
 
 // When Redis is unreachable:
 // - Credential limiters (createFailureLimiter, createBackoffLimiter and the
@@ -17,12 +18,6 @@ import { logger } from "./logger.js";
 // All of them give up at once while the client is not "ready", rather than
 // waiting in ioredis's offline queue for Redis to come back.
 
-const EXTERNAL_POINTS = 100;
-const INTERNAL_POINTS = 1000;
-// Per IP, before authentication: above the per-user limit, so a NAT shared by
-// several users reaches their own limits first.
-const PRE_AUTH_EXTERNAL_POINTS = 300;
-const PRE_AUTH_INTERNAL_POINTS = 1000;
 const DURATION_SECONDS = 1;
 const UNAVAILABLE_RETRY_AFTER_SECONDS = 5;
 
@@ -90,6 +85,7 @@ type ReqWithAuth = Request & {
     userId?: string;
     userType?: "human" | "service_account";
     oauthClientId?: string | null;
+    rateLimitPerSecond?: number | null;
   };
 };
 
@@ -190,7 +186,12 @@ interface TieredLimiterConfig {
   internalPoints: number;
   /** Set X-RateLimit-* on requests that pass, not only on a 429. */
   headersOnPass: boolean;
-  classify: (req: Request) => { internal: boolean; key: string };
+  /** `points` replaces the default of whichever tier applies. */
+  classify: (req: Request) => {
+    internal: boolean;
+    key: string;
+    points?: number;
+  };
   getCost?: (req: Request) => number;
 }
 
@@ -203,21 +204,32 @@ function createTieredLimiter(config: TieredLimiterConfig): RequestHandler {
     duration: DURATION_SECONDS,
     rejectIfRedisNotReady: true,
   };
-  const limiterExternal = new RateLimiterRedis({
-    ...options,
-    keyPrefix,
-    points: externalPoints,
-  });
-  const limiterInternal = new RateLimiterRedis({
-    ...options,
-    keyPrefix: `${keyPrefix}:internal`,
-    points: internalPoints,
-  });
+  // One limiter per points value per tier, all on the tier's key prefix, so
+  // a changed limit meets the count already held rather than a fresh one.
+  const limiters = {
+    external: new Map<number, RateLimiterRedis>(),
+    internal: new Map<number, RateLimiterRedis>(),
+  };
+  const limiterFor = (internal: boolean, points: number) => {
+    const tier = internal ? limiters.internal : limiters.external;
+    let limiter = tier.get(points);
+    if (!limiter) {
+      limiter = new RateLimiterRedis({
+        ...options,
+        keyPrefix: internal ? `${keyPrefix}:internal` : keyPrefix,
+        points,
+      });
+      tier.set(points, limiter);
+    }
+    return limiter;
+  };
+  limiterFor(false, externalPoints);
+  limiterFor(true, internalPoints);
 
   return async (req: Request, res: Response, next: NextFunction) => {
-    const { internal, key } = classify(req);
-    const limiter = internal ? limiterInternal : limiterExternal;
-    const points = internal ? internalPoints : externalPoints;
+    const { internal, key, points: override } = classify(req);
+    const points = override ?? (internal ? internalPoints : externalPoints);
+    const limiter = limiterFor(internal, points);
 
     let cost = 1;
     if (getCost) {
@@ -272,8 +284,8 @@ export function createRateLimitMiddleware(
 ): RequestHandler {
   return createTieredLimiter({
     keyPrefix: `${serviceName}:ratelimit`,
-    externalPoints: EXTERNAL_POINTS,
-    internalPoints: INTERNAL_POINTS,
+    externalPoints: env.RATE_LIMIT_PER_SECOND,
+    internalPoints: env.RATE_LIMIT_INTERNAL_PER_SECOND,
     headersOnPass: true,
     getCost: opts.getCost,
     classify: (req) => {
@@ -284,7 +296,8 @@ export function createRateLimitMiddleware(
         : auth?.userId
           ? `user:${auth.userId}`
           : `ip:${getIpIdentifier(req)}`;
-      return { internal, key };
+      // Only an authenticated request carries an override.
+      return { internal, key, points: auth?.rateLimitPerSecond ?? undefined };
     },
   });
 }
@@ -303,8 +316,8 @@ export function createPreAuthRateLimitMiddleware(
 ): RequestHandler {
   return createTieredLimiter({
     keyPrefix: `${serviceName}:ratelimit:${scope}`,
-    externalPoints: PRE_AUTH_EXTERNAL_POINTS,
-    internalPoints: PRE_AUTH_INTERNAL_POINTS,
+    externalPoints: env.RATE_LIMIT_PRE_AUTH_PER_SECOND,
+    internalPoints: env.RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND,
     headersOnPass: false,
     classify: (req) => ({
       internal: isInternalByNetwork(req),

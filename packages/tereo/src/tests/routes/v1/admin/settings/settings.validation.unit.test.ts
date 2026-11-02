@@ -21,6 +21,7 @@ describe("PATCH /v1/admin/settings", () => {
         { totpRecoveryCodeCount: 25 },
         ["totpRecoveryCodeCount"],
       ],
+      ["an unknown key", { rateLimits: { perSecond: 5 } }, []],
     ])("rejects %s", (_label, body, path) => {
       const result = UpdateSettingsSchema.safeParse(body);
       expect(result.success).toBe(false);

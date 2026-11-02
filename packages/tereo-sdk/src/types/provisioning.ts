@@ -69,6 +69,11 @@ export interface ServiceProvisioning {
   internalHost?: string;
   /** Name of the environment variable, in core's environment, that holds the client secret. */
   secretFrom: string;
+  /**
+   * Requests per second the service account may make, 1 to 100000. Omitted:
+   * the tier's default; dropping it clears an earlier value.
+   */
+  rateLimitPerSecond?: number;
   /** Access the service asks for; approved by the document itself. */
   access?: {
     /** A bare name for core's roles, `<slug>/<name>` for another service's. */
@@ -134,6 +139,11 @@ export interface IntegrationProvisioning {
   organizationId?: string;
   /** Name of the environment variable, in core's environment, that holds the client secret. */
   secretFrom: string;
+  /**
+   * Requests per second its service account may make, 1 to 100000. Omitted:
+   * the tier's default; dropping it clears an earlier value.
+   */
+  rateLimitPerSecond?: number;
   /**
    * Role names. Org-bound: org-assignable custom roles of the set. Otherwise
    * also core's roles and `<slug>/<name>` services' system roles. Default [].

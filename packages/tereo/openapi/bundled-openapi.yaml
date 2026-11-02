@@ -4484,7 +4484,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/AdminUser'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -4571,6 +4571,11 @@ paths:
         like `DELETE /v1/admin/users/{id}/sessions/all`: a caller resetting their
         own password keeps the session they act from.
 
+        Setting `rateLimitPerSecond` alone is a valid update. When it changes, a
+        separate audit entry (`metadata.rateLimitPerSecond` with `from` and `to`)
+        and an `auth.user.rate-limit-changed` event are recorded, and no
+        `auth.user.updated` event is sent for a body that holds only that field.
+
         An audit log entry is created for this action; it records the changed
         profile fields, and `passwordReset: true` in its metadata when a
         password was set — never the password or its hash.
@@ -4602,7 +4607,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/AdminUser'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
           description: Invalid body or user id (`invalid_request`), the target is the system user (`system_user`), or the caller is deactivating their own account (`self_deactivation`)
@@ -7890,7 +7895,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Integration'
+                $ref: '#/components/schemas/AdminIntegration'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -7914,6 +7919,11 @@ paths:
         service-account user and revokes its tokens; no new token is issued
         until it is reactivated. A provisioned integration is `409
         managed_by_provisioning`.
+
+        `rateLimitPerSecond` sets the rate limit of the integration's
+        service-account user (`null` clears it); a change is audited against
+        that user and emits `auth.user.rate-limit-changed`, and sent alone it
+        emits no `core.integration.updated`.
 
         An audit log entry is created for this action. A
         `core.integration.deactivated` webhook event is emitted on deactivation,
@@ -7943,7 +7953,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Integration'
+                $ref: '#/components/schemas/AdminIntegration'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -8410,6 +8420,11 @@ paths:
         with `409 managed_by_provisioning`: its name and secret come from the
         provisioning documents.
 
+        `rateLimitPerSecond` sets the rate limit of the service's service
+        account (`null` clears it); a change is audited against that user and
+        emits `auth.user.rate-limit-changed`, and sent alone it emits no
+        `core.service.updated`.
+
         An audit log entry is created for this action.
         A `core.service.updated` webhook event is emitted.
       operationId: updateAdminService
@@ -8437,10 +8452,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Service'
+                $ref: '#/components/schemas/AdminService'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
-          description: Validation error, or neither `name` nor `isActive` given
+          description: Validation error, or none of `name`, `isActive` or `rateLimitPerSecond` given
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
@@ -8690,7 +8705,7 @@ paths:
       tags:
         - Admin - Settings
       summary: Get system settings
-      description: Returns the system-wide 2FA settings.
+      description: Returns the system-wide 2FA settings and the active default rate limits (read-only).
       operationId: getAdminSettings
       security:
         - BearerAuth:
@@ -8708,7 +8723,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SystemSettings'
+                $ref: '#/components/schemas/SystemSettingsWithRateLimits'
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
@@ -8760,7 +8775,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SystemSettings'
+                $ref: '#/components/schemas/SystemSettingsWithRateLimits'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -15234,6 +15249,49 @@ webhooks:
                             type: string
                             format: uuid
                           description: The user's role ids after the change
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.user.rate-limit-changed:
+    post:
+      tags:
+        - Admin - Users
+      summary: User rate limit changed
+      description: Fired when a user's `rateLimitPerSecond` override changes, not when a request sets the value it already has.
+      operationId: webhookUserRateLimitChanged
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.user.rate-limit-changed
+                    entityType:
+                      const: User
+                    data:
+                      type: object
+                      required:
+                        - userId
+                        - rateLimitPerSecond
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        rateLimitPerSecond:
+                          type:
+                            - integer
+                            - 'null'
+                          description: The override after the change; `null` means the tier default
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -22887,6 +22945,21 @@ components:
         updatedAt:
           type: string
           format: date-time
+    AdminUser:
+      description: A user as the admin API returns it. Webhook payloads and `/v1/account` carry `User`, without the rate limit.
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          required:
+            - rateLimitPerSecond
+          properties:
+            rateLimitPerSecond:
+              type:
+                - integer
+                - 'null'
+              minimum: 1
+              maximum: 100000
+              description: Requests per second this user may make, replacing the default for its tier. `null` uses the default.
     CreateUserRequest:
       type: object
       required:
@@ -22939,6 +23012,13 @@ components:
           maxLength: 100
         isActive:
           type: boolean
+        rateLimitPerSecond:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 100000
+          description: Requests per second this user may make, replacing the default for its tier. `null` clears it. Allowed for a deactivated user; it applies once reactivated.
     PaginatedUsersResponse:
       type: object
       required:
@@ -22950,7 +23030,7 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/User'
+            $ref: '#/components/schemas/AdminUser'
         hasMore:
           type: boolean
           description: Whether more pages exist beyond this one.
@@ -23966,6 +24046,7 @@ components:
           description: How many recovery codes are generated at enrolment and on regeneration
     UpdateSettingsRequest:
       type: object
+      additionalProperties: false
       properties:
         totpPolicy:
           type: string
@@ -24388,9 +24469,24 @@ components:
             default 24).
           examples:
             - 24
-    ServiceDetail:
+    AdminService:
+      description: A service as `GET` and `PATCH /v1/admin/services/{id}` return it. Webhook payloads and the other service responses carry `Service`, without the rate limit.
       allOf:
         - $ref: '#/components/schemas/Service'
+        - type: object
+          required:
+            - rateLimitPerSecond
+          properties:
+            rateLimitPerSecond:
+              type:
+                - integer
+                - 'null'
+              minimum: 1
+              maximum: 100000
+              description: Requests per second its service account may make, replacing the default for its tier. `null` uses the default.
+    ServiceDetail:
+      allOf:
+        - $ref: '#/components/schemas/AdminService'
         - type: object
           required:
             - declared
@@ -24571,6 +24667,13 @@ components:
         isActive:
           type: boolean
           description: '`false` deactivates the service and its service account and revokes its tokens.'
+        rateLimitPerSecond:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 100000
+          description: Requests per second its service account may make, replacing the default for its tier. `null` clears it.
     RegenerateServiceSecretResponse:
       type: object
       required:
@@ -28847,7 +28950,7 @@ components:
           description: The provider's authorization endpoint. Navigate the browser there.
     AdminUserDetail:
       allOf:
-        - $ref: '#/components/schemas/User'
+        - $ref: '#/components/schemas/AdminUser'
         - type: object
           required:
             - managedBy
@@ -29364,6 +29467,21 @@ components:
           properties:
             credentials:
               $ref: '#/components/schemas/ServiceCredentials'
+    AdminIntegration:
+      description: An integration as `GET` and `PATCH /v1/admin/integrations/{id}` return it. Webhook payloads and the other integration responses carry `Integration`, without the rate limit.
+      allOf:
+        - $ref: '#/components/schemas/Integration'
+        - type: object
+          required:
+            - rateLimitPerSecond
+          properties:
+            rateLimitPerSecond:
+              type:
+                - integer
+                - 'null'
+              minimum: 1
+              maximum: 100000
+              description: Requests per second its service account may make, replacing the default for its tier. `null` uses the default.
     UpdateIntegrationRequest:
       type: object
       minProperties: 1
@@ -29376,6 +29494,13 @@ components:
         isActive:
           type: boolean
           description: '`false` deactivates the integration and its service account and revokes its tokens.'
+        rateLimitPerSecond:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 100000
+          description: Requests per second its service account may make, replacing the default for its tier. `null` clears it.
     SetIntegrationRolesRequest:
       type: object
       required:
@@ -29399,6 +29524,39 @@ components:
           items:
             type: string
           description: Service slugs; `[]` clears the audience.
+    SystemSettingsWithRateLimits:
+      allOf:
+        - $ref: '#/components/schemas/SystemSettings'
+        - type: object
+          required:
+            - rateLimits
+          properties:
+            rateLimits:
+              type: object
+              readOnly: true
+              description: |
+                The default per-second rate limits this deployment runs with, set
+                by environment variables. Read-only: `PATCH` rejects it with 400.
+                A per-user `rateLimitPerSecond` above `preAuthPerSecond` is not
+                reached by requests that carry no token.
+              required:
+                - perSecond
+                - internalPerSecond
+                - preAuthPerSecond
+                - preAuthInternalPerSecond
+              properties:
+                perSecond:
+                  type: integer
+                  description: Default limit for authenticated requests (`RATE_LIMIT_PER_SECOND`)
+                internalPerSecond:
+                  type: integer
+                  description: Default limit for internal callers (`RATE_LIMIT_INTERNAL_PER_SECOND`)
+                preAuthPerSecond:
+                  type: integer
+                  description: Limit for requests before authentication (`RATE_LIMIT_PRE_AUTH_PER_SECOND`)
+                preAuthInternalPerSecond:
+                  type: integer
+                  description: Pre-authentication limit for internal callers (`RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND`)
     SigningKey:
       type: object
       required:

@@ -1619,6 +1619,8 @@ components:
       $ref: './components/auth/schemas.yaml#/ChangePasswordRequest'
     User:
       $ref: './components/auth/schemas.yaml#/User'
+    AdminUser:
+      $ref: './components/auth/schemas.yaml#/AdminUser'
     CreateUserRequest:
       $ref: './components/auth/schemas.yaml#/CreateUserRequest'
     UpdateUserRequest:
@@ -1713,6 +1715,8 @@ components:
       $ref: './components/auth/schemas.yaml#/ServiceAccessListItem'
     ServiceSettings:
       $ref: './components/auth/schemas.yaml#/ServiceSettings'
+    AdminService:
+      $ref: './components/auth/schemas.yaml#/AdminService'
     ServiceDetail:
       $ref: './components/auth/schemas.yaml#/ServiceDetail'
     CreateServiceRequest:
@@ -1967,6 +1971,8 @@ webhooks:
     $ref: './paths/auth/admin/users.yaml#/auth.user.updated'
   auth.user.roles-changed:
     $ref: './paths/auth/admin/users.yaml#/auth.user.roles-changed'
+  auth.user.rate-limit-changed:
+    $ref: './paths/auth/admin/users.yaml#/auth.user.rate-limit-changed'
   auth.user.totp-enabled:
     $ref: './paths/auth/oauth.yaml#/auth.user.totp-enabled'
   auth.user.totp-disabled:

@@ -5,9 +5,12 @@ import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import RenameServiceButton from "./buttons/RenameServiceButton";
 import { ServiceAccessSection } from "./ServiceAccessSection";
 import { DeclaredItemsSection } from "./DeclaredItemsSection";
+import { RateLimitField } from "@/components/RateLimitField";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
+import useUpdateService from "../api/useUpdateService";
 import { PageHeader } from "@/components/PageHeader";
 import { userLabel, type UserRef } from "@/lib/refs";
+import { useSettings } from "@/features/auth-admin";
 import { formatDateTime } from "@/utils/formatDate";
 import { ServiceStatusBadge } from "./StatusBadges";
 import { Link, useParams } from "react-router-dom";
@@ -17,6 +20,7 @@ import { useAuth } from "@/lib/auth";
 import {
   Alert,
   Badge,
+  Card,
   Centered,
   Col,
   EmptyState,
@@ -33,6 +37,10 @@ export const ServiceDetail = () => {
   const { serviceId } = useParams<{ serviceId: string }>();
   const { hasPermission } = useAuth();
   const { data: service, isLoading } = useService(serviceId ?? "");
+  const { data: settings } = useSettings({
+    enabled: hasPermission("settings.read"),
+  });
+  const updateService = useUpdateService();
 
   useDocumentTitle(service?.name);
 
@@ -191,6 +199,20 @@ export const ServiceDetail = () => {
                 },
               ]}
             />
+            <Card>
+              <RateLimitField
+                value={service.rateLimitPerSecond}
+                readOnly={!canWrite}
+                preAuthLimit={settings?.rateLimits?.preAuthPerSecond}
+                internalCaller
+                onSave={async (rateLimitPerSecond) => {
+                  await updateService.mutateAsync({
+                    id: service.id,
+                    data: { rateLimitPerSecond },
+                  });
+                }}
+              />
+            </Card>
           </Col>
           <Col>
             <TagCard

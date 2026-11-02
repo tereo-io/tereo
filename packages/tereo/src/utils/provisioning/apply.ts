@@ -4,6 +4,7 @@ import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
 import { broadcastBucketInvalidate } from "../cacheBroadcast.js";
 import { formatClient, formatRole } from "../transformers.js";
 import { syncProvisionedAccessTx } from "../serviceAccess.js";
+import { setRateLimitTx } from "../rateLimitOverride.js";
 import { openSigningSecret } from "../webhookSecrets.js";
 import { prisma, type Prisma } from "../db/prisma.js";
 import type { CustomRoleEntry } from "./schema.js";
@@ -72,7 +73,10 @@ export interface ProvisioningResult {
   unprovisioned: string[];
   /** Services whose declaration was applied. */
   declared: string[];
-  /** Access granted, extended or revoked; integrations' roles or audiences set. */
+  /**
+   * Access granted, extended or revoked; integrations' roles or audiences set;
+   * a service account's rate limit changed.
+   */
   access: string[];
   /** Custom roles created or changed. */
   roles: string[];
@@ -733,6 +737,15 @@ const applyIntegrationsAccess = async (
         )
       )
         result.access.push(`integration:${spec.slug} audiences`);
+      if (
+        await setRateLimitTx(
+          tx,
+          SYSTEM_ACTOR,
+          ref.accountUserId,
+          spec.rateLimitPerSecond ?? null
+        )
+      )
+        result.access.push(`integration:${spec.slug} rate limit`);
     });
   }
   return problems;
@@ -1483,6 +1496,15 @@ const applyServicesContent = async (
       for (const [verb, keys] of Object.entries(byVerb))
         for (const key of keys)
           result.access.push(`service:${row.slug} ${verb} ${key}`);
+      if (
+        await setRateLimitTx(
+          tx,
+          SYSTEM_ACTOR,
+          accountUserId,
+          entry.service.rateLimitPerSecond ?? null
+        )
+      )
+        result.access.push(`service:${row.slug} rate limit`);
       // Tokens carry the permissions: a narrowed role's are stale too, even
       // when the same role also gained others.
       if (

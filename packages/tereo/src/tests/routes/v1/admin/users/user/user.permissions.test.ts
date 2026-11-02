@@ -90,6 +90,28 @@ describe("PATCH /v1/admin/users/:id and POST /v1/admin/users/:id/totp/reset", ()
   const passwordHash = async (id: string) =>
     (await prisma.user.findUniqueOrThrow({ where: { id } })).passwordHash;
 
+  it("needs users.write to set a rate limit", async () => {
+    const reader = await getTestPrincipalToken({ permissions: ["users.read"] });
+    const target = await createTestUser();
+    const response = await patchUser(reader, target.id, {
+      rateLimitPerSecond: 20,
+    });
+    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+    const row = await prisma.user.findUniqueOrThrow({
+      where: { id: target.id },
+    });
+    expect(row.rateLimitPerSecond).toBeNull();
+
+    const written = await patchUser(writerToken, target.id, {
+      rateLimitPerSecond: 20,
+    });
+    expect(written.status).toBe(HTTP_STATUS.OK);
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id: target.id } }))
+        .rateLimitPerSecond
+    ).toBe(20);
+  });
+
   it("protects a target whose roles.write role is deactivated", async () => {
     // Suspended, not archived: an admin can reactivate it.
     const role = await createTestRole();
@@ -438,6 +460,50 @@ describe("PATCH /v1/admin/users/:id and POST /v1/admin/users/:id/totp/reset", ()
       expect(
         (await patchUser(caller, target.id, { password: NEW_PASSWORD })).status
       ).toBe(HTTP_STATUS.OK);
+    });
+  });
+
+  describe("PATCH /admin/users/:id changing a rate limit", () => {
+    const limitOf = async (id: string) =>
+      (await prisma.user.findUniqueOrThrow({ where: { id } }))
+        .rateLimitPerSecond;
+
+    it("refuses a users.write caller the limit of an admin", async () => {
+      const target = await createTestUser();
+      await grantAdmin(target.id);
+
+      const response = await patchUser(writerToken, target.id, {
+        rateLimitPerSecond: 1,
+      });
+
+      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(await limitOf(target.id)).toBeNull();
+    });
+
+    it("lets a user change their own limit", async () => {
+      const userId = (await createTestUser()).id;
+      const token = await getTestPrincipalToken({
+        userId,
+        permissions: ["users.write"],
+      });
+
+      const response = await patchUser(token, userId, {
+        rateLimitPerSecond: 40,
+      });
+
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(await limitOf(userId)).toBe(40);
+    });
+
+    it("lets an admin change the limit of a lesser user", async () => {
+      const target = await createTestUser();
+
+      const response = await patchUser(adminToken, target.id, {
+        rateLimitPerSecond: 60,
+      });
+
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(await limitOf(target.id)).toBe(60);
     });
   });
 

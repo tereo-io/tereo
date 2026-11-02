@@ -1,5 +1,5 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
-import { formatIntegration } from "../../../../../utils/transformers.js";
+import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { assertMayTakeOverAccount } from "../../users/user/guards.js";
 import { emitTx, logAuditTx } from "../../../../../utils/outbox.js";
@@ -7,6 +7,10 @@ import { assertMayChangeAudience } from "../../clients/utils.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
+import {
+  formatAdminIntegration,
+  formatIntegration,
+} from "../../../../../utils/transformers.js";
 import {
   integrationRef,
   setIntegrationAudiencesTx,
@@ -43,19 +47,35 @@ const getEditable = async (req: Request) => {
 };
 
 export const getIntegration = async (req: Request, res: Response) => {
-  res.json(formatIntegration(await getRow(req)));
+  res.json(formatAdminIntegration(await getRow(req)));
 };
 
-/** Rename, deactivate or reactivate. A deactivated integration's tokens stop. */
+/**
+ * Rename, deactivate or reactivate, or set its service account's rate limit.
+ * A deactivated integration's tokens stop.
+ */
 export const updateIntegration = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const body = validateBody(UpdateIntegrationSchema, req);
   const existing = await getEditable(req);
 
-  const updated = await db.$transaction((tx) =>
-    updateIntegrationTx(tx, existing, body, auth)
-  );
-  res.json(formatIntegration(updated));
+  const updated = await db.$transaction(async (tx) => {
+    const { rateLimitPerSecond, ...fields } = body;
+    // A limit on its own is not a change to the integration, so no integration event.
+    if (fields.name !== undefined || fields.isActive !== undefined) {
+      await updateIntegrationTx(tx, existing, fields, auth);
+    }
+    if (rateLimitPerSecond !== undefined) {
+      await setRateLimitTx(
+        tx,
+        auth,
+        existing.accountUserId,
+        rateLimitPerSecond
+      );
+    }
+    return db.services.getIntegration(existing.id, tx);
+  });
+  res.json(formatAdminIntegration(updated));
 };
 
 /**

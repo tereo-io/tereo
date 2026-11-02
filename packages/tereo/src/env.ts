@@ -509,6 +509,19 @@ const EnvFields = z
     WEBHOOK_STALE_DELIVERY_SECONDS: int(1, DAY, 300),
 
     // -------------------------------------------------------------------------
+    // rate limits
+    // -------------------------------------------------------------------------
+    // Requests per second per user (per IP when unauthenticated, per OAuth
+    // client for internal service accounts). Internal is the tier for
+    // service accounts on an internal network address.
+    RATE_LIMIT_PER_SECOND: int(1, 100_000, 100),
+    RATE_LIMIT_INTERNAL_PER_SECOND: int(1, 100_000, 1000),
+    // Per IP, before authentication. Must not fall below the matching limit
+    // above, so users behind one NAT reach their own limits first.
+    RATE_LIMIT_PRE_AUTH_PER_SECOND: int(1, 100_000, 300),
+    RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND: int(1, 100_000, 1000),
+
+    // -------------------------------------------------------------------------
     // outbox
     // -------------------------------------------------------------------------
     // How long a dead-lettered outbox row is kept for replay before the
@@ -561,6 +574,21 @@ const EnvFields = z
         path: ["DB_POOL_MIN"],
         message: "DB_POOL_MIN must not exceed DB_POOL_MAX",
       });
+    }
+    for (const [general, preAuth] of [
+      ["RATE_LIMIT_PER_SECOND", "RATE_LIMIT_PRE_AUTH_PER_SECOND"],
+      [
+        "RATE_LIMIT_INTERNAL_PER_SECOND",
+        "RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND",
+      ],
+    ] as const) {
+      if (val[preAuth] < val[general]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [preAuth],
+          message: `${preAuth} must not be below ${general}`,
+        });
+      }
     }
     if (
       val.USER_SESSION_IDLE_TTL !== undefined &&
