@@ -31,6 +31,7 @@ import {
   getTestAccessToken,
   grantTestPermission,
   testIdempotencyKey,
+  uploadTestObject,
 } from "../../../../../../../support/files.js";
 
 describe("POST, GET and DELETE /v1/files/buckets/:name/multipart/:uploadId", () => {
@@ -151,6 +152,90 @@ describe("POST, GET and DELETE /v1/files/buckets/:name/multipart/:uploadId", () 
         { ...as(), responseType: "arraybuffer" }
       );
       expect(Buffer.from(download.data).equals(content)).toBe(true);
+    });
+
+    describe("preconditions at complete", () => {
+      // An upload for `key` with one part, and the object already at `key`.
+      const uploadOverExisting = async () => {
+        const key = `pre-${randomBytes(4).toString("hex")}.bin`;
+        const created = await uploadTestObject(token, bucketName, key, {
+          buffer: text(),
+          filename: key,
+          contentType: "application/octet-stream",
+        });
+        const started = await axios.post(
+          `${BASE_URL}/buckets/${bucketName}/multipart`,
+          { objectKey: key, contentType: "application/octet-stream" },
+          as()
+        );
+        expect(started.status).toBe(HTTP_STATUS.CREATED);
+        const uploadId = started.data.uploadId as string;
+        const part = await putPart(uploadId, 1, text());
+        return {
+          uploadId,
+          etag: created.etag as string,
+          parts: [{ partNumber: 1, etag: part.data.etag as string }],
+        };
+      };
+
+      const completeWith = (
+        uploadId: string,
+        parts: Array<{ partNumber: number; etag: string }>,
+        headers: Record<string, string>
+      ) =>
+        axios.post(
+          `${BASE_URL}/buckets/${bucketName}/multipart/${uploadId}/complete`,
+          { parts },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Idempotency-Key": testIdempotencyKey(),
+              ...headers,
+            },
+            validateStatus: () => true,
+          }
+        );
+
+      it("refuses a stale If-Match and leaves the upload open", async () => {
+        const { uploadId, parts } = await uploadOverExisting();
+        const res = await completeWith(uploadId, parts, {
+          "If-Match": '"not-the-etag"',
+        });
+        expect(res.status).toBe(412);
+        expect(res.data.error).toBe("precondition_failed");
+
+        const state = await axios.get(
+          `${BASE_URL}/buckets/${bucketName}/multipart/${uploadId}`,
+          as()
+        );
+        expect(state.data).toMatchObject({
+          completedAt: null,
+          abortedAt: null,
+        });
+        const aborted = await axios.delete(
+          `${BASE_URL}/buckets/${bucketName}/multipart/${uploadId}`,
+          as()
+        );
+        expect(aborted.status).toBe(HTTP_STATUS.NO_CONTENT);
+      });
+
+      it("refuses If-None-Match: * over an existing key", async () => {
+        const { uploadId, parts } = await uploadOverExisting();
+        const res = await completeWith(uploadId, parts, {
+          "If-None-Match": "*",
+        });
+        expect(res.status).toBe(412);
+        expect(res.data.error).toBe("precondition_failed");
+      });
+
+      it("completes with the current ETag in If-Match", async () => {
+        const { uploadId, parts, etag } = await uploadOverExisting();
+        const res = await completeWith(uploadId, parts, {
+          "If-Match": `"${etag}"`,
+        });
+        expect(res.status).toBe(HTTP_STATUS.OK);
+        expect(res.data.etag).not.toBe(etag);
+      });
     });
 
     it("lists an upload's parts only for the user who initiated it", async () => {

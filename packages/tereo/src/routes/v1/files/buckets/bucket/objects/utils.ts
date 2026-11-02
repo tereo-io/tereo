@@ -1,3 +1,4 @@
+import type { EtagPreconditions } from "../../../../../../utils/writePreconditions.js";
 import type { ObjectWithCurrent } from "../../../../../../utils/db/objects.js";
 import { noteAccessLogError } from "../../../../../../middleware/accessLog.js";
 import { normalizeContentType } from "../../../../../../utils/contentType.js";
@@ -360,13 +361,7 @@ export const standardizeObjectKey = (req: Request) => {
   } else if (req.params[0]) req.params.objectKey = req.params[0];
 };
 
-export interface EtagPreconditions {
-  /** Strong tags only (or `*`): a weak tag never satisfies `If-Match`. */
-  ifMatch: string[] | null;
-  /** Opaque tags, `W/` dropped: `If-None-Match` compares weakly. */
-  ifNoneMatch: string[] | null;
-  ifNoneMatchWildcard: boolean;
-}
+export type { EtagPreconditions };
 
 /** `If-Match` / `If-None-Match` of a write, for `upsertWithBlob`. */
 export const parseEtagPreconditions = (req: Request): EtagPreconditions => {

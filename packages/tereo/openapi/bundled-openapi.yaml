@@ -11188,6 +11188,13 @@ paths:
         - System: `file-service.objects.write` AND bucket-level `canWrite`
         - The caller must be the user who initiated the upload, or hold `file-service.admin`
 
+        `If-Match` and `If-None-Match` apply to the object at the upload's key,
+        as on a single upload (`PUT` of an object): `If-None-Match: *` creates
+        only, `If-Match: "<etag>"` replaces only that version. They are checked
+        when the object is written, after the parts are assembled. A failed
+        precondition is `412 precondition_failed` and leaves the upload active,
+        to be retried or aborted.
+
         An audit log entry is created. For a bucket in an organization a
         `file-service.multipart.completed` webhook event is emitted, plus
         `file-service.object.created` / `file-service.object.updated`
@@ -11201,6 +11208,18 @@ paths:
         - $ref: '#/components/parameters/BucketNameParam'
         - $ref: '#/components/parameters/UploadIdParam'
         - $ref: '#/components/parameters/IdempotencyKeyHeader'
+        - name: If-Match
+          in: header
+          description: Replace only if the current version's ETag strongly matches; `*` requires the key to exist.
+          required: false
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          description: Use `*` for atomic create-only semantics; a list of tags refuses (412) a write over content with one of them.
+          required: false
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -11277,6 +11296,12 @@ paths:
             with this `Idempotency-Key` is still in flight
             (`idempotency_request_in_progress`), or the bucket is retired
             (`bucket_retired`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          description: Precondition failed (`If-Match` or `If-None-Match`); the upload stays active
           content:
             application/json:
               schema:

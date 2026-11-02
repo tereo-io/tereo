@@ -1,3 +1,4 @@
+import type { EtagPreconditions } from "../../../../../../../utils/writePreconditions.js";
 import { broadcastObjectInvalidate } from "../../../../../../../utils/cacheBroadcast.js";
 import { setAccessLog } from "../../../../../../../middleware/accessLog.js";
 import { assertMultipartFits, multipartCompleteClaim } from "../utils.js";
@@ -50,6 +51,7 @@ import {
   UnprocessableEntityError,
 } from "../../../../../../../utils/errors.js";
 import {
+  parseEtagPreconditions,
   queueObjectWriteFollowUps,
   serializeObject,
   validateMimeType,
@@ -163,6 +165,7 @@ export const completeMultipart = async (req: Request, res: Response) => {
   const params = validateParams(uploadIdParamsSchema, req);
   const body = validateBody(completeBodySchema, req);
   const idempotencyKey = requireIdempotencyKey(req.header("Idempotency-Key"));
+  const preconditions = parseEtagPreconditions(req);
 
   const bucket = await getAccessibleBucket(auth, params.name, "write");
   // Use `getAny` (not `getActive`) so that a replay of an already-completed
@@ -224,6 +227,7 @@ export const completeMultipart = async (req: Request, res: Response) => {
             ordered,
             requestHash,
             [completeScope(upload.createdBy), completeScope(auth.userId)],
+            preconditions,
             persist
           )
       )
@@ -243,6 +247,7 @@ const runComplete = async (
   ordered: Array<{ partNumber: number; etag: string }>,
   requestHash: string,
   completeScopes: string[],
+  preconditions: EtagPreconditions,
   persist: PersistIdempotentResult<ReturnType<typeof serializeObject>>
 ): Promise<{ status: number; body: ReturnType<typeof serializeObject> }> => {
   const params = { uploadId };
@@ -421,6 +426,7 @@ const runComplete = async (
           etag,
           createdBy: activeUpload.createdBy,
           stagedPath: tempPath,
+          preconditions,
           // Finalize the multipart upload row inside the same transaction
           // so completion is atomic with the object write.
           markMultipartCompleted: { uploadId: params.uploadId },
