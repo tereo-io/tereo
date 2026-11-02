@@ -2,6 +2,7 @@ import { getOriginalStatus, requests } from "../handler.js";
 import { FileCache } from "../utils/fileCache.js";
 import type { Readable } from "stream";
 import {
+  asUploadSource,
   readUpTo,
   resolveUploadOptions,
   uploadMultipart,
@@ -91,7 +92,8 @@ export class FileServiceClient {
     key: string,
     data: UploadObjectInput
   ): Promise<FileServiceObject> {
-    const { file, ...input } = data;
+    const { file: given, ...input } = data;
+    const file = asUploadSource(given);
     if (this.testMode) {
       let sizeBytes = 0;
       if (Buffer.isBuffer(file)) sizeBytes = file.length;

@@ -56,6 +56,25 @@ export const resolveUploadOptions = (
 };
 
 /**
+ * A Buffer (a plain `Uint8Array` viewed as one, without a copy) or a byte
+ * stream. A stream decoding to strings or yielding objects would not reach
+ * core as the bytes it was given.
+ */
+export const asUploadSource = (file: unknown): Buffer | Readable => {
+  if (Buffer.isBuffer(file)) return file;
+  if (file instanceof Uint8Array) {
+    return Buffer.from(file.buffer, file.byteOffset, file.byteLength);
+  }
+  const stream = file as Readable;
+  if (stream.readableEncoding || stream.readableObjectMode) {
+    throw new Error(
+      "@tereo-io/sdk: uploadObject needs a byte stream (no setEncoding, not objectMode)"
+    );
+  }
+  return stream;
+};
+
+/**
  * Stands in for a consumer between `readUpTo` returning and `uploadMultipart`
  * attaching its own listener, so an error emitted in that gap is not thrown
  * as unhandled. The stream keeps it in `errored`, which `StreamReader` checks.

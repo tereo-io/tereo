@@ -725,3 +725,58 @@ describe("complete still in progress", () => {
     );
   });
 });
+
+describe("byte streams only", () => {
+  const message =
+    "@tereo-io/sdk: uploadObject needs a byte stream (no setEncoding, not objectMode)";
+
+  it("refuses a stream with an encoding set", async () => {
+    const stream = streamOf(pattern(12 * MiB));
+    stream.setEncoding("latin1");
+
+    await expect(
+      client().uploadObject("b", "k", { file: stream })
+    ).rejects.toThrow(message);
+    expect(mockRequests.files.uploadObject).not.toHaveBeenCalled();
+    expect(mockRequests.files.initiateMultipart).not.toHaveBeenCalled();
+  });
+
+  it("refuses an object-mode stream", async () => {
+    const stream = Readable.from([pattern(10)]);
+
+    await expect(
+      client().uploadObject("b", "k", { file: stream })
+    ).rejects.toThrow(message);
+    expect(mockRequests.files.uploadObject).not.toHaveBeenCalled();
+    expect(mockRequests.files.initiateMultipart).not.toHaveBeenCalled();
+  });
+});
+
+describe("a plain Uint8Array", () => {
+  it("is sent as a Buffer over the same memory", async () => {
+    const bytes = new Uint8Array(pattern(1000));
+
+    await client().uploadObject("b", "k", {
+      file: bytes as unknown as Buffer,
+    });
+
+    const sent = mockRequests.files.uploadObject.mock.calls[0][2] as {
+      file: Buffer;
+    };
+    expect(Buffer.isBuffer(sent.file)).toBe(true);
+    expect(sent.file.buffer).toBe(bytes.buffer);
+    expect(sent.file.equals(bytes)).toBe(true);
+  });
+
+  it("above the threshold goes multipart", async () => {
+    const source = pattern(12 * MiB);
+    const bytes = new Uint8Array(source);
+
+    await client().uploadObject("b", "k", {
+      file: bytes as unknown as Buffer,
+    });
+
+    expect(mockRequests.files.uploadObject).not.toHaveBeenCalled();
+    expect(Buffer.concat(partBodies()).equals(source)).toBe(true);
+  });
+});
