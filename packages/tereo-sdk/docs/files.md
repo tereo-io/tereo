@@ -20,7 +20,7 @@ Listings are cursor-paged: `{ data, hasMore, limit, nextCursor }`; pass `nextCur
 
 | Method | Returns | |
 |--------|---------|---|
-| `uploadObject(bucket, key, input)` | `FileServiceObject` | `input`: `{ file: Buffer \| Readable, contentType?, metadata?, tags?, ifMatch?, ifNoneMatch?, idempotencyKey? }`. Core requires an `Idempotency-Key`; the SDK generates one when omitted — pass a deterministic one (e.g. `invoice:{number}:pdf`) for retries across processes. `metadata` travels in `X-Metadata` as JSON with non-ASCII characters `\u`-escaped; `tags` in `X-Tags` as a JSON array, likewise escaped, so a tag may hold any character, commas included (needs a core that reads that form); each is trimmed, and tags over core's 50 × 128-character limits throw `InvalidRequestInputError` |
+| `uploadObject(bucket, key, input)` | `FileServiceObject` | `input`: `{ file: Buffer \| Readable, contentType?, metadata?, tags?, ifMatch?, ifNoneMatch?, idempotencyKey? }`. Core requires an `Idempotency-Key`; the SDK generates one when omitted — pass a deterministic one (e.g. `invoice:{number}:pdf`) for retries across processes. Above `multipartThresholdBytes` the key dedupes only retries of the complete: a second process repeating the call starts a new upload and writes again, so dedupe across processes there needs `ifNoneMatch: "*"` or `ifMatch`. `metadata` travels in `X-Metadata` as JSON with non-ASCII characters `\u`-escaped; `tags` in `X-Tags` as a JSON array, likewise escaped, so a tag may hold any character, commas included (needs a core that reads that form); each is trimmed, and tags over core's 50 × 128-character limits throw `InvalidRequestInputError` |
 | `downloadObject(bucket, key)` | `Buffer` | |
 | `getObjectMetadata(bucket, key)` | response headers | HEAD; cached 1 h |
 | `getObject(bucket, id)` | `FileServiceObject \| null` | null on 404 |
@@ -82,7 +82,8 @@ leaves the upload open: abort it, or retry the complete, or it stays until it ex
 
 ### Automatic multipart in `uploadObject`
 
-`uploadObject` takes a `Buffer` or a `Readable`. Up to `multipartThresholdBytes` it sends one `PUT`;
+`uploadObject` takes a `Buffer` (or a plain `Uint8Array`, used without a copy) or a byte `Readable`
+— not one with `setEncoding` or in object mode, which it refuses. Up to `multipartThresholdBytes` it sends one `PUT`;
 above that it initiates a multipart upload, sends parts with up to `partConcurrency` in flight, and
 completes. Set the options under `createCoreClient({ files: { … } })`:
 
@@ -101,8 +102,14 @@ that is not an integer of at least 1.
 - Memory for a stream: the head read (up to the threshold plus 1 byte) plus up to `partConcurrency`
   parts while the head is consumed, then about `partSizeBytes × (partConcurrency + 1)`. A `Buffer`
   is already in memory.
-- On any failure after initiate, the upload is aborted best-effort and the original error is rethrown.
-  A failed multipart destroys the caller's stream.
+- `idempotencyKey` (one is generated when omitted) is sent on every attempt at complete, so it dedupes
+  retries of the complete only. Another process repeating the same `uploadObject` starts a new upload
+  and writes again; dedupe across processes above the threshold needs `ifNoneMatch: "*"` or `ifMatch`.
+- A complete answered `409 multipart_complete_in_progress` (a retry that reached core while an earlier
+  attempt was still assembling, e.g. after a proxy dropped the connection) is retried under the same
+  key, backing off from 1 s to 30 s for up to 10 minutes, until the stored result comes back.
+- On any other failure after initiate, or once that wait runs out, the upload is aborted best-effort
+  and the original error is rethrown. A failed multipart destroys the caller's stream.
 - There is no read timeout. A caller whose source may stall should time it out itself.
 
 ## Cache

@@ -157,7 +157,10 @@ export interface UploadObjectInput {
    * this header on every upload PUT — if omitted here, the SDK generates a
    * UUIDv7. Pass a deterministic, content-bound value (e.g.
    * `invoice:{invoiceNumber}:pdf`) when you want retries across process
-   * boundaries to dedupe to the first successful upload.
+   * boundaries to dedupe to the first successful upload. Above the multipart
+   * threshold it dedupes only retries of the complete: a repeated
+   * `uploadObject` starts a new upload, so dedupe across processes there
+   * needs `ifNoneMatch: "*"` or `ifMatch`.
    */
   idempotencyKey?: string;
 }
