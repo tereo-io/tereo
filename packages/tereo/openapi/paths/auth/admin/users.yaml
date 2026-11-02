@@ -194,6 +194,11 @@
       like `DELETE /v1/admin/users/{id}/sessions/all`: a caller resetting their
       own password keeps the session they act from.
 
+      Setting `rateLimitPerSecond` alone is a valid update. When it changes, a
+      separate audit entry (`metadata.rateLimitPerSecond` with `from` and `to`)
+      and an `auth.user.rate-limit-changed` event are recorded, and no
+      `auth.user.updated` event is sent for a body that holds only that field.
+
       An audit log entry is created for this action; it records the changed
       profile fields, and `passwordReset: true` in its metadata when a
       password was set — never the password or its hash.
@@ -788,6 +793,46 @@ auth.user.roles-changed:
                           type: string
                           format: uuid
                         description: The user's role ids after the change
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.user.rate-limit-changed:
+  post:
+    tags:
+      - Admin - Users
+    summary: User rate limit changed
+    description: Fired when a user's `rateLimitPerSecond` override changes, not when a request sets the value it already has.
+    operationId: webhookUserRateLimitChanged
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.rate-limit-changed
+                  entityType:
+                    const: User
+                  data:
+                    type: object
+                    required: [userId, rateLimitPerSecond]
+                    properties:
+                      userId:
+                        type: string
+                        format: uuid
+                      rateLimitPerSecond:
+                        type: [integer, 'null']
+                        description: The override after the change; `null` means the tier default
     responses:
       '2XX':
         description: Any 2xx response acknowledges the delivery; anything else is retried.

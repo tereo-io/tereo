@@ -317,6 +317,115 @@ describe("PATCH /v1/admin/users/:id", () => {
     expect(row.isActive).toBe(true);
   });
 
+  describe("rateLimitPerSecond", () => {
+    const patchLimit = (id: string, body: object) =>
+      fetch(`${BASE_URL}/v1/admin/users/${id}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    const getLimit = async (id: string) => {
+      const response = await fetch(`${BASE_URL}/v1/admin/users/${id}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      return ((await response.json()) as UserResponse).rateLimitPerSecond;
+    };
+    const limitEntries = async (id: string) =>
+      (
+        await prisma.auditLogEntry.findMany({
+          where: { entityId: id, entityType: "User", action: "UPDATE" },
+          orderBy: { createdAt: "asc" },
+        })
+      ).filter(
+        (entry) =>
+          entry.metadata !== null &&
+          typeof entry.metadata === "object" &&
+          "rateLimitPerSecond" in entry.metadata
+      );
+
+    it("is set on its own, read back, and cleared with null", async () => {
+      const target = await createTestUser();
+      expect(await getLimit(target.id)).toBeNull();
+
+      const set = await patchLimit(target.id, { rateLimitPerSecond: 50 });
+      expect(set.status).toBe(HTTP_STATUS.OK);
+      expect(((await set.json()) as UserResponse).rateLimitPerSecond).toBe(50);
+      expect(await getLimit(target.id)).toBe(50);
+
+      const cleared = await patchLimit(target.id, { rateLimitPerSecond: null });
+      expect(cleared.status).toBe(HTTP_STATUS.OK);
+      expect(await getLimit(target.id)).toBeNull();
+    });
+
+    it.each([0, 100_001, 1.5, "50"])("refuses %s", async (value) => {
+      const target = await createTestUser();
+      const response = await patchLimit(target.id, {
+        rateLimitPerSecond: value,
+      });
+      expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(await getLimit(target.id)).toBeNull();
+    });
+
+    it("is stored for a deactivated person", async () => {
+      const target = await createTestUser();
+      await prisma.user.update({
+        where: { id: target.id },
+        data: { isActive: false },
+      });
+      const response = await patchLimit(target.id, {
+        rateLimitPerSecond: 20,
+      });
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(await getLimit(target.id)).toBe(20);
+    });
+
+    it("is refused for a service account", async () => {
+      const { userId } = await createAppServiceAccount("ratelimit-svc");
+      const response = await patchLimit(userId, { rateLimitPerSecond: 20 });
+      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+    });
+
+    it("is audited and emitted on a change, and neither when unchanged", async () => {
+      const endpoint = await createTestWebhookEndpoint(
+        await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+        { eventTypes: ["auth.user.rate-limit-changed"] }
+      );
+      const target = await createTestUser();
+      const deliveries = () =>
+        prisma.webhookDelivery.findMany({
+          where: {
+            webhookEndpointId: endpoint.id,
+            eventType: "auth.user.rate-limit-changed",
+            payload: { path: ["entityId"], equals: target.id },
+          },
+        });
+
+      await patchLimit(target.id, { rateLimitPerSecond: 40 });
+      await waitFor(async () => (await deliveries()).length === 1, 10_000);
+      const [delivery] = await deliveries();
+      expect(delivery.payload).toMatchObject({
+        data: { userId: target.id, rateLimitPerSecond: 40 },
+      });
+      const entries = await limitEntries(target.id);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        action: "UPDATE",
+        entityType: "User",
+        metadata: { rateLimitPerSecond: { from: null, to: 40 } },
+      });
+
+      const again = await patchLimit(target.id, { rateLimitPerSecond: 40 });
+      expect(again.status).toBe(HTTP_STATUS.OK);
+      // The next change is delivered second: the repeat emitted nothing.
+      await patchLimit(target.id, { rateLimitPerSecond: null });
+      await waitFor(async () => (await deliveries()).length === 2, 10_000);
+      expect(await limitEntries(target.id)).toHaveLength(2);
+    });
+  });
+
   describe("system user", () => {
     it("cannot be modified through the admin API", async () => {
       const response = await fetch(

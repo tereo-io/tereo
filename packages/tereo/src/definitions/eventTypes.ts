@@ -44,6 +44,10 @@ const authEvents: EventTypeDefinition[] = [
   { eventType: "auth.user.created", description: "User created" },
   { eventType: "auth.user.updated", description: "User profile updated" },
   {
+    eventType: "auth.user.rate-limit-changed",
+    description: "User rate limit changed",
+  },
+  {
     eventType: "auth.user.roles-changed",
     description: "User role assignments changed",
   },

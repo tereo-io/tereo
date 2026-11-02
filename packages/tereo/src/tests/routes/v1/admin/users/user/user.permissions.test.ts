@@ -90,6 +90,28 @@ describe("PATCH /v1/admin/users/:id and POST /v1/admin/users/:id/totp/reset", ()
   const passwordHash = async (id: string) =>
     (await prisma.user.findUniqueOrThrow({ where: { id } })).passwordHash;
 
+  it("needs users.write to set a rate limit", async () => {
+    const reader = await getTestPrincipalToken({ permissions: ["users.read"] });
+    const target = await createTestUser();
+    const response = await patchUser(reader, target.id, {
+      rateLimitPerSecond: 20,
+    });
+    expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+    const row = await prisma.user.findUniqueOrThrow({
+      where: { id: target.id },
+    });
+    expect(row.rateLimitPerSecond).toBeNull();
+
+    const written = await patchUser(writerToken, target.id, {
+      rateLimitPerSecond: 20,
+    });
+    expect(written.status).toBe(HTTP_STATUS.OK);
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id: target.id } }))
+        .rateLimitPerSecond
+    ).toBe(20);
+  });
+
   it("protects a target whose roles.write role is deactivated", async () => {
     // Suspended, not archived: an admin can reactivate it.
     const role = await createTestRole();

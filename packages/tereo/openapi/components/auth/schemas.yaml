@@ -1269,7 +1269,7 @@ ChangePasswordRequest:
 # Admin - User Schemas
 User:
   type: object
-  required: [id, email, name, isActive, userType, hasPassword, createdAt, updatedAt]
+  required: [id, email, name, isActive, userType, hasPassword, rateLimitPerSecond, createdAt, updatedAt]
   properties:
     id:
       type: string
@@ -1287,6 +1287,11 @@ User:
     hasPassword:
       type: boolean
       description: Whether the user has a password. False for a user created without one, who can sign in only through a linked identity provider (or an invite's first sign-in).
+    rateLimitPerSecond:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 100000
+      description: Requests per second this user may make, replacing the default for its tier. `null` uses the default.
     createdAt:
       type: string
       format: date-time
@@ -1379,6 +1384,11 @@ UpdateUserRequest:
       maxLength: 100
     isActive:
       type: boolean
+    rateLimitPerSecond:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 100000
+      description: Requests per second this user may make, replacing the default for its tier. `null` clears it. Allowed for a deactivated user; it applies once reactivated.
 
 PaginatedUsersResponse:
   type: object

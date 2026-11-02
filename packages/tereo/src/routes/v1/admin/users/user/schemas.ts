@@ -7,6 +7,13 @@ export const UpdateUserSchema = z.object({
   password: passwordSchema.optional(),
   name: z.string().max(100).optional(),
   isActive: z.boolean().optional(),
+  rateLimitPerSecond: z
+    .number()
+    .int()
+    .min(1)
+    .max(100_000)
+    .nullable()
+    .optional(),
 });
 
 export const UserIdParamSchema = z.object({

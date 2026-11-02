@@ -1967,6 +1967,8 @@ webhooks:
     $ref: './paths/auth/admin/users.yaml#/auth.user.updated'
   auth.user.roles-changed:
     $ref: './paths/auth/admin/users.yaml#/auth.user.roles-changed'
+  auth.user.rate-limit-changed:
+    $ref: './paths/auth/admin/users.yaml#/auth.user.rate-limit-changed'
   auth.user.totp-enabled:
     $ref: './paths/auth/oauth.yaml#/auth.user.totp-enabled'
   auth.user.totp-disabled:

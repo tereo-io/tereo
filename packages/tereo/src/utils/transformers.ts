@@ -113,6 +113,7 @@ export const formatUser = (user: {
   isActive: boolean;
   userType: UserType;
   passwordHash: string | null;
+  rateLimitPerSecond: number | null;
   createdAt: Date;
   updatedAt: Date;
 }) => ({
@@ -122,6 +123,7 @@ export const formatUser = (user: {
   isActive: user.isActive,
   userType: user.userType,
   hasPassword: user.passwordHash !== null,
+  rateLimitPerSecond: user.rateLimitPerSecond,
   createdAt: user.createdAt.toISOString(),
   updatedAt: user.updatedAt.toISOString(),
 });

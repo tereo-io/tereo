@@ -4571,6 +4571,11 @@ paths:
         like `DELETE /v1/admin/users/{id}/sessions/all`: a caller resetting their
         own password keeps the session they act from.
 
+        Setting `rateLimitPerSecond` alone is a valid update. When it changes, a
+        separate audit entry (`metadata.rateLimitPerSecond` with `from` and `to`)
+        and an `auth.user.rate-limit-changed` event are recorded, and no
+        `auth.user.updated` event is sent for a body that holds only that field.
+
         An audit log entry is created for this action; it records the changed
         profile fields, and `passwordReset: true` in its metadata when a
         password was set — never the password or its hash.
@@ -15237,6 +15242,49 @@ webhooks:
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.user.rate-limit-changed:
+    post:
+      tags:
+        - Admin - Users
+      summary: User rate limit changed
+      description: Fired when a user's `rateLimitPerSecond` override changes, not when a request sets the value it already has.
+      operationId: webhookUserRateLimitChanged
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.user.rate-limit-changed
+                    entityType:
+                      const: User
+                    data:
+                      type: object
+                      required:
+                        - userId
+                        - rateLimitPerSecond
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        rateLimitPerSecond:
+                          type:
+                            - integer
+                            - 'null'
+                          description: The override after the change; `null` means the tier default
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
   auth.user.totp-enabled:
     post:
       tags:
@@ -22858,6 +22906,7 @@ components:
         - isActive
         - userType
         - hasPassword
+        - rateLimitPerSecond
         - createdAt
         - updatedAt
       properties:
@@ -22881,6 +22930,13 @@ components:
         hasPassword:
           type: boolean
           description: Whether the user has a password. False for a user created without one, who can sign in only through a linked identity provider (or an invite's first sign-in).
+        rateLimitPerSecond:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 100000
+          description: Requests per second this user may make, replacing the default for its tier. `null` uses the default.
         createdAt:
           type: string
           format: date-time
@@ -22939,6 +22995,13 @@ components:
           maxLength: 100
         isActive:
           type: boolean
+        rateLimitPerSecond:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 100000
+          description: Requests per second this user may make, replacing the default for its tier. `null` clears it. Allowed for a deactivated user; it applies once reactivated.
     PaginatedUsersResponse:
       type: object
       required:
