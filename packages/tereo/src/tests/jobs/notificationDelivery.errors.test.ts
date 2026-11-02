@@ -8,6 +8,7 @@ import { ensureDailyPartitions } from "../../utils/partitions.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { DelayedError, type Job } from "bullmq";
+import { emitTx } from "../../utils/outbox.js";
 import { logger } from "../../utils/logger.js";
 import db from "../../utils/db/index.js";
 import { randomBytes } from "crypto";
@@ -34,6 +35,13 @@ import {
 // One attempt at a time, run here rather than by a worker: the job is a stub,
 // and the rows are written directly, with no outbox row to dispatch them.
 
+// Outbox rows are dispatched and deleted by the running server's reaper, so
+// the emitted events are asserted at the call instead of in core.outbox.
+vi.mock("../../utils/outbox.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../utils/outbox.js")>();
+  return { ...actual, emitTx: vi.fn(actual.emitTx) };
+});
+
 const rand = () => randomBytes(4).toString("hex");
 
 let smtp: FakeSmtpServer;
@@ -56,6 +64,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  vi.mocked(emitTx).mockClear();
   code = 250;
   smtp.messages.length = 0;
   await clean();
@@ -140,13 +149,12 @@ const reload = (id: string) =>
   prisma.notificationDelivery.findFirstOrThrow({ where: { id } });
 
 /** The webhook events written for a notification, oldest first. */
-const eventsFor = async (notificationId: string) =>
-  (
-    await prisma.outbox.findMany({
-      where: { payload: { path: ["entityId"], equals: notificationId } },
-      orderBy: { createdAt: "asc" },
-    })
-  ).map((row) => row.payload as { eventType: string; data: unknown });
+const eventsFor = (notificationId: string) =>
+  vi
+    .mocked(emitTx)
+    .mock.calls.map(([, event]) => event)
+    .filter((event) => event.entityId === notificationId)
+    .map(({ eventType, data }) => ({ eventType, data }));
 
 describe("processNotificationDelivery", () => {
   describe("delivery attempt cap", () => {
