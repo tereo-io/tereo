@@ -5,6 +5,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { issuePasswordSetupLink } from "../../../../utils/passwordSetup.js";
 import { loginAndExchange, postForm } from "../../../support/auth/login.js";
 import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
+import { getTestPrincipalToken } from "../../../support/principals.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { SYSTEM_USER_ID } from "../../../../definitions/index.js";
 import { createTestUser } from "../../../support/auth/users.js";
@@ -206,6 +207,40 @@ describe("password setup", () => {
       expect((await inspect(second)).status).toBe(HTTP_STATUS.OK);
     });
 
+    it("answers 404 and keeps the password when the user is deactivated after inspect", async () => {
+      const guest = await createGuest();
+      const token = await issue(guest.id);
+      expect((await inspect(token)).status).toBe(HTTP_STATUS.OK);
+
+      await prisma.user.update({
+        where: { id: guest.id },
+        data: { isActive: false },
+      });
+
+      expect((await setPassword(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
+      const after = await prisma.user.findUniqueOrThrow({
+        where: { id: guest.id },
+      });
+      expect(after.passwordHash).toBeNull();
+      expect(after.passwordChangeRequired).toBe(true);
+    });
+
+    it(
+      "lets two concurrent issues both succeed, leaving one live token",
+      { tags: ["race"] },
+      async () => {
+        const guest = await createGuest();
+
+        await Promise.all([issue(guest.id), issue(guest.id)]);
+
+        expect(
+          await prisma.passwordSetupToken.count({
+            where: { userId: guest.id, usedAt: null },
+          })
+        ).toBe(1);
+      }
+    );
+
     it("rejects a weak password with 400 and leaves the token usable", async () => {
       const guest = await createGuest();
       const token = await issue(guest.id);
@@ -285,6 +320,149 @@ describe("password setup", () => {
       const [message] = smtp.messages;
       expect(message.rcpt).toEqual([guest.email]);
       expect(message.parsed.text).toContain(`/set-password#token=${token}`);
+    });
+
+    const smtpSettings = (port: number) => ({
+      host: "127.0.0.1",
+      port,
+      security: "none",
+      defaultFrom: { address: "billing@acme.com" },
+      allowedSenders: ["@acme.com"],
+    });
+
+    const notificationOfUser = async (email: string) => {
+      let found: Awaited<ReturnType<typeof prisma.notification.findFirst>> =
+        null;
+      await waitFor(
+        async () => {
+          found = await prisma.notification.findFirst({
+            where: { recipients: { path: ["0", "address"], equals: email } },
+          });
+          return found !== null;
+        },
+        5000,
+        50
+      );
+      return found!;
+    };
+
+    it("marks the notification sensitive and drops its content once sent", async () => {
+      await createNotificationConnection({
+        isDefault: true,
+        settings: smtpSettings(smtp.port),
+      });
+      const guest = await createGuest();
+      await issue(guest.id, true);
+      const n = await notificationOfUser(guest.email);
+      expect(n.sensitive).toBe(true);
+
+      await waitFor(
+        async () =>
+          (await prisma.notification.findFirstOrThrow({ where: { id: n.id } }))
+            .status === "sent",
+        10_000,
+        50
+      );
+      const done = await prisma.notification.findFirstOrThrow({
+        where: { id: n.id },
+      });
+      expect(done.content).toBeNull();
+    });
+
+    it("drops the content once the delivery has failed", async () => {
+      const refusing = await startFakeSmtpServer({ reply: () => 550 });
+      try {
+        await createNotificationConnection({
+          isDefault: true,
+          settings: smtpSettings(refusing.port),
+        });
+        const guest = await createGuest();
+        await issue(guest.id, true);
+        const n = await notificationOfUser(guest.email);
+
+        await waitFor(
+          async () =>
+            (
+              await prisma.notification.findFirstOrThrow({
+                where: { id: n.id },
+              })
+            ).status === "failed",
+          10_000,
+          50
+        );
+        const done = await prisma.notification.findFirstOrThrow({
+          where: { id: n.id },
+        });
+        expect(done.content).toBeNull();
+      } finally {
+        await refusing.close();
+      }
+    });
+
+    it("does not return a pending sensitive notification's content from the log", async () => {
+      const conn = await createNotificationConnection({ isDefault: true });
+      const row = await prisma.notification.create({
+        data: {
+          channel: "email",
+          connectionId: conn.id,
+          senderUserId: SYSTEM_USER_ID,
+          recipients: [{ address: "x@test.local" }],
+          content: {
+            subject: "s",
+            text: "https://x/set-password#token=SECRET",
+          },
+          sensitive: true,
+          attachments: [],
+        },
+      });
+      const token = await getTestPrincipalToken({
+        permissions: ["notifications.read"],
+      });
+
+      const res = await axios.get(
+        `${BASE_URL}/v1/admin/notifications/${row.id}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          validateStatus: () => true,
+        }
+      );
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      expect(res.data.content).toBeNull();
+      expect(res.data.contentRedacted).toBe(true);
+      expect(JSON.stringify(res.data)).not.toContain("SECRET");
+    });
+
+    it("never takes `sensitive` from the public API", async () => {
+      const conn = await createNotificationConnection({
+        isDefault: true,
+        settings: smtpSettings(smtp.port),
+      });
+      const token = await getTestPrincipalToken({
+        permissions: ["notifications.send"],
+      });
+
+      const res = await axios.post(
+        `${BASE_URL}/v1/notifications`,
+        {
+          channel: "email",
+          connection: conn.slug,
+          sensitive: true,
+          recipients: [{ address: "pub@test.local" }],
+          content: { subject: "s", text: "t" },
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          validateStatus: () => true,
+        }
+      );
+      if (res.status === 202) {
+        const row = await prisma.notification.findFirstOrThrow({
+          where: { id: res.data.id },
+        });
+        expect(row.sensitive).toBe(false);
+      } else {
+        expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      }
     });
   });
 });

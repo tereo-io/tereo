@@ -46,7 +46,13 @@ export const setPassword = async (req: Request, res: Response) => {
     user.id,
     null,
     async (tx, sessionIds, ssoSessionIds) => {
-      if (!(await db.passwordSetupTokens.consume(tokenId, tx))) {
+      // The user's row is locked: a deactivation or expiry since the lookup
+      // shows here.
+      const current = await db.users.get(user.id, tx);
+      if (
+        !isAccountUsable(current) ||
+        !(await db.passwordSetupTokens.consume(tokenId, tx))
+      ) {
         await passwordSetupFailure.recordFailure(req);
         throw new NotFoundError("Not found");
       }

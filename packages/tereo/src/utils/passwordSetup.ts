@@ -38,6 +38,10 @@ export const issuePasswordSetupLink = async (
     notify,
   }: { userId: string; createdBy: string; notify: boolean }
 ): Promise<IssuedPasswordSetupLink> => {
+  // Two issues for one user serialise here: the second would otherwise hit
+  // the one-live-token index.
+  await tx.$executeRaw`
+    SELECT 1 FROM "auth"."users" WHERE "id" = ${userId}::uuid FOR UPDATE`;
   const user = await db.users.get(userId, tx);
   const creator = await db.users.get(createdBy, tx);
 
@@ -63,6 +67,7 @@ export const issuePasswordSetupLink = async (
   if (notify) {
     await notifyTx(tx, {
       channel: "email",
+      sensitive: true,
       recipients: [{ address: user.email }],
       content: {
         subject: "Set your password",
