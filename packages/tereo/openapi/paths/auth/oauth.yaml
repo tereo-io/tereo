@@ -1276,6 +1276,10 @@
       for the 2FA session issued by `POST /oauth/authorize`. Requires the
       `tereo_2fa_session_{client_id}` cookie to match `session_token`.
 
+      When the user must replace their password (`passwordChangeRequired`),
+      the `redirect_url` is `/login/change-password` with a `change_grant`
+      (see `POST /oauth/password-change`) rather than the next login step.
+
       400 `invalid_session` (unknown session, missing or mismatched cookie),
       `session_expired`, `totp_not_configured`; 401 `invalid_code` for a wrong
       code. Attempts are counted per user, across this endpoint and
@@ -1473,12 +1477,14 @@
       The step a password sign-in meets when the user's `passwordChangeRequired`
       is set (a guest created with a password and `mustChange`): instead of a
       code, the login redirects to `/login/change-password` with a one-time
-      `change_grant`, also set as a cookie, so the grant works only in that
-      browser. This sets the new password (`400 password_unchanged` when it
-      equals the current one), clears the flag, ends the user's other sessions
-      and consumes the grant; the login then restarts. The step comes before
-      TOTP, and only password logins meet it: a provider login skips it and
-      leaves the flag set. `invalid_change_grant` and `change_expired` are
+      `change_grant`; a cookie holding a separate secret (only its hash is
+      stored with the grant) binds it to that browser. This sets the new
+      password (`400 password_unchanged` when it equals the current one),
+      clears the flag, ends the user's other sessions and consumes the grant;
+      the login then restarts. The step comes after TOTP: for a user with TOTP
+      enabled, `/oauth/totp/verify` or `/oauth/totp/recovery` answers with the
+      redirect to `/login/change-password`. Only password logins meet it: a
+      provider login skips it and leaves the flag set. `invalid_change_grant` and `change_expired` are
       OAuth2 errors. Wrong attempts are rate limited per client; no code is
       issued until the password is changed.
 

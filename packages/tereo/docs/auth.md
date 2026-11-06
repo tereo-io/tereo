@@ -869,8 +869,8 @@ endpoints follow the normal rule.
 | `GET /v1/admin/guests`                                      | `users.guests.read`                                                 | List guests (also `GET /v1/admin/users?filter[userType]=guest`, `users.read`)                                                                          |
 | `GET /v1/admin/guests/:id`                                  | `users.guests.read`                                                 | One guest (the user plus `organizationId`, unwrapped); `404 not_a_guest` for a non-guest                                                               |
 | `PATCH /v1/admin/guests/:id { expiresAt, name? }`           | `users.guests.write`                                                | Extend or shorten (`expiresAt` is required; a time in the past ends access now); returns the guest. `404 not_a_guest`                                  |
-| `POST /v1/admin/guests/:id/password-setup-link { notify? }` | `users.guests.write`                                                | Issue a fresh link; earlier ones die. `200 { url, expiresAt }`; `409 guest_not_usable` for a deactivated or expired guest, `409 email_not_configured`  |
-| `POST /v1/admin/users/:id/promote`                          | `users.write` plus the "holds every permission the user holds" rule | `userType = human`, `expiresAt = null`; id, membership, roles, password, grants and history kept. Returns the user. An expired guest can sign in again |
+| `POST /v1/admin/guests/:id/password-setup-link { notify? }` | `users.guests.write`; for a guest who has a password, also `users.write` and the "holds every permission" rule | Issue a fresh link; earlier ones die. `200 { url, expiresAt }`; `403 guest_has_password` when the guest has a password and the caller lacks `users.write`; `409 guest_not_usable` for a deactivated or expired guest, `409 email_not_configured` |
+| `POST /v1/admin/users/:id/promote`                          | `users.write` plus the "holds every permission the user holds" rule | `userType = human`, `expiresAt = null`; id, membership, roles, password, grants and history kept; live setup links and forced-change grants retired. Returns the user. `409 password_not_user_set` while the password is one someone else chose. An expired guest can sign in again |
 
 Every user the admin API and webhooks return carries `expiresAt` (null unless a guest),
 `status` (`active`, `expired`, `deactivated`) and `passwordChangeRequired`. `GET /v1/admin/guests`
@@ -881,6 +881,21 @@ ordinary user endpoints. After promotion the guest restrictions lift: SSO, linki
 are allowed. The 2FA rules for regular users apply too: when the policy is `required` or a role the
 user holds requires 2FA, access tokens from a sign-in without a second factor are revoked, so the next
 refresh meets the step-up.
+
+**Who chose the password.** `users.password_set_by_user` is false while the password is one someone
+else chose: an invite's `initialAccess.password`, or one an admin set (`POST /v1/admin/users`,
+`PATCH /v1/admin/users/:id`). It turns true when the user sets one through a setup link, the forced
+change or `POST /v1/account/password`. Promotion is refused while it is false (`409
+password_not_user_set`), since whoever chose the password could sign in as the promoted account:
+send the guest a setup link (which, for a guest with a password, takes the credential-reset
+authority above) and promote once they have used it. An inviter who knew the initial password
+could still sign in as the guest and make the forced change before promotion; a promoter who doubts
+the invite should reset the guest's credentials first all the same.
+
+**Setup links and grants do not survive the account changing hands.** A live setup link and any
+pending forced-change grant are retired on promotion, on an admin password reset, email change or
+deactivation (`PATCH /v1/admin/users/:id`), and when the user changes their own password: the
+inviter got the link's URL back and must not keep a way in.
 
 **`POST /v1/admin/guests`** takes `email`, optional `name`, `organizationId` (default: the token's
 organization, else the default organization, which must be active: 400 `organization_inactive`),
@@ -919,7 +934,8 @@ null`, `contentRedacted: true`), nulled once the notification is terminal, and a
 answers `409 content_redacted` ([notifications.md](notifications.md)).
 
 Both routes are public, rate limited per IP, and give one uniform `404` for an unknown, used or
-expired token or a user no longer usable (a miss counts against the caller's IP):
+expired token or a user no longer usable or no longer a guest (a miss counts against the caller's
+IP):
 
 - `POST /v1/password-setup/inspect { token }` returns `{ email, name, expiresAt }` (the link's
   expiry) and uses nothing up.
@@ -929,17 +945,22 @@ expired token or a user no longer usable (a miss counts against the caller's IP)
   `auth.user.password-set` (never the password). The UI then shows a "Password set" screen whose
   Sign in button goes to `/`.
 
-Issuing emits `auth.user.password-setup-link-issued`.
+Issuing emits `auth.user.password-setup-link-issued`. The hourly auth cleanup deletes a token
+`AUTH_TOKEN_GRACE_MS` (7 days) after it expired or was used (retired included).
 
 ### Forced password change
 
 With `passwordChangeRequired` set (a guest created with `initialAccess.password`), a **password**
-login does not issue a code: it redirects to `/login/change-password` with a one-time grant bound
-to the browser by a cookie, and `POST /oauth/password-change { change_grant, password }` sets the
-new password (it must differ: `password_unchanged`), clears the flag and ends other sessions; the
-login then restarts. The step comes before the TOTP step; that is safe today because the flag is
-set only at guest creation. A provider login skips it and leaves the flag set, which matters for a
-promoted ex-guest.
+login does not issue a code: it redirects to `/login/change-password` with a one-time grant, and
+`POST /oauth/password-change { change_grant, password }` sets the new password (it must differ:
+`password_unchanged`), clears the flag and ends other sessions; the login then restarts. The grant
+is bound to the browser by a cookie holding a separate random secret (only its hash is stored on
+the grant; the URL never carries it), so a grant lifted from a URL is refused elsewhere
+(`invalid_change_grant`; an expired one is `change_expired`). The step comes **after** the TOTP
+step: a user with TOTP enabled enters a code (or a recovery code) first, and the TOTP handlers issue
+the grant, so the password alone cannot replace the password. The restarted login asks for a code
+again. A provider login skips the step and leaves the flag set, which matters for a promoted
+ex-guest.
 
 ### Two-factor for guests
 
