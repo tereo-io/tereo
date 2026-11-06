@@ -132,6 +132,44 @@ describe("SetPasswordPage", () => {
     expect(screen.queryByText("Not found")).toBeNull();
   });
 
+  it.each([429, 503])(
+    "asks to try again shortly when the set fails with %i",
+    async (status) => {
+      await submitWith(
+        new AxiosError("busy", undefined, undefined, undefined, {
+          status,
+          data: { error: "rate_limited" },
+        } as never)
+      );
+
+      expect(await screen.findByText(/Try again shortly/)).toBeVisible();
+      expect(screen.queryByText("This link is no longer valid")).toBeNull();
+      expect(
+        screen.getByRole("button", { name: "Set password" })
+      ).toBeVisible();
+    }
+  );
+
+  it.each([429, 503])(
+    "offers a retry when the inspect fails with %i",
+    async (status) => {
+      const user = userEvent.setup();
+      authMock.axios.post.mockRejectedValueOnce(
+        new AxiosError("busy", undefined, undefined, undefined, {
+          status,
+          data: { error: "rate_limited" },
+        } as never)
+      );
+      authMock.axios.post.mockResolvedValueOnce(DETAILS);
+      renderAt("/set-password#token=abc123");
+
+      expect(await screen.findByText(/Try again shortly/)).toBeVisible();
+      expect(screen.queryByText("This link is no longer valid")).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Try again" }));
+      expect(await screen.findByLabelText(/^New password/)).toBeVisible();
+    }
+  );
+
   it("ignores a token in the query string", async () => {
     renderAt("/set-password?token=abc123");
 

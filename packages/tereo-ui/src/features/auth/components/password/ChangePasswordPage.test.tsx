@@ -98,18 +98,25 @@ describe("ChangePasswordPage", () => {
     await waitFor(() => expect(redirect).toHaveBeenCalledTimes(1));
   });
 
-  it("shows Session Expired when the grant has expired", async () => {
-    const user = userEvent.setup();
-    authMock.axios.post.mockRejectedValue(
-      coreError(400, { error: "invalid_session", error_description: "Gone" })
-    );
-    renderPage();
+  it.each(["invalid_change_grant", "change_expired"])(
+    "shows Session Expired on %s from core",
+    async (error) => {
+      const user = userEvent.setup();
+      authMock.axios.post.mockRejectedValue(
+        coreError(400, { error, error_description: "Please login again." })
+      );
+      renderPage();
 
-    await fill(user, "N3w-pass-phrase!");
-    await user.click(screen.getByRole("button", { name: "Change password" }));
+      await fill(user, "N3w-pass-phrase!");
+      await user.click(screen.getByRole("button", { name: "Change password" }));
 
-    expect(await screen.findByText("Session Expired")).toBeVisible();
-  });
+      expect(await screen.findByText("Session Expired")).toBeVisible();
+      expect(screen.getByText("Please login again.")).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: "Change password" })
+      ).toBeNull();
+    }
+  );
 
   it("shows Session Expired without a grant", () => {
     renderPage("/login/change-password?client_id=c1");
