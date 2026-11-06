@@ -1,6 +1,5 @@
 import useInspectPasswordSetup from "../../api/password/useInspectPasswordSetup";
 import { AuthPage, Alert, Button, Col, Input, Spinner } from "@kosmeo-ui/react";
-import { oauthErrorMessage } from "../../api/oauthErrorMessage";
 import useSetPassword from "../../api/password/useSetPassword";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useMemo, useState } from "react";
@@ -67,7 +66,8 @@ export const SetPasswordPage = () => {
       { token, password },
       {
         onSuccess: () => setDone(true),
-        onError: (err) => setError(oauthErrorMessage(err, INVALID_LINK)),
+        // A miss is one uniform 404 whose text says nothing to the reader.
+        onError: () => setError(INVALID_LINK),
       }
     );
   };

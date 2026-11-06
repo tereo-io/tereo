@@ -76,6 +76,42 @@ describe("SetPasswordPage", () => {
     expect(await screen.findByTestId("where")).toHaveTextContent(/^\/$/);
   });
 
+  it("shows the uniform message when setting the password fails", async () => {
+    const user = userEvent.setup();
+    const gone = new AxiosError("nf", undefined, undefined, undefined, {
+      status: 404,
+      data: { error: "not_found", error_description: "Not found" },
+    } as never);
+    authMock.axios.post.mockImplementation(async (path: string) => {
+      if (path === "/v1/password-setup/inspect") {
+        return {
+          data: {
+            email: "jane@customer.com",
+            name: "Jane",
+            expiresAt: "2026-11-09T00:00:00Z",
+          },
+        };
+      }
+      throw gone;
+    });
+    renderAt("/set-password#token=abc123");
+
+    await user.type(
+      await screen.findByLabelText(/^New password/),
+      "Str0ng-pass-phrase"
+    );
+    await user.type(
+      screen.getByLabelText(/^Confirm password/),
+      "Str0ng-pass-phrase"
+    );
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+
+    expect(
+      await screen.findByText("This link is no longer valid")
+    ).toBeVisible();
+    expect(screen.queryByText("Not found")).toBeNull();
+  });
+
   it("ignores a token in the query string", async () => {
     renderAt("/set-password?token=abc123");
 
