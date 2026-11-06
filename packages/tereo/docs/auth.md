@@ -903,9 +903,16 @@ else chose: an invite's `initialAccess.password`, or one an admin set (`POST /v1
 change or `POST /v1/account/password`. Promotion is refused while it is false (`409
 password_not_user_set`), since whoever chose the password could sign in as the promoted account:
 send the guest a setup link (which, for a guest with a password, takes the credential-reset
-authority above) and promote once they have used it. An inviter who knew the initial password
-could still sign in as the guest and make the forced change before promotion; a promoter who doubts
-the invite should reset the guest's credentials first all the same.
+authority above) and promote once they have used it.
+
+**Promotion keeps the account as it is.** Promotion hands over the account with its password, TOTP
+and sessions; it does not reset them. While the account is a guest, whoever invited it can sign in
+as it (with a password they chose, or a link they were given) and set a password of their own,
+which then counts as user-set. That is within what inviting allows: the inviter could create a guest
+with the same roles anyway. A promoted account gains more (no expiry, roles no longer limited to
+guest-assignable ones, whatever is granted next), so a promoter who wants only the person to hold
+it resets their credentials (`PATCH /v1/admin/users/:id`, then a setup link or the person's own
+sign-in) before granting more.
 
 **Setup links and grants do not survive the account changing hands.** A live setup link and any
 pending forced-change grant are retired on promotion, on an admin password reset, email change or

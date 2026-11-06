@@ -920,6 +920,11 @@ auth.user.created:
       a password setup link and promote once they have set their own. The
       guest's live setup link and pending forced-change grants are retired.
 
+      Promotion keeps the account's password, TOTP and sessions. A guest's
+      inviter can sign in as the guest before promotion, so to hand the
+      account to the person alone, reset their credentials before granting
+      more.
+
       An audit log entry is created and `auth.guest.promoted` is emitted.
     operationId: promoteAdminUser
     security:
