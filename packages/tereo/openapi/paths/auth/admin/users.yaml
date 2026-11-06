@@ -13,6 +13,7 @@
       - `email`: `contains`, `equals`
       - `name`: `contains`, `equals`
       - `isActive`: `equals` (true/false)
+      - `userType`: `equals` (`human`, `service_account`, `guest`); each user also carries `expiresAt`, `status` and `passwordChangeRequired`
       - `createdAt`: range only — `filter[createdAt_gte]`, `filter[createdAt_lte]` (ISO date)
 
       **Sort fields:** `id` (default), `email`, `name`, `createdAt`, `isActive`
@@ -22,6 +23,7 @@
       - `?filter[email]=john&filter[email_op]=contains`
       - `?filter[id]=<uuid>,<uuid>&filter[id_op]=in&limit=2`
       - `?filter[isActive]=true` (defaults to equals)
+      - `?filter[userType]=guest`
       - `?filter[createdAt_gte]=2024-01-01`
 
       An unknown filter field or operator, a bad value, or an invalid cursor
@@ -890,3 +892,50 @@ auth.user.created:
     responses:
       '2XX':
         description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+/admin/users/{id}/promote:
+  post:
+    tags:
+      - Admin - Users
+    summary: Promote a guest
+    description: |
+      Makes a guest a permanent user: `userType` becomes `human` and `expiresAt`
+      is cleared. The id, organization membership, roles, password, grants and
+      history are kept. The guest restrictions lift, so SSO sign-in, identity
+      linking and global roles are allowed afterwards. Needs `users.write` and,
+      as for a credential reset, global permissions covering every permission
+      the user holds (`403` naming those lacking). `404 not_a_guest` for a user
+      who is not a guest. Promoting restores sign-in for a guest whose time had run out (`expiresAt` is cleared). A password change still required (`passwordChangeRequired`)
+      stays set until the user changes it at a password sign-in.
+
+      An audit log entry is created and `auth.guest.promoted` is emitted.
+    operationId: promoteAdminUser
+    security:
+      - BearerAuth: [users.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    responses:
+      '200':
+        description: Guest promoted
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/AdminUser'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: No such user, or `not_a_guest`
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'

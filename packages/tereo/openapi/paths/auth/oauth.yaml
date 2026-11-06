@@ -1464,6 +1464,52 @@
         $ref: '../../components/responses.yaml#/RateLimitResponse'
       '500':
         $ref: '../../components/responses.yaml#/ServerErrorResponse'
+/oauth/password-change:
+  post:
+    tags:
+      - OAuth2/OIDC - Authorization
+    summary: Change a required password
+    description: |
+      The step a password sign-in meets when the user's `passwordChangeRequired`
+      is set (a guest created with a password and `mustChange`): instead of a
+      code, the login redirects to `/login/change-password` with a one-time
+      `change_grant`, also set as a cookie, so the grant works only in that
+      browser. This sets the new password (`400 password_unchanged` when it
+      equals the current one), clears the flag, ends the user's other sessions
+      and consumes the grant; the login then restarts. The step comes before
+      TOTP, and only password logins meet it: a provider login skips it and
+      leaves the flag set. `invalid_change_grant` and `change_expired` are
+      OAuth2 errors. Wrong attempts are rate limited per client; no code is
+      issued until the password is changed.
+
+      An audit log entry is created and `auth.user.password-changed` is emitted.
+    operationId: postOAuthPasswordChange
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/PasswordChangeRequest'
+    responses:
+      '204':
+        description: Password changed
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
 /oauth/totp/setup/verify:
   post:
     tags:

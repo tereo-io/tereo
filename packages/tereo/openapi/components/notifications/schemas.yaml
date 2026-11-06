@@ -584,9 +584,13 @@ NotificationLogDetail:
         content:
           description: |
             What was sent, as the channel takes it (for email: `subject`, `text`, `html`, `from`,
-            `replyTo`). Null once every delivery is sent.
+            `replyTo`). Null once every delivery is sent, and always null for a sensitive
+            notification (see `contentRedacted`).
           type: [object, 'null']
           additionalProperties: true
+        contentRedacted:
+          type: boolean
+          description: True for a sensitive notification, such as a password-setup email, whose content is never returned and is dropped once the notification is terminal. Retrying one is `409 content_redacted`.
         deliveries:
           type: array
           items:

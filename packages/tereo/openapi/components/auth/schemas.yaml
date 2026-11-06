@@ -1269,7 +1269,7 @@ ChangePasswordRequest:
 # Admin - User Schemas
 User:
   type: object
-  required: [id, email, name, isActive, userType, hasPassword, createdAt, updatedAt]
+  required: [id, email, name, isActive, userType, expiresAt, status, passwordChangeRequired, hasPassword, createdAt, updatedAt]
   properties:
     id:
       type: string
@@ -1283,7 +1283,18 @@ User:
       type: boolean
     userType:
       type: string
-      enum: [human, service_account]
+      enum: [human, service_account, guest]
+    expiresAt:
+      type: [string, 'null']
+      format: date-time
+      description: When a guest's access ends; `null` for everyone else. Checked live, so an expired guest is refused as a deactivated user is, without `isActive` changing.
+    status:
+      type: string
+      enum: [active, expired, deactivated]
+      description: '`deactivated` when `isActive` is false, else `expired` for a guest past `expiresAt`, else `active`.'
+    passwordChangeRequired:
+      type: boolean
+      description: Whether the next password sign-in must change the password first (a guest created with `initialAccess.password` and `mustChange`).
     hasPassword:
       type: boolean
       description: Whether the user has a password. False for a user created without one, who can sign in only through a linked identity provider (or an invite's first sign-in).
@@ -1827,6 +1838,7 @@ Role:
     - serviceId
     - service
     - requires2fa
+    - guestAssignable
     - provisioned
     - unprovisionedAt
     - retiredAt
@@ -1873,6 +1885,12 @@ Role:
         - type: 'null'
     requires2fa:
       type: boolean
+    guestAssignable:
+      type: boolean
+      description: |
+        Whether guest users may hold this role (in their one organization).
+        Only custom roles can be; the role must be org-assignable and carry no
+        core permission besides `file-service.objects.read` and `write`.
     retiredAt:
       type: [string, 'null']
       format: date-time
@@ -1984,6 +2002,10 @@ CreateRoleRequest:
     requires2fa:
       type: boolean
       default: false
+    guestAssignable:
+      type: boolean
+      default: false
+      description: Refused with `400 role_not_guest_assignable` unless the role may be (see `Role.guestAssignable`); a new role has no permissions yet, so set it after they are.
 
 UpdateRoleRequest:
   type: object
@@ -2004,6 +2026,14 @@ UpdateRoleRequest:
       type: boolean
     requires2fa:
       type: boolean
+    guestAssignable:
+      type: boolean
+      description: |
+        Custom roles only (`400 role_not_guest_assignable` when the role holds a
+        permission a guest may not: one that is not org-assignable, or a core
+        permission other than `file-service.objects.read`/`write`; the error
+        names them). Turning it off makes guests' assignments of the role inert.
+        Emits `auth.role.guest-assignable-changed`.
 
 DuplicateRoleRequest:
   type: object
@@ -3719,3 +3749,185 @@ IdentityInvite:
       type: string
       format: date-time
       description: 7 days after the invite was issued
+
+GuestInitialAccess:
+  description: How the guest first gets in.
+  oneOf:
+    - type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [password_setup_link]
+        notify:
+          type: boolean
+          default: false
+          description: Email the link through the default email connection (`409 email_not_configured` without one). The link is returned either way.
+    - type: object
+      required: [type, password]
+      properties:
+        type:
+          type: string
+          enum: [password]
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+        mustChange:
+          type: boolean
+          default: true
+          description: Require a new password at the first sign-in.
+
+InviteGuestRequest:
+  type: object
+  required: [email, initialAccess]
+  description: Give exactly one of `expiresAt` and `expiresIn`.
+  properties:
+    email:
+      type: string
+      format: email
+      maxLength: 255
+      description: Trimmed and lower-cased. Invites for one email are serialized.
+    name:
+      type: string
+      maxLength: 100
+      description: Used when the guest is created; an existing guest's name is left alone.
+    organizationId:
+      type: string
+      format: uuid
+      description: The guest's one organization. Default is the token's organization, else the default organization. It must be active (`400 organization_inactive`).
+    roles:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+      description: |
+        Guest-assignable custom roles, by name or id (`400 unknown_role`,
+        `400 role_not_guest_assignable`). When omitted, a new guest gets the
+        provisioned `guests.defaultRoles` (a stale one is skipped); an existing
+        guest being extended gets none added.
+    expiresAt:
+      type: string
+      format: date-time
+      description: When access ends. Must be in the future and no further ahead than `GUEST_MAX_TTL_SECONDS` (90 days by default).
+    expiresIn:
+      type: integer
+      minimum: 1
+      description: Seconds from now until access ends; same limits as `expiresAt`.
+    initialAccess:
+      $ref: '#/GuestInitialAccess'
+
+GuestUser:
+  description: A guest as the admin API returns it, with the organization they belong to.
+  allOf:
+    - $ref: '#/AdminUser'
+    - type: object
+      required: [organizationId]
+      properties:
+        organizationId:
+          type: [string, 'null']
+          format: uuid
+
+InviteGuestResponse:
+  type: object
+  required: [user, created]
+  properties:
+    user:
+      $ref: '#/GuestUser'
+    created:
+      type: boolean
+      description: '`true` for a new guest (201); `false` when an existing guest of the same organization was extended (200).'
+    passwordSetupUrl:
+      type: string
+      format: uri
+      description: The one-time link (`/set-password#token=…`), present when a link was issued. Shown once; only its hash is stored.
+
+PaginatedGuestsResponse:
+  type: object
+  required: [data, hasMore, limit, nextCursor]
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AdminUser'
+    hasMore:
+      type: boolean
+    limit:
+      type: integer
+    nextCursor:
+      type: [string, 'null']
+
+UpdateGuestRequest:
+  type: object
+  required: [expiresAt]
+  properties:
+    expiresAt:
+      type: string
+      format: date-time
+      description: Extends or shortens; a time in the past ends access now. No further ahead than `GUEST_MAX_TTL_SECONDS` from now.
+    name:
+      type: string
+      maxLength: 100
+
+IssuePasswordSetupLinkRequest:
+  type: object
+  properties:
+    notify:
+      type: boolean
+      default: false
+
+PasswordSetupLinkResponse:
+  type: object
+  required: [url, expiresAt]
+  properties:
+    url:
+      type: string
+      format: uri
+      description: The one-time link (`/set-password#token=…`).
+    expiresAt:
+      type: string
+      format: date-time
+
+PasswordSetupInspectRequest:
+  type: object
+  required: [token]
+  properties:
+    token:
+      type: string
+      maxLength: 128
+
+PasswordSetupInspectResponse:
+  type: object
+  required: [email, name]
+  properties:
+    email:
+      type: string
+      format: email
+    name:
+      type: [string, 'null']
+
+PasswordSetupRequest:
+  type: object
+  required: [token, password]
+  properties:
+    token:
+      type: string
+      maxLength: 128
+    password:
+      type: string
+      minLength: 12
+      maxLength: 256
+
+PasswordChangeRequest:
+  type: object
+  required: [change_grant, password]
+  properties:
+    change_grant:
+      type: string
+      maxLength: 128
+      description: The one-time grant from the `/login/change-password` redirect. It works only in the browser that holds the matching cookie.
+    password:
+      type: string
+      minLength: 12
+      maxLength: 256
+      description: The new password; it must differ from the current one (`password_unchanged`).

@@ -445,7 +445,8 @@
       (default `member`). Refused on an archived
       organization (`409 resource_archived`). Only an active person can be a
       member: core's system user, a service account or an inactive user is
-      refused with `400 user_not_addable`.
+      refused with `400 user_not_addable`, as is a guest who already belongs to
+      an organization. A guest can only be a `member` (`400 guest_tier`).
 
       On an archived organization every mutation answers
       `409 resource_archived` once the caller passes the member-tier check
@@ -484,7 +485,7 @@
               $ref: '../../../components/auth/schemas.yaml#/OrganizationMember'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
-        description: Invalid body (`invalid_request`), a `userId` that names no user (`unknown_user`), or the user is the system user, a service account or inactive (`user_not_addable`)
+        description: Invalid body (`invalid_request`), a `userId` that names no user (`unknown_user`), or the user is the system user, a service account or inactive, or a guest already in an organization (`user_not_addable`), or a guest given a tier above `member` (`guest_tier`)
       '401':
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
