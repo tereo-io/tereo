@@ -235,6 +235,14 @@ export const RoleDetail = () => {
                   "No"
                 ),
               },
+              ...(role.isSystem
+                ? []
+                : [
+                    {
+                      label: "Guest-assignable",
+                      value: role.guestAssignable ? "Yes" : "No",
+                    },
+                  ]),
               {
                 label: "Created",
                 value: formatDateTime(role.createdAt),

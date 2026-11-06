@@ -1,6 +1,7 @@
 import { requireAllowedOriginForCookies } from "../../middleware/originCheck.js";
 import { rateLimitGeneral } from "../../middleware/rateLimit.js";
 import checkPermissionRouter from "./check-permission/index.js";
+import passwordChangeRouter from "./password-change/index.js";
 import endSessionRouter from "./end-session/index.js";
 import introspectRouter from "./introspect/index.js";
 import orgSelectRouter from "./org-select/index.js";
@@ -31,6 +32,7 @@ router.use("/consent", consentRouter);
 router.use("/end-session", endSessionRouter);
 router.use("/introspect", introspectRouter);
 router.use("/org-select", orgSelectRouter);
+router.use("/password-change", passwordChangeRouter);
 router.use("/revoke", revokeRouter);
 router.use("/token", tokenRouter);
 router.use("/totp", totpRouter);

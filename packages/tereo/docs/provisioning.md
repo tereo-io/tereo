@@ -36,11 +36,12 @@ Every document has this shape; unknown keys are refused at every level, so a typ
   "service": { … },                                // at most one
   "clients": [ … ],                                // login clients
   "roles": [ … ],                                  // custom roles
-  "integrations": [ … ]                            // machine clients for external parties
+  "integrations": [ … ],                           // machine clients for external parties
+  "guests": { "defaultRoles": [ … ] }              // roles an invite gets when it names none
 }
 ```
 
-A document needs at least one of `service`, `clients`, `roles`, `integrations`, and an empty list does not count. Core prints the JSON Schema with
+A document needs at least one of `service`, `clients`, `roles`, `integrations`, `guests`, and an empty list does not count. Core prints the JSON Schema with
 `npm run cli -- provisioning-schema`; it is also published as `packages/tereo/provisioning.schema.json`
 and exported by `@tereo-io/sdk`. An editor given it as `$schema` completes and checks documents.
 
@@ -178,7 +179,7 @@ A service's own document usually holds only `version` and `service`.
 | `internalHost` | Optional, max 253: the one host its own webhooks may reach at a private address ([below](#internal-webhook-targets)) |
 | `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)) |
 | `rateLimitPerSecond` | Optional integer 1 to 100000: the service account's requests per second, in place of its tier's default. Omitted means no override, so dropping it from the document clears it at the next apply. Audited, with `auth.user.rate-limit-changed`, only when it changes |
-| `access.roles` | Requestable core roles, bare (`file_user`, `webhook_publisher`, `audit_writer`, `audit_reader`, `notification_sender`, `tenant_resolver`, `user_resolver`), or `<slug>/<name>`, a system role another service of the set declares |
+| `access.roles` | Requestable core roles, bare (`file_user`, `webhook_publisher`, `audit_writer`, `audit_reader`, `notification_sender`, `tenant_resolver`, `user_resolver`, `guest_inviter`), or `<slug>/<name>`, a system role another service of the set declares |
 | `access.audiences` | Services of the set whose APIs this one may call (it can be introspected by them). Not core, not itself |
 | `permissions`, `systemRoles`, `buckets`, `eventTypes` | The service's declaration, with the namespacing, validation and update rules of [registry](registry.md#what-a-declaration-holds) |
 | `webhooks` | Service-owned endpoints: [Webhooks](#webhooks) |
@@ -300,7 +301,36 @@ admins as usual):
 | `name` | Lowercase letters, digits, `_` and `-`; unique across the set; may not equal a system role of core or of a service. Not namespaced |
 | `displayName`, `description`, `permissions` | A permission may be core's or any service's in the set |
 | `orgAssignable` | Default `false`. `true` needs every permission to be org-assignable |
-| `requires2fa` | Default `false`. `true`: holders must sign in with 2FA, as for a hand-made role |
+| `requires2fa` | Default `false`. `true`: holders must sign in with 2FA, as for a hand-made role. A guest-assignable role that comes to require it revokes the password-only access tokens of the guests holding it |
+| `guestAssignable` | Default `false`. `true` lets [guest users](auth.md#guest-users) hold the role. Needs `orgAssignable: true` and no core permission besides `file-service.objects.read` and `file-service.objects.write`. Custom roles only: a service's `systemRoles` never are. Not editable in the admin API (`409 managed_by_provisioning`) |
+
+### `guests`
+
+```json
+{
+  "version": "1.0.0",
+  "roles": [
+    {
+      "name": "guest_files",
+      "displayName": "Guest files",
+      "permissions": [
+        "file-service.objects.read",
+        "file-service.objects.write"
+      ],
+      "orgAssignable": true,
+      "guestAssignable": true
+    }
+  ],
+  "guests": { "defaultRoles": ["guest_files"] }
+}
+```
+
+`defaultRoles` lists the custom roles (by name) that `POST /v1/admin/guests` assigns when the invite
+names none. It may appear in **one** document only, and each name must be a guest-assignable custom
+role of the set. Core stores the resolved role ids in the system setting `guestDefaultRoles`; a role
+later un-flagged or retired is skipped when a guest is invited. Dropping the section clears the
+defaults. A change to the stored ids is written to the audit log (`SystemSettings`, `guestDefaultRoles`);
+an apply that leaves them as they were writes nothing. A service that invites guests requests the core role `guest_inviter` in `access.roles`.
 
 ## Validation
 
@@ -308,7 +338,7 @@ Core loads every document, then checks the set as one. Every problem is reported
 its file name, and any problem means **nothing is written**. At start, core then does not start; from
 the CLI the exit code is non-zero.
 
-- **Per document**: JSON syntax, the schema, a semver `version`, at least one of the four sections.
+- **Per document**: JSON syntax, the schema, a semver `version`, at least one of the five sections.
 - **Uniqueness across the set**: service and integration slug (one space), service namespace (and no overlap, as a namespace may
   not equal or hyphen-extend another's, nor one core reserves), client ID across services, integrations and login
   clients, `internalHost`, custom role name, webhook `key` within its service, permission, event-type and bucket
@@ -322,6 +352,9 @@ the CLI the exit code is non-zero.
   - an integration's `roles`, as in [`integrations`](#integrations);
   - a custom role's permissions; a system role's (its own service's only); an event type's
     `readPermission` (its own service's or core's).
+- **Guests**: `guestAssignable` on a service system role is refused; a guest-assignable role must be
+  org-assignable and hold no core permission outside the two guest ones; `guests` may appear in one
+  document; each `defaultRoles` entry must be a guest-assignable custom role of the set.
 - **Webhooks**:
   - `events` (1–100) name event types declared in the set or by core, not reserved (`webhook.test`);
   - the owning service must be able to read each one. A service's account does **not** hold its own

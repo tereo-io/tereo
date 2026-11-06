@@ -2,6 +2,7 @@ import { signedObjectParamsSchema, signedQuerySchema } from "./schemas.js";
 import { validateQuery } from "../../../../utils/validateReq.js";
 import { ForbiddenError } from "../../../../utils/errors.js";
 import type { Prisma } from "../../../../utils/db/prisma.js";
+import { isUsableAccount } from "../../../../utils/users.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { pipeline as pipelineCb } from "stream";
 import db from "../../../../utils/db/index.js";
@@ -118,7 +119,8 @@ export async function auditAndSpendShareUrl(
  * would have it: their global roles, plus that organization's while they are
  * a member and it is active. For a bucket outside any organization, every
  * active organization they belong to counts, since they could have signed
- * from any of them. Null for an inactive or missing user.
+ * from any of them. Null for a missing user or one that is inactive or
+ * expired.
  */
 const signerAccessor = async (
   userId: string,
@@ -126,9 +128,9 @@ const signerAccessor = async (
 ) => {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { isActive: true },
+    select: { isActive: true, expiresAt: true },
   });
-  if (!user?.isActive) return null;
+  if (!user || !isUsableAccount(user)) return null;
   if (!organizationId) {
     return {
       userId,

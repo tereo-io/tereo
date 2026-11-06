@@ -1,3 +1,4 @@
+import type { GuestStatus } from "../guests/types.js";
 import { AuthServiceUserType } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -25,6 +26,10 @@ export interface AuthServiceUser {
   createdAt: string;
   /** ISO-8601 timestamp. */
   updatedAt: string;
+  /** ISO-8601 timestamp when the account expires; null for one that never does. */
+  expiresAt: string | null;
+  /** `expired` only for an account with an expiry that has passed. */
+  status: GuestStatus;
 }
 
 /** Role assignment shape returned by `GET /v1/admin/users/:id/roles`. */

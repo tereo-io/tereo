@@ -161,6 +161,8 @@ export class AuthServiceClient {
         name: `Test User ${userId}`,
         isActive: true,
         userType: "human",
+        expiresAt: null,
+        status: "active",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

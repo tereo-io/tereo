@@ -2,6 +2,7 @@ import { BlockedAddressError, resolveSafeAddresses } from "../../ssrfGuard.js";
 import nodemailer, { type Transporter } from "nodemailer";
 import { isAllowedSender } from "../addresses.js";
 import { BadRequestError } from "../../errors.js";
+import { isUsableAccount } from "../../users.js";
 import { logger } from "../../logger.js";
 import type { Readable } from "stream";
 import { createHash } from "crypto";
@@ -328,7 +329,9 @@ export const emailAdapter: ChannelAdapter<Settings, Secrets, Content, Options> =
     },
 
     resolveUser(user) {
-      return user.isActive && user.userType === "human" ? user.email : null;
+      return isUsableAccount(user) && user.userType !== "service_account"
+        ? user.email
+        : null;
     },
 
     plan(recipients) {

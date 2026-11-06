@@ -258,6 +258,35 @@ describe("POST /v1/notifications", () => {
       );
     });
 
+    it("accepts a live guest", async () => {
+      const user = await prisma.user.create({
+        data: {
+          email: `guest-${rand()}@example.com`,
+          passwordHash: "!",
+          userType: "guest",
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        },
+      });
+      const res = await send(message({ recipients: [{ userId: user.id }] }));
+      expect(res.status, JSON.stringify(res.body)).toBe(202);
+    });
+
+    it("refuses an expired guest", async () => {
+      const user = await prisma.user.create({
+        data: {
+          email: `expired-guest-${rand()}@example.com`,
+          passwordHash: "!",
+          userType: "guest",
+          expiresAt: new Date(Date.now() - 60 * 1000),
+        },
+      });
+      expectError(
+        await send(message({ recipients: [{ userId: user.id }] })),
+        400,
+        "inactive_user"
+      );
+    });
+
     it("refuses a version that belongs to another object", async () => {
       expectError(
         await send(

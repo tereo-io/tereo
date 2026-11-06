@@ -31,7 +31,7 @@ export const writeStepConsuming =
 
 /**
  * Deletes the user's login steps already past the first factor: consent and
- * organization picks, TOTP verifications, 2FA setup grants and every setup
+ * organization picks, TOTP verifications, 2FA setup grants, password change grants and every setup
  * session (the account page's too), identity link grants and provider round
  * trips, and authorization codes not yet exchanged. Consent for an org
  * switch of `keepUserSessionId`, and that session's codes, stay.
@@ -53,6 +53,7 @@ export const deletePendingForUser = async (
   await tx.orgSelectionSession.deleteMany({ where: { userId } });
   await tx.totpVerification.deleteMany({ where: { userId } });
   await tx.totpSetupGrant.deleteMany({ where: { userId } });
+  await tx.passwordChangeGrant.deleteMany({ where: { userId } });
   await tx.totpSetupSession.deleteMany({ where: { userId } });
   await tx.identityLinkGrant.deleteMany({ where: { userId } });
   await tx.upstreamAuthSession.deleteMany({ where: { userId } });

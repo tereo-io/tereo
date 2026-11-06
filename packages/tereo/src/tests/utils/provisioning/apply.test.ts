@@ -4,7 +4,9 @@ import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js
 import { type CustomRoleEntry } from "../../../utils/provisioning/schema.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { openEndpointSecrets } from "../../../utils/webhookSecrets.js";
+import { getGuestDefaultRoleIds } from "../../../utils/guestRoles.js";
 import { generateClientSecret } from "../../../utils/crypto.js";
+import { createTestGuest } from "../../support/auth/guests.js";
 import { retireMissing } from "../../../utils/registry.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
@@ -856,6 +858,7 @@ describe("applyProvisioning", () => {
         displayName: `Role ${name}`,
         orgAssignable: false,
         requires2fa: false,
+        guestAssignable: false,
         permissions,
         ...extra,
       };
@@ -1237,6 +1240,7 @@ describe("applyProvisioning", () => {
         displayName: name,
         orgAssignable,
         requires2fa: false,
+        guestAssignable: false,
         permissions,
       };
     };
@@ -1475,6 +1479,136 @@ describe("applyProvisioning", () => {
         where: { slug: integration.slug },
       });
       expect(row.isActive).toBe(false);
+    });
+  });
+});
+
+describe("applyProvisioning guest documents", () => {
+  const names: string[] = [];
+
+  const guestRole = (name: string): LoadedDocument["roles"][number] => {
+    names.push(name);
+    return {
+      name,
+      displayName: name,
+      orgAssignable: true,
+      requires2fa: false,
+      guestAssignable: true,
+      permissions: ["file-service.objects.read"],
+    };
+  };
+
+  const set = (roles: LoadedDocument["roles"], defaultRoles?: string[]) => ({
+    documents: [
+      {
+        file: "guests.json",
+        version: "1.0.0",
+        service: null,
+        clients: [],
+        roles,
+        ...(defaultRoles && { guests: { defaultRoles } }),
+      },
+    ],
+  });
+
+  beforeAll(async () => {
+    await ensureDefaultOrganization();
+  });
+
+  afterAll(async () => {
+    await prisma.systemSetting.deleteMany({
+      where: { key: "guestDefaultRoles" },
+    });
+    await removeRoles(names);
+  });
+
+  describe("applyProvisioning: guests", () => {
+    it("persists guestAssignable and stores then replaces the default roles", async () => {
+      const a = `guest-a-${rand()}`;
+      const b = `guest-b-${rand()}`;
+      await applyProvisioning(set([guestRole(a), guestRole(b)], [a]));
+
+      const rows = await prisma.role.findMany({
+        where: { name: { in: [a, b] } },
+      });
+      expect(rows).toHaveLength(2);
+      expect(rows.every((r) => r.guestAssignable)).toBe(true);
+      const idOf = (n: string) => rows.find((r) => r.name === n)!.id;
+      expect(await getGuestDefaultRoleIds()).toEqual([idOf(a)]);
+
+      await applyProvisioning(set([guestRole(a), guestRole(b)], [b]));
+      expect(await getGuestDefaultRoleIds()).toEqual([idOf(b)]);
+    });
+
+    it("audits a change of the default roles, and only a change", async () => {
+      const a = `guest-aud-${rand()}`;
+      const b = `guest-aud-${rand()}`;
+      const count = () =>
+        prisma.auditLogEntry.count({
+          where: {
+            entityType: "SystemSettings",
+            entityId: "guestDefaultRoles",
+          },
+        });
+      const before = await count();
+      await applyProvisioning(set([guestRole(a), guestRole(b)], [a]));
+      expect(await count()).toBe(before + 1);
+      await applyProvisioning(set([guestRole(a), guestRole(b)], [a]));
+      expect(await count()).toBe(before + 1);
+      await applyProvisioning(set([guestRole(a), guestRole(b)], [b]));
+      expect(await count()).toBe(before + 2);
+    });
+
+    it("revokes password-only tokens of guests when a held role comes to require 2FA", async () => {
+      const name = `guest-2fa-${rand()}`;
+      const org = await ensureDefaultOrganization();
+      await applyProvisioning(set([guestRole(name)]));
+      const role = await prisma.role.findFirstOrThrow({ where: { name } });
+      const { user } = await createTestGuest({
+        organizationId: org.id,
+        roleIds: [role.id],
+      });
+      const client = await prisma.oAuthClient.findFirstOrThrow();
+      const issue = () =>
+        prisma.accessToken.create({
+          data: {
+            jti: `jti-${rand()}`,
+            clientId: client.id,
+            userId: user.id,
+            organizationId: org.id,
+            scopes: ["openid"],
+            expiresAt: new Date(Date.now() + 60_000),
+          },
+        });
+      const first = await issue();
+      await applyProvisioning(set([guestRole(name)]));
+      expect(
+        (
+          await prisma.accessToken.findUniqueOrThrow({
+            where: { jti: first.jti },
+          })
+        ).revokedAt
+      ).toBeNull();
+
+      const stricter = { ...guestRole(name), requires2fa: true };
+      await applyProvisioning(set([stricter]));
+      expect(
+        (
+          await prisma.accessToken.findUniqueOrThrow({
+            where: { jti: first.jti },
+          })
+        ).revokedAt
+      ).not.toBeNull();
+
+      const second = await issue();
+      await applyProvisioning(set([stricter]));
+      expect(
+        (
+          await prisma.accessToken.findUniqueOrThrow({
+            where: { jti: second.jti },
+          })
+        ).revokedAt
+      ).toBeNull();
     });
   });
 });

@@ -1,4 +1,5 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
+import { assertGuestAssignable } from "../../../../../utils/guestRoles.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
 import { DuplicateRoleSchema, RoleIdParamSchema } from "../schemas.js";
 import { SetPermissionsSchema, UpdateRoleSchema } from "./schemas.js";
@@ -132,6 +133,14 @@ export const updateRole = async (req: Request, res: Response) => {
     ) {
       await refuseAdminForIntegrations(params.id, tx);
     }
+    if (body.guestAssignable === true) {
+      await db.roles.lockRoles([params.id], "update", tx);
+      assertGuestAssignable(
+        (await db.roles.get(params.id, tx)).rolePermissions.map(
+          (rp) => rp.permission
+        )
+      );
+    }
     await db.roles.update(params.id, body, tx);
     const updated = await db.roles.get(params.id, tx);
     // Permissions are read live, so a holder's token from a password-only
@@ -140,10 +149,28 @@ export const updateRole = async (req: Request, res: Response) => {
       updated.isActive &&
       updated.requires2fa &&
       !(existing.isActive && existing.requires2fa);
+    // A guest is held only to guest-assignable roles assigned in an
+    // organization, so flagging one that requires 2FA is a gain for them too.
+    const guestsGain2fa =
+      updated.isActive &&
+      updated.requires2fa &&
+      updated.guestAssignable &&
+      !(existing.isActive && existing.requires2fa && existing.guestAssignable);
     const revokedJtis = [
       ...(gains2fa
         ? await db.accessTokens.revokeWithoutMfa(
             { userRoles: { some: { roleId: params.id } } },
+            tx
+          )
+        : []),
+      ...(guestsGain2fa
+        ? await db.accessTokens.revokeWithoutMfa(
+            {
+              userType: "guest",
+              userRoles: {
+                some: { roleId: params.id, organizationId: { not: null } },
+              },
+            },
             tx
           )
         : []),
@@ -172,6 +199,19 @@ export const updateRole = async (req: Request, res: Response) => {
       entityId: updated.id,
       data: formatRole(updated) as Record<string, unknown>,
     });
+    if (updated.guestAssignable !== existing.guestAssignable) {
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.role.guest-assignable-changed",
+        entityType: "Role",
+        entityId: updated.id,
+        data: {
+          id: updated.id,
+          name: updated.name,
+          guestAssignable: updated.guestAssignable,
+        },
+      });
+    }
     return { role: updated, revokedJtis };
   });
 
@@ -421,10 +461,24 @@ export const setRolePermissions = async (req: Request, res: Response) => {
     const keepsAdmin = await tx.permission.count({
       where: { id: { in: body.permissionIds }, name: "admin", retiredAt: null },
     });
+    // The admin guard's advisory lock comes before any role row lock, as in
+    // updateRole, deleteRole and setUserRoles; the opposite order deadlocks
+    // against a user-role insert, whose foreign key share-locks the role.
+    if (!keepsAdmin) {
+      await assertAdminRemains((a) => a.roleId !== params.id, tx);
+    }
+    // PATCH guestAssignable checks under this same lock, so one of the two
+    // sees the other's result; the flag is read after taking it.
+    await db.roles.lockRoles([params.id], "update", tx);
+    if ((await db.roles.get(params.id, tx)).guestAssignable) {
+      const next = await tx.permission.findMany({
+        where: { id: { in: body.permissionIds } },
+        select: { name: true, orgAssignable: true, retiredAt: true },
+      });
+      assertGuestAssignable(next);
+    }
     if (keepsAdmin) {
       await refuseAdminForIntegrations(params.id, tx);
-    } else {
-      await assertAdminRemains((a) => a.roleId !== params.id, tx);
     }
     const updated = await db.roles.setPermissions(
       params.id,

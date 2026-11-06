@@ -3,11 +3,47 @@
  * user details, and the startup check for the system user.
  */
 import { SYSTEM_USER_ID } from "../definitions/index.js";
+import { prisma, type Prisma } from "./db/prisma.js";
 import { toUserRef, type UserRef } from "./refs.js";
 import { formatUser } from "./transformers.js";
-import { prisma } from "./db/prisma.js";
 
 export type User = ReturnType<typeof formatUser>;
+
+interface AccountStanding {
+  isActive: boolean;
+  expiresAt: Date | null;
+}
+
+/**
+ * Whether the account may sign in and act: active, and not past its expiry.
+ * An expired account keeps `isActive`, so every sign-in and token check goes
+ * through here rather than reading `isActive` alone.
+ */
+export const isUsableAccount = (
+  user: AccountStanding,
+  now: Date = new Date()
+): boolean =>
+  user.isActive && (user.expiresAt === null || user.expiresAt > now);
+
+/** `isUsableAccount` as a Prisma filter on the user. */
+export const usableAccountWhere = (
+  now: Date = new Date()
+): Prisma.UserWhereInput => ({
+  isActive: true,
+  OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+});
+
+/** Whole seconds until the account expires, never negative; null if it never does. */
+export const remainingSeconds = (
+  user: Pick<AccountStanding, "expiresAt">,
+  now: Date = new Date()
+): number | null =>
+  user.expiresAt === null
+    ? null
+    : Math.max(
+        0,
+        Math.floor((user.expiresAt.getTime() - now.getTime()) / 1000)
+      );
 
 /** Fetch users by id. Ids with no user map to `null`. */
 export const getUsers = async (
@@ -77,6 +113,39 @@ export const canActInOrganization = async (
     select: { id: true },
   });
   return user !== null;
+};
+
+/**
+ * The organizations the user can hold a token for, as in
+ * `canActInOrganization`: their memberships and their client's organization,
+ * leaving out archived ones.
+ */
+export const actingOrganizationIds = async (
+  userId: string
+): Promise<string[]> => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      organizationMembers: {
+        where: { organization: { archivedAt: null } },
+        select: { organizationId: true },
+      },
+      oauthClient: { select: { organizationId: true } },
+    },
+  });
+  if (!user) return [];
+  const ids = user.organizationMembers.map((m) => m.organizationId);
+  const clientOrg = user.oauthClient?.organizationId;
+  if (
+    clientOrg &&
+    !ids.includes(clientOrg) &&
+    (await prisma.organization.count({
+      where: { id: clientOrg, archivedAt: null },
+    })) > 0
+  ) {
+    ids.push(clientOrg);
+  }
+  return ids;
 };
 
 /**

@@ -1,0 +1,496 @@
+/admin/guests:
+  post:
+    tags:
+      - Admin - Guests
+    summary: Invite a guest
+    description: |
+      Creates a guest user, or extends one, by email. A guest is a temporary
+      login: a `member` of one organization with org-scoped roles that are
+      guest-assignable, expiring at `expiresAt`. Needs `users.guests.write`;
+      the "only what you hold" grant rule does not apply to the guest-assignable
+      roles named here.
+
+      What happens depends on who holds the email:
+
+      - **No account**: creates the guest, its membership and roles, and sets
+        up `initialAccess`. `201`, `created: true`.
+      - **A guest in the same organization, or in none** (expired included,
+        while not deactivated): extends. A guest in no organization (removed
+        from theirs, or theirs archived) first joins this one as a `member`;
+        that needs `organizations.write`, as it hands the caller the guest's
+        account, and is otherwise `409 guest_unassigned`. `expiresAt` becomes the later of the current and
+        requested value, which lifts the guest's refresh sessions capped at the
+        old expiry. `roles` are added (none removed; omitted adds none, the
+        defaults apply only to a new guest). The name and password are left
+        alone; `initialAccess` applies only if they have never set a password.
+        `200`, `created: false`, with `passwordSetupUrl` when a link was
+        issued.
+      - **A guest in another organization**: `409 guest_in_other_organization`.
+      - **A human**: `409 user_exists`, with `userId`; grant that user directly.
+      - **A service account, the system user or a deactivated user**:
+        `409 user_not_invitable`.
+
+      These refusals tell whether the email has an account, so only a caller
+      holding `users.read` gets them. Any other caller gets
+      `409 email_unavailable` for all of them, with no `userId`.
+
+      `initialAccess` is a password-setup link (`notify: true` emails it and needs
+      a default email connection: `409 email_not_configured`; the link is returned
+      as `passwordSetupUrl` either way) or a password, which the guest must change
+      at first sign-in unless `mustChange` is false.
+
+      The caller must act in the organization (a member, or a service account
+      whose client belongs to it) unless they hold `organizations.write`:
+      `403 organization_not_permitted`. The organization must be active
+      (`400 organization_inactive`). An audit log
+      entry is created. `auth.guest.invited` (new) or
+      `auth.guest.extended` (old and new `expiresAt`, roles added) is emitted
+      under the guest's organization, and
+      `auth.user.password-setup-link-issued` when a link is issued. The user,
+      membership and roles are also audited and emitted as their own endpoints
+      do: `auth.user.created` for a new guest, `auth.organization.member-added`
+      when a membership is added, and `auth.organization.member-roles-changed`
+      when roles are added.
+    operationId: inviteGuest
+    security:
+      - BearerAuth: [users.guests.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/InviteGuestRequest'
+    responses:
+      '201':
+        description: Guest created
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/InviteGuestResponse'
+      '200':
+        description: Existing guest of the same organization extended
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/InviteGuestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'Missing permission, or `organization_not_permitted`'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: 'Invalid body, `organization_inactive`, `unknown_role`, `role_not_guest_assignable`, or an expiry out of range'
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: '`guest_in_other_organization`, `guest_unassigned`, `user_exists` (with `userId`), `user_not_invitable` (these four only with `users.read`; otherwise `email_unavailable`), or `email_not_configured`'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: The organization does not exist
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  get:
+    tags:
+      - Admin - Guests
+    summary: List guests
+    description: |
+      Guests with their `expiresAt` and `status` (`active`, `expired`,
+      `deactivated`). Needs `users.guests.read`. Without `organizations.write`,
+      only guests in organizations the caller acts in (a member, or a service
+      account whose client belongs to it) are listed.
+
+      **Filter fields and operators:** `organizationId` (`equals`), `email`
+      (`contains`, `equals`), `isActive` (`equals`), `expiresAt` and `createdAt`
+      (range: `filter[expiresAt_gte]`, `filter[expiresAt_lte]`). **Sort fields:**
+      `id` (default), `email`, `createdAt`, `expiresAt`. The same users are
+      listed by `GET /v1/admin/users?filter[userType]=guest` (`users.read`).
+    operationId: getAdminGuests
+    security:
+      - BearerAuth: [users.guests.read]
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../../components/parameters.yaml#/CursorParam'
+      - $ref: '../../../components/parameters.yaml#/SortParam'
+      - $ref: '../../../components/parameters.yaml#/SortDirParam'
+      - $ref: '../../../components/parameters.yaml#/FilterValueParam'
+      - $ref: '../../../components/parameters.yaml#/FilterOperatorParam'
+    responses:
+      '200':
+        description: Paginated list of guests
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/PaginatedGuestsResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: Invalid query parameters
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/guests/options:
+  get:
+    tags:
+      - Admin - Guests
+    summary: Get guest invitation options
+    description: |
+      What an inviter needs to fill in an invitation without `roles.read`: the
+      custom roles a guest may be given now, the configured defaults among
+      them, and `maxTtlSeconds` (`GUEST_MAX_TTL_SECONDS`), the furthest ahead
+      an invitation or extension may set `expiresAt`. Needs `users.guests.write`.
+    operationId: getGuestOptions
+    security:
+      - BearerAuth: [users.guests.write]
+    responses:
+      '200':
+        description: The options
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/GuestOptionsResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/guests/{id}:
+  get:
+    tags:
+      - Admin - Guests
+    summary: Get a guest
+    description: |
+      One guest. Needs `users.guests.read`. Without `organizations.write`, the
+      caller sees only guests of an organization they act in, and anything
+      else (a guest elsewhere or in no organization, a user who is not a
+      guest, an unknown id) is the same `404 not_a_guest`, so the answer
+      tells nothing about the user. With it, `404 not_a_guest` for a user who
+      is not a guest.
+    operationId: getAdminGuest
+    security:
+      - BearerAuth: [users.guests.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    responses:
+      '200':
+        description: The guest
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/GuestUser'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: '`not_a_guest` (also an unknown id or a guest outside the caller''s organizations, without `organizations.write`), or no such user'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Admin - Guests
+    summary: Extend or shorten a guest
+    description: |
+      Sets `expiresAt` (required) and optionally `name`. A time in the past ends
+      access now. Extending lifts the guest's refresh tokens that were capped at
+      the old expiry: each runs to its family's start plus the refresh lifetime,
+      still capped at the new expiry. Needs
+      `users.guests.write`. `404 not_a_guest` as for `GET`. `expiresAt` must
+      be an RFC 3339 date-time; `null` or any other value is a `400`.
+
+      Ending access (an `expiresAt` not in the future) also revokes the
+      guest's live access tokens and closes their sockets.
+
+      An audit log entry is created, with `metadata.action`
+      `guest_extended`, `guest_shortened` or `guest_access_ended`, and
+      `auth.guest.extended` is emitted under the guest's organization with
+      `change` saying which.
+    operationId: patchAdminGuest
+    security:
+      - BearerAuth: [users.guests.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/UpdateGuestRequest'
+    responses:
+      '200':
+        description: Guest updated
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/GuestUser'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: '`not_a_guest` (also an unknown id or a guest outside the caller''s organizations, without `organizations.write`), or no such user'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/guests/{id}/password-setup-link:
+  post:
+    tags:
+      - Admin - Guests
+    summary: Issue a password setup link
+    description: |
+      Issues a fresh one-time link for the guest to set their password
+      (`${UI_BASE_URL}/set-password#token=…`, valid `PASSWORD_SETUP_TTL_SECONDS`,
+      72 hours by default); earlier links stop working. With `notify`, the link is
+      emailed (`409 email_not_configured` without a default email connection). The
+      email is a sensitive notification: its content is redacted from the
+      notification log. Needs `users.guests.write`, in an organization the
+      caller acts in (`403 organization_not_permitted`, as for `PATCH`).
+      `409 guest_not_usable` for a guest who is deactivated or expired (extend or
+      reactivate them first); the link would be refused on use.
+
+      For a guest who already has a password, the link replaces it and its URL
+      comes back to the caller, so it is a credential reset: it also needs
+      `users.write` and, as for `PATCH /admin/users/{id}`, global permissions
+      covering every permission the guest holds (`403 guest_has_password`
+      without `users.write`, `403 forbidden` naming those lacking). A guest
+      with no password keeps needing only `users.guests.write`.
+
+      An audit log entry is created and `auth.user.password-setup-link-issued`
+      is emitted.
+    operationId: issueGuestPasswordSetupLink
+    security:
+      - BearerAuth: [users.guests.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/IssuePasswordSetupLinkRequest'
+    responses:
+      '200':
+        description: Link issued
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/PasswordSetupLinkResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: '`organization_not_permitted`, `guest_has_password`, or `forbidden` for a guest holding permissions the caller lacks'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: No such user, or `not_a_guest`
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: '`email_not_configured`, or `guest_not_usable`'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+auth.guest.invited:
+  post:
+    tags:
+      - Admin - Guests
+    summary: Guest invited
+    description: 'Fired when `POST /v1/admin/guests` creates a guest, under the guest''s organization (endpoints of that organization, and service endpoints of all organizations). `data` is the user plus `organizationId` and `roleIds`, the roles assigned.'
+    operationId: webhookGuestInvited
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.guest.invited
+                  entityType:
+                    const: User
+                  data:
+                    allOf:
+                      - $ref: '../../../components/auth/schemas.yaml#/User'
+                      - type: object
+                        required: [organizationId]
+                        properties:
+                          organizationId:
+                            type: [string, 'null']
+                            format: uuid
+                          roleIds:
+                            type: array
+                            items:
+                              type: string
+                              format: uuid
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.guest.extended:
+  post:
+    tags:
+      - Admin - Guests
+    summary: Guest extended
+    description: 'Fired when a guest''s expiry changes or roles are added: by a repeat invite or `PATCH /v1/admin/guests/{id}`. Emitted under the guest''s organization. `data` is the user after the change plus `organizationId`, `previousExpiresAt`, `rolesAdded` (role ids; empty for a PATCH) and `change`: `extended`, `shortened` (an earlier expiry still in the future) or `ended` (access ended now).'
+    operationId: webhookGuestExtended
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.guest.extended
+                  entityType:
+                    const: User
+                  data:
+                    allOf:
+                      - $ref: '../../../components/auth/schemas.yaml#/User'
+                      - type: object
+                        required: [organizationId]
+                        properties:
+                          organizationId:
+                            type: [string, 'null']
+                            format: uuid
+                          previousExpiresAt:
+                            type: [string, 'null']
+                            format: date-time
+                          rolesAdded:
+                            type: array
+                            items:
+                              type: string
+                              format: uuid
+                          change:
+                            type: string
+                            enum: [extended, shortened, ended]
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.guest.promoted:
+  post:
+    tags:
+      - Admin - Guests
+    summary: Guest promoted
+    description: 'Fired when `POST /v1/admin/users/{id}/promote` makes a guest a permanent user, under the guest''s organization. `data` is the user after promotion plus `organizationId`.'
+    operationId: webhookGuestPromoted
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.guest.promoted
+                  entityType:
+                    const: User
+                  data:
+                    allOf:
+                      - $ref: '../../../components/auth/schemas.yaml#/User'
+                      - type: object
+                        required: [organizationId]
+                        properties:
+                          organizationId:
+                            type: [string, 'null']
+                            format: uuid
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

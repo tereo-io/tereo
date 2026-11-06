@@ -32,6 +32,10 @@ import {
   updateIntegrationTx,
 } from "../integrations.js";
 import {
+  GUEST_DEFAULT_ROLES_KEY,
+  getGuestDefaultRoleIds,
+} from "../guestRoles.js";
+import {
   createServiceTx,
   revokeServiceTokens,
   serviceAccountEmail,
@@ -915,6 +919,7 @@ const roleFields = (spec: CustomRoleEntry) => ({
   displayName: spec.displayName,
   description: spec.description ?? null,
   requires2fa: spec.requires2fa,
+  guestAssignable: spec.guestAssignable,
 });
 
 /**
@@ -926,9 +931,14 @@ const applyRoles = async (
   tx: Tx,
   p: Entries,
   result: ProvisioningResult
-): Promise<{ permissionsChanged: string[]; statusChanged: string[] }> => {
+): Promise<{
+  permissionsChanged: string[];
+  statusChanged: string[];
+  revokedJtis: string[];
+}> => {
   const permissionsChanged: string[] = [];
   const statusChanged: string[] = [];
+  const revokedJtis: string[] = [];
   const permissions = await tx.permission.findMany({
     where: {
       name: { in: p.roles.flatMap((e) => e.role.permissions) },
@@ -967,6 +977,7 @@ const applyRoles = async (
           displayName: spec.displayName,
           description: spec.description,
           requires2fa: spec.requires2fa,
+          guestAssignable: spec.guestAssignable,
           provisioned: true,
         },
         tx
@@ -1036,6 +1047,25 @@ const applyRoles = async (
     if (permissionsDiffer)
       await db.roles.setPermissions(existing.id, wanted, tx);
     const role = await db.roles.get(existing.id, tx);
+    // Permissions are read live, so a guest's token from a password-only
+    // login would keep working; revoked, its refresh meets the step-up.
+    if (
+      role.requires2fa &&
+      role.guestAssignable &&
+      !(existing.isActive && existing.requires2fa && existing.guestAssignable)
+    ) {
+      revokedJtis.push(
+        ...(await db.accessTokens.revokeWithoutMfa(
+          {
+            userType: "guest",
+            userRoles: {
+              some: { roleId: role.id, organizationId: { not: null } },
+            },
+          },
+          tx
+        ))
+      );
+    }
     await logAuditTx(tx, {
       auth: SYSTEM_ACTOR,
       action: "UPDATE",
@@ -1056,6 +1086,19 @@ const applyRoles = async (
       entityId: role.id,
       data: formatRole(role) as Record<string, unknown>,
     });
+    if (role.guestAssignable !== existing.guestAssignable) {
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.role.guest-assignable-changed",
+        entityType: "Role",
+        entityId: role.id,
+        data: {
+          id: role.id,
+          name: role.name,
+          guestAssignable: role.guestAssignable,
+        },
+      });
+    }
     if (permissionsDiffer) {
       await emitTx(tx, {
         organizationId: getDefaultOrganizationId(),
@@ -1069,7 +1112,37 @@ const applyRoles = async (
     if (reactivated) statusChanged.push(role.id);
     result.roles.push(entry);
   }
-  return { permissionsChanged, statusChanged };
+  return { permissionsChanged, statusChanged, revokedJtis };
+};
+
+/** Stores the roles new guests get by default, as ids; an absent section stores none. */
+const applyGuests = async (tx: Tx, set: ProvisioningSet) => {
+  const sources = set.documents.filter((d) => d.guests?.defaultRoles?.length);
+  const meta = { files: sources.map((d) => d.file) };
+  const names = set.documents.flatMap((d) => d.guests?.defaultRoles ?? []);
+  const roles = await tx.role.findMany({
+    where: { name: { in: names }, serviceId: null, archivedAt: null },
+    select: { id: true, name: true },
+  });
+  const idOf = new Map(roles.map((r) => [r.name, r.id]));
+  const next = names.map((n) => idOf.get(n)!);
+  const previous = await getGuestDefaultRoleIds(tx);
+  if (JSON.stringify(previous) === JSON.stringify(next)) return;
+  await db.settings.set(GUEST_DEFAULT_ROLES_KEY, next, tx);
+  // Audit only: `auth.settings.updated` carries the two-factor settings.
+  await logAuditTx(tx, {
+    auth: SYSTEM_ACTOR,
+    action: "UPDATE",
+    entityType: "SystemSettings",
+    entityId: GUEST_DEFAULT_ROLES_KEY,
+    entityName: "Guest default roles",
+    metadata: {
+      action: "provisioned",
+      previousRoleIds: previous,
+      roleIds: next,
+      ...meta,
+    },
+  });
 };
 
 /** Where a webhook entry goes: one endpoint for all organizations, or one per listed one. */
@@ -1570,6 +1643,7 @@ export const applyProvisioning = async (
         if (content.problems.length > 0)
           throw new ProvisioningError(content.problems);
         const roleChanges = await applyRoles(tx, p, result);
+        await applyGuests(tx, set);
         for (const entry of p.integrations)
           await applyIntegration(tx, entry, state, now, result);
         const integrationProblems = await applyIntegrationsAccess(
@@ -1610,6 +1684,7 @@ export const applyProvisioning = async (
   };
   for (const id of revokedClients)
     await after("revoking service tokens", () => revokeServiceTokens(id));
+  disconnectTokenSockets(roleChanges.revokedJtis);
   for (const id of roleChanges.permissionsChanged)
     await after("revoking role holders' client tokens", () =>
       revokeHolderClientTokens(id)

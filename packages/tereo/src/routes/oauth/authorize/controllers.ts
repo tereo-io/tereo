@@ -7,6 +7,7 @@ import type { AuthorizeRequest, AuthorizeSubmit } from "./schemas.js";
 import type { StepWriter } from "../../../utils/db/loginFlows.js";
 import { knownDeviceFor } from "../../../utils/knownDevice.js";
 import { skipsConsent } from "../../../definitions/index.js";
+import { isUsableAccount } from "../../../utils/users.js";
 import { emailDomain } from "../../../utils/email.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
@@ -351,7 +352,9 @@ export const authorizePostHandler = async (req: Request, res: Response) => {
 
   const user = await db.users.getByEmail(body.email);
   const canLogIn =
-    !!user && user.isActive && user.userType !== UserType.service_account;
+    !!user &&
+    isUsableAccount(user) &&
+    user.userType !== UserType.service_account;
 
   // A browser that has logged in as this user before is let through the
   // account's backoff, which an attacker can otherwise hold the owner in; its
@@ -490,5 +493,5 @@ const isUserActive = async (userId: string) => {
     if (err instanceof NotFoundError) return null;
     throw err;
   });
-  return !!user?.isActive;
+  return !!user && isUsableAccount(user);
 };

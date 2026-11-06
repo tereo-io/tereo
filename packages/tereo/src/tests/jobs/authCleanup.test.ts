@@ -242,4 +242,39 @@ describe("auth cleanup", () => {
       await prisma.identityInvite.findUnique({ where: { id: liveInvite.id } })
     ).not.toBeNull();
   });
+  it("deletes password setup links a grace period after they expire or are used", async () => {
+    const pastGrace = -AUTH_TOKEN_GRACE_MS - DAY;
+    const link = async (
+      forUserId: string,
+      expiresAt: Date,
+      usedAt: Date | null = null
+    ) =>
+      prisma.passwordSetupToken.create({
+        data: {
+          userId: forUserId,
+          tokenHash: unique(),
+          createdBy: userId,
+          expiresAt,
+          usedAt,
+        },
+      });
+    const other = (await createTestUser()).id;
+
+    const expiredLong = await link(userId, at(pastGrace));
+    const usedLong = await link(userId, at(-DAY), at(pastGrace));
+    const usedRecently = await link(userId, at(DAY), at(-DAY));
+    const live = await link(other, at(DAY));
+
+    await cleanupExpiredAuthRows();
+
+    const left = await prisma.passwordSetupToken.findMany({
+      where: {
+        id: { in: [expiredLong.id, usedLong.id, usedRecently.id, live.id] },
+      },
+      select: { id: true },
+    });
+    expect(left.map((r) => r.id).sort()).toEqual(
+      [usedRecently.id, live.id].sort()
+    );
+  });
 });

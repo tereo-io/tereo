@@ -1,3 +1,4 @@
+import type { Role } from "@/features/auth-admin/api/roles/types";
 import { RoleForm, roleFormErrors } from "./RoleForm";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
@@ -77,6 +78,66 @@ describe("RoleForm", () => {
     renderForm({ error: "Something broke" });
 
     expect(screen.getByRole("alert")).toHaveTextContent("Something broke");
+  });
+});
+
+const custom: Role = {
+  id: "r1",
+  name: "guest_files",
+  displayName: "Guest files",
+  description: null,
+  isSystem: false,
+  serviceId: null,
+  service: null,
+  isActive: true,
+  archivedAt: null,
+  retiredAt: null,
+  requires2fa: false,
+  guestAssignable: false,
+  provisioned: false,
+  unprovisionedAt: null,
+  createdAt: "2026-10-01T00:00:00Z",
+  updatedAt: "2026-10-01T00:00:00Z",
+};
+
+describe("RoleForm guest-assignable", () => {
+  it("is offered for a custom role and submitted when toggled", async () => {
+    const user = userEvent.setup();
+    const onSubmit = renderForm({ role: custom });
+
+    await user.click(screen.getByLabelText("Guest-assignable"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ guestAssignable: true });
+  });
+
+  it("is offered when creating a role", () => {
+    renderForm();
+
+    expect(screen.getByLabelText("Guest-assignable")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["a system role", { isSystem: true, serviceId: "s1" }],
+    ["a provisioned role", { provisioned: true }],
+  ])("is absent for %s", (_case, patch) => {
+    renderForm({ role: { ...custom, ...patch } });
+
+    expect(screen.queryByLabelText("Guest-assignable")).toBeNull();
+  });
+
+  it("shows role_not_guest_assignable at form level", () => {
+    const description = "Role holds permissions guests cannot have: users.read";
+    const { error } = roleFormErrors(
+      coreError(400, {
+        error: "role_not_guest_assignable",
+        error_description: description,
+      }),
+      "Failed"
+    );
+    renderForm({ role: custom, error });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(description);
   });
 });
 

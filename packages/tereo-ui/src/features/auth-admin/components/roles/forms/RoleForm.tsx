@@ -65,6 +65,9 @@ export const RoleForm = ({
   const [displayName, setDisplayName] = useState(role?.displayName || "");
   const [description, setDescription] = useState(role?.description || "");
   const [requires2fa, setRequires2fa] = useState(role?.requires2fa || false);
+  const [guestAssignable, setGuestAssignable] = useState(
+    role?.guestAssignable || false
+  );
   const [isActive, setIsActive] = useState(
     role?.isActive !== undefined ? String(role.isActive) : "true"
   );
@@ -86,6 +89,8 @@ export const RoleForm = ({
           updates.description = description;
         if (String(role.isActive) !== isActive)
           updates.isActive = isActive === "true";
+        if (guestAssignable !== role.guestAssignable)
+          updates.guestAssignable = guestAssignable;
       }
       onSubmit(updates);
     } else {
@@ -95,6 +100,7 @@ export const RoleForm = ({
         displayName,
         description: description || undefined,
         requires2fa,
+        ...(guestAssignable ? { guestAssignable } : {}),
       });
     }
   };
@@ -161,6 +167,20 @@ export const RoleForm = ({
             Users with this role must set up and use two-factor authentication.
           </p>
         </div>
+        {!role?.isSystem && !role?.provisioned && (
+          <div className="t-role-2fa-section">
+            <Checkbox
+              label="Guest-assignable"
+              labelLocation="right"
+              checked={guestAssignable}
+              onChange={(e) => setGuestAssignable(e.target.checked)}
+            />
+            <p className="v-help-text">
+              Guests may hold this role. Only roles whose permissions are all
+              safe for guests qualify.
+            </p>
+          </div>
+        )}
       </Col>
     </Form>
   );

@@ -7,6 +7,7 @@ import type { AuthContext } from "../../middleware/auth.js";
 import { CHANNELS, getAdapter } from "./channels/index.js";
 import { toConnectionView } from "./connections.js";
 import { hasNul, pgText } from "../pgInput.js";
+import { isUsableAccount } from "../users.js";
 import type { Prisma } from "../db/prisma.js";
 import { prisma } from "../db/prisma.js";
 import db from "../db/index.js";
@@ -30,6 +31,11 @@ export interface NotificationInput {
   organizationId?: string | null;
   recipients: RecipientInput[];
   content: unknown;
+  /**
+   * Core-internal: the content is a credential, so the log never returns it
+   * and it is dropped once the deliveries settle. Not in the public schema.
+   */
+  sensitive?: boolean;
   attachments?: {
     bucket: string;
     objectId: string;
@@ -62,6 +68,7 @@ export interface ValidatedNotification {
   /** As requested: `{ address }` or `{ userId }` with the parsed options. */
   recipients: Record<string, unknown>[];
   content: unknown;
+  sensitive: boolean;
   /** The channel's one-line description of `content`, for the log. */
   summary: string | null;
   attachments: StoredAttachment[];
@@ -168,7 +175,9 @@ const resolveRecipients = async (
       `No user with id: ${missing.join(", ")}`
     );
   }
-  const inactive = users.filter((u) => !u.isActive || u.userType !== "human");
+  const inactive = users.filter(
+    (u) => !isUsableAccount(u) || u.userType === "service_account"
+  );
   if (inactive.length > 0) {
     throw new BadRequestError(
       "inactive_user",
@@ -298,7 +307,8 @@ export async function validateNotification(
   raw: NotificationInput,
   client: Tx = prisma
 ): Promise<ValidatedNotification> {
-  const parsed = notificationInputSchema.safeParse(raw);
+  const { sensitive = false, ...publicInput } = raw;
+  const parsed = notificationInputSchema.safeParse(publicInput);
   if (!parsed.success) {
     throw new ValidationError(
       `Invalid notification. ${summarize(parsed.error)}`
@@ -419,6 +429,7 @@ export async function validateNotification(
       ...r.options,
     })),
     content: content.data,
+    sensitive,
     summary: adapter.summarize(content.data),
     attachments,
     deliveries: plans.map((plan) =>
@@ -460,6 +471,7 @@ export async function writeNotification(
       organizationId: notification.organizationId,
       recipients: json(notification.recipients),
       content: json(notification.content),
+      sensitive: notification.sensitive,
       summary: notification.summary,
       attachments: json(notification.attachments),
       ...(sender.auth !== "system" && {

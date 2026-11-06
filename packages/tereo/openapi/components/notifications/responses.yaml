@@ -65,7 +65,7 @@ NotificationsSendBadRequestResponse:
     `unknown_connection` (no connection with that slug on the channel), `invalid_content` (the
     content, a recipient's address or options, an attachment's filename, or no `to`),
     `too_many_recipients`, `sender_not_allowed` (`from` or `replyTo` is not an allowed sender of
-    the connection), `unknown_user`, `inactive_user` (deactivated, or not a person),
+    the connection), `unknown_user`, `inactive_user` (deactivated, an expired guest, or not a person),
     `unknown_organization`, `attachment_not_found` (the version is not one of the object's, or
     is a delete marker), `attachments_too_large`.
   headers:
@@ -186,7 +186,7 @@ NotificationsIdempotencyKeyConflictResponse:
             type: string
 
 NotificationsNothingToRetryResponse:
-  description: Conflict. `nothing_to_retry`, the notification has no failed delivery.
+  description: Conflict. `nothing_to_retry` (the notification has no failed delivery) or `content_redacted` (a sensitive notification, whose content is not kept, cannot be retried).
   headers:
     X-RateLimit-Limit:
       $ref: '../headers.yaml#/X-RateLimit-Limit'
@@ -202,6 +202,6 @@ NotificationsNothingToRetryResponse:
         properties:
           error:
             type: string
-            enum: [nothing_to_retry]
+            enum: [nothing_to_retry, content_redacted]
           error_description:
             type: string

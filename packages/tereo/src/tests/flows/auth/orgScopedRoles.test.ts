@@ -179,15 +179,26 @@ describe("org-assignable permissions", () => {
   });
 
   it("filter the permission list", async () => {
+    // Other suites add org-assignable permissions, so look names up rather
+    // than expecting them on the first page.
+    const list = (name: string) =>
+      call(
+        "GET",
+        `/v1/admin/permissions?filter[orgAssignable]=true&filter[name]=${name}&filter[name_op]=equals`,
+        adminToken
+      );
+    const webhooks = await list("webhooks.read");
+    expect(webhooks.status).toBe(HTTP_STATUS.OK);
+    expect(webhooks.body.data.map((p: { name: string }) => p.name)).toEqual([
+      "webhooks.read",
+    ]);
+    expect((await list("admin")).body.data).toEqual([]);
+
     const res = await call(
       "GET",
       "/v1/admin/permissions?filter[orgAssignable]=true&limit=100",
       adminToken
     );
-    expect(res.status).toBe(HTTP_STATUS.OK);
-    const names = res.body.data.map((p: { name: string }) => p.name);
-    expect(names).toContain("webhooks.read");
-    expect(names).not.toContain("admin");
     expect(
       res.body.data.every((p: { orgAssignable: boolean }) => p.orgAssignable)
     ).toBe(true);
