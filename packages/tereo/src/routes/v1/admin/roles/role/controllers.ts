@@ -166,12 +166,12 @@ export const updateRole = async (req: Request, res: Response) => {
       ...(guestsGain2fa
         ? await db.accessTokens.revokeWithoutMfa(
             {
+              userType: "guest",
               userRoles: {
                 some: { roleId: params.id, organizationId: { not: null } },
               },
             },
-            tx,
-            "guest"
+            tx
           )
         : []),
       ...(body.isActive === false && existing.isActive
