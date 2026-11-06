@@ -36,3 +36,19 @@ export const invalidateForUser = (userId: string, tx: Tx = prisma) =>
     where: { userId, usedAt: null },
     data: { usedAt: new Date() },
   });
+
+/**
+ * Deletes tokens expired or used (retired included) before `cutoff`: kept
+ * until then so a late use still meets a row that explains its 404.
+ */
+export const deleteSpentBefore = async (
+  cutoff: Date,
+  tx: Tx = prisma
+): Promise<number> => {
+  const { count } = await tx.passwordSetupToken.deleteMany({
+    where: {
+      OR: [{ expiresAt: { lt: cutoff } }, { usedAt: { lt: cutoff } }],
+    },
+  });
+  return count;
+};

@@ -102,6 +102,9 @@ model User {
   // A guest is usable until this time; set exactly when user_type is guest.
   expiresAt              DateTime? @map("expires_at")
   passwordChangeRequired Boolean   @default(false) @map("password_change_required")
+  // False while the password is one someone else chose (an invite's initial
+  // password, an admin's): promoting a guest is refused until they set their own.
+  passwordSetByUser      Boolean   @default(true) @map("password_set_by_user")
 
   authCodes                  AuthorizationCode[]
   refreshTokens              RefreshToken[]
@@ -543,6 +546,8 @@ model TotpSetupGrant {
 model PasswordChangeGrant {
   id                  String   @id @default(uuid(7)) @db.Uuid
   tokenHash           String   @unique @map("token_hash") @db.VarChar(64)
+  // Of the secret in the browser's cookie, which the URL never carries.
+  cookieSecretHash    String   @map("cookie_secret_hash") @db.VarChar(64)
   userId              String   @map("user_id") @db.Uuid
   clientId            String   @map("client_id") @db.Uuid
   redirectUri         String   @map("redirect_uri") @db.VarChar(2048)
@@ -1848,6 +1853,7 @@ model PasswordSetupToken {
   user    User @relation("PasswordSetupTokenUser", fields: [userId], references: [id], onDelete: Restrict)
   creator User @relation("PasswordSetupTokenCreator", fields: [createdBy], references: [id], onDelete: Restrict)
 
+  @@index([expiresAt])
   @@map("password_setup_tokens")
   @@schema("auth")
 }

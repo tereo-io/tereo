@@ -4,6 +4,7 @@ import { prisma } from "./prisma.js";
 export interface PasswordChangeGrantData {
   id: string;
   tokenHash: string;
+  cookieSecretHash: string;
   userId: string;
   clientId: string;
   redirectUri: string;
@@ -43,6 +44,17 @@ export const consume = async (
     where: { id },
   });
   return result.count === 1;
+};
+
+/** Deletes every grant of the user, live or not. */
+export const deleteForUser = async (
+  userId: string,
+  tx: Prisma.TransactionClient
+): Promise<number> => {
+  const result = await tx.passwordChangeGrant.deleteMany({
+    where: { userId },
+  });
+  return result.count;
 };
 
 export const cleanupExpired = async (): Promise<number> => {

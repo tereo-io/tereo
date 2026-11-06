@@ -1,8 +1,11 @@
 import { writeStepAfterSecondFactor } from "../../../utils/identityProviders/forcedLink.js";
 import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js";
 import { handlePostAuthOrgSelection } from "../../../utils/orgSelection.js";
+import { passwordChangeStepIfDue } from "../../../utils/firstFactor.js";
 import { recordSessionsRevoked } from "../../../utils/sessionEvents.js";
+import type { TotpVerificationData } from "../../../utils/db/totp.js";
 import { totpSetupFailure } from "../../../middleware/rateLimit.js";
+import type { StepWriter } from "../../../utils/db/loginFlows.js";
 import { beginTotpAttempt } from "../../../utils/totpAttempts.js";
 import { issueKnownDevice } from "../../../utils/knownDevice.js";
 import { logAuditTx, emitTx } from "../../../utils/outbox.js";
@@ -37,6 +40,67 @@ import {
   TotpSetupInitiateSchema,
   TotpSetupVerifySchema,
 } from "./schemas.js";
+
+/**
+ * After a TOTP or recovery code: a forced password change if one is due,
+ * then the organization and consent steps.
+ */
+const continueAfterSecondFactor = async (
+  req: Request,
+  res: Response,
+  {
+    user,
+    client,
+    verification,
+    writeStep,
+  }: {
+    user: { id: string; passwordChangeRequired: boolean };
+    client: Awaited<ReturnType<typeof db.clients.get>>;
+    verification: TotpVerificationData;
+    writeStep: StepWriter;
+  },
+  authMethods: string[]
+) => {
+  const changeStep = await passwordChangeStepIfDue(res, {
+    user,
+    client,
+    request: {
+      clientId: client.clientId,
+      redirectUri: verification.redirectUri,
+      scopes: verification.scopes,
+      state: verification.state || null,
+      codeChallenge: verification.codeChallenge,
+      codeChallengeMethod: verification.codeChallengeMethod,
+      nonce: verification.nonce || null,
+      maxAge: verification.maxAge ?? null,
+      acrValues: verification.acrValues || null,
+      prompt: verification.prompt || null,
+    },
+    authMethods,
+    writeStep,
+  });
+  if (changeStep) return changeStep;
+  return handlePostAuthOrgSelection(
+    req,
+    res,
+    verification.userId,
+    client,
+    verification.redirectUri,
+    verification.scopes,
+    verification.state || null,
+    verification.codeChallenge,
+    verification.codeChallengeMethod,
+    verification.nonce || null,
+    new Date(),
+    verification.maxAge ?? null,
+    verification.acrValues || null,
+    verification.prompt || null,
+    authMethods,
+    undefined,
+    writeStep,
+    verification.provider
+  );
+};
 
 export const totpVerifyHandler = async (req: Request, res: Response) => {
   const body = validateBody(TotpVerifySchema, req);
@@ -110,25 +174,11 @@ export const totpVerifyHandler = async (req: Request, res: Response) => {
       }
     }
   );
-  const result = await handlePostAuthOrgSelection(
+  const result = await continueAfterSecondFactor(
     req,
     res,
-    verification.userId,
-    client,
-    verification.redirectUri,
-    verification.scopes,
-    verification.state || null,
-    verification.codeChallenge,
-    verification.codeChallengeMethod,
-    verification.nonce || null,
-    new Date(),
-    verification.maxAge ?? null,
-    verification.acrValues || null,
-    verification.prompt || null,
-    [...verification.firstFactor, "otp"],
-    undefined,
-    writeStep,
-    verification.provider
+    { user, client, verification, writeStep },
+    [...verification.firstFactor, "otp"]
   );
   clearTotpSessionCookie(res, client.clientId);
   issueKnownDevice(res, await db.users.get(verification.userId));
@@ -232,25 +282,11 @@ export const totpRecoveryHandler = async (req: Request, res: Response) => {
       });
     }
   );
-  const result = await handlePostAuthOrgSelection(
+  const result = await continueAfterSecondFactor(
     req,
     res,
-    verification.userId,
-    client,
-    verification.redirectUri,
-    verification.scopes,
-    verification.state || null,
-    verification.codeChallenge,
-    verification.codeChallengeMethod,
-    verification.nonce || null,
-    new Date(),
-    verification.maxAge ?? null,
-    verification.acrValues || null,
-    verification.prompt || null,
-    [...verification.firstFactor, "recovery"],
-    undefined,
-    writeStep,
-    verification.provider
+    { user, client, verification, writeStep },
+    [...verification.firstFactor, "recovery"]
   );
   clearTotpSessionCookie(res, client.clientId);
   await attempt.succeeded();

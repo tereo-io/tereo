@@ -32,10 +32,12 @@ export const passwordChangeHandler = async (req: Request, res: Response) => {
   if (!grant) throw invalidGrant();
 
   const client = await db.clients.get(grant.clientId);
-  // The cookie is set alongside the grant, so a grant lifted from a URL is
-  // useless outside the browser that passed the password check.
+  // The cookie holds a secret the URL never carries, set with the grant: a
+  // grant lifted from a URL is useless outside the browser that signed in.
+  const cookieSecret = getPasswordChangeGrantFromCookie(req, client.clientId);
   if (
-    getPasswordChangeGrantFromCookie(req, client.clientId) !== body.change_grant
+    !cookieSecret ||
+    hashTotpSetupGrant(cookieSecret) !== grant.cookieSecretHash
   ) {
     throw invalidGrant();
   }
@@ -82,8 +84,14 @@ export const passwordChangeHandler = async (req: Request, res: Response) => {
       }
       await tx.user.update({
         where: { id: user.id },
-        data: { passwordHash, passwordChangeRequired: false },
+        data: {
+          passwordHash,
+          passwordChangeRequired: false,
+          passwordSetByUser: true,
+        },
       });
+      // A setup link issued before would replace the password just chosen.
+      await db.passwordSetupTokens.invalidateForUser(user.id, tx);
       await logAuditTx(tx, {
         auth: actor,
         action: "UPDATE",

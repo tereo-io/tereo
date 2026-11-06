@@ -1,5 +1,6 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
+import { retirePasswordLinks } from "../../../../../utils/passwordSetup.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
@@ -113,6 +114,11 @@ export const updateUser = async (req: Request, res: Response) => {
     const invitesWithdrawn = newEmail
       ? await db.userIdentities.deleteInvitesForUser(id, tx)
       : 0;
+    // Whoever holds a setup link or a forced-change grant must not keep a way
+    // in past a new password, a new sign-in email or a deactivation.
+    if (body.password || newEmail || deactivating) {
+      await retirePasswordLinks(tx, id);
+    }
     if (profileChanged) {
       const metadata = {
         ...(body.password && { passwordReset: true }),

@@ -3,15 +3,14 @@
 import { ensureDefaultOrganization } from "../../../../utils/defaultOrganization.js";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { issuePasswordSetupLink } from "../../../../utils/passwordSetup.js";
-import { loginAndExchange, postForm } from "../../../support/auth/login.js";
 import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
+import { hashFlowToken, hashPassword } from "../../../../utils/crypto.js";
 import { getTestPrincipalToken } from "../../../support/principals.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { SYSTEM_USER_ID } from "../../../../definitions/index.js";
-import { createTestUser } from "../../../support/auth/users.js";
-import { hashFlowToken } from "../../../../utils/crypto.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { waitFor } from "../../../support/webhooks.js";
+import { fetchJson } from "../../../support/http.js";
 import { randomBytes } from "node:crypto";
 import env from "../../../../env.js";
 import axios from "axios";
@@ -31,6 +30,15 @@ import {
   cleanNotifications,
   createNotificationConnection,
 } from "../../../support/notifications.js";
+import {
+  getAccessTokenForUser,
+  loginAndExchange,
+  postForm,
+} from "../../../support/auth/login.js";
+import {
+  createAdminUser,
+  createTestUser,
+} from "../../../support/auth/users.js";
 
 const REDIRECT_URI = "http://localhost:3000/callback";
 const SCOPE = "openid offline_access";
@@ -271,6 +279,152 @@ describe("password setup", () => {
         expect((await bad()).status).toBe(HTTP_STATUS.NOT_FOUND);
       }
       expect((await bad()).status).toBe(429);
+    });
+  });
+
+  describe("when the account changes hands", () => {
+    let adminToken: string;
+    beforeAll(async () => {
+      adminToken = await getAccessTokenForUser(await createAdminUser(), client);
+    });
+
+    const patchUser = (id: string, body: object) =>
+      fetchJson("PATCH", `${BASE_URL}/v1/admin/users/${id}`, adminToken, body);
+
+    /** A guest with a password, a live link and a pending change grant. */
+    const guestWithLinks = async () => {
+      const guest = await createGuest();
+      const plainPassword = "GuestPassword123!";
+      await prisma.user.update({
+        where: { id: guest.id },
+        data: {
+          passwordHash: await hashPassword(plainPassword),
+          passwordChangeRequired: false,
+        },
+      });
+      const token = await issue(guest.id);
+      await prisma.passwordChangeGrant.create({
+        data: {
+          tokenHash: `grant-${guest.id}`,
+          cookieSecretHash: `cookie-${guest.id}`,
+          userId: guest.id,
+          clientId: client.id,
+          redirectUri: REDIRECT_URI,
+          scopes: ["openid"],
+          codeChallenge: "c",
+          codeChallengeMethod: "S256",
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+      return { guest, token, plainPassword };
+    };
+
+    const expectRetired = async (userId: string, token: string) => {
+      expect((await inspect(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
+      expect(
+        await prisma.passwordSetupToken.count({
+          where: { userId, usedAt: null },
+        })
+      ).toBe(0);
+      expect(
+        await prisma.passwordChangeGrant.count({ where: { userId } })
+      ).toBe(0);
+    };
+
+    it("refuses a live link once the user is no longer a guest", async () => {
+      const guest = await createGuest();
+      const token = await issue(guest.id);
+      await prisma.user.update({
+        where: { id: guest.id },
+        data: { userType: "human", expiresAt: null },
+      });
+
+      expect((await inspect(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
+      expect((await setPassword(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
+      const after = await prisma.user.findUniqueOrThrow({
+        where: { id: guest.id },
+      });
+      expect(after.passwordHash).toBeNull();
+    });
+
+    it("retires them on an admin password reset, which the user did not choose", async () => {
+      const { guest, token } = await guestWithLinks();
+
+      const res = await patchUser(guest.id, { password: "AdminChosen123!x" });
+
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      await expectRetired(guest.id, token);
+      const after = await prisma.user.findUniqueOrThrow({
+        where: { id: guest.id },
+      });
+      expect(after.passwordSetByUser).toBe(false);
+    });
+
+    it("retires them on an email change", async () => {
+      const { guest, token } = await guestWithLinks();
+
+      const res = await patchUser(guest.id, {
+        email: `moved-${randomBytes(6).toString("hex")}@test.local`,
+      });
+
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      await expectRetired(guest.id, token);
+    });
+
+    it("retires them on deactivation, so a reactivation does not revive them", async () => {
+      const { guest, token } = await guestWithLinks();
+
+      expect((await patchUser(guest.id, { isActive: false })).status).toBe(
+        HTTP_STATUS.OK
+      );
+      expect((await patchUser(guest.id, { isActive: true })).status).toBe(
+        HTTP_STATUS.OK
+      );
+
+      await expectRetired(guest.id, token);
+    });
+
+    it("retires them when the user changes their own password", async () => {
+      const { guest, token, plainPassword } = await guestWithLinks();
+      await prisma.user.update({
+        where: { id: guest.id },
+        data: { passwordSetByUser: false },
+      });
+      const userToken = await getAccessTokenForUser(
+        { id: guest.id, email: guest.email, plainPassword },
+        client
+      );
+
+      const res = await fetchJson(
+        "POST",
+        `${BASE_URL}/v1/account/password`,
+        userToken,
+        { currentPassword: plainPassword, newPassword: "UsersOwnChoice123!" }
+      );
+
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      await expectRetired(guest.id, token);
+      const after = await prisma.user.findUniqueOrThrow({
+        where: { id: guest.id },
+      });
+      expect(after.passwordSetByUser).toBe(true);
+    });
+
+    it("marks a password set from a link as the user's own", async () => {
+      const guest = await createGuest();
+      await prisma.user.update({
+        where: { id: guest.id },
+        data: { passwordSetByUser: false },
+      });
+
+      expect((await setPassword(await issue(guest.id))).status).toBe(
+        HTTP_STATUS.NO_CONTENT
+      );
+
+      const after = await prisma.user.findUniqueOrThrow({
+        where: { id: guest.id },
+      });
+      expect(after.passwordSetByUser).toBe(true);
     });
   });
 
