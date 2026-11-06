@@ -14,6 +14,7 @@ export const UpdateRoleSchema = z.object({
   description: z.string().max(500).optional(),
   isActive: z.boolean().optional(),
   requires2fa: z.boolean().optional(),
+  guestAssignable: z.boolean().optional(),
 });
 
 export const SetPermissionsSchema = z.object({

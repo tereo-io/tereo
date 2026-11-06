@@ -174,6 +174,8 @@ export interface LoadedDocument {
   roles: CustomRoleEntry[];
   /** Absent is none. */
   integrations?: ResolvedIntegration[];
+  /** Absent is not declared. */
+  guests?: { defaultRoles: string[] };
 }
 
 export interface ProvisioningSet {
@@ -433,6 +435,7 @@ export const parseDocuments = (
         trustedCoreScopes: c.trustedCoreScopes,
       })),
       roles: data.roles ?? [],
+      ...(data.guests && { guests: data.guests }),
       integrations: (data.integrations ?? []).map((i) => ({
         slug: i.slug,
         name: i.name,
