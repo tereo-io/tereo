@@ -33,6 +33,8 @@ const inviteErrorMessage = (error: unknown): string => {
       return "This person already has an account. Add them to the organization as a member instead.";
     case "guest_in_other_organization":
       return "This person is a guest of another organization.";
+    case "organization_not_permitted":
+      return "You can invite guests only into an organization you belong to.";
     case "user_not_invitable":
       return "This account cannot be invited as a guest.";
     case "email_not_configured":

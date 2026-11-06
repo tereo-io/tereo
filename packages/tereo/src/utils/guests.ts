@@ -5,7 +5,9 @@ import { issuePasswordSetupLink } from "./passwordSetup.js";
 import type { AuthContext } from "../middleware/auth.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { prisma, type Prisma } from "./db/prisma.js";
+import { canActInOrganization } from "./users.js";
 import { emitTx, logAuditTx } from "./outbox.js";
+import { hasPermission } from "./permissions.js";
 import { formatUser } from "./transformers.js";
 import { normalizeEmail } from "./email.js";
 import { hashPassword } from "./crypto.js";
@@ -43,6 +45,29 @@ export const getGuest = async (id: string, tx?: Tx): Promise<UserRow> => {
     throw new AppError(404, "not_a_guest", "This user is not a guest");
   }
   return user;
+};
+
+/**
+ * Guest writes reach only an organization the caller acts in: as a member, or
+ * as a service account whose client belongs to it. organizations.write acts
+ * in every organization.
+ */
+export const assertMayManageGuestsIn = async (
+  auth: Pick<AuthContext, "userId" | "permissions">,
+  organizationId: string | null
+): Promise<void> => {
+  if (hasPermission(auth.permissions, "organizations.write")) return;
+  if (
+    organizationId !== null &&
+    (await canActInOrganization(auth.userId, organizationId))
+  ) {
+    return;
+  }
+  throw new AppError(
+    403,
+    "organization_not_permitted",
+    "You can manage guests only in an organization you belong to"
+  );
 };
 
 /** The organization a guest belongs to (exactly one). */
@@ -269,14 +294,15 @@ export interface InviteGuestResult {
  */
 export const inviteGuest = async (
   tx: Tx,
-  auth: Actor,
+  auth: Actor & Pick<AuthContext, "permissions">,
   input: InviteGuestInput
 ): Promise<InviteGuestResult> => {
-  const email = normalizeEmail(input.email);
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`core:guest-invite:${email}`}, 0))`;
-
   const organizationId =
     input.organizationId ?? auth.organizationId ?? getDefaultOrganizationId();
+  await assertMayManageGuestsIn(auth, organizationId);
+
+  const email = normalizeEmail(input.email);
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`core:guest-invite:${email}`}, 0))`;
   const organization = await db.organizations.get(organizationId, tx);
   if (!organization.isActive) {
     throw new BadRequestError(
@@ -474,7 +500,7 @@ const extendInvitedGuest = async (
 /** Sets a guest's expiry, earlier or later; one in the past ends access now. */
 export const updateGuest = async (
   tx: Tx,
-  auth: Actor,
+  auth: Actor & Pick<AuthContext, "permissions">,
   id: string,
   body: { expiresAt: Date; name?: string }
 ): Promise<UserRow> => {
@@ -482,13 +508,14 @@ export const updateGuest = async (
   // not_a_guest rather than an expiry on a regular user.
   await db.users.lockForSignInChange(id, tx);
   const existing = await getGuest(id, tx);
+  const organizationId = await guestOrganizationId(id, tx);
+  await assertMayManageGuestsIn(auth, organizationId);
   const user = await setAccountExpiry(
     tx,
     existing,
     body.expiresAt,
     body.name !== undefined ? { name: body.name } : {}
   );
-  const organizationId = await guestOrganizationId(id, tx);
   await logAuditTx(tx, {
     auth,
     organizationId,

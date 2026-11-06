@@ -1,7 +1,6 @@
 // @module-tag int
 // @module-tag auth
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../../definitions/index.js";
-import { ensureTestOrganization } from "../../../../../support/principals.js";
 import { createTestClient } from "../../../../../support/auth/clients.js";
 import { createTestGuest } from "../../../../../support/auth/guests.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
@@ -9,6 +8,10 @@ import { prisma } from "../../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../../support/http.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import env from "../../../../../../env.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../../../../../support/principals.js";
 import {
   createAdminUser,
   createTestUser,
@@ -246,5 +249,27 @@ describe("PATCH /v1/admin/guests/:id", () => {
     expect(await liveRefreshExpiries(g.user.id)).toEqual([
       token.createdAt.getTime() + env.JWT_REFRESH_TOKEN_TTL * 1000,
     ]);
+  });
+});
+
+describe("guest writes outside the caller's organizations", () => {
+  it("PATCH is refused for a caller outside the guest's organization", async () => {
+    const { user } = await createTestGuest({ organizationId: orgId });
+    const token = await getTestPrincipalToken({
+      organizationId: orgId,
+      permissions: ["users.guests.write"],
+    });
+    const res = await fetchJson(
+      "PATCH",
+      `${BASE_URL}/v1/admin/guests/${user.id}`,
+      token,
+      { expiresAt: new Date(Date.now() + 30 * DAY_MS).toISOString() }
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("organization_not_permitted");
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id: user.id } }))
+        .expiresAt
+    ).toEqual(user.expiresAt);
   });
 });

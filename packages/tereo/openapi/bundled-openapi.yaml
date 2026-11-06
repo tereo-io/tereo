@@ -5355,7 +5355,10 @@ paths:
         as `passwordSetupUrl` either way) or a password, which the guest must change
         at first sign-in unless `mustChange` is false.
 
-        The organization must be active (`400 organization_inactive`). An audit log
+        The caller must act in the organization (a member, or a service account
+        whose client belongs to it) unless they hold `organizations.write`:
+        `403 organization_not_permitted`. The organization must be active
+        (`400 organization_inactive`). An audit log
         entry is created. `auth.guest.invited` (new) or
         `auth.guest.extended` (old and new `expiresAt`, roles added) is emitted, and
         `auth.user.password-setup-link-issued` when a link is issued.
@@ -5403,6 +5406,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
+          description: Missing permission, or `organization_not_permitted`
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: The organization does not exist
@@ -5510,7 +5514,9 @@ paths:
         access now. Extending lifts the guest's refresh tokens that were capped at
         the old expiry: each runs to its family's start plus the refresh lifetime,
         still capped at the new expiry. Needs
-        `users.guests.write`. `404 not_a_guest` for a user who is not a guest.
+        `users.guests.write`. `404 not_a_guest` for a user who is not a guest;
+        `403 organization_not_permitted` when the caller does not act in the
+        guest's organization and lacks `organizations.write`.
 
         An audit log entry is created and `auth.guest.extended` is emitted.
       operationId: patchAdminGuest
@@ -5563,7 +5569,8 @@ paths:
         72 hours by default); earlier links stop working. With `notify`, the link is
         emailed (`409 email_not_configured` without a default email connection). The
         email is a sensitive notification: its content is redacted from the
-        notification log. Needs `users.guests.write`.
+        notification log. Needs `users.guests.write`, in an organization the
+        caller acts in (`403 organization_not_permitted`, as for `PATCH`).
         `409 guest_not_usable` for a guest who is deactivated or expired (extend or
         reactivate them first); the link would be refused on use.
 

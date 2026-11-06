@@ -12,6 +12,7 @@ import { BASE_URL } from "../../../../support/auth/constants.js";
 import { verifyPassword } from "../../../../../utils/crypto.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../support/http.js";
+import { randomUUID } from "node:crypto";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
@@ -452,14 +453,62 @@ describe("POST /v1/admin/guests", () => {
   });
 
   it("allows a caller holding only users.guests.write to give guest roles it does not hold", async () => {
+    const userId = randomUUID();
     const token = await getTestPrincipalToken({
+      userId,
       organizationId: orgId,
       permissions: ["users.guests.write"],
+    });
+    await prisma.organizationMember.create({
+      data: { organizationId: orgId, userId, memberRole: "member" },
     });
     const role = await createGuestRole();
     const res = await invite({ email: uniqueEmail(), roles: [role.id] }, token);
     expect(res.status).toBe(201);
     expect(await orgRoleIds(res.body.user.id)).toEqual([role.id]);
+  });
+
+  it("refuses a caller outside the target organization, creating nothing", async () => {
+    const token = await getTestPrincipalToken({
+      organizationId: orgId,
+      permissions: ["users.guests.write"],
+    });
+    const email = uniqueEmail();
+    const res = await invite({ email }, token);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("organization_not_permitted");
+    expect(await prisma.user.count({ where: { email } })).toBe(0);
+  });
+
+  it("refuses to extend a guest in an organization the caller is outside", async () => {
+    const { user } = await createTestGuest({ organizationId: orgId });
+    const token = await getTestPrincipalToken({
+      organizationId: orgId,
+      permissions: ["users.guests.write"],
+    });
+    const res = await invite({ email: user.email }, token);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("organization_not_permitted");
+  });
+
+  it("allows a service account whose client belongs to the organization", async () => {
+    const client = await createTestClient({
+      clientType: "confidential",
+      grantTypes: ["client_credentials"],
+    });
+    await prisma.oAuthClient.update({
+      where: { id: client.id },
+      data: { organizationId: orgId },
+    });
+    const account = await prisma.user.findFirstOrThrow({
+      where: { oauthClientId: client.id },
+    });
+    const token = await getTestPrincipalToken({
+      userId: account.id,
+      permissions: ["users.guests.write"],
+    });
+    const res = await invite({ email: uniqueEmail() }, token);
+    expect(res.status).toBe(201);
   });
 });
 

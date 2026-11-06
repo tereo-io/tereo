@@ -1,6 +1,5 @@
 // @module-tag int
 // @module-tag auth
-import { ensureTestOrganization } from "../../../../../../support/principals.js";
 import { getAccessTokenForUser } from "../../../../../../support/auth/login.js";
 import { createTestClient } from "../../../../../../support/auth/clients.js";
 import { createTestGuest } from "../../../../../../support/auth/guests.js";
@@ -8,6 +7,10 @@ import { BASE_URL } from "../../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../../../support/http.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../../../../../../support/principals.js";
 import {
   createAdminUser,
   createTestUser,
@@ -74,5 +77,25 @@ describe("POST /v1/admin/guests/:id/password-setup-link", () => {
     const res = await issue(human.id);
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("not_a_guest");
+  });
+});
+
+describe("password-setup-link outside the caller's organizations", () => {
+  it("is refused, issuing no link", async () => {
+    const { user } = await createTestGuest({ organizationId: orgId });
+    const token = await getTestPrincipalToken({
+      organizationId: orgId,
+      permissions: ["users.guests.write"],
+    });
+    const res = await fetchJson(
+      "POST",
+      `${BASE_URL}/v1/admin/guests/${user.id}/password-setup-link`,
+      token
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("organization_not_permitted");
+    expect(
+      await prisma.passwordSetupToken.count({ where: { userId: user.id } })
+    ).toBe(0);
   });
 });
