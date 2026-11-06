@@ -1,3 +1,5 @@
+// @module-tag unit
+// @module-tag auth
 import { ROLES, isRequestableCoreRole } from "../../definitions/roles.js";
 import { PERMISSION_CATALOG } from "../../definitions/permissions.js";
 import { EVENT_TYPES } from "../../definitions/eventTypes.js";
