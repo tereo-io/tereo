@@ -19,7 +19,7 @@
 // ---------------------------------------------------------------------------
 
 /** Prisma `UserType` enum — see schema.prisma. */
-export type AuthServiceUserType = "human" | "service_account";
+export type AuthServiceUserType = "human" | "service_account" | "guest";
 
 /** Prisma `OrgMemberRole` enum — see schema.prisma. */
 export type AuthServiceOrgMemberRole = "owner" | "admin" | "member";

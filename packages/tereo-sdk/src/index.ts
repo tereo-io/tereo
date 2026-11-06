@@ -143,6 +143,18 @@ export type {
   SendNotificationResult,
 } from "./types/notifications.js";
 
+// --- Guests ------------------------------------------------------------------
+
+export { GuestsClient } from "./clients/guests.js";
+export type {
+  Guest,
+  GuestInitialAccess,
+  GuestStatus,
+  InviteGuestInput,
+  InviteGuestResult,
+  PasswordSetupLink,
+} from "./requests/auth/guests/types.js";
+
 // --- Audit -------------------------------------------------------------------
 
 export { AuditLogServiceClient } from "./clients/audit.js";
