@@ -28,6 +28,9 @@ const person: UserDetailData = {
   isActive: true,
   userType: "human",
   hasPassword: true,
+  expiresAt: null,
+  status: "active",
+  passwordChangeRequired: false,
   createdAt: "2026-10-01T00:00:00Z",
   updatedAt: "2026-10-01T00:00:00Z",
   managedBy: null,
@@ -109,6 +112,61 @@ describe("UserDetail", () => {
       ).not.toBeInTheDocument();
     }
   );
+
+  describe("a guest", () => {
+    const guest: UserDetailData = {
+      ...person,
+      userType: "guest",
+      expiresAt: "2026-12-01T00:00:00Z",
+    };
+
+    it("offers Extend, Promote and Send password link", async () => {
+      renderDetail(guest);
+
+      await screen.findByText("User Details");
+      expect(screen.getByRole("button", { name: "Extend" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Promote" })).toBeVisible();
+      expect(
+        screen.getByRole("button", { name: "Send password link" })
+      ).toBeVisible();
+      expect(screen.getByText("Guest")).toBeVisible();
+    });
+
+    it("hides all three without users.guests.write", async () => {
+      denied.add("users.guests.write");
+      renderDetail(guest);
+
+      await screen.findByText("User Details");
+      expect(screen.queryByRole("button", { name: "Extend" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Promote" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Send password link" })
+      ).toBeNull();
+    });
+
+    it("hides Promote without users.write", async () => {
+      denied.add("users.write");
+      renderDetail(guest);
+
+      await screen.findByText("User Details");
+      expect(screen.getByRole("button", { name: "Extend" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Promote" })).toBeNull();
+    });
+
+    it("shows an expired guest as Expired", async () => {
+      renderDetail({ ...guest, status: "expired" });
+
+      expect(await screen.findByText("Expired")).toBeVisible();
+    });
+  });
+
+  it("offers no guest actions for a person", async () => {
+    renderDetail(person);
+
+    await screen.findByText("User Details");
+    expect(screen.queryByRole("button", { name: "Extend" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Promote" })).toBeNull();
+  });
 
   it("says core manages the system user", async () => {
     renderDetail({ ...account, managedBy: { kind: "system" } });

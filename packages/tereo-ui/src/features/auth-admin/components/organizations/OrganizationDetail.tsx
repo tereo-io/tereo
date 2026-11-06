@@ -6,6 +6,7 @@ import EditOrganizationButton from "./buttons/EditOrganizationButton";
 import UpdateMemberRoleButton from "./buttons/UpdateMemberRoleButton";
 import useOrganization from "../../api/organizations/useOrganization";
 import RemoveMemberButton from "./buttons/RemoveMemberButton";
+import InviteGuestModal from "./modals/InviteGuestModal";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import AddMemberModal from "./modals/AddMemberModal";
 import { PageHeader } from "@/components/PageHeader";
@@ -36,6 +37,7 @@ export const OrganizationDetail = () => {
   const { data: organization, isLoading: orgLoading } = useOrganization(id);
   const { data: membersData } = useOrganizationMembers(id);
   const [showAddMember, setShowAddMember] = useState(false);
+  const [showInviteGuest, setShowInviteGuest] = useState(false);
   const { hasPermission, organizations } = useAuth();
 
   useDocumentTitle(organization?.name);
@@ -47,6 +49,7 @@ export const OrganizationDetail = () => {
   // manage its members. Adding a member is organizations.write alone.
   const myRole = organizations.find((o) => o.id === id)?.memberRole;
   const canWrite = hasPermission("organizations.write");
+  const canInviteGuests = hasPermission("users.guests.write");
   const canEdit = canWrite || myRole === "owner";
   const canManageMembers = canWrite || myRole === "owner" || myRole === "admin";
 
@@ -208,10 +211,26 @@ export const OrganizationDetail = () => {
               <SectionHeader
                 title={`Members (${membersData?.members.length || 0})`}
                 actions={
-                  isArchived || !canWrite ? undefined : (
-                    <Button size="sm" onClick={() => setShowAddMember(true)}>
-                      Add Member
-                    </Button>
+                  isArchived || !(canWrite || canInviteGuests) ? undefined : (
+                    <>
+                      {canInviteGuests && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setShowInviteGuest(true)}
+                        >
+                          Invite Guest
+                        </Button>
+                      )}
+                      {canWrite && (
+                        <Button
+                          size="sm"
+                          onClick={() => setShowAddMember(true)}
+                        >
+                          Add Member
+                        </Button>
+                      )}
+                    </>
                   )
                 }
               />
@@ -223,6 +242,11 @@ export const OrganizationDetail = () => {
               />
             </Col>
           </Card>
+          <InviteGuestModal
+            orgId={id}
+            show={showInviteGuest}
+            onClose={() => setShowInviteGuest(false)}
+          />
           <AddMemberModal
             orgId={id}
             members={membersData?.members || []}

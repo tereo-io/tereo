@@ -1,11 +1,15 @@
 import RevokeAllSessionsButton from "./buttons/RevokeAllSessionsButton";
+import SendPasswordLinkButton from "./buttons/SendPasswordLinkButton";
 import useUserPermissions from "../../api/users/useUserPermissions";
+import { UserStatusBadge, userTypeLabel } from "./UserStatusBadge";
 import useUserTotpStatus from "../../api/users/useUserTotpStatus";
 import RevokeSessionButton from "./buttons/RevokeSessionButton";
 import { UserConnectedAccounts } from "./UserConnectedAccounts";
 import useUserSessions from "../../api/users/useUserSessions";
+import PromoteGuestButton from "./buttons/PromoteGuestButton";
 import { RateLimitField } from "@/components/RateLimitField";
 import ManageRolesButton from "./buttons/ManageRolesButton";
+import ExtendGuestButton from "./buttons/ExtendGuestButton";
 import useUpdateUser from "../../api/users/useUpdateUser";
 import useSettings from "../../api/settings/useSettings";
 import type { UserManager } from "../../api/users/types";
@@ -65,6 +69,7 @@ export const UserDetail = () => {
   // users.write; revoking sessions and disabling TOTP need users.delete.
   const canWrite = hasPermission("users.write");
   const canDelete = hasPermission("users.delete");
+  const canWriteGuests = hasPermission("users.guests.write");
 
   const canReadSettings = hasPermission("settings.read");
 
@@ -98,21 +103,31 @@ export const UserDetail = () => {
 
   // Core refuses to update, re-role, reset 2FA for or invite these accounts.
   const editable = canWrite && !user.managedBy;
+  const isGuest = user.userType === "guest";
 
   return (
     <Page padded fillHeight>
       <PageHeader
         title={user.email}
         subtitle={`User ID: ${user.id}`}
-        actions={
-          editable
+        actions={[
+          ...(isGuest && canWriteGuests
+            ? [
+                <ExtendGuestButton key="extend" user={user} />,
+                <SendPasswordLinkButton key="link" user={user} />,
+                ...(canWrite
+                  ? [<PromoteGuestButton key="promote" user={user} />]
+                  : []),
+              ]
+            : []),
+          ...(editable
             ? [
                 // Users are deactivated (Edit → Status), never deleted.
                 <EditUserButton key="edit" user={user} />,
                 <ManageRolesButton key="roles" userId={id} />,
               ]
-            : []
-        }
+            : []),
+        ]}
       />
       {user.managedBy && <ManagedNotice manager={user.managedBy} />}
       <Row>
@@ -122,22 +137,31 @@ export const UserDetail = () => {
             items={[
               { label: "Email", value: user.email },
               { label: "Name", value: user.name || "-" },
-              {
-                label: "Type",
-                value: user.userType === "human" ? "Human" : "Service Account",
-              },
+              { label: "Type", value: userTypeLabel(user.userType) },
               {
                 label: "Status",
-                value: (
-                  <Badge
-                    size="sm"
-                    subtle={true}
-                    variant={user.isActive ? "success" : "danger"}
-                  >
-                    {user.isActive ? "Active" : "Inactive"}
-                  </Badge>
-                ),
+                value: <UserStatusBadge user={user} />,
               },
+              ...(isGuest && user.expiresAt
+                ? [
+                    {
+                      label: "Access expires",
+                      value: formatDateTime(user.expiresAt),
+                    },
+                  ]
+                : []),
+              ...(user.passwordChangeRequired
+                ? [
+                    {
+                      label: "Password",
+                      value: (
+                        <Badge size="sm" subtle={true} variant="warning">
+                          Must change at next sign-in
+                        </Badge>
+                      ),
+                    },
+                  ]
+                : []),
               ...(user.userType === "human" && !user.hasPassword
                 ? [
                     {
