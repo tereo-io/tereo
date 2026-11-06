@@ -2,6 +2,10 @@ import { Prisma } from "../../../prisma/generated/client/index.js";
 import { orgRefSelect, serviceRefSelect } from "../refs.js";
 import { prisma } from "./prisma.js";
 import {
+  isCorePermission,
+  isGuestAllowedCorePermission,
+} from "../../definitions/guests.js";
+import {
   AlreadyArchivedError,
   ArchivedError,
   ConflictError,
@@ -391,6 +395,11 @@ export interface AssignmentOptions {
    * a role, such as who may act on their account.
    */
   includeInactiveRoles?: boolean;
+  /**
+   * For a guest, count every assignment and permission as for a human: what
+   * they would hold once promoted, such as who may act on their account.
+   */
+  ignoreGuestFloor?: boolean;
 }
 
 /**
@@ -434,13 +443,39 @@ export const liveAssignmentsWhere = (
   };
 };
 
-/** A user's roles that count in `scope` (see `liveAssignmentsWhere`). */
+/**
+ * The only assignments that count for a guest: org-scoped, of a role still
+ * flagged guest-assignable. Combine with `liveAssignmentsWhere` under `AND`.
+ */
+export const guestAssignmentsWhere: Prisma.UserRoleWhereInput = {
+  organizationId: { not: null },
+  role: { guestAssignable: true },
+};
+
+export const isGuest = async (
+  userId: string,
+  tx?: Prisma.TransactionClient
+): Promise<boolean> => {
+  const user = await (tx ?? prisma).user.findUnique({
+    where: { id: userId },
+    select: { userType: true },
+  });
+  return user?.userType === "guest";
+};
+
+/**
+ * A user's roles that count in `scope` (see `liveAssignmentsWhere`); for a
+ * guest, only those that grant them anything (`guestAssignmentsWhere`).
+ */
 export const getLiveUserRoles = async (
   userId: string,
   scope: AssignmentScope
 ) => {
+  const live = liveAssignmentsWhere(userId, scope);
   return await prisma.userRole.findMany({
-    where: liveAssignmentsWhere(userId, scope),
+    where: (await isGuest(userId))
+      ? { AND: [live, guestAssignmentsWhere] }
+      : live,
     include: { role: true },
     orderBy: { role: { name: "asc" } },
   });
@@ -478,8 +513,10 @@ const permissionsInScope = async (
   tx?: Prisma.TransactionClient,
   options?: AssignmentOptions
 ): Promise<string[]> => {
+  const guest = !options?.ignoreGuestFloor && (await isGuest(userId, tx));
+  const live = liveAssignmentsWhere(userId, scope, options);
   const userRoles = await (tx ?? prisma).userRole.findMany({
-    where: liveAssignmentsWhere(userId, scope, options),
+    where: guest ? { AND: [live, guestAssignmentsWhere] } : live,
     include: {
       role: {
         include: {
@@ -504,6 +541,15 @@ const permissionsInScope = async (
       if (rp.permission.retiredAt) continue;
       if (orgScoped && !rp.permission.orgAssignable) continue;
       if (approved && !approved.has(rp.permissionId)) continue;
+      // Backstop for a flagged role that gained a core permission outside
+      // the guest floor some other way than the admin API.
+      if (
+        guest &&
+        isCorePermission(rp.permission.name) &&
+        !isGuestAllowedCorePermission(rp.permission.name)
+      ) {
+        continue;
+      }
       permissionSet.add(rp.permission.name);
     }
   }

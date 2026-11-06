@@ -208,16 +208,32 @@ describe("guest expiry", () => {
       `guest/${randomUUID()}.txt`,
       createTestFile("guest-bytes")
     );
-    const userId = randomUUID();
+    // A guest holds permissions only through a guest-assignable role
+    // assigned in an organization.
+    const role = await prisma.role.create({
+      data: {
+        name: `guest-expiry-${randomUUID()}`,
+        displayName: "Guest expiry reader",
+        guestAssignable: true,
+        rolePermissions: {
+          create: {
+            permission: { connect: { name: "file-service.objects.read" } },
+          },
+        },
+      },
+    });
+    const { user } = await createTestGuest({
+      organizationId,
+      expiresAt: new Date(Date.now() + 60_000),
+      roleIds: [role.id],
+    });
+    const userId = user.id;
     const token = await getTestPrincipalToken({
       userId,
-      permissions: ["file-service.objects.read"],
+      organizationId,
+      permissions: [],
     });
     await grantTestPermission(admin, bucket.name, userId, { canRead: true });
-    await prisma.user.update({
-      where: { id: userId },
-      data: { userType: "guest", expiresAt: new Date(Date.now() + 60_000) },
-    });
 
     const presigned = await fetch(
       `${BASE_URL}/v1/files/buckets/${bucket.name}/objects/by-id/${objectId}/presign`,

@@ -2,7 +2,9 @@
 // @module-tag auth
 
 import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { ensureTestOrganization } from "../../support/principals.js";
 import { createTestClient } from "../../support/auth/clients.js";
+import { createTestGuest } from "../../support/auth/guests.js";
 import { makeServiceOf } from "../../support/testService.js";
 import { browserLogin } from "../../support/browserLogin.js";
 import { LOGIN_CLIENT } from "../../../definitions/index.js";
@@ -323,6 +325,68 @@ describe("a service client's tokens after the role changes", () => {
     expect(res.status).toBe(HTTP_STATUS.NO_CONTENT);
     expect(await revoked()).toBe(true);
     expect(await auditedRevocations(role.id, "DELETE")).toBe(1);
+  });
+});
+
+describe("a guest's tokens when a role requiring 2FA becomes guest-assignable", () => {
+  /** A live token from no login, which counts as a password-only one. */
+  const liveToken = async (userId: string) => {
+    const client = await prisma.oAuthClient.findUniqueOrThrow({
+      where: { clientId: LOGIN_CLIENT.clientId },
+    });
+    const token = await prisma.accessToken.create({
+      data: {
+        jti: crypto.randomUUID(),
+        clientId: client.id,
+        userId,
+        scopes: ["openid"],
+        expiresAt: new Date(Date.now() + 3600_000),
+      },
+    });
+    return async () =>
+      (
+        await prisma.accessToken.findUniqueOrThrow({
+          where: { id: token.id },
+        })
+      ).revokedAt !== null;
+  };
+
+  it("revokes guests holding it in an organization, and only them", async () => {
+    const organizationId = await ensureTestOrganization("guest-2fa-flag");
+    const role = await createTestRole();
+    await prisma.role.update({
+      where: { id: role.id },
+      data: { requires2fa: true },
+    });
+    const { user: orgGuest } = await createTestGuest({
+      organizationId,
+      roleIds: [role.id],
+    });
+    const { user: globalGuest } = await createTestGuest({ organizationId });
+    await prisma.userRole.create({
+      data: { userId: globalGuest.id, roleId: role.id },
+    });
+    const human = await createTestUser();
+    await prisma.userRole.create({
+      data: { userId: human.id, roleId: role.id },
+    });
+    const orgGuestRevoked = await liveToken(orgGuest.id);
+    const globalGuestRevoked = await liveToken(globalGuest.id);
+    const humanRevoked = await liveToken(human.id);
+
+    const res = await fetch(`${BASE_URL}/v1/admin/roles/${role.id}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ guestAssignable: true }),
+    });
+    expect(res.status).toBe(HTTP_STATUS.OK);
+
+    expect(await orgGuestRevoked()).toBe(true);
+    expect(await globalGuestRevoked()).toBe(false);
+    expect(await humanRevoked()).toBe(false);
   });
 });
 

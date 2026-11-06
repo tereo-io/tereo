@@ -198,10 +198,10 @@ export const revokeByOrganizationId = async (
 const MFA_AUTH_METHODS = ["otp", "recovery", "mfa"];
 
 /**
- * Revokes the live access tokens of the people matching `users` that came
- * from a login without a second factor (a token with no login counts as
- * one), so the client's next refresh meets the 2FA step-up. Returns their
- * jtis.
+ * Revokes the live access tokens of the people (humans and guests, not
+ * service accounts) matching `users` that came from a login without a second
+ * factor (a token with no login counts as one), so the client's next refresh
+ * meets the 2FA step-up. Returns their jtis.
  */
 export const revokeWithoutMfa = async (
   users: Prisma.UserWhereInput,
@@ -212,7 +212,7 @@ export const revokeWithoutMfa = async (
     where: {
       revokedAt: null,
       expiresAt: { gt: now },
-      user: { ...users, userType: "human" },
+      user: { AND: [users, { userType: { in: ["human", "guest"] } }] },
       OR: [
         { authCodeId: null },
         { authCode: { NOT: { authMethods: { hasSome: MFA_AUTH_METHODS } } } },

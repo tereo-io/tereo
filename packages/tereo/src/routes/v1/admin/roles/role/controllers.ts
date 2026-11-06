@@ -149,10 +149,28 @@ export const updateRole = async (req: Request, res: Response) => {
       updated.isActive &&
       updated.requires2fa &&
       !(existing.isActive && existing.requires2fa);
+    // A guest is held only to guest-assignable roles assigned in an
+    // organization, so flagging one that requires 2FA is a gain for them too.
+    const guestsGain2fa =
+      updated.isActive &&
+      updated.requires2fa &&
+      updated.guestAssignable &&
+      !(existing.isActive && existing.requires2fa && existing.guestAssignable);
     const revokedJtis = [
       ...(gains2fa
         ? await db.accessTokens.revokeWithoutMfa(
             { userRoles: { some: { roleId: params.id } } },
+            tx
+          )
+        : []),
+      ...(guestsGain2fa
+        ? await db.accessTokens.revokeWithoutMfa(
+            {
+              userType: "guest",
+              userRoles: {
+                some: { roleId: params.id, organizationId: { not: null } },
+              },
+            },
             tx
           )
         : []),
