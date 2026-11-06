@@ -158,10 +158,17 @@ describe("guest restrictions on existing routes", () => {
       userId: user.id,
       organizationId: org.id,
       permissions: [],
+      authTime: new Date(),
     });
-    await expectRefusal(
-      await call("POST", "/v1/account/identities", { provider: "any" }, token),
-      403
+    const res = await call(
+      "POST",
+      "/v1/account/identities",
+      { provider: "any" },
+      token
     );
+    expect(res.status).toBe(403);
+    expect(
+      ((await res.json()) as { error_description: string }).error_description
+    ).toContain("Only a person can link");
   });
 });
