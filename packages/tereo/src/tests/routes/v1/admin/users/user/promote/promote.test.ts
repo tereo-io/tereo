@@ -1,6 +1,5 @@
 // @module-tag int
 // @module-tag auth
-import { DEFAULT_ORGANIZATION_ID } from "../../../../../../../definitions/index.js";
 import { getAccessTokenForUser } from "../../../../../../support/auth/login.js";
 import { createTestClient } from "../../../../../../support/auth/clients.js";
 import { createTestGuest } from "../../../../../../support/auth/guests.js";
@@ -68,7 +67,7 @@ describe("POST /v1/admin/users/:id/promote", () => {
       permissions: ["admin", permission.name],
     });
     const endpoint = await createTestWebhookEndpoint(
-      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      await getCoreEventSubscriberToken(orgId),
       { eventTypes: ["auth.guest.promoted"] }
     );
 

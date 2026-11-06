@@ -3809,7 +3809,7 @@ InviteGuestRequest:
     expiresAt:
       type: string
       format: date-time
-      description: When access ends. Must be in the future and no further ahead than `GUEST_MAX_TTL_SECONDS` (90 days by default).
+      description: When access ends, as an RFC 3339 date-time. Must be in the future and no further ahead than `GUEST_MAX_TTL_SECONDS` (90 days by default).
     expiresIn:
       type: integer
       minimum: 1
@@ -3894,7 +3894,7 @@ UpdateGuestRequest:
     expiresAt:
       type: string
       format: date-time
-      description: Extends or shortens; a time in the past ends access now. No further ahead than `GUEST_MAX_TTL_SECONDS` from now.
+      description: Extends or shortens, as an RFC 3339 date-time (`null` is refused); a time in the past ends access now. No further ahead than `GUEST_MAX_TTL_SECONDS` from now.
     name:
       type: string
       maxLength: 100

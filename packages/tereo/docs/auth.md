@@ -793,8 +793,14 @@ but an expired guest gets the deactivated responses, so a login is not an expiry
 refresh token lifetimes are capped at the remaining time, and extending a guest lifts their live
 refresh families.
 
-**One organization, member tier.** A guest is a `member` of exactly one organization with only
-org-scoped role assignments:
+**One organization, member tier.** A guest is a `member` of at most one organization with only
+org-scoped role assignments. A membership of an **archived** organization does not count
+(`guestOrganizationId`, `utils/guests.ts`): that guest belongs to none, is managed only with
+`organizations.write`, and may be invited into or added to another organization. The archived
+membership grants nothing (no token is issued for an inactive or archived organization, and the
+`memberships` scope skips it). Restoring the organization removes it from such a guest who has
+joined another meanwhile, with their roles and bucket grants there, audited and emitted as
+`auth.organization.member-removed`.
 
 | Refused                                                                                                       | Code                            |
 | ------------------------------------------------------------------------------------------------------------- | ------------------------------- |
@@ -855,8 +861,12 @@ Permissions `users.guests.read` and `users.guests.write` are global-only. The co
 **Organization scope.** The guest endpoints (`/v1/admin/guests`, reads and writes) reach only an
 organization the caller acts in: one they are a member of, or, for a service account, the one its
 client belongs to. A holder of `organizations.write` acts in every organization. The list shows
-only the guests in those organizations; any other guest action is `403 organization_not_permitted`.
-Promotion is not scoped: it is a `users.write` action, and `users.write` is global.
+only the guests in those organizations. An invite naming another organization is
+`403 organization_not_permitted`. On `/v1/admin/guests/:id` the scope is checked before the user is
+looked at (`getManagedGuest`): without `organizations.write`, a guest elsewhere or in no
+organization, a user who is not a guest and an unknown id all answer `404 not_a_guest`, so an
+outsider learns nothing about the user. Promotion is not scoped: it is a `users.write` action, and
+`users.write` is global.
 
 **Granting.** "Granting: only what you hold" does not apply to guest-assignable roles given through
 the guest endpoints: flagging the role was the grant decision and `users.guests.write` the right to
@@ -868,8 +878,8 @@ endpoints follow the normal rule.
 | `POST /v1/admin/guests`                                     | `users.guests.write`                                                | Invite (below)                                                                                                                                         |
 | `GET /v1/admin/guests`                                      | `users.guests.read`                                                 | List guests (also `GET /v1/admin/users?filter[userType]=guest`, `users.read`)                                                                          |
 | `GET /v1/admin/guests/options`                              | `users.guests.write`                                                | The invite form's data without `roles.read`: `{ roles, defaultRoleIds, maxTtlSeconds }`, the roles a guest may be given now                            |
-| `GET /v1/admin/guests/:id`                                  | `users.guests.read`                                                 | One guest (the user plus `organizationId`, unwrapped); `404 not_a_guest` for a non-guest                                                               |
-| `PATCH /v1/admin/guests/:id { expiresAt, name? }`           | `users.guests.write`                                                | Extend or shorten (`expiresAt` is required; a time in the past ends access now); returns the guest. `404 not_a_guest`                                  |
+| `GET /v1/admin/guests/:id`                                  | `users.guests.read`                                                 | One guest (the user plus `organizationId`, unwrapped); `404 not_a_guest` for a non-guest or one out of scope                                           |
+| `PATCH /v1/admin/guests/:id { expiresAt, name? }`           | `users.guests.write`                                                | Extend or shorten (`expiresAt` is a required RFC 3339 date-time, `null` is a 400; a time in the past ends access now); returns the guest. As `GET` for 404 |
 | `POST /v1/admin/guests/:id/password-setup-link { notify? }` | `users.guests.write`                                                | Issue a fresh link; earlier ones die. `200 { url, expiresAt }`; `409 guest_not_usable` for a deactivated or expired guest, `409 email_not_configured`  |
 | `POST /v1/admin/users/:id/promote`                          | `users.write` plus the "holds every permission the user holds" rule | `userType = human`, `expiresAt = null`; id, membership, roles, password, grants and history kept. Returns the user. An expired guest can sign in again |
 
@@ -899,16 +909,36 @@ depends on who holds the email:
 | Existing account                                            | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | none                                                        | Creates the guest, membership and roles (the default roles when `roles` is omitted), sets up initial access: `201 { user, created: true, passwordSetupUrl? }` (`user` carries `organizationId`)                                                                                                                                                                                                                                                                                                            |
-| a guest in the same organization or in none, expired or not | Extends (a guest in no organization first joins this one as a `member`): `expiresAt` becomes the later value, and refresh tokens capped at the old expiry are lifted (each to its family's start plus `JWT_REFRESH_TOKEN_TTL`, capped at the new expiry). Roles named are added, none removed; omitted `roles` adds nothing (defaults apply only on create). Name and password are untouched; `initialAccess` applies only if they never set a password: `200 { user, created: false, passwordSetupUrl? }` |
+| a guest in the same organization or in none, expired or not | Extends (a guest in no organization first joins this one as a `member`, which needs `organizations.write`: otherwise `409 guest_unassigned`): `expiresAt` becomes the later value, and refresh tokens capped at the old expiry are lifted (each to its family's start plus `JWT_REFRESH_TOKEN_TTL`, capped at the new expiry). Roles named are added, none removed; omitted `roles` adds nothing (defaults apply only on create). Name and password are untouched; `initialAccess` applies only if they never set a password: `200 { user, created: false, passwordSetupUrl? }` |
 | a guest in another organization                             | `409 guest_in_other_organization`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | a human                                                     | `409 user_exists` with `userId`; the app grants that user directly                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | a service account, the system user or a deactivated user    | `409 user_not_invitable`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
+The refusals above say whether the email has an account, so only a caller holding `users.read`
+(which lists every user anyway) gets them. Any other caller gets one `409 email_unavailable` for all
+of them, without `userId`.
+
 `notify: true` emails the link and needs a default email connection (`409 email_not_configured`);
 `passwordSetupUrl` is returned either way, so an app can deliver it itself. Each operation runs in
-one transaction with its audit entry and event. The events carry the user plus `organizationId`:
-`auth.guest.invited` (`roleIds`), `auth.guest.extended` (`previousExpiresAt`, `rolesAdded`; also
-emitted by `PATCH`, with no roles added) and `auth.guest.promoted`.
+one transaction with its audit entries and events. The guest events carry the user plus
+`organizationId`: `auth.guest.invited` (`roleIds`), `auth.guest.extended` (`previousExpiresAt`,
+`rolesAdded`, and `change`: `extended`, `shortened` or `ended`; also emitted by `PATCH`, with no
+roles added) and `auth.guest.promoted`. They are emitted under the **guest's organization** (null
+for a guest in none), not the default one: `users.guests.read` is scoped to the organizations one
+acts in, so only that organization's endpoints, and service endpoints of all organizations, receive
+them.
+
+The invite also records what it creates as the ordinary endpoints do, in the same transaction: a new
+guest's `CREATE User` entry (`metadata.action: guest_invited`, with `email`, `name`, `userType`) and
+`auth.user.created`; a membership added (on create, or when a guest in no organization joins) as
+`CREATE OrganizationMember` and `auth.organization.member-added`; roles added as
+`roles_changed` and `auth.organization.member-roles-changed` (`roleIds` being the full set held).
+These platform events keep the default organization, as their own endpoints emit them.
+
+`PATCH` audits a later expiry as `guest_extended`, an earlier one still in the future as
+`guest_shortened`, and one not in the future as `guest_access_ended`. Ending access also revokes the
+guest's live access tokens and closes their sockets; their refresh tokens are lowered to the new
+expiry, so they are spent too.
 
 ### Password setup link
 

@@ -8,6 +8,7 @@ import { prisma } from "../../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../../support/http.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import env from "../../../../../../env.js";
+import { randomUUID } from "node:crypto";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
@@ -35,6 +36,7 @@ const DAY_MS = 86_400_000;
 let adminToken: string;
 let client: Awaited<ReturnType<typeof createTestClient>>;
 let orgId: string;
+let otherOrgId: string;
 
 beforeAll(async () => {
   adminToken = await getAccessTokenForUser(
@@ -43,6 +45,7 @@ beforeAll(async () => {
   );
   client = await createTestClient({ redirectUris: [REDIRECT_URI] });
   orgId = await ensureTestOrganization("admin-guest");
+  otherOrgId = await ensureTestOrganization("admin-guest-other");
 });
 
 const patch = (id: string, body: unknown) =>
@@ -69,6 +72,17 @@ const refresh = (refreshToken: string) =>
     client_id: client.clientId,
     refresh_token: refreshToken,
   });
+
+const lastGuestAction = async (userId: string) =>
+  (
+    (
+      await prisma.auditLogEntry.findFirstOrThrow({
+        where: { entityId: userId, entityType: "User", action: "UPDATE" },
+        orderBy: { createdAt: "desc" },
+        select: { metadata: true },
+      })
+    ).metadata as { action: string }
+  ).action;
 
 const liveRefreshExpiries = async (userId: string) =>
   (
@@ -112,6 +126,10 @@ describe("PATCH /v1/admin/guests/:id", () => {
   it("extends the guest and emits auth.guest.extended", async () => {
     const { user } = await createTestGuest({ organizationId: orgId });
     const endpoint = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(orgId),
+      { eventTypes: ["auth.guest.extended"] }
+    );
+    const platform = await createTestWebhookEndpoint(
       await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
       { eventTypes: ["auth.guest.extended"] }
     );
@@ -146,7 +164,36 @@ describe("PATCH /v1/admin/guests/:id", () => {
       previousExpiresAt: user.expiresAt!.toISOString(),
       expiresAt: later.toISOString(),
       rolesAdded: [],
+      change: "extended",
     });
+    // Deliveries of one event are written together.
+    expect(
+      await prisma.webhookDelivery.count({
+        where: { ...where, webhookEndpointId: platform.id },
+      })
+    ).toBe(0);
+  });
+
+  it("refuses a null expiresAt, leaving the guest as they were", async () => {
+    const { user } = await createTestGuest({ organizationId: orgId });
+    const res = await patch(user.id, { expiresAt: null });
+    expect(res.status).toBe(400);
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id: user.id } }))
+        .expiresAt
+    ).toEqual(user.expiresAt);
+  });
+
+  it("audits a shortening as guest_shortened", async () => {
+    const { user } = await createTestGuest({
+      organizationId: orgId,
+      expiresAt: new Date(Date.now() + 10 * DAY_MS),
+    });
+    const res = await patch(user.id, {
+      expiresAt: new Date(Date.now() + DAY_MS).toISOString(),
+    });
+    expect(res.status).toBe(200);
+    expect(await lastGuestAction(user.id)).toBe("guest_shortened");
   });
 
   it("returns 404 not_a_guest for a guest promoted since", async () => {
@@ -190,6 +237,13 @@ describe("PATCH /v1/admin/guests/:id", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("expired");
+    expect(await lastGuestAction(g.user.id)).toBe("guest_access_ended");
+    // Revoked, not only refused for the expiry: their sockets close too.
+    expect(
+      await prisma.accessToken.count({
+        where: { userId: g.user.id, revokedAt: null },
+      })
+    ).toBe(0);
     expect(await me(tokens.access_token)).toBe(401);
     const refreshed = await refresh(tokens.refresh_token);
     expect(refreshed.status).toBe(400);
@@ -253,38 +307,115 @@ describe("PATCH /v1/admin/guests/:id", () => {
 });
 
 describe("guest actions outside the caller's organizations", () => {
-  it("GET is refused for a caller outside the guest's organization", async () => {
-    const { user } = await createTestGuest({ organizationId: orgId });
+  const scopedCaller = async (permissions: string[]) => {
+    const userId = randomUUID();
     const token = await getTestPrincipalToken({
+      userId,
       organizationId: orgId,
-      permissions: ["users.guests.read"],
+      permissions,
     });
+    await prisma.organizationMember.create({
+      data: { organizationId: orgId, userId, memberRole: "member" },
+    });
+    return token;
+  };
+
+  // Scope comes first: an outsider cannot tell a guest elsewhere from a
+  // user who is not a guest or does not exist.
+  it.each([
+    [
+      "a guest in another organization",
+      async () =>
+        (await createTestGuest({ organizationId: otherOrgId })).user.id,
+    ],
+    [
+      "a guest in no organization",
+      async () => {
+        const { user } = await createTestGuest({ organizationId: otherOrgId });
+        await prisma.organizationMember.deleteMany({
+          where: { userId: user.id },
+        });
+        return user.id;
+      },
+    ],
+    ["a regular user", async () => (await createTestUser()).id],
+    ["an unknown id", async () => randomUUID()],
+  ])("GET and PATCH answer 404 not_a_guest for %s", async (_label, make) => {
+    const id = await make();
+    const token = await scopedCaller(["users.guests.write"]);
+
+    const got = await fetchJson(
+      "GET",
+      `${BASE_URL}/v1/admin/guests/${id}`,
+      token
+    );
+    const patched = await fetchJson(
+      "PATCH",
+      `${BASE_URL}/v1/admin/guests/${id}`,
+      token,
+      { expiresAt: new Date(Date.now() + 30 * DAY_MS).toISOString() }
+    );
+
+    for (const res of [got, patched]) {
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe("not_a_guest");
+    }
+  });
+
+  it("PATCH leaves a guest outside the caller's organizations unchanged", async () => {
+    const { user } = await createTestGuest({ organizationId: otherOrgId });
+    const token = await scopedCaller(["users.guests.write"]);
+    await fetchJson("PATCH", `${BASE_URL}/v1/admin/guests/${user.id}`, token, {
+      expiresAt: new Date(Date.now() + 30 * DAY_MS).toISOString(),
+    });
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id: user.id } }))
+        .expiresAt
+    ).toEqual(user.expiresAt);
+  });
+
+  it("GET returns a guest in the caller's organization", async () => {
+    const { user } = await createTestGuest({ organizationId: orgId });
+    const token = await scopedCaller(["users.guests.read"]);
     const res = await fetchJson(
       "GET",
       `${BASE_URL}/v1/admin/guests/${user.id}`,
       token
     );
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("organization_not_permitted");
+    expect(res.status).toBe(200);
+    expect(res.body.organizationId).toBe(orgId);
   });
 
-  it("PATCH is refused for a caller outside the guest's organization", async () => {
-    const { user } = await createTestGuest({ organizationId: orgId });
-    const token = await getTestPrincipalToken({
-      organizationId: orgId,
-      permissions: ["users.guests.write"],
-    });
-    const res = await fetchJson(
-      "PATCH",
-      `${BASE_URL}/v1/admin/guests/${user.id}`,
-      token,
-      { expiresAt: new Date(Date.now() + 30 * DAY_MS).toISOString() }
+  it("treats a guest whose organization is archived as in none", async () => {
+    const archived = await ensureTestOrganization(
+      `admin-guest-archived-${randomUUID()}`
     );
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("organization_not_permitted");
-    expect(
-      (await prisma.user.findUniqueOrThrow({ where: { id: user.id } }))
-        .expiresAt
-    ).toEqual(user.expiresAt);
+    const { user } = await createTestGuest({ organizationId: archived });
+    const userId = randomUUID();
+    const token = await getTestPrincipalToken({
+      userId,
+      permissions: ["users.guests.read"],
+    });
+    await prisma.organizationMember.create({
+      data: { organizationId: archived, userId, memberRole: "member" },
+    });
+    await prisma.organization.update({
+      where: { id: archived },
+      data: { isActive: false, archivedAt: new Date() },
+    });
+
+    const scoped = await fetchJson(
+      "GET",
+      `${BASE_URL}/v1/admin/guests/${user.id}`,
+      token
+    );
+    expect(scoped.status).toBe(404);
+    const admin = await fetchJson(
+      "GET",
+      `${BASE_URL}/v1/admin/guests/${user.id}`,
+      adminToken
+    );
+    expect(admin.status).toBe(200);
+    expect(admin.body.organizationId).toBeNull();
   });
 });

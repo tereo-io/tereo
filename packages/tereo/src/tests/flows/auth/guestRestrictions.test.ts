@@ -55,6 +55,61 @@ describe("guest restrictions on existing routes", () => {
     );
   });
 
+  it("adds a guest whose only organization is archived, and restoring it releases them", async () => {
+    const archived = await createTestOrganization(adminToken);
+    const { user } = await createTestGuest({ organizationId: archived.id });
+    const role = await createTestRole();
+    await prisma.userRole.create({
+      data: { userId: user.id, roleId: role.id, organizationId: archived.id },
+    });
+    expect(
+      (
+        await call("PATCH", `/v1/admin/organizations/${archived.id}`, {
+          isActive: false,
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (await call("POST", `/v1/admin/organizations/${archived.id}/archive`))
+        .status
+    ).toBe(204);
+    const other = await createTestOrganization(adminToken);
+
+    const added = await call(
+      "POST",
+      `/v1/admin/organizations/${other.id}/members`,
+      { userId: user.id }
+    );
+    expect(added.status).toBe(201);
+
+    const restored = await call(
+      "POST",
+      `/v1/admin/organizations/${archived.id}/restore`
+    );
+    expect(restored.status).toBe(200);
+    // One organization still: the one they joined since.
+    expect(
+      (
+        await prisma.organizationMember.findMany({ where: { userId: user.id } })
+      ).map((m) => m.organizationId)
+    ).toEqual([other.id]);
+    expect(
+      await prisma.userRole.count({
+        where: { userId: user.id, organizationId: archived.id },
+      })
+    ).toBe(0);
+    expect(
+      await prisma.auditLogEntry.count({
+        where: {
+          organizationId: archived.id,
+          entityType: "OrganizationMember",
+          action: "DELETE",
+          metadata: { path: ["userId"], equals: user.id },
+        },
+      })
+    ).toBe(1);
+  });
+
   it("refuses adding a guest with an owner or admin tier", async () => {
     const { user } = await createTestGuest({ organizationId: org.id });
     await prisma.organizationMember.deleteMany({ where: { userId: user.id } });

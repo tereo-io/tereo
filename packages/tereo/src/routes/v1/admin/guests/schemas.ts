@@ -6,6 +6,14 @@ import { z } from "zod";
 
 const MAX_ROLES_PER_INVITE = 100;
 
+/**
+ * An RFC 3339 date-time. Not `z.coerce.date()`, which turns `null` into 1970
+ * and so would end a guest's access on a missing value.
+ */
+export const expiresAtSchema = z.iso
+  .datetime({ offset: true })
+  .transform((s) => new Date(s));
+
 const InitialAccessSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("password_setup_link"),
@@ -28,7 +36,7 @@ export const InviteGuestSchema = z
       .array(z.string().min(1).max(100))
       .max(MAX_ROLES_PER_INVITE)
       .optional(),
-    expiresAt: z.coerce.date().optional(),
+    expiresAt: expiresAtSchema.optional(),
     expiresIn: z.number().int().min(1).optional(),
     initialAccess: InitialAccessSchema,
   })

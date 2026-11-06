@@ -50,6 +50,16 @@ describe("POST /v1/admin/guests", () => {
         "expiresAt",
       ],
       [
+        "a null expiresAt",
+        { expiresIn: undefined, expiresAt: null },
+        "expiresAt",
+      ],
+      [
+        "an expiresAt that is not a date-time string",
+        { expiresIn: undefined, expiresAt: Date.now() + DAY * 1000 },
+        "expiresAt",
+      ],
+      [
         "a password breaking the password rules",
         { initialAccess: { type: "password", password: "short" } },
         "initialAccess",
@@ -108,6 +118,11 @@ describe("PATCH /v1/admin/guests/:id", () => {
 
     it.each([
       ["no expiresAt", {}],
+      // z.coerce.date() would read null as 1970 and end access.
+      ["a null expiresAt", { expiresAt: null }],
+      ["a numeric expiresAt", { expiresAt: 0 }],
+      ["an empty expiresAt", { expiresAt: "" }],
+      ["an expiresAt that is not a date-time", { expiresAt: "tomorrow" }],
       [
         "an expiry beyond GUEST_MAX_TTL_SECONDS",
         {

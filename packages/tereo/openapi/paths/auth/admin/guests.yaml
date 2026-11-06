@@ -15,8 +15,10 @@
       - **No account**: creates the guest, its membership and roles, and sets
         up `initialAccess`. `201`, `created: true`.
       - **A guest in the same organization, or in none** (expired included,
-        while not deactivated): extends; a guest in no organization first
-        joins this one as a `member`. `expiresAt` becomes the later of the current and
+        while not deactivated): extends. A guest in no organization (removed
+        from theirs, or theirs archived) first joins this one as a `member`;
+        that needs `organizations.write`, as it hands the caller the guest's
+        account, and is otherwise `409 guest_unassigned`. `expiresAt` becomes the later of the current and
         requested value, which lifts the guest's refresh sessions capped at the
         old expiry. `roles` are added (none removed; omitted adds none, the
         defaults apply only to a new guest). The name and password are left
@@ -28,6 +30,10 @@
       - **A service account, the system user or a deactivated user**:
         `409 user_not_invitable`.
 
+      These refusals tell whether the email has an account, so only a caller
+      holding `users.read` gets them. Any other caller gets
+      `409 email_unavailable` for all of them, with no `userId`.
+
       `initialAccess` is a password-setup link (`notify: true` emails it and needs
       a default email connection: `409 email_not_configured`; the link is returned
       as `passwordSetupUrl` either way) or a password, which the guest must change
@@ -38,8 +44,13 @@
       `403 organization_not_permitted`. The organization must be active
       (`400 organization_inactive`). An audit log
       entry is created. `auth.guest.invited` (new) or
-      `auth.guest.extended` (old and new `expiresAt`, roles added) is emitted, and
-      `auth.user.password-setup-link-issued` when a link is issued.
+      `auth.guest.extended` (old and new `expiresAt`, roles added) is emitted
+      under the guest's organization, and
+      `auth.user.password-setup-link-issued` when a link is issued. The user,
+      membership and roles are also audited and emitted as their own endpoints
+      do: `auth.user.created` for a new guest, `auth.organization.member-added`
+      when a membership is added, and `auth.organization.member-roles-changed`
+      when roles are added.
     operationId: inviteGuest
     security:
       - BearerAuth: [users.guests.write]
@@ -86,7 +97,7 @@
         description: 'Invalid body, `organization_inactive`, `unknown_role`, `role_not_guest_assignable`, or an expiry out of range'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: '`guest_in_other_organization`, `user_exists` (with `userId`), `user_not_invitable`, or `email_not_configured`'
+        description: '`guest_in_other_organization`, `guest_unassigned`, `user_exists` (with `userId`), `user_not_invitable` (these four only with `users.read`; otherwise `email_unavailable`), or `email_not_configured`'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: The organization does not exist
@@ -187,9 +198,12 @@
       - Admin - Guests
     summary: Get a guest
     description: |
-      One guest. `404 not_a_guest` for a user who is not one. Needs
-      `users.guests.read`; `403 organization_not_permitted` when the caller
-      does not act in the guest's organization and lacks `organizations.write`.
+      One guest. Needs `users.guests.read`. Without `organizations.write`, the
+      caller sees only guests of an organization they act in, and anything
+      else (a guest elsewhere or in no organization, a user who is not a
+      guest, an unknown id) is the same `404 not_a_guest`, so the answer
+      tells nothing about the user. With it, `404 not_a_guest` for a user who
+      is not a guest.
     operationId: getAdminGuest
     security:
       - BearerAuth: [users.guests.read]
@@ -217,7 +231,7 @@
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
-        description: No such user, or `not_a_guest`
+        description: '`not_a_guest` (also an unknown id or a guest outside the caller''s organizations, without `organizations.write`), or no such user'
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -231,11 +245,16 @@
       access now. Extending lifts the guest's refresh tokens that were capped at
       the old expiry: each runs to its family's start plus the refresh lifetime,
       still capped at the new expiry. Needs
-      `users.guests.write`. `404 not_a_guest` for a user who is not a guest;
-      `403 organization_not_permitted` when the caller does not act in the
-      guest's organization and lacks `organizations.write`.
+      `users.guests.write`. `404 not_a_guest` as for `GET`. `expiresAt` must
+      be an RFC 3339 date-time; `null` or any other value is a `400`.
 
-      An audit log entry is created and `auth.guest.extended` is emitted.
+      Ending access (an `expiresAt` not in the future) also revokes the
+      guest's live access tokens and closes their sockets.
+
+      An audit log entry is created, with `metadata.action`
+      `guest_extended`, `guest_shortened` or `guest_access_ended`, and
+      `auth.guest.extended` is emitted under the guest's organization with
+      `change` saying which.
     operationId: patchAdminGuest
     security:
       - BearerAuth: [users.guests.write]
@@ -269,7 +288,7 @@
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
-        description: No such user, or `not_a_guest`
+        description: '`not_a_guest` (also an unknown id or a guest outside the caller''s organizations, without `organizations.write`), or no such user'
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -340,7 +359,7 @@ auth.guest.invited:
     tags:
       - Admin - Guests
     summary: Guest invited
-    description: 'Fired when `POST /v1/admin/guests` creates a guest. `data` is the user plus `organizationId` and `roleIds`, the roles assigned.'
+    description: 'Fired when `POST /v1/admin/guests` creates a guest, under the guest''s organization (endpoints of that organization, and service endpoints of all organizations). `data` is the user plus `organizationId` and `roleIds`, the roles assigned.'
     operationId: webhookGuestInvited
     security: []
     parameters:
@@ -384,7 +403,7 @@ auth.guest.extended:
     tags:
       - Admin - Guests
     summary: Guest extended
-    description: 'Fired when a guest''s expiry changes or roles are added: by a repeat invite or `PATCH /v1/admin/guests/{id}`. `data` is the user after the change plus `organizationId`, `previousExpiresAt` and `rolesAdded` (role ids; empty for a PATCH).'
+    description: 'Fired when a guest''s expiry changes or roles are added: by a repeat invite or `PATCH /v1/admin/guests/{id}`. Emitted under the guest''s organization. `data` is the user after the change plus `organizationId`, `previousExpiresAt`, `rolesAdded` (role ids; empty for a PATCH) and `change`: `extended`, `shortened` (an earlier expiry still in the future) or `ended` (access ended now).'
     operationId: webhookGuestExtended
     security: []
     parameters:
@@ -422,6 +441,9 @@ auth.guest.extended:
                             items:
                               type: string
                               format: uuid
+                          change:
+                            type: string
+                            enum: [extended, shortened, ended]
     responses:
       '2XX':
         description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -431,7 +453,7 @@ auth.guest.promoted:
     tags:
       - Admin - Guests
     summary: Guest promoted
-    description: 'Fired when `POST /v1/admin/users/{id}/promote` makes a guest a permanent user. `data` is the user after promotion plus `organizationId`.'
+    description: 'Fired when `POST /v1/admin/users/{id}/promote` makes a guest a permanent user, under the guest''s organization. `data` is the user after promotion plus `organizationId`.'
     operationId: webhookGuestPromoted
     security: []
     parameters:

@@ -352,6 +352,12 @@
       (`isActive: false`) — it grants and authorizes nothing until it is
       explicitly reactivated via `PATCH /v1/admin/organizations/{id}`.
 
+      A guest belongs to one organization, and one whose organization is
+      archived belongs to none, so may join another meanwhile. Restoring
+      removes such guests from this organization, with their roles and bucket
+      grants in it, each audited and emitted as
+      `auth.organization.member-removed`.
+
       **Authorization:** Requires the platform-level permission `organizations.archive`. Org membership roles do not grant access to this operation.
 
       An audit log entry is created for this action.
@@ -446,7 +452,8 @@
       organization (`409 resource_archived`). Only an active person can be a
       member: core's system user, a service account or an inactive user is
       refused with `400 user_not_addable`, as is a guest who already belongs to
-      an organization. A guest can only be a `member` (`400 guest_tier`).
+      an organization (a membership of an archived organization does not
+      count). A guest can only be a `member` (`400 guest_tier`).
 
       On an archived organization every mutation answers
       `409 resource_archived` once the caller passes the member-tier check
