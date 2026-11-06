@@ -48,3 +48,44 @@ export interface PasswordSetupLink {
   /** ISO-8601 timestamp. */
   expiresAt: string;
 }
+
+/** A guest as `GET /v1/admin/guests` lists it: without `organizationId`. */
+export type GuestListItem = Omit<Guest, "organizationId">;
+
+export interface ListGuestsOptions {
+  limit?: number;
+  /** `nextCursor` from the previous page. */
+  cursor?: string;
+  sort?: "id" | "email" | "createdAt" | "expiresAt";
+  sortDir?: "asc" | "desc";
+  organizationId?: string;
+  /** Exact email. */
+  email?: string;
+  emailContains?: string;
+  isActive?: boolean;
+  expiresAt?: { gte?: Date | string; lte?: Date | string };
+  createdAt?: { gte?: Date | string; lte?: Date | string };
+}
+
+export interface PaginatedGuests {
+  data: GuestListItem[];
+  hasMore: boolean;
+  limit: number;
+  nextCursor: string | null;
+}
+
+/** A custom role a guest may be given now. */
+export interface GuestRoleOption {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string | null;
+}
+
+export interface GuestOptions {
+  roles: GuestRoleOption[];
+  /** The configured defaults among `roles`: what a guest invited without `roles` gets. */
+  defaultRoleIds: string[];
+  /** The furthest ahead, in seconds, an invitation or extension may set `expiresAt`. */
+  maxTtlSeconds: number;
+}

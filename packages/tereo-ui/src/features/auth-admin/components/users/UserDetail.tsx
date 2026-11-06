@@ -114,7 +114,11 @@ export const UserDetail = () => {
           ...(isGuest && canWriteGuests
             ? [
                 <ExtendGuestButton key="extend" user={user} />,
-                <SendPasswordLinkButton key="link" user={user} />,
+                // A guest who has set a password gets a new link only
+                // under users.write.
+                ...(!user.hasPassword || canWrite
+                  ? [<SendPasswordLinkButton key="link" user={user} />]
+                  : []),
                 ...(canWrite
                   ? [<PromoteGuestButton key="promote" user={user} />]
                   : []),

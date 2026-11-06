@@ -8,11 +8,14 @@ interface OrganizationOption {
 }
 
 /** Every organization, for pickers. */
-const useAllOrganizations = () => {
+const useAllOrganizations = ({
+  enabled = true,
+}: { enabled?: boolean } = {}) => {
   const axios = useAxios("auth");
 
   return useQuery({
     queryKey: ["allOrganizations"],
+    enabled,
     queryFn: () =>
       fetchAllPages<OrganizationOption>(axios, "/v1/admin/organizations", {
         sort: "name",

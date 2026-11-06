@@ -46,10 +46,12 @@ export const OrganizationDetail = () => {
 
   // Core lets organizations.write, or the caller's role in this
   // organization, through: an owner may edit it, an admin or owner may
-  // manage its members. Adding a member is organizations.write alone.
+  // manage its members. Adding a member is organizations.write alone, and
+  // inviting a guest needs organizations.write or any membership here.
   const myRole = organizations.find((o) => o.id === id)?.memberRole;
   const canWrite = hasPermission("organizations.write");
-  const canInviteGuests = hasPermission("users.guests.write");
+  const canInviteGuests =
+    hasPermission("users.guests.write") && (canWrite || myRole !== undefined);
   const canEdit = canWrite || myRole === "owner";
   const canManageMembers = canWrite || myRole === "owner" || myRole === "admin";
 
