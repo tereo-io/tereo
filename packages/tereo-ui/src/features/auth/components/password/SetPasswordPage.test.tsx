@@ -25,7 +25,7 @@ const renderAt = (url: string) =>
       <MemoryRouter initialEntries={[url]}>
         <Routes>
           <Route path="/set-password" element={<SetPasswordPage />} />
-          <Route path="/login" element={<Where />} />
+          <Route path="/" element={<Where />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 
 describe("SetPasswordPage", () => {
-  it("reads the token from the fragment, sets the password, and goes to login with the email", async () => {
+  it("reads the token from the fragment, sets the password, and offers sign in", async () => {
     const user = userEvent.setup();
     authMock.axios.post.mockImplementation(async (path: string) =>
       path === "/v1/password-setup/inspect"
@@ -71,9 +71,9 @@ describe("SetPasswordPage", () => {
         password: "Str0ng-pass-phrase",
       })
     );
-    expect(await screen.findByTestId("where")).toHaveTextContent(
-      "/login?login_hint=jane%40customer.com"
-    );
+    expect(await screen.findByText(/Your password is set/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByTestId("where")).toHaveTextContent(/^\/$/);
   });
 
   it("ignores a token in the query string", async () => {

@@ -18,9 +18,25 @@ export const SetPasswordPage = () => {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
 
   const { data: details, isLoading, isError } = useInspectPasswordSetup(token);
   const { mutate, isPending } = useSetPassword();
+
+  if (done) {
+    return (
+      <AuthPage title="Password set">
+        <Col>
+          <Alert variant="success">
+            Your password is set. You can now sign in.
+          </Alert>
+          <Button fullWidth onClick={() => navigate("/")}>
+            Sign in
+          </Button>
+        </Col>
+      </AuthPage>
+    );
+  }
 
   if (!token || isError) {
     return (
@@ -50,10 +66,7 @@ export const SetPasswordPage = () => {
     mutate(
       { token, password },
       {
-        onSuccess: () =>
-          navigate(`/login?login_hint=${encodeURIComponent(details.email)}`, {
-            replace: true,
-          }),
+        onSuccess: () => setDone(true),
         onError: (err) => setError(oauthErrorMessage(err, INVALID_LINK)),
       }
     );

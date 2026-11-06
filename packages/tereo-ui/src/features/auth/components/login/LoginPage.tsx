@@ -14,7 +14,7 @@ import "./styles.css";
 
 export const LoginPage = () => {
   const [searchParams] = useSearchParams();
-  const [email, setEmail] = useState(searchParams.get("login_hint") ?? "");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
