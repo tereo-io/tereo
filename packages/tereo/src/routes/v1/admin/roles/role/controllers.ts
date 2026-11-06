@@ -440,8 +440,10 @@ export const setRolePermissions = async (req: Request, res: Response) => {
       existing.rolePermissions.map((rp) => rp.permissionId),
       body.permissionIds
     );
-    if (existing.guestAssignable) {
-      await db.roles.lockRoles([params.id], "update", tx);
+    // PATCH guestAssignable checks under this same lock, so one of the two
+    // sees the other's result; the flag is read after taking it.
+    await db.roles.lockRoles([params.id], "update", tx);
+    if ((await db.roles.get(params.id, tx)).guestAssignable) {
       const next = await tx.permission.findMany({
         where: { id: { in: body.permissionIds } },
         select: { name: true, orgAssignable: true, retiredAt: true },
