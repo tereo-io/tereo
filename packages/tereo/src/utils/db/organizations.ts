@@ -203,7 +203,15 @@ export const getMembers = async (orgId: string) => {
   return await prisma.organizationMember.findMany({
     where: { organizationId: orgId },
     include: {
-      user: { select: { id: true, email: true, name: true, isActive: true } },
+      user: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          isActive: true,
+          expiresAt: true,
+        },
+      },
     },
     orderBy: { user: { email: "asc" } },
   });
@@ -217,7 +225,15 @@ export const getMembership = async (
   return await (tx ?? prisma).organizationMember.findUnique({
     where: { organizationId_userId: { organizationId: orgId, userId } },
     include: {
-      user: { select: { id: true, email: true, name: true, isActive: true } },
+      user: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          isActive: true,
+          expiresAt: true,
+        },
+      },
     },
   });
 };
@@ -332,7 +348,15 @@ export const addMember = async (
   return await (tx ?? prisma).organizationMember.create({
     data: { organizationId: orgId, userId, memberRole: role },
     include: {
-      user: { select: { id: true, email: true, name: true, isActive: true } },
+      user: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          isActive: true,
+          expiresAt: true,
+        },
+      },
     },
   });
 };
@@ -368,7 +392,15 @@ export const updateMemberRole = async (
     where: { organizationId_userId: { organizationId: orgId, userId } },
     data: { memberRole: role },
     include: {
-      user: { select: { id: true, email: true, name: true, isActive: true } },
+      user: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          isActive: true,
+          expiresAt: true,
+        },
+      },
     },
   });
   return { previousRole: existing.memberRole, member: updated };
