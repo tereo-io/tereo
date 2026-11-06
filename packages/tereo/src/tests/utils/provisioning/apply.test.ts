@@ -4,6 +4,7 @@ import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js
 import { type CustomRoleEntry } from "../../../utils/provisioning/schema.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { openEndpointSecrets } from "../../../utils/webhookSecrets.js";
+import { getGuestDefaultRoleIds } from "../../../utils/guestRoles.js";
 import { generateClientSecret } from "../../../utils/crypto.js";
 import { retireMissing } from "../../../utils/registry.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -1477,6 +1478,65 @@ describe("applyProvisioning", () => {
         where: { slug: integration.slug },
       });
       expect(row.isActive).toBe(false);
+    });
+  });
+});
+
+describe("applyProvisioning guest documents", () => {
+  const names: string[] = [];
+
+  const guestRole = (name: string): LoadedDocument["roles"][number] => {
+    names.push(name);
+    return {
+      name,
+      displayName: name,
+      orgAssignable: true,
+      requires2fa: false,
+      guestAssignable: true,
+      permissions: ["file-service.objects.read"],
+    };
+  };
+
+  const set = (roles: LoadedDocument["roles"], defaultRoles?: string[]) => ({
+    documents: [
+      {
+        file: "guests.json",
+        version: "1.0.0",
+        service: null,
+        clients: [],
+        roles,
+        ...(defaultRoles && { guests: { defaultRoles } }),
+      },
+    ],
+  });
+
+  beforeAll(async () => {
+    await ensureDefaultOrganization();
+  });
+
+  afterAll(async () => {
+    await prisma.systemSetting.deleteMany({
+      where: { key: "guestDefaultRoles" },
+    });
+    await removeRoles(names);
+  });
+
+  describe("applyProvisioning: guests", () => {
+    it("persists guestAssignable and stores then replaces the default roles", async () => {
+      const a = `guest-a-${rand()}`;
+      const b = `guest-b-${rand()}`;
+      await applyProvisioning(set([guestRole(a), guestRole(b)], [a]));
+
+      const rows = await prisma.role.findMany({
+        where: { name: { in: [a, b] } },
+      });
+      expect(rows).toHaveLength(2);
+      expect(rows.every((r) => r.guestAssignable)).toBe(true);
+      const idOf = (n: string) => rows.find((r) => r.name === n)!.id;
+      expect(await getGuestDefaultRoleIds()).toEqual([idOf(a)]);
+
+      await applyProvisioning(set([guestRole(a), guestRole(b)], [b]));
+      expect(await getGuestDefaultRoleIds()).toEqual([idOf(b)]);
     });
   });
 });
