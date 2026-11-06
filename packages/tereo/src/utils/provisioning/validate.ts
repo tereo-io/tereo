@@ -1,5 +1,6 @@
-import { guestAssignableProblems, isCorePermission } from "../guestRoles.js";
 import { ROLES, isRequestableCoreRole } from "../../definitions/roles.js";
+import { isCorePermission } from "../../definitions/guests.js";
+import { guestAssignableProblems } from "../guestRoles.js";
 import { hasPermission } from "../permissions.js";
 import {
   CORE_DECLARATION,

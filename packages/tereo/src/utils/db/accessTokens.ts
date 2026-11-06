@@ -198,21 +198,22 @@ export const revokeByOrganizationId = async (
 const MFA_AUTH_METHODS = ["otp", "recovery", "mfa"];
 
 /**
- * Revokes the live access tokens of the people matching `users` that came
+ * Revokes the live access tokens of the `userType` users matching `users` that came
  * from a login without a second factor (a token with no login counts as
  * one), so the client's next refresh meets the 2FA step-up. Returns their
  * jtis.
  */
 export const revokeWithoutMfa = async (
   users: Prisma.UserWhereInput,
-  tx: Prisma.TransactionClient
+  tx: Prisma.TransactionClient,
+  userType: "human" | "guest" = "human"
 ): Promise<string[]> => {
   const now = new Date();
   const revoked = await tx.accessToken.updateManyAndReturn({
     where: {
       revokedAt: null,
       expiresAt: { gt: now },
-      user: { ...users, userType: "human" },
+      user: { ...users, userType },
       OR: [
         { authCodeId: null },
         { authCode: { NOT: { authMethods: { hasSome: MFA_AUTH_METHODS } } } },

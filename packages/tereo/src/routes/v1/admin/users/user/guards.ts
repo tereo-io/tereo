@@ -81,7 +81,7 @@ const assertHoldsTargetPermissions = async (
   const targetPermissions = await db.roles.getUserPermissionsAnywhere(
     targetId,
     tx,
-    { includeInactiveRoles: true }
+    { includeInactiveRoles: true, ignoreGuestFloor: true }
   );
   const managesOrgs = await db.organizations.hasManagingMembership(
     targetId,

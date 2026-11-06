@@ -1,13 +1,10 @@
-import { isGuestAllowedCorePermission } from "../definitions/guests.js";
-import { PERMISSION_CATALOG } from "../definitions/index.js";
 import { BadRequestError } from "./errors.js";
 import type { Prisma } from "./db/prisma.js";
 import db from "./db/index.js";
-
-const CORE_PERMISSION_NAMES = new Set(PERMISSION_CATALOG.map((p) => p.name));
-
-export const isCorePermission = (name: string): boolean =>
-  CORE_PERMISSION_NAMES.has(name);
+import {
+  isCorePermission,
+  isGuestAllowedCorePermission,
+} from "../definitions/guests.js";
 
 interface PermissionFacts {
   name: string;
