@@ -76,26 +76,21 @@ describe("SetPasswordPage", () => {
     expect(await screen.findByTestId("where")).toHaveTextContent(/^\/$/);
   });
 
-  it("shows the uniform message when setting the password fails", async () => {
+  const DETAILS = {
+    data: {
+      email: "jane@customer.com",
+      name: "Jane",
+      expiresAt: "2026-11-09T00:00:00Z",
+    },
+  };
+
+  const submitWith = async (failure: AxiosError) => {
     const user = userEvent.setup();
-    const gone = new AxiosError("nf", undefined, undefined, undefined, {
-      status: 404,
-      data: { error: "not_found", error_description: "Not found" },
-    } as never);
     authMock.axios.post.mockImplementation(async (path: string) => {
-      if (path === "/v1/password-setup/inspect") {
-        return {
-          data: {
-            email: "jane@customer.com",
-            name: "Jane",
-            expiresAt: "2026-11-09T00:00:00Z",
-          },
-        };
-      }
-      throw gone;
+      if (path === "/v1/password-setup/inspect") return DETAILS;
+      throw failure;
     });
     renderAt("/set-password#token=abc123");
-
     await user.type(
       await screen.findByLabelText(/^New password/),
       "Str0ng-pass-phrase"
@@ -105,6 +100,31 @@ describe("SetPasswordPage", () => {
       "Str0ng-pass-phrase"
     );
     await user.click(screen.getByRole("button", { name: "Set password" }));
+  };
+
+  it("shows the server's message when the password is refused", async () => {
+    await submitWith(
+      new AxiosError("bad", undefined, undefined, undefined, {
+        status: 400,
+        data: {
+          error: "invalid_request",
+          error_description: "Invalid request body. password: Too weak",
+          issues: [{ path: "password", message: "Too weak" }],
+        },
+      } as never)
+    );
+
+    expect(await screen.findByText("Too weak")).toBeVisible();
+    expect(screen.queryByText("This link is no longer valid")).toBeNull();
+  });
+
+  it("shows the uniform message when the link fails on set", async () => {
+    await submitWith(
+      new AxiosError("nf", undefined, undefined, undefined, {
+        status: 404,
+        data: { error: "not_found", error_description: "Not found" },
+      } as never)
+    );
 
     expect(
       await screen.findByText("This link is no longer valid")

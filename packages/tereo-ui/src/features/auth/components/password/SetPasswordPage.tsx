@@ -1,10 +1,24 @@
 import useInspectPasswordSetup from "../../api/password/useInspectPasswordSetup";
 import { AuthPage, Alert, Button, Col, Input, Spinner } from "@kosmeo-ui/react";
+import { errorDescriptionOf, issuesOf } from "@/utils/apiErrors";
 import useSetPassword from "../../api/password/useSetPassword";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useMemo, useState } from "react";
+import { isAxiosError } from "axios";
 
 const INVALID_LINK = "This link is no longer valid";
+
+/**
+ * A 400 is about the password itself, so its rules are worth showing; any
+ * other failure is the link's, and every miss reads the same.
+ */
+const setPasswordErrorMessage = (err: unknown): string => {
+  if (!isAxiosError(err) || err.response?.status !== 400) return INVALID_LINK;
+  const issues = issuesOf(err);
+  return issues.length > 0
+    ? issues.map((i) => i.message).join(" ")
+    : errorDescriptionOf(err, INVALID_LINK);
+};
 
 /** The link carries its token in the fragment, which never reaches server logs or Referer headers. */
 const tokenFromHash = (hash: string): string =>
@@ -66,8 +80,7 @@ export const SetPasswordPage = () => {
       { token, password },
       {
         onSuccess: () => setDone(true),
-        // A miss is one uniform 404 whose text says nothing to the reader.
-        onError: () => setError(INVALID_LINK),
+        onError: (err) => setError(setPasswordErrorMessage(err)),
       }
     );
   };
