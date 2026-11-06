@@ -1,9 +1,13 @@
+import { inviteGuestErrorMessage } from "@/features/auth-admin/api/guests/guestErrors";
 import type { InviteGuestResult } from "@/features/auth-admin/api/guests/types";
+import useGuestOptions from "@/features/auth-admin/api/guests/useGuestOptions";
 import useInviteGuest from "@/features/auth-admin/api/guests/useInviteGuest";
-import useAllRoles from "@/features/auth-admin/api/roles/useAllRoles";
-import { errorCodeOf, errorDescriptionOf } from "@/utils/apiErrors";
 import { formatDateTime } from "@/utils/formatDate";
 import { useState } from "react";
+import {
+  defaultDuration,
+  guestDurationOptions,
+} from "@/features/auth-admin/api/guests/guestDurations";
 import {
   Button,
   Checkbox,
@@ -17,62 +21,56 @@ import {
   Select,
 } from "@kosmeo-ui/react";
 
-const DAY_SECONDS = 24 * 60 * 60;
-
-const EXPIRY_OPTIONS = [
-  { value: "7", label: "7 days" },
-  { value: "30", label: "30 days" },
-  { value: "90", label: "90 days" },
-];
-
 type AccessType = "password_setup_link" | "password";
 
-const inviteErrorMessage = (error: unknown): string => {
-  switch (errorCodeOf(error)) {
-    case "user_exists":
-      return "This person already has an account. Add them to the organization as a member instead.";
-    case "guest_in_other_organization":
-      return "This person is a guest of another organization.";
-    case "organization_not_permitted":
-      return "You can invite guests only into an organization you belong to.";
-    case "user_not_invitable":
-      return "This account cannot be invited as a guest.";
-    case "email_not_configured":
-      return "Core has no email connection, so it cannot email the link. Turn off emailing to get the link here instead.";
-    default:
-      return errorDescriptionOf(error, "Failed to invite guest");
-  }
-};
-
 interface InviteGuestModalProps {
-  orgId: string;
+  /** The organization to invite into; without it, one is picked from `organizations`. */
+  orgId?: string;
+  organizations?: { id: string; name: string }[];
   show: boolean;
   onClose: () => void;
 }
 
-const InviteGuestModal = ({ orgId, show, onClose }: InviteGuestModalProps) => {
+const InviteGuestModal = ({
+  orgId,
+  organizations = [],
+  show,
+  onClose,
+}: InviteGuestModalProps) => {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [roles, setRoles] = useState<string[]>([]);
-  const [days, setDays] = useState("30");
+  const [pickedOrgId, setPickedOrgId] = useState<string | null>(null);
+  // Null until touched: the defaults show checked, and core applies them
+  // when `roles` is left out.
+  const [roles, setRoles] = useState<string[] | null>(null);
+  const [duration, setDuration] = useState<string | null>(null);
   const [access, setAccess] = useState<AccessType>("password_setup_link");
   const [notify, setNotify] = useState(false);
   const [password, setPassword] = useState("");
   const [mustChange, setMustChange] = useState(true);
   const [result, setResult] = useState<InviteGuestResult | null>(null);
 
-  const { data: allRoles } = useAllRoles();
+  const { data: options } = useGuestOptions({ enabled: show });
   const invite = useInviteGuest();
 
-  const assignable = (allRoles ?? []).filter(
-    (r) => r.guestAssignable && r.isActive
-  );
+  const assignable = options?.roles ?? [];
+  const selectedRoles = roles ?? options?.defaultRoleIds ?? [];
+  const durations = guestDurationOptions(options?.maxTtlSeconds);
+  const expiresIn =
+    duration !== null && durations.some((o) => o.value === duration)
+      ? duration
+      : defaultDuration(durations);
+  const organizationId =
+    orgId ??
+    pickedOrgId ??
+    (organizations.length === 1 ? organizations[0].id : "");
 
   const close = () => {
     setEmail("");
     setName("");
-    setRoles([]);
-    setDays("30");
+    setPickedOrgId(null);
+    setRoles(null);
+    setDuration(null);
     setAccess("password_setup_link");
     setNotify(false);
     setPassword("");
@@ -88,9 +86,9 @@ const InviteGuestModal = ({ orgId, show, onClose }: InviteGuestModalProps) => {
       {
         email: email.trim(),
         ...(name.trim() ? { name: name.trim() } : {}),
-        organizationId: orgId,
-        ...(roles.length > 0 ? { roles } : {}),
-        expiresIn: Number(days) * DAY_SECONDS,
+        organizationId,
+        ...(roles !== null ? { roles } : {}),
+        expiresIn: Number(expiresIn),
         initialAccess:
           access === "password"
             ? { type: "password", password, mustChange }
@@ -143,6 +141,7 @@ const InviteGuestModal = ({ orgId, show, onClose }: InviteGuestModalProps) => {
           type="submit"
           form="invite-guest-form"
           isLoading={invite.isPending}
+          disabled={!options}
         >
           Invite Guest
         </Button>,
@@ -159,7 +158,7 @@ const InviteGuestModal = ({ orgId, show, onClose }: InviteGuestModalProps) => {
       <form id="invite-guest-form" onSubmit={handleSubmit}>
         <Col size="md">
           {invite.isError && (
-            <FormError>{inviteErrorMessage(invite.error)}</FormError>
+            <FormError>{inviteGuestErrorMessage(invite.error)}</FormError>
           )}
           <Input
             label="Email"
@@ -175,21 +174,34 @@ const InviteGuestModal = ({ orgId, show, onClose }: InviteGuestModalProps) => {
             onChange={(e) => setName(e.target.value)}
             placeholder="Optional"
           />
+          {orgId === undefined && (
+            <Select
+              label="Organization"
+              value={organizationId || undefined}
+              placeholder="Choose an organization"
+              options={organizations.map((o) => ({
+                value: o.id,
+                label: o.name,
+              }))}
+              onChange={(value) => setPickedOrgId(value ?? null)}
+              required
+            />
+          )}
           <Select
             label="Access lasts"
-            value={days}
-            options={EXPIRY_OPTIONS}
-            onChange={(value) => setDays(value ?? "30")}
+            value={expiresIn}
+            options={durations}
+            onChange={(value) => setDuration(value ?? null)}
           />
           {assignable.length > 0 && (
             <CheckboxGroup
               name="guest-roles"
               label="Roles"
               options={assignable.map((r) => ({
-                value: r.name,
+                value: r.id,
                 label: r.displayName,
               }))}
-              values={roles}
+              values={selectedRoles}
               onChange={setRoles}
             />
           )}

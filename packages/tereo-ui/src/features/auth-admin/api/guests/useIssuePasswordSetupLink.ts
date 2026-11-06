@@ -1,8 +1,8 @@
+import { passwordLinkErrorMessage } from "./guestErrors";
 import { useMutation } from "@tanstack/react-query";
 import type { PasswordSetupLink } from "./types";
 import { toast } from "react-toastify";
 import { useAxios } from "@/lib/auth";
-import { AxiosError } from "axios";
 
 const useIssuePasswordSetupLink = () => {
   const axios = useAxios("auth");
@@ -18,11 +18,8 @@ const useIssuePasswordSetupLink = () => {
       );
       return res.data;
     },
-    onError: (error: AxiosError<{ error_description?: string }>) => {
-      toast.error(
-        error.response?.data?.error_description ||
-          "Failed to create the password link"
-      );
+    onError: (error) => {
+      toast.error(passwordLinkErrorMessage(error));
     },
   });
 };

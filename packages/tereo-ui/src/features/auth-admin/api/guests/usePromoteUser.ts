@@ -1,8 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { promoteGuestErrorMessage } from "./guestErrors";
 import type { UserDetail } from "../users/types";
 import { toast } from "react-toastify";
 import { useAxios } from "@/lib/auth";
-import { AxiosError } from "axios";
 
 const usePromoteUser = () => {
   const queryClient = useQueryClient();
@@ -16,12 +16,11 @@ const usePromoteUser = () => {
     onSuccess: async (_data, id) => {
       await queryClient.invalidateQueries({ queryKey: ["users", id] });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await queryClient.invalidateQueries({ queryKey: ["guests-infinite"] });
       toast.success("Guest promoted to a full user");
     },
-    onError: (error: AxiosError<{ error_description?: string }>) => {
-      toast.error(
-        error.response?.data?.error_description || "Failed to promote guest"
-      );
+    onError: (error) => {
+      toast.error(promoteGuestErrorMessage(error));
     },
   });
 };

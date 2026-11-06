@@ -1,16 +1,14 @@
+import useGuestOptions from "@/features/auth-admin/api/guests/useGuestOptions";
 import useExtendGuest from "@/features/auth-admin/api/guests/useExtendGuest";
 import type { User } from "@/features/auth-admin/api/users/types";
 import { Button, Col, Modal, Select } from "@kosmeo-ui/react";
 import { formatDateTime } from "@/utils/formatDate";
 import { useState } from "react";
-
-const DAY_SECONDS = 24 * 60 * 60;
-
-export const EXTEND_OPTIONS = [
-  { value: "7", label: "7 days from now" },
-  { value: "30", label: "30 days from now" },
-  { value: "90", label: "90 days from now" },
-];
+import {
+  defaultDuration,
+  expiryAfter,
+  guestDurationOptions,
+} from "@/features/auth-admin/api/guests/guestDurations";
 
 interface ExtendGuestButtonProps {
   user: User;
@@ -18,13 +16,19 @@ interface ExtendGuestButtonProps {
 
 const ExtendGuestButton = ({ user }: ExtendGuestButtonProps) => {
   const [show, setShow] = useState(false);
-  const [days, setDays] = useState("30");
+  const [duration, setDuration] = useState<string | null>(null);
+  const { data: options } = useGuestOptions({ enabled: show });
   const extend = useExtendGuest();
 
+  const max = options?.maxTtlSeconds;
+  const durations = guestDurationOptions(max, " from now");
+  const seconds =
+    duration !== null && durations.some((o) => o.value === duration)
+      ? duration
+      : defaultDuration(durations);
+
   const handleSubmit = () => {
-    const expiresAt = new Date(
-      Date.now() + Number(days) * DAY_SECONDS * 1000
-    ).toISOString();
+    const expiresAt = expiryAfter(Number(seconds), max).toISOString();
     extend.mutate(
       { id: user.id, expiresAt },
       { onSuccess: () => setShow(false) }
@@ -52,6 +56,7 @@ const ExtendGuestButton = ({ user }: ExtendGuestButtonProps) => {
             key="save"
             onClick={handleSubmit}
             isLoading={extend.isPending}
+            disabled={!options}
           >
             Set expiry
           </Button>,
@@ -65,9 +70,9 @@ const ExtendGuestButton = ({ user }: ExtendGuestButtonProps) => {
           </p>
           <Select
             label="New expiry"
-            value={days}
-            options={EXTEND_OPTIONS}
-            onChange={(value) => setDays(value ?? "30")}
+            value={seconds}
+            options={durations}
+            onChange={(value) => setDuration(value ?? null)}
           />
         </Col>
       </Modal>

@@ -14,6 +14,7 @@ const useInviteGuest = () => {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await queryClient.invalidateQueries({ queryKey: ["guests-infinite"] });
       await queryClient.invalidateQueries({ queryKey: ["organizations"] });
     },
   });

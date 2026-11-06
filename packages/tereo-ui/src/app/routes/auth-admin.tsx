@@ -61,6 +61,16 @@ export const authAdminRoute: RouteObject = {
       ),
     },
     {
+      path: "guests",
+      element: gated(
+        "guests",
+        namedLazy(
+          () => import("@/features/auth-admin/components/guests/GuestList"),
+          "GuestList"
+        )
+      ),
+    },
+    {
       path: "roles",
       element: gated(
         "roles",

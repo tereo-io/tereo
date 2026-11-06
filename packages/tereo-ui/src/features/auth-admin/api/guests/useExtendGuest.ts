@@ -1,8 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { extendGuestErrorMessage } from "./guestErrors";
 import type { UserDetail } from "../users/types";
 import { toast } from "react-toastify";
 import { useAxios } from "@/lib/auth";
-import { AxiosError } from "axios";
 
 const useExtendGuest = () => {
   const queryClient = useQueryClient();
@@ -23,12 +23,11 @@ const useExtendGuest = () => {
         queryKey: ["users", variables.id],
       });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await queryClient.invalidateQueries({ queryKey: ["guests-infinite"] });
       toast.success("Guest access updated");
     },
-    onError: (error: AxiosError<{ error_description?: string }>) => {
-      toast.error(
-        error.response?.data?.error_description || "Failed to update guest"
-      );
+    onError: (error) => {
+      toast.error(extendGuestErrorMessage(error));
     },
   });
 };

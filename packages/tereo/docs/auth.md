@@ -873,6 +873,10 @@ endpoints follow the normal rule.
 | `POST /v1/admin/guests/:id/password-setup-link { notify? }` | `users.guests.write`                                                | Issue a fresh link; earlier ones die. `200 { url, expiresAt }`; `409 guest_not_usable` for a deactivated or expired guest, `409 email_not_configured`  |
 | `POST /v1/admin/users/:id/promote`                          | `users.write` plus the "holds every permission the user holds" rule | `userType = human`, `expiresAt = null`; id, membership, roles, password, grants and history kept. Returns the user. An expired guest can sign in again |
 
+The admin UI's Auth Admin → Guests page lists guests through `GET /v1/admin/guests`, so
+`users.guests.read` alone reaches it, with extend and password-link actions; its invite form reads
+`GET /v1/admin/guests/options` and offers only expiries within `maxTtlSeconds`.
+
 Every user the admin API and webhooks return carries `expiresAt` (null unless a guest),
 `status` (`active`, `expired`, `deactivated`) and `passwordChangeRequired`. `GET /v1/admin/guests`
 is the usual page envelope of users, filterable by `organizationId`, `email`, `isActive`,
