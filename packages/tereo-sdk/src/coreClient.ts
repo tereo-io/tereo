@@ -9,6 +9,7 @@ import { AuditLogServiceClient } from "./clients/audit.js";
 import { FileServiceClient } from "./clients/files.js";
 import type { OutboxOptions } from "./types/outbox.js";
 import { AuthServiceClient } from "./clients/auth.js";
+import { GuestsClient } from "./clients/guests.js";
 import { OutboxClient } from "./clients/outbox.js";
 import { useCacheRedis } from "./utils/cache.js";
 import type { Redis } from "ioredis";
@@ -78,6 +79,8 @@ export interface CoreClient {
   audit: AuditLogServiceClient;
   /** Send notifications through core, or read one back. Needs the `notification_sender` role. */
   notifications: NotificationsClient;
+  /** Invite and manage guests. Needs the `guest_inviter` role. */
+  guests: GuestsClient;
   /**
    * Write audit entries, webhook events and notifications in your own transaction; they reach
    * core after it commits. Requires the `outbox` option.
@@ -147,6 +150,7 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
   const audit = new AuditLogServiceClient({ source: options.service });
   const webhooks = new WebhookServiceClient({ eventTypes: options.eventTypes });
   const notifications = new NotificationsClient();
+  const guests = new GuestsClient();
   const outbox = options.outbox
     ? new OutboxClient(options.outbox, {
         audit,
@@ -165,6 +169,7 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
     webhooks,
     audit,
     notifications,
+    guests,
     get outbox(): OutboxClient {
       if (!outbox) {
         throw new Error(

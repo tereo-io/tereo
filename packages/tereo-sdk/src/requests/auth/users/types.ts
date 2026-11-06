@@ -25,6 +25,10 @@ export interface AuthServiceUser {
   createdAt: string;
   /** ISO-8601 timestamp. */
   updatedAt: string;
+  /** Guests only: ISO-8601 timestamp. */
+  expiresAt?: string;
+  /** Guests only. */
+  status?: "active" | "expired" | "deactivated";
 }
 
 /** Role assignment shape returned by `GET /v1/admin/users/:id/roles`. */

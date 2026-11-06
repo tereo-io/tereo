@@ -416,6 +416,10 @@
             "default": false,
             "type": "boolean"
           },
+          "guestAssignable": {
+            "default": false,
+            "type": "boolean"
+          },
           "permissions": {
             "type": "array",
             "items": {
@@ -486,6 +490,23 @@
         ],
         "additionalProperties": false
       }
+    },
+    "guests": {
+      "type": "object",
+      "properties": {
+        "defaultRoles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "defaultRoles"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [

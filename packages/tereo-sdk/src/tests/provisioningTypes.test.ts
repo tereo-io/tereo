@@ -79,9 +79,11 @@ const full: ProvisioningDocument = {
       description: "Reads everything",
       orgAssignable: false,
       requires2fa: true,
+      guestAssignable: true,
       permissions: ["billing.invoices.read"],
     },
   ],
+  guests: { defaultRoles: ["auditor"] },
   integrations: [
     {
       slug: "acme-3pl",
