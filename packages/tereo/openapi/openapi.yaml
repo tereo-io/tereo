@@ -1121,6 +1121,8 @@ paths:
     $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1promote'
   /v1/admin/guests:
     $ref: './paths/auth/admin/guests.yaml#/~1admin~1guests'
+  /v1/admin/guests/options:
+    $ref: './paths/auth/admin/guests.yaml#/~1admin~1guests~1options'
   /v1/admin/guests/{id}:
     $ref: './paths/auth/admin/guests.yaml#/~1admin~1guests~1{id}'
   /v1/admin/guests/{id}/password-setup-link:

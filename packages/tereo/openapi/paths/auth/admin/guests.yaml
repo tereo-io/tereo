@@ -145,6 +145,42 @@
       '500':
         $ref: '../../../components/responses.yaml#/ServerErrorResponse'
 
+/admin/guests/options:
+  get:
+    tags:
+      - Admin - Guests
+    summary: Get guest invitation options
+    description: |
+      What an inviter needs to fill in an invitation without `roles.read`: the
+      custom roles a guest may be given now, the configured defaults among
+      them, and `maxTtlSeconds` (`GUEST_MAX_TTL_SECONDS`), the furthest ahead
+      an invitation or extension may set `expiresAt`. Needs `users.guests.write`.
+    operationId: getGuestOptions
+    security:
+      - BearerAuth: [users.guests.write]
+    responses:
+      '200':
+        description: The options
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/GuestOptionsResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
 /admin/guests/{id}:
   get:
     tags:

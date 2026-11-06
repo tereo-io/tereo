@@ -3857,6 +3857,36 @@ PaginatedGuestsResponse:
     nextCursor:
       type: [string, 'null']
 
+GuestOptionsResponse:
+  type: object
+  required: [roles, defaultRoleIds, maxTtlSeconds]
+  properties:
+    roles:
+      type: array
+      description: The custom roles a guest may be given now (active, not archived or retired, guest-assignable, and holding only permissions a guest may hold), by name.
+      items:
+        type: object
+        required: [id, name, displayName, description]
+        properties:
+          id:
+            type: string
+            format: uuid
+          name:
+            type: string
+          displayName:
+            type: string
+          description:
+            type: [string, 'null']
+    defaultRoleIds:
+      type: array
+      description: The configured default guest roles among `roles`; a new guest invited without `roles` gets these.
+      items:
+        type: string
+        format: uuid
+    maxTtlSeconds:
+      type: integer
+      description: '`GUEST_MAX_TTL_SECONDS`: the furthest ahead an invitation or extension may set `expiresAt`.'
+
 UpdateGuestRequest:
   type: object
   required: [expiresAt]
