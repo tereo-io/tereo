@@ -109,6 +109,11 @@ export const PUBLIC: Allowlist = [
     "Confirms TOTP enrolment during login with its setup token",
   ],
   [
+    "post",
+    "/oauth/password-change",
+    "Forced password change during login, keyed by the change grant the login issued",
+  ],
+  [
     "get",
     "/oauth/end-session",
     "OIDC RP-initiated logout, identified by id_token_hint or client_id and the session cookie",

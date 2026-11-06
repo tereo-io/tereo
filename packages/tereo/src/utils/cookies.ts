@@ -9,6 +9,7 @@ const CONSENT_SESSION_COOKIE_NAME = "tereo_consent_session";
 const USER_SESSION_COOKIE_NAME = "tereo_user_session";
 const TOTP_SESSION_COOKIE_NAME = "tereo_2fa_session";
 const TOTP_SETUP_GRANT_COOKIE_NAME = "tereo_2fa_setup_grant";
+const PASSWORD_CHANGE_GRANT_COOKIE_NAME = "tereo_password_change_grant";
 const ORG_SELECT_SESSION_COOKIE_NAME = "tereo_org_select_session";
 const LOGOUT_CONFIRM_COOKIE_NAME = "tereo_logout_confirm";
 const SESSION_COOKIE_NAME = "tereo_session";
@@ -28,6 +29,7 @@ const CLIENT_COOKIE_BASES = [
   USER_SESSION_COOKIE_NAME,
   TOTP_SESSION_COOKIE_NAME,
   TOTP_SETUP_GRANT_COOKIE_NAME,
+  PASSWORD_CHANGE_GRANT_COOKIE_NAME,
   ORG_SELECT_SESSION_COOKIE_NAME,
   LOGOUT_CONFIRM_COOKIE_NAME,
   SESSION_COOKIE_NAME,
@@ -309,6 +311,30 @@ export const getTotpSetupGrantFromCookie = (
 ): string | undefined =>
   readClientCookie(req, TOTP_SETUP_GRANT_COOKIE_NAME, clientId);
 
+export const setPasswordChangeGrantCookie = (
+  res: Response,
+  grant: string,
+  clientId: string
+) =>
+  setClientCookie(
+    res,
+    PASSWORD_CHANGE_GRANT_COOKIE_NAME,
+    clientId,
+    grant,
+    env.TOTP_VERIFICATION_TTL
+  );
+
+export const clearPasswordChangeGrantCookie = (
+  res: Response,
+  clientId: string
+) => clearClientCookie(res, PASSWORD_CHANGE_GRANT_COOKIE_NAME, clientId);
+
+export const getPasswordChangeGrantFromCookie = (
+  req: Request,
+  clientId: string
+): string | undefined =>
+  readClientCookie(req, PASSWORD_CHANGE_GRANT_COOKIE_NAME, clientId);
+
 export const setOrgSelectSessionCookie = (
   res: Response,
   sessionToken: string,
@@ -402,6 +428,7 @@ export const clearAllSessionCookies = (res: Response, clientId: string) => {
   clearConsentSessionCookie(res, clientId);
   clearTotpSessionCookie(res, clientId);
   clearTotpSetupGrantCookie(res, clientId);
+  clearPasswordChangeGrantCookie(res, clientId);
   clearOrgSelectSessionCookie(res, clientId);
   clearAuthSessionCookie(res, clientId);
   clearLogoutConfirmCookie(res, clientId);

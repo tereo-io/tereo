@@ -148,6 +148,17 @@ export const accountTotpFailure = createFailureLimiter({
   logExtra: (req) => ({ userId: req.auth?.userId }),
 });
 
+// Failed attempts at /oauth/password-change, per IP: a grant is 256 bits, so
+// this only bounds probing and a loop of rejected new passwords.
+export const passwordChangeFailure = createFailureLimiter({
+  keyPrefix: "rl:password-change:fail",
+  points: 10,
+  duration: 300,
+  errorDescription:
+    "Too many failed password change attempts. Please try again later.",
+  getKey: (req) => `ip:${getIpIdentifier(req)}`,
+});
+
 // Wrong current passwords on POST /account/password, per user: as for
 // accountTotpFailure, a stolen access token must not be a password oracle.
 export const accountPasswordFailure = createFailureLimiter({
