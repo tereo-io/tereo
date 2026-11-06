@@ -154,6 +154,16 @@ export const PUBLIC: Allowlist = [
     "Creates the first admin; the setup token is the credential (404 once setup is done)",
   ],
   [
+    "post",
+    "/v1/password-setup/inspect",
+    "Shows who a password setup link is for; the link's token is the credential (404 when unusable)",
+  ],
+  [
+    "post",
+    "/v1/password-setup",
+    "Sets a password from a setup link; the link's token is the credential (404 when unusable)",
+  ],
+  [
     "get",
     "/v1/files/signed/objects/:bucket/by-id/:id",
     "Presigned download, authenticated by the HMAC signature in its query",

@@ -1,6 +1,7 @@
 import * as notificationConnections from "./notificationConnections.js";
 import { Prisma } from "../../../prisma/generated/client/index.js";
 import * as orgSelectionSessions from "./orgSelectionSessions.js";
+import * as passwordSetupTokens from "./passwordSetupTokens.js";
 import * as idempotencyRecords from "./idempotencyRecords.js";
 import * as authorizationCode from "./authorizationCode.js";
 import * as bucketPermissions from "./bucketPermissions.js";
@@ -56,6 +57,7 @@ export default {
   loginFlows,
   organizations,
   orgSelectionSessions,
+  passwordSetupTokens,
   permissions,
   refreshTokens,
   roles,
