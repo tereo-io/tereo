@@ -8,6 +8,8 @@ export interface Guest extends Omit<AuthServiceUser, "userType"> {
   /** ISO-8601 timestamp. */
   expiresAt: string;
   status: GuestStatus;
+  /** The organization the guest belongs to; null when they belong to none. */
+  organizationId: string | null;
   passwordChangeRequired: boolean;
   hasPassword: boolean;
 }
@@ -37,7 +39,7 @@ export interface InviteGuestResult {
   user: Guest;
   /** False when the email already belonged to a guest. */
   created: boolean;
-  /** Set for `password_setup_link` access when `notify` is not true. */
+  /** Set whenever a password setup link was issued, `notify` or not. */
   passwordSetupUrl?: string;
 }
 
