@@ -458,6 +458,15 @@ export const setRolePermissions = async (req: Request, res: Response) => {
       existing.rolePermissions.map((rp) => rp.permissionId),
       body.permissionIds
     );
+    const keepsAdmin = await tx.permission.count({
+      where: { id: { in: body.permissionIds }, name: "admin", retiredAt: null },
+    });
+    // The admin guard's advisory lock comes before any role row lock, as in
+    // updateRole, deleteRole and setUserRoles; the opposite order deadlocks
+    // against a user-role insert, whose foreign key share-locks the role.
+    if (!keepsAdmin) {
+      await assertAdminRemains((a) => a.roleId !== params.id, tx);
+    }
     // PATCH guestAssignable checks under this same lock, so one of the two
     // sees the other's result; the flag is read after taking it.
     await db.roles.lockRoles([params.id], "update", tx);
@@ -468,13 +477,8 @@ export const setRolePermissions = async (req: Request, res: Response) => {
       });
       assertGuestAssignable(next);
     }
-    const keepsAdmin = await tx.permission.count({
-      where: { id: { in: body.permissionIds }, name: "admin", retiredAt: null },
-    });
     if (keepsAdmin) {
       await refuseAdminForIntegrations(params.id, tx);
-    } else {
-      await assertAdminRemains((a) => a.roleId !== params.id, tx);
     }
     const updated = await db.roles.setPermissions(
       params.id,

@@ -135,7 +135,7 @@
               $ref: '../../../components/auth/schemas.yaml#/PaginatedGuestsResponse'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
-        description: 'Invalid body, `organization_inactive`, `unknown_role`, `role_not_guest_assignable`, or an expiry out of range'
+        description: Invalid query parameters
       '401':
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':

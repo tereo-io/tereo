@@ -111,3 +111,40 @@ describe("PATCH /v1/admin/roles/:id and POST /v1/admin/roles/:id/archive", () =>
     expect(res.status).toBe(409);
   });
 });
+
+/**
+ * Replacing permissions without `admin` takes the admin guard's advisory lock,
+ * then the role row. A user-role insert share-locks that row, and
+ * setUserRoles holds the advisory lock first, so the PUT must queue on the
+ * advisory lock before touching the row, or the two deadlock.
+ */
+describe("PUT /v1/admin/roles/:id/permissions and a concurrent user-role assignment", () => {
+  it("queues on the admin guard without holding the role row, so no deadlock", async () => {
+    const role = await createTestRole();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let held!: () => void;
+    const isHeld = new Promise<void>((r) => (held = r));
+    const holder = prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('core:admin-remains', 0))`;
+        held();
+        await gate;
+        // What a user-role insert's foreign key does to the role row.
+        await tx.$queryRaw`SELECT 1 FROM "auth"."roles" WHERE id = ${role.id}::uuid FOR KEY SHARE`;
+      },
+      { timeout: 30_000 }
+    );
+    await isHeld;
+    const pending = call(
+      "PUT",
+      `/v1/admin/roles/${role.id}/permissions`,
+      adminToken,
+      { permissionIds: [] }
+    );
+    await waitForLockWait("%pg_advisory_xact_lock%");
+    release();
+    await holder;
+    expect((await pending).status).toBe(200);
+  });
+});

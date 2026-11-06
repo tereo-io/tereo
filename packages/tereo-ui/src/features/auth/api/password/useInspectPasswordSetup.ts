@@ -7,7 +7,7 @@ export interface PasswordSetupDetails {
   expiresAt: string;
 }
 
-/** Inspecting uses nothing up, so it is safe to repeat; any failure reads as an unusable link. */
+/** Inspecting consumes nothing, so it is safe to repeat; any failure reads as an unusable link. */
 const useInspectPasswordSetup = (token: string) => {
   const axios = usePublicAxios("auth");
   return useQuery({

@@ -301,7 +301,7 @@ admins as usual):
 | `name` | Lowercase letters, digits, `_` and `-`; unique across the set; may not equal a system role of core or of a service. Not namespaced |
 | `displayName`, `description`, `permissions` | A permission may be core's or any service's in the set |
 | `orgAssignable` | Default `false`. `true` needs every permission to be org-assignable |
-| `requires2fa` | Default `false`. `true`: holders must sign in with 2FA, as for a hand-made role |
+| `requires2fa` | Default `false`. `true`: holders must sign in with 2FA, as for a hand-made role. A guest-assignable role that comes to require it revokes the password-only access tokens of the guests holding it |
 | `guestAssignable` | Default `false`. `true` lets [guest users](auth.md#guest-users) hold the role. Needs `orgAssignable: true` and no core permission besides `file-service.objects.read` and `file-service.objects.write`. Custom roles only: a service's `systemRoles` never are. Not editable in the admin API (`409 managed_by_provisioning`) |
 
 ### `guests`
@@ -329,7 +329,8 @@ admins as usual):
 names none. It may appear in **one** document only, and each name must be a guest-assignable custom
 role of the set. Core stores the resolved role ids in the system setting `guestDefaultRoles`; a role
 later un-flagged or retired is skipped when a guest is invited. Dropping the section clears the
-defaults. A service that invites guests requests the core role `guest_inviter` in `access.roles`.
+defaults. A change to the stored ids is written to the audit log (`SystemSettings`, `guestDefaultRoles`);
+an apply that leaves them as they were writes nothing. A service that invites guests requests the core role `guest_inviter` in `access.roles`.
 
 ## Validation
 

@@ -119,7 +119,7 @@ const AUTH_SERVICE_PERMISSIONS: PermissionDefinition[] = [
   adminPermission(
     "users.guests.write",
     "Write Guests",
-    "Invite, extend, shorten and promote guests, and issue their password setup links"
+    "Invite, extend and shorten guests, and issue their password setup links"
   ),
   adminPermission(
     "roles.read",

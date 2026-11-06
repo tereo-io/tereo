@@ -1479,7 +1479,7 @@
       and consumes the grant; the login then restarts. The step comes before
       TOTP, and only password logins meet it: a provider login skips it and
       leaves the flag set. `invalid_change_grant` and `change_expired` are
-      OAuth2 errors. Wrong attempts are rate limited per client; no code is
+      `400` errors. Wrong attempts are rate limited per client; no code is
       issued until the password is changed.
 
       An audit log entry is created and `auth.user.password-changed` is emitted.
@@ -1502,7 +1502,8 @@
           X-RateLimit-Reset:
             $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
       '400':
-        $ref: '../../components/auth/responses.yaml#/OAuth2ErrorResponse'
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+        description: '`invalid_request` (with `issues`, e.g. the password rules), `password_unchanged`, `invalid_change_grant` or `change_expired`'
       '429':
         $ref: '../../components/responses.yaml#/RateLimitResponse'
       '503':
