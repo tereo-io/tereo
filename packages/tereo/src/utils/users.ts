@@ -116,6 +116,27 @@ export const canActInOrganization = async (
 };
 
 /**
+ * The organizations the user can hold a token for, as in
+ * `canActInOrganization`: their memberships and their client's organization.
+ */
+export const actingOrganizationIds = async (
+  userId: string
+): Promise<string[]> => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      organizationMembers: { select: { organizationId: true } },
+      oauthClient: { select: { organizationId: true } },
+    },
+  });
+  if (!user) return [];
+  const ids = user.organizationMembers.map((m) => m.organizationId);
+  const clientOrg = user.oauthClient?.organizationId;
+  if (clientOrg && !ids.includes(clientOrg)) ids.push(clientOrg);
+  return ids;
+};
+
+/**
  * Fail startup if the seed has not created core's system user — every
  * system write names it, and the foreign keys reject writes without it.
  */

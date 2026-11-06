@@ -100,7 +100,9 @@
     summary: List guests
     description: |
       Guests with their `expiresAt` and `status` (`active`, `expired`,
-      `deactivated`). Needs `users.guests.read`.
+      `deactivated`). Needs `users.guests.read`. Without `organizations.write`,
+      only guests in organizations the caller acts in (a member, or a service
+      account whose client belongs to it) are listed.
 
       **Filter fields and operators:** `organizationId` (`equals`), `email`
       (`contains`, `equals`), `isActive` (`equals`), `expiresAt` and `createdAt`
@@ -148,7 +150,10 @@
     tags:
       - Admin - Guests
     summary: Get a guest
-    description: One guest. `404 not_a_guest` for a user who is not one. Needs `users.guests.read`.
+    description: |
+      One guest. `404 not_a_guest` for a user who is not one. Needs
+      `users.guests.read`; `403 organization_not_permitted` when the caller
+      does not act in the guest's organization and lacks `organizations.write`.
     operationId: getAdminGuest
     security:
       - BearerAuth: [users.guests.read]

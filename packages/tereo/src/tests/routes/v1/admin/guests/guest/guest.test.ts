@@ -252,7 +252,22 @@ describe("PATCH /v1/admin/guests/:id", () => {
   });
 });
 
-describe("guest writes outside the caller's organizations", () => {
+describe("guest actions outside the caller's organizations", () => {
+  it("GET is refused for a caller outside the guest's organization", async () => {
+    const { user } = await createTestGuest({ organizationId: orgId });
+    const token = await getTestPrincipalToken({
+      organizationId: orgId,
+      permissions: ["users.guests.read"],
+    });
+    const res = await fetchJson(
+      "GET",
+      `${BASE_URL}/v1/admin/guests/${user.id}`,
+      token
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("organization_not_permitted");
+  });
+
   it("PATCH is refused for a caller outside the guest's organization", async () => {
     const { user } = await createTestGuest({ organizationId: orgId });
     const token = await getTestPrincipalToken({

@@ -532,4 +532,28 @@ describe("GET /v1/admin/guests", () => {
       expect(user.status).toBe("active");
     }
   });
+
+  it("shows a caller without organizations.write only their organizations' guests", async () => {
+    const mine = await createTestGuest({ organizationId: orgId });
+    const theirs = await createTestGuest({ organizationId: otherOrgId });
+    const userId = randomUUID();
+    const token = await getTestPrincipalToken({
+      userId,
+      permissions: ["users.guests.read"],
+    });
+    await prisma.organizationMember.create({
+      data: { organizationId: orgId, userId, memberRole: "member" },
+    });
+
+    const res = await fetchJson(
+      "GET",
+      `${BASE_URL}/v1/admin/guests?limit=200&sort=createdAt&sortDir=desc`,
+      token
+    );
+
+    expect(res.status).toBe(200);
+    const ids = res.body.data.map((u: { id: string }) => u.id);
+    expect(ids).toContain(mine.user.id);
+    expect(ids).not.toContain(theirs.user.id);
+  });
 });

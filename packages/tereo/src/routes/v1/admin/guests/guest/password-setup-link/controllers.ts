@@ -11,9 +11,8 @@ import {
   validateParams,
 } from "../../../../../../utils/validateReq.js";
 import {
-  assertMayManageGuestsIn,
+  assertMayManageGuest,
   getGuest,
-  guestOrganizationId,
 } from "../../../../../../utils/guests.js";
 
 export const issueGuestPasswordSetupLink = async (
@@ -27,7 +26,7 @@ export const issueGuestPasswordSetupLink = async (
   const { url, expiresAt } = await db.$transaction(async (tx) => {
     await db.users.lockForSignInChange(id, tx);
     const guest = await getGuest(id, tx);
-    await assertMayManageGuestsIn(auth, await guestOrganizationId(id, tx));
+    await assertMayManageGuest(auth, id, tx);
     // A link for an account that cannot sign in would be refused on use.
     if (!isUsableAccount(guest)) {
       throw new ConflictError(

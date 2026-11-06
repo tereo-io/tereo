@@ -1,7 +1,6 @@
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
 import { InviteGuestSchema, ListGuestsQuerySchema } from "./schemas.js";
 import { formatAdminUser } from "../../../../utils/transformers.js";
-import { inviteGuest as invite } from "../../../../utils/guests.js";
 import { validateUser } from "../../../../utils/auth.js";
 import type { Request, Response } from "express";
 import db from "../../../../utils/db/index.js";
@@ -9,6 +8,10 @@ import {
   disconnectTokenSockets,
   notifyOrgRolesChanged,
 } from "../../../../websocket/emitters/index.js";
+import {
+  inviteGuest as invite,
+  visibleGuestsWhere,
+} from "../../../../utils/guests.js";
 import {
   applyCursorToWhere,
   buildCursorPageResponse,
@@ -35,9 +38,14 @@ export const inviteGuest = async (req: Request, res: Response) => {
 };
 
 export const listGuests = async (req: Request, res: Response) => {
+  const auth = validateUser(req);
   const query = validateQuery(ListGuestsQuerySchema, req);
 
-  const where = applyCursorToWhere(query, { userType: "guest" });
+  const visible = await visibleGuestsWhere(auth);
+  const where = applyCursorToWhere(query, {
+    userType: "guest",
+    ...(visible && { AND: [visible] }),
+  });
 
   const result = await db.users.getPaginated({
     take: query.limit,

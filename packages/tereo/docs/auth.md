@@ -852,10 +852,11 @@ and nothing more.
 Permissions `users.guests.read` and `users.guests.write` are global-only. The core role
 `guest_inviter` (requestable by a service in its provisioning document) holds both.
 
-**Organization scope.** Guest writes (invite, extend, `PATCH`, a new setup link) reach only an
+**Organization scope.** The guest endpoints (`/v1/admin/guests`, reads and writes) reach only an
 organization the caller acts in: one they are a member of, or, for a service account, the one its
-client belongs to. A holder of `organizations.write` acts in every organization. Otherwise
-`403 organization_not_permitted`. Reads (`users.guests.read`) are not scoped.
+client belongs to. A holder of `organizations.write` acts in every organization. The list shows
+only the guests in those organizations; any other guest action is `403 organization_not_permitted`.
+Promotion is not scoped: it is a `users.write` action, and `users.write` is global.
 
 **Granting.** "Granting: only what you hold" does not apply to guest-assignable roles given through
 the guest endpoints: flagging the role was the grant decision and `users.guests.write` the right to

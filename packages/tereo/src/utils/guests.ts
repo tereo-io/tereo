@@ -1,11 +1,11 @@
 import type { InviteGuestInput } from "../routes/v1/admin/guests/schemas.js";
+import { actingOrganizationIds, canActInOrganization } from "./users.js";
 import { AppError, BadRequestError, ConflictError } from "./errors.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { issuePasswordSetupLink } from "./passwordSetup.js";
 import type { AuthContext } from "../middleware/auth.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { prisma, type Prisma } from "./db/prisma.js";
-import { canActInOrganization } from "./users.js";
 import { emitTx, logAuditTx } from "./outbox.js";
 import { hasPermission } from "./permissions.js";
 import { formatUser } from "./transformers.js";
@@ -47,16 +47,21 @@ export const getGuest = async (id: string, tx?: Tx): Promise<UserRow> => {
   return user;
 };
 
+type GuestManager = Pick<AuthContext, "userId" | "permissions">;
+
+const managesAllGuests = (auth: GuestManager) =>
+  hasPermission(auth.permissions, "organizations.write");
+
 /**
- * Guest writes reach only an organization the caller acts in: as a member, or
- * as a service account whose client belongs to it. organizations.write acts
- * in every organization.
+ * The guest endpoints (users.guests.*) reach only an organization the caller
+ * acts in: as a member, or as a service account whose client belongs to it.
+ * organizations.write acts in every organization.
  */
 export const assertMayManageGuestsIn = async (
-  auth: Pick<AuthContext, "userId" | "permissions">,
+  auth: GuestManager,
   organizationId: string | null
 ): Promise<void> => {
-  if (hasPermission(auth.permissions, "organizations.write")) return;
+  if (managesAllGuests(auth)) return;
   if (
     organizationId !== null &&
     (await canActInOrganization(auth.userId, organizationId))
@@ -68,6 +73,28 @@ export const assertMayManageGuestsIn = async (
     "organization_not_permitted",
     "You can manage guests only in an organization you belong to"
   );
+};
+
+/** `assertMayManageGuestsIn` for the organization guest `id` belongs to. */
+export const assertMayManageGuest = async (
+  auth: GuestManager,
+  id: string,
+  tx?: Tx
+): Promise<void> =>
+  assertMayManageGuestsIn(auth, await guestOrganizationId(id, tx));
+
+/**
+ * A filter on users to the guests the caller may see; undefined when they
+ * see every guest.
+ */
+export const visibleGuestsWhere = async (
+  auth: GuestManager
+): Promise<Prisma.UserWhereInput | undefined> => {
+  if (managesAllGuests(auth)) return undefined;
+  const organizationIds = await actingOrganizationIds(auth.userId);
+  return {
+    organizationMembers: { some: { organizationId: { in: organizationIds } } },
+  };
 };
 
 /** The organization a guest belongs to (exactly one). */
@@ -508,8 +535,8 @@ export const updateGuest = async (
   // not_a_guest rather than an expiry on a regular user.
   await db.users.lockForSignInChange(id, tx);
   const existing = await getGuest(id, tx);
+  await assertMayManageGuest(auth, id, tx);
   const organizationId = await guestOrganizationId(id, tx);
-  await assertMayManageGuestsIn(auth, organizationId);
   const user = await setAccountExpiry(
     tx,
     existing,

@@ -8,14 +8,17 @@ import {
   validateParams,
 } from "../../../../../utils/validateReq.js";
 import {
+  assertMayManageGuest,
   getGuest as findGuest,
   guestOrganizationId,
   updateGuest as update,
 } from "../../../../../utils/guests.js";
 
 export const getGuest = async (req: Request, res: Response) => {
+  const auth = validateUser(req);
   const { id } = validateParams(GuestIdParamSchema, req);
   const user = await findGuest(id);
+  await assertMayManageGuest(auth, id);
   res.json({
     ...formatAdminUser(user),
     organizationId: await guestOrganizationId(id),
