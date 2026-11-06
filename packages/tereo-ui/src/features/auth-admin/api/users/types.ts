@@ -3,7 +3,13 @@ export interface User {
   email: string;
   name: string | null;
   isActive: boolean;
-  userType: "human" | "service_account";
+  userType: "human" | "service_account" | "guest";
+  /** When a guest's access ends; null for everyone else. */
+  expiresAt: string | null;
+  /** A guest past `expiresAt` is `expired`; an admin's deactivation is `deactivated`. */
+  status: "active" | "expired" | "deactivated";
+  /** Set until the user replaces a password an admin chose for them. */
+  passwordChangeRequired: boolean;
   /** False for a user who signs in only through an identity provider. */
   hasPassword: boolean;
   createdAt: string;

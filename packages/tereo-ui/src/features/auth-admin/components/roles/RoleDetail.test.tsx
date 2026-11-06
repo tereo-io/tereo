@@ -23,6 +23,7 @@ const role: Role = {
   archivedAt: null,
   retiredAt: null,
   requires2fa: false,
+  guestAssignable: false,
   provisioned: false,
   unprovisionedAt: null,
   createdAt: "2026-10-01T00:00:00Z",
