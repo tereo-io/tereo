@@ -224,6 +224,8 @@ env (no overlap).
 | `USER_SESSION_IDLE_TTL` | `259200`, or `USER_SESSION_TTL` when shorter | Seconds an SSO session may go without issuing a code before it counts as expired; at most `USER_SESSION_TTL` |
 | `AUTHORIZATION_CODE_TTL` | `120` | Seconds, 1–600; authorization codes only |
 | `LOGIN_FLOW_TTL` | `900` | Seconds (1–3600) a login flow stays usable: the login, consent and org-select steps, their cookies and sessions |
+| `GUEST_MAX_TTL_SECONDS` | `7776000` | Seconds (1–315360000, 10 y); the furthest ahead a guest's `expiresAt` may be set |
+| `PASSWORD_SETUP_TTL_SECONDS` | `259200` | Seconds (60–2592000, 30 d) a password setup link stays valid |
 | `UI_BASE_URL` | `PUBLIC_URL` in production, `http://localhost:4000` otherwise | Login, consent and org-select redirects; the login client's `${UI_BASE_URL}/callback`. Must be `https://` in production |
 | `UI_DIST_PATH` | `packages/tereo-ui/dist` | The admin UI's build, served at the root when present |
 | `COOKIE_DOMAIN` | — | Shares core's cookies with every subdomain of this domain. Unset, they are host-only and, when Secure, `__Host-` cookies (path `/`, refused by the browser from another host or over http). Set, **every subdomain is trusted with them** — any of its pages can read the session indicator and overwrite the credential cookies — and the prefix is off |

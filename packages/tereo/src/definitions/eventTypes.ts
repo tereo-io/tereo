@@ -157,6 +157,27 @@ const authEvents: EventTypeDefinition[] = [
     eventType: "auth.user.identity-invite-withdrawn",
     description: "An admin withdrew a user's identity invite",
   },
+  { eventType: "auth.guest.invited", description: "Guest invited" },
+  {
+    eventType: "auth.guest.extended",
+    description: "Guest's expiry changed, or guest-assignable roles added",
+  },
+  {
+    eventType: "auth.guest.promoted",
+    description: "Guest promoted to a regular user",
+  },
+  {
+    eventType: "auth.user.password-setup-link-issued",
+    description: "A password setup link was issued for a user",
+  },
+  {
+    eventType: "auth.user.password-set",
+    description: "User set their password from a setup link",
+  },
+  {
+    eventType: "auth.role.guest-assignable-changed",
+    description: "Role marked or unmarked as assignable to guests",
+  },
 ];
 
 const fileEvents: EventTypeDefinition[] = [
@@ -396,6 +417,7 @@ const notificationEvents: EventTypeDefinition[] = [
 // checked against the bucket they name (`utils/webhookAccess.ts`).
 const READ_PERMISSIONS: [prefix: string, permission: string][] = [
   ["auth.organization.", "organizations.read"],
+  ["auth.guest.", "users.guests.read"],
   ["auth.user.", "users.read"],
   ["auth.role.", "roles.read"],
   ["auth.client.", "clients.read"],

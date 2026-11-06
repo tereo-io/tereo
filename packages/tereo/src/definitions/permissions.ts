@@ -112,6 +112,16 @@ const AUTH_SERVICE_PERMISSIONS: PermissionDefinition[] = [
     "Delete user accounts and revoke sessions"
   ),
   adminPermission(
+    "users.guests.read",
+    "Read Guests",
+    "View guest accounts and their expiry"
+  ),
+  adminPermission(
+    "users.guests.write",
+    "Write Guests",
+    "Invite, extend, shorten and promote guests, and issue their password setup links"
+  ),
+  adminPermission(
     "roles.read",
     "Read Roles",
     "View roles and their permissions"
