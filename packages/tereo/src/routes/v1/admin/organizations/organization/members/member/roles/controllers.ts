@@ -1,5 +1,6 @@
 import { getDefaultOrganizationId } from "../../../../../../../../utils/defaultOrganization.js";
 import { assertNotIntegrationAccount } from "../../../../../../../../utils/integrations.js";
+import { UserType } from "../../../../../../../../../prisma/generated/client/index.js";
 import { emitTx, logAuditTx } from "../../../../../../../../utils/outbox.js";
 import { assertCanTakeAway } from "../../../../../../../../utils/grants.js";
 import { validateUser } from "../../../../../../../../utils/auth.js";
@@ -88,7 +89,14 @@ export const setMemberOrgRoles = async (req: Request, res: Response) => {
     const heldRoles = await db.organizations.getMemberRoles(orgId, userId, tx);
     const held = new Set(heldRoles.map((ur) => ur.roleId));
     const added = roleIds.filter((roleId) => !held.has(roleId));
-    await assertOrgAssignableRoles(auth, orgId, added, new Set(), tx);
+    await assertOrgAssignableRoles(
+      auth,
+      orgId,
+      added,
+      new Set(),
+      tx,
+      (await db.users.get(userId, tx)).userType === UserType.guest
+    );
     const removed = heldRoles.filter((ur) => !roleIds.includes(ur.roleId));
     if (removed.length > 0) {
       assertCanTakeAway(

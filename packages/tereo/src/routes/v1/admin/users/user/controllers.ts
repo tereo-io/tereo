@@ -48,6 +48,7 @@ import {
   assertMayDisempower,
   assertMayReactivate,
   assertMayResetCredentials,
+  assertNotGuest,
   assertNotServiceAccount,
   assertNotSystemUser,
   managerOf,
@@ -215,6 +216,13 @@ export const setUserRoles = async (req: Request, res: Response) => {
   const targetUser = await db.users.get(id);
   // A service's roles are what an admin approved for it (/admin/services).
   await assertNotServiceAccount(targetUser);
+  if (roleIds.length > 0) {
+    assertNotGuest(
+      targetUser,
+      "guest_global_role",
+      "A guest cannot hold global roles"
+    );
+  }
 
   const { userRoles, revokedJtis } = await db.$transaction(async (tx) => {
     // A grant races a credential reset's check of what the user holds.
