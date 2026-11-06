@@ -2,6 +2,7 @@ import type { InviteGuestInput } from "../routes/v1/admin/guests/schemas.js";
 import { actingOrganizationIds, canActInOrganization } from "./users.js";
 import { AppError, BadRequestError, ConflictError } from "./errors.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
+import { revokeOrganizationGrantsTx } from "./bucketGrants.js";
 import { issuePasswordSetupLink } from "./passwordSetup.js";
 import type { AuthContext } from "../middleware/auth.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
@@ -38,12 +39,13 @@ const roleWithPermissions = {
   },
 } satisfies Prisma.RoleInclude;
 
+const notAGuest = () =>
+  new AppError(404, "not_a_guest", "This user is not a guest");
+
 /** A guest by id; any other user is 404 `not_a_guest`. */
 export const getGuest = async (id: string, tx?: Tx): Promise<UserRow> => {
   const user = await db.users.get(id, tx);
-  if (user.userType !== UserType.guest) {
-    throw new AppError(404, "not_a_guest", "This user is not a guest");
-  }
+  if (user.userType !== UserType.guest) throw notAGuest();
   return user;
 };
 
@@ -51,6 +53,30 @@ type GuestManager = Pick<AuthContext, "userId" | "permissions">;
 
 const managesAllGuests = (auth: GuestManager) =>
   hasPermission(auth.permissions, "organizations.write");
+
+/**
+ * A guest the caller may manage. The scope is checked before the user is
+ * looked at: without organizations.write, a user who is not a guest, does
+ * not exist, or is a guest outside the caller's organizations (or in none)
+ * is the same 404 `not_a_guest`, so the answer reveals nothing about them.
+ */
+export const getManagedGuest = async (
+  auth: GuestManager,
+  id: string,
+  tx?: Tx
+): Promise<UserRow> => {
+  if (managesAllGuests(auth)) return getGuest(id, tx);
+  const organizationId = await guestOrganizationId(id, tx);
+  if (
+    organizationId === null ||
+    !(await canActInOrganization(auth.userId, organizationId))
+  ) {
+    throw notAGuest();
+  }
+  const user = await (tx ?? prisma).user.findUnique({ where: { id } });
+  if (user?.userType !== UserType.guest) throw notAGuest();
+  return user;
+};
 
 /**
  * The guest endpoints (users.guests.*) reach only an organization the caller
@@ -93,20 +119,106 @@ export const visibleGuestsWhere = async (
   if (managesAllGuests(auth)) return undefined;
   const organizationIds = await actingOrganizationIds(auth.userId);
   return {
-    organizationMembers: { some: { organizationId: { in: organizationIds } } },
+    organizationMembers: {
+      some: {
+        organizationId: { in: organizationIds },
+        organization: { archivedAt: null },
+      },
+    },
   };
 };
 
-/** The organization a guest belongs to (exactly one). */
+/**
+ * Memberships that place a guest in an organization: those of organizations
+ * not archived. A guest whose only membership is in an archived organization
+ * belongs to none.
+ */
+export const liveGuestMembershipWhere = (
+  userId: string
+): Prisma.OrganizationMemberWhereInput => ({
+  userId,
+  organization: { archivedAt: null },
+});
+
+/** The organization a guest belongs to (at most one), or null. */
 export const guestOrganizationId = async (
   userId: string,
   tx?: Tx
 ): Promise<string | null> => {
   const membership = await (tx ?? prisma).organizationMember.findFirst({
-    where: { userId },
+    where: liveGuestMembershipWhere(userId),
     select: { organizationId: true },
   });
   return membership?.organizationId ?? null;
+};
+
+/**
+ * For an organization being restored: its guests who joined another
+ * organization while it was archived leave it, so each keeps one. Their
+ * roles and bucket grants in it go with the membership, as on removal.
+ * Returns each released guest with the buckets whose grants were revoked.
+ */
+export const releaseRehomedGuestsTx = async (
+  tx: Tx,
+  auth: Actor,
+  organizationId: string
+): Promise<{ userId: string; revokedBuckets: string[] }[]> => {
+  const members = await tx.organizationMember.findMany({
+    where: {
+      organizationId,
+      user: {
+        userType: UserType.guest,
+        organizationMembers: {
+          some: {
+            organizationId: { not: organizationId },
+            organization: { archivedAt: null },
+          },
+        },
+      },
+    },
+    include: { user: { select: { email: true } } },
+  });
+  const released = [];
+  for (const member of members) {
+    await db.users.lockAuthority(member.userId, tx);
+    await tx.userRole.deleteMany({
+      where: { userId: member.userId, organizationId },
+    });
+    const revokedBuckets = await revokeOrganizationGrantsTx(
+      tx,
+      auth,
+      organizationId,
+      member.userId
+    );
+    await tx.organizationMember.delete({ where: { id: member.id } });
+    await logAuditTx(tx, {
+      auth,
+      organizationId,
+      action: "DELETE",
+      entityType: "OrganizationMember",
+      entityId: member.id,
+      entityName: member.user.email,
+      metadata: {
+        userId: member.userId,
+        memberRole: member.memberRole,
+        reason: "guest_in_other_organization",
+      },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.organization.member-removed",
+      entityType: "OrganizationMember",
+      entityId: member.id,
+      data: {
+        organizationId,
+        userId: member.userId,
+        email: member.user.email,
+        memberRole: member.memberRole,
+      },
+    });
+    released.push({ userId: member.userId, revokedBuckets });
+  }
+  return released;
 };
 
 /**
@@ -211,6 +323,105 @@ const addGuestRoles = async (
     : [];
   return { addedRoleIds, revokedJtis };
 };
+
+/**
+ * The audit entry and event of an organization membership being added, as
+ * `POST /v1/admin/organizations/:id/members` writes them.
+ */
+const recordMemberAdded = async (
+  tx: Tx,
+  auth: Actor,
+  member: Awaited<ReturnType<typeof db.organizations.addMember>>
+) => {
+  await logAuditTx(tx, {
+    auth,
+    organizationId: member.organizationId,
+    action: "CREATE",
+    entityType: "OrganizationMember",
+    entityId: member.id,
+    entityName: member.user.email,
+    metadata: { userId: member.userId, memberRole: member.memberRole },
+  });
+  await emitTx(tx, {
+    organizationId: getDefaultOrganizationId(),
+    eventType: "auth.organization.member-added",
+    entityType: "OrganizationMember",
+    entityId: member.id,
+    data: {
+      organizationId: member.organizationId,
+      userId: member.userId,
+      email: member.user.email,
+      memberRole: member.memberRole,
+    },
+  });
+};
+
+/**
+ * The audit entry and event of a member's organization roles changing, as
+ * `PUT /v1/admin/organizations/:id/members/:userId/roles` writes them:
+ * `roleIds` is the full set held afterwards.
+ */
+const recordMemberRolesChanged = async (
+  tx: Tx,
+  auth: Actor,
+  organizationId: string,
+  userId: string,
+  revokedJtis: string[]
+) => {
+  const membership = await db.organizations.getMembership(
+    organizationId,
+    userId,
+    tx
+  );
+  if (!membership) return;
+  const roleIds = (
+    await db.organizations.getMemberRoles(organizationId, userId, tx)
+  ).map((ur) => ur.roleId);
+  await logAuditTx(tx, {
+    auth,
+    organizationId,
+    action: "UPDATE",
+    entityType: "OrganizationMember",
+    entityId: membership.id,
+    entityName: membership.user.email,
+    metadata: {
+      action: "roles_changed",
+      userId,
+      roleIds,
+      ...(revokedJtis.length > 0 && {
+        accessTokensRevoked: revokedJtis.length,
+      }),
+    },
+  });
+  await emitTx(tx, {
+    organizationId: getDefaultOrganizationId(),
+    eventType: "auth.organization.member-roles-changed",
+    entityType: "OrganizationMember",
+    entityId: membership.id,
+    data: {
+      organizationId,
+      userId,
+      email: membership.user.email,
+      roleIds,
+    },
+  });
+};
+
+/**
+ * An invite refused because of the account the email names. A caller who
+ * cannot read users (`users.read`) gets one `409 email_unavailable` whatever
+ * the reason, so an invite is not an oracle for which emails have accounts.
+ */
+const refuseEmail = (
+  auth: Pick<AuthContext, "permissions">,
+  detailed: AppError
+): AppError =>
+  hasPermission(auth.permissions, "users.read")
+    ? detailed
+    : new ConflictError(
+        "This email cannot be invited as a guest",
+        "email_unavailable"
+      );
 
 /**
  * Moves the account's expiry to `next` (null: never) and its live refresh
@@ -356,18 +567,31 @@ export const inviteGuest = async (
       passwordHash: null,
     },
   });
-  await db.organizations.addMember(
+  // The user, membership and roles are recorded as their own endpoints
+  // record them; the guest entry and event below add what the invite was.
+  await emitTx(tx, {
+    organizationId: getDefaultOrganizationId(),
+    eventType: "auth.user.created",
+    entityType: "User",
+    entityId: created.id,
+    data: formatUser(created) as unknown as Record<string, unknown>,
+  });
+  const member = await db.organizations.addMember(
     organizationId,
     created.id,
     OrgMemberRole.member,
     tx
   );
+  await recordMemberAdded(tx, auth, member);
   const { addedRoleIds } = await addGuestRoles(
     tx,
     created.id,
     organizationId,
     roles
   );
+  if (addedRoleIds.length > 0) {
+    await recordMemberRolesChanged(tx, auth, organizationId, created.id, []);
+  }
   const { user, passwordSetupUrl } = await applyInitialAccess(
     tx,
     auth,
@@ -375,6 +599,7 @@ export const inviteGuest = async (
     input.initialAccess
   );
 
+  // The user's creation entry, in the shape POST /v1/admin/users writes.
   await logAuditTx(tx, {
     auth,
     organizationId,
@@ -384,6 +609,9 @@ export const inviteGuest = async (
     entityName: user.email,
     metadata: {
       action: "guest_invited",
+      email: user.email,
+      name: user.name,
+      userType: user.userType,
       organizationId,
       roleIds: addedRoleIds,
       expiresAt: input.expiresAt.toISOString(),
@@ -391,7 +619,7 @@ export const inviteGuest = async (
     },
   });
   await emitTx(tx, {
-    organizationId: getDefaultOrganizationId(),
+    organizationId,
     eventType: "auth.guest.invited",
     entityType: "User",
     entityId: user.id,
@@ -412,7 +640,7 @@ export const inviteGuest = async (
 
 const extendInvitedGuest = async (
   tx: Tx,
-  auth: Actor,
+  auth: Actor & Pick<AuthContext, "permissions">,
   found: UserRow,
   organizationId: string,
   input: InviteGuestInput
@@ -428,34 +656,55 @@ const extendInvitedGuest = async (
     existing.userType === UserType.service_account ||
     !existing.isActive
   ) {
-    throw new ConflictError(
-      "This account cannot be invited as a guest",
-      "user_not_invitable"
+    throw refuseEmail(
+      auth,
+      new ConflictError(
+        "This account cannot be invited as a guest",
+        "user_not_invitable"
+      )
     );
   }
   if (existing.userType !== UserType.guest) {
-    throw new AppError(
-      409,
-      "user_exists",
-      "A user with this email exists; grant them access directly",
-      { details: { userId: existing.id } }
+    throw refuseEmail(
+      auth,
+      new AppError(
+        409,
+        "user_exists",
+        "A user with this email exists; grant them access directly",
+        { details: { userId: existing.id } }
+      )
     );
   }
   const memberOf = await guestOrganizationId(existing.id, tx);
   if (memberOf !== null && memberOf !== organizationId) {
-    throw new ConflictError(
-      "This guest belongs to another organization",
-      "guest_in_other_organization"
+    throw refuseEmail(
+      auth,
+      new ConflictError(
+        "This guest belongs to another organization",
+        "guest_in_other_organization"
+      )
     );
   }
-  // A guest left with no organization joins the one inviting them.
+  // A guest left with no organization (removed, or theirs archived) joins
+  // the one inviting them. That hands the inviter the guest's account, so it
+  // is for whoever acts in every organization.
   if (memberOf === null) {
-    await db.organizations.addMember(
+    if (!managesAllGuests(auth)) {
+      throw refuseEmail(
+        auth,
+        new ConflictError(
+          "This guest belongs to no organization; only an administrator of every organization can invite them into one",
+          "guest_unassigned"
+        )
+      );
+    }
+    const member = await db.organizations.addMember(
       organizationId,
       existing.id,
       OrgMemberRole.member,
       tx
     );
+    await recordMemberAdded(tx, auth, member);
   }
 
   const roles = input.roles ? await resolveGuestRoles(input.roles, tx) : [];
@@ -465,6 +714,15 @@ const extendInvitedGuest = async (
     organizationId,
     roles
   );
+  if (addedRoleIds.length > 0) {
+    await recordMemberRolesChanged(
+      tx,
+      auth,
+      organizationId,
+      existing.id,
+      revokedJtis
+    );
+  }
 
   const previous = existing.expiresAt;
   const expiresAt =
@@ -504,7 +762,7 @@ const extendInvitedGuest = async (
     },
   });
   await emitTx(tx, {
-    organizationId: getDefaultOrganizationId(),
+    organizationId,
     eventType: "auth.guest.extended",
     entityType: "User",
     entityId: user.id,
@@ -513,6 +771,7 @@ const extendInvitedGuest = async (
       organizationId,
       previousExpiresAt: previous?.toISOString() ?? null,
       rolesAdded: addedRoleIds,
+      change: "extended",
     },
   });
   return {
@@ -524,25 +783,60 @@ const extendInvitedGuest = async (
   };
 };
 
-/** Sets a guest's expiry, earlier or later; one in the past ends access now. */
+type ExpiryChange = "extended" | "shortened" | "ended";
+
+const AUDIT_ACTION: Record<ExpiryChange, string> = {
+  extended: "guest_extended",
+  shortened: "guest_shortened",
+  ended: "guest_access_ended",
+};
+
+/**
+ * Sets a guest's expiry, earlier or later. One not in the future ends access
+ * now: their live access tokens are revoked as well, and their jtis returned
+ * so the caller can close the sockets they hold.
+ */
 export const updateGuest = async (
   tx: Tx,
   auth: Actor & Pick<AuthContext, "permissions">,
   id: string,
   body: { expiresAt: Date; name?: string }
-): Promise<UserRow> => {
+): Promise<{
+  user: UserRow;
+  organizationId: string | null;
+  revokedJtis: string[];
+}> => {
   // Row-locked before the read, so a promotion committing first gives 404
   // not_a_guest rather than an expiry on a regular user.
   await db.users.lockForSignInChange(id, tx);
-  const existing = await getGuest(id, tx);
-  await assertMayManageGuest(auth, id, tx);
+  const existing = await getManagedGuest(auth, id, tx);
   const organizationId = await guestOrganizationId(id, tx);
+  const now = new Date();
+  const previous = existing.expiresAt;
+  const change: ExpiryChange =
+    body.expiresAt <= now
+      ? "ended"
+      : previous !== null && body.expiresAt < previous
+        ? "shortened"
+        : "extended";
   const user = await setAccountExpiry(
     tx,
     existing,
     body.expiresAt,
     body.name !== undefined ? { name: body.name } : {}
   );
+  // Expiry is checked on every use, but a token's socket is not: revoking
+  // the tokens lets the caller close their sockets too.
+  const revokedJtis =
+    change === "ended"
+      ? (
+          await tx.accessToken.updateManyAndReturn({
+            where: { userId: id, revokedAt: null, expiresAt: { gt: now } },
+            data: { revokedAt: now },
+            select: { jti: true },
+          })
+        ).map((t) => t.jti)
+      : [];
   await logAuditTx(tx, {
     auth,
     organizationId,
@@ -551,25 +845,29 @@ export const updateGuest = async (
     entityId: user.id,
     entityName: user.email,
     metadata: {
-      action: "guest_extended",
-      previousExpiresAt: existing.expiresAt?.toISOString() ?? null,
+      action: AUDIT_ACTION[change],
+      previousExpiresAt: previous?.toISOString() ?? null,
       expiresAt: body.expiresAt.toISOString(),
       ...(body.name !== undefined && { name: body.name }),
+      ...(revokedJtis.length > 0 && {
+        accessTokensRevoked: revokedJtis.length,
+      }),
     },
   });
   await emitTx(tx, {
-    organizationId: getDefaultOrganizationId(),
+    organizationId,
     eventType: "auth.guest.extended",
     entityType: "User",
     entityId: user.id,
     data: {
       ...(formatUser(user) as unknown as Record<string, unknown>),
       organizationId,
-      previousExpiresAt: existing.expiresAt?.toISOString() ?? null,
+      previousExpiresAt: previous?.toISOString() ?? null,
       rolesAdded: [],
+      change,
     },
   });
-  return user;
+  return { user, organizationId, revokedJtis };
 };
 
 /**
@@ -631,7 +929,7 @@ export const promoteGuest = async (
     },
   });
   await emitTx(tx, {
-    organizationId: getDefaultOrganizationId(),
+    organizationId,
     eventType: "auth.guest.promoted",
     entityType: "User",
     entityId: user.id,

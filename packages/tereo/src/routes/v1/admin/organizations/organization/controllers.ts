@@ -1,5 +1,6 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { formatOrganization } from "../../../../../utils/transformers.js";
+import { releaseRehomedGuestsTx } from "../../../../../utils/guests.js";
 import { requireOrgRole } from "../../../../../utils/orgRoleAuth.js";
 import { hasPermission } from "../../../../../utils/permissions.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
@@ -11,7 +12,9 @@ import { OrgIdParamSchema } from "../schemas.js";
 import type { Request, Response } from "express";
 import {
   disconnectOrganizationSockets,
+  notifyBucketAccessChanged,
   notifyOrgDeactivated,
+  notifyOrgMembershipChanged,
   notifySessionsRevoked,
 } from "../../../../../websocket/emitters/index.js";
 import {
@@ -138,8 +141,11 @@ export const restoreOrganization = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const params = validateParams(OrgIdParamSchema, req);
 
-  const restored = await db.$transaction(async (tx) => {
+  const { restored, released } = await db.$transaction(async (tx) => {
     const result = await db.organizations.restore(params.id, tx);
+    // A guest re-homed while this organization was archived stays where
+    // they went: a guest belongs to one organization.
+    const released = await releaseRehomedGuestsTx(tx, auth, result.id);
     await logAuditTx(tx, {
       auth,
       organizationId: result.id,
@@ -156,9 +162,15 @@ export const restoreOrganization = async (req: Request, res: Response) => {
       entityId: result.id,
       data: formatOrganization(result) as Record<string, unknown>,
     });
-    return result;
+    return { restored: result, released };
   });
 
+  for (const { userId, revokedBuckets } of released) {
+    notifyOrgMembershipChanged(userId, params.id);
+    for (const bucketName of revokedBuckets) {
+      notifyBucketAccessChanged([userId], bucketName);
+    }
+  }
   res.json(formatOrganization(restored));
 };
 

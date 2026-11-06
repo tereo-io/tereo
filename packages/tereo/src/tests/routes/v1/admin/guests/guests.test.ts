@@ -120,8 +120,18 @@ describe("POST /v1/admin/guests", () => {
     const role = await createGuestRole();
     await setDefaultRoles([role.id]);
     const endpoint = await createTestWebhookEndpoint(
-      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      await getCoreEventSubscriberToken(orgId),
       { eventTypes: ["auth.guest.invited"] }
+    );
+    const platform = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      {
+        eventTypes: [
+          "auth.user.created",
+          "auth.organization.member-added",
+          "auth.organization.member-roles-changed",
+        ],
+      }
     );
     const email = uniqueEmail();
 
@@ -156,6 +166,71 @@ describe("POST /v1/admin/guests", () => {
       })
     ).toBe(1);
     await expectDelivery(endpoint.id, "auth.guest.invited", id);
+    // The user, membership and roles are recorded as their own endpoints
+    // record them.
+    expect(
+      await expectDelivery(platform.id, "auth.user.created", id)
+    ).toMatchObject({ id, email, userType: "guest" });
+    const member = membership[0];
+    expect(
+      await expectDelivery(
+        platform.id,
+        "auth.organization.member-added",
+        member.id
+      )
+    ).toMatchObject({
+      organizationId: orgId,
+      userId: id,
+      memberRole: "member",
+    });
+    expect(
+      await expectDelivery(
+        platform.id,
+        "auth.organization.member-roles-changed",
+        member.id
+      )
+    ).toMatchObject({ organizationId: orgId, userId: id, roleIds: [role.id] });
+    const memberEntries = await prisma.auditLogEntry.findMany({
+      where: { entityType: "OrganizationMember", entityId: member.id },
+      select: { action: true, metadata: true },
+    });
+    expect(memberEntries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "CREATE" }),
+        expect.objectContaining({
+          action: "UPDATE",
+          metadata: expect.objectContaining({
+            action: "roles_changed",
+            roleIds: [role.id],
+          }),
+        }),
+      ])
+    );
+  });
+
+  it("sends guest events to the guest's organization, not the default one", async () => {
+    const theirs = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(orgId),
+      { eventTypes: ["auth.guest.invited"] }
+    );
+    const platform = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      { eventTypes: ["auth.guest.invited"] }
+    );
+
+    const res = await invite({ email: uniqueEmail() });
+
+    expect(res.status).toBe(201);
+    await expectDelivery(theirs.id, "auth.guest.invited", res.body.user.id);
+    // Deliveries of one event are written together.
+    expect(
+      await prisma.webhookDelivery.count({
+        where: {
+          webhookEndpointId: platform.id,
+          payload: { path: ["entityId"], equals: res.body.user.id },
+        },
+      })
+    ).toBe(0);
   });
 
   it("assigns the named roles, by name or id, instead of the defaults", async () => {
@@ -206,7 +281,7 @@ describe("POST /v1/admin/guests", () => {
       roleIds: [held.id],
     });
     const endpoint = await createTestWebhookEndpoint(
-      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      await getCoreEventSubscriberToken(orgId),
       { eventTypes: ["auth.guest.extended"] }
     );
     const later = new Date(Date.now() + 10 * DAY_MS);
@@ -237,6 +312,21 @@ describe("POST /v1/admin/guests", () => {
       previousExpiresAt: user.expiresAt!.toISOString(),
       expiresAt: later.toISOString(),
       rolesAdded: [added.id],
+      change: "extended",
+    });
+    const member = await prisma.organizationMember.findFirstOrThrow({
+      where: { userId: user.id },
+    });
+    expect(
+      await prisma.auditLogEntry.findFirst({
+        where: {
+          entityId: member.id,
+          metadata: { path: ["action"], equals: "roles_changed" },
+        },
+        select: { metadata: true },
+      })
+    ).toMatchObject({
+      metadata: { roleIds: expect.arrayContaining([held.id, added.id]) },
     });
 
     // An earlier expiry keeps the later one.
@@ -314,11 +404,114 @@ describe("POST /v1/admin/guests", () => {
     expect(res.status).toBe(200);
     expect(res.body.created).toBe(false);
     expect(res.body.user.id).toBe(user.id);
-    expect(
-      await prisma.organizationMember.findMany({ where: { userId: user.id } })
-    ).toEqual([
+    const memberships = await prisma.organizationMember.findMany({
+      where: { userId: user.id },
+    });
+    expect(memberships).toEqual([
       expect.objectContaining({ organizationId: orgId, memberRole: "member" }),
     ]);
+    expect(
+      await prisma.auditLogEntry.count({
+        where: {
+          entityType: "OrganizationMember",
+          entityId: memberships[0].id,
+          action: "CREATE",
+        },
+      })
+    ).toBe(1);
+  });
+
+  it("re-invites a guest whose organization was archived", async () => {
+    const archived = await ensureTestOrganization(
+      `guests-archived-${generateUniqueId()}`
+    );
+    const { user } = await createTestGuest({ organizationId: archived });
+    await prisma.organization.update({
+      where: { id: archived },
+      data: { isActive: false, archivedAt: new Date() },
+    });
+
+    const res = await invite({ email: user.email });
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.organizationId).toBe(orgId);
+  });
+
+  describe("a guest in no organization, invited without organizations.write", () => {
+    const callerIn = async (permissions: string[]) => {
+      const userId = randomUUID();
+      const token = await getTestPrincipalToken({
+        userId,
+        organizationId: orgId,
+        permissions,
+      });
+      await prisma.organizationMember.create({
+        data: { organizationId: orgId, userId, memberRole: "member" },
+      });
+      return token;
+    };
+    const unassignedGuest = async () => {
+      const { user } = await createTestGuest({ organizationId: otherOrgId });
+      await prisma.organizationMember.deleteMany({
+        where: { userId: user.id },
+      });
+      return user;
+    };
+
+    it("is refused with guest_unassigned, joining nothing", async () => {
+      const user = await unassignedGuest();
+      const token = await callerIn(["users.guests.write", "users.read"]);
+
+      const res = await invite({ email: user.email }, token);
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("guest_unassigned");
+      expect(
+        await prisma.organizationMember.count({ where: { userId: user.id } })
+      ).toBe(0);
+    });
+
+    it("is refused as email_unavailable without users.read", async () => {
+      const user = await unassignedGuest();
+      const token = await callerIn(["users.guests.write"]);
+      const res = await invite({ email: user.email }, token);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("email_unavailable");
+    });
+  });
+
+  describe("a caller without users.read", () => {
+    let token: string;
+    beforeAll(async () => {
+      const userId = randomUUID();
+      token = await getTestPrincipalToken({
+        userId,
+        organizationId: orgId,
+        permissions: ["users.guests.write"],
+      });
+      await prisma.organizationMember.create({
+        data: { organizationId: orgId, userId, memberRole: "member" },
+      });
+    });
+
+    it.each([
+      ["a human", async () => createTestUser()],
+      [
+        "a guest in another organization",
+        async () =>
+          (await createTestGuest({ organizationId: otherOrgId })).user,
+      ],
+      ["a deactivated user", () => createTestUser({ isActive: false })],
+    ])(
+      "gets one email_unavailable for %s, without their id",
+      async (_label, make) => {
+        const user = await make();
+        const res = await invite({ email: user.email }, token);
+        expect(res.status).toBe(409);
+        expect(res.body.error).toBe("email_unavailable");
+        expect(res.body).not.toHaveProperty("userId");
+      }
+    );
   });
 
   it("refuses an inactive organization", async () => {

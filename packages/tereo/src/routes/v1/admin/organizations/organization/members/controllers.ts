@@ -3,6 +3,7 @@ import { getDefaultOrganizationId } from "../../../../../../utils/defaultOrganiz
 import { formatOrganizationMember } from "../../../../../../utils/transformers.js";
 import { requireOrgRole } from "../../../../../../utils/orgRoleAuth.js";
 import { SYSTEM_USER_ID } from "../../../../../../definitions/index.js";
+import { guestOrganizationId } from "../../../../../../utils/guests.js";
 import { emitTx, logAuditTx } from "../../../../../../utils/outbox.js";
 import { BadRequestError } from "../../../../../../utils/errors.js";
 import { validateUser } from "../../../../../../utils/auth.js";
@@ -66,9 +67,11 @@ export const addMember = async (req: Request, res: Response) => {
   const member = await db.$transaction(async (tx) => {
     // An owner or admin tier is authority a credential reset checks for.
     await db.users.lockAuthority(user.id, tx);
+    // A membership in an archived organization does not count: that guest
+    // belongs to none and may be added elsewhere.
     if (
       user.userType === UserType.guest &&
-      (await tx.organizationMember.count({ where: { userId: user.id } })) > 0
+      (await guestOrganizationId(user.id, tx)) !== null
     ) {
       throw new BadRequestError(
         "user_not_addable",
