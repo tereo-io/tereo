@@ -3,6 +3,7 @@ import { TokenResponse } from "../routes/oauth/token/controllers.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { generateAccessToken, generateIdToken } from "./tokens.js";
 import { TokenRequest } from "../routes/oauth/token/schemas.js";
+import { isUsableAccount, remainingSeconds } from "./users.js";
 import { stepUpRequired, usedMfa } from "./authorization.js";
 import { maySelectOrganization } from "./supportAccess.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
@@ -228,7 +229,7 @@ export const handleClientCredentials = async (
     };
   }
 
-  const { token } = await handleCreateTokens(
+  const { token, expiresIn } = await handleCreateTokens(
     client,
     requestedScopes,
     "client_credentials",
@@ -241,7 +242,7 @@ export const handleClientCredentials = async (
     status: "success",
     access_token: token,
     token_type: "Bearer",
-    expires_in: env.JWT_ACCESS_TOKEN_TTL,
+    expires_in: expiresIn,
     scope: requestedScopes.join(" "),
   };
 };
@@ -268,31 +269,33 @@ export const handleAuthorizationCode = async (
     nonce: code.nonce ?? undefined,
   };
 
-  const { token, refreshToken, idToken } = await db.$transaction(async (tx) => {
-    await db.users.lockForTokenIssue(code.userId, tx);
-    // Atomic, so two exchanges racing past the lock cannot both redeem it.
-    if (!(await db.authorizationCode.markUsed(code.id, tx))) {
-      throw new InvalidGrantError();
+  const { token, refreshToken, idToken, expiresIn } = await db.$transaction(
+    async (tx) => {
+      await db.users.lockForTokenIssue(code.userId, tx);
+      // Atomic, so two exchanges racing past the lock cannot both redeem it.
+      if (!(await db.authorizationCode.markUsed(code.id, tx))) {
+        throw new InvalidGrantError();
+      }
+      return handleCreateTokens(
+        client,
+        code.scopes,
+        "authorization_code",
+        code.userId,
+        code.id,
+        idTokenContext,
+        code.organizationId ?? undefined,
+        undefined,
+        undefined,
+        tx
+      );
     }
-    return handleCreateTokens(
-      client,
-      code.scopes,
-      "authorization_code",
-      code.userId,
-      code.id,
-      idTokenContext,
-      code.organizationId ?? undefined,
-      undefined,
-      undefined,
-      tx
-    );
-  });
+  );
   return {
     status: "success",
     access_token: token,
     ...(idToken && { id_token: idToken }),
     token_type: "Bearer",
-    expires_in: env.JWT_ACCESS_TOKEN_TTL,
+    expires_in: expiresIn,
     refresh_token: refreshToken,
     scope: code.scopes.join(" "),
   };
@@ -380,7 +383,7 @@ const getAuthorizationCode = async (
   const bound = verifyAuthorizationCodeBinding(body.code, client.clientId);
   if (!bound) throw new InvalidGrantError();
   if (code.clientId !== client.id) throw new InvalidGrantError();
-  if (!code.user.isActive) throw new InvalidGrantError();
+  if (!isUsableAccount(code.user)) throw new InvalidGrantError();
   if (code.usedAt) {
     await revokeFamily(code.userId, code.id, {
       clientId: client.clientId,
@@ -452,30 +455,32 @@ export const handleRefreshToken = async (
   const idTokenContext = login
     ? await loginIdTokenContext(old.user, login, scopes)
     : undefined;
-  const { token, refreshToken, idToken } = await db.$transaction(async (tx) => {
-    await db.users.lockForTokenIssue(old.userId, tx);
-    if (!(await db.refreshTokens.rotateIfActive(old.id, tx))) {
-      throw new InvalidGrantError();
+  const { token, refreshToken, idToken, expiresIn } = await db.$transaction(
+    async (tx) => {
+      await db.users.lockForTokenIssue(old.userId, tx);
+      if (!(await db.refreshTokens.rotateIfActive(old.id, tx))) {
+        throw new InvalidGrantError();
+      }
+      return handleCreateTokens(
+        client,
+        scopes,
+        "refresh_token",
+        old.userId,
+        old.authCodeId ?? undefined,
+        idTokenContext,
+        old.organizationId ?? undefined,
+        old.expiresAt,
+        grant,
+        tx
+      );
     }
-    return handleCreateTokens(
-      client,
-      scopes,
-      "refresh_token",
-      old.userId,
-      old.authCodeId ?? undefined,
-      idTokenContext,
-      old.organizationId ?? undefined,
-      old.expiresAt,
-      grant,
-      tx
-    );
-  });
+  );
   return {
     status: "success",
     access_token: token,
     ...(idToken && { id_token: idToken }),
     token_type: "Bearer",
-    expires_in: env.JWT_ACCESS_TOKEN_TTL,
+    expires_in: expiresIn,
     refresh_token: refreshToken,
     scope: scopes.join(" "),
   };
@@ -653,7 +658,7 @@ const getRefreshToken = async (
     throw new InvalidGrantError();
   }
   if (token.expiresAt < new Date()) throw new InvalidGrantError();
-  if (!token.user.isActive) throw new InvalidGrantError();
+  if (!isUsableAccount(token.user)) throw new InvalidGrantError();
   return token;
 };
 
@@ -669,6 +674,18 @@ const handleCreateTokens = async (
   refreshScopes: string[] = scopes,
   tx?: Prisma.TransactionClient
 ) => {
+  // Read again under the caller's lock: an account that expired or was
+  // deactivated since the grant was checked gets nothing.
+  const account = userId ? await db.users.get(userId, tx) : null;
+  const remaining = account ? remainingSeconds(account) : null;
+  if (account && (!isUsableAccount(account) || remaining === 0)) {
+    throw new InvalidGrantError();
+  }
+  const expiresIn = Math.min(
+    env.JWT_ACCESS_TOKEN_TTL,
+    remaining ?? env.JWT_ACCESS_TOKEN_TTL
+  );
+
   const { refreshToken, refreshTokenId } = await createRefreshToken(
     client,
     refreshScopes,
@@ -676,10 +693,12 @@ const handleCreateTokens = async (
     authCodeId,
     organizationId,
     familyExpiresAt,
+    account?.expiresAt ?? null,
     tx
   );
 
   const { token, jti, expiresAt } = generateAccessToken({
+    expiresIn,
     subject: userId ?? client.clientId,
     clientId: client.clientId,
     scopes,
@@ -731,7 +750,7 @@ const handleCreateTokens = async (
   if (refreshTokenId) {
     logTokenRefreshed(client.clientId, userId!, scopes, jti);
   }
-  return { token, refreshToken, idToken };
+  return { token, refreshToken, idToken, expiresIn };
 };
 
 const createRefreshToken = async (
@@ -741,6 +760,7 @@ const createRefreshToken = async (
   authCodeId?: string,
   organizationId?: string,
   familyExpiresAt?: Date,
+  accountExpiresAt?: Date | null,
   tx?: Prisma.TransactionClient
 ): Promise<{ refreshToken?: string; refreshTokenId?: string }> => {
   // Only for a user, and only to a client allowed to use one.
@@ -748,8 +768,13 @@ const createRefreshToken = async (
   const refreshToken = generateRefreshToken();
   // A rotated token inherits its family's expiry: JWT_REFRESH_TOKEN_TTL is an
   // absolute lifetime from the authorization-code exchange, not a sliding one.
-  const refreshExpiresAt =
+  // Never past the account's own expiry.
+  const familyEnd =
     familyExpiresAt ?? new Date(Date.now() + env.JWT_REFRESH_TOKEN_TTL * 1000);
+  const refreshExpiresAt =
+    accountExpiresAt && accountExpiresAt < familyEnd
+      ? accountExpiresAt
+      : familyEnd;
 
   const refreshTokenId = await db.refreshTokens.create(
     {

@@ -3,6 +3,7 @@ import { ForbiddenError, NotFoundError } from "../../../utils/errors.js";
 import type { ClientRecord } from "../../../utils/db/clients.js";
 import { hasPermission } from "../../../utils/permissions.js";
 import { validateBody } from "../../../utils/validateReq.js";
+import { isUsableAccount } from "../../../utils/users.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
 import {
@@ -73,7 +74,7 @@ const permissionsInClientOrg = async (
       }
       throw err;
     });
-    if (!user.isActive) return [];
+    if (!isUsableAccount(user)) return [];
     return db.roles.getUserPermissions(body.user_id);
   }
   if (body.organization_id && body.organization_id !== clientOrg) {
@@ -90,7 +91,10 @@ const permissionsInClientOrg = async (
       "The user is not a member of this client's organization"
     );
   }
-  if (!membership.user.isActive || !(await isActiveOrganization(clientOrg))) {
+  if (
+    !isUsableAccount(membership.user) ||
+    !(await isActiveOrganization(clientOrg))
+  ) {
     return [];
   }
   return db.roles.getUserPermissions(body.user_id, clientOrg);

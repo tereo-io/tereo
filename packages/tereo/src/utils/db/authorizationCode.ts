@@ -29,6 +29,7 @@ interface AuthorizationCode {
     email: string;
     passwordHash: string | null;
     isActive: boolean;
+    expiresAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
     photoObjectId: string | null;
