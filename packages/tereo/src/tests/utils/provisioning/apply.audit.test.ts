@@ -202,6 +202,7 @@ describe("applyProvisioning", () => {
         displayName: `Role ${name}`,
         orgAssignable: false,
         requires2fa: false,
+        guestAssignable: false,
         permissions,
         ...extra,
       };

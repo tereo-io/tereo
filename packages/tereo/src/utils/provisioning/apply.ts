@@ -4,6 +4,7 @@ import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
 import { broadcastBucketInvalidate } from "../cacheBroadcast.js";
 import { formatClient, formatRole } from "../transformers.js";
 import { syncProvisionedAccessTx } from "../serviceAccess.js";
+import { GUEST_DEFAULT_ROLES_KEY } from "../guestRoles.js";
 import { setRateLimitTx } from "../rateLimitOverride.js";
 import { openSigningSecret } from "../webhookSecrets.js";
 import { prisma, type Prisma } from "../db/prisma.js";
@@ -915,6 +916,7 @@ const roleFields = (spec: CustomRoleEntry) => ({
   displayName: spec.displayName,
   description: spec.description ?? null,
   requires2fa: spec.requires2fa,
+  guestAssignable: spec.guestAssignable,
 });
 
 /**
@@ -967,6 +969,7 @@ const applyRoles = async (
           displayName: spec.displayName,
           description: spec.description,
           requires2fa: spec.requires2fa,
+          guestAssignable: spec.guestAssignable,
           provisioned: true,
         },
         tx
@@ -1070,6 +1073,21 @@ const applyRoles = async (
     result.roles.push(entry);
   }
   return { permissionsChanged, statusChanged };
+};
+
+/** Stores the roles new guests get by default, as ids; an absent section stores none. */
+const applyGuests = async (tx: Tx, set: ProvisioningSet) => {
+  const names = set.documents.flatMap((d) => d.guests?.defaultRoles ?? []);
+  const roles = await tx.role.findMany({
+    where: { name: { in: names }, serviceId: null, archivedAt: null },
+    select: { id: true, name: true },
+  });
+  const idOf = new Map(roles.map((r) => [r.name, r.id]));
+  await db.settings.set(
+    GUEST_DEFAULT_ROLES_KEY,
+    names.map((n) => idOf.get(n)!),
+    tx
+  );
 };
 
 /** Where a webhook entry goes: one endpoint for all organizations, or one per listed one. */
@@ -1570,6 +1588,7 @@ export const applyProvisioning = async (
         if (content.problems.length > 0)
           throw new ProvisioningError(content.problems);
         const roleChanges = await applyRoles(tx, p, result);
+        await applyGuests(tx, set);
         for (const entry of p.integrations)
           await applyIntegration(tx, entry, state, now, result);
         const integrationProblems = await applyIntegrationsAccess(

@@ -21,6 +21,7 @@ export interface CreateRoleInput {
   displayName: string;
   description?: string;
   requires2fa?: boolean;
+  guestAssignable?: boolean;
   provisioned?: boolean;
 }
 
@@ -30,6 +31,7 @@ export interface UpdateRoleInput {
   description?: string;
   isActive?: boolean;
   requires2fa?: boolean;
+  guestAssignable?: boolean;
 }
 
 /**
@@ -177,6 +179,7 @@ export const create = async (
       displayName: data.displayName,
       description: data.description,
       requires2fa: data.requires2fa ?? false,
+      guestAssignable: data.guestAssignable ?? false,
       provisioned: data.provisioned ?? false,
     },
   });

@@ -13,6 +13,7 @@ export const CreateRoleSchema = z.object({
   displayName: z.string().min(1).max(255),
   description: z.string().max(500).optional(),
   requires2fa: z.boolean().optional().default(false),
+  guestAssignable: z.boolean().optional().default(false),
 });
 
 export const RoleIdParamSchema = z.object({
