@@ -106,6 +106,17 @@ export const formatClient = (
   return result;
 };
 
+/** Deactivation wins over expiry: a deactivated guest stays deactivated when extended. */
+export const userStatus = (
+  user: { isActive: boolean; expiresAt: Date | null },
+  now: Date = new Date()
+): "active" | "expired" | "deactivated" => {
+  if (!user.isActive) return "deactivated";
+  return user.expiresAt !== null && user.expiresAt <= now
+    ? "expired"
+    : "active";
+};
+
 export const formatUser = (user: {
   id: string;
   email: string;
@@ -113,6 +124,8 @@ export const formatUser = (user: {
   isActive: boolean;
   userType: UserType;
   passwordHash: string | null;
+  expiresAt: Date | null;
+  passwordChangeRequired: boolean;
   createdAt: Date;
   updatedAt: Date;
 }) => ({
@@ -122,6 +135,9 @@ export const formatUser = (user: {
   isActive: user.isActive,
   userType: user.userType,
   hasPassword: user.passwordHash !== null,
+  expiresAt: user.expiresAt ? user.expiresAt.toISOString() : null,
+  status: userStatus(user),
+  passwordChangeRequired: user.passwordChangeRequired,
   createdAt: user.createdAt.toISOString(),
   updatedAt: user.updatedAt.toISOString(),
 });
