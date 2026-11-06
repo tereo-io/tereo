@@ -4,7 +4,7 @@
 
 # Tereo
 
-**τηρέω** — _to keep, to watch over._
+**τηρέω** — *to keep, to watch over.*
 
 A reusable application core — OAuth2/OIDC authentication, virtual file storage, webhook delivery,
 and centralized audit logging — so any new app can start from a working foundation instead of
@@ -16,10 +16,10 @@ configuration is not.
 
 ## Packages
 
-| Package         | Description                                                                                                                                                                                                                                                                                 |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tereo`         | **The service** — auth (OAuth2/OIDC), file storage, webhook delivery and audit logging in one process, port 4001                                                                                                                                                                            |
-| `tereo-ui`      | The admin UI (Vite + React): auth admin and My Account, file storage, webhooks and the audit log, talking to core directly. Ships in core's image and is served by core at `/`; port 4000 in development                                                                                    |
+| Package | Description |
+|---------|-------------|
+| `tereo` | **The service** — auth (OAuth2/OIDC), file storage, webhook delivery and audit logging in one process, port 4001 |
+| `tereo-ui` | The admin UI (Vite + React): auth admin and My Account, file storage, webhooks and the audit log, talking to core directly. Ships in core's image and is served by core at `/`; port 4000 in development |
 | `@tereo-io/sdk` | The SDK app services use to reach core: `createCoreClient` gives `auth`, `files`, `webhooks` and `audit` over the service's one set of credentials. its types describe the service's provisioning document, and `core.outbox` writes audit entries and events in the app's own transactions |
 
 ## Getting started
@@ -91,7 +91,8 @@ npx prisma migrate deploy && npx tsx src/scripts/seed.ts
 npm run dev                                            # core on http://localhost:4001
 ```
 
-Stop the Docker `core` container first if it is running (`docker compose stop core`): both use port 4001. Local core uses the same database as the Docker stack, so an admin created in step 2 carries
+Stop the Docker `core` container first if it is running (`docker compose stop core`): both use port
+4001. Local core uses the same database as the Docker stack, so an admin created in step 2 carries
 over. On an empty database core logs its setup token in this terminal instead; complete setup as in
 step 2, at http://localhost:4000/setup once the UI is running.
 
@@ -175,13 +176,13 @@ it reads and its values; it runs migrations as a hook and refuses a configuratio
 Elsewhere, run the published image, `ghcr.io/tereo-io/tereo` (amd64 and arm64), pinned to a release such as
 `0.1.0`, with `NODE_ENV=production`, the image's default. Core refuses to start without:
 
-| Variable                    | Notes                                                                                                                             |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`, `REDIS_URL` | Postgres and Redis (or `REDIS_SENTINELS` + `REDIS_MASTER_NAME`)                                                                   |
-| `PUBLIC_URL`                | Core's public `https://` URL, not localhost. The admin UI is served at `PUBLIC_URL`, core's API under `${PUBLIC_URL}/v1`          |
-| `CORS_ALLOWED_ORIGINS`      | Browser origins allowed to call core's API with credentials; `*` and non-loopback `http://` origins are refused                   |
-| `TRUST_PROXY`               | The proxies in front of core (`1`, a CIDR list), or `false` when there are none; `true` is refused                                |
-| `CORE_KEK`                  | `openssl rand -base64 32`. Encrypts the keys core stores; keep it in a secret manager — the stored keys cannot be read without it |
+| Variable | Notes |
+|----------|-------|
+| `DATABASE_URL`, `REDIS_URL` | Postgres and Redis (or `REDIS_SENTINELS` + `REDIS_MASTER_NAME`) |
+| `PUBLIC_URL` | Core's public `https://` URL, not localhost. The admin UI is served at `PUBLIC_URL`, core's API under `${PUBLIC_URL}/v1` |
+| `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call core's API with credentials; `*` and non-loopback `http://` origins are refused |
+| `TRUST_PROXY` | The proxies in front of core (`1`, a CIDR list), or `false` when there are none; `true` is refused |
+| `CORE_KEK` | `openssl rand -base64 32`. Encrypts the keys core stores; keep it in a secret manager — the stored keys cannot be read without it |
 
 It also refuses `COOKIE_SECURE=false` and a `UI_BASE_URL` that is not `https://`. Give
 `FILE_SERVICE_STORAGE_PATH` (the image uses `/app/storage`) a persistent volume too.
@@ -210,15 +211,15 @@ Notifications (email connections, sending, delivery) are in [packages/tereo/docs
 
 ### Troubleshooting
 
-| Symptom                                                   | Fix                                                                                                                                   |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `EADDRINUSE` on 4001                                      | The Docker `core` container and `npm run dev` (or the test suite) both use 4001; stop one                                             |
-| `Port 4000 is already in use` from the UI                 | Free it, or move the dev server as in step 3                                                                                          |
-| Lost the setup token                                      | Restart core; it logs a new one while setup is pending. With `SETUP_TOKEN` set, core never logs it: use the value you set             |
-| Core exits with `Invalid provisioning`                    | It lists every problem, naming the file and the variable or entry; see [provisioning](packages/tereo/docs/provisioning.md)            |
-| UI login fails with `Invalid redirect URI`                | Core's `UI_BASE_URL` must match where the UI runs (:4000 for `npm run dev`, `:4001` for the built UI); restart core after changing it |
-| `Cannot find module '…/prisma/generated/client/index.js'` | `npx prisma generate` in `packages/tereo`                                                                                             |
-| Core exits with a configuration error                     | The message names the variable; see [configuration](packages/tereo/docs/configuration.md)                                             |
+| Symptom | Fix |
+|---------|-----|
+| `EADDRINUSE` on 4001 | The Docker `core` container and `npm run dev` (or the test suite) both use 4001; stop one |
+| `Port 4000 is already in use` from the UI | Free it, or move the dev server as in step 3 |
+| Lost the setup token | Restart core; it logs a new one while setup is pending. With `SETUP_TOKEN` set, core never logs it: use the value you set |
+| Core exits with `Invalid provisioning` | It lists every problem, naming the file and the variable or entry; see [provisioning](packages/tereo/docs/provisioning.md) |
+| UI login fails with `Invalid redirect URI` | Core's `UI_BASE_URL` must match where the UI runs (:4000 for `npm run dev`, `:4001` for the built UI); restart core after changing it |
+| `Cannot find module '…/prisma/generated/client/index.js'` | `npx prisma generate` in `packages/tereo` |
+| Core exits with a configuration error | The message names the variable; see [configuration](packages/tereo/docs/configuration.md) |
 
 ## How the UI is served
 
@@ -268,6 +269,6 @@ release (0.1 → 0.2) may change the API, the SDK or the configuration; each pac
 
 **What is not done yet**, in order:
 
-| #   | Gap                | Notes                                                                                                                                                     |
-| --- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Object storage** | Files are on local disk (`FILE_SERVICE_STORAGE_PATH`), so every core process must share one volume, and core cannot scale out, until an S3 backend exists |
+| # | Gap | Notes |
+|---|-----|-------|
+| 1 | **Object storage** | Files are on local disk (`FILE_SERVICE_STORAGE_PATH`), so every core process must share one volume, and core cannot scale out, until an S3 backend exists |

@@ -163,11 +163,7 @@ webhook subscribes to.
       "name": "support",
       "displayName": "Support",
       "orgAssignable": false,
-      "permissions": [
-        "users.read",
-        "customer.customers.read",
-        "product.items.read"
-      ]
+      "permissions": ["users.read", "customer.customers.read", "product.items.read"]
     }
   ]
 }
@@ -175,18 +171,18 @@ webhook subscribes to.
 
 A service's own document usually holds only `version` and `service`.
 
-| Field                                                 | Rule                                                                                                                                                                                                                                                                 |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `slug`, `namespace`                                   | Lowercase words joined by hyphens, max 64. `namespace` defaults to the slug without a trailing `-service`. It prefixes everything the service declares ([registry](registry.md))                                                                                     |
-| `name`                                                | Required, max 100                                                                                                                                                                                                                                                    |
-| `clientId`                                            | The service's OAuth client ID; defaults to the slug. Unique across services and login clients                                                                                                                                                                        |
-| `internalHost`                                        | Optional, max 253: the one host its own webhooks may reach at a private address ([below](#internal-webhook-targets))                                                                                                                                                 |
-| `secretFrom`                                          | Required: an environment variable's name ([Secrets](#secrets))                                                                                                                                                                                                       |
-| `rateLimitPerSecond`                                  | Optional integer 1 to 100000: the service account's requests per second, in place of its tier's default. Omitted means no override, so dropping it from the document clears it at the next apply. Audited, with `auth.user.rate-limit-changed`, only when it changes |
-| `access.roles`                                        | Requestable core roles, bare (`file_user`, `webhook_publisher`, `audit_writer`, `audit_reader`, `notification_sender`, `tenant_resolver`, `user_resolver`, `guest_inviter`), or `<slug>/<name>`, a system role another service of the set declares                   |
-| `access.audiences`                                    | Services of the set whose APIs this one may call (it can be introspected by them). Not core, not itself                                                                                                                                                              |
-| `permissions`, `systemRoles`, `buckets`, `eventTypes` | The service's declaration, with the namespacing, validation and update rules of [registry](registry.md#what-a-declaration-holds)                                                                                                                                     |
-| `webhooks`                                            | Service-owned endpoints: [Webhooks](#webhooks)                                                                                                                                                                                                                       |
+| Field | Rule |
+|-------|------|
+| `slug`, `namespace` | Lowercase words joined by hyphens, max 64. `namespace` defaults to the slug without a trailing `-service`. It prefixes everything the service declares ([registry](registry.md)) |
+| `name` | Required, max 100 |
+| `clientId` | The service's OAuth client ID; defaults to the slug. Unique across services and login clients |
+| `internalHost` | Optional, max 253: the one host its own webhooks may reach at a private address ([below](#internal-webhook-targets)) |
+| `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)) |
+| `rateLimitPerSecond` | Optional integer 1 to 100000: the service account's requests per second, in place of its tier's default. Omitted means no override, so dropping it from the document clears it at the next apply. Audited, with `auth.user.rate-limit-changed`, only when it changes |
+| `access.roles` | Requestable core roles, bare (`file_user`, `webhook_publisher`, `audit_writer`, `audit_reader`, `notification_sender`, `tenant_resolver`, `user_resolver`, `guest_inviter`), or `<slug>/<name>`, a system role another service of the set declares |
+| `access.audiences` | Services of the set whose APIs this one may call (it can be introspected by them). Not core, not itself |
+| `permissions`, `systemRoles`, `buckets`, `eventTypes` | The service's declaration, with the namespacing, validation and update rules of [registry](registry.md#what-a-declaration-holds) |
+| `webhooks` | Service-owned endpoints: [Webhooks](#webhooks) |
 
 #### Internal webhook targets
 
@@ -236,17 +232,17 @@ with the declaration's hash and its access, from `GET /v1/account/service`.
 
 Login clients, as made in the admin UI.
 
-| Field                                    | Rule                                                                                                                                                                                                                                                         |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `clientId`                               | Required, max 64                                                                                                                                                                                                                                             |
-| `name`                                   | Required, max 100                                                                                                                                                                                                                                            |
-| `clientType`                             | `public` (default) has no secret (`secretFrom` is an error); `confidential` needs it                                                                                                                                                                         |
-| `redirectUris`, `postLogoutRedirectUris` | Safe URLs: `https`, or loopback `http`                                                                                                                                                                                                                       |
-| `scopes`, `grantTypes`                   | Default grant types `authorization_code` and `refresh_token`. Scopes and audience take effect as for clients made in the admin UI ([auth](auth.md))                                                                                                          |
-| `audience`                               | Services of the set its tokens may name. Unlike a hand-made client's audience, no `services.approve` is involved: the documents are the deploy's decision                                                                                                    |
-| `consentRequired`                        | Default `true`. `false` skips consent after a login (silent `prompt=none` included), unless the request asks for a `core:*` scope not in `trustedCoreScopes`. It grants no core API access beyond the scopes                                                 |
-| `trustedCoreScopes`                      | Default `[]`. Core scopes a first-party app gets without the consent screen when `consentRequired` is `false`. Each must be a core scope listed in `scopes`; `core:admin` and `core:admin.read` are refused. Settable only here: hand-made clients have none |
-| `description`                            | Optional, max 500                                                                                                                                                                                                                                            |
+| Field | Rule |
+|-------|------|
+| `clientId` | Required, max 64 |
+| `name` | Required, max 100 |
+| `clientType` | `public` (default) has no secret (`secretFrom` is an error); `confidential` needs it |
+| `redirectUris`, `postLogoutRedirectUris` | Safe URLs: `https`, or loopback `http` |
+| `scopes`, `grantTypes` | Default grant types `authorization_code` and `refresh_token`. Scopes and audience take effect as for clients made in the admin UI ([auth](auth.md)) |
+| `audience` | Services of the set its tokens may name. Unlike a hand-made client's audience, no `services.approve` is involved: the documents are the deploy's decision |
+| `consentRequired` | Default `true`. `false` skips consent after a login (silent `prompt=none` included), unless the request asks for a `core:*` scope not in `trustedCoreScopes`. It grants no core API access beyond the scopes |
+| `trustedCoreScopes` | Default `[]`. Core scopes a first-party app gets without the consent screen when `consentRequired` is `false`. Each must be a core scope listed in `scopes`; `core:admin` and `core:admin.read` are refused. Settable only here: hand-made clients have none |
+| `description` | Optional, max 500 |
 
 ### `integrations`
 
@@ -280,15 +276,15 @@ Shown alongside `customer.json` above, whose `customer-service` it names as an a
 }
 ```
 
-| Field                | Rule                                                                                                                                                                                                                                                                                                        |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `slug`               | Required, as a service slug; shares the slug space of services (never `core` or `tereo`). It is also the integration's client ID                                                                                                                                                                            |
-| `name`               | Required, max 100                                                                                                                                                                                                                                                                                           |
-| `organizationId`     | Optional UUID. Set: **org-bound**, its tokens carry this organization. Absent: **platform**. Fixed once created; the organization must exist and not be archived. Documents do not create organizations: make it first ([order of creation](integrations.md#order-of-creation))                             |
-| `secretFrom`         | Required: an environment variable's name ([Secrets](#secrets)); rotates as a service's does                                                                                                                                                                                                                 |
-| `rateLimitPerSecond` | Optional, as a service's: its service account's override; omitted clears it                                                                                                                                                                                                                                 |
-| `roles`              | Role names it holds. Org-bound: `orgAssignable` custom roles of the set. Platform: also core's roles and `<slug>/<name>` system roles of services in the set. A bare name is the set's custom role when it declares one, else core's role, never a custom role an admin made. Never a role carrying `admin` |
-| `audiences`          | Services of the set whose APIs it may call (introspectable by them); not core, not an integration                                                                                                                                                                                                           |
+| Field | Rule |
+|-------|------|
+| `slug` | Required, as a service slug; shares the slug space of services (never `core` or `tereo`). It is also the integration's client ID |
+| `name` | Required, max 100 |
+| `organizationId` | Optional UUID. Set: **org-bound**, its tokens carry this organization. Absent: **platform**. Fixed once created; the organization must exist and not be archived. Documents do not create organizations: make it first ([order of creation](integrations.md#order-of-creation)) |
+| `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)); rotates as a service's does |
+| `rateLimitPerSecond` | Optional, as a service's: its service account's override; omitted clears it |
+| `roles` | Role names it holds. Org-bound: `orgAssignable` custom roles of the set. Platform: also core's roles and `<slug>/<name>` system roles of services in the set. A bare name is the set's custom role when it declares one, else core's role, never a custom role an admin made. Never a role carrying `admin` |
+| `audiences` | Services of the set whose APIs it may call (introspectable by them); not core, not an integration |
 
 The roles and audiences are set as the system user at apply, replaced to match the document; a
 change revokes the integration's tokens. An integration removed from the documents is marked, then
@@ -300,13 +296,13 @@ answers `409 managed_by_provisioning` to every admin write except `revoke-previo
 Custom roles composed across services, for people (assigned to users and organization members by
 admins as usual):
 
-| Field                                       | Rule                                                                                                                                                                                                                                                                                                                          |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                                      | Lowercase letters, digits, `_` and `-`; unique across the set; may not equal a system role of core or of a service. Not namespaced                                                                                                                                                                                            |
-| `displayName`, `description`, `permissions` | A permission may be core's or any service's in the set                                                                                                                                                                                                                                                                        |
-| `orgAssignable`                             | Default `false`. `true` needs every permission to be org-assignable                                                                                                                                                                                                                                                           |
-| `requires2fa`                               | Default `false`. `true`: holders must sign in with 2FA, as for a hand-made role                                                                                                                                                                                                                                               |
-| `guestAssignable`                           | Default `false`. `true` lets [guest users](auth.md#guest-users) hold the role. Needs `orgAssignable: true` and no core permission besides `file-service.objects.read` and `file-service.objects.write`. Custom roles only: a service's `systemRoles` never are. Not editable in the admin API (`409 managed_by_provisioning`) |
+| Field | Rule |
+|-------|------|
+| `name` | Lowercase letters, digits, `_` and `-`; unique across the set; may not equal a system role of core or of a service. Not namespaced |
+| `displayName`, `description`, `permissions` | A permission may be core's or any service's in the set |
+| `orgAssignable` | Default `false`. `true` needs every permission to be org-assignable |
+| `requires2fa` | Default `false`. `true`: holders must sign in with 2FA, as for a hand-made role |
+| `guestAssignable` | Default `false`. `true` lets [guest users](auth.md#guest-users) hold the role. Needs `orgAssignable: true` and no core permission besides `file-service.objects.read` and `file-service.objects.write`. Custom roles only: a service's `systemRoles` never are. Not editable in the admin API (`409 managed_by_provisioning`) |
 
 ### `guests`
 
@@ -409,14 +405,14 @@ UI declares nothing; provisioning is how a service gets a declaration.
 A service's `webhooks` give it endpoints core delivers events to, owned by the service. Each is
 created from its `key` (`<service slug>:<key>`, so reapplying is idempotent).
 
-| Field           | Rule                                                                                                                                                                   |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `key`           | Required, unique within the service                                                                                                                                    |
-| `url`           | Required; checked as under [Validation](#validation)                                                                                                                   |
-| `events`        | Required, at least one event type                                                                                                                                      |
-| `secretFrom`    | Required: signs the deliveries ([Secrets](#secrets)); webhooks of the **same** service may share a secret, those of different services may not                         |
+| Field | Rule |
+|-------|------|
+| `key` | Required, unique within the service |
+| `url` | Required; checked as under [Validation](#validation) |
+| `events` | Required, at least one event type |
+| `secretFrom` | Required: signs the deliveries ([Secrets](#secrets)); webhooks of the **same** service may share a secret, those of different services may not |
 | `organizations` | `"all"` (default): one endpoint receiving the events of every organization, present and future. Or a list of organization IDs: one endpoint per organization, same key |
-| `description`   | Optional                                                                                                                                                               |
+| `description` | Optional |
 
 - The endpoint is created by the service's account. Delivery needs not `webhooks.read` but the
   event's `readPermission` (and bucket access for `file-service.*` events) of that account, which
@@ -507,25 +503,25 @@ Marking an entry removed, and clearing the mark when it returns, sets the row's 
 (shown by the admin API) and emits the entry's update event, whose `data` carries
 `unprovisionedAt` — the time it went missing, then `null`:
 
-| Entry        | Event                                                               |
-| ------------ | ------------------------------------------------------------------- |
-| Service      | `core.service.updated`                                              |
-| Integration  | `core.integration.updated`                                          |
-| Login client | `auth.client.updated`                                               |
-| Custom role  | `auth.role.updated` (`auth.role.restored` when it returns archived) |
+| Entry | Event |
+|-------|-------|
+| Service | `core.service.updated` |
+| Integration | `core.integration.updated` |
+| Login client | `auth.client.updated` |
+| Custom role | `auth.role.updated` (`auth.role.restored` when it returns archived) |
 
 ## Managed rows
 
 Provisioned rows change only in the documents. The admin API answers `409` with code
 `managed_by_provisioning` to:
 
-| Row              | Refused                                                                                                         | Still allowed                                                                                       |
-| ---------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Service          | `PATCH /v1/admin/services/:id` (rename, deactivate), `regenerate-secret`                                        | `access/approve` and `access/revoke`; `revoke-previous-secret`, to end a rotation's overlap at once |
-| Integration      | `PATCH`, roles, audiences and `regenerate-secret` on `/v1/admin/integrations/:id`                               | Reading it; `revoke-previous-secret`                                                                |
-| Login client     | `PATCH`, `DELETE`, `regenerate-secret` on `/v1/admin/clients/:id`                                               | Reading it                                                                                          |
-| Custom role      | Edit, delete, archive, restore, and changing its permissions                                                    | Assigning it to users and organization members, and duplicating it                                  |
-| Webhook endpoint | `PATCH` (except a status-only re-enable), `DELETE`, archive, restore, `rotate-secret`, `revoke-previous-secret` | Delivery views, retries, test sends, a status-only `PATCH` to re-enable                             |
+| Row | Refused | Still allowed |
+|-----|---------|---------------|
+| Service | `PATCH /v1/admin/services/:id` (rename, deactivate), `regenerate-secret` | `access/approve` and `access/revoke`; `revoke-previous-secret`, to end a rotation's overlap at once |
+| Integration | `PATCH`, roles, audiences and `regenerate-secret` on `/v1/admin/integrations/:id` | Reading it; `revoke-previous-secret` |
+| Login client | `PATCH`, `DELETE`, `regenerate-secret` on `/v1/admin/clients/:id` | Reading it |
+| Custom role | Edit, delete, archive, restore, and changing its permissions | Assigning it to users and organization members, and duplicating it |
+| Webhook endpoint | `PATCH` (except a status-only re-enable), `DELETE`, archive, restore, `rotate-secret`, `revoke-previous-secret` | Delivery views, retries, test sends, a status-only `PATCH` to re-enable |
 
 Responses carry `provisioned: true` (an endpoint also `ownerService`), and the admin UI shows a
 "Managed by provisioning" badge and hides the change controls.
@@ -561,7 +557,7 @@ With the chart, put each document under `provisioning.documents`, a map of file 
 ```yaml
 provisioning:
   documents:
-    product: # rendered as product.json
+    product:            # rendered as product.json
       version: 1.4.0
       service:
         slug: product-service
@@ -632,3 +628,4 @@ From service registration:
    the first apply that leaves it out starts its retirement, and it is deactivated
    `REGISTRY_RETIREMENT_GRACE_HOURS` later. A service an admin created that never registered
    stays admin-managed.
+
