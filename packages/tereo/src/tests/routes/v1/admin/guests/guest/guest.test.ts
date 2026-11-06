@@ -125,17 +125,42 @@ describe("PATCH /v1/admin/guests/:id", () => {
       name: "Renamed",
       status: "active",
     });
+    const where = {
+      webhookEndpointId: endpoint.id,
+      eventType: "auth.guest.extended",
+      payload: { path: ["entityId"], equals: user.id },
+    };
     await waitFor(
-      async () =>
-        (await prisma.webhookDelivery.count({
-          where: {
-            webhookEndpointId: endpoint.id,
-            eventType: "auth.guest.extended",
-            payload: { path: ["entityId"], equals: user.id },
-          },
-        })) > 0,
+      async () => (await prisma.webhookDelivery.count({ where })) > 0,
       10_000
     );
+    const delivery = await prisma.webhookDelivery.findFirstOrThrow({ where });
+    expect(
+      (delivery.payload as { data: Record<string, unknown> }).data
+    ).toMatchObject({
+      id: user.id,
+      organizationId: orgId,
+      previousExpiresAt: user.expiresAt!.toISOString(),
+      expiresAt: later.toISOString(),
+      rolesAdded: [],
+    });
+  });
+
+  it("returns 404 not_a_guest for a guest promoted since", async () => {
+    const { user } = await createTestGuest({ organizationId: orgId });
+    const promoted = await fetchJson(
+      "POST",
+      `${BASE_URL}/v1/admin/users/${user.id}/promote`,
+      adminToken
+    );
+    expect(promoted.status).toBe(200);
+
+    const res = await patch(user.id, {
+      expiresAt: new Date(Date.now() + DAY_MS).toISOString(),
+    });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("not_a_guest");
   });
 
   it("returns 404 not_a_guest for a regular user", async () => {
@@ -182,7 +207,9 @@ describe("PATCH /v1/admin/guests/:id", () => {
   });
 
   it("extending keeps an existing refresh token usable past the old expiry", async () => {
-    const oldExpiry = new Date(Date.now() + 4000);
+    // JWT_REFRESH_TOKEN_TTL is longer than a day, so sign-in caps the
+    // refresh token at the account's expiry.
+    const oldExpiry = new Date(Date.now() + DAY_MS);
     const g = await createTestGuest({
       organizationId: orgId,
       expiresAt: oldExpiry,
@@ -193,16 +220,31 @@ describe("PATCH /v1/admin/guests/:id", () => {
     const later = new Date(Date.now() + 10 * DAY_MS);
     expect((await patch(g.user.id, { expiresAt: later })).status).toBe(200);
 
-    const [raised] = await liveRefreshExpiries(g.user.id);
-    expect(raised).toBeGreaterThan(oldExpiry.getTime());
-    expect(raised).toBeLessThanOrEqual(
-      Math.min(later.getTime(), Date.now() + env.JWT_REFRESH_TOKEN_TTL * 1000)
-    );
-
-    await new Promise((r) =>
-      setTimeout(r, oldExpiry.getTime() - Date.now() + 500)
-    );
+    expect(await liveRefreshExpiries(g.user.id)).toEqual([later.getTime()]);
+    // The rotated token keeps the raised expiry, not the old cap.
     const refreshed = await refresh(tokens.refresh_token);
     expect(refreshed.status).toBe(200);
+    expect(await liveRefreshExpiries(g.user.id)).toEqual([later.getTime()]);
+  });
+
+  it("raises a capped token no further than its family's lifetime", async () => {
+    const g = await createTestGuest({
+      organizationId: orgId,
+      expiresAt: new Date(Date.now() + DAY_MS),
+    });
+    await signIn(g);
+    const [token] = await prisma.refreshToken.findMany({
+      where: { userId: g.user.id, revokedAt: null },
+    });
+
+    await patch(g.user.id, {
+      expiresAt: new Date(
+        Date.now() + (env.JWT_REFRESH_TOKEN_TTL + 3600) * 1000
+      ).toISOString(),
+    });
+
+    expect(await liveRefreshExpiries(g.user.id)).toEqual([
+      token.createdAt.getTime() + env.JWT_REFRESH_TOKEN_TTL * 1000,
+    ]);
   });
 });

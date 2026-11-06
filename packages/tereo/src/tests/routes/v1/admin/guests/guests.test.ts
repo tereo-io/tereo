@@ -95,18 +95,24 @@ const orgRoleIds = async (userId: string) =>
     })
     .sort();
 
-const expectDelivery = (endpointId: string, eventType: string, id: string) =>
-  waitFor(
-    async () =>
-      (await prisma.webhookDelivery.count({
-        where: {
-          webhookEndpointId: endpointId,
-          eventType,
-          payload: { path: ["entityId"], equals: id },
-        },
-      })) > 0,
+/** Waits for the event's delivery and returns its `data`. */
+const expectDelivery = async (
+  endpointId: string,
+  eventType: string,
+  id: string
+) => {
+  const where = {
+    webhookEndpointId: endpointId,
+    eventType,
+    payload: { path: ["entityId"], equals: id },
+  };
+  await waitFor(
+    async () => (await prisma.webhookDelivery.count({ where })) > 0,
     10_000
   );
+  const delivery = await prisma.webhookDelivery.findFirstOrThrow({ where });
+  return (delivery.payload as { data: Record<string, unknown> }).data;
+};
 
 describe("POST /v1/admin/guests", () => {
   it("creates a guest", async () => {
@@ -222,7 +228,15 @@ describe("POST /v1/admin/guests", () => {
       where: { id: user.id },
     });
     expect(await verifyPassword(after.passwordHash!, PASSWORD)).toBe(true);
-    await expectDelivery(endpoint.id, "auth.guest.extended", user.id);
+    expect(
+      await expectDelivery(endpoint.id, "auth.guest.extended", user.id)
+    ).toMatchObject({
+      id: user.id,
+      organizationId: orgId,
+      previousExpiresAt: user.expiresAt!.toISOString(),
+      expiresAt: later.toISOString(),
+      rolesAdded: [added.id],
+    });
 
     // An earlier expiry keeps the later one.
     const earlier = await invite({ email: user.email, expiresIn: 3600 });
@@ -271,6 +285,19 @@ describe("POST /v1/admin/guests", () => {
     const res = await invite({ email: user.email });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe("guest_in_other_organization");
+  });
+
+  it("refuses an inactive organization", async () => {
+    const inactive = await ensureTestOrganization("guests-invite-inactive");
+    await prisma.organization.update({
+      where: { id: inactive },
+      data: { isActive: false },
+    });
+    const email = uniqueEmail();
+    const res = await invite({ email, organizationId: inactive });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("organization_inactive");
+    expect(await prisma.user.count({ where: { email } })).toBe(0);
   });
 
   it("human is refused with their id", async () => {

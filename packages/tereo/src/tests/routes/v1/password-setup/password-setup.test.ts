@@ -160,9 +160,12 @@ describe("password setup", () => {
       const guest = await createGuest();
       await prisma.user.update({
         where: { id: guest.id },
+        // Without the flag, so the old password signs in without the
+        // forced-change step.
         data: {
           passwordHash: (await createTestUser({ password: "OldPassword123!" }))
             .passwordHash,
+          passwordChangeRequired: false,
         },
       });
       const before = await loginAndExchange(

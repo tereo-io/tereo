@@ -1,4 +1,6 @@
 import { issuePasswordSetupLink } from "../../../../../../utils/passwordSetup.js";
+import { isUsableAccount } from "../../../../../../utils/users.js";
+import { ConflictError } from "../../../../../../utils/errors.js";
 import { validateUser } from "../../../../../../utils/auth.js";
 import { getGuest } from "../../../../../../utils/guests.js";
 import { IssuePasswordSetupLinkSchema } from "./schemas.js";
@@ -19,7 +21,14 @@ export const issueGuestPasswordSetupLink = async (
   const { notify } = validateBody(IssuePasswordSetupLinkSchema, req);
 
   const { url, expiresAt } = await db.$transaction(async (tx) => {
-    await getGuest(id, tx);
+    await db.users.lockForSignInChange(id, tx);
+    // A link for an account that cannot sign in would be refused on use.
+    if (!isUsableAccount(await getGuest(id, tx))) {
+      throw new ConflictError(
+        "This guest is deactivated or expired; extend or reactivate them first",
+        "guest_not_usable"
+      );
+    }
     return issuePasswordSetupLink(tx, {
       userId: id,
       createdBy: auth.userId,

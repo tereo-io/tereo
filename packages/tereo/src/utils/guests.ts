@@ -275,7 +275,13 @@ export const inviteGuest = async (
 
   const organizationId =
     input.organizationId ?? auth.organizationId ?? getDefaultOrganizationId();
-  await db.organizations.get(organizationId, tx);
+  const organization = await db.organizations.get(organizationId, tx);
+  if (!organization.isActive) {
+    throw new BadRequestError(
+      "organization_inactive",
+      "Guests cannot be invited to an inactive organization"
+    );
+  }
 
   const existing = await db.users.getByEmail(email, tx);
   if (existing) {
@@ -352,10 +358,16 @@ export const inviteGuest = async (
 const extendInvitedGuest = async (
   tx: Tx,
   auth: Actor,
-  existing: UserRow,
+  found: UserRow,
   organizationId: string,
   input: InviteGuestInput
 ): Promise<InviteGuestResult> => {
+  // Authority first, then the row, the order deactivation and promotion take
+  // them in. Every check below reads the row as of the lock: one read before
+  // it could let a deactivation, promotion or password set slip in between.
+  await db.users.lockAuthority(found.id, tx);
+  await db.users.lockForSignInChange(found.id, tx);
+  const existing = await db.users.get(found.id, tx);
   if (
     existing.id === SYSTEM_USER_ID ||
     existing.userType === UserType.service_account ||
@@ -381,8 +393,6 @@ const extendInvitedGuest = async (
     );
   }
 
-  // Serializes with credential resets, which check what the guest holds.
-  await db.users.lockAuthority(existing.id, tx);
   const roles = input.roles ? await resolveGuestRoles(input.roles, tx) : [];
   const { addedRoleIds, revokedJtis } = await addGuestRoles(
     tx,
@@ -435,6 +445,7 @@ const extendInvitedGuest = async (
     data: {
       ...(formatUser(user) as unknown as Record<string, unknown>),
       organizationId,
+      previousExpiresAt: previous?.toISOString() ?? null,
       rolesAdded: addedRoleIds,
     },
   });
@@ -454,6 +465,9 @@ export const updateGuest = async (
   id: string,
   body: { expiresAt: Date; name?: string }
 ): Promise<UserRow> => {
+  // Row-locked before the read, so a promotion committing first gives 404
+  // not_a_guest rather than an expiry on a regular user.
+  await db.users.lockForSignInChange(id, tx);
   const existing = await getGuest(id, tx);
   const user = await setAccountExpiry(
     tx,
@@ -484,6 +498,7 @@ export const updateGuest = async (
     data: {
       ...(formatUser(user) as unknown as Record<string, unknown>),
       organizationId,
+      previousExpiresAt: existing.expiresAt?.toISOString() ?? null,
       rolesAdded: [],
     },
   });
