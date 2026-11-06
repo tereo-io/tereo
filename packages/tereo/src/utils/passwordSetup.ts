@@ -13,16 +13,6 @@ export interface IssuedPasswordSetupLink {
 }
 
 /**
- * Whether an account may still be used: active and not past its expiry. The
- * link of one that is not is as good as unknown.
- */
-export const isAccountUsable = (
-  user: { isActive: boolean; expiresAt: Date | null },
-  now = new Date()
-): boolean =>
-  user.isActive && (user.expiresAt === null || user.expiresAt > now);
-
-/**
  * Issues a one-time link for the user to set their password, in the caller's
  * transaction, replacing any earlier link. The token is in the URL fragment,
  * so it stays out of server and proxy logs; only its hash is stored. With
