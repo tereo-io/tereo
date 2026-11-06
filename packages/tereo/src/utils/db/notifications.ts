@@ -334,12 +334,17 @@ export const rollUp = async (tx: Tx, id: string, createdAt: Date) => {
         : sent + failed === deliveries.length
           ? "partial"
           : "pending";
+  const row = await tx.notification.findFirst({
+    where: { id, createdAt },
+    select: { sensitive: true },
+  });
+  // A sensitive notification's content is a credential: it goes as soon as
+  // nothing is left to send, a failed delivery included.
+  const dropContent =
+    status === "sent" || (row?.sensitive === true && status !== "pending");
   await tx.notification.updateMany({
     where: { id, createdAt },
-    data: {
-      status,
-      ...(status === "sent" && { content: Prisma.DbNull }),
-    },
+    data: { status, ...(dropContent && { content: Prisma.DbNull }) },
   });
   return status;
 };

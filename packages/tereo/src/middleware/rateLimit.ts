@@ -180,3 +180,14 @@ export const setupFailure = createFailureLimiter({
   errorDescription: "Too many failed setup attempts. Please try again later.",
   getKey: (req) => `ip:${getIpIdentifier(req)}`,
 });
+
+// Wrong or spent password-setup tokens, per IP. A token has 256 bits, so this
+// is defence in depth and keeps the log quiet under probing.
+export const passwordSetupFailure = createFailureLimiter({
+  keyPrefix: "rl:password-setup",
+  points: 10,
+  duration: 900,
+  errorDescription:
+    "Too many failed password setup attempts. Please try again later.",
+  getKey: (req) => `ip:${getIpIdentifier(req)}`,
+});

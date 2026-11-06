@@ -1776,8 +1776,12 @@ model Notification {
   senderUserId   String              @map("sender_user_id") @db.Uuid
   organizationId String?             @map("organization_id") @db.Uuid
   recipients     Json
-  // Null once every delivery is sent.
+  // Null once every delivery is sent; for a sensitive notification, once its
+  // deliveries have all settled.
   content        Json?
+  // Content that is a credential (a password setup link): core-internal, never
+  // settable through the API; the log and detail endpoints do not return it.
+  sensitive      Boolean             @default(false)
   // A one-line description for the log, from the channel (email: the subject).
   summary        String?             @map("summary") @db.VarChar(998)
   attachments    Json
