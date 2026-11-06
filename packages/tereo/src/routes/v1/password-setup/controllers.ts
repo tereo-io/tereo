@@ -2,10 +2,10 @@ import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js"
 import { recordSessionsRevoked } from "../../../utils/sessionEvents.js";
 import { passwordSetupFailure } from "../../../middleware/rateLimit.js";
 import { hashPassword, hashFlowToken } from "../../../utils/crypto.js";
-import { isAccountUsable } from "../../../utils/passwordSetup.js";
 import { emitTx, logAuditTx } from "../../../utils/outbox.js";
 import { endUserSessions } from "../../../utils/sessions.js";
 import { validateBody } from "../../../utils/validateReq.js";
+import { isUsableAccount } from "../../../utils/users.js";
 import { NotFoundError } from "../../../utils/errors.js";
 import { SetPasswordSchema } from "./schemas.js";
 import type { Request, Response } from "express";
@@ -20,7 +20,7 @@ export const findUsableSetupToken = async (req: Request, token: string) => {
   const found = await db.passwordSetupTokens.findLiveByHash(
     hashFlowToken(token)
   );
-  if (!found || !isAccountUsable(found.user)) {
+  if (!found || !isUsableAccount(found.user)) {
     await passwordSetupFailure.recordFailure(req);
     throw new NotFoundError("Not found");
   }
@@ -50,7 +50,7 @@ export const setPassword = async (req: Request, res: Response) => {
       // shows here.
       const current = await db.users.get(user.id, tx);
       if (
-        !isAccountUsable(current) ||
+        !isUsableAccount(current) ||
         !(await db.passwordSetupTokens.consume(tokenId, tx))
       ) {
         await passwordSetupFailure.recordFailure(req);
