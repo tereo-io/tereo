@@ -18,7 +18,8 @@ export const assertOrgAssignableRoles = async (
   organizationId: string,
   roleIds: string[],
   alreadyHeld: Set<string>,
-  tx?: Prisma.TransactionClient
+  tx?: Prisma.TransactionClient,
+  targetIsGuest = false
 ) => {
   const ids = [...new Set(roleIds)];
   if (ids.length === 0) return [];
@@ -47,6 +48,20 @@ export const assertOrgAssignableRoles = async (
         .map((r) => r.name)
         .join(", ")}`
     );
+  }
+
+  if (targetIsGuest) {
+    const refused = roles.filter(
+      (r) => !alreadyHeld.has(r.id) && !r.guestAssignable
+    );
+    if (refused.length > 0) {
+      throw new BadRequestError(
+        "role_not_guest_assignable",
+        `A guest can only hold guest-assignable roles: ${refused
+          .map((r) => r.name)
+          .join(", ")}`
+      );
+    }
   }
 
   // A newly granted role may carry only org-assignable permissions, and only

@@ -17,6 +17,7 @@ import {
 } from "../../../../../../utils/errors.js";
 import {
   assertMayResetCredentials,
+  assertNotGuest,
   assertNotServiceAccount,
   assertNotSystemUser,
 } from "../guards.js";
@@ -31,6 +32,11 @@ export const createIdentityInvite = async (req: Request, res: Response) => {
 
   const user = await db.users.get(id);
   await assertNotServiceAccount(user);
+  assertNotGuest(
+    user,
+    "user_not_invitable",
+    "A guest signs in with a password and cannot be invited to an identity provider"
+  );
 
   const invite = await db.$transaction(async (tx) => {
     // An invite is a new way into the account, as a password reset is.
