@@ -196,6 +196,11 @@
       like `DELETE /v1/admin/users/{id}/sessions/all`: a caller resetting their
       own password keeps the session they act from.
 
+      Setting a `password`, changing the `email` or deactivating also retires
+      the user's live password setup link and pending forced-change grants. A
+      password set here is the admin's choice: a guest so set cannot be
+      promoted until they set their own (`409 password_not_user_set`).
+
       Setting `rateLimitPerSecond` alone is a valid update. When it changes, a
       separate audit entry (`metadata.rateLimitPerSecond` with `from` and `to`)
       and an `auth.user.rate-limit-changed` event are recorded, and no
@@ -910,6 +915,11 @@ auth.user.created:
       instance policy is `required` or a role the user holds requires 2FA,
       access tokens from a sign-in without a second factor are revoked.
 
+      `409 password_not_user_set` while the guest's password is one someone
+      else chose (an invite's `initialAccess.password` or an admin's): send them
+      a password setup link and promote once they have set their own. The
+      guest's live setup link and pending forced-change grants are retired.
+
       An audit log entry is created and `auth.guest.promoted` is emitted.
     operationId: promoteAdminUser
     security:
@@ -937,6 +947,9 @@ auth.user.created:
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: No such user, or `not_a_guest`
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: '`password_not_user_set`'
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':

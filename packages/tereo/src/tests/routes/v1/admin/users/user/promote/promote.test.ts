@@ -7,6 +7,7 @@ import { BASE_URL } from "../../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../../../support/http.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { randomUUID } from "node:crypto";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
@@ -206,5 +207,95 @@ describe("POST /v1/admin/users/:id/promote", () => {
     expect(after.expiresAt.getTime()).toBeGreaterThan(
       user.expiresAt!.getTime()
     );
+  });
+  describe("a password and links someone else chose", () => {
+    const invite = (initialAccess: Record<string, unknown>) =>
+      fetchJson("POST", `${BASE_URL}/v1/admin/guests`, adminToken, {
+        email: `promote-${randomUUID()}@example.com`,
+        organizationId: orgId,
+        expiresIn: 86_400,
+        initialAccess,
+      });
+    const tokenOf = (url: string) => new URL(url).hash.replace("#token=", "");
+    const passwordSetup = (path: string, body: object) =>
+      fetchJson("POST", `${BASE_URL}/v1/password-setup${path}`, null, body);
+
+    it.each([false, true])(
+      "refuses 409 password_not_user_set while the invite's password stands (mustChange %s)",
+      async (mustChange) => {
+        const invited = await invite({
+          type: "password",
+          password: "InvitersPassword123!",
+          mustChange,
+        });
+        expect(invited.status).toBe(201);
+        const id = invited.body.user.id;
+
+        const res = await promote(id);
+
+        expect(res.status).toBe(409);
+        expect(res.body.error).toBe("password_not_user_set");
+        const after = await prisma.user.findUniqueOrThrow({ where: { id } });
+        expect(after.userType).toBe("guest");
+      }
+    );
+
+    it("promotes once the guest has set their own password from a link", async () => {
+      const invited = await invite({
+        type: "password",
+        password: "InvitersPassword123!",
+      });
+      const id = invited.body.user.id;
+      const link = await fetchJson(
+        "POST",
+        `${BASE_URL}/v1/admin/guests/${id}/password-setup-link`,
+        adminToken
+      );
+      expect(link.status).toBe(200);
+      const set = await passwordSetup("", {
+        token: tokenOf(link.body.url),
+        password: "GuestsOwnPassword123!",
+      });
+      expect(set.status).toBe(204);
+
+      expect((await promote(id)).status).toBe(200);
+    });
+
+    it("retires the guest's setup link and pending password change grants", async () => {
+      const invited = await invite({ type: "password_setup_link" });
+      const id = invited.body.user.id;
+      const token = tokenOf(invited.body.passwordSetupUrl);
+      const client = await createTestClient();
+      await prisma.passwordChangeGrant.create({
+        data: {
+          tokenHash: `promote-grant-${id}`,
+          cookieSecretHash: `promote-cookie-${id}`,
+          userId: id,
+          clientId: client.id,
+          redirectUri: client.redirectUris[0],
+          scopes: ["openid"],
+          codeChallenge: "c",
+          codeChallengeMethod: "S256",
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+
+      expect((await promote(id)).status).toBe(200);
+
+      expect((await passwordSetup("/inspect", { token })).status).toBe(404);
+      expect(
+        (await passwordSetup("", { token, password: "TakenOver123!x" })).status
+      ).toBe(404);
+      expect(
+        await prisma.passwordSetupToken.count({
+          where: { userId: id, usedAt: null },
+        })
+      ).toBe(0);
+      expect(
+        await prisma.passwordChangeGrant.count({ where: { userId: id } })
+      ).toBe(0);
+      const after = await prisma.user.findUniqueOrThrow({ where: { id } });
+      expect(after.passwordHash).toBeNull();
+    });
   });
 });

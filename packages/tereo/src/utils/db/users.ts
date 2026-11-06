@@ -128,6 +128,8 @@ export const create = async (
       ...(data.id ? { id: data.id } : {}),
       email: data.email,
       passwordHash,
+      // A password given here is the admin's choice, not the user's.
+      passwordSetByUser: passwordHash === null,
       name: data.name,
       userType: data.userType,
     },
@@ -158,6 +160,7 @@ export const update = async (
   const updateData: {
     email?: string;
     passwordHash?: string;
+    passwordSetByUser?: boolean;
     name?: string;
     isActive?: boolean;
   } = {};
@@ -167,6 +170,7 @@ export const update = async (
   if (data.isActive !== undefined) updateData.isActive = data.isActive;
   if (data.password) {
     updateData.passwordHash = await hashPassword(data.password);
+    updateData.passwordSetByUser = false;
   }
 
   return await db.user.update({ where: { id }, data: updateData });

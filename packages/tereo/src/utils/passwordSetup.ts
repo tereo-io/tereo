@@ -7,6 +7,20 @@ import { randomBytes } from "node:crypto";
 import db from "./db/index.js";
 import env from "../env.js";
 
+/**
+ * Retires the user's live setup link and pending forced-change grants, in the
+ * caller's transaction. Called wherever control of the account changes hands
+ * (promotion, a new password or email, deactivation): a link handed to an
+ * inviter must not outlive the account it was issued for.
+ */
+export const retirePasswordLinks = async (
+  tx: Prisma.TransactionClient,
+  userId: string
+): Promise<void> => {
+  await db.passwordSetupTokens.invalidateForUser(userId, tx);
+  await db.passwordChangeGrants.deleteForUser(userId, tx);
+};
+
 export interface IssuedPasswordSetupLink {
   url: string;
   expiresAt: Date;

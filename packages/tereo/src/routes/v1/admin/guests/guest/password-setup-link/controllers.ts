@@ -1,6 +1,8 @@
 import { issuePasswordSetupLink } from "../../../../../../utils/passwordSetup.js";
+import { AppError, ConflictError } from "../../../../../../utils/errors.js";
+import { assertMayResetCredentials } from "../../../users/user/guards.js";
+import { hasPermission } from "../../../../../../utils/permissions.js";
 import { isUsableAccount } from "../../../../../../utils/users.js";
-import { ConflictError } from "../../../../../../utils/errors.js";
 import { validateUser } from "../../../../../../utils/auth.js";
 import { IssuePasswordSetupLinkSchema } from "./schemas.js";
 import db from "../../../../../../utils/db/index.js";
@@ -15,6 +17,13 @@ import {
   getGuest,
 } from "../../../../../../utils/guests.js";
 
+const guestHasPassword = () =>
+  new AppError(
+    403,
+    "guest_has_password",
+    "This guest has set a password; resetting it requires users.write and every permission they hold"
+  );
+
 export const issueGuestPasswordSetupLink = async (
   req: Request,
   res: Response
@@ -24,9 +33,25 @@ export const issueGuestPasswordSetupLink = async (
   const { notify } = validateBody(IssuePasswordSetupLinkSchema, req);
 
   const { url, expiresAt } = await db.$transaction(async (tx) => {
+    const before = await getGuest(id, tx);
+    await assertMayManageGuest(auth, id, tx);
+    // A link for a guest who has a password replaces it, and its URL comes
+    // back to the caller: a credential reset, so it needs what an admin
+    // credential reset needs. The authority lock that check takes comes
+    // before the row lock.
+    const resetsPassword = before.passwordHash !== null;
+    if (resetsPassword) {
+      if (!hasPermission(auth.permissions, "users.write")) {
+        throw guestHasPassword();
+      }
+      await assertMayResetCredentials(auth, id, tx);
+    }
     await db.users.lockForSignInChange(id, tx);
     const guest = await getGuest(id, tx);
-    await assertMayManageGuest(auth, id, tx);
+    // Set since the check above: refused as though it had been there.
+    if (guest.passwordHash !== null && !resetsPassword) {
+      throw guestHasPassword();
+    }
     // A link for an account that cannot sign in would be refused on use.
     if (!isUsableAccount(guest)) {
       throw new ConflictError(

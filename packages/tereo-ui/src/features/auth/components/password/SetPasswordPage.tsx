@@ -7,12 +7,21 @@ import { useMemo, useState } from "react";
 import { isAxiosError } from "axios";
 
 const INVALID_LINK = "This link is no longer valid";
+const TRY_AGAIN =
+  "Too many attempts or the service is busy. Try again shortly.";
+
+/** Rate limited or unavailable: the link may well still be good. */
+const isTransient = (err: unknown): boolean =>
+  isAxiosError(err) &&
+  (err.response?.status === 429 || err.response?.status === 503);
 
 /**
- * A 400 is about the password itself, so its rules are worth showing; any
- * other failure is the link's, and every miss reads the same.
+ * A 400 is about the password itself, so its rules are worth showing; a 429
+ * or 503 is worth retrying; any other failure is the link's, and every miss
+ * reads the same.
  */
 const setPasswordErrorMessage = (err: unknown): string => {
+  if (isTransient(err)) return TRY_AGAIN;
   if (!isAxiosError(err) || err.response?.status !== 400) return INVALID_LINK;
   const issues = issuesOf(err);
   return issues.length > 0
@@ -33,7 +42,13 @@ export const SetPasswordPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
-  const { data: details, isLoading, isError } = useInspectPasswordSetup(token);
+  const {
+    data: details,
+    isLoading,
+    isError,
+    error: inspectError,
+    refetch,
+  } = useInspectPasswordSetup(token);
   const { mutate, isPending } = useSetPassword();
 
   if (done) {
@@ -45,6 +60,19 @@ export const SetPasswordPage = () => {
           </Alert>
           <Button fullWidth onClick={() => navigate("/")}>
             Sign in
+          </Button>
+        </Col>
+      </AuthPage>
+    );
+  }
+
+  if (token && isError && isTransient(inspectError)) {
+    return (
+      <AuthPage title="Set your password">
+        <Col>
+          <Alert variant="warning">{TRY_AGAIN}</Alert>
+          <Button fullWidth onClick={() => void refetch()}>
+            Try again
           </Button>
         </Col>
       </AuthPage>

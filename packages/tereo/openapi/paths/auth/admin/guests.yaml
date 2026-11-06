@@ -310,6 +310,13 @@
       `409 guest_not_usable` for a guest who is deactivated or expired (extend or
       reactivate them first); the link would be refused on use.
 
+      For a guest who already has a password, the link replaces it and its URL
+      comes back to the caller, so it is a credential reset: it also needs
+      `users.write` and, as for `PATCH /admin/users/{id}`, global permissions
+      covering every permission the guest holds (`403 guest_has_password`
+      without `users.write`, `403 forbidden` naming those lacking). A guest
+      with no password keeps needing only `users.guests.write`.
+
       An audit log entry is created and `auth.user.password-setup-link-issued`
       is emitted.
     operationId: issueGuestPasswordSetupLink
@@ -343,6 +350,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: '`organization_not_permitted`, `guest_has_password`, or `forbidden` for a guest holding permissions the caller lacks'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: No such user, or `not_a_guest`

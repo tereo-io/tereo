@@ -7,12 +7,15 @@ import { BASE_URL } from "../../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../../../support/http.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import { randomUUID } from "node:crypto";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../../../../../../support/principals.js";
 import {
   createAdminUser,
+  createTestPermission,
+  createTestRole,
   createTestUser,
 } from "../../../../../../support/auth/users.js";
 
@@ -97,5 +100,97 @@ describe("password-setup-link outside the caller's organizations", () => {
     expect(
       await prisma.passwordSetupToken.count({ where: { userId: user.id } })
     ).toBe(0);
+  });
+});
+
+describe("password-setup-link for a guest who has a password", () => {
+  // A member of the guest's organization, holding `permissions` globally.
+  const memberToken = async (permissions: string[]) => {
+    const userId = randomUUID();
+    const token = await getTestPrincipalToken({ userId, permissions });
+    await prisma.organizationMember.create({
+      data: { organizationId: orgId, userId, memberRole: "member" },
+    });
+    return token;
+  };
+  const issueAs = (token: string, id: string) =>
+    fetchJson(
+      "POST",
+      `${BASE_URL}/v1/admin/guests/${id}/password-setup-link`,
+      token
+    );
+
+  it("is refused with 403 guest_has_password to users.guests.write alone", async () => {
+    const { user } = await createTestGuest({ organizationId: orgId });
+
+    const res = await issueAs(
+      await memberToken(["users.guests.write"]),
+      user.id
+    );
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("guest_has_password");
+    expect(res.body.url).toBeUndefined();
+    expect(
+      await prisma.passwordSetupToken.count({ where: { userId: user.id } })
+    ).toBe(0);
+  });
+
+  it("is issued to a caller who may reset the guest's credentials", async () => {
+    const { user } = await createTestGuest({ organizationId: orgId });
+
+    const res = await issueAs(
+      await memberToken(["users.guests.write", "users.write"]),
+      user.id
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.url).toMatch(/\/set-password#token=/);
+  });
+
+  it("is refused to users.write lacking a permission the guest holds", async () => {
+    const permission = await createTestPermission();
+    await prisma.permission.update({
+      where: { id: permission.id },
+      data: { orgAssignable: true },
+    });
+    const role = await createTestRole();
+    await prisma.role.update({
+      where: { id: role.id },
+      data: {
+        guestAssignable: true,
+        rolePermissions: { create: { permissionId: permission.id } },
+      },
+    });
+    const { user } = await createTestGuest({
+      organizationId: orgId,
+      roleIds: [role.id],
+    });
+
+    const res = await issueAs(
+      await memberToken(["users.guests.write", "users.write"]),
+      user.id
+    );
+
+    expect(res.status).toBe(403);
+    expect(
+      await prisma.passwordSetupToken.count({ where: { userId: user.id } })
+    ).toBe(0);
+  });
+
+  it("stays open to users.guests.write while the guest has no password", async () => {
+    const { user } = await createTestGuest({ organizationId: orgId });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: null },
+    });
+
+    const res = await issueAs(
+      await memberToken(["users.guests.write"]),
+      user.id
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.url).toMatch(/\/set-password#token=/);
   });
 });

@@ -3,7 +3,6 @@ import { actingOrganizationIds, canActInOrganization } from "./users.js";
 import { AppError, BadRequestError, ConflictError } from "./errors.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { revokeOrganizationGrantsTx } from "./bucketGrants.js";
-import { issuePasswordSetupLink } from "./passwordSetup.js";
 import type { AuthContext } from "../middleware/auth.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { prisma, type Prisma } from "./db/prisma.js";
@@ -18,6 +17,10 @@ import {
   OrgMemberRole,
   UserType,
 } from "../../prisma/generated/client/index.js";
+import {
+  issuePasswordSetupLink,
+  retirePasswordLinks,
+} from "./passwordSetup.js";
 import {
   getGuestDefaultRoleIds,
   guestAssignableProblemsOf,
@@ -502,6 +505,8 @@ const applyInitialAccess = async (
       data: {
         passwordHash: await hashPassword(access.password),
         passwordChangeRequired: access.mustChange,
+        // The inviter chose it: promotion waits for one the guest chooses.
+        passwordSetByUser: false,
       },
     });
     // A link from an earlier invite would replace the password just set.
@@ -895,15 +900,27 @@ const regularUserRequires2fa = async (
 /**
  * Makes a guest a regular user: same id, membership, roles, password and
  * history, with no expiry. The caller has already passed the credential-reset
- * check, which took the authority lock. Returns the access tokens revoked
- * because the user now needs 2FA.
+ * check, which took the authority lock. Refused while the password is one
+ * someone else chose (409 `password_not_user_set`): whoever chose it could
+ * sign in as the promoted account. The guest's live setup link and pending
+ * forced-change grants are retired, since their holder may be the inviter.
+ * Returns the access tokens revoked because the user now needs 2FA.
  */
 export const promoteGuest = async (
   tx: Tx,
   auth: Actor,
   id: string
 ): Promise<{ user: UserRow; revokedJtis: string[] }> => {
+  // Holds back a password set until the check below commits with the change.
+  await db.users.lockForSignInChange(id, tx);
   const existing = await getGuest(id, tx);
+  if (existing.passwordHash !== null && !existing.passwordSetByUser) {
+    throw new ConflictError(
+      "The guest's password was chosen for them; reset the user's credentials first: send them a password setup link and promote them once they have set their own",
+      "password_not_user_set"
+    );
+  }
+  await retirePasswordLinks(tx, id);
   const user = await setAccountExpiry(tx, existing, null, {
     userType: UserType.human,
   });

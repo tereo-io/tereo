@@ -86,10 +86,74 @@ export const writeStepWhilePasswordIs =
     });
 
 /**
+ * The forced password change, when the user's password must be replaced:
+ * after the second factor, so the password alone cannot replace it, and
+ * before any step that leads to a code. Provider logins have no password to
+ * change. Null when no change is due. The browser's cookie holds a secret of
+ * its own, not the grant in the URL, so a grant lifted from a URL or a log
+ * is useless outside the browser that signed in.
+ */
+export const passwordChangeStepIfDue = async (
+  res: Response,
+  {
+    user,
+    client,
+    request,
+    authMethods,
+    writeStep,
+  }: {
+    user: { id: string; passwordChangeRequired: boolean };
+    client: { id: string; clientId: string };
+    request: AuthorizeRequestParams;
+    authMethods: string[];
+    writeStep: StepWriter;
+  }
+): Promise<{ redirect_url: string } | null> => {
+  if (!user.passwordChangeRequired || !authMethods.includes("pwd")) {
+    return null;
+  }
+  const grant = generateTotpSetupGrant();
+  const cookieSecret = generateTotpSetupGrant();
+  await writeStep((tx) =>
+    db.passwordChangeGrants.create(
+      {
+        tokenHash: hashTotpSetupGrant(grant),
+        cookieSecretHash: hashTotpSetupGrant(cookieSecret),
+        userId: user.id,
+        clientId: client.id,
+        redirectUri: request.redirectUri,
+        scopes: request.scopes,
+        state: request.state,
+        codeChallenge: request.codeChallenge,
+        codeChallengeMethod: request.codeChallengeMethod,
+        nonce: request.nonce,
+        maxAge: request.maxAge,
+        acrValues: request.acrValues,
+        prompt: request.prompt,
+        firstFactor: authMethods,
+        expiresAt: new Date(Date.now() + env.TOTP_VERIFICATION_TTL * 1000),
+      },
+      tx
+    )
+  );
+
+  setPasswordChangeGrantCookie(res, cookieSecret, client.clientId);
+  clearAuthSessionCookie(res, client.clientId);
+
+  return {
+    redirect_url: uiUrl("/login/change-password", {
+      change_grant: grant,
+      ...authorizeRestartParams(request),
+    }),
+  };
+};
+
+/**
  * Everything after a first factor: the scope check, then a TOTP step if one is
- * due, then the organization and consent steps. Returns where the browser goes
- * next. Whatever the TOTP step saves carries `authMethods`, so the login it
- * finishes records the first factor too.
+ * due, then a forced password change (the TOTP step's handlers make it when
+ * that step comes first), then the organization and consent steps. Returns
+ * where the browser goes next. Whatever the TOTP step saves carries
+ * `authMethods`, so the login it finishes records the first factor too.
  */
 export const continueAfterFirstFactor = async (
   req: Request,
@@ -115,43 +179,6 @@ export const continueAfterFirstFactor = async (
         error: "invalid_scope",
         error_description: `Invalid scope(s): ${invalidScopes.join(", ")}`,
         state: request.state,
-      }),
-    };
-  }
-
-  // Before any step that leads to a code. Provider logins have no password
-  // to change.
-  if (user.passwordChangeRequired && authMethods.includes("pwd")) {
-    const grant = generateTotpSetupGrant();
-    await writeStep((tx) =>
-      db.passwordChangeGrants.create(
-        {
-          tokenHash: hashTotpSetupGrant(grant),
-          userId: user.id,
-          clientId: client.id,
-          redirectUri: request.redirectUri,
-          scopes: request.scopes,
-          state: request.state,
-          codeChallenge: request.codeChallenge,
-          codeChallengeMethod: request.codeChallengeMethod,
-          nonce: request.nonce,
-          maxAge: request.maxAge,
-          acrValues: request.acrValues,
-          prompt: request.prompt,
-          firstFactor: authMethods,
-          expiresAt: new Date(Date.now() + env.TOTP_VERIFICATION_TTL * 1000),
-        },
-        tx
-      )
-    );
-
-    setPasswordChangeGrantCookie(res, grant, client.clientId);
-    clearAuthSessionCookie(res, client.clientId);
-
-    return {
-      redirect_url: uiUrl("/login/change-password", {
-        change_grant: grant,
-        ...authorizeRestartParams(request),
       }),
     };
   }
@@ -260,6 +287,15 @@ export const continueAfterFirstFactor = async (
       };
     }
   }
+
+  const changeStep = await passwordChangeStepIfDue(res, {
+    user,
+    client,
+    request,
+    authMethods,
+    writeStep,
+  });
+  if (changeStep) return changeStep;
 
   issueKnownDevice(res, user);
 

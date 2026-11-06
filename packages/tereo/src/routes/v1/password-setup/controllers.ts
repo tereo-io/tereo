@@ -1,6 +1,7 @@
 import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js";
 import { recordSessionsRevoked } from "../../../utils/sessionEvents.js";
 import { passwordSetupFailure } from "../../../middleware/rateLimit.js";
+import { UserType } from "../../../../prisma/generated/client/index.js";
 import { hashPassword, hashFlowToken } from "../../../utils/crypto.js";
 import { emitTx, logAuditTx } from "../../../utils/outbox.js";
 import { endUserSessions } from "../../../utils/sessions.js";
@@ -12,15 +13,25 @@ import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
 
 /**
+ * Setup links are for guests: once promoted, the account is a regular user's,
+ * and a link the inviter saw must not reach it.
+ */
+const isSettable = (user: {
+  isActive: boolean;
+  expiresAt: Date | null;
+  userType: UserType;
+}) => isUsableAccount(user) && user.userType === UserType.guest;
+
+/**
  * The live token and its user, or the one 404 every miss gets: unknown, used
- * or expired token, and a user no longer usable, so a probe learns nothing.
- * A miss counts against the caller's IP.
+ * or expired token, and a user no longer usable or no longer a guest, so a
+ * probe learns nothing. A miss counts against the caller's IP.
  */
 export const findUsableSetupToken = async (req: Request, token: string) => {
   const found = await db.passwordSetupTokens.findLiveByHash(
     hashFlowToken(token)
   );
-  if (!found || !isUsableAccount(found.user)) {
+  if (!found || !isSettable(found.user)) {
     await passwordSetupFailure.recordFailure(req);
     throw new NotFoundError("Not found");
   }
@@ -46,11 +57,11 @@ export const setPassword = async (req: Request, res: Response) => {
     user.id,
     null,
     async (tx, sessionIds, ssoSessionIds) => {
-      // The user's row is locked: a deactivation or expiry since the lookup
-      // shows here.
+      // The user's row is locked: a deactivation, expiry or promotion since
+      // the lookup shows here.
       const current = await db.users.get(user.id, tx);
       if (
-        !isUsableAccount(current) ||
+        !isSettable(current) ||
         !(await db.passwordSetupTokens.consume(tokenId, tx))
       ) {
         await passwordSetupFailure.recordFailure(req);
@@ -58,7 +69,11 @@ export const setPassword = async (req: Request, res: Response) => {
       }
       await tx.user.update({
         where: { id: user.id },
-        data: { passwordHash, passwordChangeRequired: false },
+        data: {
+          passwordHash,
+          passwordChangeRequired: false,
+          passwordSetByUser: true,
+        },
       });
       await logAuditTx(tx, {
         auth: { userId: user.id, email: user.email },

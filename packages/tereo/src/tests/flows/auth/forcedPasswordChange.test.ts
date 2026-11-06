@@ -1,7 +1,9 @@
 // @module-tag int
 // @module-tag auth
+import { encryptTotpSecret, generateTotpSecret } from "../../../utils/totp.js";
 import { ensureTestOrganization } from "../../support/principals.js";
 import { createTestClient } from "../../support/auth/clients.js";
+import { generateTotpCode } from "../../support/auth/crypto.js";
 import { createTestGuest } from "../../support/auth/guests.js";
 import { createTestUser } from "../../support/auth/users.js";
 import { BASE_URL } from "../../support/auth/constants.js";
@@ -139,6 +141,91 @@ describe("forced password change at sign-in", () => {
     expect(((await replay.json()) as { error: string }).error).toBe(
       "invalid_change_grant"
     );
+  });
+
+  it("the cookie holds a secret of its own: one holding the grant is refused", async () => {
+    const client = await createTestClient();
+    const user = await flaggedUser();
+    const { jar, grant } = await toChangePassword(client, user);
+    const cookieName = [...jar.keys()].find((name) =>
+      name.includes("tereo_password_change_grant")
+    )!;
+    expect(jar.get(cookieName)).not.toBe(grant);
+
+    const forged: CookieJar = new Map(jar).set(cookieName, grant);
+    const res = await changePassword(
+      { change_grant: grant, password: NEW_PASSWORD },
+      forged
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_change_grant"
+    );
+
+    const ok = await changePassword(
+      { change_grant: grant, password: NEW_PASSWORD },
+      jar
+    );
+    expect(ok.status).toBe(204);
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+    });
+    expect(after.passwordSetByUser).toBe(true);
+  });
+
+  it("with TOTP enabled, asks for the code before the change", async () => {
+    const client = await createTestClient();
+    const user = await flaggedUser();
+    const secret = generateTotpSecret();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        totpSecret: encryptTotpSecret(secret),
+        totpEnabled: true,
+        totpEnabledAt: new Date(),
+      },
+    });
+
+    const { jar, redirectUrl } = await submitPassword(client, user);
+
+    expect(redirectUrl.pathname).toBe("/login/2fa");
+    expect(
+      await prisma.passwordChangeGrant.count({ where: { userId: user.id } })
+    ).toBe(0);
+
+    const verify = await fetch(`${BASE_URL}/oauth/totp/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader(jar),
+      },
+      body: JSON.stringify({
+        session_token: redirectUrl.searchParams.get("session"),
+        totp_code: generateTotpCode(secret),
+      }),
+    });
+    absorbCookies(jar, verify);
+    expect(verify.status).toBe(200);
+    const next = new URL(
+      ((await verify.json()) as { redirect_url: string }).redirect_url
+    );
+    expect(next.pathname).toBe("/login/change-password");
+    expect(
+      await prisma.authorizationCode.count({ where: { userId: user.id } })
+    ).toBe(0);
+    const grantRow = await prisma.passwordChangeGrant.findFirstOrThrow({
+      where: { userId: user.id },
+    });
+    expect(grantRow.firstFactor).toEqual(["pwd", "otp"]);
+
+    const res = await changePassword(
+      {
+        change_grant: next.searchParams.get("change_grant"),
+        password: NEW_PASSWORD,
+      },
+      jar
+    );
+    expect(res.status).toBe(204);
   });
 
   it("after change, authorize completes and the flag is clear", async () => {

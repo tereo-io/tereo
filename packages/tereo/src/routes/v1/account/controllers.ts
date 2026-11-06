@@ -4,6 +4,7 @@ import { BadRequestError, NotFoundError } from "../../../utils/errors.js";
 import { beginPasswordAttempt } from "../../../utils/passwordAttempts.js";
 import { hashPassword, verifyPassword } from "../../../utils/crypto.js";
 import { recordSessionsRevoked } from "../../../utils/sessionEvents.js";
+import { retirePasswordLinks } from "../../../utils/passwordSetup.js";
 import { presignUserPhotoUrl } from "../../../utils/userPhotos.js";
 import { emitTx, logAuditTx } from "../../../utils/outbox.js";
 import { validateBody } from "../../../utils/validateReq.js";
@@ -108,8 +109,10 @@ export const changePassword = async (req: Request, res: Response) => {
     async (tx, sessionIds, ssoSessionIds) => {
       await tx.user.update({
         where: { id: userId },
-        data: { passwordHash: newPasswordHash },
+        data: { passwordHash: newPasswordHash, passwordSetByUser: true },
       });
+      // A setup link issued before would replace the password just chosen.
+      await retirePasswordLinks(tx, userId);
       await logAuditTx(tx, {
         auth: actor,
         action: "UPDATE",
