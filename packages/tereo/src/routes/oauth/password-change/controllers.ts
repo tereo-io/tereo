@@ -7,6 +7,7 @@ import { emitTx, logAuditTx } from "../../../utils/outbox.js";
 import { validateBody } from "../../../utils/validateReq.js";
 import { endUserSessions } from "../../../utils/sessions.js";
 import { hashTotpSetupGrant } from "../../../utils/totp.js";
+import { isUsableAccount } from "../../../utils/users.js";
 import { PasswordChangeSchema } from "./schemas.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
@@ -49,7 +50,11 @@ export const passwordChangeHandler = async (req: Request, res: Response) => {
   }
 
   const user = await db.users.get(grant.userId);
-  if (!user.isActive || !user.passwordHash || !user.passwordChangeRequired) {
+  if (
+    !isUsableAccount(user) ||
+    !user.passwordHash ||
+    !user.passwordChangeRequired
+  ) {
     await db.passwordChangeGrants.consume(grant.id);
     clearPasswordChangeGrantCookie(res, client.clientId);
     throw invalidGrant();

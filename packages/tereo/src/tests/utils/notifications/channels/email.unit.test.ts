@@ -164,6 +164,7 @@ describe("emailAdapter", () => {
         email: "p@x.com",
         isActive: true,
         userType: "human",
+        expiresAt: null,
         ...o,
       }) as User;
 
@@ -174,6 +175,15 @@ describe("emailAdapter", () => {
       expect(emailAdapter.resolveUser(user({ isActive: false }))).toBeNull();
       expect(
         emailAdapter.resolveUser(user({ userType: "service_account" }))
+      ).toBeNull();
+    });
+    it("returns the address of a live guest, and null once it expires", () => {
+      const guest = (expiresAt: Date) => user({ userType: "guest", expiresAt });
+      expect(
+        emailAdapter.resolveUser(guest(new Date(Date.now() + 60_000)))
+      ).toBe("p@x.com");
+      expect(
+        emailAdapter.resolveUser(guest(new Date(Date.now() - 60_000)))
       ).toBeNull();
     });
   });

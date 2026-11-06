@@ -255,6 +255,23 @@ describe("POST /v1/admin/guests", () => {
     expect(res.body.user.passwordChangeRequired).toBe(true);
   });
 
+  it("password initial access voids the guest's live setup link", async () => {
+    const first = await invite({ email: uniqueEmail() });
+    expect(first.body.passwordSetupUrl).toBeDefined();
+
+    const res = await invite({
+      email: first.body.user.email,
+      initialAccess: { type: "password", password: PASSWORD },
+    });
+
+    expect(res.status).toBe(200);
+    expect(
+      await prisma.passwordSetupToken.count({
+        where: { userId: first.body.user.id, usedAt: null },
+      })
+    ).toBe(0);
+  });
+
   it("normalizes email before matching", async () => {
     const email = uniqueEmail();
     const first = await invite({ email });
@@ -285,6 +302,22 @@ describe("POST /v1/admin/guests", () => {
     const res = await invite({ email: user.email });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe("guest_in_other_organization");
+  });
+
+  it("re-invites a guest with no membership into the organization", async () => {
+    const { user } = await createTestGuest({ organizationId: otherOrgId });
+    await prisma.organizationMember.deleteMany({ where: { userId: user.id } });
+
+    const res = await invite({ email: user.email });
+
+    expect(res.status).toBe(200);
+    expect(res.body.created).toBe(false);
+    expect(res.body.user.id).toBe(user.id);
+    expect(
+      await prisma.organizationMember.findMany({ where: { userId: user.id } })
+    ).toEqual([
+      expect.objectContaining({ organizationId: orgId, memberRole: "member" }),
+    ]);
   });
 
   it("refuses an inactive organization", async () => {

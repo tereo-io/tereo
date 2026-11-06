@@ -152,7 +152,7 @@ Paths are under `/v1/admin/notifications/connections`.
   `400 invalid_request`.
 - A recipient gives exactly one of `address` and `userId`. Options are strict too: a misspelt `as`
   is refused rather than ignored, so a bcc cannot end up in `To`. A `userId` must be an active
-  person with an address for the channel.
+  person (a user or an unexpired guest, not a service account) with an address for the channel.
 - At most 50 attachments, each a version of an object in core's file storage, named by bucket,
   object id and version id. The sender must be able to read the bucket. The version is pinned, and
   its bytes are read from storage when the message is sent. `filename` defaults to the last part of

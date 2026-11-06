@@ -906,7 +906,9 @@ auth.user.created:
       as for a credential reset, global permissions covering every permission
       the user holds (`403` naming those lacking). `404 not_a_guest` for a user
       who is not a guest. Promoting restores sign-in for a guest whose time had run out (`expiresAt` is cleared). A password change still required (`passwordChangeRequired`)
-      stays set until the user changes it at a password sign-in.
+      stays set until the user changes it at a password sign-in. When the
+      instance policy is `required` or a role the user holds requires 2FA,
+      access tokens from a sign-in without a second factor are revoked.
 
       An audit log entry is created and `auth.guest.promoted` is emitted.
     operationId: promoteAdminUser

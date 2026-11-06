@@ -97,14 +97,21 @@ describe("password setup", () => {
   });
 
   describe("POST /v1/password-setup/inspect", () => {
-    it("returns email and name without consuming", async () => {
+    it("returns email, name and the link's expiry without consuming", async () => {
       const guest = await createGuest();
       const token = await issue(guest.id);
+      const { expiresAt } = await prisma.passwordSetupToken.findFirstOrThrow({
+        where: { userId: guest.id },
+      });
 
       for (let i = 0; i < 2; i++) {
         const res = await inspect(token);
         expect(res.status).toBe(HTTP_STATUS.OK);
-        expect(res.data).toEqual({ email: guest.email, name: guest.name });
+        expect(res.data).toEqual({
+          email: guest.email,
+          name: guest.name,
+          expiresAt: expiresAt.toISOString(),
+        });
       }
     });
   });

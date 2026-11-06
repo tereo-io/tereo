@@ -246,6 +246,32 @@ describe("applyProvisioning", () => {
         unprovisionedAt: null,
       });
     });
+
+    it("emits auth.role.guest-assignable-changed when the flag changes", async () => {
+      const event = "auth.role.guest-assignable-changed";
+      const endpoint = await createTestWebhookEndpoint(
+        await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+        { eventTypes: [event] }
+      );
+      const role = roleSpec(["file-service.objects.read"], {
+        orgAssignable: true,
+      });
+      await apply(rolesDoc(role));
+      const { id } = await roleRow(role.name);
+
+      await apply(rolesDoc({ ...role, guestAssignable: true }));
+      await waitForDelivered(endpoint.id, event, id, {
+        id,
+        name: role.name,
+        guestAssignable: true,
+      });
+
+      await apply(rolesDoc(role));
+      await waitForDelivered(endpoint.id, event, id, {
+        id,
+        guestAssignable: false,
+      });
+    });
   });
 
   describe("webhooks", () => {

@@ -805,7 +805,7 @@ org-scoped role assignments:
 | An identity invite for a guest                                                                                | 400 `user_not_invitable`        |
 
 **Password only.** A guest cannot sign in through an identity provider, is not matched by domain
-auto-accept (`account_exists`, as today) and cannot link a provider from the account page. All of
+auto-accept (`account_exists`, as for any user) and cannot link a provider from the account page. All of
 this lifts on promotion.
 
 ### The permission floor
@@ -840,7 +840,7 @@ Only **custom** roles (`serviceId` null) can be guest-assignable; a system role 
 keeps the flag false). A guest-assignable role must be org-assignable and carry no core permission
 besides `file-service.objects.read` and `file-service.objects.write`. `PATCH`, and adding a permission
 to a flagged role, refuse otherwise with 400 `role_not_guest_assignable`, naming the permissions at
-fault. Changing the flag emits `auth.role.guest-assignable-changed`.
+fault. Changing the flag, through the API or a document, emits `auth.role.guest-assignable-changed`.
 
 The default roles are stored in the system setting `guestDefaultRoles` (role ids), written only by
 provisioning. An invite that names no roles gets them; an id whose role has since been un-flagged or
@@ -872,7 +872,9 @@ is the usual page envelope of users, filterable by `organizationId`, `email`, `i
 `expiresAt` and `createdAt` and sortable by `id`, `email`, `createdAt` and `expiresAt`; the users
 list takes `filter[userType]=guest`. Deactivating, ending sessions and resetting a password use the
 ordinary user endpoints. After promotion the guest restrictions lift: SSO, linking and global roles
-are allowed.
+are allowed. The 2FA rules for regular users apply too: when the policy is `required` or a role the
+user holds requires 2FA, access tokens from a sign-in without a second factor are revoked, so the next
+refresh meets the step-up.
 
 **`POST /v1/admin/guests`** takes `email`, optional `name`, `organizationId` (default: the token's
 organization, else the default organization, which must be active: 400 `organization_inactive`),
@@ -883,13 +885,13 @@ in the future, no further than `GUEST_MAX_TTL_SECONDS` from now), and `initialAc
 The email is normalized, and a per-email advisory lock serializes concurrent invites. What happens
 depends on who holds the email:
 
-| Existing account                                         | Result                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| none                                                     | Creates the guest, membership and roles (the default roles when `roles` is omitted), sets up initial access: `201 { user, created: true, passwordSetupUrl? }` (`user` carries `organizationId`)                                                                                                                                                                                                                         |
-| a guest in the same organization, expired or not         | Extends: `expiresAt` becomes the later value, and refresh tokens capped at the old expiry are lifted (each to its family's start plus `JWT_REFRESH_TOKEN_TTL`, capped at the new expiry). Roles named are added, none removed; omitted `roles` adds nothing (defaults apply only on create). Name and password are untouched; `initialAccess` applies only if they never set a password: `200 { user, created: false }` |
-| a guest in another organization                          | `409 guest_in_other_organization`                                                                                                                                                                                                                                                                                                                                                                                       |
-| a human                                                  | `409 user_exists` with `userId`; the app grants that user directly                                                                                                                                                                                                                                                                                                                                                      |
-| a service account, the system user or a deactivated user | `409 user_not_invitable`                                                                                                                                                                                                                                                                                                                                                                                                |
+| Existing account                                            | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| none                                                        | Creates the guest, membership and roles (the default roles when `roles` is omitted), sets up initial access: `201 { user, created: true, passwordSetupUrl? }` (`user` carries `organizationId`)                                                                                                                                                                                                                                                                                                            |
+| a guest in the same organization or in none, expired or not | Extends (a guest in no organization first joins this one as a `member`): `expiresAt` becomes the later value, and refresh tokens capped at the old expiry are lifted (each to its family's start plus `JWT_REFRESH_TOKEN_TTL`, capped at the new expiry). Roles named are added, none removed; omitted `roles` adds nothing (defaults apply only on create). Name and password are untouched; `initialAccess` applies only if they never set a password: `200 { user, created: false, passwordSetupUrl? }` |
+| a guest in another organization                             | `409 guest_in_other_organization`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| a human                                                     | `409 user_exists` with `userId`; the app grants that user directly                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| a service account, the system user or a deactivated user    | `409 user_not_invitable`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 `notify: true` emails the link and needs a default email connection (`409 email_not_configured`);
 `passwordSetupUrl` is returned either way, so an app can deliver it itself. Each operation runs in
@@ -913,7 +915,8 @@ answers `409 content_redacted` ([notifications.md](notifications.md)).
 Both routes are public, rate limited per IP, and give one uniform `404` for an unknown, used or
 expired token or a user no longer usable (a miss counts against the caller's IP):
 
-- `POST /v1/password-setup/inspect { token }` returns `{ email, name }` and uses nothing up.
+- `POST /v1/password-setup/inspect { token }` returns `{ email, name, expiresAt }` (the link's
+  expiry) and uses nothing up.
 - `POST /v1/password-setup { token, password }` sets the password under the password rules, consumes
   the token with a conditional update (of two concurrent requests one wins), clears
   `passwordChangeRequired` and ends the user's other sessions, in one transaction; `204`. Emits

@@ -1,6 +1,8 @@
 // @module-tag int
 // @module-tag auth
+import { ensureTestOrganization } from "../../support/principals.js";
 import { createTestClient } from "../../support/auth/clients.js";
+import { createTestGuest } from "../../support/auth/guests.js";
 import { createTestUser } from "../../support/auth/users.js";
 import { BASE_URL } from "../../support/auth/constants.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -165,6 +167,39 @@ describe("forced password change at sign-in", () => {
       password: NEW_PASSWORD,
     });
     expect(login.code).toBeTruthy();
+  });
+
+  it("refuses a grant once its guest has expired", async () => {
+    const client = await createTestClient();
+    const { user, plainPassword } = await createTestGuest({
+      organizationId: await ensureTestOrganization("forced-change-guest"),
+    });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordChangeRequired: true },
+    });
+    const { jar, grant } = await toChangePassword(client, {
+      email: user.email,
+      plainPassword,
+    });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    const res = await changePassword(
+      { change_grant: grant, password: NEW_PASSWORD },
+      jar
+    );
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_change_grant"
+    );
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+    });
+    expect(after.passwordHash).toBe(user.passwordHash);
   });
 
   it("the new password must differ from the current one", async () => {

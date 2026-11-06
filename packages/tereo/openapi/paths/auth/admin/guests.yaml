@@ -14,13 +14,15 @@
 
       - **No account**: creates the guest, its membership and roles, and sets
         up `initialAccess`. `201`, `created: true`.
-      - **A guest in the same organization** (expired included, while not
-        deactivated): extends. `expiresAt` becomes the later of the current and
+      - **A guest in the same organization, or in none** (expired included,
+        while not deactivated): extends; a guest in no organization first
+        joins this one as a `member`. `expiresAt` becomes the later of the current and
         requested value, which lifts the guest's refresh sessions capped at the
         old expiry. `roles` are added (none removed; omitted adds none, the
         defaults apply only to a new guest). The name and password are left
         alone; `initialAccess` applies only if they have never set a password.
-        `200`, `created: false`.
+        `200`, `created: false`, with `passwordSetupUrl` when a link was
+        issued.
       - **A guest in another organization**: `409 guest_in_other_organization`.
       - **A human**: `409 user_exists`, with `userId`; grant that user directly.
       - **A service account, the system user or a deactivated user**:

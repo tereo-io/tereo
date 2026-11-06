@@ -145,6 +145,45 @@ describe("POST /v1/admin/users/:id/promote", () => {
     expect(res.body.error).toBe("not_a_guest");
   });
 
+  it("revokes a password-only token when the promoted user now needs 2FA", async () => {
+    // Not guest-assignable, so it demands nothing of the guest until promoted.
+    const role = await createTestRole();
+    await prisma.role.update({
+      where: { id: role.id },
+      data: { requires2fa: true },
+    });
+    const { user, plainPassword } = await createTestGuest({
+      organizationId: orgId,
+      roleIds: [role.id],
+    });
+    const guestToken = await getAccessTokenForUser(
+      { id: user.id, email: user.email, plainPassword },
+      await createTestClient()
+    );
+    const before = await fetchJson(
+      "GET",
+      `${BASE_URL}/v1/account/me`,
+      guestToken
+    );
+    expect(before.status).toBe(200);
+
+    expect((await promote(user.id)).status).toBe(200);
+
+    const after = await fetchJson(
+      "GET",
+      `${BASE_URL}/v1/account/me`,
+      guestToken
+    );
+    expect(after.status).toBe(401);
+    const entry = await prisma.auditLogEntry.findFirstOrThrow({
+      where: {
+        entityId: user.id,
+        metadata: { path: ["action"], equals: "guest_promoted" },
+      },
+    });
+    expect(entry.metadata).toMatchObject({ accessTokensRevoked: 1 });
+  });
+
   it("lifts the cap on the guest's refresh tokens", async () => {
     const { user } = await createTestGuest({ organizationId: orgId });
     const client = await prisma.oAuthClient.findFirstOrThrow({

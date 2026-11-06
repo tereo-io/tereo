@@ -5284,7 +5284,9 @@ paths:
         as for a credential reset, global permissions covering every permission
         the user holds (`403` naming those lacking). `404 not_a_guest` for a user
         who is not a guest. Promoting restores sign-in for a guest whose time had run out (`expiresAt` is cleared). A password change still required (`passwordChangeRequired`)
-        stays set until the user changes it at a password sign-in.
+        stays set until the user changes it at a password sign-in. When the
+        instance policy is `required` or a role the user holds requires 2FA,
+        access tokens from a sign-in without a second factor are revoked.
 
         An audit log entry is created and `auth.guest.promoted` is emitted.
       operationId: promoteAdminUser
@@ -5334,13 +5336,15 @@ paths:
 
         - **No account**: creates the guest, its membership and roles, and sets
           up `initialAccess`. `201`, `created: true`.
-        - **A guest in the same organization** (expired included, while not
-          deactivated): extends. `expiresAt` becomes the later of the current and
+        - **A guest in the same organization, or in none** (expired included,
+          while not deactivated): extends; a guest in no organization first
+          joins this one as a `member`. `expiresAt` becomes the later of the current and
           requested value, which lifts the guest's refresh sessions capped at the
           old expiry. `roles` are added (none removed; omitted adds none, the
           defaults apply only to a new guest). The name and password are left
           alone; `initialAccess` applies only if they have never set a password.
-          `200`, `created: false`.
+          `200`, `created: false`, with `passwordSetupUrl` when a link was
+          issued.
         - **A guest in another organization**: `409 guest_in_other_organization`.
         - **A human**: `409 user_exists`, with `userId`; grant that user directly.
         - **A service account, the system user or a deactivated user**:
@@ -5613,8 +5617,9 @@ paths:
         - Password Setup
       summary: Inspect a password setup link
       description: |
-        Who a setup link is for, so the page can greet them. Public: the token
-        from the link's URL fragment is the credential. Uses nothing up. Every
+        Who a setup link is for and when it expires, so the page can greet
+        them. Public: the token from the link's URL fragment is the credential.
+        Uses nothing up. Every
         miss, whether the token is unknown, used or expired, or its user is no
         longer usable, is the same `404`, and counts against the caller's IP
         (`429` past the limit, `503` when the limiter cannot reach Redis).
@@ -5628,7 +5633,7 @@ paths:
               $ref: '#/components/schemas/PasswordSetupInspectRequest'
       responses:
         '200':
-          description: The link's user
+          description: The link's user and expiry
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
@@ -22067,7 +22072,7 @@ components:
         `unknown_connection` (no connection with that slug on the channel), `invalid_content` (the
         content, a recipient's address or options, an attachment's filename, or no `to`),
         `too_many_recipients`, `sender_not_allowed` (`from` or `replyTo` is not an allowed sender of
-        the connection), `unknown_user`, `inactive_user` (deactivated, or not a person),
+        the connection), `unknown_user`, `inactive_user` (deactivated, an expired guest, or not a person),
         `unknown_organization`, `attachment_not_found` (the version is not one of the object's, or
         is a delete marker), `attachments_too_large`.
       headers:
@@ -30075,6 +30080,7 @@ components:
       required:
         - email
         - name
+        - expiresAt
       properties:
         email:
           type: string
@@ -30083,6 +30089,10 @@ components:
           type:
             - string
             - 'null'
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the link expires.
     PasswordSetupRequest:
       type: object
       required:

@@ -1059,6 +1059,19 @@ const applyRoles = async (
       entityId: role.id,
       data: formatRole(role) as Record<string, unknown>,
     });
+    if (role.guestAssignable !== existing.guestAssignable) {
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.role.guest-assignable-changed",
+        entityType: "Role",
+        entityId: role.id,
+        data: {
+          id: role.id,
+          name: role.name,
+          guestAssignable: role.guestAssignable,
+        },
+      });
+    }
     if (permissionsDiffer) {
       await emitTx(tx, {
         organizationId: getDefaultOrganizationId(),

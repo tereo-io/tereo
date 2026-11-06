@@ -7,6 +7,7 @@ import type { AuthContext } from "../../middleware/auth.js";
 import { CHANNELS, getAdapter } from "./channels/index.js";
 import { toConnectionView } from "./connections.js";
 import { hasNul, pgText } from "../pgInput.js";
+import { isUsableAccount } from "../users.js";
 import type { Prisma } from "../db/prisma.js";
 import { prisma } from "../db/prisma.js";
 import db from "../db/index.js";
@@ -174,7 +175,9 @@ const resolveRecipients = async (
       `No user with id: ${missing.join(", ")}`
     );
   }
-  const inactive = users.filter((u) => !u.isActive || u.userType !== "human");
+  const inactive = users.filter(
+    (u) => !isUsableAccount(u) || u.userType === "service_account"
+  );
   if (inactive.length > 0) {
     throw new BadRequestError(
       "inactive_user",

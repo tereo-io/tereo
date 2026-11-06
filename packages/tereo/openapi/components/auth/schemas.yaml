@@ -3898,13 +3898,17 @@ PasswordSetupInspectRequest:
 
 PasswordSetupInspectResponse:
   type: object
-  required: [email, name]
+  required: [email, name, expiresAt]
   properties:
     email:
       type: string
       format: email
     name:
       type: [string, 'null']
+    expiresAt:
+      type: string
+      format: date-time
+      description: When the link expires.
 
 PasswordSetupRequest:
   type: object

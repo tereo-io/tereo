@@ -241,6 +241,8 @@ const applyInitialAccess = async (
         passwordChangeRequired: access.mustChange,
       },
     });
+    // A link from an earlier invite would replace the password just set.
+    await db.passwordSetupTokens.invalidateForUser(user.id, tx);
     return { user: updated };
   }
   const { url } = await issuePasswordSetupLink(tx, {
@@ -386,10 +388,20 @@ const extendInvitedGuest = async (
       { details: { userId: existing.id } }
     );
   }
-  if ((await guestOrganizationId(existing.id, tx)) !== organizationId) {
+  const memberOf = await guestOrganizationId(existing.id, tx);
+  if (memberOf !== null && memberOf !== organizationId) {
     throw new ConflictError(
       "This guest belongs to another organization",
       "guest_in_other_organization"
+    );
+  }
+  // A guest left with no organization joins the one inviting them.
+  if (memberOf === null) {
+    await db.organizations.addMember(
+      organizationId,
+      existing.id,
+      OrgMemberRole.member,
+      tx
     );
   }
 
@@ -431,6 +443,7 @@ const extendInvitedGuest = async (
       previousExpiresAt: previous?.toISOString() ?? null,
       expiresAt: expiresAt.toISOString(),
       rolesAdded: addedRoleIds,
+      ...(memberOf === null && { membershipAdded: true }),
       ...(passwordSetupUrl !== undefined && { passwordSetupLinkIssued: true }),
       ...(revokedJtis.length > 0 && {
         accessTokensRevoked: revokedJtis.length,
@@ -506,19 +519,47 @@ export const updateGuest = async (
 };
 
 /**
+ * Whether, once a regular user, `userId` must use 2FA: the instance policy
+ * is `required`, or a live assignment of theirs is of a role requiring it.
+ */
+const regularUserRequires2fa = async (
+  tx: Tx,
+  userId: string
+): Promise<boolean> => {
+  const policy = await db.settings.getTotpPolicy();
+  if (policy === "disabled") return false;
+  if (policy === "required") return true;
+  const required = await tx.userRole.count({
+    where: {
+      AND: [
+        db.roles.liveAssignmentsWhere(userId, "memberships"),
+        { role: { requires2fa: true } },
+      ],
+    },
+  });
+  return required > 0;
+};
+
+/**
  * Makes a guest a regular user: same id, membership, roles, password and
  * history, with no expiry. The caller has already passed the credential-reset
- * check, which took the authority lock.
+ * check, which took the authority lock. Returns the access tokens revoked
+ * because the user now needs 2FA.
  */
 export const promoteGuest = async (
   tx: Tx,
   auth: Actor,
   id: string
-): Promise<UserRow> => {
+): Promise<{ user: UserRow; revokedJtis: string[] }> => {
   const existing = await getGuest(id, tx);
   const user = await setAccountExpiry(tx, existing, null, {
     userType: UserType.human,
   });
+  // The policy and roles that skipped the guest now apply: a token from a
+  // password-only login is revoked, so its refresh meets the step-up.
+  const revokedJtis = (await regularUserRequires2fa(tx, id))
+    ? await db.accessTokens.revokeWithoutMfa({ id }, tx)
+    : [];
   const organizationId = await guestOrganizationId(id, tx);
   await logAuditTx(tx, {
     auth,
@@ -530,6 +571,9 @@ export const promoteGuest = async (
     metadata: {
       action: "guest_promoted",
       previousExpiresAt: existing.expiresAt?.toISOString() ?? null,
+      ...(revokedJtis.length > 0 && {
+        accessTokensRevoked: revokedJtis.length,
+      }),
     },
   });
   await emitTx(tx, {
@@ -542,5 +586,5 @@ export const promoteGuest = async (
       organizationId,
     },
   });
-  return user;
+  return { user, revokedJtis };
 };
