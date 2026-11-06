@@ -3780,7 +3780,8 @@ GuestInitialAccess:
 
 InviteGuestRequest:
   type: object
-  required: [email]
+  required: [email, initialAccess]
+  description: Give exactly one of `expiresAt` and `expiresIn`.
   properties:
     email:
       type: string
@@ -3790,32 +3791,49 @@ InviteGuestRequest:
     name:
       type: string
       maxLength: 100
+      description: Used when the guest is created; an existing guest's name is left alone.
     organizationId:
       type: string
       format: uuid
-      description: The guest's one organization. Default is the token's organization, else the default organization.
+      description: The guest's one organization. Default is the token's organization, else the default organization. It must be active (`400 organization_inactive`).
     roles:
       type: array
+      maxItems: 100
       items:
         type: string
-      description: Guest-assignable custom roles, by name or id. Default is the provisioned `guests.defaultRoles` (a stale one is skipped). With neither, the guest has no roles.
+      description: |
+        Guest-assignable custom roles, by name or id (`400 unknown_role`,
+        `400 role_not_guest_assignable`). When omitted, a new guest gets the
+        provisioned `guests.defaultRoles` (a stale one is skipped); an existing
+        guest being extended gets none added.
     expiresAt:
       type: string
       format: date-time
-      description: When access ends. Give this or `expiresIn`; no further ahead than `GUEST_MAX_TTL_SECONDS` (90 days by default).
+      description: When access ends. Must be in the future and no further ahead than `GUEST_MAX_TTL_SECONDS` (90 days by default).
     expiresIn:
       type: integer
       minimum: 1
-      description: Seconds from now until access ends.
+      description: Seconds from now until access ends; same limits as `expiresAt`.
     initialAccess:
       $ref: '#/GuestInitialAccess'
+
+GuestUser:
+  description: A guest as the admin API returns it, with the organization they belong to.
+  allOf:
+    - $ref: '#/AdminUser'
+    - type: object
+      required: [organizationId]
+      properties:
+        organizationId:
+          type: [string, 'null']
+          format: uuid
 
 InviteGuestResponse:
   type: object
   required: [user, created]
   properties:
     user:
-      $ref: '#/AdminUser'
+      $ref: '#/GuestUser'
     created:
       type: boolean
       description: '`true` for a new guest (201); `false` when an existing guest of the same organization was extended (200).'
@@ -3823,13 +3841,6 @@ InviteGuestResponse:
       type: string
       format: uri
       description: The one-time link (`/set-password#token=…`), present when a link was issued. Shown once; only its hash is stored.
-
-GuestResponse:
-  type: object
-  required: [user]
-  properties:
-    user:
-      $ref: '#/AdminUser'
 
 PaginatedGuestsResponse:
   type: object
@@ -3848,11 +3859,12 @@ PaginatedGuestsResponse:
 
 UpdateGuestRequest:
   type: object
+  required: [expiresAt]
   properties:
     expiresAt:
       type: string
       format: date-time
-      description: Extends or shortens; a time in the past ends access now. No further ahead than `GUEST_MAX_TTL_SECONDS`.
+      description: Extends or shortens; a time in the past ends access now. No further ahead than `GUEST_MAX_TTL_SECONDS` from now.
     name:
       type: string
       maxLength: 100
@@ -3866,11 +3878,12 @@ IssuePasswordSetupLinkRequest:
 
 PasswordSetupLinkResponse:
   type: object
-  required: [passwordSetupUrl, expiresAt]
+  required: [url, expiresAt]
   properties:
-    passwordSetupUrl:
+    url:
       type: string
       format: uri
+      description: The one-time link (`/set-password#token=…`).
     expiresAt:
       type: string
       format: date-time

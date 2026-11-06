@@ -5283,7 +5283,7 @@ paths:
         linking and global roles are allowed afterwards. Needs `users.write` and,
         as for a credential reset, global permissions covering every permission
         the user holds (`403` naming those lacking). `404 not_a_guest` for a user
-        who is not a guest. A password change still required (`passwordChangeRequired`)
+        who is not a guest. Promoting restores sign-in for a guest whose time had run out (`expiresAt` is cleared). A password change still required (`passwordChangeRequired`)
         stays set until the user changes it at a password sign-in.
 
         An audit log entry is created and `auth.guest.promoted` is emitted.
@@ -5334,20 +5334,25 @@ paths:
 
         - **No account**: creates the guest, its membership and roles, and sets
           up `initialAccess`. `201`, `created: true`.
-        - **A guest in the same organization**: extends. `expiresAt` becomes the
-          later of the current and requested value, roles are added (none removed)
-          and the password is left alone; `initialAccess` applies only if they have
-          never set a password. `200`, `created: false`.
+        - **A guest in the same organization** (expired included, while not
+          deactivated): extends. `expiresAt` becomes the later of the current and
+          requested value, which lifts the guest's refresh sessions capped at the
+          old expiry. `roles` are added (none removed; omitted adds none, the
+          defaults apply only to a new guest). The name and password are left
+          alone; `initialAccess` applies only if they have never set a password.
+          `200`, `created: false`.
         - **A guest in another organization**: `409 guest_in_other_organization`.
         - **A human**: `409 user_exists`, with `userId`; grant that user directly.
-        - **A service account or a deactivated user**: `409 user_not_invitable`.
+        - **A service account, the system user or a deactivated user**:
+          `409 user_not_invitable`.
 
         `initialAccess` is a password-setup link (`notify: true` emails it and needs
         a default email connection: `409 email_not_configured`; the link is returned
         as `passwordSetupUrl` either way) or a password, which the guest must change
         at first sign-in unless `mustChange` is false.
 
-        An audit log entry is created. `auth.guest.invited` (new) or
+        The organization must be active (`400 organization_inactive`). An audit log
+        entry is created. `auth.guest.invited` (new) or
         `auth.guest.extended` (old and new `expiresAt`, roles added) is emitted, and
         `auth.user.password-setup-link-issued` when a link is issued.
       operationId: inviteGuest
@@ -5389,13 +5394,14 @@ paths:
                 $ref: '#/components/schemas/InviteGuestResponse'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
+          description: Invalid body, `organization_inactive`, `unknown_role`, `role_not_guest_assignable`, or an expiry out of range
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
           $ref: '#/components/responses/NotFoundResponse'
-          description: The organization or a named role does not exist
+          description: The organization does not exist
         '409':
           $ref: '#/components/responses/ConflictResponse'
           description: '`guest_in_other_organization`, `user_exists` (with `userId`), `user_not_invitable`, or `email_not_configured`'
@@ -5409,9 +5415,13 @@ paths:
       summary: List guests
       description: |
         Guests with their `expiresAt` and `status` (`active`, `expired`,
-        `deactivated`). Needs `users.guests.read`. The same users are listed, with
-        the usual filters, by `GET /v1/admin/users?filter[userType]=guest`
-        (`users.read`).
+        `deactivated`). Needs `users.guests.read`.
+
+        **Filter fields and operators:** `organizationId` (`equals`), `email`
+        (`contains`, `equals`), `isActive` (`equals`), `expiresAt` and `createdAt`
+        (range: `filter[expiresAt_gte]`, `filter[expiresAt_lte]`). **Sort fields:**
+        `id` (default), `email`, `createdAt`, `expiresAt`. The same users are
+        listed by `GET /v1/admin/users?filter[userType]=guest` (`users.read`).
       operationId: getAdminGuests
       security:
         - BearerAuth:
@@ -5419,7 +5429,10 @@ paths:
       parameters:
         - $ref: '#/components/parameters/LimitParam'
         - $ref: '#/components/parameters/CursorParam'
+        - $ref: '#/components/parameters/SortParam'
         - $ref: '#/components/parameters/SortDirParam'
+        - $ref: '#/components/parameters/FilterValueParam'
+        - $ref: '#/components/parameters/FilterOperatorParam'
       responses:
         '200':
           description: Paginated list of guests
@@ -5436,6 +5449,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedGuestsResponse'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
+          description: Invalid body, `organization_inactive`, `unknown_role`, `role_not_guest_assignable`, or an expiry out of range
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
@@ -5469,7 +5483,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GuestResponse'
+                $ref: '#/components/schemas/GuestUser'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -5488,8 +5502,10 @@ paths:
         - Admin - Guests
       summary: Extend or shorten a guest
       description: |
-        Sets `expiresAt` (and optionally `name`). A time in the past ends access
-        now; extending a guest lifts their live refresh sessions. Needs
+        Sets `expiresAt` (required) and optionally `name`. A time in the past ends
+        access now. Extending lifts the guest's refresh tokens that were capped at
+        the old expiry: each runs to its family's start plus the refresh lifetime,
+        still capped at the new expiry. Needs
         `users.guests.write`. `404 not_a_guest` for a user who is not a guest.
 
         An audit log entry is created and `auth.guest.extended` is emitted.
@@ -5518,7 +5534,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GuestResponse'
+                $ref: '#/components/schemas/GuestUser'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -5544,6 +5560,8 @@ paths:
         emailed (`409 email_not_configured` without a default email connection). The
         email is a sensitive notification: its content is redacted from the
         notification log. Needs `users.guests.write`.
+        `409 guest_not_usable` for a guest who is deactivated or expired (extend or
+        reactivate them first); the link would be refused on use.
 
         An audit log entry is created and `auth.user.password-setup-link-issued`
         is emitted.
@@ -5584,7 +5602,7 @@ paths:
           description: No such user, or `not_a_guest`
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: '`email_not_configured`, or `user_not_invitable`'
+          description: '`email_not_configured`, or `guest_not_usable`'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -16952,7 +16970,7 @@ webhooks:
       tags:
         - Admin - Guests
       summary: Guest invited
-      description: Fired when `POST /v1/admin/guests` creates a guest.
+      description: Fired when `POST /v1/admin/guests` creates a guest. `data` is the user plus `organizationId` and `roleIds`, the roles assigned.
       operationId: webhookGuestInvited
       security: []
       parameters:
@@ -16971,23 +16989,25 @@ webhooks:
                   properties:
                     eventType:
                       const: auth.guest.invited
+                    entityType:
+                      const: User
                     data:
-                      type: object
-                      required:
-                        - userId
-                        - email
-                      properties:
-                        userId:
-                          type: string
-                          format: uuid
-                        email:
-                          type: string
-                        organizationId:
-                          type: string
-                          format: uuid
-                        expiresAt:
-                          type: string
-                          format: date-time
+                      allOf:
+                        - $ref: '#/components/schemas/User'
+                        - type: object
+                          required:
+                            - organizationId
+                          properties:
+                            organizationId:
+                              type:
+                                - string
+                                - 'null'
+                              format: uuid
+                            roleIds:
+                              type: array
+                              items:
+                                type: string
+                                format: uuid
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -16996,7 +17016,7 @@ webhooks:
       tags:
         - Admin - Guests
       summary: Guest extended
-      description: Fired when a guest's expiry changes, or guest-assignable roles are added by a repeat invite. `data` carries the old and new `expiresAt` and the roles added.
+      description: 'Fired when a guest''s expiry changes or roles are added: by a repeat invite or `PATCH /v1/admin/guests/{id}`. `data` is the user after the change plus `organizationId`, `previousExpiresAt` and `rolesAdded` (role ids; empty for a PATCH).'
       operationId: webhookGuestExtended
       security: []
       parameters:
@@ -17015,27 +17035,30 @@ webhooks:
                   properties:
                     eventType:
                       const: auth.guest.extended
+                    entityType:
+                      const: User
                     data:
-                      type: object
-                      required:
-                        - userId
-                        - email
-                      properties:
-                        userId:
-                          type: string
-                          format: uuid
-                        email:
-                          type: string
-                        previousExpiresAt:
-                          type: string
-                          format: date-time
-                        expiresAt:
-                          type: string
-                          format: date-time
-                        rolesAdded:
-                          type: array
-                          items:
-                            type: string
+                      allOf:
+                        - $ref: '#/components/schemas/User'
+                        - type: object
+                          required:
+                            - organizationId
+                          properties:
+                            organizationId:
+                              type:
+                                - string
+                                - 'null'
+                              format: uuid
+                            previousExpiresAt:
+                              type:
+                                - string
+                                - 'null'
+                              format: date-time
+                            rolesAdded:
+                              type: array
+                              items:
+                                type: string
+                                format: uuid
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -17044,7 +17067,7 @@ webhooks:
       tags:
         - Admin - Guests
       summary: Guest promoted
-      description: Fired when `POST /v1/admin/users/{id}/promote` makes a guest a permanent user.
+      description: Fired when `POST /v1/admin/users/{id}/promote` makes a guest a permanent user. `data` is the user after promotion plus `organizationId`.
       operationId: webhookGuestPromoted
       security: []
       parameters:
@@ -17063,17 +17086,20 @@ webhooks:
                   properties:
                     eventType:
                       const: auth.guest.promoted
+                    entityType:
+                      const: User
                     data:
-                      type: object
-                      required:
-                        - userId
-                        - email
-                      properties:
-                        userId:
-                          type: string
-                          format: uuid
-                        email:
-                          type: string
+                      allOf:
+                        - $ref: '#/components/schemas/User'
+                        - type: object
+                          required:
+                            - organizationId
+                          properties:
+                            organizationId:
+                              type:
+                                - string
+                                - 'null'
+                              format: uuid
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -29941,6 +29967,8 @@ components:
       type: object
       required:
         - email
+        - initialAccess
+      description: Give exactly one of `expiresAt` and `expiresIn`.
       properties:
         email:
           type: string
@@ -29950,25 +29978,44 @@ components:
         name:
           type: string
           maxLength: 100
+          description: Used when the guest is created; an existing guest's name is left alone.
         organizationId:
           type: string
           format: uuid
-          description: The guest's one organization. Default is the token's organization, else the default organization.
+          description: The guest's one organization. Default is the token's organization, else the default organization. It must be active (`400 organization_inactive`).
         roles:
           type: array
+          maxItems: 100
           items:
             type: string
-          description: Guest-assignable custom roles, by name or id. Default is the provisioned `guests.defaultRoles` (a stale one is skipped). With neither, the guest has no roles.
+          description: |
+            Guest-assignable custom roles, by name or id (`400 unknown_role`,
+            `400 role_not_guest_assignable`). When omitted, a new guest gets the
+            provisioned `guests.defaultRoles` (a stale one is skipped); an existing
+            guest being extended gets none added.
         expiresAt:
           type: string
           format: date-time
-          description: When access ends. Give this or `expiresIn`; no further ahead than `GUEST_MAX_TTL_SECONDS` (90 days by default).
+          description: When access ends. Must be in the future and no further ahead than `GUEST_MAX_TTL_SECONDS` (90 days by default).
         expiresIn:
           type: integer
           minimum: 1
-          description: Seconds from now until access ends.
+          description: Seconds from now until access ends; same limits as `expiresAt`.
         initialAccess:
           $ref: '#/components/schemas/GuestInitialAccess'
+    GuestUser:
+      description: A guest as the admin API returns it, with the organization they belong to.
+      allOf:
+        - $ref: '#/components/schemas/AdminUser'
+        - type: object
+          required:
+            - organizationId
+          properties:
+            organizationId:
+              type:
+                - string
+                - 'null'
+              format: uuid
     InviteGuestResponse:
       type: object
       required:
@@ -29976,7 +30023,7 @@ components:
         - created
       properties:
         user:
-          $ref: '#/components/schemas/AdminUser'
+          $ref: '#/components/schemas/GuestUser'
         created:
           type: boolean
           description: '`true` for a new guest (201); `false` when an existing guest of the same organization was extended (200).'
@@ -29984,20 +30031,15 @@ components:
           type: string
           format: uri
           description: The one-time link (`/set-password#token=…`), present when a link was issued. Shown once; only its hash is stored.
-    GuestResponse:
-      type: object
-      required:
-        - user
-      properties:
-        user:
-          $ref: '#/components/schemas/AdminUser'
     UpdateGuestRequest:
       type: object
+      required:
+        - expiresAt
       properties:
         expiresAt:
           type: string
           format: date-time
-          description: Extends or shortens; a time in the past ends access now. No further ahead than `GUEST_MAX_TTL_SECONDS`.
+          description: Extends or shortens; a time in the past ends access now. No further ahead than `GUEST_MAX_TTL_SECONDS` from now.
         name:
           type: string
           maxLength: 100
@@ -30010,12 +30052,13 @@ components:
     PasswordSetupLinkResponse:
       type: object
       required:
-        - passwordSetupUrl
+        - url
         - expiresAt
       properties:
-        passwordSetupUrl:
+        url:
           type: string
           format: uri
+          description: The one-time link (`/set-password#token=…`).
         expiresAt:
           type: string
           format: date-time

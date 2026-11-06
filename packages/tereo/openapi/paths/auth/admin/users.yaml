@@ -905,7 +905,7 @@ auth.user.created:
       linking and global roles are allowed afterwards. Needs `users.write` and,
       as for a credential reset, global permissions covering every permission
       the user holds (`403` naming those lacking). `404 not_a_guest` for a user
-      who is not a guest. A password change still required (`passwordChangeRequired`)
+      who is not a guest. Promoting restores sign-in for a guest whose time had run out (`expiresAt` is cleared). A password change still required (`passwordChangeRequired`)
       stays set until the user changes it at a password sign-in.
 
       An audit log entry is created and `auth.guest.promoted` is emitted.

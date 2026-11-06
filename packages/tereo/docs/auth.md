@@ -857,39 +857,45 @@ the guest endpoints: flagging the role was the grant decision and `users.guests.
 apply it (a service account does not hold its own service's permissions). The ordinary role
 endpoints follow the normal rule.
 
-| Route                                                       | Permission                                                          | Does                                                                                             |
-| ----------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `POST /v1/admin/guests`                                     | `users.guests.write`                                                | Invite (below)                                                                                   |
-| `GET /v1/admin/guests`                                      | `users.guests.read`                                                 | List guests (also `GET /v1/admin/users?filter[userType]=guest`, `users.read`)                    |
-| `GET /v1/admin/guests/:id`                                  | `users.guests.read`                                                 | One guest; `404 not_a_guest` for a non-guest                                                     |
-| `PATCH /v1/admin/guests/:id { expiresAt, name? }`           | `users.guests.write`                                                | Extend or shorten; a time in the past ends access now. `404 not_a_guest`                         |
-| `POST /v1/admin/guests/:id/password-setup-link { notify? }` | `users.guests.write`                                                | Issue a fresh link; earlier ones die                                                             |
-| `POST /v1/admin/users/:id/promote`                          | `users.write` plus the "holds every permission the user holds" rule | `userType = human`, `expiresAt = null`; id, membership, roles, password, grants and history kept |
+| Route                                                       | Permission                                                          | Does                                                                                                                                                   |
+| ----------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /v1/admin/guests`                                     | `users.guests.write`                                                | Invite (below)                                                                                                                                         |
+| `GET /v1/admin/guests`                                      | `users.guests.read`                                                 | List guests (also `GET /v1/admin/users?filter[userType]=guest`, `users.read`)                                                                          |
+| `GET /v1/admin/guests/:id`                                  | `users.guests.read`                                                 | One guest (the user plus `organizationId`, unwrapped); `404 not_a_guest` for a non-guest                                                               |
+| `PATCH /v1/admin/guests/:id { expiresAt, name? }`           | `users.guests.write`                                                | Extend or shorten (`expiresAt` is required; a time in the past ends access now); returns the guest. `404 not_a_guest`                                  |
+| `POST /v1/admin/guests/:id/password-setup-link { notify? }` | `users.guests.write`                                                | Issue a fresh link; earlier ones die. `200 { url, expiresAt }`; `409 guest_not_usable` for a deactivated or expired guest, `409 email_not_configured`  |
+| `POST /v1/admin/users/:id/promote`                          | `users.write` plus the "holds every permission the user holds" rule | `userType = human`, `expiresAt = null`; id, membership, roles, password, grants and history kept. Returns the user. An expired guest can sign in again |
 
-Users carry `userType`, `expiresAt`, `status` and `passwordChangeRequired`. Deactivating, ending
-sessions and resetting a password use the ordinary user endpoints. After promotion the guest
-restrictions lift: SSO, linking and global roles are allowed.
+Every user the admin API and webhooks return carries `expiresAt` (null unless a guest),
+`status` (`active`, `expired`, `deactivated`) and `passwordChangeRequired`. `GET /v1/admin/guests`
+is the usual page envelope of users, filterable by `organizationId`, `email`, `isActive`,
+`expiresAt` and `createdAt` and sortable by `id`, `email`, `createdAt` and `expiresAt`; the users
+list takes `filter[userType]=guest`. Deactivating, ending sessions and resetting a password use the
+ordinary user endpoints. After promotion the guest restrictions lift: SSO, linking and global roles
+are allowed.
 
 **`POST /v1/admin/guests`** takes `email`, optional `name`, `organizationId` (default: the token's
-organization, else the default organization), `roles` (default: the default roles), `expiresAt` or
-`expiresIn` (seconds; no further than `GUEST_MAX_TTL_SECONDS` from now), and `initialAccess`: either
-`{ "type": "password_setup_link", "notify": true }` or
-`{ "type": "password", "password": "…", "mustChange": true }` (`mustChange` defaults to `true`). The
-email is normalized, and a per-email advisory lock serializes concurrent invites. What happens
+organization, else the default organization, which must be active: 400 `organization_inactive`),
+`roles` (names or ids; 400 `unknown_role`), exactly one of `expiresAt` and `expiresIn` (seconds;
+in the future, no further than `GUEST_MAX_TTL_SECONDS` from now), and `initialAccess`
+(required): either `{ "type": "password_setup_link", "notify": true }` or
+`{ "type": "password", "password": "…", "mustChange": true }` (`mustChange` defaults to `true`).
+The email is normalized, and a per-email advisory lock serializes concurrent invites. What happens
 depends on who holds the email:
 
-| Existing account                        | Result                                                                                                                                                                                      |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| none                                    | Creates the guest, membership and roles, sets up initial access: `201 { user, created: true, passwordSetupUrl? }`                                                                           |
-| a guest in the same organization        | Extends: `expiresAt` becomes the later value, roles are added (none removed), the password is untouched; `initialAccess` applies only if they never set one: `200 { user, created: false }` |
-| a guest in another organization         | `409 guest_in_other_organization`                                                                                                                                                           |
-| a human                                 | `409 user_exists` with `userId`; the app grants that user directly                                                                                                                          |
-| a service account or a deactivated user | `409 user_not_invitable`                                                                                                                                                                    |
+| Existing account                                         | Result                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| none                                                     | Creates the guest, membership and roles (the default roles when `roles` is omitted), sets up initial access: `201 { user, created: true, passwordSetupUrl? }` (`user` carries `organizationId`)                                                                                                                                                                                                                         |
+| a guest in the same organization, expired or not         | Extends: `expiresAt` becomes the later value, and refresh tokens capped at the old expiry are lifted (each to its family's start plus `JWT_REFRESH_TOKEN_TTL`, capped at the new expiry). Roles named are added, none removed; omitted `roles` adds nothing (defaults apply only on create). Name and password are untouched; `initialAccess` applies only if they never set a password: `200 { user, created: false }` |
+| a guest in another organization                          | `409 guest_in_other_organization`                                                                                                                                                                                                                                                                                                                                                                                       |
+| a human                                                  | `409 user_exists` with `userId`; the app grants that user directly                                                                                                                                                                                                                                                                                                                                                      |
+| a service account, the system user or a deactivated user | `409 user_not_invitable`                                                                                                                                                                                                                                                                                                                                                                                                |
 
 `notify: true` emails the link and needs a default email connection (`409 email_not_configured`);
 `passwordSetupUrl` is returned either way, so an app can deliver it itself. Each operation runs in
-one transaction with its audit entry and event: `auth.guest.invited`, `auth.guest.extended` (old and
-new `expiresAt`, roles added), `auth.guest.promoted`.
+one transaction with its audit entry and event. The events carry the user plus `organizationId`:
+`auth.guest.invited` (`roleIds`), `auth.guest.extended` (`previousExpiresAt`, `rolesAdded`; also
+emitted by `PATCH`, with no roles added) and `auth.guest.promoted`.
 
 ### Password setup link
 
