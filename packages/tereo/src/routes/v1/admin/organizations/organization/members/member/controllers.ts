@@ -7,6 +7,7 @@ import { revokeCreatorSharesTx } from "../../../../../../../utils/shareRevocatio
 import { recordSessionsRevoked } from "../../../../../../../utils/sessionEvents.js";
 import { endOrganizationSessions } from "../../../../../../../utils/sessions.js";
 import type { Prisma } from "../../../../../../../utils/db/prisma.js";
+import { assertNotGuest } from "../../../../users/user/guards.js";
 import { validateUser } from "../../../../../../../utils/auth.js";
 import db from "../../../../../../../utils/db/index.js";
 import { OrgIdParamSchema } from "../../../schemas.js";
@@ -151,6 +152,9 @@ export const updateMemberRole = async (req: Request, res: Response) => {
   const member = await db.$transaction(async (tx) => {
     // An owner or admin tier is authority a credential reset checks for.
     await db.users.lockAuthority(userId, tx);
+    if (body.memberRole !== "member") {
+      assertNotGuest(await db.users.get(userId, tx), "guest_tier");
+    }
     await lockOrgOwners(tx, orgId);
     const { previousRole, member: updated } =
       await db.organizations.updateMemberRole(

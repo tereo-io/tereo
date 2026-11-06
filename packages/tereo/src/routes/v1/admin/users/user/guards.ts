@@ -1,3 +1,4 @@
+import { UserType } from "../../../../../../prisma/generated/client/index.js";
 import { globalGrantablePermissions } from "../../../../../utils/grants.js";
 import type { AuthContext } from "../../../../../middleware/auth.js";
 import { SYSTEM_USER_ID } from "../../../../../definitions/index.js";
@@ -18,6 +19,17 @@ export const assertNotSystemUser = (id: string) => {
       "system_user",
       "The system user is managed by core and cannot be modified"
     );
+  }
+};
+
+/** A guest has one organization and guest-assignable roles only. */
+export const assertNotGuest = (
+  user: { userType: UserType },
+  code: string,
+  message = "A guest cannot be changed this way"
+) => {
+  if (user.userType === UserType.guest) {
+    throw new BadRequestError(code, message);
   }
 };
 
