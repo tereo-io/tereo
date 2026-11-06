@@ -6,7 +6,9 @@ test("the API docs render core's spec", async ({ page }) => {
   await expect(page).toHaveURL(/\/docs$/);
 
   // Redoc's own navigation, built from the bundled OpenAPI spec.
-  await expect(page.getByRole("menuitem", { name: "Setup" })).toBeVisible({
+  await expect(
+    page.getByRole("menuitem", { name: "Setup", exact: true })
+  ).toBeVisible({
     timeout: 20_000,
   });
   await page.getByRole("textbox", { name: "Search" }).fill("setup");
