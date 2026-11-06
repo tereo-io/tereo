@@ -1,4 +1,5 @@
 import { issuePasswordSetupLink } from "../../../../../../utils/passwordSetup.js";
+import { getGuest, getManagedGuest } from "../../../../../../utils/guests.js";
 import { AppError, ConflictError } from "../../../../../../utils/errors.js";
 import { assertMayResetCredentials } from "../../../users/user/guards.js";
 import { hasPermission } from "../../../../../../utils/permissions.js";
@@ -12,10 +13,6 @@ import {
   validateBody,
   validateParams,
 } from "../../../../../../utils/validateReq.js";
-import {
-  assertMayManageGuest,
-  getGuest,
-} from "../../../../../../utils/guests.js";
 
 const guestHasPassword = () =>
   new AppError(
@@ -33,8 +30,7 @@ export const issueGuestPasswordSetupLink = async (
   const { notify } = validateBody(IssuePasswordSetupLinkSchema, req);
 
   const { url, expiresAt } = await db.$transaction(async (tx) => {
-    const before = await getGuest(id, tx);
-    await assertMayManageGuest(auth, id, tx);
+    const before = await getManagedGuest(auth, id, tx);
     // A link for a guest who has a password replaces it, and its URL comes
     // back to the caller: a credential reset, so it needs what an admin
     // credential reset needs. The authority lock that check takes comes

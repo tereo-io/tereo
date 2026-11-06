@@ -2,6 +2,7 @@ import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
 import { InviteGuestSchema, ListGuestsQuerySchema } from "./schemas.js";
 import { formatAdminUser } from "../../../../utils/transformers.js";
 import { validateUser } from "../../../../utils/auth.js";
+import { prisma } from "../../../../utils/db/prisma.js";
 import type { Request, Response } from "express";
 import db from "../../../../utils/db/index.js";
 import {
@@ -54,5 +55,19 @@ export const listGuests = async (req: Request, res: Response) => {
   });
 
   const page = buildCursorPageResponse(result, query);
-  res.json({ ...page, data: page.data.map((u) => formatAdminUser(u)) });
+  const memberships = await prisma.organizationMember.findMany({
+    where: {
+      userId: { in: page.data.map((u) => u.id) },
+      organization: { archivedAt: null },
+    },
+    select: { userId: true, organizationId: true },
+  });
+  const orgOf = new Map(memberships.map((m) => [m.userId, m.organizationId]));
+  res.json({
+    ...page,
+    data: page.data.map((u) => ({
+      ...formatAdminUser(u),
+      organizationId: orgOf.get(u.id) ?? null,
+    })),
+  });
 };

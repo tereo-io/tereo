@@ -95,8 +95,8 @@ describe("password-setup-link outside the caller's organizations", () => {
       `${BASE_URL}/v1/admin/guests/${user.id}/password-setup-link`,
       token
     );
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("organization_not_permitted");
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("not_a_guest");
     expect(
       await prisma.passwordSetupToken.count({ where: { userId: user.id } })
     ).toBe(0);

@@ -3849,7 +3849,7 @@ PaginatedGuestsResponse:
     data:
       type: array
       items:
-        $ref: '#/AdminUser'
+        $ref: '#/GuestUser'
     hasMore:
       type: boolean
     limit:

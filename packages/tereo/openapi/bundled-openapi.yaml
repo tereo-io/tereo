@@ -2908,6 +2908,10 @@ paths:
         for the 2FA session issued by `POST /oauth/authorize`. Requires the
         `tereo_2fa_session_{client_id}` cookie to match `session_token`.
 
+        When the user must replace their password (`passwordChangeRequired`),
+        the `redirect_url` is `/login/change-password` with a `change_grant`
+        (see `POST /oauth/password-change`) rather than the next login step.
+
         400 `invalid_session` (unknown session, missing or mismatched cookie),
         `session_expired`, `totp_not_configured`; 401 `invalid_code` for a wrong
         code. Attempts are counted per user, across this endpoint and
@@ -3053,13 +3057,15 @@ paths:
         The step a password sign-in meets when the user's `passwordChangeRequired`
         is set (a guest created with a password and `mustChange`): instead of a
         code, the login redirects to `/login/change-password` with a one-time
-        `change_grant`, also set as a cookie, so the grant works only in that
-        browser. This sets the new password (`400 password_unchanged` when it
-        equals the current one), clears the flag, ends the user's other sessions
-        and consumes the grant; the login then restarts. The step comes before
-        TOTP, and only password logins meet it: a provider login skips it and
-        leaves the flag set. `invalid_change_grant` and `change_expired` are
-        OAuth2 errors. Wrong attempts are rate limited per client; no code is
+        `change_grant`; a cookie holding a separate secret (only its hash is
+        stored with the grant) binds it to that browser. This sets the new
+        password (`400 password_unchanged` when it equals the current one),
+        clears the flag, ends the user's other sessions and consumes the grant;
+        the login then restarts. The step comes after TOTP: for a user with TOTP
+        enabled, `/oauth/totp/verify` or `/oauth/totp/recovery` answers with the
+        redirect to `/login/change-password`. Only password logins meet it: a
+        provider login skips it and leaves the flag set. `invalid_change_grant` and `change_expired` are
+        `400` errors. Wrong attempts are rate limited per client; no code is
         issued until the password is changed.
 
         An audit log entry is created and `auth.user.password-changed` is emitted.
@@ -3082,7 +3088,8 @@ paths:
             X-RateLimit-Reset:
               $ref: '#/components/headers/X-RateLimit-Reset'
         '400':
-          $ref: '#/components/responses/OAuth2ErrorResponse'
+          $ref: '#/components/responses/BadRequestResponse'
+          description: '`invalid_request` (with `issues`, e.g. the password rules), `password_unchanged`, `invalid_change_grant` or `change_expired`'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -4622,6 +4629,11 @@ paths:
         like `DELETE /v1/admin/users/{id}/sessions/all`: a caller resetting their
         own password keeps the session they act from.
 
+        Setting a `password`, changing the `email` or deactivating also retires
+        the user's live password setup link and pending forced-change grants. A
+        password set here is the admin's choice: a guest so set cannot be
+        promoted until they set their own (`409 password_not_user_set`).
+
         Setting `rateLimitPerSecond` alone is a valid update. When it changes, a
         separate audit entry (`metadata.rateLimitPerSecond` with `from` and `to`)
         and an `auth.user.rate-limit-changed` event are recorded, and no
@@ -5288,6 +5300,11 @@ paths:
         instance policy is `required` or a role the user holds requires 2FA,
         access tokens from a sign-in without a second factor are revoked.
 
+        `409 password_not_user_set` while the guest's password is one someone
+        else chose (an invite's `initialAccess.password` or an admin's): send them
+        a password setup link and promote once they have set their own. The
+        guest's live setup link and pending forced-change grants are retired.
+
         An audit log entry is created and `auth.guest.promoted` is emitted.
       operationId: promoteAdminUser
       security:
@@ -5316,6 +5333,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: No such user, or `not_a_guest`
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: '`password_not_user_set`'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5337,8 +5357,10 @@ paths:
         - **No account**: creates the guest, its membership and roles, and sets
           up `initialAccess`. `201`, `created: true`.
         - **A guest in the same organization, or in none** (expired included,
-          while not deactivated): extends; a guest in no organization first
-          joins this one as a `member`. `expiresAt` becomes the later of the current and
+          while not deactivated): extends. A guest in no organization (removed
+          from theirs, or theirs archived) first joins this one as a `member`;
+          that needs `organizations.write`, as it hands the caller the guest's
+          account, and is otherwise `409 guest_unassigned`. `expiresAt` becomes the later of the current and
           requested value, which lifts the guest's refresh sessions capped at the
           old expiry. `roles` are added (none removed; omitted adds none, the
           defaults apply only to a new guest). The name and password are left
@@ -5350,6 +5372,10 @@ paths:
         - **A service account, the system user or a deactivated user**:
           `409 user_not_invitable`.
 
+        These refusals tell whether the email has an account, so only a caller
+        holding `users.read` gets them. Any other caller gets
+        `409 email_unavailable` for all of them, with no `userId`.
+
         `initialAccess` is a password-setup link (`notify: true` emails it and needs
         a default email connection: `409 email_not_configured`; the link is returned
         as `passwordSetupUrl` either way) or a password, which the guest must change
@@ -5360,8 +5386,13 @@ paths:
         `403 organization_not_permitted`. The organization must be active
         (`400 organization_inactive`). An audit log
         entry is created. `auth.guest.invited` (new) or
-        `auth.guest.extended` (old and new `expiresAt`, roles added) is emitted, and
-        `auth.user.password-setup-link-issued` when a link is issued.
+        `auth.guest.extended` (old and new `expiresAt`, roles added) is emitted
+        under the guest's organization, and
+        `auth.user.password-setup-link-issued` when a link is issued. The user,
+        membership and roles are also audited and emitted as their own endpoints
+        do: `auth.user.created` for a new guest, `auth.organization.member-added`
+        when a membership is added, and `auth.organization.member-roles-changed`
+        when roles are added.
       operationId: inviteGuest
       security:
         - BearerAuth:
@@ -5412,7 +5443,7 @@ paths:
           description: The organization does not exist
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: '`guest_in_other_organization`, `user_exists` (with `userId`), `user_not_invitable`, or `email_not_configured`'
+          description: '`guest_in_other_organization`, `guest_unassigned`, `user_exists` (with `userId`), `user_not_invitable` (these four only with `users.read`; otherwise `email_unavailable`), or `email_not_configured`'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5459,7 +5490,43 @@ paths:
                 $ref: '#/components/schemas/PaginatedGuestsResponse'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
-          description: Invalid body, `organization_inactive`, `unknown_role`, `role_not_guest_assignable`, or an expiry out of range
+          description: Invalid query parameters
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/guests/options:
+    get:
+      tags:
+        - Admin - Guests
+      summary: Get guest invitation options
+      description: |
+        What an inviter needs to fill in an invitation without `roles.read`: the
+        custom roles a guest may be given now, the configured defaults among
+        them, and `maxTtlSeconds` (`GUEST_MAX_TTL_SECONDS`), the furthest ahead
+        an invitation or extension may set `expiresAt`. Needs `users.guests.write`.
+      operationId: getGuestOptions
+      security:
+        - BearerAuth:
+            - users.guests.write
+      responses:
+        '200':
+          description: The options
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestOptionsResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
@@ -5474,9 +5541,12 @@ paths:
         - Admin - Guests
       summary: Get a guest
       description: |
-        One guest. `404 not_a_guest` for a user who is not one. Needs
-        `users.guests.read`; `403 organization_not_permitted` when the caller
-        does not act in the guest's organization and lacks `organizations.write`.
+        One guest. Needs `users.guests.read`. Without `organizations.write`, the
+        caller sees only guests of an organization they act in, and anything
+        else (a guest elsewhere or in no organization, a user who is not a
+        guest, an unknown id) is the same `404 not_a_guest`, so the answer
+        tells nothing about the user. With it, `404 not_a_guest` for a user who
+        is not a guest.
       operationId: getAdminGuest
       security:
         - BearerAuth:
@@ -5505,7 +5575,7 @@ paths:
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
           $ref: '#/components/responses/NotFoundResponse'
-          description: No such user, or `not_a_guest`
+          description: '`not_a_guest` (also an unknown id or a guest outside the caller''s organizations, without `organizations.write`), or no such user'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5519,11 +5589,16 @@ paths:
         access now. Extending lifts the guest's refresh tokens that were capped at
         the old expiry: each runs to its family's start plus the refresh lifetime,
         still capped at the new expiry. Needs
-        `users.guests.write`. `404 not_a_guest` for a user who is not a guest;
-        `403 organization_not_permitted` when the caller does not act in the
-        guest's organization and lacks `organizations.write`.
+        `users.guests.write`. `404 not_a_guest` as for `GET`. `expiresAt` must
+        be an RFC 3339 date-time; `null` or any other value is a `400`.
 
-        An audit log entry is created and `auth.guest.extended` is emitted.
+        Ending access (an `expiresAt` not in the future) also revokes the
+        guest's live access tokens and closes their sockets.
+
+        An audit log entry is created, with `metadata.action`
+        `guest_extended`, `guest_shortened` or `guest_access_ended`, and
+        `auth.guest.extended` is emitted under the guest's organization with
+        `change` saying which.
       operationId: patchAdminGuest
       security:
         - BearerAuth:
@@ -5558,7 +5633,7 @@ paths:
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
           $ref: '#/components/responses/NotFoundResponse'
-          description: No such user, or `not_a_guest`
+          description: '`not_a_guest` (also an unknown id or a guest outside the caller''s organizations, without `organizations.write`), or no such user'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5578,6 +5653,13 @@ paths:
         caller acts in (`403 organization_not_permitted`, as for `PATCH`).
         `409 guest_not_usable` for a guest who is deactivated or expired (extend or
         reactivate them first); the link would be refused on use.
+
+        For a guest who already has a password, the link replaces it and its URL
+        comes back to the caller, so it is a credential reset: it also needs
+        `users.write` and, as for `PATCH /admin/users/{id}`, global permissions
+        covering every permission the guest holds (`403 guest_has_password`
+        without `users.write`, `403 forbidden` naming those lacking). A guest
+        with no password keeps needing only `users.guests.write`.
 
         An audit log entry is created and `auth.user.password-setup-link-issued`
         is emitted.
@@ -5613,6 +5695,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
+          description: '`organization_not_permitted`, `guest_has_password`, or `forbidden` for a guest holding permissions the caller lacks'
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: No such user, or `not_a_guest`
@@ -5631,9 +5714,9 @@ paths:
       description: |
         Who a setup link is for and when it expires, so the page can greet
         them. Public: the token from the link's URL fragment is the credential.
-        Uses nothing up. Every
+        Consumes nothing. Every
         miss, whether the token is unknown, used or expired, or its user is no
-        longer usable, is the same `404`, and counts against the caller's IP
+        longer usable or no longer a guest, is the same `404`, and counts against the caller's IP
         (`429` past the limit, `503` when the limiter cannot reach Redis).
       operationId: inspectPasswordSetup
       security: []
@@ -5661,7 +5744,7 @@ paths:
           $ref: '#/components/responses/BadRequestResponse'
         '404':
           $ref: '#/components/responses/NotFoundResponse'
-          description: Unknown, used or expired token, or a user no longer usable
+          description: Unknown, used or expired token, or a user no longer usable or no longer a guest
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5705,7 +5788,7 @@ paths:
           $ref: '#/components/responses/BadRequestResponse'
         '404':
           $ref: '#/components/responses/NotFoundResponse'
-          description: Unknown, used or expired token, or a user no longer usable
+          description: Unknown, used or expired token, or a user no longer usable or no longer a guest
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7202,6 +7285,12 @@ paths:
         (`isActive: false`) — it grants and authorizes nothing until it is
         explicitly reactivated via `PATCH /v1/admin/organizations/{id}`.
 
+        A guest belongs to one organization, and one whose organization is
+        archived belongs to none, so may join another meanwhile. Restoring
+        removes such guests from this organization, with their roles and bucket
+        grants in it, each audited and emitted as
+        `auth.organization.member-removed`.
+
         **Authorization:** Requires the platform-level permission `organizations.archive`. Org membership roles do not grant access to this operation.
 
         An audit log entry is created for this action.
@@ -7297,7 +7386,8 @@ paths:
         organization (`409 resource_archived`). Only an active person can be a
         member: core's system user, a service account or an inactive user is
         refused with `400 user_not_addable`, as is a guest who already belongs to
-        an organization. A guest can only be a `member` (`400 guest_tier`).
+        an organization (a membership of an archived organization does not
+        count). A guest can only be a `member` (`400 guest_tier`).
 
         On an archived organization every mutation answers
         `409 resource_archived` once the caller passes the member-tier check
@@ -16987,7 +17077,7 @@ webhooks:
       tags:
         - Admin - Guests
       summary: Guest invited
-      description: Fired when `POST /v1/admin/guests` creates a guest. `data` is the user plus `organizationId` and `roleIds`, the roles assigned.
+      description: Fired when `POST /v1/admin/guests` creates a guest, under the guest's organization (endpoints of that organization, and service endpoints of all organizations). `data` is the user plus `organizationId` and `roleIds`, the roles assigned.
       operationId: webhookGuestInvited
       security: []
       parameters:
@@ -17033,7 +17123,7 @@ webhooks:
       tags:
         - Admin - Guests
       summary: Guest extended
-      description: 'Fired when a guest''s expiry changes or roles are added: by a repeat invite or `PATCH /v1/admin/guests/{id}`. `data` is the user after the change plus `organizationId`, `previousExpiresAt` and `rolesAdded` (role ids; empty for a PATCH).'
+      description: 'Fired when a guest''s expiry changes or roles are added: by a repeat invite or `PATCH /v1/admin/guests/{id}`. Emitted under the guest''s organization. `data` is the user after the change plus `organizationId`, `previousExpiresAt`, `rolesAdded` (role ids; empty for a PATCH) and `change`: `extended`, `shortened` (an earlier expiry still in the future) or `ended` (access ended now).'
       operationId: webhookGuestExtended
       security: []
       parameters:
@@ -17076,6 +17166,12 @@ webhooks:
                               items:
                                 type: string
                                 format: uuid
+                            change:
+                              type: string
+                              enum:
+                                - extended
+                                - shortened
+                                - ended
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -17084,7 +17180,7 @@ webhooks:
       tags:
         - Admin - Guests
       summary: Guest promoted
-      description: Fired when `POST /v1/admin/users/{id}/promote` makes a guest a permanent user. `data` is the user after promotion plus `organizationId`.
+      description: Fired when `POST /v1/admin/users/{id}/promote` makes a guest a permanent user, under the guest's organization. `data` is the user after promotion plus `organizationId`.
       operationId: webhookGuestPromoted
       security: []
       parameters:
@@ -17188,7 +17284,7 @@ webhooks:
                     eventType:
                       const: auth.user.password-setup-link-issued
                     entityType:
-                      const: None
+                      const: User
                     data:
                       type: object
                       required:
@@ -17233,7 +17329,7 @@ webhooks:
                     eventType:
                       const: auth.user.password-set
                     entityType:
-                      const: None
+                      const: User
                     data:
                       type: object
                       required:
@@ -29928,6 +30024,19 @@ components:
           type: string
           format: date-time
           description: 7 days after the invite was issued
+    GuestUser:
+      description: A guest as the admin API returns it, with the organization they belong to.
+      allOf:
+        - $ref: '#/components/schemas/AdminUser'
+        - type: object
+          required:
+            - organizationId
+          properties:
+            organizationId:
+              type:
+                - string
+                - 'null'
+              format: uuid
     PaginatedGuestsResponse:
       type: object
       required:
@@ -29939,7 +30048,7 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/AdminUser'
+            $ref: '#/components/schemas/GuestUser'
         hasMore:
           type: boolean
         limit:
@@ -30013,26 +30122,13 @@ components:
         expiresAt:
           type: string
           format: date-time
-          description: When access ends. Must be in the future and no further ahead than `GUEST_MAX_TTL_SECONDS` (90 days by default).
+          description: When access ends, as an RFC 3339 date-time. Must be in the future and no further ahead than `GUEST_MAX_TTL_SECONDS` (90 days by default).
         expiresIn:
           type: integer
           minimum: 1
           description: Seconds from now until access ends; same limits as `expiresAt`.
         initialAccess:
           $ref: '#/components/schemas/GuestInitialAccess'
-    GuestUser:
-      description: A guest as the admin API returns it, with the organization they belong to.
-      allOf:
-        - $ref: '#/components/schemas/AdminUser'
-        - type: object
-          required:
-            - organizationId
-          properties:
-            organizationId:
-              type:
-                - string
-                - 'null'
-              format: uuid
     InviteGuestResponse:
       type: object
       required:
@@ -30048,6 +30144,44 @@ components:
           type: string
           format: uri
           description: The one-time link (`/set-password#token=…`), present when a link was issued. Shown once; only its hash is stored.
+    GuestOptionsResponse:
+      type: object
+      required:
+        - roles
+        - defaultRoleIds
+        - maxTtlSeconds
+      properties:
+        roles:
+          type: array
+          description: The custom roles a guest may be given now (active, not archived or retired, guest-assignable, and holding only permissions a guest may hold), by name.
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - displayName
+              - description
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              displayName:
+                type: string
+              description:
+                type:
+                  - string
+                  - 'null'
+        defaultRoleIds:
+          type: array
+          description: The configured default guest roles among `roles`; a new guest invited without `roles` gets these.
+          items:
+            type: string
+            format: uuid
+        maxTtlSeconds:
+          type: integer
+          description: '`GUEST_MAX_TTL_SECONDS`: the furthest ahead an invitation or extension may set `expiresAt`.'
     UpdateGuestRequest:
       type: object
       required:
@@ -30056,7 +30190,7 @@ components:
         expiresAt:
           type: string
           format: date-time
-          description: Extends or shortens; a time in the past ends access now. No further ahead than `GUEST_MAX_TTL_SECONDS` from now.
+          description: Extends or shortens, as an RFC 3339 date-time (`null` is refused); a time in the past ends access now. No further ahead than `GUEST_MAX_TTL_SECONDS` from now.
         name:
           type: string
           maxLength: 100

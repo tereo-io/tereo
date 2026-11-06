@@ -720,6 +720,10 @@ describe("GET /v1/admin/guests", () => {
     const ids = res.body.data.map((u: { id: string }) => u.id);
     expect(ids).toContain(theirs.user.id);
     expect(ids).not.toContain(mine.user.id);
+    expect(
+      res.body.data.find((u: { id: string }) => u.id === theirs.user.id)
+        .organizationId
+    ).toBe(otherOrgId);
     for (const user of res.body.data) {
       expect(user.userType).toBe("guest");
       expect(user.status).toBe("active");

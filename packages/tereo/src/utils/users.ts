@@ -117,7 +117,8 @@ export const canActInOrganization = async (
 
 /**
  * The organizations the user can hold a token for, as in
- * `canActInOrganization`: their memberships and their client's organization.
+ * `canActInOrganization`: their memberships and their client's organization,
+ * leaving out archived ones.
  */
 export const actingOrganizationIds = async (
   userId: string
@@ -125,14 +126,25 @@ export const actingOrganizationIds = async (
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
-      organizationMembers: { select: { organizationId: true } },
+      organizationMembers: {
+        where: { organization: { archivedAt: null } },
+        select: { organizationId: true },
+      },
       oauthClient: { select: { organizationId: true } },
     },
   });
   if (!user) return [];
   const ids = user.organizationMembers.map((m) => m.organizationId);
   const clientOrg = user.oauthClient?.organizationId;
-  if (clientOrg && !ids.includes(clientOrg)) ids.push(clientOrg);
+  if (
+    clientOrg &&
+    !ids.includes(clientOrg) &&
+    (await prisma.organization.count({
+      where: { id: clientOrg, archivedAt: null },
+    })) > 0
+  ) {
+    ids.push(clientOrg);
+  }
   return ids;
 };
 

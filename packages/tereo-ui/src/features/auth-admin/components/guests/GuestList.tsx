@@ -1,14 +1,15 @@
 import useAllOrganizations from "../../api/organizations/useAllOrganizations";
 import SendPasswordLinkButton from "../users/buttons/SendPasswordLinkButton";
 import InviteGuestModal from "../organizations/modals/InviteGuestModal";
-import useInfiniteGuests from "../../api/guests/useInfiniteGuests";
 import ExtendGuestButton from "../users/buttons/ExtendGuestButton";
 import { UserStatusBadge } from "../users/UserStatusBadge";
 import { Link, useNavigate } from "react-router-dom";
-import type { User } from "../../api/users/types";
 import { formatDate } from "@/utils/formatDate";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
+import useInfiniteGuests, {
+  type GuestRow,
+} from "../../api/guests/useInfiniteGuests";
 import {
   InfiniteScroll,
   Page,
@@ -46,8 +47,18 @@ export const GuestList = () => {
     : organizations.map(({ id, name }) => ({ id, name }));
   const canInvite =
     canWriteGuests && (anyOrganization || inviteInto.length > 0);
+  const organizationNames = useMemo(
+    () =>
+      new Map(
+        [...organizations, ...(allOrganizations ?? [])].map((o) => [
+          o.id,
+          o.name,
+        ])
+      ),
+    [organizations, allOrganizations]
+  );
 
-  const columns: TableColumn<User>[] = useMemo(
+  const columns: TableColumn<GuestRow>[] = useMemo(
     () => [
       {
         title: "Email",
@@ -67,6 +78,15 @@ export const GuestList = () => {
         cellElement: (user) => user.name || "-",
       },
       {
+        title: "Organization",
+        dataKey: "organizationId",
+        cellElement: (user) =>
+          user.organizationId
+            ? (organizationNames.get(user.organizationId) ??
+              user.organizationId)
+            : "-",
+      },
+      {
         title: "Expires",
         dataKey: "expiresAt",
         cellElement: (user) =>
@@ -84,7 +104,7 @@ export const GuestList = () => {
             {
               title: "Actions",
               width: "16rem",
-              cellElement: (user: User) => (
+              cellElement: (user: GuestRow) => (
                 // Keeps clicks, the modals' included, off the row.
                 <div onClick={(e) => e.stopPropagation()}>
                   <Row size="sm">
@@ -99,7 +119,7 @@ export const GuestList = () => {
           ]
         : []),
     ],
-    [canReadUsers, canWriteGuests, canWriteUsers]
+    [canReadUsers, canWriteGuests, canWriteUsers, organizationNames]
   );
 
   const menu: InfiniteScrollMenu = useMemo(
@@ -132,7 +152,7 @@ export const GuestList = () => {
 
   return (
     <Page fillHeight maxWidth="none">
-      <InfiniteScroll<User>
+      <InfiniteScroll<GuestRow>
         menu={menu}
         data={data}
         hasMore={hasMore}

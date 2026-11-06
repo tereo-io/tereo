@@ -49,8 +49,8 @@ export interface PasswordSetupLink {
   expiresAt: string;
 }
 
-/** A guest as `GET /v1/admin/guests` lists it: without `organizationId`. */
-export type GuestListItem = Omit<Guest, "organizationId">;
+/** A guest as `GET /v1/admin/guests` lists it. */
+export type GuestListItem = Guest;
 
 export interface ListGuestsOptions {
   limit?: number;
