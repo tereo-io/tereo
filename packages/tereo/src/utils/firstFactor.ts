@@ -14,6 +14,7 @@ import {
 } from "./authorization.js";
 import {
   clearAuthSessionCookie,
+  setPasswordChangeGrantCookie,
   setTotpSessionCookie,
   setTotpSetupGrantCookie,
 } from "./cookies.js";
@@ -37,7 +38,12 @@ export const buildRedirectUrl = (
 
 /** A user whose first factor (password or provider) has just been checked. */
 export interface FirstFactorContinuation {
-  user: { id: string; totpEnabled: boolean; passwordHash: string | null };
+  user: {
+    id: string;
+    totpEnabled: boolean;
+    passwordHash: string | null;
+    passwordChangeRequired: boolean;
+  };
   client: {
     id: string;
     clientId: string;
@@ -109,6 +115,43 @@ export const continueAfterFirstFactor = async (
         error: "invalid_scope",
         error_description: `Invalid scope(s): ${invalidScopes.join(", ")}`,
         state: request.state,
+      }),
+    };
+  }
+
+  // Before any step that leads to a code. Provider logins have no password
+  // to change.
+  if (user.passwordChangeRequired && authMethods.includes("pwd")) {
+    const grant = generateTotpSetupGrant();
+    await writeStep((tx) =>
+      db.passwordChangeGrants.create(
+        {
+          tokenHash: hashTotpSetupGrant(grant),
+          userId: user.id,
+          clientId: client.id,
+          redirectUri: request.redirectUri,
+          scopes: request.scopes,
+          state: request.state,
+          codeChallenge: request.codeChallenge,
+          codeChallengeMethod: request.codeChallengeMethod,
+          nonce: request.nonce,
+          maxAge: request.maxAge,
+          acrValues: request.acrValues,
+          prompt: request.prompt,
+          firstFactor: authMethods,
+          expiresAt: new Date(Date.now() + env.TOTP_VERIFICATION_TTL * 1000),
+        },
+        tx
+      )
+    );
+
+    setPasswordChangeGrantCookie(res, grant, client.clientId);
+    clearAuthSessionCookie(res, client.clientId);
+
+    return {
+      redirect_url: uiUrl("/login/change-password", {
+        change_grant: grant,
+        ...authorizeRestartParams(request),
       }),
     };
   }
