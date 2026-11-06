@@ -186,7 +186,7 @@ NotificationsIdempotencyKeyConflictResponse:
             type: string
 
 NotificationsNothingToRetryResponse:
-  description: Conflict. `nothing_to_retry`, the notification has no failed delivery.
+  description: Conflict. `nothing_to_retry` (the notification has no failed delivery) or `content_redacted` (a sensitive notification, whose content is not kept, cannot be retried).
   headers:
     X-RateLimit-Limit:
       $ref: '../headers.yaml#/X-RateLimit-Limit'
@@ -202,6 +202,6 @@ NotificationsNothingToRetryResponse:
         properties:
           error:
             type: string
-            enum: [nothing_to_retry]
+            enum: [nothing_to_retry, content_redacted]
           error_description:
             type: string

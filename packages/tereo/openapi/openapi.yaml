@@ -869,6 +869,10 @@ tags:
     description: Admin endpoints for upstream identity providers and their lifecycle events
   - name: Admin - Identity Provider Domains
     description: Admin endpoints for the email domains a provider claims — organization, default roles, auto-accept and SSO-only
+  - name: Admin - Guests
+    description: Admin endpoints for guest users — temporary single-organization logins that invite, extend, expire and promote
+  - name: Password Setup
+    description: Public pages behind a password setup link — inspect the link and set the first password (the one-time token is the credential)
   - name: Admin - Settings
     description: Admin endpoints for system settings
   - name: Admin - Services
@@ -962,6 +966,8 @@ x-tagGroups:
       - Account - TOTP
       - Account - Sign-in Methods
       - Admin - Users
+      - Admin - Guests
+      - Password Setup
       - Admin - User Identities
       - Admin - User Permissions
       - Admin - User Sessions
@@ -1057,6 +1063,8 @@ paths:
     $ref: './paths/auth/oauth.yaml#/~1oauth~1totp~1verify'
   /oauth/totp/recovery:
     $ref: './paths/auth/oauth.yaml#/~1oauth~1totp~1recovery'
+  /oauth/password-change:
+    $ref: './paths/auth/oauth.yaml#/~1oauth~1password-change'
   /oauth/totp/setup:
     $ref: './paths/auth/oauth.yaml#/~1oauth~1totp~1setup'
   /oauth/totp/setup/verify:
@@ -1109,6 +1117,18 @@ paths:
     $ref: './paths/auth/admin/user-identities.yaml#/~1admin~1users~1{id}~1identity-invites'
   /v1/admin/users/{id}/identity-invites/{providerId}:
     $ref: './paths/auth/admin/user-identities.yaml#/~1admin~1users~1{id}~1identity-invites~1{providerId}'
+  /v1/admin/users/{id}/promote:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1promote'
+  /v1/admin/guests:
+    $ref: './paths/auth/admin/guests.yaml#/~1admin~1guests'
+  /v1/admin/guests/{id}:
+    $ref: './paths/auth/admin/guests.yaml#/~1admin~1guests~1{id}'
+  /v1/admin/guests/{id}/password-setup-link:
+    $ref: './paths/auth/admin/guests.yaml#/~1admin~1guests~1{id}~1password-setup-link'
+  /v1/password-setup/inspect:
+    $ref: './paths/auth/password-setup.yaml#/~1password-setup~1inspect'
+  /v1/password-setup:
+    $ref: './paths/auth/password-setup.yaml#/~1password-setup'
   /v1/admin/users/{id}/totp/reset:
     $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1totp~1reset'
   /v1/admin/clients:
@@ -2023,6 +2043,18 @@ webhooks:
     $ref: './paths/auth/admin/organizations.yaml#/auth.organization.support-access'
   auth.user.created:
     $ref: './paths/auth/admin/users.yaml#/auth.user.created'
+  auth.guest.invited:
+    $ref: './paths/auth/admin/guests.yaml#/auth.guest.invited'
+  auth.guest.extended:
+    $ref: './paths/auth/admin/guests.yaml#/auth.guest.extended'
+  auth.guest.promoted:
+    $ref: './paths/auth/admin/guests.yaml#/auth.guest.promoted'
+  auth.role.guest-assignable-changed:
+    $ref: './paths/auth/admin/roles.yaml#/auth.role.guest-assignable-changed'
+  auth.user.password-setup-link-issued:
+    $ref: './paths/auth/password-setup.yaml#/auth.user.password-setup-link-issued'
+  auth.user.password-set:
+    $ref: './paths/auth/password-setup.yaml#/auth.user.password-set'
   auth.user.password-changed:
     $ref: './paths/auth/account.yaml#/auth.user.password-changed'
   auth.user.sessions-revoked:
