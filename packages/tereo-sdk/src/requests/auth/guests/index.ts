@@ -1,7 +1,13 @@
-import type { Guest, InviteGuestResult, PasswordSetupLink } from "./types.js";
 import { tryHandleRequest } from "../../../utils/tryHandleRequest.js";
 import { CORE_CLIENT } from "../../../handler.js";
 import { urlPath } from "../../paths.js";
+import type {
+  Guest,
+  GuestOptions,
+  InviteGuestResult,
+  PaginatedGuests,
+  PasswordSetupLink,
+} from "./types.js";
 
 export * from "./types.js";
 
@@ -70,6 +76,37 @@ export const issueGuestPasswordSetupLink = async (
     },
     "AS_0104",
     `Failed to issue a password setup link for guest ${userId}`
+  );
+  return res.data;
+};
+
+export const listGuests = async (
+  params: Record<string, string | number | boolean>
+): Promise<PaginatedGuests> => {
+  const res = await tryHandleRequest<PaginatedGuests>(
+    {
+      clientName: CORE_CLIENT,
+      requestName: "core.guests.list",
+      method: "GET",
+      url: "/v1/admin/guests",
+      params,
+    },
+    "AS_0105",
+    "Failed to list guests"
+  );
+  return res.data;
+};
+
+export const getGuestOptions = async (): Promise<GuestOptions> => {
+  const res = await tryHandleRequest<GuestOptions>(
+    {
+      clientName: CORE_CLIENT,
+      requestName: "core.guests.options",
+      method: "GET",
+      url: "/v1/admin/guests/options",
+    },
+    "AS_0106",
+    "Failed to fetch guest options"
   );
   return res.data;
 };
