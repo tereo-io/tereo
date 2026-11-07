@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag auth
+// @module-tag race
 import { SYSTEM_USER_ID } from "../../../definitions/systemUser.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateUniqueId } from "../../support/auth/crypto.js";
@@ -155,5 +156,46 @@ describe("branding image expiry", () => {
       60_000
     );
     expect(await deleteAfterOf(b)).toBeNull();
+  });
+
+  // Profile B references X in an open transaction while profile A releases X.
+  // A must wait for B and then see B's reference.
+  it("does not expire an image a concurrent save just referenced", async () => {
+    const x = await store();
+    const profileA = await makeProfile(x);
+    const profileB = await makeProfile(null);
+    await prisma.$transaction((tx) => referenceImagesTx(tx, [x]));
+
+    let releaseB!: () => void;
+    const bHolds = new Promise<void>((r) => (releaseB = r));
+    let bLocked!: () => void;
+    const bReady = new Promise<void>((r) => (bLocked = r));
+    const b = prisma.$transaction(async (tx) => {
+      await referenceImagesTx(tx, [x]);
+      await tx.brandingProfile.update({
+        where: { id: profileB.id },
+        data: { logoObjectId: x },
+      });
+      bLocked();
+      await bHolds;
+    });
+    await bReady;
+
+    let aDone = false;
+    const a = prisma
+      .$transaction(async (tx) => {
+        await tx.brandingProfile.update({
+          where: { id: profileA.id },
+          data: { logoObjectId: null },
+        });
+        await releaseImagesTx(tx, [x], new Date());
+      })
+      .then(() => (aDone = true));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(aDone).toBe(false);
+    releaseB();
+    await Promise.all([a, b]);
+
+    expect(await deleteAfterOf(x)).toBeNull();
   });
 });

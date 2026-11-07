@@ -34,6 +34,29 @@ export const getLiveImageByHash = async (
 };
 
 /**
+ * Reusing an unreferenced image restarts its grace period, so it cannot expire
+ * before the caller's profile references it. A null `delete_after` means a
+ * profile references it: left alone. Returns false when the object is gone.
+ */
+const extendExpiryTx = async (
+  tx: Prisma.TransactionClient,
+  objectId: string
+): Promise<boolean> => {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "files"."objects"
+    WHERE "id" = ${objectId}::uuid AND "deleted_at" IS NULL
+    FOR UPDATE
+  `;
+  if (rows.length === 0) return false;
+  await tx.$executeRaw`
+    UPDATE "files"."objects"
+    SET "delete_after" = GREATEST("delete_after", ${new Date(Date.now() + BRANDING_IMAGE_GRACE_MS)})
+    WHERE "id" = ${objectId}::uuid AND "delete_after" IS NOT NULL
+  `;
+  return true;
+};
+
+/**
  * Store a checked image under its content-addressed key. A live object with
  * that key is reused as is; a new one expires after the grace period unless a
  * profile references it first.
@@ -46,7 +69,12 @@ export const storeBrandingImage = async (
   const bucket = await db.buckets.getByName(BRANDING_BUCKET);
 
   const existing = await getLiveImageByHash(image.sha256);
-  if (existing?.objectKey === key) return existing;
+  if (existing?.objectKey === key) {
+    const stillLive = await db.$transaction((tx) =>
+      extendExpiryTx(tx, existing.objectId)
+    );
+    if (stillLive) return existing;
+  }
 
   const saved = await saveBlobStream(Readable.from(image.buffer));
   let written;
@@ -64,8 +92,9 @@ export const storeBrandingImage = async (
         },
         select: { id: true },
       });
-      if (live)
+      if (live && (await extendExpiryTx(tx, live.id))) {
         return { reused: true as const, id: live.id, released: [] as string[] };
+      }
       const result = await db.objects.upsertWithBlob(
         {
           bucketId: bucket.id,
@@ -84,7 +113,7 @@ export const storeBrandingImage = async (
       );
       await logAuditTx(tx, {
         auth: { userId: actorUserId, email: null },
-        action: result.type === "updated" ? "UPDATE" : "CREATE",
+        action: "CREATE",
         entityType: "object",
         entityId: String(result.object.id),
         entityName: key,

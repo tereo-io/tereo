@@ -73,4 +73,35 @@ describe("storeBrandingImage", () => {
     });
     expect(await getLiveImageByHash(image.sha256)).toBeNull();
   });
+
+  it("restarts the grace period when an expiring image is stored again", async () => {
+    const image = await uniquePng();
+    const { objectId } = await storeBrandingImage(image, SYSTEM_USER_ID);
+    await prisma.object.update({
+      where: { id: objectId },
+      data: { deleteAfter: new Date(Date.now() + 60_000) },
+    });
+    await storeBrandingImage(image, SYSTEM_USER_ID);
+    const row = await prisma.object.findUniqueOrThrow({
+      where: { id: objectId },
+    });
+    const expected = Date.now() + BRANDING_IMAGE_GRACE_MS;
+    expect(Math.abs(row.deleteAfter!.getTime() - expected)).toBeLessThan(
+      60_000
+    );
+  });
+
+  it("leaves a referenced image's expiry null when stored again", async () => {
+    const image = await uniquePng();
+    const { objectId } = await storeBrandingImage(image, SYSTEM_USER_ID);
+    await prisma.object.update({
+      where: { id: objectId },
+      data: { deleteAfter: null },
+    });
+    await storeBrandingImage(image, SYSTEM_USER_ID);
+    const row = await prisma.object.findUniqueOrThrow({
+      where: { id: objectId },
+    });
+    expect(row.deleteAfter).toBeNull();
+  });
 });

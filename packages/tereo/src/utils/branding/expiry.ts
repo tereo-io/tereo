@@ -44,8 +44,18 @@ export const releaseImagesTx = async (
   objectIds: string[],
   now: Date
 ): Promise<void> => {
+  const candidates = [...new Set(objectIds)];
+  if (candidates.length === 0) return;
+  // Lock first: a profile mid-save that references one of these holds the
+  // lock until it commits, and the read below then starts after that commit.
+  await tx.$queryRaw`
+    SELECT "id" FROM "files"."objects"
+    WHERE "id" = ANY(${candidates}::uuid[]) AND "deleted_at" IS NULL
+    ORDER BY "id"
+    FOR UPDATE
+  `;
   const referenced = await db.brandingProfiles.referencedObjectIds(tx);
-  const dropped = [...new Set(objectIds)].filter((id) => !referenced.has(id));
+  const dropped = candidates.filter((id) => !referenced.has(id));
   if (dropped.length === 0) return;
   await tx.$executeRaw`
     UPDATE "files"."objects"
