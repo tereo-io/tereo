@@ -648,6 +648,52 @@ describe("branding", () => {
     expect(branding?.clients["acme-web"].logo?.ext).toBe("png");
   });
 
+  it("reads an image through a ConfigMap-style mount", async () => {
+    const { dir } = await docsFolder();
+    await mkdir(join(dir, "..2026_10_16"));
+    await writeFile(join(dir, "..2026_10_16", "logo.png"), PNG);
+    await symlink("..2026_10_16", join(dir, "..data"));
+    await symlink(join("..data", "logo.png"), join(dir, "logo.png"));
+    await writeFile(join(dir, "a.json"), brandingDoc("./logo.png"));
+    const set = await loadProvisioningSet(dir, baseEnv());
+    expect(
+      set?.documents[0].branding?.clients["acme-web"].logo?.sha256
+    ).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("reads a file whose name starts with two dots", async () => {
+    const { dir } = await docsFolder();
+    await writeFile(join(dir, "..logo.png"), PNG);
+    await writeFile(join(dir, "a.json"), brandingDoc("./..logo.png"));
+    const set = await loadProvisioningSet(dir, baseEnv());
+    expect(set?.documents[0].branding?.clients["acme-web"].logo?.ext).toBe(
+      "png"
+    );
+  });
+
+  it("refuses an image over the slot's size limit", async () => {
+    const { dir } = await docsFolder();
+    await writeFile(
+      join(dir, "branding", "logo.png"),
+      Buffer.concat([PNG, Buffer.alloc(600 * 1024)])
+    );
+    await writeFile(join(dir, "a.json"), brandingDoc("./branding/logo.png"));
+    const problems = await problemsOfPath(dir);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(
+      /^a\.json: branding\.clients\[acme-web\]\.logo: The logo image exceeds 512 KB/
+    );
+  });
+
+  it("refuses an empty branding block", () => {
+    expect(problemsOf({ "a.json": doc({ branding: {} }) })).toEqual([
+      "a.json: branding: needs default or at least one client",
+    ]);
+    expect(
+      problemsOf({ "a.json": doc({ branding: { clients: {} } }) })
+    ).toEqual(["a.json: branding: needs default or at least one client"]);
+  });
+
   it("refuses a path that leaves the provisioning folder", async () => {
     const { parent, dir } = await docsFolder();
     await writeFile(join(parent, "outside.png"), PNG);

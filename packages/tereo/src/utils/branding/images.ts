@@ -39,6 +39,17 @@ export function imageMaxBytes(slot: BrandingImageSlot): number {
     : env.BRANDING_IMAGE_MAX_SIZE_KB * 1024;
 }
 
+export function imageTooLarge(slot: BrandingImageSlot): PayloadTooLargeError {
+  const max = imageMaxBytes(slot);
+  return new PayloadTooLargeError(
+    `The ${slot} image exceeds ${
+      slot === "background"
+        ? `${max / (1024 * 1024)} MB`
+        : `${Math.floor(max / 1024)} KB`
+    }`
+  );
+}
+
 export function brandingObjectKey(
   image: Pick<CheckedImage, "sha256" | "ext">
 ): string {
@@ -86,16 +97,7 @@ export async function checkImage(
   slot: BrandingImageSlot,
   buffer: Buffer
 ): Promise<CheckedImage> {
-  const max = imageMaxBytes(slot);
-  if (buffer.length > max) {
-    throw new PayloadTooLargeError(
-      `The ${slot} image exceeds ${
-        slot === "background"
-          ? `${max / (1024 * 1024)} MB`
-          : `${Math.floor(max / 1024)} KB`
-      }`
-    );
-  }
+  if (buffer.length > imageMaxBytes(slot)) throw imageTooLarge(slot);
 
   const ext = await detectExt(buffer);
   if (!ext || !ALLOWED_BY_SLOT[slot].includes(ext)) {

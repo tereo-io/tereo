@@ -1,8 +1,8 @@
 import { CLIENT_SECRET_PREFIX, secretStrengthProblem } from "../secretRules.js";
 import { ProvisioningDocumentSchema, type CustomRoleEntry } from "./schema.js";
+import { readFile, readdir, realpath, stat } from "fs/promises";
 import { CORE_SCOPES } from "../../definitions/index.js";
 import { isSafeRedirectUri } from "../redirectUris.js";
-import { readFile, readdir, stat } from "fs/promises";
 import { basename, dirname, join } from "path";
 import { hashFlowToken } from "../crypto.js";
 import { AppError } from "../errors.js";
@@ -496,6 +496,7 @@ const loadImages = async (
   root: string
 ) => {
   const problems: string[] = [];
+  const realRoot = await realpath(root);
   for (const doc of set.documents) {
     const branding = declared.get(doc.file);
     if (!branding) continue;
@@ -506,7 +507,7 @@ const loadImages = async (
     ) =>
       loadBrandingImages(
         root,
-        root,
+        realRoot,
         profile,
         `${doc.file}: ${label}`,
         problems

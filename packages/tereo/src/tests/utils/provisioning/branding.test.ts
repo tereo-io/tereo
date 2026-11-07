@@ -190,6 +190,14 @@ describe("provisioned branding", () => {
       provisioned: false,
       provisionedFrom: null,
     });
+    const released = await prisma.auditLogEntry.findFirstOrThrow({
+      where: { entityType: "BrandingProfile", entityId: row.id },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(released.metadata).toMatchObject({
+      before: { provisioned: true, provisionedFrom: "app.json" },
+      after: { provisioned: false, provisionedFrom: null },
+    });
     expect((await adminPut(clientId)).status).toBe(200);
   });
 

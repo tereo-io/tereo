@@ -130,7 +130,11 @@ const BrandingEntry = z
     default: ProvisionedProfileSchema.optional(),
     clients: z.record(ClientId, ProvisionedProfileSchema).default({}),
   })
-  .strict();
+  .strict()
+  // An empty block would release every provisioned profile unnoticed.
+  .refine((b) => b.default || Object.keys(b.clients).length > 0, {
+    message: "needs default or at least one client",
+  });
 
 export const ProvisioningDocumentSchema = z
   .object({

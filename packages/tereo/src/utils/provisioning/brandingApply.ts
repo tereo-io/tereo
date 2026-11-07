@@ -140,11 +140,10 @@ export const applyBranding = async (
       entityType: "BrandingProfile",
       entityId: row.id,
       entityName: name ?? "default",
-      changes: {
-        provisioned: { old: true, new: false },
-        provisionedFrom: { old: row.provisionedFrom, new: null },
+      metadata: {
+        before: { provisioned: true, provisionedFrom: row.provisionedFrom },
+        after: { provisioned: false, provisionedFrom: null },
       },
-      metadata: { action: "unprovisioned" },
     });
     result.branding.push(name ?? "default");
   }

@@ -1,8 +1,13 @@
-import { checkImage, type CheckedImage } from "../branding/images.js";
+import { isAbsolute, relative, resolve, sep } from "path";
 import { readFile, realpath, stat } from "fs/promises";
-import { isAbsolute, relative, resolve } from "path";
 import { AppError } from "../errors.js";
 import type { z } from "zod";
+import {
+  checkImage,
+  imageMaxBytes,
+  imageTooLarge,
+  type CheckedImage,
+} from "../branding/images.js";
 import {
   BRANDING_IMAGE_SLOTS,
   type BrandingFields,
@@ -28,9 +33,10 @@ export const profileFields = (profile: DeclaredProfile): BrandingFields => {
   return fields as BrandingFields;
 };
 
+// By segment: a ConfigMap mount keeps its files under `..<timestamp>/`.
 const inside = (root: string, path: string) => {
   const rel = relative(root, path);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+  return rel !== "" && rel.split(sep)[0] !== ".." && !isAbsolute(rel);
 };
 
 const readImage = async (
@@ -49,7 +55,10 @@ const readImage = async (
   if (!inside(realRoot, real))
     return `"${declared}" resolves outside PROVISIONING_PATH`;
   try {
-    if (!(await stat(real)).isFile()) return `"${declared}" is not a file`;
+    const info = await stat(real);
+    if (!info.isFile()) return `"${declared}" is not a file`;
+    // checkImage refuses it too; this spares reading a huge file first.
+    if (info.size > imageMaxBytes(slot)) return imageTooLarge(slot).message;
     return await checkImage(slot, await readFile(real));
   } catch (err) {
     if (err instanceof AppError) return err.message;
@@ -59,18 +68,17 @@ const readImage = async (
 
 /**
  * Read and check each image a profile declares, its path relative to the
- * document's folder and required to stay inside `root` (PROVISIONING_PATH's
- * folder). Problems are recorded as `<label>.<slot>: <reason>`.
+ * document's folder and required to stay inside `realRoot` (PROVISIONING_PATH's
+ * folder, links resolved). Problems are recorded as `<label>.<slot>: <reason>`.
  */
 export const loadBrandingImages = async (
   docDir: string,
-  root: string,
+  realRoot: string,
   profile: DeclaredProfile,
   label: string,
   problems: string[]
 ): Promise<LoadedProfile> => {
   const loaded: LoadedProfile = profileFields(profile);
-  const realRoot = await realpath(root);
   for (const slot of BRANDING_IMAGE_SLOTS) {
     const declared = profile[slot];
     if (declared === undefined) continue;
