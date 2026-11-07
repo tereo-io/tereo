@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { BrandingProvider } from "./BrandingProvider";
+import { BrandedAuthPage } from "./BrandedAuthPage";
 import { useBranding } from "./useBranding";
 import { authMock } from "@/test/authMock";
 import { makeBranding } from "./fixtures";
@@ -82,5 +83,89 @@ describe("BrandingProvider", () => {
     );
     expect(screen.getByTestId("name")).toHaveTextContent("Preview");
     expect(authMock.axios.get).not.toHaveBeenCalled();
+  });
+
+  it("treats an injected null as no branding, with no request or loader", () => {
+    inject(null);
+    const { container } = render(
+      <BrandingProvider>
+        <BrandedAuthPage>x</BrandedAuthPage>
+      </BrandingProvider>
+    );
+    expect(screen.getByRole("heading")).toHaveTextContent("Tereo");
+    expect(container.querySelector(".t-brand-loading")).toBeNull();
+    expect(authMock.axios.get).not.toHaveBeenCalled();
+  });
+
+  it("fetches when the injected block is unparseable", async () => {
+    const el = document.createElement("script");
+    el.id = "tereo-branding";
+    el.textContent = "5";
+    document.head.appendChild(el);
+    authMock.axios.get.mockResolvedValue({ data: null });
+    render(
+      <BrandingProvider>
+        <Probe />
+      </BrandingProvider>
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("name")).toHaveTextContent("none")
+    );
+    expect(authMock.axios.get).toHaveBeenCalled();
+  });
+
+  it("renders unbranded on a malformed 200 payload", async () => {
+    authMock.axios.get.mockResolvedValue({ data: "<html>oops</html>" });
+    render(
+      <BrandingProvider>
+        <Probe />
+      </BrandingProvider>
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("name")).toHaveTextContent("none")
+    );
+  });
+
+  it("tolerates a payload without colour maps", async () => {
+    authMock.axios.get.mockResolvedValue({
+      data: { scope: "auth", appName: "Bare" },
+    });
+    render(
+      <BrandingProvider>
+        <Probe />
+      </BrandingProvider>
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("name")).toHaveTextContent("Bare")
+    );
+  });
+
+  it("renders unbranded when the request fails", async () => {
+    authMock.axios.get.mockRejectedValue(new Error("boom"));
+    render(
+      <BrandingProvider>
+        <Probe />
+      </BrandingProvider>
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("name")).toHaveTextContent("none")
+    );
+  });
+
+  it("omits client_id when the URL has none", async () => {
+    window.history.pushState({}, "", "/login");
+    authMock.axios.get.mockResolvedValue({ data: null });
+    render(
+      <BrandingProvider>
+        <Probe />
+      </BrandingProvider>
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("name")).toHaveTextContent("none")
+    );
+    expect(authMock.axios.get).toHaveBeenCalledWith(
+      "/oauth/branding",
+      expect.objectContaining({ params: undefined })
+    );
   });
 });

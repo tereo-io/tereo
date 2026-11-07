@@ -9,6 +9,11 @@ interface Props {
   footer?: ReactNode;
 }
 
+/** https: absolute or root-relative; never `//host`, `javascript:` or `data:`. */
+const isSafeUrl = (url: string | null | undefined): url is string =>
+  !!url &&
+  (/^https:\/\//i.test(url) || (url.startsWith("/") && !url.startsWith("//")));
+
 const cssUrl = (url: string) =>
   `url("${url.replace(/["\\\n]/g, encodeURIComponent)}")`;
 
@@ -24,10 +29,13 @@ export const BrandedAuthPage = ({
   const appName = branding?.appName ?? null;
   const authScope = branding?.scope === "auth";
   const layout = authScope ? (branding?.layout ?? "centered") : "centered";
-  const logoUrl = authScope ? branding?.logoUrl : null;
-  const links = authScope ? (branding?.footerLinks ?? []) : [];
+  const logoUrl =
+    authScope && isSafeUrl(branding?.logoUrl) ? branding.logoUrl : null;
+  const links = authScope
+    ? (branding?.footerLinks ?? []).filter((l) => isSafeUrl(l.url))
+    : [];
   const style: CSSProperties | undefined =
-    authScope && branding?.backgroundUrl
+    authScope && isSafeUrl(branding?.backgroundUrl)
       ? { backgroundImage: cssUrl(branding.backgroundUrl) }
       : undefined;
 
@@ -41,7 +49,7 @@ export const BrandedAuthPage = ({
         <div className="k-auth-page-header">
           {logoUrl && (
             <picture className="t-brand-logo">
-              {branding?.logoDarkUrl && (
+              {isSafeUrl(branding?.logoDarkUrl) && (
                 <source
                   media="(prefers-color-scheme: dark)"
                   srcSet={branding.logoDarkUrl}

@@ -1,10 +1,14 @@
-import { BRANDING_STYLE_ID, readInjectedBranding } from "./readInjected";
 import { useEffect, useState, type ReactNode } from "react";
 import { BRANDING_COLOR_TOKENS } from "./colorTokens";
 import type { EffectiveBranding } from "./types";
 import { BrandingContext } from "./useBranding";
 import { usePublicAxios } from "@/lib/auth";
 import "./styles.css";
+import {
+  BRANDING_STYLE_ID,
+  normalizeBranding,
+  readInjectedBranding,
+} from "./readInjected";
 
 const FETCH_TIMEOUT_MS = 1500;
 const SAFE_VALUE = /^[#0-9a-zA-Z.,%/ ()]+$/;
@@ -49,9 +53,9 @@ export const BrandingProvider = ({ children, override }: Props) => {
   const [state, setState] = useState<State>(() => {
     if (override !== undefined) return { status: "ready", branding: override };
     const injected = readInjectedBranding();
-    return injected
-      ? { status: "ready", branding: injected }
-      : { status: "pending" };
+    return injected === undefined
+      ? { status: "pending" }
+      : { status: "ready", branding: injected };
   });
 
   useEffect(() => {
@@ -60,7 +64,11 @@ export const BrandingProvider = ({ children, override }: Props) => {
     const finish = (branding: EffectiveBranding | null) => {
       if (settled) return;
       settled = true;
-      if (branding) applyColors(branding);
+      try {
+        if (branding) applyColors(branding);
+      } catch {
+        // Colours are cosmetic; the page must render regardless.
+      }
       setState({ status: "ready", branding });
     };
     const clientId = new URLSearchParams(window.location.search).get(
@@ -72,7 +80,7 @@ export const BrandingProvider = ({ children, override }: Props) => {
         params: clientId ? { client_id: clientId } : undefined,
         timeout: FETCH_TIMEOUT_MS,
       })
-      .then((res) => finish(res.data ?? null))
+      .then((res) => finish(normalizeBranding(res.data) ?? null))
       .catch(() => finish(null))
       .finally(() => clearTimeout(timer));
     return () => {

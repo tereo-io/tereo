@@ -55,4 +55,21 @@ describe("BrandedAuthPage", () => {
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.queryByRole("link")).toBeNull();
   });
+
+  it("drops unsafe URLs", () => {
+    renderWith(
+      makeBranding({
+        logoUrl: "javascript:alert(1)",
+        footerLinks: [
+          { label: "Bad", url: "javascript:alert(1)" },
+          { label: "Proto", url: "//evil.test" },
+          { label: "Good", url: "https://ok.test" },
+        ],
+      })
+    );
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Bad" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Proto" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Good" })).toBeInTheDocument();
+  });
 });
