@@ -54,6 +54,8 @@ export interface BrandingProfile {
   /** null when the target has no profile of its own. */
   own: BrandingOwn | null;
   effective: EffectiveBranding;
+  /** The merge without this profile's own layer; null means stock Tereo. */
+  inherited: EffectiveBranding | null;
   /** Where each slot's effective value comes from. */
   sources: Partial<Record<string, BrandingSource>>;
   colorSources: {

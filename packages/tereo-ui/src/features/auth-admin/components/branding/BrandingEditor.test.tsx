@@ -1,6 +1,6 @@
 import { RouterProvider, createMemoryRouter, Link } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import type { BrandingProfile } from "../../api/branding/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EffectiveBranding } from "@/features/auth";
@@ -51,6 +51,7 @@ const profile = (over: Partial<BrandingProfile> = {}): BrandingProfile => ({
   client: { id: "c1", clientId: "web-app", name: "Web App" },
   own,
   effective: { ...effective, appName: "Acme" },
+  inherited: null,
   sources: { appName: "client" },
   colorSources: { light: {}, dark: {} },
   provisioned: false,
@@ -170,6 +171,52 @@ describe("BrandingEditor", () => {
       favicon: null,
       background: null,
     });
+  });
+
+  it("previews the inherited app name once the override is cleared", async () => {
+    const user = userEvent.setup();
+    renderEditor(
+      profile({
+        own: { ...own, appName: "Foo" },
+        effective: { ...effective, appName: "Foo" },
+        inherited: { ...effective, appName: "Acme" },
+      })
+    );
+    const preview = await screen.findByTestId("branding-preview");
+    expect(
+      within(preview).getByRole("heading", { name: "Foo" })
+    ).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("App name"));
+    expect(
+      within(preview).getByRole("heading", { name: "Acme" })
+    ).toBeInTheDocument();
+  });
+
+  it("previews the inherited colour once the override is cleared", async () => {
+    const user = userEvent.setup();
+    renderEditor(
+      profile({
+        own: { ...own, colorsLight: { "--k-primary-color": "#ff0000" } },
+        effective: {
+          ...effective,
+          colorsLight: { "--k-primary-color": "#ff0000" },
+        },
+        inherited: {
+          ...effective,
+          colorsLight: { "--k-primary-color": "#0000ff" },
+        },
+      })
+    );
+    const frame = await screen.findByTestId("branding-preview-frame");
+    expect(frame.getAttribute("style")).toContain("#ff0000");
+    await user.clear(screen.getByLabelText("primary-color"));
+    expect(frame.getAttribute("style")).toContain("#0000ff");
+  });
+
+  it("shows the grants panel only when the viewer can manage grants", async () => {
+    renderEditor(profile({ canManageGrants: false }));
+    await screen.findByTestId("branding-preview");
+    expect(screen.queryByText("Who can edit")).toBeNull();
   });
 
   it("prompts before leaving with unsaved changes", async () => {

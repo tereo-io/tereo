@@ -1,23 +1,41 @@
 import { PREVIEW_PAGES, PreviewBody, type PreviewPage } from "./previewPages";
-import { BrandingProvider, type EffectiveBranding } from "@/features/auth";
-import { BRANDING_COLOR_TOKENS } from "@/features/auth";
 import type { CSSProperties } from "react";
 import { Button } from "@kosmeo-ui/react";
 import { useState } from "react";
 import type {
   BrandingDraft,
-  BrandingProfile,
   BrandingImageSlot,
   BrandingLayout,
 } from "../../api/branding/types";
+import {
+  BRANDING_COLOR_TOKENS,
+  BrandingProvider,
+  type EffectiveBranding,
+} from "@/features/auth";
 
 interface Props {
   draft: BrandingDraft;
-  /** Values the profile would inherit, with nothing of its own left in them. */
-  inherited: EffectiveBranding;
-  /** Image URLs by slot, taking precedence over the draft's (e.g. fresh uploads). */
-  imageUrls?: Partial<Record<BrandingImageSlot, string | null>>;
+  /** What the profile inherits without its own layer; null is stock Tereo. */
+  inherited: EffectiveBranding | null;
 }
+
+const STOCK: EffectiveBranding = {
+  scope: "auth",
+  appName: null,
+  headline: null,
+  subtitle: null,
+  signInLabel: null,
+  notice: null,
+  layout: null,
+  footerLinks: null,
+  colorsLight: {},
+  colorsDark: {},
+  logoUrl: null,
+  logoDarkUrl: null,
+  faviconUrl: null,
+  backgroundUrl: null,
+  applyToConsole: false,
+};
 
 const IMAGE_URL_KEY = {
   logo: "logoUrl",
@@ -31,11 +49,11 @@ const blank = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
 /** Draft over inherited: a non-empty draft value wins; colours merge key by key. */
 export const mergeDraft = (
   draft: BrandingDraft,
-  inherited: EffectiveBranding,
-  imageUrls: Props["imageUrls"] = {}
+  base: EffectiveBranding | null
 ): EffectiveBranding => {
+  const inherited = base ?? STOCK;
   const url = (slot: BrandingImageSlot) =>
-    imageUrls[slot] ?? draft[slot]?.url ?? inherited[IMAGE_URL_KEY[slot]];
+    draft[slot]?.url ?? inherited[IMAGE_URL_KEY[slot]];
   return {
     scope: "auth",
     appName: blank(draft.appName) ?? inherited.appName,
@@ -57,33 +75,6 @@ export const mergeDraft = (
   };
 };
 
-const without = (all: Record<string, string>, own: Record<string, string>) =>
-  Object.fromEntries(Object.entries(all).filter(([k]) => !(k in own)));
-
-/** What the profile would fall back to if it set nothing: effective minus its own values. */
-export const inheritedFrom = (profile: BrandingProfile): EffectiveBranding => {
-  const { effective, own } = profile;
-  if (!own) return effective;
-  const keep = <T,>(mine: unknown, value: T): T | null =>
-    mine == null || (Array.isArray(mine) && mine.length === 0) ? value : null;
-  return {
-    ...effective,
-    appName: keep(own.appName, effective.appName),
-    headline: keep(own.headline, effective.headline),
-    subtitle: keep(own.subtitle, effective.subtitle),
-    signInLabel: keep(own.signInLabel, effective.signInLabel),
-    notice: keep(own.notice, effective.notice),
-    layout: keep(own.layout, effective.layout),
-    footerLinks: keep(own.footerLinks, effective.footerLinks),
-    colorsLight: without(effective.colorsLight, own.colorsLight),
-    colorsDark: without(effective.colorsDark, own.colorsDark),
-    logoUrl: keep(own.logo, effective.logoUrl),
-    logoDarkUrl: keep(own.logoDark, effective.logoDarkUrl),
-    faviconUrl: keep(own.favicon, effective.faviconUrl),
-    backgroundUrl: keep(own.background, effective.backgroundUrl),
-  };
-};
-
 const colorStyle = (colors: Record<string, string>): CSSProperties =>
   Object.fromEntries(
     Object.entries(colors).filter(([name]) =>
@@ -95,12 +86,12 @@ const colorStyle = (colors: Record<string, string>): CSSProperties =>
  * The real sign-in shell fed the unsaved draft. The colours live on the frame
  * only, so the console's own palette is untouched.
  */
-export const BrandingPreview = ({ draft, inherited, imageUrls }: Props) => {
+export const BrandingPreview = ({ draft, inherited }: Props) => {
   const [page, setPage] = useState<PreviewPage>("login");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [layoutChoice, setLayoutChoice] = useState<BrandingLayout | null>(null);
 
-  const merged = mergeDraft(draft, inherited, imageUrls);
+  const merged = mergeDraft(draft, inherited);
   const layout = layoutChoice ?? merged.layout ?? "centered";
   const branding: EffectiveBranding = { ...merged, layout };
 
@@ -151,7 +142,7 @@ export const BrandingPreview = ({ draft, inherited, imageUrls }: Props) => {
       <div
         className="t-branding-preview-frame"
         data-testid="branding-preview-frame"
-        data-theme={theme === "dark" ? "dark" : undefined}
+        data-theme={theme}
         style={colorStyle(
           theme === "dark" ? branding.colorsDark : branding.colorsLight
         )}

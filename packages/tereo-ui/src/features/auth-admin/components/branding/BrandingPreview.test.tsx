@@ -47,7 +47,7 @@ describe("BrandingPreview", () => {
     expect(frame.getAttribute("style")).toContain("--k-primary-color: #00bb55");
     // Colours the draft does not set come from the inherited values.
     expect(frame.getAttribute("style")).toContain("--k-danger-color: #aa0000");
-    expect(frame).not.toHaveAttribute("data-theme");
+    expect(frame).toHaveAttribute("data-theme", "light");
     expect(
       document.documentElement.style.getPropertyValue("--k-primary-color")
     ).toBe("");
@@ -77,9 +77,11 @@ describe("BrandingPreview", () => {
   it("switches the layout and uses uploaded image urls", async () => {
     const { container } = render(
       <BrandingPreview
-        draft={draft}
         inherited={inherited}
-        imageUrls={{ logo: "https://cdn.example/logo.png" }}
+        draft={{
+          ...draft,
+          logo: { sha256: "a", url: "https://cdn.example/logo.png" },
+        }}
       />
     );
     expect(screen.getByRole("img")).toHaveAttribute(
