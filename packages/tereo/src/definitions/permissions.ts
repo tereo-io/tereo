@@ -98,6 +98,25 @@ const INTEGRATION_PERMISSIONS: PermissionDefinition[] = [
   ),
 ];
 
+// Branding is global: no organization can hold it.
+const BRANDING_PERMISSIONS: PermissionDefinition[] = [
+  adminPermission(
+    "branding.read",
+    "Read Branding",
+    "View sign-in page branding profiles"
+  ),
+  adminPermission(
+    "branding.write",
+    "Write Branding",
+    "Edit the default sign-in branding and the profiles of clients the user holds a grant on"
+  ),
+  adminPermission(
+    "branding.admin",
+    "Administer Branding",
+    "Full access to branding, including every client's profile, console branding and grants"
+  ),
+];
+
 // Explicit set (not domainPermissions()) to preserve the exact names + action subsets the service enforces — settings is read/write only, no per-domain .admin wildcards.
 const AUTH_SERVICE_PERMISSIONS: PermissionDefinition[] = [
   adminPermission("users.read", "Read Users", "View user accounts and details"),
@@ -288,6 +307,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   ...AUTH_SERVICE_PERMISSIONS,
   ...SERVICE_PERMISSIONS,
   ...INTEGRATION_PERMISSIONS,
+  ...BRANDING_PERMISSIONS,
   ...FILE_SERVICE_PERMISSIONS,
   ...WEBHOOK_PERMISSIONS,
   ...AUDIT_LOG_PERMISSIONS,
@@ -370,6 +390,12 @@ export const PERMISSIONS = {
     READ: "integrations.read",
     WRITE: "integrations.write",
     ADMIN: "integrations.admin",
+  },
+
+  BRANDING: {
+    READ: "branding.read",
+    WRITE: "branding.write",
+    ADMIN: "branding.admin",
   },
 
   AUDIT_LOGS: {

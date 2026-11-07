@@ -178,6 +178,22 @@ const authEvents: EventTypeDefinition[] = [
     eventType: "auth.role.guest-assignable-changed",
     description: "Role marked or unmarked as assignable to guests",
   },
+  {
+    eventType: "auth.branding.updated",
+    description: "Sign-in page branding profile created or changed",
+  },
+  {
+    eventType: "auth.branding.deleted",
+    description: "Sign-in page branding profile deleted",
+  },
+  {
+    eventType: "auth.branding.grant-added",
+    description: "User granted the right to edit a client's branding",
+  },
+  {
+    eventType: "auth.branding.grant-revoked",
+    description: "User's right to edit a client's branding revoked",
+  },
 ];
 
 const fileEvents: EventTypeDefinition[] = [
@@ -421,6 +437,7 @@ const READ_PERMISSIONS: [prefix: string, permission: string][] = [
   ["auth.user.", "users.read"],
   ["auth.role.", "roles.read"],
   ["auth.client.", "clients.read"],
+  ["auth.branding.", "branding.read"],
   ["auth.settings.", "settings.read"],
   ["auth.identity-provider.", "identity-providers.read"],
   ["file-service.bucket.", "file-service.buckets.read"],
