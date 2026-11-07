@@ -4245,10 +4245,13 @@ BrandingProfileView:
       type: boolean
     canManageGrants:
       type: boolean
+      description: |
+        Whether the caller may add and revoke the client's grants: owner or `branding.admin`, holding
+        `branding.write`. Always `false` for the default profile and `tereo-ui`.
 
 BrandingList:
   type: object
-  required: [default, clients]
+  required: [default, clients, brandable]
   properties:
     default:
       type: [object, 'null']
@@ -4278,6 +4281,23 @@ BrandingList:
           updatedAt:
             type: string
             format: date-time
+    brandable:
+      type: array
+      description: |
+        Clients with no profile yet that the caller may start one on, by name: for a `branding.admin`, every
+        such client, `tereo-ui` included; for anyone else holding `branding.write`, those they own or hold an
+        active grant on (never `tereo-ui`). Empty without `branding.write`.
+      items:
+        type: object
+        required: [id, clientId, name]
+        properties:
+          id:
+            type: string
+            format: uuid
+          clientId:
+            type: string
+          name:
+            type: string
 
 BrandingGrant:
   type: object

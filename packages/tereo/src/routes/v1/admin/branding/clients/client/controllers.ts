@@ -1,4 +1,6 @@
+import { PERMISSIONS } from "../../../../../../definitions/permissions.js";
 import { profileView } from "../../../../../../utils/branding/view.js";
+import { hasPermission } from "../../../../../../utils/permissions.js";
 import { ForbiddenError } from "../../../../../../utils/errors.js";
 import { validateUser } from "../../../../../../utils/auth.js";
 import db from "../../../../../../utils/db/index.js";
@@ -42,7 +44,10 @@ const view = async (
   }
   return await profileView(client, {
     canEdit,
-    canManageGrants: mayManageGrants(user, client),
+    // Listing grants needs only branding.read; adding and revoking need write.
+    canManageGrants:
+      mayManageGrants(user, client) &&
+      hasPermission(user.permissions, PERMISSIONS.BRANDING.WRITE),
   });
 };
 

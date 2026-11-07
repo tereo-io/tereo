@@ -114,6 +114,15 @@ describe("/v1/admin/branding/clients/:id access", () => {
     expect((await put(own.id, reader.token)).status).toBe(403);
   });
 
+  it("does not offer grant management to an owner holding only branding.read", async () => {
+    const reader = await brandingPrincipal(["branding.read"]);
+    const own = await createBrandingClient(reader.userId);
+    clientIds.push(own.id);
+    const res = await fetchJson("GET", url(own.id), reader.token);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ canEdit: false, canManageGrants: false });
+  });
+
   it("refuses a branding.admin on a provisioned profile with 409", async () => {
     const res = await put(provisionedUuid, admin.token);
     expect(res.status).toBe(409);

@@ -8919,8 +8919,8 @@ paths:
       description: |
         Needs `branding.read`. For a `branding.admin` holder: the default profile and every client's profile,
         `tereo-ui`'s included. For anyone else: the profiles of clients they own or hold an active grant on
-        (never `tereo-ui`), and `default` is `null`. Clients without a profile are not listed; read
-        `GET /v1/admin/branding/clients/{id}` for one.
+        (never `tereo-ui`), and `default` is `null`. Clients without a profile are not in `clients`; those the
+        caller may brand are in `brandable`.
       operationId: listBranding
       security:
         - BearerAuth:
@@ -31535,6 +31535,7 @@ components:
       required:
         - default
         - clients
+        - brandable
       properties:
         default:
           type:
@@ -31573,6 +31574,26 @@ components:
               updatedAt:
                 type: string
                 format: date-time
+        brandable:
+          type: array
+          description: |
+            Clients with no profile yet that the caller may start one on, by name: for a `branding.admin`, every
+            such client, `tereo-ui` included; for anyone else holding `branding.write`, those they own or hold an
+            active grant on (never `tereo-ui`). Empty without `branding.write`.
+          items:
+            type: object
+            required:
+              - id
+              - clientId
+              - name
+            properties:
+              id:
+                type: string
+                format: uuid
+              clientId:
+                type: string
+              name:
+                type: string
     BrandingImage:
       type: object
       required:
@@ -31745,6 +31766,9 @@ components:
           type: boolean
         canManageGrants:
           type: boolean
+          description: |
+            Whether the caller may add and revoke the client's grants: owner or `branding.admin`, holding
+            `branding.write`. Always `false` for the default profile and `tereo-ui`.
     BrandingImageRef:
       type: object
       required:

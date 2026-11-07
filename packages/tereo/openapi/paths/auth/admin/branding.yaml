@@ -8,8 +8,8 @@
     description: |
       Needs `branding.read`. For a `branding.admin` holder: the default profile and every client's profile,
       `tereo-ui`'s included. For anyone else: the profiles of clients they own or hold an active grant on
-      (never `tereo-ui`), and `default` is `null`. Clients without a profile are not listed; read
-      `GET /v1/admin/branding/clients/{id}` for one.
+      (never `tereo-ui`), and `default` is `null`. Clients without a profile are not in `clients`; those the
+      caller may brand are in `brandable`.
     operationId: listBranding
     security:
       - BearerAuth: [branding.read]

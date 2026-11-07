@@ -67,6 +67,35 @@ export const listClientProfiles = async (
   });
 };
 
+/**
+ * Clients with no profile yet, by name: every one, or those a user owns or
+ * holds an active grant on (never the console client).
+ */
+export const listBrandableClients = async (
+  filter: { all: true } | { editableBy: string; excludeClientId: string }
+) => {
+  const where: Prisma.OAuthClientWhereInput =
+    "all" in filter
+      ? { brandingProfile: null }
+      : {
+          brandingProfile: null,
+          clientId: { not: filter.excludeClientId },
+          OR: [
+            { ownerId: filter.editableBy },
+            {
+              brandingGrants: {
+                some: { userId: filter.editableBy, revokedAt: null },
+              },
+            },
+          ],
+        };
+  return await prisma.oAuthClient.findMany({
+    where,
+    select: { id: true, clientId: true, name: true },
+    orderBy: [{ name: "asc" }, { clientId: "asc" }],
+  });
+};
+
 /** Create or replace the profile for the target. Call `lockForWrite` first in the same transaction. */
 export const upsert = async (
   target: BrandingTarget,
