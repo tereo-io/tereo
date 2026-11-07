@@ -3,6 +3,8 @@
 
 export { default as LoginButton } from "./components/login/LoginButton";
 export { OrgSwitcher } from "./components/org-select/OrgSwitcher";
+export { useConsoleBranding } from "./branding/useConsoleBranding";
+export { useStockColors } from "./branding/useStockColors";
 export { RequireAuth } from "./components/RequireAuth";
 export { default as useUpstreamProviders } from "./api/upstream/useUpstreamProviders";
 export { upstreamErrorMessage } from "./api/upstream/upstreamErrors";

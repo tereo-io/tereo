@@ -1,12 +1,21 @@
 import { useEffect } from "react";
 
 /** App name shown in the browser tab; used as the suffix and the bare default. */
-const APP_NAME = "Tereo";
+const DEFAULT_APP_NAME = "Tereo";
+
+let brandedName: string | null = null;
+
+/** Console branding renames the tab suffix; the app layer sets it once from the injected block. */
+export const setDocumentAppName = (name: string | null) => {
+  brandedName = name;
+};
+
+const appName = () => brandedName ?? DEFAULT_APP_NAME;
 
 /** Format a page title for the browser tab: `"<page> · Tereo"`, or the
  * bare app name when no/empty page title is given. */
 export const formatDocumentTitle = (pageTitle?: string | null) =>
-  pageTitle ? `${pageTitle} · ${APP_NAME}` : APP_NAME;
+  pageTitle ? `${pageTitle} · ${appName()}` : appName();
 
 /**
  * Sets `document.title` to `"<pageTitle> · Tereo"` while the calling
@@ -25,7 +34,7 @@ const useDocumentTitle = (pageTitle?: string | null) => {
   useEffect(() => {
     document.title = formatDocumentTitle(pageTitle);
     return () => {
-      document.title = APP_NAME;
+      document.title = appName();
     };
   }, [pageTitle]);
 };

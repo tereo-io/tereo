@@ -1,5 +1,6 @@
 import { AppTopBar, AppTopBarLink } from "@kosmeo-ui/react";
 import { ThemeToggleButton } from "./ThemeToggleButton";
+import { useConsoleBranding } from "@/features/auth";
 import { NavLink } from "react-router-dom";
 import { docsNav } from "../routes/docs";
 import { SECTIONS } from "../sections";
@@ -8,6 +9,7 @@ import { useAuth } from "@/lib/auth";
 
 export const TopBar = () => {
   const { hasPermission } = useAuth();
+  const { appName } = useConsoleBranding();
   const sectionsToShow = SECTIONS.filter((s) =>
     hasPermission(s.nav.permission)
   );
@@ -19,7 +21,7 @@ export const TopBar = () => {
       brand={
         <>
           <img src="/favicon.svg" alt="" />
-          <span>Tereo</span>
+          <span>{appName ?? "Tereo"}</span>
         </>
       }
       actions={
