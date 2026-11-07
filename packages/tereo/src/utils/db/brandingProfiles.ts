@@ -47,7 +47,7 @@ export const list = async (filter: {
   });
 };
 
-/** Create or replace the profile for the target. Lock it first when racing. */
+/** Create or replace the profile for the target. Call `lockForWrite` first in the same transaction. */
 export const upsert = async (
   target: BrandingTarget,
   data: BrandingProfileData,
@@ -96,14 +96,14 @@ export const referencedObjectIds = async (
   return ids;
 };
 
-/** Row lock on the target's profile; a no-op when none exists yet. */
+/**
+ * Serialize writers of one target's profile for the rest of the transaction.
+ * An advisory lock, because a row lock cannot protect a first save: there is
+ * no row to lock yet. Take it before reading the profile.
+ */
 export const lockForWrite = async (
   target: BrandingTarget,
   tx: Prisma.TransactionClient
 ) => {
-  if (target.clientUuid) {
-    await tx.$queryRaw`SELECT "id" FROM "auth"."branding_profiles" WHERE "client_id" = ${target.clientUuid}::uuid FOR UPDATE`;
-  } else {
-    await tx.$queryRaw`SELECT "id" FROM "auth"."branding_profiles" WHERE "client_id" IS NULL FOR UPDATE`;
-  }
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`branding:${target.clientUuid ?? "default"}`}, 0))`;
 };

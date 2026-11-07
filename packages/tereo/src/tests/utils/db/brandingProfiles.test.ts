@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag auth
+// @module-tag race
 import { SYSTEM_USER_ID } from "../../../definitions/systemUser.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateUniqueId } from "../../support/auth/crypto.js";
@@ -23,35 +24,65 @@ describe("branding tables", () => {
   let ownerId: string;
   let userId: string;
   const clientIds: string[] = [];
-  let hadDefault = false;
 
   beforeAll(async () => {
     ownerId = (await createTestUser()).id;
     userId = (await createTestUser()).id;
-    hadDefault = (await db.brandingProfiles.getDefault()) !== null;
   });
 
   afterAll(async () => {
-    if (!hadDefault) {
-      await prisma.brandingProfile.deleteMany({ where: { clientId: null } });
-    }
     await prisma.oAuthClient.deleteMany({ where: { id: { in: clientIds } } });
   });
 
   it("allows only one default profile", async () => {
-    await prisma.brandingProfile.deleteMany({ where: { clientId: null } });
-    await prisma.brandingProfile.create({
-      data: { clientId: null, updatedBy: SYSTEM_USER_ID },
-    });
+    const rollback = new Error("rollback");
+    // The default may already exist in the shared DB; leave it alone by
+    // working in a transaction that is always rolled back.
     await expect(
-      prisma.brandingProfile.create({
-        data: { clientId: null, updatedBy: SYSTEM_USER_ID },
+      prisma.$transaction(async (tx) => {
+        await tx.brandingProfile.deleteMany({ where: { clientId: null } });
+        await tx.brandingProfile.create({
+          data: { clientId: null, updatedBy: SYSTEM_USER_ID },
+        });
+        await tx.$executeRaw`SAVEPOINT second_default`;
+        let failed = false;
+        try {
+          await tx.brandingProfile.create({
+            data: { clientId: null, updatedBy: SYSTEM_USER_ID },
+          });
+        } catch {
+          failed = true;
+        }
+        await tx.$executeRaw`ROLLBACK TO SAVEPOINT second_default`;
+        expect(failed).toBe(true);
+        throw rollback;
       })
-    ).rejects.toThrow();
+    ).rejects.toBe(rollback);
+  });
+
+  it("serializes two concurrent first saves for one client", async () => {
+    const client = await makeClient(ownerId);
+    clientIds.push(client.id);
+    const target = { clientUuid: client.id };
+    const save = (appName: string) =>
+      prisma.$transaction(async (tx) => {
+        await db.brandingProfiles.lockForWrite(target, tx);
+        await db.brandingProfiles.upsert(
+          target,
+          { appName, updatedBy: SYSTEM_USER_ID },
+          tx
+        );
+      });
+    const results = await Promise.allSettled([save("A"), save("B")]);
+    expect(results.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
+    expect(
+      await prisma.brandingProfile.count({ where: { clientId: client.id } })
+    ).toBe(1);
   });
 
   it("removes a client's profile and grants with the client", async () => {
     const client = await makeClient(ownerId);
+    clientIds.push(client.id);
     await prisma.brandingProfile.create({
       data: { clientId: client.id, updatedBy: SYSTEM_USER_ID },
     });
