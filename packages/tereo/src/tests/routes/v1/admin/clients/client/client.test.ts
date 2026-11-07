@@ -646,6 +646,41 @@ describe("DELETE /v1/admin/clients/:id", () => {
     expect(after).toMatchObject({ isActive: false, oauthClientId: null });
   });
 
+  it("drops the deleted client's cached branding, so a reused client id starts unbranded", async () => {
+    const doomed = await createTestClient();
+    const appName = `Deleted ${generateUniqueId()}`;
+    await prisma.brandingProfile.create({
+      data: { clientId: doomed.id, appName, updatedBy: doomed.ownerId },
+    });
+    const branding = async () =>
+      (await (
+        await fetch(`${BASE_URL}/oauth/branding?client_id=${doomed.clientId}`)
+      ).json()) as { appName?: string } | null;
+    // Warms core's cache with the profile.
+    expect((await branding())?.appName).toBe(appName);
+
+    const response = await fetch(`${BASE_URL}/v1/admin/clients/${doomed.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(response.status).toBe(HTTP_STATUS.NO_CONTENT);
+    const reused = await prisma.oAuthClient.create({
+      data: {
+        clientId: doomed.clientId,
+        name: "Reused client id",
+        redirectUris: [],
+        scopes: [],
+        grantTypes: ["authorization_code"],
+        ownerId: doomed.ownerId,
+      },
+    });
+    try {
+      expect((await branding())?.appName).not.toBe(appName);
+    } finally {
+      await prisma.oAuthClient.delete({ where: { id: reused.id } });
+    }
+  });
+
   it("should return 404 for non-existent client", async () => {
     const response = await fetch(
       `${BASE_URL}/v1/admin/clients/${NON_EXISTENT_UUID}`,

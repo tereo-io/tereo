@@ -6,6 +6,7 @@ import { broadcastBucketInvalidate } from "../cacheBroadcast.js";
 import { formatClient, formatRole } from "../transformers.js";
 import { syncProvisionedAccessTx } from "../serviceAccess.js";
 import { invalidateBranding } from "../branding/resolve.js";
+import { invalidateAfterWrite } from "../branding/write.js";
 import { setRateLimitTx } from "../rateLimitOverride.js";
 import { openSigningSecret } from "../webhookSecrets.js";
 import { prisma, type Prisma } from "../db/prisma.js";
@@ -1850,6 +1851,8 @@ export const deprovisionMissing = async (
   for (const id of serviceClientIds) await revokeServiceTokens(id);
   for (const name of missingBuckets) await broadcastBucketInvalidate(name);
   disconnectTokenSockets(jtis);
+  // Deleted clients took their profiles with them.
+  if (clients > 0) await invalidateAfterWrite();
   for (const { id } of archivedRoles) {
     await revokeHolderClientTokens(id);
     notifyRoleDeleted(

@@ -1,6 +1,7 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { disconnectTokenSockets } from "../../../../../websocket/emitters/index.js";
 import { UserType } from "../../../../../../prisma/generated/client/index.js";
+import { invalidateAfterWrite } from "../../../../../utils/branding/write.js";
 import { UpdateClientSchema, type UpdateClientInput } from "./schemas.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { formatClient } from "../../../../../utils/transformers.js";
@@ -227,6 +228,8 @@ export const deleteClient = async (req: Request, res: Response) => {
     deleteLoginClientTx(tx, existingClient, user)
   );
   disconnectTokenSockets(jtis);
+  // Its profile went with it; a client recreated under the same id is unbranded.
+  await invalidateAfterWrite();
 
   res.status(204).send();
 };
