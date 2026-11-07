@@ -1,5 +1,6 @@
 import useUploadBrandingImage from "../../api/branding/useUploadBrandingImage";
 import { brandingErrorMessage } from "../../api/branding/brandingErrors";
+import { brandingImageUrl } from "@/features/auth";
 import { Button } from "@kosmeo-ui/react";
 import { useId, useState } from "react";
 import type {
@@ -33,6 +34,8 @@ export const ImageField = ({
   const upload = useUploadBrandingImage();
   const [error, setError] = useState<string | null>(null);
 
+  const src = brandingImageUrl(value?.url);
+
   const pick = (file: File | undefined) => {
     if (!file) return;
     setError(null);
@@ -49,7 +52,7 @@ export const ImageField = ({
   return (
     <div className="t-image-field">
       <label htmlFor={id}>{label}</label>
-      {value && <img src={value.url} alt={`${label} preview`} />}
+      {src && <img src={src} alt={`${label} preview`} />}
       {!readOnly && (
         <input
           id={id}

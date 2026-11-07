@@ -15,5 +15,6 @@ export { BRANDING_COLOR_TOKENS } from "./branding/colorTokens";
 export type { BrandingFooterLink, EffectiveBranding } from "./branding/types";
 export { BrandingProvider } from "./branding/BrandingProvider";
 export { BrandedAuthPage } from "./branding/BrandedAuthPage";
+export { brandingImageUrl } from "./branding/urls";
 export { LoginFormView } from "./components/login/LoginFormView";
 export { STOCK_COLORS } from "./branding/stockColors";

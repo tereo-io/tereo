@@ -5,6 +5,8 @@ import { BrandingPreview } from "./BrandingPreview";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { STOCK_COLORS } from "@/features/auth";
+import { readFileSync } from "node:fs";
+import env from "@/lib/env";
 
 vi.mock("@/lib/auth", () => ({
   usePublicAxios: () => ({ get: vi.fn() }),
@@ -115,5 +117,38 @@ describe("BrandingPreview", () => {
     expect(
       container.querySelector("[data-brand-layout='split']")
     ).not.toBeNull();
+  });
+
+  it("loads uploaded images from core and shows the dark logo in the dark frame", async () => {
+    const { container } = render(
+      <BrandingPreview
+        inherited={inherited}
+        draft={{
+          ...draft,
+          logo: { sha256: "a", url: "/oauth/branding/assets/a.png" },
+          logoDark: { sha256: "b", url: "/oauth/branding/assets/b.png" },
+        }}
+      />
+    );
+    const frame = screen.getByTestId("branding-preview-frame");
+    expect(frame.querySelector(".t-brand-logo-light")).toHaveAttribute(
+      "src",
+      `${env.CORE_URL}/oauth/branding/assets/a.png`
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Dark" }));
+    expect(frame).toHaveAttribute("data-theme", "dark");
+    expect(container.querySelector(".t-brand-logo")).toHaveClass(
+      "t-brand-logo-has-dark"
+    );
+  });
+
+  it("decides the split against the frame's width, not the viewport's", () => {
+    const previewCss = readFileSync(
+      "src/features/auth-admin/components/branding/styles.css",
+      "utf8"
+    );
+    expect(previewCss).toMatch(
+      /@container \(min-width: [\d.]+rem\)\s*\{[^@]*\.t-brand-split-image/
+    );
   });
 });

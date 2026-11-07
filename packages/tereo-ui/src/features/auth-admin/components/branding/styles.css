@@ -65,6 +65,12 @@
   align-self: flex-start;
 }
 
+.t-branding-hint {
+  margin: 0;
+  font-size: 0.875rem;
+  opacity: 0.75;
+}
+
 .t-field-error {
   color: var(--k-danger-color);
   margin: 0;
@@ -122,6 +128,26 @@
 
 .t-branding-preview-frame .k-auth-page {
   min-height: 32rem;
+}
+
+/* The split follows the frame's width, not the viewport's. */
+.t-branding-preview-frame .t-brand-split-with-image[data-brand-layout="split"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.t-branding-preview-frame .t-brand-split-with-image .t-brand-split-image {
+  display: none;
+}
+
+@container (min-width: 48rem) {
+  .t-branding-preview-frame
+    .t-brand-split-with-image[data-brand-layout="split"] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .t-branding-preview-frame .t-brand-split-with-image .t-brand-split-image {
+    display: block;
+  }
 }
 
 .t-grants {
