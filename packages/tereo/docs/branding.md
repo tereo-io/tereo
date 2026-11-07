@@ -74,10 +74,11 @@ publishes an invalidation, so every replica drops it. An unknown client id is ca
 
 Images live in the core bucket `auth-service-branding` (private), keyed `<sha256>.<ext>`; the same
 bytes uploaded twice, or provisioned on every start, are one object. The type comes from the bytes,
-not the name or header, and must be allowed for the slot. An SVG is checked against an allowlist
-(no `script`, `foreignObject`, event handlers, `javascript:` or external references, no `@import` or
-`url()` in styles); one the sanitizer would change is refused (`400 invalid_branding_image`), so the
-stored file is what was uploaded. An upload over the slot's limit is `413 payload_too_large`.
+not the name or header, and must be allowed for the slot. An SVG is checked against an allowlist and
+refused (`400 invalid_branding_image`) when it falls outside it: a fixed element set, no `<style>`,
+`<script>` or `<foreignObject>`, no event attributes, `href` only to a local `#id`, `url()` only as
+`url(#id)`, no `data:` or `javascript:`, no DOCTYPE or ENTITY, no processing instructions, UTF-8 only.
+Nothing is rewritten, so the stored file is exactly what was uploaded. An upload over the slot's limit is `413 payload_too_large`.
 
 `POST /v1/admin/branding/assets` (multipart: `slot`, then `file`) answers `{ sha256, ext, url }`; a
 profile then references the image as `{ "sha256": "…" }`. A hash no live image has is `400
@@ -103,7 +104,7 @@ them); `admin` includes the other two.
 | A client's profile | `branding.read` and (owner, active grantee, or `branding.admin`) | `branding.write` and (owner, active grantee, or `branding.admin`) |
 | `tereo-ui`'s profile | `branding.admin` | `branding.admin` |
 | Default profile | `branding.admin` | `branding.admin` |
-| A client's grants (list, add, revoke) | owner or `branding.admin` | owner or `branding.admin` |
+| A client's grants | `branding.read` (list) and (owner or `branding.admin`) | `branding.write` (add, revoke) and (owner or `branding.admin`) |
 
 Uploading needs `branding.write`; the image belongs to nothing until a profile the caller may edit
 references it. `GET /v1/admin/branding` lists the default (for `branding.admin`) and the clients

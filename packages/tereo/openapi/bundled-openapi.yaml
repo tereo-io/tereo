@@ -9316,9 +9316,10 @@ paths:
         | `favicon` | PNG, SVG, ICO | `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB) |
         | `background` | PNG, WebP, JPEG | `BRANDING_BACKGROUND_MAX_SIZE_MB` (5 MB) |
 
-        The type is detected from the bytes, not the file name or header. An SVG the sanitizer would change
-        (scripts, `foreignObject`, event handlers, external references, `@import` or `url()` in a style) is
-        refused, so what is stored is what was uploaded: `400 invalid_branding_image`. No file is
+        The type is detected from the bytes, not the file name or header. An SVG outside the allowlist
+        (a fixed element set; no `<style>`, `<script>` or `<foreignObject>`, event attributes, external
+        references, `data:` or `javascript:`) is rejected, never rewritten, so what is stored is what was
+        uploaded: `400 invalid_branding_image`. No file is
         `400 file_upload_required`; more than one file or an unexpected field is `400 invalid_request`; over the
         slot's limit is `413 payload_too_large`.
       operationId: uploadBrandingAsset
@@ -23078,9 +23079,9 @@ components:
         unknown colour variable, a colour outside the allowed grammar, a link that is not `https:`, more
         than 3 links, or an image `sha256` that no live uploaded image has, whose type the slot refuses
         or that is over the slot's limit. `invalid_branding_image`: an upload that is not an allowed image
-        for its slot, or an SVG the sanitizer would change. `unknown_branding_image`: an image expired
+        for its slot, or an SVG outside the allowlist (unsafe SVGs are rejected, never rewritten). `unknown_branding_image`: an image expired
         between the check and the save; upload it again. `file_upload_required`: no file in the upload.
-        `user_inactive`: granting to a deactivated user. `unknown_user`: a grantee that does not exist.
+        `user_inactive`: granting to a deactivated user.
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -23101,7 +23102,6 @@ components:
                   - unknown_branding_image
                   - file_upload_required
                   - user_inactive
-                  - unknown_user
               error_description:
                 type: string
               issues:

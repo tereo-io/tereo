@@ -400,9 +400,10 @@
       | `favicon` | PNG, SVG, ICO | `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB) |
       | `background` | PNG, WebP, JPEG | `BRANDING_BACKGROUND_MAX_SIZE_MB` (5 MB) |
 
-      The type is detected from the bytes, not the file name or header. An SVG the sanitizer would change
-      (scripts, `foreignObject`, event handlers, external references, `@import` or `url()` in a style) is
-      refused, so what is stored is what was uploaded: `400 invalid_branding_image`. No file is
+      The type is detected from the bytes, not the file name or header. An SVG outside the allowlist
+      (a fixed element set; no `<style>`, `<script>` or `<foreignObject>`, event attributes, external
+      references, `data:` or `javascript:`) is rejected, never rewritten, so what is stored is what was
+      uploaded: `400 invalid_branding_image`. No file is
       `400 file_upload_required`; more than one file or an unexpected field is `400 invalid_request`; over the
       slot's limit is `413 payload_too_large`.
     operationId: uploadBrandingAsset

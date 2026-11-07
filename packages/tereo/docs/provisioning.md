@@ -363,7 +363,7 @@ See [branding](branding.md) for the slots and limits.
 Image paths (`logo`, `logoDark`, `favicon`, `background`) are relative to the document's file and
 must resolve inside `PROVISIONING_PATH` (its folder, when it names a file): no `..` out of it and no
 symlink pointing outside it. Each file is checked as an upload is: type from its bytes, the slot's
-types and size limit, SVG sanitizing. Images are stored by content before the apply's transaction,
+types and size limit, the SVG allowlist. Images are stored by content before the apply's transaction,
 reusing an object with the same content; one nothing references (a dry run's, or a failed apply's)
 expires after 24 hours. A file changed in place is a new image: the profile points at it and the
 old one expires.
@@ -408,7 +408,8 @@ the CLI the exit code is non-zero.
   - the URL is `http` or `https` with no credentials, and its host is not `localhost` or a
     private or reserved IP literal, unless it is the service's own
     [`internalHost`](#internal-webhook-targets). In-cluster DNS names are fine.
-- **Branding**: a block with `default` or at least one client; `default` and each client in one document; image paths inside the folder, each a
+- **Branding**: a block with `default` or at least one client; `default` and each client in one
+  document; image paths inside the folder, each a
   valid image for its slot; every branded client in the set or the database.
 - **Secrets**: format, strength and the other rules of [Secrets](#secrets), across service, client
   and webhook secrets; every `secretFrom` variable must be set.
