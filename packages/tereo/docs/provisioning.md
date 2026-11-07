@@ -373,7 +373,8 @@ Each declared profile is written whole (an omitted slot is `null`, inherit), wit
 as it was writes nothing. Its profile is read-only through the admin API (`409
 managed_by_provisioning`). **Removing a profile from the documents does not retire it**, unlike the
 other entries: it keeps its values, `provisioned` is cleared, and it is the admin UI's to edit from
-then on.
+then on. The release is audited and emits `auth.branding.updated` with `changedSlots: []` and
+`released: true`.
 
 ## Validation
 

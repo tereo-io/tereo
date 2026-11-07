@@ -107,13 +107,17 @@ them); `admin` includes the other two.
 | A client's grants | `branding.read` (list) and (owner or `branding.admin`) | `branding.write` (add, revoke) and (owner or `branding.admin`) |
 
 Uploading needs `branding.write`; the image belongs to nothing until a profile the caller may edit
-references it. `GET /v1/admin/branding` lists the default (for `branding.admin`) and the clients
-with a profile the caller may read; `tereo-ui` is listed only for `branding.admin`.
+references it. `GET /v1/admin/branding` lists the default (for `branding.admin`), the clients
+with a profile the caller may read, and `brandable`: the clients with no profile yet that the caller
+may start one on (owned or actively granted with `branding.write`; every one for `branding.admin`).
+`tereo-ui` is listed only for `branding.admin`. A profile's `GET` says what the caller may do:
+`canEdit`, and `canManageGrants` (owner or `branding.admin`, holding `branding.write`).
 
 A provisioned profile refuses `PUT` and `DELETE` with `409 managed_by_provisioning` and the
 document's file name as `provisionedFrom`, for everyone, `branding.admin` included. Writes are
 last-write-wins. Each mutation writes an audit entry and emits `auth.branding.updated` (with the
-slots changed) or `auth.branding.deleted`; grants emit `auth.branding.grant-added` and
+slots changed) or `auth.branding.deleted`; a profile released from provisioning emits
+`auth.branding.updated` with `changedSlots: []` and `released: true`. Grants emit `auth.branding.grant-added` and
 `auth.branding.grant-revoked`. Reading these events needs `branding.read`.
 
 ## Grants
@@ -128,7 +132,8 @@ reaches the client's settings, the default profile or `tereo-ui`'s profile.
 - **`tereo-ui` takes no grants**, for anyone: `403`, `branding.admin` included. Its branding is
   `branding.admin`'s alone; give the person `branding.admin` instead.
 - A deactivated user cannot be granted (`400 user_inactive`); an existing active grant is
-  `409 conflict`. Deleting a client removes its grants and profile with it.
+  `409 conflict`. Deleting a client removes its grants and profile with it, and drops its cached
+  branding, so a client later created under the same id starts unbranded.
 
 ## The console
 

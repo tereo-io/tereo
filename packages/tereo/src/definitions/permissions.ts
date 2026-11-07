@@ -108,7 +108,7 @@ const BRANDING_PERMISSIONS: PermissionDefinition[] = [
   adminPermission(
     "branding.write",
     "Write Branding",
-    "Edit the default sign-in branding and the profiles of clients the user holds a grant on"
+    "Edit the sign-in branding of clients the user owns or holds a grant on, and manage their own clients' grants (the default needs branding.admin)"
   ),
   adminPermission(
     "branding.admin",
