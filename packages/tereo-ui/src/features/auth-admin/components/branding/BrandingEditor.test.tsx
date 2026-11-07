@@ -213,6 +213,33 @@ describe("BrandingEditor", () => {
     expect(frame.getAttribute("style")).toContain("#0000ff");
   });
 
+  it("uses the inherited value as the placeholder when the profile overrides", async () => {
+    renderEditor(
+      profile({
+        own: {
+          ...own,
+          appName: "Foo",
+          colorsLight: { "--k-primary-color": "#ff0000" },
+        },
+        inherited: {
+          ...effective,
+          appName: "Acme",
+          colorsLight: { "--k-primary-color": "#111111" },
+        },
+        sources: { appName: "client" },
+        colorSources: { light: { "--k-primary-color": "client" }, dark: {} },
+      })
+    );
+    expect(await screen.findByLabelText("primary-color")).toHaveAttribute(
+      "placeholder",
+      "#111111 (from Default)"
+    );
+    expect(screen.getByLabelText("App name")).toHaveAttribute(
+      "placeholder",
+      "Acme"
+    );
+  });
+
   it("shows the grants panel only when the viewer can manage grants", async () => {
     renderEditor(profile({ canManageGrants: false }));
     await screen.findByTestId("branding-preview");

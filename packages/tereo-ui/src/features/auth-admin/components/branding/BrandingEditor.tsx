@@ -113,9 +113,7 @@ const EditorForm = ({ target, profile }: FormProps) => {
     profile.client?.clientId === CORE_LOGIN_CLIENT_ID;
 
   const inheritedText = (slot: BrandingTextSlot) =>
-    profile.sources[slot] && profile.sources[slot] !== "client"
-      ? (profile.effective[slot] ?? undefined)
-      : undefined;
+    profile.inherited?.[slot] ?? undefined;
 
   const title =
     target.kind === "default"
@@ -164,14 +162,27 @@ const EditorForm = ({ target, profile }: FormProps) => {
           : []),
       ];
 
+  // Where each colour's placeholder value comes from: the layer that supplies it
+  // when the profile doesn't, else the default profile if it has one.
+  const placeholderSources = (key: "colorsLight" | "colorsDark") => {
+    const reported =
+      profile.colorSources?.[key === "colorsLight" ? "light" : "dark"] ?? {};
+    return Object.fromEntries(
+      Object.keys(profile.inherited?.[key] ?? {}).map((token) => [
+        token,
+        reported[token] && reported[token] !== "client"
+          ? reported[token]
+          : "default",
+      ])
+    );
+  };
+
   const mk = (key: "colorsLight" | "colorsDark") => (
     <ColorFields
       value={draft[key]}
       onChange={(v) => patch({ [key]: v })}
-      inherited={profile.effective[key]}
-      sources={
-        profile.colorSources?.[key === "colorsLight" ? "light" : "dark"] ?? {}
-      }
+      inherited={profile.inherited?.[key] ?? {}}
+      sources={placeholderSources(key)}
       errors={errors}
       errorPrefix={key}
       readOnly={locked}
