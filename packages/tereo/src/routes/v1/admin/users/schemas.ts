@@ -48,6 +48,10 @@ export const ListUsersQuerySchema = createCursorQuerySchema({
       operators: ["equals"],
       schema: z.boolean(),
     },
+    userType: {
+      operators: ["equals"],
+      schema: z.enum(["human", "guest", "service_account"]),
+    },
     createdAt: {
       operators: ["gte", "lte"],
       schema: z.coerce.date(),

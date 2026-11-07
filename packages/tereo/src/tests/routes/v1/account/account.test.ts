@@ -1,13 +1,18 @@
 // @module-tag int
 // @module-tag auth
 
+import { createTestRole, createTestUser } from "../../../support/auth/users.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../../../definitions/index.js";
 import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
 import { getAccessTokenForUser } from "../../../support/auth/login.js";
 import { createTestClient } from "../../../support/auth/clients.js";
-import { createTestUser } from "../../../support/auth/users.js";
+import { createTestGuest } from "../../../support/auth/guests.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../../../support/principals.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
@@ -96,6 +101,35 @@ describe("GET /v1/account/me", () => {
     expect(Array.isArray(data.permissions)).toBe(true);
     expect(data.totp).toBeDefined();
     expect(typeof data.totp?.enabled).toBe("boolean");
+  });
+
+  it("lists a guest only the roles their guest floor counts", async () => {
+    const organizationId = await ensureTestOrganization("account-me-guest");
+    const flagged = await createTestRole();
+    const unflagged = await createTestRole();
+    await prisma.role.update({
+      where: { id: flagged.id },
+      data: { guestAssignable: true },
+    });
+    const { user } = await createTestGuest({
+      organizationId,
+      roleIds: [flagged.id, unflagged.id],
+    });
+    await prisma.userRole.create({
+      data: { userId: user.id, roleId: flagged.id },
+    });
+    const token = await getTestPrincipalToken({
+      userId: user.id,
+      organizationId,
+      permissions: [],
+    });
+
+    const response = await fetch(`${BASE_URL}/v1/account/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.status).toBe(HTTP_STATUS.OK);
+    const data = (await response.json()) as AccountResponse;
+    expect(data.roles?.map((r) => r.id)).toEqual([flagged.id]);
   });
 
   it("should not return password hash in response", async () => {

@@ -122,6 +122,8 @@ export interface CustomRole {
   orgAssignable?: boolean;
   /** Holders must have 2FA enrolled. Default false. */
   requires2fa?: boolean;
+  /** Whether guests may be given this role. Default false. */
+  guestAssignable?: boolean;
   permissions: string[];
 }
 
@@ -155,7 +157,7 @@ export interface IntegrationProvisioning {
 
 /**
  * One file; it needs at least one of `service`, `clients`, `roles`,
- * `integrations`, not empty.
+ * `integrations`, `guests`, not empty.
  */
 export interface ProvisioningDocument {
   $schema?: string;
@@ -165,4 +167,6 @@ export interface ProvisioningDocument {
   clients?: LoginClientProvisioning[];
   roles?: CustomRole[];
   integrations?: IntegrationProvisioning[];
+  /** Guest defaults: custom, guest-assignable roles a guest gets when the invite names none. */
+  guests?: { defaultRoles: string[] };
 }

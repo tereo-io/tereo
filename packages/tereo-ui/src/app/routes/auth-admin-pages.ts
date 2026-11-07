@@ -7,6 +7,7 @@ import {
   faIdBadge,
   faKey,
   faServer,
+  faUserClock,
   faUsers,
   faUserShield,
 } from "@fortawesome/free-solid-svg-icons";
@@ -43,6 +44,12 @@ export const AUTH_ADMIN_PAGES: AuthAdminPage[] = [
     permission: "organizations.read",
   },
   { path: "users", label: "Users", icon: faUsers, permission: "users.read" },
+  {
+    path: "guests",
+    label: "Guests",
+    icon: faUserClock,
+    permission: "users.guests.read",
+  },
   {
     path: "roles",
     label: "Roles",

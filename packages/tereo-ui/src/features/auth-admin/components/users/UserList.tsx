@@ -1,3 +1,4 @@
+import { UserStatusBadge, userTypeLabel } from "./UserStatusBadge";
 import useInfiniteUsers from "../../api/users/useInfiniteUsers";
 import CreateUserModal from "./modals/CreateUserModal";
 import { Link, useNavigate } from "react-router-dom";
@@ -48,9 +49,15 @@ export const UserList = () => {
             subtle={true}
             variant={user.userType === "human" ? "primary" : "secondary"}
           >
-            {user.userType === "human" ? "Human" : "Service Account"}
+            {userTypeLabel(user.userType)}
           </Badge>
         ),
+      },
+      {
+        title: "Expires",
+        dataKey: "expiresAt",
+        cellElement: (user) =>
+          user.expiresAt ? formatDate(user.expiresAt) : "-",
       },
       {
         title: "Created",
@@ -62,15 +69,7 @@ export const UserList = () => {
         dataKey: "isActive",
         width: "7rem",
         align: "center",
-        cellElement: (user) => (
-          <Badge
-            size="sm"
-            subtle={true}
-            variant={user.isActive ? "success" : "danger"}
-          >
-            {user.isActive ? "Active" : "Inactive"}
-          </Badge>
-        ),
+        cellElement: (user) => <UserStatusBadge user={user} />,
       },
     ],
     []
@@ -90,6 +89,16 @@ export const UserList = () => {
           type: "SEARCH",
           title: "Name",
           dataKey: "name",
+        },
+        {
+          type: "SELECT",
+          title: "Type",
+          dataKey: "userType",
+          options: [
+            { id: "human", name: "Human", selected: false },
+            { id: "service_account", name: "Service Account", selected: false },
+            { id: "guest", name: "Guest", selected: false },
+          ],
         },
         {
           type: "SELECT",

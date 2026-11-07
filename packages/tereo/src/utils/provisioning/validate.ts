@@ -1,4 +1,6 @@
 import { ROLES, isRequestableCoreRole } from "../../definitions/roles.js";
+import { isCorePermission } from "../../definitions/guests.js";
+import { guestAssignableProblems } from "../guestRoles.js";
 import { hasPermission } from "../permissions.js";
 import {
   CORE_DECLARATION,
@@ -345,6 +347,29 @@ const checkCustomRoles = (
       );
     }
 
+    if (role.guestAssignable) {
+      if (!role.orgAssignable)
+        problems.push(
+          `${doc.file}: ${where}: a guest-assignable role must also be org-assignable`
+        );
+      const unfit = guestAssignableProblems(
+        role.permissions
+          .filter((name) => orgAssignable.has(name))
+          .map((name) => ({
+            name,
+            orgAssignable: orgAssignable.get(name) === true,
+            retiredAt: null,
+            isCore: isCorePermission(name),
+          }))
+      );
+      if (unfit.length > 0)
+        problems.push(
+          `${doc.file}: ${where}: a guest-assignable role may hold only org-assignable permissions, and of core's only the guest ones: ${unfit
+            .map((p) => `"${p}"`)
+            .join(", ")}`
+        );
+    }
+
     if (role.orgAssignable) {
       const globalOnly = role.permissions.filter(
         (p) => orgAssignable.get(p) === false
@@ -357,6 +382,26 @@ const checkCustomRoles = (
         );
     }
   }
+};
+
+/** The `guests` section: declared once, naming guest-assignable custom roles of the set. */
+const checkGuests = (set: ProvisioningSet, problems: string[]) => {
+  const declaring = set.documents.filter((d) => d.guests);
+  if (declaring.length > 1)
+    problems.push(
+      `${declaring.map((d) => d.file).join(", ")}: guests is declared in more than one document`
+    );
+  const guestRoles = new Set(
+    set.documents.flatMap((d) =>
+      d.roles.filter((r) => r.guestAssignable).map((r) => r.name)
+    )
+  );
+  for (const doc of declaring)
+    for (const name of doc.guests!.defaultRoles)
+      if (!guestRoles.has(name))
+        problems.push(
+          `${doc.file}: guests.defaultRoles: "${name}" is not a guest-assignable custom role in the provisioning set`
+        );
 };
 
 /**
@@ -459,5 +504,6 @@ export const validateSet = (set: ProvisioningSet): string[] => {
     for (const integration of doc.integrations ?? [])
       checkIntegration(set, doc.file, integration, services, problems);
   }
+  checkGuests(set, problems);
   return problems;
 };

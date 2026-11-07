@@ -348,6 +348,10 @@ const EnvFields = z
     // Defaults to the public key's JWK thumbprint.
     JWT_KEY_ID: z.string().optional(),
     JWT_ACCESS_TOKEN_TTL: int(1, DAY, 3600),
+    // Longest a guest's access may run from now, in seconds.
+    GUEST_MAX_TTL_SECONDS: int(1, 10 * 365 * DAY, 90 * DAY),
+    // Lifetime of a password setup link, in seconds.
+    PASSWORD_SETUP_TTL_SECONDS: int(60, 30 * DAY, 72 * HOUR),
     // How often each node checks its sockets' tokens again and closes those no
     // longer active; 0 turns the check off.
     WEBSOCKET_REVALIDATE_INTERVAL_SECONDS: int(0, HOUR, 60),

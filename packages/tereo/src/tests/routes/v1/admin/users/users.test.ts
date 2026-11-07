@@ -3,12 +3,17 @@
 
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../definitions/index.js";
 import { BASE_URL, HTTP_STATUS } from "../../../../support/auth/constants.js";
-import { getTestPrincipalToken } from "../../../../support/principals.js";
 import { getAccessTokenForUser } from "../../../../support/auth/login.js";
 import { createTestClient } from "../../../../support/auth/clients.js";
 import { generateUniqueId } from "../../../../support/auth/crypto.js";
+import { createTestGuest } from "../../../../support/auth/guests.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../../utils/db/prisma.js";
+import { fetchJson } from "../../../../support/http.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../../../../support/principals.js";
 import {
   createTestUser,
   createAdminUser,
@@ -331,6 +336,28 @@ describe("POST /v1/admin/users events", () => {
     await waitFor(
       async () => (await prisma.webhookDelivery.count({ where })) > 0,
       10_000
+    );
+  });
+});
+
+describe("GET /v1/admin/users?filter[userType]=guest", () => {
+  it("returns only guests, each with a status", async () => {
+    const { user } = await createTestGuest({
+      organizationId: await ensureTestOrganization("users-guest-filter"),
+      expiresAt: new Date(Date.now() - 1000),
+    });
+
+    const res = await fetchJson(
+      "GET",
+      `${BASE_URL}/v1/admin/users?filter[userType]=guest&sort=createdAt&sortDir=desc&limit=200`,
+      adminToken
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    for (const u of res.body.data) expect(u.userType).toBe("guest");
+    expect(res.body.data).toContainEqual(
+      expect.objectContaining({ id: user.id, status: "expired" })
     );
   });
 });

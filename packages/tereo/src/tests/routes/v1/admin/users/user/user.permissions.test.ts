@@ -4,6 +4,7 @@
 import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
 import { createTestClient } from "../../../../../support/auth/clients.js";
 import { CORE_SERVICE_ID } from "../../../../../../definitions/index.js";
+import { createTestGuest } from "../../../../../support/auth/guests.js";
 import { makeServiceOf } from "../../../../../support/testService.js";
 import { browserLogin } from "../../../../../support/browserLogin.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
@@ -140,6 +141,38 @@ describe("PATCH /v1/admin/users/:id and POST /v1/admin/users/:id/totp/reset", ()
       isActive: false,
     });
     expect(deactivate.status).toBe(HTTP_STATUS.FORBIDDEN);
+  });
+
+  it("protects a guest holding authority their guest floor hides", async () => {
+    // A global roles.write assignment grants a guest nothing, but comes back
+    // if they are promoted.
+    const role = await createTestRole();
+    const permission = await prisma.permission.findFirstOrThrow({
+      where: { name: "roles.write", serviceId: CORE_SERVICE_ID },
+    });
+    await prisma.rolePermission.create({
+      data: { roleId: role.id, permissionId: permission.id },
+    });
+    const { user: guest } = await createTestGuest({
+      organizationId: await ensureTestOrganization("guard-guest"),
+    });
+    await prisma.userRole.create({
+      data: { userId: guest.id, roleId: role.id },
+    });
+    const before = await passwordHash(guest.id);
+
+    const refused = await patchUser(writerToken, guest.id, {
+      password: NEW_PASSWORD,
+    });
+    expect(refused.status).toBe(HTTP_STATUS.FORBIDDEN);
+    expect(await passwordHash(guest.id)).toBe(before);
+
+    const holder = await getTestPrincipalToken({
+      permissions: ["users.write", "roles.write"],
+    });
+    const reset = await patchUser(holder, guest.id, { password: NEW_PASSWORD });
+    expect(reset.status).toBe(HTTP_STATUS.OK);
+    expect(await passwordHash(guest.id)).not.toBe(before);
   });
 
   describe("a target holding admin", () => {

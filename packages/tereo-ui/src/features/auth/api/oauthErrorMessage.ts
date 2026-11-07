@@ -25,6 +25,8 @@ const EXPIRED_FLOW_ERRORS = new Set([
   "invalid_setup_grant",
   "invalid_setup_token",
   "setup_expired",
+  "invalid_change_grant",
+  "change_expired",
 ]);
 
 export const isExpiredFlowError = (error: unknown): boolean =>

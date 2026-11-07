@@ -28,6 +28,8 @@ export interface Role {
   /** Set when a system role's service stopped declaring it; grants nothing. */
   retiredAt: string | null;
   requires2fa: boolean;
+  /** Guests may hold it; allowed only on custom roles whose permissions are all guest-safe. */
+  guestAssignable: boolean;
   /** Declared in the provisioning file: read-only here, but still assignable to users. */
   provisioned: boolean;
   /** When it went missing from the provisioning documents; null while they list it. */
@@ -50,6 +52,7 @@ export interface UpdateRoleInput {
   description?: string;
   isActive?: boolean;
   requires2fa?: boolean;
+  guestAssignable?: boolean;
 }
 
 export interface DuplicateRoleInput {

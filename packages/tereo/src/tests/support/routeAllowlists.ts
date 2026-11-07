@@ -109,6 +109,11 @@ export const PUBLIC: Allowlist = [
     "Confirms TOTP enrolment during login with its setup token",
   ],
   [
+    "post",
+    "/oauth/password-change",
+    "Forced password change during login, keyed by the change grant the login issued",
+  ],
+  [
     "get",
     "/oauth/end-session",
     "OIDC RP-initiated logout, identified by id_token_hint or client_id and the session cookie",
@@ -152,6 +157,16 @@ export const PUBLIC: Allowlist = [
     "post",
     "/v1/setup",
     "Creates the first admin; the setup token is the credential (404 once setup is done)",
+  ],
+  [
+    "post",
+    "/v1/password-setup/inspect",
+    "Shows who a password setup link is for; the link's token is the credential (404 when unusable)",
+  ],
+  [
+    "post",
+    "/v1/password-setup",
+    "Sets a password from a setup link; the link's token is the credential (404 when unusable)",
   ],
   [
     "get",

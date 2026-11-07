@@ -148,6 +148,7 @@ Core's own roles are requestable by their bare name only; any other core role (`
 | `audit_writer` | `audit-logs.write` — under the service's slug as `source`; covers reading its own entries |
 | `audit_reader` | `audit-logs.read` — only the entries the service wrote ([audit.md](audit.md#organization-scope)) |
 | `notification_sender` | `notifications.send` |
+| `guest_inviter` | `users.guests.read`, `users.guests.write` — invite and manage guests |
 
 Core's roles change only with core's code, so a granted core role gives whatever core's current
 version gives it.

@@ -19,6 +19,7 @@ export const getNotification = async (req: Request, res: Response) => {
   const { deliveries, ...rest } = notification;
   res.json({
     ...rest,
+    ...(rest.sensitive && { content: null, contentRedacted: true }),
     deliveries: deliveries.map(
       ({ notificationId: _n, notificationCreatedAt: _c, ...d }) => d
     ),
@@ -30,6 +31,13 @@ export const retryNotification = async (req: Request, res: Response) => {
   const { id } = validateParams(NotificationIdParamsSchema, req);
   const notification = await db.notifications.get(id);
   if (!notification) throw new NotFoundError("Notification not found");
+  // Its content is gone once settled, so there is nothing to resend.
+  if (notification.sensitive) {
+    throw new ConflictError(
+      "A sensitive notification cannot be retried",
+      "content_redacted"
+    );
+  }
 
   const requeued = await db.$transaction(async (tx) => {
     const count = await db.notifications.requeueFailed(

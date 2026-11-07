@@ -137,6 +137,8 @@ export interface TestPrincipalOptions {
   /** Organization id or label; `null` for a token with no organization. */
   organizationId?: string | null;
   permissions: string[];
+  /** When the user signed in, for routes that need a recent login. */
+  authTime?: Date;
 }
 
 const tokenCache = new Map<string, Promise<string>>();
@@ -153,6 +155,7 @@ export const getTestPrincipalToken = (
     userId,
     options.organizationId ?? null,
     [...options.permissions].sort(),
+    options.authTime?.getTime() ?? null,
   ]);
   let token = tokenCache.get(key);
   if (!token) {
@@ -180,6 +183,7 @@ const mintToken = async (
     clientId: client.clientId,
     scopes: ["openid"],
     organizationId,
+    authTime: options.authTime,
   });
   await prisma.accessToken.create({
     data: {

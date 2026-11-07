@@ -85,15 +85,15 @@ the default at delivery time.
 
 Paths are under `/v1/admin/notifications/connections`.
 
-| Method and path     | Permission | Purpose                                                                                                                                             |
-| ------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /`             | `read`     | List, optionally `?channel=email`. Answers `{ data }`                                                                                               |
-| `POST /`            | `admin`    | Create. Body: `channel`, `slug`, `displayName`, `settings`, optional `secrets`, `isEnabled`, `maxPerMinute`                                         |
-| `GET /:id`          | `read`     | One connection                                                                                                                                      |
-| `PATCH /:id`        | `admin`    | Change `displayName`, `settings`, `secrets`, `isEnabled`, `maxPerMinute`. An omitted field is kept; `secrets: null` clears them                     |
+| Method and path     | Permission | Purpose                                                                                                                                                                                 |
+| ------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /`             | `read`     | List, optionally `?channel=email`. Answers `{ data }`                                                                                                                                   |
+| `POST /`            | `admin`    | Create. Body: `channel`, `slug`, `displayName`, `settings`, optional `secrets`, `isEnabled`, `maxPerMinute`                                                                             |
+| `GET /:id`          | `read`     | One connection                                                                                                                                                                          |
+| `PATCH /:id`        | `admin`    | Change `displayName`, `settings`, `secrets`, `isEnabled`, `maxPerMinute`. An omitted field is kept; `secrets: null` clears them                                                         |
 | `DELETE /:id`       | `admin`    | `204`. Refused with `409 connection_in_use` once any notification used it (disable it instead), and with `409 connection_is_default` while it is the default and the channel has others |
-| `POST /:id/default` | `admin`    | Make it the channel's default                                                                                                                       |
-| `POST /:id/test`    | `admin`    | Body `{ to }`. Sends a test message now and answers `{ ok: true, providerResponse }` or `{ ok: false, error }`; the call itself is `200` either way |
+| `POST /:id/default` | `admin`    | Make it the channel's default                                                                                                                                                           |
+| `POST /:id/test`    | `admin`    | Body `{ to }`. Sends a test message now and answers `{ ok: true, providerResponse }` or `{ ok: false, error }`; the call itself is `200` either way                                     |
 
 - `slug` is lowercase letters, digits and hyphens, unique per channel (`409 slug_taken`).
 - Secrets are write-only. They are sealed in the row with the key-encryption key
@@ -152,7 +152,7 @@ Paths are under `/v1/admin/notifications/connections`.
   `400 invalid_request`.
 - A recipient gives exactly one of `address` and `userId`. Options are strict too: a misspelt `as`
   is refused rather than ignored, so a bcc cannot end up in `To`. A `userId` must be an active
-  person with an address for the channel.
+  person (a user or an unexpired guest, not a service account) with an address for the channel.
 - At most 50 attachments, each a version of an object in core's file storage, named by bucket,
   object id and version id. The sender must be able to read the bucket. The version is pinned, and
   its bytes are read from storage when the message is sent. `filename` defaults to the last part of
@@ -217,7 +217,13 @@ It runs the same checks as the API, as the system user, with every bucket readab
 List the role in the app's provisioning document, and once it is applied the app can send:
 
 ```json
-{ "version": "1.0.0", "service": { "slug": "orders-service", "access": { "roles": ["notification_sender"] } } }
+{
+  "version": "1.0.0",
+  "service": {
+    "slug": "orders-service",
+    "access": { "roles": ["notification_sender"] }
+  }
+}
 ```
 
 - `core.notifications.send(input)` calls `POST /v1/notifications` and returns `{ id, status }`.
@@ -299,11 +305,11 @@ it, and logs a warning. If that job has already claimed it again, the message ma
 
 Paths are under `/v1/admin/notifications`.
 
-| Method and path   | Permission            | Purpose                                                                       |
-| ----------------- | --------------------- | ----------------------------------------------------------------------------- |
-| `GET /`           | `notifications.read`  | The log, across organizations, newest first                                   |
-| `GET /:id`        | `notifications.read`  | One notification with its deliveries; `content` is included while kept        |
-| `POST /:id/retry` | `notifications.admin` | Re-queue the notification's `failed` deliveries                               |
+| Method and path   | Permission            | Purpose                                                                |
+| ----------------- | --------------------- | ---------------------------------------------------------------------- |
+| `GET /`           | `notifications.read`  | The log, across organizations, newest first                            |
+| `GET /:id`        | `notifications.read`  | One notification with its deliveries; `content` is included while kept |
+| `POST /:id/retry` | `notifications.admin` | Re-queue the notification's `failed` deliveries                        |
 
 The list is cursor-paged: `?limit=` (default 50, at most 200) and `?cursor=`, answering
 `{ data, hasMore, limit, nextCursor }`. Lists leave `content` out. Each entry carries `summary` (for
@@ -326,6 +332,8 @@ Retry resets the notification's `failed` deliveries to `pending` with their atte
 many were reset) and is audited (`UPDATE` on `Notification`, `metadata: { retried }`). A
 notification with no failed delivery is `409 nothing_to_retry`.
 
+A notification sent with `sensitive: true` (core's password-setup email is one) is never shown: its `content` reads `null` with `contentRedacted: true` in the admin log, is nulled once the notification is terminal, and `POST /:id/retry` on it is `409 content_redacted`.
+
 `content` is kept while any delivery is unsent, so a failed delivery can be retried until retention
 removes it. Once every delivery is sent it is gone.
 
@@ -337,16 +345,16 @@ removes it. Once every delivery is sent it is gone.
   delivered until it returns; accepted notifications stay in Postgres and the outbox.
 - `lastError` on a delivery means:
 
-| Value                           | Meaning                                                                                                                 |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `no_connection`                 | No enabled connection to send through; the job waits and retries every 60 s. Create, enable or set a default connection |
-| `host_not_allowed`              | The SMTP host resolves to a private or reserved address. Permanent                                                      |
-| `The SMTP host did not resolve` | DNS failed; retried. The worker logs the DNS error (`SMTP host did not resolve`, with `connectionId`)                  |
-| `attachment_missing`            | An attached version is no longer stored, or its object or bucket is in the trash. Permanent                             |
-| `attachment_forbidden`          | The sender can no longer read an attachment's bucket (grant or permission revoked, or the sender deactivated). Permanent |
+| Value                           | Meaning                                                                                                                                 |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `no_connection`                 | No enabled connection to send through; the job waits and retries every 60 s. Create, enable or set a default connection                 |
+| `host_not_allowed`              | The SMTP host resolves to a private or reserved address. Permanent                                                                      |
+| `The SMTP host did not resolve` | DNS failed; retried. The worker logs the DNS error (`SMTP host did not resolve`, with `connectionId`)                                   |
+| `attachment_missing`            | An attached version is no longer stored, or its object or bucket is in the trash. Permanent                                             |
+| `attachment_forbidden`          | The sender can no longer read an attachment's bucket (grant or permission revoked, or the sender deactivated). Permanent                |
 | `sender_not_allowed`            | `content.from` or `content.replyTo` is not allowed on the connection used at delivery, e.g. the default changed since accept. Permanent |
-| `smtp_rejected`                 | Shown as the server's `5xx` reply text. Permanent                                                                       |
-| anything else                   | The error's message, e.g. a connection or `4xx` SMTP reply; retried up to 8 attempts                                    |
+| `smtp_rejected`                 | Shown as the server's `5xx` reply text. Permanent                                                                                       |
+| anything else                   | The error's message, e.g. a connection or `4xx` SMTP reply; retried up to 8 attempts                                                    |
 
 ## Retention
 

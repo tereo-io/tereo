@@ -112,7 +112,14 @@ const CustomRoleEntry = z
     description: Description.optional(),
     orgAssignable: z.boolean().default(false),
     requires2fa: z.boolean().default(false),
+    guestAssignable: z.boolean().default(false),
     permissions: z.array(z.string().min(1).max(200)),
+  })
+  .strict();
+
+const GuestsEntry = z
+  .object({
+    defaultRoles: z.array(z.string().min(1).max(100)),
   })
   .strict();
 
@@ -130,6 +137,7 @@ export const ProvisioningDocumentSchema = z
     clients: z.array(ClientEntry).optional(),
     roles: z.array(CustomRoleEntry).optional(),
     integrations: z.array(IntegrationEntry).optional(),
+    guests: GuestsEntry.optional(),
   })
   .strict()
   .refine(
@@ -137,8 +145,12 @@ export const ProvisioningDocumentSchema = z
       d.service ||
       d.clients?.length ||
       d.roles?.length ||
-      d.integrations?.length,
-    { message: "needs one of service, clients, roles, integrations, not empty" }
+      d.integrations?.length ||
+      d.guests,
+    {
+      message:
+        "needs one of service, clients, roles, integrations, guests, not empty",
+    }
   );
 
 export type ProvisioningDocument = z.input<typeof ProvisioningDocumentSchema>;

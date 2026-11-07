@@ -47,15 +47,15 @@ reads them from `/oauth/introspect` (the SDK's `requireAuth`) or asks `/oauth/ch
 Core's API scopes (`definitions/coreScopes.ts`; seeded into `auth.scopes`, advertised in
 discovery) are per area, each with a read-only variant:
 
-| Scope                                  | Area                 | Ceiling                                                                                                  |
-| -------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------- |
-| `core:account`                         | `/v1/account`, `/ws` | — (the user's own account)                                                                               |
-| `core:admin` / `core:admin.read`       | `/v1/admin`          | `users`, `roles`, `permissions`, `clients`, `settings`, `organizations`, `services` — `.admin` / `.read` |
-| `core:files` / `core:files.read`       | `/v1/files`          | `file-service.admin` / the four `file-service.*.read`                                                    |
-| `core:audit` / `core:audit.read`       | `/v1/audit`          | `audit-logs.admin` / `audit-logs.read`                                                                   |
-| `core:webhooks` / `core:webhooks.read` | `/v1/webhooks`       | `webhooks.admin` / `webhooks.read`, `webhooks.event-types.read`                                          |
-| `core:events`                          | `/ws`                | — (the socket only: permission changes and its own session's end, nothing else)                          |
-| `core:organizations`                   | `GET /v1/account/organizations` | `organizations.support-access` ([Support access](#support-access))                            |
+| Scope                                  | Area                            | Ceiling                                                                                                  |
+| -------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `core:account`                         | `/v1/account`, `/ws`            | — (the user's own account)                                                                               |
+| `core:admin` / `core:admin.read`       | `/v1/admin`                     | `users`, `roles`, `permissions`, `clients`, `settings`, `organizations`, `services` — `.admin` / `.read` |
+| `core:files` / `core:files.read`       | `/v1/files`                     | `file-service.admin` / the four `file-service.*.read`                                                    |
+| `core:audit` / `core:audit.read`       | `/v1/audit`                     | `audit-logs.admin` / `audit-logs.read`                                                                   |
+| `core:webhooks` / `core:webhooks.read` | `/v1/webhooks`                  | `webhooks.admin` / `webhooks.read`, `webhooks.event-types.read`                                          |
+| `core:events`                          | `/ws`                           | — (the socket only: permission changes and its own session's end, nothing else)                          |
+| `core:organizations`                   | `GET /v1/account/organizations` | `organizations.support-access` ([Support access](#support-access))                                       |
 
 `/v1/notifications` has no scope: only core's UI and services reach it.
 
@@ -467,6 +467,9 @@ The user's email in core is not updated from the provider.
 
 ### Invites
 
+A guest cannot be invited (400 `user_not_invitable`) or linked to a provider until promoted
+([Guest users](#guest-users)).
+
 An admin creates a user without a password (`POST /v1/admin/users` takes an optional `password`; the
 user reads `hasPassword: false`) and issues an invite for a provider with
 `POST /v1/admin/users/{id}/identity-invites` (`{ providerId }`). The first sign-in with that provider
@@ -698,6 +701,7 @@ organization. The organization route counts what the caller holds there.
 What a target already has is kept without the check, so a narrower admin can still edit a user or
 role a broader one set up. `users.write` alone can no longer give anyone, itself included, `admin`.
 Adding a member (`POST /v1/admin/organizations/:id/members`) assigns no role, so it has nothing to check.
+Guest-assignable roles given through the guest endpoints are exempt ([Guest users](#guest-users)).
 
 Taking power away is bounded the same way as a credential reset (below): deactivating a user
 (`PATCH /v1/admin/users/:id` with `isActive: false`), removing any of their global roles
@@ -724,7 +728,6 @@ permissions from it (`PUT /v1/admin/roles/:id/permissions`) need the caller's gl
 cover every permission taken away (`assertCanTakeAway`) — otherwise 403 naming those lacking.
 Each of the three revokes the access tokens of the service clients holding the role in its
 transaction, and its audit entry counts them (`accessTokensRevoked`).
-
 
 ## Organizations: roles, members, activation
 
@@ -766,20 +769,254 @@ change member tiers, or assign roles. Members can still read it.
 **Members.** `POST /v1/admin/organizations/:id/members` needs the platform permission
 `organizations.write`; an organization's owners and admins cannot add anyone (403), though they
 still change members' tiers and roles and remove them. It adds only an active person: core's system
-user, a service account or an inactive user is refused with 400 `user_not_addable`. An org admin
+user, a service account or an inactive user is refused with 400 `user_not_addable`, as is a guest
+who already belongs to an organization; a guest joins only as `member` (400 `guest_tier`). An org admin
 does not manage an owner: changing an owner's tier (`PATCH …/members/:userId`) or roles
 (`PUT …/members/:userId/roles`) needs an owner or `organizations.write` (403 otherwise).
 
 **Scope of roles.** `GET /v1/account/me` and `/oauth/userinfo` list the same roles that give their
 permissions: global ones plus the token's organization's, unexpired, of an active, unarchived,
-unretired role.
+unretired role. For a guest, inert roles are left out ([Guest users](#guest-users)).
+
+## Guest users
+
+A guest is a temporary login: a row in `auth.users` with `userType = guest` and an `expiresAt`, for a
+customer who should reach only what they were shared. It is the same row for life: extending,
+re-sharing and promoting keep one id, so roles, grants and audit history carry over.
+
+**Usable.** A guest is usable while `isActive` and `expiresAt > now`. Expiry is checked live on every
+sign-in and token path (`isUsableAccount`, `utils/users.ts`: the password step, access-token checks
+behind `requireAuth`, `/oauth/introspect` and the socket, the refresh grant and the session check),
+so no job gates access and an extension needs no reactivation. Expiry never sets `isActive = false`:
+"expired" and "deactivated" stay distinguishable (`status` is `active`, `expired` or `deactivated`),
+but an expired guest gets the deactivated responses, so a login is not an expiry oracle. Access and
+refresh token lifetimes are capped at the remaining time, and extending a guest lifts their live
+refresh families.
+
+**One organization, member tier.** A guest is a `member` of at most one organization with only
+org-scoped role assignments. A membership of an **archived** organization does not count
+(`guestOrganizationId`, `utils/guests.ts`): that guest belongs to none, is managed only with
+`organizations.write`, and may be invited into or added to another organization. The archived
+membership grants nothing (no token is issued for an inactive or archived organization, and the
+`memberships` scope skips it). Restoring the organization removes it from such a guest who has
+joined another meanwhile, with their roles and bucket grants there, audited and emitted as
+`auth.organization.member-removed`.
+
+| Refused                                                                                                       | Code                            |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| Adding a guest who already belongs to an organization to another (`POST /v1/admin/organizations/:id/members`) | 400 `user_not_addable`          |
+| Making a guest an owner or admin                                                                              | 400 `guest_tier`                |
+| Assigning a guest a global role                                                                               | 400 `guest_global_role`         |
+| Assigning a guest a role that is not guest-assignable                                                         | 400 `role_not_guest_assignable` |
+| An identity invite for a guest                                                                                | 400 `user_not_invitable`        |
+
+**Password only.** A guest cannot sign in through an identity provider, is not matched by domain
+auto-accept (`account_exists`, as for any user) and cannot link a provider from the account page. All of
+this lifts on promotion.
+
+### The permission floor
+
+Applied in `permissionsInScope` (`utils/db/roles.ts`), the one place permissions are resolved, so it
+holds for tokens, introspection, `check-permission`, `my-permissions` and 2FA scope alike:
+
+1. For a guest only **org-scoped assignments of currently guest-assignable roles** count. Un-flagging
+   a role makes guests' assignments inert at once (kept, granting nothing); flagging it again
+   restores them.
+2. Of core's permissions a guest holds only `GUEST_CORE_PERMISSIONS`
+   (`definitions/guests.ts`): `file-service.objects.read` and `file-service.objects.write`. A core
+   permission added later is closed to guests by default. Service permissions are not filtered here.
+
+Inert roles are hidden: the userinfo `roles` claim and `GET /v1/account/me` list only what counts.
+Credential-reset style guards (`assertMayTakeOverAccount` and the like) still count a guest's
+dormant permissions, so the guard cannot be sidestepped by un-flagging. Bucket grants are unchanged:
+a guest with `file-service.objects.read` sees only buckets that grant them `canRead`, and holds no
+`file-service.shares.*`, so cannot create shares.
+
+### Guest-assignable roles
+
+Core declares no guest role. Which roles guests may hold is a choice, from three sources:
+
+| Source         | How                                                                                                                               | Admin-editable                     |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| Provisioning   | `guestAssignable: true` on a custom role in a document's `roles` ([provisioning.md](provisioning.md))                             | No (`409 managed_by_provisioning`) |
+| Admin API / UI | `PATCH /v1/admin/roles/:id { guestAssignable }` (`roles.write`) on an admin-made custom role; `POST /v1/admin/roles` takes it too | Yes                                |
+| Defaults       | `guests.defaultRoles` in one provisioning document                                                                                | Through the document               |
+
+Only **custom** roles (`serviceId` null) can be guest-assignable; a system role never is (a CHECK
+keeps the flag false). A guest-assignable role must be org-assignable and carry no core permission
+besides `file-service.objects.read` and `file-service.objects.write`. `PATCH`, and adding a permission
+to a flagged role, refuse otherwise with 400 `role_not_guest_assignable`, naming the permissions at
+fault. Changing the flag, through the API or a document, emits `auth.role.guest-assignable-changed`.
+
+The default roles are stored in the system setting `guestDefaultRoles` (role ids), written only by
+provisioning. An invite that names no roles gets them; an id whose role has since been un-flagged or
+retired is skipped at invite time. With none, the guest can sign in and manage their own account
+and nothing more.
+
+### Inviting, extending, promoting
+
+Permissions `users.guests.read` and `users.guests.write` are global-only. The core role
+`guest_inviter` (requestable by a service in its provisioning document) holds both.
+
+**Organization scope.** The guest endpoints (`/v1/admin/guests`, reads and writes) reach only an
+organization the caller acts in: one they are a member of, or, for a service account, the one its
+client belongs to. A holder of `organizations.write` acts in every organization. The list shows
+only the guests in those organizations. An invite naming another organization is
+`403 organization_not_permitted`. On `/v1/admin/guests/:id` the scope is checked before the user is
+looked at (`getManagedGuest`): without `organizations.write`, a guest elsewhere or in no
+organization, a user who is not a guest and an unknown id all answer `404 not_a_guest`, so an
+outsider learns nothing about the user. Promotion is not scoped: it is a `users.write` action, and
+`users.write` is global.
+
+**Granting.** "Granting: only what you hold" does not apply to guest-assignable roles given through
+the guest endpoints: flagging the role was the grant decision and `users.guests.write` the right to
+apply it (a service account does not hold its own service's permissions). The ordinary role
+endpoints follow the normal rule.
+
+| Route                                                       | Permission                                                          | Does                                                                                                                                                   |
+| ----------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /v1/admin/guests`                                     | `users.guests.write`                                                | Invite (below)                                                                                                                                         |
+| `GET /v1/admin/guests`                                      | `users.guests.read`                                                 | List guests (also `GET /v1/admin/users?filter[userType]=guest`, `users.read`)                                                                          |
+| `GET /v1/admin/guests/options`                              | `users.guests.write`                                                | The invite form's data without `roles.read`: `{ roles, defaultRoleIds, maxTtlSeconds }`, the roles a guest may be given now                            |
+| `GET /v1/admin/guests/:id`                                  | `users.guests.read`                                                 | One guest (the user plus `organizationId`, unwrapped); `404 not_a_guest` for a non-guest or one out of scope                                           |
+| `PATCH /v1/admin/guests/:id { expiresAt, name? }`           | `users.guests.write`                                                | Extend or shorten (`expiresAt` is a required RFC 3339 date-time, `null` is a 400; a time in the past ends access now); returns the guest. As `GET` for 404 |
+| `POST /v1/admin/guests/:id/password-setup-link { notify? }` | `users.guests.write`; for a guest who has a password, also `users.write` and the "holds every permission" rule | Issue a fresh link; earlier ones die. `200 { url, expiresAt }`; `403 guest_has_password` when the guest has a password and the caller lacks `users.write`; `409 guest_not_usable` for a deactivated or expired guest, `409 email_not_configured` |
+| `POST /v1/admin/users/:id/promote`                          | `users.write` plus the "holds every permission the user holds" rule | `userType = human`, `expiresAt = null`; id, membership, roles, password, grants and history kept; live setup links and forced-change grants retired. Returns the user. `409 password_not_user_set` while the password is one someone else chose. An expired guest can sign in again |
+
+The admin UI's Auth Admin → Guests page lists guests through `GET /v1/admin/guests`, so
+`users.guests.read` alone reaches it, with extend and password-link actions; its invite form reads
+`GET /v1/admin/guests/options` and offers only expiries within `maxTtlSeconds`.
+
+Every user the admin API and webhooks return carries `expiresAt` (null unless a guest),
+`status` (`active`, `expired`, `deactivated`) and `passwordChangeRequired`. `GET /v1/admin/guests`
+is the usual page envelope of users, filterable by `organizationId`, `email`, `isActive`,
+`expiresAt` and `createdAt` and sortable by `id`, `email`, `createdAt` and `expiresAt`; the users
+list takes `filter[userType]=guest`. Deactivating, ending sessions and resetting a password use the
+ordinary user endpoints. After promotion the guest restrictions lift: SSO, linking and global roles
+are allowed. The 2FA rules for regular users apply too: when the policy is `required` or a role the
+user holds requires 2FA, access tokens from a sign-in without a second factor are revoked, so the next
+refresh meets the step-up.
+
+**Who chose the password.** `users.password_set_by_user` is false while the password is one someone
+else chose: an invite's `initialAccess.password`, or one an admin set (`POST /v1/admin/users`,
+`PATCH /v1/admin/users/:id`). It turns true when the user sets one through a setup link, the forced
+change or `POST /v1/account/password`. Promotion is refused while it is false (`409
+password_not_user_set`), since whoever chose the password could sign in as the promoted account:
+send the guest a setup link (which, for a guest with a password, takes the credential-reset
+authority above) and promote once they have used it.
+
+**Promotion keeps the account as it is.** Promotion hands over the account with its password, TOTP
+and sessions; it does not reset them. While the account is a guest, whoever invited it can sign in
+as it (with a password they chose, or a link they were given) and set a password of their own,
+which then counts as user-set. That is within what inviting allows: the inviter could create a guest
+with the same roles anyway. A promoted account gains more (no expiry, roles no longer limited to
+guest-assignable ones, whatever is granted next), so a promoter who wants only the person to hold
+it resets their credentials (`PATCH /v1/admin/users/:id`, then a setup link or the person's own
+sign-in) before granting more.
+
+**Setup links and grants do not survive the account changing hands.** A live setup link and any
+pending forced-change grant are retired on promotion, on an admin password reset, email change or
+deactivation (`PATCH /v1/admin/users/:id`), and when the user changes their own password: the
+inviter got the link's URL back and must not keep a way in.
+
+**`POST /v1/admin/guests`** takes `email`, optional `name`, `organizationId` (default: the token's
+organization, else the default organization, which must be active: 400 `organization_inactive`),
+`roles` (names or ids; 400 `unknown_role`), exactly one of `expiresAt` and `expiresIn` (seconds;
+in the future, no further than `GUEST_MAX_TTL_SECONDS` from now), and `initialAccess`
+(required): either `{ "type": "password_setup_link", "notify": true }` or
+`{ "type": "password", "password": "…", "mustChange": true }` (`mustChange` defaults to `true`).
+The email is normalized, and a per-email advisory lock serializes concurrent invites. What happens
+depends on who holds the email:
+
+| Existing account                                            | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| none                                                        | Creates the guest, membership and roles (the default roles when `roles` is omitted), sets up initial access: `201 { user, created: true, passwordSetupUrl? }` (`user` carries `organizationId`)                                                                                                                                                                                                                                                                                                            |
+| a guest in the same organization or in none, expired or not | Extends (a guest in no organization first joins this one as a `member`, which needs `organizations.write`: otherwise `409 guest_unassigned`): `expiresAt` becomes the later value, and refresh tokens capped at the old expiry are lifted (each to its family's start plus `JWT_REFRESH_TOKEN_TTL`, capped at the new expiry). Roles named are added, none removed; omitted `roles` adds nothing (defaults apply only on create). Name and password are untouched; `initialAccess` applies only if they never set a password: `200 { user, created: false, passwordSetupUrl? }` |
+| a guest in another organization                             | `409 guest_in_other_organization`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| a human                                                     | `409 user_exists` with `userId`; the app grants that user directly                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| a service account, the system user or a deactivated user    | `409 user_not_invitable`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+
+The refusals above say whether the email has an account, so only a caller holding `users.read`
+(which lists every user anyway) gets them. Any other caller gets one `409 email_unavailable` for all
+of them, without `userId`.
+
+`notify: true` emails the link and needs a default email connection (`409 email_not_configured`);
+`passwordSetupUrl` is returned either way, so an app can deliver it itself. Each operation runs in
+one transaction with its audit entries and events. The guest events carry the user plus
+`organizationId`: `auth.guest.invited` (`roleIds`), `auth.guest.extended` (`previousExpiresAt`,
+`rolesAdded`, and `change`: `extended`, `shortened` or `ended`; also emitted by `PATCH`, with no
+roles added) and `auth.guest.promoted`. They are emitted under the **guest's organization** (null
+for a guest in none), not the default one: `users.guests.read` is scoped to the organizations one
+acts in, so only that organization's endpoints, and service endpoints of all organizations, receive
+them.
+
+The invite also records what it creates as the ordinary endpoints do, in the same transaction: a new
+guest's `CREATE User` entry (`metadata.action: guest_invited`, with `email`, `name`, `userType`) and
+`auth.user.created`; a membership added (on create, or when a guest in no organization joins) as
+`CREATE OrganizationMember` and `auth.organization.member-added`; roles added as
+`roles_changed` and `auth.organization.member-roles-changed` (`roleIds` being the full set held).
+These platform events keep the default organization, as their own endpoints emit them.
+
+`PATCH` audits a later expiry as `guest_extended`, an earlier one still in the future as
+`guest_shortened`, and one not in the future as `guest_access_ended`. Ending access also revokes the
+guest's live access tokens and closes their sockets; their refresh tokens are lowered to the new
+expiry, so they are spent too.
+
+### Password setup link
+
+Issued by `issuePasswordSetupLink` (`utils/passwordSetup.ts`) as
+`${UI_BASE_URL}/set-password#token=<token>`: 32 random bytes, base64url, valid for
+`PASSWORD_SETUP_TTL_SECONDS` (72 hours by default), single use, and only its SHA-256 is stored in
+`auth.password_setup_tokens`. A user has at most one live token; issuing replaces it. The token is
+in the URL **fragment**, so it never reaches server logs, `Referer` headers or link previews. The
+helper does not refuse unusable users itself; the invite endpoint checks.
+
+The email is a **sensitive** notification: its content is redacted from the admin APIs (`content:
+null`, `contentRedacted: true`), nulled once the notification is terminal, and an admin retry of one
+answers `409 content_redacted` ([notifications.md](notifications.md)).
+
+Both routes are public, rate limited per IP, and give one uniform `404` for an unknown, used or
+expired token or a user no longer usable or no longer a guest (a miss counts against the caller's
+IP):
+
+- `POST /v1/password-setup/inspect { token }` returns `{ email, name, expiresAt }` (the link's
+  expiry) and uses nothing up.
+- `POST /v1/password-setup { token, password }` sets the password under the password rules, consumes
+  the token with a conditional update (of two concurrent requests one wins), clears
+  `passwordChangeRequired` and ends the user's other sessions, in one transaction; `204`. Emits
+  `auth.user.password-set` (never the password). The UI then shows a "Password set" screen whose
+  Sign in button goes to `/`.
+
+Issuing emits `auth.user.password-setup-link-issued`. The hourly auth cleanup deletes a token
+`AUTH_TOKEN_GRACE_MS` (7 days) after it expired or was used (retired included).
+
+### Forced password change
+
+With `passwordChangeRequired` set (a guest created with `initialAccess.password`), a **password**
+login does not issue a code: it redirects to `/login/change-password` with a one-time grant, and
+`POST /oauth/password-change { change_grant, password }` sets the new password (it must differ:
+`password_unchanged`), clears the flag and ends other sessions; the login then restarts. The grant
+is bound to the browser by a cookie holding a separate random secret (only its hash is stored on
+the grant; the URL never carries it), so a grant lifted from a URL is refused elsewhere
+(`invalid_change_grant`; an expired one is `change_expired`). The step comes **after** the TOTP
+step: a user with TOTP enabled enters a code (or a recovery code) first, and the TOTP handlers issue
+the grant, so the password alone cannot replace the password. The restarted login asks for a code
+again. A provider login skips the step and leaves the flag set, which matters for a promoted
+ex-guest.
+
+### Two-factor for guests
+
+The instance `totpPolicy: required` does not force a guest to enrol (`disabled` still wins). A
+guest-assignable role with `requires2fa` does, since an admin chose it. Flagging such a role, or
+assigning it, revokes the password-only tokens of the guests it reaches, as for any holder.
 
 ## Two-factor authentication (TOTP)
 
 The `totpPolicy` system setting (`PATCH /v1/admin/settings`) is `disabled`, `optional` (the default) or
 `required`:
 
-- `required` — every user must enrol; login redirects to setup until they do.
+- `required` — every user must enrol; login redirects to setup until they do. Guests are not forced
+  by it ([Guest users](#guest-users)).
 - `optional` — users may enrol; a user holding an active role with `requires2fa` must.
 
 `settings.write` may tighten the policy, but relaxing it (`required` to anything, `optional` to
@@ -917,7 +1154,7 @@ revokes the token families issued under it, and the browser's next password logi
 | `JWT_ACCESS_TOKEN_TTL`   | 3600 (1 h)     | Access and ID tokens                                                                                                                               |
 | `JWT_REFRESH_TOKEN_TTL`  | 2592000 (30 d) | A refresh-token family, from the code exchange. A rotated token keeps the family's original expiry                                                 |
 | `USER_SESSION_TTL`       | 604800 (7 d)   | The SSO session behind `prompt=none` and org switching (`org_id`). A session continued without a password keeps the expiry of the one it came from |
-| `USER_SESSION_IDLE_TTL`  | 259200 (3 d)   | The same SSO session, since it last issued a code                                                                                                    |
+| `USER_SESSION_IDLE_TTL`  | 259200 (3 d)   | The same SSO session, since it last issued a code                                                                                                  |
 | `AUTHORIZATION_CODE_TTL` | 120            | Authorization codes                                                                                                                                |
 | `LOGIN_FLOW_TTL`         | 900 (15 min)   | The login, consent and org-select steps: their cookies and sessions, since a person fills them in                                                  |
 
@@ -1009,12 +1246,12 @@ the user's account nor core's files (`core:events` alone) gets only `auth:permis
 the `auth:session:revoked` of its own session — nothing naming the user's other sessions,
 organizations or buckets:
 
-| Event                       | Payload                                 | Sent when                                                                                                                                                                                                         |
-| --------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth:permissions:changed`  | `{ reason, timestamp }`                 | to every socket of the user: their global roles change, or an admin changes a role they hold (a registry retirement is not notified; the UI sees it on its next token refresh)                                    |
-| `auth:session:revoked`      | `{ sessionId, timestamp }`              | to the account room and the session's own sockets: one of the user's sessions is revoked; its sockets close after                                                                                                 |
-| `auth:organization:changed` | `{ reason, organizationId, timestamp }` | to the account room. `membership_changed`: added, removed, or member tier changed; `roles_changed`: org-scoped roles set; `org_deactivated`: to every member, after the organization's tokens are revoked and before its sockets close |
-| `files:bucket-access:changed` | `{ bucketName, timestamp }` | to the files room: a bucket grant was given to or revoked from the user (a member removal included), or the bucket's ownership moved to or from them (see [files.md](files.md)) |
+| Event                         | Payload                                 | Sent when                                                                                                                                                                                                                              |
+| ----------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth:permissions:changed`    | `{ reason, timestamp }`                 | to every socket of the user: their global roles change, or an admin changes a role they hold (a registry retirement is not notified; the UI sees it on its next token refresh)                                                         |
+| `auth:session:revoked`        | `{ sessionId, timestamp }`              | to the account room and the session's own sockets: one of the user's sessions is revoked; its sockets close after                                                                                                                      |
+| `auth:organization:changed`   | `{ reason, organizationId, timestamp }` | to the account room. `membership_changed`: added, removed, or member tier changed; `roles_changed`: org-scoped roles set; `org_deactivated`: to every member, after the organization's tokens are revoked and before its sockets close |
+| `files:bucket-access:changed` | `{ bucketName, timestamp }`             | to the files room: a bucket grant was given to or revoked from the user (a member removal included), or the bucket's ownership moved to or from them (see [files.md](files.md))                                                        |
 
 The UI refreshes its token on `auth:permissions:changed` and `auth:organization:changed`; a refresh
 core rejects signs it out.

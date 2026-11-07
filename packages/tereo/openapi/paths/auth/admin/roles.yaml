@@ -176,8 +176,17 @@
       from logins without a second factor, so their next refresh meets the
       2FA step-up.
 
+      `guestAssignable` (custom roles only) lets guest users hold the role. It
+      is refused with `400 role_not_guest_assignable`, naming the permissions at
+      fault, when the role holds one a guest may not: a permission that is not
+      org-assignable, or a core permission other than `file-service.objects.read`
+      and `write`. Turning it off makes guests' assignments of the role inert.
+      Flagging a role that requires 2FA revokes the password-only tokens of the
+      guests holding it. A provisioned role is `409 managed_by_provisioning`.
+
       An audit log entry is created for this action.
-      An `auth.role.updated` webhook event is emitted.
+      An `auth.role.updated` webhook event is emitted, and
+      `auth.role.guest-assignable-changed` when `guestAssignable` changes.
     operationId: patchAdminRole
     security:
       - BearerAuth: [roles.write]
@@ -984,6 +993,47 @@ auth.role.user-removed:
                         description: The organization the removed assignment was scoped to; null for a global one.
                       roleName:
                         type: string
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.role.guest-assignable-changed:
+  post:
+    tags:
+      - Admin - Roles
+    summary: Role guest-assignable flag changed
+    description: Fired when a role is marked or unmarked as assignable to guests.
+    operationId: webhookRoleGuestAssignableChanged
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.role.guest-assignable-changed
+                  entityType:
+                    const: Role
+                  data:
+                    type: object
+                    required: [id, name, guestAssignable]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      name:
+                        type: string
+                      guestAssignable:
+                        type: boolean
     responses:
       '2XX':
         description: Any 2xx response acknowledges the delivery; anything else is retried.

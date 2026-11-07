@@ -256,6 +256,9 @@ them (`recipients`). A service can reach its own webhooks at a private address w
 `internalHost`. Permitted staff can sign in into any active organization
 ([support access](packages/tereo/docs/auth.md#support-access)), and an app can offer an
 organization picker with the `core:organizations` scope.
+[Guest users](packages/tereo/docs/auth.md#guest-users) are temporary, single-organization logins that expire on their own
+and reach only roles flagged guest-assignable; an app invites, extends and promotes them with
+`core.guests`, and a guest sets a first password from a one-time link.
 CI checks formatting, import order, lint and types, runs the suite in Docker with real users and
 tokens, and starts the release image against a fresh database.
 

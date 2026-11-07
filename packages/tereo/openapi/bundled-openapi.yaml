@@ -865,6 +865,10 @@ tags:
     description: Admin endpoints for upstream identity providers and their lifecycle events
   - name: Admin - Identity Provider Domains
     description: Admin endpoints for the email domains a provider claims — organization, default roles, auto-accept and SSO-only
+  - name: Admin - Guests
+    description: Admin endpoints for guest users — temporary single-organization logins that invite, extend, expire and promote
+  - name: Password Setup
+    description: Public pages behind a password setup link — inspect the link and set the first password (the one-time token is the credential)
   - name: Admin - Settings
     description: Admin endpoints for system settings
   - name: Admin - Services
@@ -2904,6 +2908,10 @@ paths:
         for the 2FA session issued by `POST /oauth/authorize`. Requires the
         `tereo_2fa_session_{client_id}` cookie to match `session_token`.
 
+        When the user must replace their password (`passwordChangeRequired`),
+        the `redirect_url` is `/login/change-password` with a `change_grant`
+        (see `POST /oauth/password-change`) rather than the next login step.
+
         400 `invalid_session` (unknown session, missing or mismatched cookie),
         `session_expired`, `totp_not_configured`; 401 `invalid_code` for a wrong
         code. Attempts are counted per user, across this endpoint and
@@ -3034,6 +3042,54 @@ paths:
           $ref: '#/components/responses/OAuth2ErrorResponse'
         '403':
           $ref: '#/components/responses/CrossOriginRefusedResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /oauth/password-change:
+    post:
+      tags:
+        - OAuth2/OIDC - Authorization
+      summary: Change a required password
+      description: |
+        The step a password sign-in meets when the user's `passwordChangeRequired`
+        is set (a guest created with a password and `mustChange`): instead of a
+        code, the login redirects to `/login/change-password` with a one-time
+        `change_grant`; a cookie holding a separate secret (only its hash is
+        stored with the grant) binds it to that browser. This sets the new
+        password (`400 password_unchanged` when it equals the current one),
+        clears the flag, ends the user's other sessions and consumes the grant;
+        the login then restarts. The step comes after TOTP: for a user with TOTP
+        enabled, `/oauth/totp/verify` or `/oauth/totp/recovery` answers with the
+        redirect to `/login/change-password`. Only password logins meet it: a
+        provider login skips it and leaves the flag set. `invalid_change_grant` and `change_expired` are
+        `400` errors. Wrong attempts are rate limited per client; no code is
+        issued until the password is changed.
+
+        An audit log entry is created and `auth.user.password-changed` is emitted.
+      operationId: postOAuthPasswordChange
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordChangeRequest'
+      responses:
+        '204':
+          description: Password changed
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+          description: '`invalid_request` (with `issues`, e.g. the password rules), `password_unchanged`, `invalid_change_grant` or `change_expired`'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -4387,6 +4443,7 @@ paths:
         - `email`: `contains`, `equals`
         - `name`: `contains`, `equals`
         - `isActive`: `equals` (true/false)
+        - `userType`: `equals` (`human`, `service_account`, `guest`); each user also carries `expiresAt`, `status` and `passwordChangeRequired`
         - `createdAt`: range only — `filter[createdAt_gte]`, `filter[createdAt_lte]` (ISO date)
 
         **Sort fields:** `id` (default), `email`, `name`, `createdAt`, `isActive`
@@ -4396,6 +4453,7 @@ paths:
         - `?filter[email]=john&filter[email_op]=contains`
         - `?filter[id]=<uuid>,<uuid>&filter[id_op]=in&limit=2`
         - `?filter[isActive]=true` (defaults to equals)
+        - `?filter[userType]=guest`
         - `?filter[createdAt_gte]=2024-01-01`
 
         An unknown filter field or operator, a bad value, or an invalid cursor
@@ -4570,6 +4628,11 @@ paths:
         user's sessions and token families, in the transaction that sets it,
         like `DELETE /v1/admin/users/{id}/sessions/all`: a caller resetting their
         own password keeps the session they act from.
+
+        Setting a `password`, changing the `email` or deactivating also retires
+        the user's live password setup link and pending forced-change grants. A
+        password set here is the admin's choice: a guest so set cannot be
+        promoted until they set their own (`409 password_not_user_set`).
 
         Setting `rateLimitPerSecond` alone is a valid update. When it changes, a
         separate audit entry (`metadata.rateLimitPerSecond` with `from` and `to`)
@@ -5220,6 +5283,523 @@ paths:
           $ref: '#/components/responses/RateLimitResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/users/{id}/promote:
+    post:
+      tags:
+        - Admin - Users
+      summary: Promote a guest
+      description: |
+        Makes a guest a permanent user: `userType` becomes `human` and `expiresAt`
+        is cleared. The id, organization membership, roles, password, grants and
+        history are kept. The guest restrictions lift, so SSO sign-in, identity
+        linking and global roles are allowed afterwards. Needs `users.write` and,
+        as for a credential reset, global permissions covering every permission
+        the user holds (`403` naming those lacking). `404 not_a_guest` for a user
+        who is not a guest. Promoting restores sign-in for a guest whose time had run out (`expiresAt` is cleared). A password change still required (`passwordChangeRequired`)
+        stays set until the user changes it at a password sign-in. When the
+        instance policy is `required` or a role the user holds requires 2FA,
+        access tokens from a sign-in without a second factor are revoked.
+
+        `409 password_not_user_set` while the guest's password is one someone
+        else chose (an invite's `initialAccess.password` or an admin's): send them
+        a password setup link and promote once they have set their own. The
+        guest's live setup link and pending forced-change grants are retired.
+
+        Promotion keeps the account's password, TOTP and sessions. A guest's
+        inviter can sign in as the guest before promotion, so to hand the
+        account to the person alone, reset their credentials before granting
+        more.
+
+        An audit log entry is created and `auth.guest.promoted` is emitted.
+      operationId: promoteAdminUser
+      security:
+        - BearerAuth:
+            - users.write
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      responses:
+        '200':
+          description: Guest promoted
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: No such user, or `not_a_guest`
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: '`password_not_user_set`'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/guests:
+    post:
+      tags:
+        - Admin - Guests
+      summary: Invite a guest
+      description: |
+        Creates a guest user, or extends one, by email. A guest is a temporary
+        login: a `member` of one organization with org-scoped roles that are
+        guest-assignable, expiring at `expiresAt`. Needs `users.guests.write`;
+        the "only what you hold" grant rule does not apply to the guest-assignable
+        roles named here.
+
+        What happens depends on who holds the email:
+
+        - **No account**: creates the guest, its membership and roles, and sets
+          up `initialAccess`. `201`, `created: true`.
+        - **A guest in the same organization, or in none** (expired included,
+          while not deactivated): extends. A guest in no organization (removed
+          from theirs, or theirs archived) first joins this one as a `member`;
+          that needs `organizations.write`, as it hands the caller the guest's
+          account, and is otherwise `409 guest_unassigned`. `expiresAt` becomes the later of the current and
+          requested value, which lifts the guest's refresh sessions capped at the
+          old expiry. `roles` are added (none removed; omitted adds none, the
+          defaults apply only to a new guest). The name and password are left
+          alone; `initialAccess` applies only if they have never set a password.
+          `200`, `created: false`, with `passwordSetupUrl` when a link was
+          issued.
+        - **A guest in another organization**: `409 guest_in_other_organization`.
+        - **A human**: `409 user_exists`, with `userId`; grant that user directly.
+        - **A service account, the system user or a deactivated user**:
+          `409 user_not_invitable`.
+
+        These refusals tell whether the email has an account, so only a caller
+        holding `users.read` gets them. Any other caller gets
+        `409 email_unavailable` for all of them, with no `userId`.
+
+        `initialAccess` is a password-setup link (`notify: true` emails it and needs
+        a default email connection: `409 email_not_configured`; the link is returned
+        as `passwordSetupUrl` either way) or a password, which the guest must change
+        at first sign-in unless `mustChange` is false.
+
+        The caller must act in the organization (a member, or a service account
+        whose client belongs to it) unless they hold `organizations.write`:
+        `403 organization_not_permitted`. The organization must be active
+        (`400 organization_inactive`). An audit log
+        entry is created. `auth.guest.invited` (new) or
+        `auth.guest.extended` (old and new `expiresAt`, roles added) is emitted
+        under the guest's organization, and
+        `auth.user.password-setup-link-issued` when a link is issued. The user,
+        membership and roles are also audited and emitted as their own endpoints
+        do: `auth.user.created` for a new guest, `auth.organization.member-added`
+        when a membership is added, and `auth.organization.member-roles-changed`
+        when roles are added.
+      operationId: inviteGuest
+      security:
+        - BearerAuth:
+            - users.guests.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteGuestRequest'
+      responses:
+        '200':
+          description: Existing guest of the same organization extended
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InviteGuestResponse'
+        '201':
+          description: Guest created
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InviteGuestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+          description: Invalid body, `organization_inactive`, `unknown_role`, `role_not_guest_assignable`, or an expiry out of range
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Missing permission, or `organization_not_permitted`
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: The organization does not exist
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: '`guest_in_other_organization`, `guest_unassigned`, `user_exists` (with `userId`), `user_not_invitable` (these four only with `users.read`; otherwise `email_unavailable`), or `email_not_configured`'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+    get:
+      tags:
+        - Admin - Guests
+      summary: List guests
+      description: |
+        Guests with their `expiresAt` and `status` (`active`, `expired`,
+        `deactivated`). Needs `users.guests.read`. Without `organizations.write`,
+        only guests in organizations the caller acts in (a member, or a service
+        account whose client belongs to it) are listed.
+
+        **Filter fields and operators:** `organizationId` (`equals`), `email`
+        (`contains`, `equals`), `isActive` (`equals`), `expiresAt` and `createdAt`
+        (range: `filter[expiresAt_gte]`, `filter[expiresAt_lte]`). **Sort fields:**
+        `id` (default), `email`, `createdAt`, `expiresAt`. The same users are
+        listed by `GET /v1/admin/users?filter[userType]=guest` (`users.read`).
+      operationId: getAdminGuests
+      security:
+        - BearerAuth:
+            - users.guests.read
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+        - $ref: '#/components/parameters/SortParam'
+        - $ref: '#/components/parameters/SortDirParam'
+        - $ref: '#/components/parameters/FilterValueParam'
+        - $ref: '#/components/parameters/FilterOperatorParam'
+      responses:
+        '200':
+          description: Paginated list of guests
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedGuestsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+          description: Invalid query parameters
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/guests/options:
+    get:
+      tags:
+        - Admin - Guests
+      summary: Get guest invitation options
+      description: |
+        What an inviter needs to fill in an invitation without `roles.read`: the
+        custom roles a guest may be given now, the configured defaults among
+        them, and `maxTtlSeconds` (`GUEST_MAX_TTL_SECONDS`), the furthest ahead
+        an invitation or extension may set `expiresAt`. Needs `users.guests.write`.
+      operationId: getGuestOptions
+      security:
+        - BearerAuth:
+            - users.guests.write
+      responses:
+        '200':
+          description: The options
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestOptionsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/guests/{id}:
+    get:
+      tags:
+        - Admin - Guests
+      summary: Get a guest
+      description: |
+        One guest. Needs `users.guests.read`. Without `organizations.write`, the
+        caller sees only guests of an organization they act in, and anything
+        else (a guest elsewhere or in no organization, a user who is not a
+        guest, an unknown id) is the same `404 not_a_guest`, so the answer
+        tells nothing about the user. With it, `404 not_a_guest` for a user who
+        is not a guest.
+      operationId: getAdminGuest
+      security:
+        - BearerAuth:
+            - users.guests.read
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      responses:
+        '200':
+          description: The guest
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestUser'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: '`not_a_guest` (also an unknown id or a guest outside the caller''s organizations, without `organizations.write`), or no such user'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+    patch:
+      tags:
+        - Admin - Guests
+      summary: Extend or shorten a guest
+      description: |
+        Sets `expiresAt` (required) and optionally `name`. A time in the past ends
+        access now. Extending lifts the guest's refresh tokens that were capped at
+        the old expiry: each runs to its family's start plus the refresh lifetime,
+        still capped at the new expiry. Needs
+        `users.guests.write`. `404 not_a_guest` as for `GET`. `expiresAt` must
+        be an RFC 3339 date-time; `null` or any other value is a `400`.
+
+        Ending access (an `expiresAt` not in the future) also revokes the
+        guest's live access tokens and closes their sockets.
+
+        An audit log entry is created, with `metadata.action`
+        `guest_extended`, `guest_shortened` or `guest_access_ended`, and
+        `auth.guest.extended` is emitted under the guest's organization with
+        `change` saying which.
+      operationId: patchAdminGuest
+      security:
+        - BearerAuth:
+            - users.guests.write
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGuestRequest'
+      responses:
+        '200':
+          description: Guest updated
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestUser'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: '`not_a_guest` (also an unknown id or a guest outside the caller''s organizations, without `organizations.write`), or no such user'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/guests/{id}/password-setup-link:
+    post:
+      tags:
+        - Admin - Guests
+      summary: Issue a password setup link
+      description: |
+        Issues a fresh one-time link for the guest to set their password
+        (`${UI_BASE_URL}/set-password#token=…`, valid `PASSWORD_SETUP_TTL_SECONDS`,
+        72 hours by default); earlier links stop working. With `notify`, the link is
+        emailed (`409 email_not_configured` without a default email connection). The
+        email is a sensitive notification: its content is redacted from the
+        notification log. Needs `users.guests.write`, in an organization the
+        caller acts in (`403 organization_not_permitted`, as for `PATCH`).
+        `409 guest_not_usable` for a guest who is deactivated or expired (extend or
+        reactivate them first); the link would be refused on use.
+
+        For a guest who already has a password, the link replaces it and its URL
+        comes back to the caller, so it is a credential reset: it also needs
+        `users.write` and, as for `PATCH /admin/users/{id}`, global permissions
+        covering every permission the guest holds (`403 guest_has_password`
+        without `users.write`, `403 forbidden` naming those lacking). A guest
+        with no password keeps needing only `users.guests.write`.
+
+        An audit log entry is created and `auth.user.password-setup-link-issued`
+        is emitted.
+      operationId: issueGuestPasswordSetupLink
+      security:
+        - BearerAuth:
+            - users.guests.write
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssuePasswordSetupLinkRequest'
+      responses:
+        '200':
+          description: Link issued
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordSetupLinkResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: '`organization_not_permitted`, `guest_has_password`, or `forbidden` for a guest holding permissions the caller lacks'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: No such user, or `not_a_guest`
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: '`email_not_configured`, or `guest_not_usable`'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/password-setup/inspect:
+    post:
+      tags:
+        - Password Setup
+      summary: Inspect a password setup link
+      description: |
+        Who a setup link is for and when it expires, so the page can greet
+        them. Public: the token from the link's URL fragment is the credential.
+        Consumes nothing. Every
+        miss, whether the token is unknown, used or expired, or its user is no
+        longer usable or no longer a guest, is the same `404`, and counts against the caller's IP
+        (`429` past the limit, `503` when the limiter cannot reach Redis).
+      operationId: inspectPasswordSetup
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordSetupInspectRequest'
+      responses:
+        '200':
+          description: The link's user and expiry
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordSetupInspectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: Unknown, used or expired token, or a user no longer usable or no longer a guest
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/password-setup:
+    post:
+      tags:
+        - Password Setup
+      summary: Set a password from a setup link
+      description: |
+        Sets the user's password, consumes the token, clears
+        `passwordChangeRequired` and ends the user's other sessions, in one
+        transaction. The token works once: of two concurrent requests with it,
+        one succeeds. Public, with the same uniform `404` and per-IP limit as
+        `POST /v1/password-setup/inspect`. The password follows the password
+        rules (`400 invalid_request`).
+
+        An audit log entry is created and `auth.user.password-set` is emitted
+        (never carrying the password). The UI then offers a sign-in at `/`.
+      operationId: setPasswordFromLink
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordSetupRequest'
+      responses:
+        '204':
+          description: Password set
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: Unknown, used or expired token, or a user no longer usable or no longer a guest
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
   /v1/admin/users/{id}/totp/reset:
     post:
       tags:
@@ -5801,8 +6381,17 @@ paths:
         from logins without a second factor, so their next refresh meets the
         2FA step-up.
 
+        `guestAssignable` (custom roles only) lets guest users hold the role. It
+        is refused with `400 role_not_guest_assignable`, naming the permissions at
+        fault, when the role holds one a guest may not: a permission that is not
+        org-assignable, or a core permission other than `file-service.objects.read`
+        and `write`. Turning it off makes guests' assignments of the role inert.
+        Flagging a role that requires 2FA revokes the password-only tokens of the
+        guests holding it. A provisioned role is `409 managed_by_provisioning`.
+
         An audit log entry is created for this action.
-        An `auth.role.updated` webhook event is emitted.
+        An `auth.role.updated` webhook event is emitted, and
+        `auth.role.guest-assignable-changed` when `guestAssignable` changes.
       operationId: patchAdminRole
       security:
         - BearerAuth:
@@ -6701,6 +7290,12 @@ paths:
         (`isActive: false`) — it grants and authorizes nothing until it is
         explicitly reactivated via `PATCH /v1/admin/organizations/{id}`.
 
+        A guest belongs to one organization, and one whose organization is
+        archived belongs to none, so may join another meanwhile. Restoring
+        removes such guests from this organization, with their roles and bucket
+        grants in it, each audited and emitted as
+        `auth.organization.member-removed`.
+
         **Authorization:** Requires the platform-level permission `organizations.archive`. Org membership roles do not grant access to this operation.
 
         An audit log entry is created for this action.
@@ -6795,7 +7390,9 @@ paths:
         (default `member`). Refused on an archived
         organization (`409 resource_archived`). Only an active person can be a
         member: core's system user, a service account or an inactive user is
-        refused with `400 user_not_addable`.
+        refused with `400 user_not_addable`, as is a guest who already belongs to
+        an organization (a membership of an archived organization does not
+        count). A guest can only be a `member` (`400 guest_tier`).
 
         On an archived organization every mutation answers
         `409 resource_archived` once the caller passes the member-tier check
@@ -6835,7 +7432,7 @@ paths:
                 $ref: '#/components/schemas/OrganizationMember'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
-          description: Invalid body (`invalid_request`), a `userId` that names no user (`unknown_user`), or the user is the system user, a service account or inactive (`user_not_addable`)
+          description: Invalid body (`invalid_request`), a `userId` that names no user (`unknown_user`), or the user is the system user, a service account or inactive, or a guest already in an organization (`user_not_addable`), or a guest given a tier above `member` (`guest_tier`)
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
@@ -14697,7 +15294,8 @@ paths:
       description: |
         Puts each `failed` delivery back to `pending` with its attempts reset, queues it again and
         re-rolls the notification's status. Deliveries already sent are not touched. With nothing
-        failed the answer is `409 nothing_to_retry`.
+        failed the answer is `409 nothing_to_retry`. A sensitive notification (such as
+        a password-setup email) is never retried: `409 content_redacted`.
 
         An audit log entry is created for this action.
 
@@ -16476,6 +17074,278 @@ webhooks:
                         updatedAt:
                           type: string
                           format: date-time
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.guest.invited:
+    post:
+      tags:
+        - Admin - Guests
+      summary: Guest invited
+      description: Fired when `POST /v1/admin/guests` creates a guest, under the guest's organization (endpoints of that organization, and service endpoints of all organizations). `data` is the user plus `organizationId` and `roleIds`, the roles assigned.
+      operationId: webhookGuestInvited
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.guest.invited
+                    entityType:
+                      const: User
+                    data:
+                      allOf:
+                        - $ref: '#/components/schemas/User'
+                        - type: object
+                          required:
+                            - organizationId
+                          properties:
+                            organizationId:
+                              type:
+                                - string
+                                - 'null'
+                              format: uuid
+                            roleIds:
+                              type: array
+                              items:
+                                type: string
+                                format: uuid
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.guest.extended:
+    post:
+      tags:
+        - Admin - Guests
+      summary: Guest extended
+      description: 'Fired when a guest''s expiry changes or roles are added: by a repeat invite or `PATCH /v1/admin/guests/{id}`. Emitted under the guest''s organization. `data` is the user after the change plus `organizationId`, `previousExpiresAt`, `rolesAdded` (role ids; empty for a PATCH) and `change`: `extended`, `shortened` (an earlier expiry still in the future) or `ended` (access ended now).'
+      operationId: webhookGuestExtended
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.guest.extended
+                    entityType:
+                      const: User
+                    data:
+                      allOf:
+                        - $ref: '#/components/schemas/User'
+                        - type: object
+                          required:
+                            - organizationId
+                          properties:
+                            organizationId:
+                              type:
+                                - string
+                                - 'null'
+                              format: uuid
+                            previousExpiresAt:
+                              type:
+                                - string
+                                - 'null'
+                              format: date-time
+                            rolesAdded:
+                              type: array
+                              items:
+                                type: string
+                                format: uuid
+                            change:
+                              type: string
+                              enum:
+                                - extended
+                                - shortened
+                                - ended
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.guest.promoted:
+    post:
+      tags:
+        - Admin - Guests
+      summary: Guest promoted
+      description: Fired when `POST /v1/admin/users/{id}/promote` makes a guest a permanent user, under the guest's organization. `data` is the user after promotion plus `organizationId`.
+      operationId: webhookGuestPromoted
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.guest.promoted
+                    entityType:
+                      const: User
+                    data:
+                      allOf:
+                        - $ref: '#/components/schemas/User'
+                        - type: object
+                          required:
+                            - organizationId
+                          properties:
+                            organizationId:
+                              type:
+                                - string
+                                - 'null'
+                              format: uuid
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.role.guest-assignable-changed:
+    post:
+      tags:
+        - Admin - Roles
+      summary: Role guest-assignable flag changed
+      description: Fired when a role is marked or unmarked as assignable to guests.
+      operationId: webhookRoleGuestAssignableChanged
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.role.guest-assignable-changed
+                    entityType:
+                      const: Role
+                    data:
+                      type: object
+                      required:
+                        - id
+                        - name
+                        - guestAssignable
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        name:
+                          type: string
+                        guestAssignable:
+                          type: boolean
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.user.password-setup-link-issued:
+    post:
+      tags:
+        - Password Setup
+      summary: Password setup link issued
+      description: Fired when a password setup link is issued for a user. The link itself is never in the event.
+      operationId: webhookUserPasswordSetupLinkIssued
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.user.password-setup-link-issued
+                    entityType:
+                      const: User
+                    data:
+                      type: object
+                      required:
+                        - userId
+                        - email
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        email:
+                          type: string
+                        expiresAt:
+                          type: string
+                          format: date-time
+                        notified:
+                          type: boolean
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.user.password-set:
+    post:
+      tags:
+        - Password Setup
+      summary: Password set from a link
+      description: Fired when a user sets their password from a setup link. Never carries the password.
+      operationId: webhookUserPasswordSet
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.user.password-set
+                    entityType:
+                      const: User
+                    data:
+                      type: object
+                      required:
+                        - userId
+                        - email
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        email:
+                          type: string
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -21257,7 +22127,7 @@ components:
                     message:
                       type: string
     NotificationsNothingToRetryResponse:
-      description: Conflict. `nothing_to_retry`, the notification has no failed delivery.
+      description: Conflict. `nothing_to_retry` (the notification has no failed delivery) or `content_redacted` (a sensitive notification, whose content is not kept, cannot be retried).
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -21277,6 +22147,7 @@ components:
                 type: string
                 enum:
                   - nothing_to_retry
+                  - content_redacted
               error_description:
                 type: string
     NotificationsConflictResponse:
@@ -21314,7 +22185,7 @@ components:
         `unknown_connection` (no connection with that slug on the channel), `invalid_content` (the
         content, a recipient's address or options, an attachment's filename, or no `to`),
         `too_many_recipients`, `sender_not_allowed` (`from` or `replyTo` is not an allowed sender of
-        the connection), `unknown_user`, `inactive_user` (deactivated, or not a person),
+        the connection), `unknown_user`, `inactive_user` (deactivated, an expired guest, or not a person),
         `unknown_organization`, `attachment_not_found` (the version is not one of the object's, or
         is a delete marker), `attachments_too_large`.
       headers:
@@ -22966,6 +23837,9 @@ components:
         - name
         - isActive
         - userType
+        - expiresAt
+        - status
+        - passwordChangeRequired
         - hasPassword
         - createdAt
         - updatedAt
@@ -22987,6 +23861,23 @@ components:
           enum:
             - human
             - service_account
+            - guest
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When a guest's access ends; `null` for everyone else. Checked live, so an expired guest is refused as a deactivated user is, without `isActive` changing.
+        status:
+          type: string
+          enum:
+            - active
+            - expired
+            - deactivated
+          description: '`deactivated` when `isActive` is false, else `expired` for a guest past `expiresAt`, else `active`.'
+        passwordChangeRequired:
+          type: boolean
+          description: Whether the next password sign-in must change the password first (a guest created with `initialAccess.password` and `mustChange`).
         hasPassword:
           type: boolean
           description: Whether the user has a password. False for a user created without one, who can sign in only through a linked identity provider (or an invite's first sign-in).
@@ -23517,6 +24408,7 @@ components:
         - serviceId
         - service
         - requires2fa
+        - guestAssignable
         - provisioned
         - unprovisionedAt
         - retiredAt
@@ -23569,6 +24461,12 @@ components:
             - type: 'null'
         requires2fa:
           type: boolean
+        guestAssignable:
+          type: boolean
+          description: |
+            Whether guest users may hold this role (in their one organization).
+            Only custom roles can be; the role must be org-assignable and carry no
+            core permission besides `file-service.objects.read` and `write`.
         retiredAt:
           type:
             - string
@@ -23699,6 +24597,10 @@ components:
         requires2fa:
           type: boolean
           default: false
+        guestAssignable:
+          type: boolean
+          default: false
+          description: Refused with `400 role_not_guest_assignable` unless the role may be (see `Role.guestAssignable`); a new role has no permissions yet, so set it after they are.
     UpdateRoleRequest:
       type: object
       properties:
@@ -23718,6 +24620,14 @@ components:
           type: boolean
         requires2fa:
           type: boolean
+        guestAssignable:
+          type: boolean
+          description: |
+            Custom roles only (`400 role_not_guest_assignable` when the role holds a
+            permission a guest may not: one that is not org-assignable, or a core
+            permission other than `file-service.objects.read`/`write`; the error
+            names them). Turning it off makes guests' assignments of the role inert.
+            Emits `auth.role.guest-assignable-changed`.
     DuplicateRoleRequest:
       type: object
       required:
@@ -28683,11 +29593,15 @@ components:
             content:
               description: |
                 What was sent, as the channel takes it (for email: `subject`, `text`, `html`, `from`,
-                `replyTo`). Null once every delivery is sent.
+                `replyTo`). Null once every delivery is sent, and always null for a sensitive
+                notification (see `contentRedacted`).
               type:
                 - object
                 - 'null'
               additionalProperties: true
+            contentRedacted:
+              type: boolean
+              description: True for a sensitive notification, such as a password-setup email, whose content is never returned and is dropped once the notification is terminal. Retrying one is `409 content_redacted`.
             deliveries:
               type: array
               items:
@@ -28900,6 +29814,21 @@ components:
           type: string
           format: uri
           description: Where the user signs in to the client again
+    PasswordChangeRequest:
+      type: object
+      required:
+        - change_grant
+        - password
+      properties:
+        change_grant:
+          type: string
+          maxLength: 128
+          description: The one-time grant from the `/login/change-password` redirect. It works only in the browser that holds the matching cookie.
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+          description: The new password; it must differ from the current one (`password_unchanged`).
     AccountOrganizationsResponse:
       type: object
       required:
@@ -29100,6 +30029,234 @@ components:
           type: string
           format: date-time
           description: 7 days after the invite was issued
+    GuestUser:
+      description: A guest as the admin API returns it, with the organization they belong to.
+      allOf:
+        - $ref: '#/components/schemas/AdminUser'
+        - type: object
+          required:
+            - organizationId
+          properties:
+            organizationId:
+              type:
+                - string
+                - 'null'
+              format: uuid
+    PaginatedGuestsResponse:
+      type: object
+      required:
+        - data
+        - hasMore
+        - limit
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/GuestUser'
+        hasMore:
+          type: boolean
+        limit:
+          type: integer
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    GuestInitialAccess:
+      description: How the guest first gets in.
+      oneOf:
+        - type: object
+          required:
+            - type
+          properties:
+            type:
+              type: string
+              enum:
+                - password_setup_link
+            notify:
+              type: boolean
+              default: false
+              description: Email the link through the default email connection (`409 email_not_configured` without one). The link is returned either way.
+        - type: object
+          required:
+            - type
+            - password
+          properties:
+            type:
+              type: string
+              enum:
+                - password
+            password:
+              type: string
+              minLength: 12
+              maxLength: 256
+            mustChange:
+              type: boolean
+              default: true
+              description: Require a new password at the first sign-in.
+    InviteGuestRequest:
+      type: object
+      required:
+        - email
+        - initialAccess
+      description: Give exactly one of `expiresAt` and `expiresIn`.
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+          description: Trimmed and lower-cased. Invites for one email are serialized.
+        name:
+          type: string
+          maxLength: 100
+          description: Used when the guest is created; an existing guest's name is left alone.
+        organizationId:
+          type: string
+          format: uuid
+          description: The guest's one organization. Default is the token's organization, else the default organization. It must be active (`400 organization_inactive`).
+        roles:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+          description: |
+            Guest-assignable custom roles, by name or id (`400 unknown_role`,
+            `400 role_not_guest_assignable`). When omitted, a new guest gets the
+            provisioned `guests.defaultRoles` (a stale one is skipped); an existing
+            guest being extended gets none added.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When access ends, as an RFC 3339 date-time. Must be in the future and no further ahead than `GUEST_MAX_TTL_SECONDS` (90 days by default).
+        expiresIn:
+          type: integer
+          minimum: 1
+          description: Seconds from now until access ends; same limits as `expiresAt`.
+        initialAccess:
+          $ref: '#/components/schemas/GuestInitialAccess'
+    InviteGuestResponse:
+      type: object
+      required:
+        - user
+        - created
+      properties:
+        user:
+          $ref: '#/components/schemas/GuestUser'
+        created:
+          type: boolean
+          description: '`true` for a new guest (201); `false` when an existing guest of the same organization was extended (200).'
+        passwordSetupUrl:
+          type: string
+          format: uri
+          description: The one-time link (`/set-password#token=…`), present when a link was issued. Shown once; only its hash is stored.
+    GuestOptionsResponse:
+      type: object
+      required:
+        - roles
+        - defaultRoleIds
+        - maxTtlSeconds
+      properties:
+        roles:
+          type: array
+          description: The custom roles a guest may be given now (active, not archived or retired, guest-assignable, and holding only permissions a guest may hold), by name.
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - displayName
+              - description
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              displayName:
+                type: string
+              description:
+                type:
+                  - string
+                  - 'null'
+        defaultRoleIds:
+          type: array
+          description: The configured default guest roles among `roles`; a new guest invited without `roles` gets these.
+          items:
+            type: string
+            format: uuid
+        maxTtlSeconds:
+          type: integer
+          description: '`GUEST_MAX_TTL_SECONDS`: the furthest ahead an invitation or extension may set `expiresAt`.'
+    UpdateGuestRequest:
+      type: object
+      required:
+        - expiresAt
+      properties:
+        expiresAt:
+          type: string
+          format: date-time
+          description: Extends or shortens, as an RFC 3339 date-time (`null` is refused); a time in the past ends access now. No further ahead than `GUEST_MAX_TTL_SECONDS` from now.
+        name:
+          type: string
+          maxLength: 100
+    IssuePasswordSetupLinkRequest:
+      type: object
+      properties:
+        notify:
+          type: boolean
+          default: false
+    PasswordSetupLinkResponse:
+      type: object
+      required:
+        - url
+        - expiresAt
+      properties:
+        url:
+          type: string
+          format: uri
+          description: The one-time link (`/set-password#token=…`).
+        expiresAt:
+          type: string
+          format: date-time
+    PasswordSetupInspectRequest:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          maxLength: 128
+    PasswordSetupInspectResponse:
+      type: object
+      required:
+        - email
+        - name
+        - expiresAt
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type:
+            - string
+            - 'null'
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the link expires.
+    PasswordSetupRequest:
+      type: object
+      required:
+        - token
+        - password
+      properties:
+        token:
+          type: string
+          maxLength: 128
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
     IdentityProvider:
       type: object
       description: An upstream identity provider. The client secret is write-only and never returned.
@@ -30143,6 +31300,8 @@ x-tagGroups:
       - Account - TOTP
       - Account - Sign-in Methods
       - Admin - Users
+      - Admin - Guests
+      - Password Setup
       - Admin - User Identities
       - Admin - User Permissions
       - Admin - User Sessions

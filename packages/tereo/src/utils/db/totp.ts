@@ -1,9 +1,13 @@
 import { Prisma } from "../../../prisma/generated/client/index.js";
-import { liveAssignmentsWhere } from "./roles.js";
 import { getTotpPolicy } from "./settings.js";
 import { hashFlowToken } from "../crypto.js";
 import { NotFoundError } from "../errors.js";
 import { prisma } from "./prisma.js";
+import {
+  guestAssignmentsWhere,
+  isGuest,
+  liveAssignmentsWhere,
+} from "./roles.js";
 
 export interface TotpStatus {
   totpEnabled: boolean;
@@ -77,11 +81,14 @@ export interface TotpSetupSessionData {
  * user cannot turn off what the next sign-in would demand.
  */
 export const userRolesRequire2fa = async (userId: string): Promise<boolean> => {
+  const guest = await isGuest(userId);
   const required = await prisma.userRole.count({
     where: {
       AND: [
         liveAssignmentsWhere(userId, "memberships"),
         { role: { requires2fa: true } },
+        // A guest's other assignments grant nothing, so they demand nothing.
+        ...(guest ? [guestAssignmentsWhere] : []),
       ],
     },
   });
@@ -112,12 +119,13 @@ export const getUserTotpStatus = async (
 
 /**
  * Whether the user must use 2FA, enrolled or not: the policy is `required`,
- * or it is `optional` and a role they hold requires it.
+ * or it is `optional` and a role they hold requires it. A guest is held only
+ * to their roles, whatever the policy short of `disabled`.
  */
 export const userRequires2fa = async (userId: string): Promise<boolean> => {
   const policy = await getTotpPolicy();
   if (policy === "disabled") return false;
-  if (policy === "required") return true;
+  if (policy === "required" && !(await isGuest(userId))) return true;
   return await userRolesRequire2fa(userId);
 };
 

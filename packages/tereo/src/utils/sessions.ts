@@ -1,5 +1,6 @@
 import { resolveCoreAccess, type CoreAccess } from "./coreAccess.js";
 import type { Prisma } from "./db/prisma.js";
+import { isUsableAccount } from "./users.js";
 import db from "./db/index.js";
 import {
   disconnectTokenSockets,
@@ -68,7 +69,7 @@ export const checkAccessToken = async (
 
   const user = await db.users.get(token.userId);
   const isClientToken = user.oauthClientId === token.clientId;
-  if (!user.isActive) {
+  if (!isUsableAccount(user)) {
     return {
       active: false,
       reason: isClientToken

@@ -2,7 +2,9 @@
 // @module-tag auth
 
 import { getAccessTokenForUser } from "../../../../../../../../support/auth/login.js";
+import { getTestPrincipalToken } from "../../../../../../../../support/principals.js";
 import { createTestClient } from "../../../../../../../../support/auth/clients.js";
+import { createTestGuest } from "../../../../../../../../support/auth/guests.js";
 import { prisma } from "../../../../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -109,6 +111,41 @@ describe("PUT /v1/admin/organizations/:id/members/:userId/roles", () => {
         roleIds: [role.id],
       },
     });
+  });
+
+  it("ends a guest's password-only token on a role requiring 2FA", async () => {
+    const org = await createTestOrganization(adminToken);
+    const { user } = await createTestGuest({ organizationId: org.id });
+    const role = await createTestRole();
+    await prisma.role.update({
+      where: { id: role.id },
+      data: { requires2fa: true, guestAssignable: true },
+    });
+    const token = await getTestPrincipalToken({
+      userId: user.id,
+      organizationId: org.id,
+      permissions: [],
+    });
+    const me = () =>
+      fetch(`${BASE_URL}/v1/account/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    expect((await me()).status).toBe(HTTP_STATUS.OK);
+
+    const response = await fetch(
+      `${BASE_URL}/v1/admin/organizations/${org.id}/members/${user.id}/roles`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ roleIds: [role.id] }),
+      }
+    );
+    expect(response.status).toBe(HTTP_STATUS.OK);
+
+    expect((await me()).status).toBe(HTTP_STATUS.UNAUTHORIZED);
   });
 
   it("should ignore duplicate role ids", async () => {

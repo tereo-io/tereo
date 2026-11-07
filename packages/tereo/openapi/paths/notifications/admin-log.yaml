@@ -158,7 +158,8 @@
     description: |
       Puts each `failed` delivery back to `pending` with its attempts reset, queues it again and
       re-rolls the notification's status. Deliveries already sent are not touched. With nothing
-      failed the answer is `409 nothing_to_retry`.
+      failed the answer is `409 nothing_to_retry`. A sensitive notification (such as
+      a password-setup email) is never retried: `409 content_redacted`.
 
       An audit log entry is created for this action.
 

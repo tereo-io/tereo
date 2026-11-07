@@ -11,7 +11,8 @@ import {
 } from "../utils/bullmq.js";
 
 // Hourly — purge expired auth rows: SSO, consent, org-selection and TOTP
-// sessions as soon as they expire, tokens and codes a grace period later.
+// sessions as soon as they expire, tokens and codes a grace period later,
+// password setup links a grace period after they expire or are used.
 const AUTH_CLEANUP_QUEUE = "core-auth-cleanup";
 const JOB_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -43,6 +44,8 @@ export async function cleanupExpiredAuthRows(now = new Date()) {
     totpVerifications: await db.totp.cleanupExpiredVerificationSessions(),
     totpSetupSessions: await db.totp.cleanupExpiredSetupSessions(),
     totpSetupGrants: await db.totp.cleanupExpiredSetupGrants(),
+    passwordChangeGrants: await db.passwordChangeGrants.cleanupExpired(),
+    passwordSetupTokens: await db.passwordSetupTokens.deleteSpentBefore(cutoff),
     upstreamAuthSessions: await db.upstreamAuth.cleanupExpiredSessions(),
     identityLinkGrants: await db.upstreamAuth.cleanupExpiredLinkGrants(),
     identityInvites: await db.userIdentities.cleanupExpiredInvites(),

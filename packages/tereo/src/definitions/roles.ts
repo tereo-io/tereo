@@ -96,6 +96,13 @@ export const ROLES: RoleDefinition[] = [
     description: "Send notifications",
     permissions: ["notifications.send"],
   },
+  {
+    name: "guest_inviter",
+    requestable: true,
+    displayName: "Guest Inviter",
+    description: "Invite and manage guest users",
+    permissions: ["users.guests.read", "users.guests.write"],
+  },
 ];
 
 const REQUESTABLE = new Set(
