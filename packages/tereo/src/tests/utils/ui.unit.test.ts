@@ -1,7 +1,11 @@
 // @module-tag unit
 // @module-tag platform
-import { isReservedPath, resolveUiBaseUrl } from "../../utils/ui.js";
 import { describe, expect, it } from "vitest";
+import {
+  isBrandedAuthPath,
+  isReservedPath,
+  resolveUiBaseUrl,
+} from "../../utils/ui.js";
 
 describe("resolveUiBaseUrl", () => {
   it("defaults to the Vite dev server outside production", () => {
@@ -55,4 +59,32 @@ describe("isReservedPath", () => {
     "/healthz",
     "/shared/abc",
   ])("leaves %s to the UI", (path) => expect(isReservedPath(path)).toBe(false));
+});
+
+describe("isBrandedAuthPath", () => {
+  it.each([
+    "/login",
+    "/login/",
+    "/login/2fa",
+    "/login/2fa/recovery",
+    "/consent",
+    "/logout",
+    "/set-password",
+    "/set-password/",
+    "/LOGIN",
+    "/Consent",
+  ])("brands %s", (path) => expect(isBrandedAuthPath(path)).toBe(true));
+
+  it.each([
+    "/",
+    "/loginx",
+    "/login-help",
+    "/consents",
+    "/auth-admin/users",
+    "/account/profile",
+    "/callback",
+    "/shared/abc",
+  ])("leaves %s unbranded", (path) =>
+    expect(isBrandedAuthPath(path)).toBe(false)
+  );
 });

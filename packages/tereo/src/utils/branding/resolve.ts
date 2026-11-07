@@ -106,6 +106,7 @@ const load = async (
  * Effective branding for a sign-in page. Takes the raw query value: anything
  * but a string of 1-64 characters counts as no client. Unknown ids resolve to
  * the default and are cached briefly, so they look like any unbranded client.
+ * Database errors propagate and are never cached.
  */
 export async function resolveBranding(
   clientId: unknown

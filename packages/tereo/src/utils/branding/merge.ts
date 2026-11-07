@@ -1,4 +1,5 @@
 import type { BrandingFields } from "./schema.js";
+import { brandingAssetUrl } from "./images.js";
 
 export interface ProfileValues extends BrandingFields {
   logoKey: string | null;
@@ -25,10 +26,6 @@ export interface EffectiveBranding {
 }
 
 export type Source = "client" | "default" | "tereo";
-
-// Same shape as brandingAssetUrl in images.ts.
-const assetUrl = (key: string | null) =>
-  key ? `/oauth/branding/assets/${key}` : null;
 
 const SCALAR_SLOTS = [
   "appName",
@@ -79,7 +76,8 @@ export function mergeWithSources(
   }
   for (const [slot, keyField, urlField] of IMAGE_SLOTS) {
     const layer = layers.find(([, profile]) => profile[keyField] !== null);
-    values[urlField] = assetUrl(layer ? layer[1][keyField] : null);
+    const key = layer ? layer[1][keyField] : null;
+    values[urlField] = key ? brandingAssetUrl(key) : null;
     sources[slot] = layer ? layer[0] : "tereo";
   }
 

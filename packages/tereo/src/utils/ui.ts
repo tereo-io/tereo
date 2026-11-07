@@ -21,6 +21,22 @@ export const isReservedPath = (path: string): boolean => {
   );
 };
 
+// The UI's sign-in routes, which core serves with the client's branding
+// injected; `/login/*` is branded too. The UI's `check` script fails when one
+// of these is not a route.
+export const BRANDED_AUTH_PATHS: readonly string[] = [
+  "/login",
+  "/consent",
+  "/logout",
+  "/set-password",
+];
+
+// Lowercased and without a trailing slash, as the UI's router matches them.
+export const isBrandedAuthPath = (path: string): boolean => {
+  const lower = path.toLowerCase().replace(/\/+$/, "");
+  return BRANDED_AUTH_PATHS.includes(lower) || lower.startsWith("/login/");
+};
+
 // The UI's build output beside core in the monorepo, which is also where the
 // Docker image puts it. Resolved from this file, so `src/` under tsx and
 // `dist/` once compiled land on the same directory.
