@@ -2,6 +2,7 @@ import useDeleteBrandingProfile from "../../api/branding/useDeleteBrandingProfil
 import { TEXT_LIMITS, validateDraft } from "../../api/branding/brandingErrors";
 import useSaveBrandingProfile from "../../api/branding/useSaveBrandingProfile";
 import useBrandingProfile from "../../api/branding/useBrandingProfile";
+import { BrandingPreview, inheritedFrom } from "./BrandingPreview";
 import { useBlocker, useNavigate } from "react-router-dom";
 import { ProvisionedDialog } from "./ProvisionedDialog";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
@@ -10,6 +11,7 @@ import { emptyDraft } from "../../api/branding/types";
 import { FooterLinksField } from "./FooterLinksField";
 import { PageHeader } from "@/components/PageHeader";
 import { useStockColors } from "@/features/auth";
+import { GrantsPanel } from "./GrantsPanel";
 import { ColorFields } from "./ColorFields";
 import { ImageField } from "./ImageField";
 import { useMemo, useState } from "react";
@@ -93,6 +95,7 @@ const EditorForm = ({ target, profile }: FormProps) => {
   const save = useSaveBrandingProfile(target);
   const remove = useDeleteBrandingProfile(target);
 
+  const inherited = useMemo(() => inheritedFrom(profile), [profile]);
   const locked = profile.provisioned || !profile.canEdit;
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
   const errors = useMemo(() => validateDraft(draft), [draft]);
@@ -303,11 +306,12 @@ const EditorForm = ({ target, profile }: FormProps) => {
             </section>
           )}
         </div>
-        {/* Task 18 replaces this with <BrandingPreview draft effective /> and the grants panel. */}
-        <div
-          className="t-branding-preview-slot"
-          data-testid="branding-preview-slot"
-        />
+        <div className="t-branding-side">
+          <BrandingPreview draft={draft} inherited={inherited} />
+          {profile.canManageGrants && profile.client && (
+            <GrantsPanel clientId={profile.client.id} />
+          )}
+        </div>
       </div>
       <ProvisionedDialog
         show={showProvisioned}

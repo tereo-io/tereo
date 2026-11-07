@@ -85,3 +85,65 @@
 .t-branding-banner {
   margin-bottom: 1rem;
 }
+
+.t-branding-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  position: sticky;
+  top: 1rem;
+}
+
+.t-branding-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.t-branding-preview-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.t-branding-preview-controls [role="group"] {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.t-branding-preview-frame {
+  border: 1px solid var(--k-border-color);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: var(--k-background-color);
+  color: var(--k-text-color);
+  container-type: inline-size;
+}
+
+.t-branding-preview-frame .k-auth-page {
+  min-height: 32rem;
+}
+
+.t-grants {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.t-grants h2 {
+  margin: 0;
+}
+
+.t-grants-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.t-grants-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}

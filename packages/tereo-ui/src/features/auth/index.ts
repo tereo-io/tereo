@@ -13,3 +13,6 @@ export { upstreamStartUrl } from "./api/upstream/upstreamUrls";
 export { redirectTo } from "./api/redirectTo";
 export { BRANDING_COLOR_TOKENS } from "./branding/colorTokens";
 export type { BrandingFooterLink, EffectiveBranding } from "./branding/types";
+export { BrandingProvider } from "./branding/BrandingProvider";
+export { BrandedAuthPage } from "./branding/BrandedAuthPage";
+export { LoginFormView } from "./components/login/LoginFormView";
