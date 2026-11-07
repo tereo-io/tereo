@@ -3,6 +3,7 @@
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
 import { loadProvisioningSet } from "../../../utils/provisioning/load.js";
 import { applyProvisioning } from "../../../utils/provisioning/index.js";
+import { DEFAULT_ORGANIZATION_ID } from "../../../definitions/index.js";
 import { invalidateBranding } from "../../../utils/branding/resolve.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeLoginClients } from "../../support/provisioning.js";
@@ -16,6 +17,11 @@ import { randomBytes } from "node:crypto";
 import { tmpdir } from "os";
 import { join } from "path";
 import axios from "axios";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../../support/webhooks.js";
 import {
   BRANDING_URL,
   brandingPrincipal,
@@ -39,6 +45,7 @@ const loginClient = (clientId: string) => ({
 describe("provisioned branding", () => {
   let dir: string;
   let admin: Awaited<ReturnType<typeof brandingPrincipal>>;
+  let endpointId: string;
   const clientIds: string[] = [];
 
   const newClientId = () => {
@@ -83,6 +90,12 @@ describe("provisioned branding", () => {
     dir = await mkdtemp(join(tmpdir(), "provisioning-branding-"));
     await mkdir(join(dir, "branding"));
     admin = await brandingPrincipal(["branding.admin"]);
+    endpointId = (
+      await createTestWebhookEndpoint(
+        await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+        { eventTypes: ["auth.branding.updated"] }
+      )
+    ).id;
   });
 
   afterAll(async () => {
@@ -198,6 +211,19 @@ describe("provisioned branding", () => {
       before: { provisioned: true, provisionedFrom: "app.json" },
       after: { provisioned: false, provisionedFrom: null },
     });
+    const where = {
+      webhookEndpointId: endpointId,
+      eventType: "auth.branding.updated",
+      payload: { path: ["entityId"], equals: row.id },
+    };
+    await waitFor(
+      async () => (await prisma.webhookDelivery.count({ where })) >= 2,
+      10_000
+    );
+    const events = await prisma.webhookDelivery.findMany({ where });
+    expect(events.map((e) => (e.payload as { data: unknown }).data)).toEqual(
+      expect.arrayContaining([{ clientId, changedSlots: [], released: true }])
+    );
     expect((await adminPut(clientId)).status).toBe(200);
   });
 

@@ -1,10 +1,11 @@
+import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { ProvisioningError, type ProvisioningSet } from "./load.js";
 import { BRANDING_IMAGE_SLOTS } from "../branding/schema.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { storeBrandingImage } from "../branding/storage.js";
 import type { LoadedProfile } from "./branding.js";
+import { emitTx, logAuditTx } from "../outbox.js";
 import type { Prisma } from "../db/prisma.js";
-import { logAuditTx } from "../outbox.js";
 import db from "../db/index.js";
 import {
   type AdminProfileValues,
@@ -98,11 +99,35 @@ export const applyBranding = async (
       )
     );
 
+  const stillDeclared = new Set(declared.map((d) => d.clientId));
+  const released = (
+    await tx.brandingProfile.findMany({
+      where: { provisioned: true },
+      select: {
+        id: true,
+        clientId: true,
+        provisionedFrom: true,
+        client: { select: { clientId: true } },
+      },
+    })
+  ).filter((row) => !stillDeclared.has(row.client?.clientId ?? null));
+
+  // Every profile lock before any image row lock, in one stable order: an
+  // admin save takes its profile's lock and then its images', so taking them
+  // interleaved could deadlock with it.
+  const lockKeys = new Set<string | null>([
+    ...declared.map((d) => (d.clientId ? clients.get(d.clientId)!.id : null)),
+    ...released.map((row) => row.clientId),
+  ]);
+  for (const clientUuid of [...lockKeys].sort(
+    (a, b) => (a ?? "").localeCompare(b ?? "") // null (default) first
+  ))
+    await db.brandingProfiles.lockForWrite({ clientUuid }, tx);
+
   for (const { file, clientId, profile } of declared) {
     const target = { client: clientId ? clients.get(clientId)! : null };
     const values = valuesOf(profile, objectIds);
     const clientUuid = target.client?.id ?? null;
-    await db.brandingProfiles.lockForWrite({ clientUuid }, tx);
     const existing = clientUuid
       ? await db.brandingProfiles.getByClientUuid(clientUuid, tx)
       : await db.brandingProfiles.getDefault(tx);
@@ -116,20 +141,8 @@ export const applyBranding = async (
     result.branding.push(clientId ?? "default");
   }
 
-  const stillDeclared = new Set(declared.map((d) => d.clientId));
-  const released = await tx.brandingProfile.findMany({
-    where: { provisioned: true },
-    select: {
-      id: true,
-      clientId: true,
-      provisionedFrom: true,
-      client: { select: { clientId: true } },
-    },
-  });
   for (const row of released) {
     const name = row.client?.clientId ?? null;
-    if (stillDeclared.has(name)) continue;
-    await db.brandingProfiles.lockForWrite({ clientUuid: row.clientId }, tx);
     await tx.brandingProfile.update({
       where: { id: row.id },
       data: { provisioned: false, provisionedFrom: null },
@@ -144,6 +157,13 @@ export const applyBranding = async (
         before: { provisioned: true, provisionedFrom: row.provisionedFrom },
         after: { provisioned: false, provisionedFrom: null },
       },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.branding.updated",
+      entityType: "BrandingProfile",
+      entityId: row.id,
+      data: { clientId: name ?? "default", changedSlots: [], released: true },
     });
     result.branding.push(name ?? "default");
   }
