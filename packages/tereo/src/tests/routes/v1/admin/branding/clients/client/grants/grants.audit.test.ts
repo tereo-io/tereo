@@ -82,17 +82,15 @@ describe("/v1/admin/branding/clients/:id/grants side effects", () => {
   it("writes nothing for a refused duplicate", async () => {
     const url = `${BRANDING_URL}/clients/${clientUuid}/grants`;
     await fetchJson("POST", url, owner.token, { userId: grantee.userId });
-    const before = await prisma.auditLogEntry.count({
-      where: { entityType: "BrandingGrant", entityName: { not: null } },
+    const { clientId } = await prisma.oAuthClient.findUniqueOrThrow({
+      where: { id: clientUuid },
     });
+    const where = { entityType: "BrandingGrant", entityName: clientId };
+    const before = await prisma.auditLogEntry.count({ where });
     const res = await fetchJson("POST", url, owner.token, {
       userId: grantee.userId,
     });
     expect(res.status).toBe(409);
-    expect(
-      await prisma.auditLogEntry.count({
-        where: { entityType: "BrandingGrant", entityName: { not: null } },
-      })
-    ).toBe(before);
+    expect(await prisma.auditLogEntry.count({ where })).toBe(before);
   });
 });

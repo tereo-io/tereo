@@ -3,7 +3,6 @@ import { assertMayManageGrants } from "../../../../../../../utils/branding/acces
 import { Prisma } from "../../../../../../../../prisma/generated/client/index.js";
 import { emitTx, logAuditTx } from "../../../../../../../utils/outbox.js";
 import { AddGrantSchema, GrantsClientParamsSchema } from "./schemas.js";
-import { ConflictError } from "../../../../../../../utils/errors.js";
 import { validateUser } from "../../../../../../../utils/auth.js";
 import db from "../../../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
@@ -11,6 +10,10 @@ import {
   validateBody,
   validateParams,
 } from "../../../../../../../utils/validateReq.js";
+import {
+  BadRequestError,
+  ConflictError,
+} from "../../../../../../../utils/errors.js";
 
 const loadClient = async (req: Request) => {
   const { id } = validateParams(GrantsClientParamsSchema, req);
@@ -45,6 +48,12 @@ export const addGrant = async (req: Request, res: Response) => {
   try {
     await db.$transaction(async (tx) => {
       const grantee = await db.users.get(userId, tx);
+      if (!grantee.isActive) {
+        throw new BadRequestError(
+          "user_inactive",
+          "Cannot grant branding to a deactivated user"
+        );
+      }
       if (await db.brandingGrants.getActive(client.id, userId, tx)) {
         throw alreadyGranted();
       }

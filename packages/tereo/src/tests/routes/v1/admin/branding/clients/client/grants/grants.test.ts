@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag auth
+import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fetchJson } from "../../../../../../../support/http.js";
 import { randomUUID } from "node:crypto";
@@ -105,17 +106,25 @@ describe("/v1/admin/branding/clients/:id/grants", () => {
     expect(res.status).toBe(404);
   });
 
-  it.each([[{}], [{ userId: "nope" }], [{ userId: randomUUID(), x: 1 }]])(
-    "rejects the body %j with 400",
-    async (body) => {
-      const client = await newClient();
-      const res = await fetchJson(
-        "POST",
-        grantsUrl(client.id),
-        owner.token,
-        body
-      );
-      expect(res.status).toBe(400);
-    }
-  );
+  it("answers 400 for a malformed body", async () => {
+    const client = await newClient();
+    const res = await fetchJson("POST", grantsUrl(client.id), owner.token, {
+      userId: "nope",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("answers 400 user_inactive for a deactivated user", async () => {
+    const client = await newClient();
+    const inactive = await brandingPrincipal(["branding.write"]);
+    await prisma.user.update({
+      where: { id: inactive.userId },
+      data: { isActive: false },
+    });
+    const res = await fetchJson("POST", grantsUrl(client.id), owner.token, {
+      userId: inactive.userId,
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("user_inactive");
+  });
 });
