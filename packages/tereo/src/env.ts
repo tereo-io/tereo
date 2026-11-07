@@ -404,6 +404,9 @@ const EnvFields = z
     TOTP_VERIFICATION_TTL: int(1, HOUR, 300),
     TOTP_SETUP_TTL: int(1, HOUR, 600),
     PROFILE_PHOTO_MAX_SIZE_MB: z.coerce.number().positive().max(100).default(5),
+    // Sign-in page branding images: logo, dark logo and favicon / background.
+    BRANDING_IMAGE_MAX_SIZE_KB: int(1, 10240, 512),
+    BRANDING_BACKGROUND_MAX_SIZE_MB: int(1, 50, 5),
     // Lets an identity provider's issuer be private, loopback or plain http.
     // Tests and local development only; refused in production.
     OIDC_ALLOW_PRIVATE_ISSUERS: bool("false"),
