@@ -16,3 +16,4 @@ export type { BrandingFooterLink, EffectiveBranding } from "./branding/types";
 export { BrandingProvider } from "./branding/BrandingProvider";
 export { BrandedAuthPage } from "./branding/BrandedAuthPage";
 export { LoginFormView } from "./components/login/LoginFormView";
+export { STOCK_COLORS } from "./branding/stockColors";

@@ -4,6 +4,7 @@ import { emptyDraft } from "../../api/branding/types";
 import { BrandingPreview } from "./BrandingPreview";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { STOCK_COLORS } from "@/features/auth";
 
 vi.mock("@/lib/auth", () => ({
   usePublicAxios: () => ({ get: vi.fn() }),
@@ -51,6 +52,26 @@ describe("BrandingPreview", () => {
     expect(
       document.documentElement.style.getPropertyValue("--k-primary-color")
     ).toBe("");
+  });
+
+  it("sets stock light colours on the frame inside a dark console", () => {
+    render(
+      <div data-theme="dark">
+        <BrandingPreview
+          draft={emptyDraft()}
+          inherited={{ ...inherited, colorsLight: {}, colorsDark: {} }}
+        />
+      </div>
+    );
+    const style = screen
+      .getByTestId("branding-preview-frame")
+      .getAttribute("style");
+    expect(style).toContain(
+      `--k-primary-color: ${STOCK_COLORS.light["--k-primary-color"]}`
+    );
+    expect(STOCK_COLORS.light["--k-primary-color"]).not.toBe(
+      STOCK_COLORS.dark["--k-primary-color"]
+    );
   });
 
   it("switches to the dark colours", async () => {

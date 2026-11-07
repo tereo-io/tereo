@@ -10,6 +10,7 @@ import type {
 import {
   BRANDING_COLOR_TOKENS,
   BrandingProvider,
+  STOCK_COLORS,
   type EffectiveBranding,
 } from "@/features/auth";
 
@@ -143,9 +144,10 @@ export const BrandingPreview = ({ draft, inherited }: Props) => {
         className="t-branding-preview-frame"
         data-testid="branding-preview-frame"
         data-theme={theme}
-        style={colorStyle(
-          theme === "dark" ? branding.colorsDark : branding.colorsLight
-        )}
+        style={colorStyle({
+          ...STOCK_COLORS[theme],
+          ...(theme === "dark" ? branding.colorsDark : branding.colorsLight),
+        })}
         inert
       >
         <BrandingProvider override={branding}>
