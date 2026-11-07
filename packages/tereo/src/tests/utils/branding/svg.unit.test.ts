@@ -26,6 +26,14 @@ describe("svgProblem", () => {
     ).toBeNull();
   });
 
+  it("accepts an XML declaration with UTF-8 and xml:space", () => {
+    expect(
+      svgProblem(
+        `<?xml version="1.0" encoding="utf-8"?><!-- c --><svg ${NS}><text xml:space="preserve">a</text></svg>`
+      )
+    ).toBeNull();
+  });
+
   it.each([
     ["script", wrap(`<script>alert(1)</script>`)],
     ["onload", `<svg ${NS} onload="x()"></svg>`],
@@ -44,6 +52,23 @@ describe("svgProblem", () => {
     ["root not svg", `<html xmlns="http://www.w3.org/1999/xhtml"></html>`],
     ["malformed", `<svg ${NS}><path></svg>`],
     ["external url paint", wrap(`<rect fill="url(https://x)"/>`)],
+    [
+      "stylesheet PI before root",
+      `<?xml-stylesheet type="text/xsl" href="https://e/x.xsl"?><svg ${NS}/>`,
+    ],
+    ["PI inside root", wrap(`<?foo bar?>`)],
+    [
+      "foreign-namespace element",
+      wrap(`<h:path xmlns:h="http://www.w3.org/1999/xhtml"/>`),
+    ],
+    ["css escape", wrap(`<g style="background:u\\72l(https://e/x)"/>`)],
+    [
+      "image-set",
+      wrap(`<g style="background-image:image-set('https://e/x' 1x)"/>`),
+    ],
+    ["cross-fade", wrap(`<g style="x:CROSS-FADE(a,b)"/>`)],
+    ["encoding", `<?xml version="1.0" encoding="UTF-16"?><svg ${NS}/>`],
+    ["xml:base", wrap(`<use xml:base="https://e/" href="#a"/>`)],
     ["javascript value", wrap(`<text title="javascript:x">a</text>`)],
   ])("rejects %s", (_name, svg) => {
     expect(typeof svgProblem(svg)).toBe("string");

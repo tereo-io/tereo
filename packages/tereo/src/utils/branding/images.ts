@@ -83,7 +83,11 @@ export async function checkImage(
   const max = imageMaxBytes(slot);
   if (buffer.length > max) {
     throw new PayloadTooLargeError(
-      `The ${slot} image exceeds ${Math.floor(max / 1024)} KB`
+      `The ${slot} image exceeds ${
+        slot === "background"
+          ? `${max / (1024 * 1024)} MB`
+          : `${Math.floor(max / 1024)} KB`
+      }`
     );
   }
 

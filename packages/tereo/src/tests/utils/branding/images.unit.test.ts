@@ -101,6 +101,12 @@ describe("checkImage", () => {
     ).rejects.toBeInstanceOf(PayloadTooLargeError);
   });
 
+  it("states the background limit in MB", async () => {
+    await expect(
+      checkImage("background", Buffer.alloc(imageMaxBytes("background") + 1))
+    ).rejects.toThrow("5 MB");
+  });
+
   it("hashes the buffer and builds the object key and URL", async () => {
     const out = await checkImage("logo", PNG);
     const hex = createHash("sha256").update(PNG).digest("hex");
