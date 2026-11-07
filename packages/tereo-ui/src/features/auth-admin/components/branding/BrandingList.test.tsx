@@ -56,48 +56,40 @@ describe("BrandingList", () => {
     expect(screen.queryByText("Brand a client…")).not.toBeInTheDocument();
   });
 
-  it("offers Brand a client with branding.write and pages through every client", async () => {
+  it("offers the clients core lists as brandable, without reading the clients list", async () => {
     authMock.permissions = ["branding.read", "branding.write"];
     const user = userEvent.setup();
-    authMock.axios.get.mockImplementation(async (url: string) => {
-      if (url.startsWith("/v1/admin/branding"))
-        return { data: { default: null, clients: [entry] } };
-      return url.includes("cursor=p2")
-        ? {
-            data: {
-              data: [{ id: "c3", clientId: "late-app", name: "Late App" }],
-              hasMore: false,
-              nextCursor: null,
-            },
-          }
-        : {
-            data: {
-              data: [
-                { id: "c1", clientId: "web-app", name: "Web App" },
-                { id: "c2", clientId: "early-app", name: "Early App" },
-              ],
-              hasMore: true,
-              nextCursor: "p2",
-            },
-          };
+    renderList({
+      default: null,
+      clients: [entry],
+      brandable: [
+        { id: "c2", clientId: "early-app", name: "Early App" },
+        { id: "c3", clientId: "granted-app", name: "Granted App" },
+      ],
     });
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter>
-          <BrandingList />
-        </MemoryRouter>
-      </QueryClientProvider>
-    );
     await user.click(await screen.findByText("Brand a client…"));
-    await screen.findByRole("option", { name: "Early App (early-app)" });
+    expect(
+      await screen.findByRole("option", { name: "Early App (early-app)" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Granted App (granted-app)" })
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("option", { name: /Web App/ })
     ).not.toBeInTheDocument();
-    await user.click(
-      await screen.findByRole("button", { name: "Load more clients" })
-    );
+    expect(authMock.axios.get).toHaveBeenCalledTimes(1);
+    expect(authMock.axios.get).toHaveBeenCalledWith("/v1/admin/branding");
+  });
+
+  it("says so when there is nothing left to brand", async () => {
+    authMock.permissions = ["branding.read", "branding.write"];
+    const user = userEvent.setup();
+    renderList({ default: null, clients: [entry], brandable: [] });
+    await user.click(await screen.findByText("Brand a client…"));
     expect(
-      await screen.findByRole("option", { name: "Late App (late-app)" })
+      await screen.findByText(
+        "Every client you may brand already has branding."
+      )
     ).toBeInTheDocument();
   });
 });

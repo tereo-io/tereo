@@ -1,6 +1,6 @@
-import useInfiniteClients from "../../api/oauth-clients/useInfiniteClients";
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import useBrandingList from "../../api/branding/useBrandingList";
+import type { BrandableClient } from "../../api/branding/types";
 import { PageHeader } from "@/components/PageHeader";
 import { Link, useNavigate } from "react-router-dom";
 import { formatDateTime } from "@/utils/formatDate";
@@ -18,43 +18,30 @@ import {
   Spinner,
 } from "@kosmeo-ui/react";
 
-const PAGE_QUERY = "limit=25";
-
-/** Core lists only the clients the caller owns without clients.admin. */
+/** Core lists the clients without a profile that the caller may brand. */
 const ClientPicker = ({
-  branded,
+  clients,
   value,
   onChange,
 }: {
-  branded: Set<string>;
+  clients: BrandableClient[];
   value: string | undefined;
   onChange: (id: string | undefined) => void;
-}) => {
-  const { data, hasMore, isLoading, onQueryChange } = useInfiniteClients();
-  const options = data
-    .filter((c) => !branded.has(c.id))
-    .map((c) => ({ value: c.id, label: `${c.name} (${c.clientId})` }));
-  return (
-    <>
-      <Select
-        label="Client"
-        placeholder="Choose a client"
-        value={value}
-        options={options}
-        onChange={onChange}
-      />
-      {hasMore && (
-        <Button
-          variant="secondary"
-          isLoading={isLoading}
-          onClick={() => onQueryChange(PAGE_QUERY)}
-        >
-          Load more clients
-        </Button>
-      )}
-    </>
+}) =>
+  clients.length === 0 ? (
+    <p>Every client you may brand already has branding.</p>
+  ) : (
+    <Select
+      label="Client"
+      placeholder="Choose a client"
+      value={value}
+      options={clients.map((c) => ({
+        value: c.id,
+        label: `${c.name} (${c.clientId})`,
+      }))}
+      onChange={onChange}
+    />
   );
-};
 
 export const BrandingList = () => {
   useStockColors();
@@ -76,7 +63,6 @@ export const BrandingList = () => {
     );
   }
 
-  const branded = new Set((data?.clients ?? []).map((c) => c.id));
   const empty = !data?.default && !data?.clients.length;
 
   return (
@@ -167,7 +153,11 @@ export const BrandingList = () => {
           </Button>,
         ]}
       >
-        <ClientPicker branded={branded} value={chosen} onChange={setChosen} />
+        <ClientPicker
+          clients={data?.brandable ?? []}
+          value={chosen}
+          onChange={setChosen}
+        />
       </Modal>
     </Page>
   );

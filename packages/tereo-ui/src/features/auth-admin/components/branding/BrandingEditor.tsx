@@ -2,6 +2,7 @@ import useDeleteBrandingProfile from "../../api/branding/useDeleteBrandingProfil
 import { TEXT_LIMITS, validateDraft } from "../../api/branding/brandingErrors";
 import useSaveBrandingProfile from "../../api/branding/useSaveBrandingProfile";
 import useBrandingProfile from "../../api/branding/useBrandingProfile";
+import useBrandingList from "../../api/branding/useBrandingList";
 import { useBlocker, useNavigate } from "react-router-dom";
 import { ProvisionedDialog } from "./ProvisionedDialog";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
@@ -111,6 +112,13 @@ const EditorForm = ({ target, profile }: FormProps) => {
   const appliesToConsole =
     target.kind === "default" ||
     profile.client?.clientId === CORE_LOGIN_CLIENT_ID;
+  // The console reads tereo-ui's profile before the default's.
+  const { data: list } = useBrandingList({
+    enabled: target.kind === "default",
+  });
+  const consoleHasOwnProfile =
+    target.kind === "default" &&
+    !!list?.clients.some((c) => c.clientId === CORE_LOGIN_CLIENT_ID);
 
   const inheritedText = (slot: BrandingTextSlot) =>
     profile.inherited?.[slot] ?? undefined;
@@ -313,6 +321,13 @@ const EditorForm = ({ target, profile }: FormProps) => {
                 disabled={locked}
                 onChange={(e) => patch({ applyToConsole: e.target.checked })}
               />
+              {consoleHasOwnProfile && (
+                <p className="t-branding-hint">
+                  The admin console ({CORE_LOGIN_CLIENT_ID}) has its own
+                  branding profile, so this setting has no effect: the console
+                  follows that profile&apos;s setting.
+                </p>
+              )}
             </section>
           )}
         </div>

@@ -1,12 +1,13 @@
+import type { BrandingProfile, BrandingTarget } from "../../api/branding/types";
 import { RouterProvider, createMemoryRouter, Link } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
-import type { BrandingProfile } from "../../api/branding/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EffectiveBranding } from "@/features/auth";
 import userEvent from "@testing-library/user-event";
 import { BrandingEditor } from "./BrandingEditor";
 import { authMock } from "@/test/authMock";
+import env from "@/lib/env";
 
 vi.mock("@/lib/auth", async () =>
   (await import("@/test/authMock")).mockAuthModule()
@@ -62,15 +63,14 @@ const profile = (over: Partial<BrandingProfile> = {}): BrandingProfile => ({
   ...over,
 });
 
-const renderEditor = (data: BrandingProfile) => {
-  authMock.axios.get.mockResolvedValue({ data });
+const mountEditor = (target: BrandingTarget) => {
   const router = createMemoryRouter(
     [
       {
         path: "/edit",
         element: (
           <>
-            <BrandingEditor target={{ kind: "client", id: "c1" }} />
+            <BrandingEditor target={target} />
             <Link to="/other">Leave</Link>
           </>
         ),
@@ -89,6 +89,11 @@ const renderEditor = (data: BrandingProfile) => {
       <RouterProvider router={router} />
     </QueryClientProvider>
   );
+};
+
+const renderEditor = (data: BrandingProfile) => {
+  authMock.axios.get.mockResolvedValue({ data });
+  mountEditor({ kind: "client", id: "c1" });
 };
 
 beforeEach(() => {
@@ -293,5 +298,63 @@ describe("BrandingEditor", () => {
     await user.click(screen.getByRole("button", { name: "Remove branding" }));
     await user.click(screen.getByRole("button", { name: "Remove" }));
     expect(await screen.findByText("Branding list")).toBeVisible();
+  });
+
+  it("loads an image field's thumbnail from core", async () => {
+    renderEditor(
+      profile({
+        own: {
+          ...own,
+          logo: { sha256: "a", url: "/oauth/branding/assets/a.png" },
+        },
+      })
+    );
+    expect(await screen.findByAltText("Logo preview")).toHaveAttribute(
+      "src",
+      `${env.CORE_URL}/oauth/branding/assets/a.png`
+    );
+  });
+
+  describe("the default profile's console toggle", () => {
+    const renderDefault = (listedClients: { clientId: string }[]) => {
+      authMock.permissions = ["branding.admin"];
+      authMock.axios.get.mockImplementation(async (url: string) =>
+        url === "/v1/admin/branding"
+          ? {
+              data: {
+                default: null,
+                clients: listedClients.map((c, i) => ({
+                  id: `c${i}`,
+                  name: c.clientId,
+                  provisioned: false,
+                  updatedAt: "2026-11-01T00:00:00Z",
+                  ...c,
+                })),
+                brandable: [],
+              },
+            }
+          : { data: profile({ client: null, canManageGrants: false }) }
+      );
+      mountEditor({ kind: "default" });
+    };
+
+    it("explains that it does nothing while tereo-ui has its own profile", async () => {
+      renderDefault([{ clientId: "tereo-ui" }]);
+      await screen.findByLabelText("Also brand the admin console");
+      expect(
+        await screen.findByText(/has its own branding profile/)
+      ).toBeInTheDocument();
+    });
+
+    it("gives no hint when tereo-ui has no profile", async () => {
+      renderDefault([{ clientId: "web-app" }]);
+      await screen.findByLabelText("Also brand the admin console");
+      await waitFor(() =>
+        expect(authMock.axios.get).toHaveBeenCalledWith("/v1/admin/branding")
+      );
+      expect(
+        screen.queryByText(/has its own branding profile/)
+      ).not.toBeInTheDocument();
+    });
   });
 });

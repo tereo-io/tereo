@@ -15,10 +15,10 @@ admin UI (**Branding**), through `/v1/admin/branding`, or by a
 | `headline`, `subtitle` | text | 80 / 160. The login page's heading and subheading |
 | `signInLabel` | text | 30. The login button |
 | `notice` | text | 280. Plain text above the login form |
-| `logo`, `logoDark` | image | PNG, WebP, JPEG, SVG; `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB). `logoDark` shows under the dark theme |
+| `logo`, `logoDark` | image | PNG, WebP, JPEG, SVG; `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB). `logoDark` shows under the app's dark theme (its theme setting, not the OS's); without one, `logo` shows in both |
 | `favicon` | image | PNG, SVG, ICO; 512 KB |
 | `background` | image | PNG, WebP, JPEG; `BRANDING_BACKGROUND_MAX_SIZE_MB` (5 MB) |
-| `layout` | enum | `centered` (card over a full-bleed background) or `split` (image one side, form the other; the image is hidden on narrow screens) |
+| `layout` | enum | `centered` (card over a full-bleed background) or `split` (the background in its own column beside a solid form column; below 48rem only the form shows, and the editor's preview applies that against its own width) |
 | `footerLinks` | list | Up to 3 `{ label, url }`; label 40 characters; `url` must be `https:` |
 | `colorsLight`, `colorsDark` | map | `--k-*` variable to colour value |
 | `applyToConsole` | boolean | Applies the colours and app name to the admin console (see below) |
@@ -64,7 +64,9 @@ the stock page is served; branding never breaks sign-in.
 **Fallback.** `GET /oauth/branding?client_id=` (public) returns exactly what injection embeds, or
 `null`. The UI calls it only when the page has no `#tereo-branding` block (the Vite dev server on
 :4000, or a UI hosted apart from core); meanwhile it shows a neutral card, and after 1.5 s or on
-error it renders stock.
+error it renders stock. Asset URLs are root-relative (`/oauth/branding/assets/…`); the UI resolves
+them against core's URL (`VITE_CORE_URL`, else its own origin), so they load wherever the UI is
+served.
 
 Resolved branding is cached in memory per client id. Every profile write and provisioning apply
 publishes an invalidation, so every replica drops it. An unknown client id is cached briefly
@@ -140,7 +142,8 @@ reaches the client's settings, the default profile or `tereo-ui`'s profile.
 `applyToConsole` brands the admin console too, with the colours and app name only (the block is
 `scope: "console"`, no logos or layout). It is read from **`tereo-ui`'s profile, else the default
 profile**: the toggle of a client's own profile has no effect. The editor shows the toggle only on
-the profile that applies to `tereo-ui`. On every non-sign-in route core injects the console block
+the profile that applies to `tereo-ui`, and on the default profile, while `tereo-ui` has its own,
+says the toggle there does nothing. On every non-sign-in route core injects the console block
 only when the toggle is on.
 
 **Stock colours escape hatch.** While the Branding page is mounted, the UI disables

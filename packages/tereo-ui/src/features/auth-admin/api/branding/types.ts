@@ -77,9 +77,17 @@ export interface BrandingListEntry {
   updatedAt: string;
 }
 
+/** A client with no profile yet that the caller may start one on. */
+export interface BrandableClient {
+  id: string;
+  clientId: string;
+  name: string;
+}
+
 export interface BrandingList {
   default: { provisioned: boolean; updatedAt: string | null } | null;
   clients: BrandingListEntry[];
+  brandable: BrandableClient[];
 }
 
 export type BrandingTarget =
