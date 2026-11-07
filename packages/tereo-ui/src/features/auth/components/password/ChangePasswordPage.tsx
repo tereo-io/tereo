@@ -1,5 +1,6 @@
 import useForcedPasswordChange from "../../api/password/useForcedPasswordChange";
-import { AuthPage, Alert, Button, Col, Input } from "@kosmeo-ui/react";
+import { Alert, Button, Col, Input } from "@kosmeo-ui/react";
+import { BrandedAuthPage } from "@/features/auth/branding";
 import { pickOAuthParams } from "../../api/oauthParams";
 import { useSearchParams } from "react-router-dom";
 import { SessionExpired } from "../SessionExpired";
@@ -63,7 +64,7 @@ export const ChangePasswordPage = () => {
   };
 
   return (
-    <AuthPage
+    <BrandedAuthPage
       title="Choose a new password"
       subtitle="You must replace the password you were given before continuing"
     >
@@ -94,6 +95,6 @@ export const ChangePasswordPage = () => {
           </Button>
         </Col>
       </form>
-    </AuthPage>
+    </BrandedAuthPage>
   );
 };

@@ -1,5 +1,6 @@
 import useConsentDetails from "@/features/auth/api/consent/useConsentDetails";
 import useSubmitConsent from "@/features/auth/api/consent/useSubmitConsent";
+import { BrandedAuthPage } from "@/features/auth/branding";
 import { useSearchParams } from "react-router-dom";
 import { SessionExpired } from "../SessionExpired";
 import { BackToSignIn } from "../BackToSignIn";
@@ -9,7 +10,6 @@ import {
   oauthErrorMessage,
 } from "../../api/oauthErrorMessage";
 import {
-  AuthPage,
   Button,
   Alert,
   Col,
@@ -58,18 +58,18 @@ export const ConsentPage = () => {
 
   if (isLoading) {
     return (
-      <AuthPage title="Authorization Request" width="wide">
+      <BrandedAuthPage title="Authorization Request" width="wide">
         <Centered>
           <Spinner size="lg" />
           <p>Loading...</p>
         </Centered>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
   if (fetchError || !consentDetails) {
     return (
-      <AuthPage title="Error" width="wide">
+      <BrandedAuthPage title="Error" width="wide">
         <Alert variant="danger">
           {oauthErrorMessage(
             fetchError,
@@ -79,7 +79,7 @@ export const ConsentPage = () => {
         <FormActions align="right">
           <BackToSignIn />
         </FormActions>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
@@ -112,7 +112,7 @@ export const ConsentPage = () => {
   };
 
   return (
-    <AuthPage
+    <BrandedAuthPage
       title="Authorization Request"
       subtitle={
         <>
@@ -154,6 +154,6 @@ export const ConsentPage = () => {
           </Button>
         </FormActions>
       </Col>
-    </AuthPage>
+    </BrandedAuthPage>
   );
 };

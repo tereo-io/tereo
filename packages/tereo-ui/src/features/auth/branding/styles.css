@@ -1,0 +1,36 @@
+.t-brand-loading {
+  min-height: 100vh;
+  background-color: var(--k-background-color);
+}
+
+.t-brand-page {
+  background-size: cover;
+  background-position: center;
+}
+
+.t-brand-logo img {
+  display: block;
+  max-width: 12rem;
+  max-height: 4rem;
+  margin: 0 auto 0.5rem;
+}
+
+.t-brand-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.t-brand-links a {
+  color: var(--k-text-color-link);
+}
+
+@media (min-width: 56rem) {
+  .t-brand-page[data-brand-layout="split"] {
+    align-items: flex-end;
+    justify-content: center;
+    padding-right: 6vw;
+    flex-direction: column;
+  }
+}

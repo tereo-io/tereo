@@ -1,19 +1,21 @@
 import useUpstreamProviders from "../../api/upstream/useUpstreamProviders";
 import { upstreamErrorMessage } from "../../api/upstream/upstreamErrors";
-import { AuthPage, Alert, Button, Input, Col } from "@kosmeo-ui/react";
+import { BrandedAuthPage, useBranding } from "@/features/auth/branding";
 import { upstreamStartUrl } from "../../api/upstream/upstreamUrls";
 import { oauthErrorMessage } from "../../api/oauthErrorMessage";
 import { pickOAuthParams } from "../../api/oauthParams";
 import { useSearchParams } from "react-router-dom";
 import { redirectTo } from "../../api/redirectTo";
 import useLogin from "../../api/login/useLogin";
+import { LoginFormView } from "./LoginFormView";
 import { BackToSignIn } from "../BackToSignIn";
+import { Alert, Col } from "@kosmeo-ui/react";
 import { useState, useEffect } from "react";
 import { isAxiosError } from "axios";
-import "./styles.css";
 
 export const LoginPage = () => {
   const [searchParams] = useSearchParams();
+  const branding = useBranding();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export const LoginPage = () => {
 
   if (!oauthParams.client_id) {
     return (
-      <AuthPage title="Tereo">
+      <BrandedAuthPage>
         <Col>
           <Alert variant="danger">
             Invalid request. Please start the login process from the
@@ -41,7 +43,7 @@ export const LoginPage = () => {
           </Alert>
           <BackToSignIn />
         </Col>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
@@ -71,55 +73,20 @@ export const LoginPage = () => {
   };
 
   return (
-    <AuthPage title="Tereo" subtitle="Sign in to continue">
-      <Col>
-        {error && <Alert variant="danger">{error}</Alert>}
-        {providers && providers.length > 0 && (
-          <>
-            {providers.map((provider) => (
-              <Button
-                key={provider.slug}
-                variant="secondary"
-                fullWidth
-                onClick={() =>
-                  redirectTo(upstreamStartUrl(provider.slug, oauthParams))
-                }
-              >
-                Sign in with {provider.displayName}
-              </Button>
-            ))}
-            <div className="t-login-divider">or</div>
-          </>
-        )}
-        <form onSubmit={handleSubmit}>
-          <Col>
-            <Input
-              label="Email"
-              name="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoFocus
-              autoComplete="email"
-            />
-
-            <Input
-              label="Password"
-              name="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-            />
-
-            <Button type="submit" fullWidth disabled={isPending}>
-              {isPending ? "Signing In..." : "Sign In"}
-            </Button>
-          </Col>
-        </form>
-      </Col>
-    </AuthPage>
+    <LoginFormView
+      headline={branding?.headline ?? null}
+      subtitle={branding?.subtitle ?? null}
+      notice={branding?.notice ?? null}
+      signInLabel={branding?.signInLabel ?? null}
+      providers={providers ?? []}
+      error={error}
+      email={email}
+      password={password}
+      pending={isPending}
+      onEmail={setEmail}
+      onPassword={setPassword}
+      onSubmit={handleSubmit}
+      onProvider={(slug) => redirectTo(upstreamStartUrl(slug, oauthParams))}
+    />
   );
 };

@@ -1,4 +1,5 @@
-import { AuthPage, Alert, Col } from "@kosmeo-ui/react";
+import { BrandedAuthPage } from "@/features/auth/branding";
+import { Alert, Col } from "@kosmeo-ui/react";
 import { BackToSignIn } from "./BackToSignIn";
 
 interface SessionExpiredProps {
@@ -7,7 +8,7 @@ interface SessionExpiredProps {
 }
 
 export const SessionExpired = ({ message, width }: SessionExpiredProps) => (
-  <AuthPage title="Session Expired" width={width}>
+  <BrandedAuthPage title="Session Expired" width={width}>
     <Col>
       <Alert variant="danger">
         {message ||
@@ -15,5 +16,5 @@ export const SessionExpired = ({ message, width }: SessionExpiredProps) => (
       </Alert>
       <BackToSignIn />
     </Col>
-  </AuthPage>
+  </BrandedAuthPage>
 );

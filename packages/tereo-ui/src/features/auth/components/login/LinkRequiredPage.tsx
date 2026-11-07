@@ -1,6 +1,7 @@
 import useUpstreamProviders from "../../api/upstream/useUpstreamProviders";
-import { AuthPage, Alert, Button, Col, Spinner } from "@kosmeo-ui/react";
 import { upstreamStartUrl } from "../../api/upstream/upstreamUrls";
+import { Alert, Button, Col, Spinner } from "@kosmeo-ui/react";
+import { BrandedAuthPage } from "@/features/auth/branding";
 import { useSearchParams } from "react-router-dom";
 import { SessionExpired } from "../SessionExpired";
 import { redirectTo } from "../../api/redirectTo";
@@ -21,9 +22,9 @@ export const LinkRequiredPage = () => {
 
   if (isLoading) {
     return (
-      <AuthPage title="Connect your account" subtitle="Please wait...">
+      <BrandedAuthPage title="Connect your account" subtitle="Please wait...">
         <Spinner size="lg" />
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
@@ -31,7 +32,7 @@ export const LinkRequiredPage = () => {
   const name = provider?.displayName ?? slug;
 
   return (
-    <AuthPage
+    <BrandedAuthPage
       title="Connect your account"
       subtitle={`Your organization signs in with ${name}`}
     >
@@ -54,6 +55,6 @@ export const LinkRequiredPage = () => {
         )}
         <BackToSignIn />
       </Col>
-    </AuthPage>
+    </BrandedAuthPage>
   );
 };
