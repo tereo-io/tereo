@@ -318,6 +318,15 @@ info:
     domain. Auth operations state their permission as the scope on `BearerAuth`; files, webhooks
     and audit operations list it in their description.
 
+    ### Branding
+
+    - `branding.read` / `branding.write` / `branding.admin` - Sign-in page branding. Global only
+      (no organization holds them). `read` and `write` also need standing on the client: its owner,
+      a user granted branding rights on it, or a `branding.admin` holder. The default profile,
+      `tereo-ui`'s profile and uploads that reference them are `branding.admin`'s alone, and only the
+      owner or `branding.admin` manages a client's grants (`tereo-ui` takes none). A provisioned
+      profile is read-only for everyone (`409 managed_by_provisioning`)
+
     ### Files
 
     - `file-service.buckets.read` / `.write` / `.delete` / `.admin` - Buckets
@@ -624,6 +633,8 @@ info:
     - `not_found` - The resource in the URL does not exist, or is hidden from the caller (`404`)
     - `unknown_user` / `unknown_organization` - An id in the request body names no user /
       organization (`400`)
+    - `managed_by_provisioning` - The row is declared in a provisioning document and read-only
+      through the admin API (`409`; branding profiles add `provisionedFrom`, the document's file)
     - `conflict` - Resource already exists, is in use, or is in a conflicting state (`409`)
     - `resource_archived` - The resource is archived and read-only; restore it first (`409`)
     - `already_archived` - Archiving a resource that is already archived (`409`)
@@ -875,6 +886,10 @@ tags:
     description: Admin endpoints for app services — credentials, activation and access approval
   - name: Admin - Integrations
     description: Admin endpoints for integrations — machine clients for external parties, org-bound or platform, with their roles and audiences
+  - name: Admin - Branding
+    description: Admin endpoints for sign-in page branding — the default profile, per-client profiles, edit grants and image uploads
+  - name: OAuth2/OIDC - Branding
+    description: Public branding of the sign-in pages — the fallback fetch and the stored images
   - name: Setup
     description: First-boot setup — create the first admin (public; authorized by the setup token)
   - name: Health
@@ -1166,6 +1181,108 @@ paths:
           $ref: '#/components/responses/RateLimitResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
+  /oauth/branding:
+    get:
+      tags:
+        - OAuth2/OIDC - Branding
+      summary: Get a sign-in page's branding
+      description: |
+        The branding of a client's sign-in pages: the same value core injects into those pages as the
+        `#tereo-branding` block, for a page served without it (the Vite dev server, or a UI hosted apart
+        from core). Public, with no credentials.
+
+        Answers `null` when nothing is branded: the client has no profile and there is no default. Otherwise
+        `EffectiveBranding` with `scope: "auth"`: the client's profile over the default, field by field and
+        colour variable by colour variable, with images as same-origin asset URLs. `client_id` is the OAuth
+        `client_id` string; a missing, malformed or unknown one counts as no client and gets the default's
+        branding, so this route never reveals which client ids exist and never answers `404`.
+      operationId: getBranding
+      security: []
+      parameters:
+        - name: client_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: The OAuth `client_id` of the app the user is signing in to
+      responses:
+        '200':
+          description: The branding, or `null` when nothing is branded
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PublicBranding'
+                  - type: 'null'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+  /oauth/branding/assets/{file}:
+    get:
+      tags:
+        - OAuth2/OIDC - Branding
+      summary: Get a branding image
+      description: |
+        A stored branding image, by `<sha256>.<ext>` (`ext` one of `png`, `jpg`, `webp`, `svg`, `ico`).
+        Public. `404` when no live image has that name or the name is not of that form.
+
+        Content-addressed, so it is served `Cache-Control: public, max-age=31536000, immutable` with
+        `X-Content-Type-Options: nosniff`; the type comes from the extension. An SVG also carries
+        `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'`, so one opened
+        directly runs nothing. An image a profile replaced stays available for 24 hours, for pages
+        already rendered with it.
+      operationId: getBrandingAsset
+      security: []
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}\.(png|jpg|webp|svg|ico)$
+      responses:
+        '200':
+          description: The image
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: '`public, max-age=31536000, immutable`'
+            X-Content-Type-Options:
+              schema:
+                type: string
+              description: '`nosniff`'
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+                format: binary
+            image/x-icon:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
   /oauth/authorize:
     get:
       tags:
@@ -8794,6 +8911,465 @@ paths:
           $ref: '#/components/responses/RateLimitResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/branding:
+    get:
+      tags:
+        - Admin - Branding
+      summary: List branding profiles
+      description: |
+        Needs `branding.read`. For a `branding.admin` holder: the default profile and every client's profile,
+        `tereo-ui`'s included. For anyone else: the profiles of clients they own or hold an active grant on
+        (never `tereo-ui`), and `default` is `null`. Clients without a profile are not listed; read
+        `GET /v1/admin/branding/clients/{id}` for one.
+      operationId: listBranding
+      security:
+        - BearerAuth:
+            - branding.read
+      responses:
+        '200':
+          description: The profiles the caller may read
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandingList'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+  /v1/admin/branding/default:
+    get:
+      tags:
+        - Admin - Branding
+      summary: Get the default branding profile
+      description: |
+        Needs `branding.admin`. The default profile: what every client inherits wherever its own profile is
+        `null`, and what sign-in pages show for a client with no profile. With no default, `own` is `null` and
+        `effective` is stock Tereo. `inherited` is always `null` here.
+      operationId: getDefaultBranding
+      security:
+        - BearerAuth:
+            - branding.admin
+      responses:
+        '200':
+          description: The default profile
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandingProfileView'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+    put:
+      tags:
+        - Admin - Branding
+      summary: Replace the default branding profile
+      description: |
+        Replaces the whole profile (created when none exists): an omitted field is `null`, which inherits. Text and
+        colour limits are those of `BrandingProfileRequest`; an image slot is the `sha256` of an image uploaded with
+        `POST /v1/admin/branding/assets`, or `null`. Answers the profile as `GET` does. A provisioned profile is read-only here: `409 managed_by_provisioning`, with `provisionedFrom`, for everyone (`branding.admin` included).
+
+        Stored images the profile no longer references expire after 24 hours unless another profile references
+        them. An audit log entry (with the slots changed) is created and `auth.branding.updated` is emitted.
+
+        Needs `branding.admin`.
+      operationId: putDefaultBranding
+      security:
+        - BearerAuth:
+            - branding.admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrandingProfileRequest'
+      responses:
+        '200':
+          description: The profile as saved
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandingProfileView'
+        '400':
+          $ref: '#/components/responses/BrandingBadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '409':
+          $ref: '#/components/responses/BrandingConflictResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+    delete:
+      tags:
+        - Admin - Branding
+      summary: Delete the default branding profile
+      description: |
+        Needs `branding.admin`. Removes the default, so clients without their own values show stock Tereo.
+        `404` when there is none. A provisioned profile is `409 managed_by_provisioning`. An audit log entry is
+        created and `auth.branding.deleted` is emitted.
+      operationId: deleteDefaultBranding
+      security:
+        - BearerAuth:
+            - branding.admin
+      responses:
+        '204':
+          description: Deleted
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/BrandingConflictResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+  /v1/admin/branding/clients/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ClientIdParam'
+    get:
+      tags:
+        - Admin - Branding
+      summary: Get a client's branding profile
+      description: |
+        Needs `branding.read` and, on the client, ownership, an active grant or `branding.admin`; `tereo-ui`'s
+        profile is `branding.admin`'s alone. `{id}` is the client's uuid, as in `/v1/admin/clients/{id}`.
+        With no profile, `own` is `null` and `effective` is what the client inherits.
+
+        `own` holds the profile's own values; `effective` the merge over the default profile (field by field,
+        colour variable by colour variable); `inherited` the same without `own`, which a preview uses as its
+        base; `sources` and `colorSources` say where each effective value comes from (`client`, `default` or
+        `tereo`). `canEdit` is false for a provisioned profile or a caller who may only read; `canManageGrants`
+        is true for the owner and `branding.admin`, never for `tereo-ui`.
+      operationId: getClientBranding
+      security:
+        - BearerAuth:
+            - branding.read
+      responses:
+        '200':
+          description: The profile
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandingProfileView'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+    put:
+      tags:
+        - Admin - Branding
+      summary: Replace a client's branding profile
+      description: |
+        Replaces the whole profile (created when none exists): an omitted field is `null`, which inherits. Text and
+        colour limits are those of `BrandingProfileRequest`; an image slot is the `sha256` of an image uploaded with
+        `POST /v1/admin/branding/assets`, or `null`. Answers the profile as `GET` does. A provisioned profile is read-only here: `409 managed_by_provisioning`, with `provisionedFrom`, for everyone (`branding.admin` included).
+
+        Stored images the profile no longer references expire after 24 hours unless another profile references
+        them. An audit log entry (with the slots changed) is created and `auth.branding.updated` is emitted.
+
+
+        Needs `branding.write` and, on the client, ownership, an active grant or `branding.admin`; `tereo-ui`'s
+        profile is `branding.admin`'s alone. `applyToConsole` is honoured only on the profile that applies to
+        `tereo-ui`.
+      operationId: putClientBranding
+      security:
+        - BearerAuth:
+            - branding.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrandingProfileRequest'
+      responses:
+        '200':
+          description: The profile as saved
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandingProfileView'
+        '400':
+          $ref: '#/components/responses/BrandingBadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/BrandingConflictResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+    delete:
+      tags:
+        - Admin - Branding
+      summary: Delete a client's branding profile
+      description: |
+        Needs `branding.write` and the same standing on the client as `PUT`. The client then inherits the
+        default. `404` when the client or its profile does not exist. A provisioned profile is
+        `409 managed_by_provisioning`. An audit log entry is created and `auth.branding.deleted` is emitted.
+      operationId: deleteClientBranding
+      security:
+        - BearerAuth:
+            - branding.write
+      responses:
+        '204':
+          description: Deleted
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/BrandingConflictResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+  /v1/admin/branding/clients/{id}/grants:
+    parameters:
+      - $ref: '#/components/parameters/ClientIdParam'
+    get:
+      tags:
+        - Admin - Branding
+      summary: List a client's branding grants
+      description: |
+        Needs `branding.read`, and the caller must own the client or hold `branding.admin`. Lists the active
+        grants: users who may edit this client's branding and nothing else about it. A grantee cannot list or
+        change grants. `tereo-ui` takes no grants: `403` for everyone, `branding.admin` included.
+      operationId: listBrandingGrants
+      security:
+        - BearerAuth:
+            - branding.read
+      responses:
+        '200':
+          description: Active grants
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandingGrantList'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+    post:
+      tags:
+        - Admin - Branding
+      summary: Grant a user branding rights on a client
+      description: |
+        Needs `branding.write`, and the caller must own the client or hold `branding.admin`. `tereo-ui` takes no
+        grants (`403`). The grantee needs `branding.write` themselves to use it. A deactivated user is
+        `400 user_inactive`; an unknown user `404`; a user who already holds an active grant `409 conflict`.
+        An audit log entry is created and `auth.branding.grant-added` is emitted.
+      operationId: addBrandingGrant
+      security:
+        - BearerAuth:
+            - branding.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrandingAddGrantRequest'
+      responses:
+        '201':
+          description: Granted
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandingAddGrantResponse'
+        '400':
+          $ref: '#/components/responses/BrandingBadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/BrandingConflictResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+  /v1/admin/branding/clients/{id}/grants/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/ClientIdParam'
+      - $ref: '#/components/parameters/BrandingGrantUserIdParam'
+    delete:
+      tags:
+        - Admin - Branding
+      summary: Revoke a user's branding grant
+      description: |
+        Needs `branding.write`, and the caller must own the client or hold `branding.admin`. Ends the grant
+        (recording who and when). `404` when the user holds no active grant. An audit log entry is created and
+        `auth.branding.grant-revoked` is emitted.
+      operationId: revokeBrandingGrant
+      security:
+        - BearerAuth:
+            - branding.write
+      responses:
+        '204':
+          description: Revoked
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+  /v1/admin/branding/assets:
+    post:
+      tags:
+        - Admin - Branding
+      summary: Upload a branding image
+      description: |
+        Needs `branding.write`. Stores one image for a slot and answers its `sha256`, which a profile then
+        references. The image belongs to no profile until one the caller may edit references it; an
+        unreferenced image is deleted after 24 hours. Uploading the same bytes again reuses the stored image.
+
+        | Slot | Types | Limit |
+        |---|---|---|
+        | `logo`, `logoDark` | PNG, WebP, JPEG, SVG | `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB) |
+        | `favicon` | PNG, SVG, ICO | `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB) |
+        | `background` | PNG, WebP, JPEG | `BRANDING_BACKGROUND_MAX_SIZE_MB` (5 MB) |
+
+        The type is detected from the bytes, not the file name or header. An SVG the sanitizer would change
+        (scripts, `foreignObject`, event handlers, external references, `@import` or `url()` in a style) is
+        refused, so what is stored is what was uploaded: `400 invalid_branding_image`. No file is
+        `400 file_upload_required`; more than one file or an unexpected field is `400 invalid_request`; over the
+        slot's limit is `413 payload_too_large`.
+      operationId: uploadBrandingAsset
+      security:
+        - BearerAuth:
+            - branding.write
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - slot
+                - file
+              properties:
+                slot:
+                  type: string
+                  enum:
+                    - logo
+                    - logoDark
+                    - favicon
+                    - background
+                  description: The slot the image is for; it sets the allowed types and size limit. Send it before `file`.
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Image stored
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandingAssetUploadResponse'
+        '400':
+          $ref: '#/components/responses/BrandingBadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '413':
+          $ref: '#/components/responses/BrandingPayloadTooLargeResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
   /v1/admin/services:
     get:
       tags:
@@ -21331,6 +21907,14 @@ components:
       schema:
         type: string
         format: uuid
+    BrandingGrantUserIdParam:
+      name: userId
+      in: path
+      required: true
+      description: The user holding the grant
+      schema:
+        type: string
+        format: uuid
     DownloadIfMatchHeaderParam:
       name: If-Match
       in: header
@@ -22488,6 +23072,102 @@ components:
           example:
             error: last_sign_in_method
             error_description: This is the account's only way to sign in
+    BrandingBadRequestResponse:
+      description: |
+        Invalid request. `invalid_request` with `issues` naming each field: a value over its limit, an
+        unknown colour variable, a colour outside the allowed grammar, a link that is not `https:`, more
+        than 3 links, or an image `sha256` that no live uploaded image has, whose type the slot refuses
+        or that is over the slot's limit. `invalid_branding_image`: an upload that is not an allowed image
+        for its slot, or an SVG the sanitizer would change. `unknown_branding_image`: an image expired
+        between the check and the save; upload it again. `file_upload_required`: no file in the upload.
+        `user_inactive`: granting to a deactivated user. `unknown_user`: a grantee that does not exist.
+      headers:
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                enum:
+                  - invalid_request
+                  - invalid_branding_image
+                  - unknown_branding_image
+                  - file_upload_required
+                  - user_inactive
+                  - unknown_user
+              error_description:
+                type: string
+              issues:
+                description: On `invalid_request`, each failed check
+                type: array
+                items:
+                  type: object
+                  required:
+                    - path
+                    - message
+                  properties:
+                    path:
+                      type: string
+                    message:
+                      type: string
+    BrandingConflictResponse:
+      description: |
+        Conflict. `managed_by_provisioning`: the profile is declared in a provisioning document, so it is
+        read-only here for everyone; `provisionedFrom` names the document's file. `conflict`: the user
+        already holds an active grant on the client.
+      headers:
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                enum:
+                  - managed_by_provisioning
+                  - conflict
+              error_description:
+                type: string
+              provisionedFrom:
+                description: On `managed_by_provisioning`, the provisioning document's file name
+                type: string
+          example:
+            error: managed_by_provisioning
+            error_description: Managed by the provisioning file; change it there and restart core
+            provisionedFrom: acme.json
+    BrandingPayloadTooLargeResponse:
+      description: The image is over the slot's limit (`BRANDING_IMAGE_MAX_SIZE_KB` or `BRANDING_BACKGROUND_MAX_SIZE_MB`), or the multipart body has too many parts or a field over 1 KB
+      headers:
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                enum:
+                  - payload_too_large
+              error_description:
+                type: string
     IdempotencyKeyConflictResponse:
       description: |
         This `Idempotency-Key` was previously used with a different request
@@ -29699,6 +30379,124 @@ components:
         timestamp:
           type: string
           format: date-time
+    BrandingLayout:
+      type: string
+      enum:
+        - centered
+        - split
+      description: '`centered` is a card over a full-bleed background; `split` puts the image on one side and the form on the other (the image is hidden on narrow screens)'
+    BrandingFooterLink:
+      type: object
+      required:
+        - label
+        - url
+      additionalProperties: false
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 40
+        url:
+          type: string
+          maxLength: 2048
+          description: An `https:` URL
+    BrandingColors:
+      type: object
+      description: |
+        Colour variables of `@kosmeo-ui/react` (`--k-*`, 51 of them: every custom property whose name has
+        `color` or `shadow`) to a colour value. A value is `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, or
+        `rgb()`, `rgba()`, `hsl()`, `hsla()` or `oklch()` with only numbers, `%`, `deg`, spaces, commas, `/`
+        and `.`, at most 64 characters. Anything else, including `var()`, `url()` and keywords, is refused.
+      propertyNames:
+        pattern: ^--k-[a-z0-9-]+$
+      additionalProperties:
+        type: string
+        maxLength: 64
+      examples:
+        - --k-primary-color: '#0b5'
+    EffectiveBranding:
+      type: object
+      required:
+        - appName
+        - headline
+        - subtitle
+        - signInLabel
+        - notice
+        - layout
+        - footerLinks
+        - colorsLight
+        - colorsDark
+        - logoUrl
+        - logoDarkUrl
+        - faviconUrl
+        - backgroundUrl
+        - applyToConsole
+      description: Branding after inheritance, with images as asset URLs. `null` is stock Tereo for that slot.
+      properties:
+        appName:
+          type:
+            - string
+            - 'null'
+        headline:
+          type:
+            - string
+            - 'null'
+        subtitle:
+          type:
+            - string
+            - 'null'
+        signInLabel:
+          type:
+            - string
+            - 'null'
+        notice:
+          type:
+            - string
+            - 'null'
+        layout:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingLayout'
+            - type: 'null'
+        footerLinks:
+          type:
+            - array
+            - 'null'
+          items:
+            $ref: '#/components/schemas/BrandingFooterLink'
+        colorsLight:
+          $ref: '#/components/schemas/BrandingColors'
+        colorsDark:
+          $ref: '#/components/schemas/BrandingColors'
+        logoUrl:
+          type:
+            - string
+            - 'null'
+        logoDarkUrl:
+          type:
+            - string
+            - 'null'
+        faviconUrl:
+          type:
+            - string
+            - 'null'
+        backgroundUrl:
+          type:
+            - string
+            - 'null'
+        applyToConsole:
+          type: boolean
+    PublicBranding:
+      description: The branding of a sign-in page, as injected into it
+      allOf:
+        - $ref: '#/components/schemas/EffectiveBranding'
+        - type: object
+          required:
+            - scope
+          properties:
+            scope:
+              type: string
+              enum:
+                - auth
     UpstreamProviderSummary:
       type: object
       description: An active identity provider, as the login page lists it
@@ -30732,6 +31530,375 @@ components:
           items:
             type: string
           description: Service slugs; `[]` clears the audience.
+    BrandingList:
+      type: object
+      required:
+        - default
+        - clients
+      properties:
+        default:
+          type:
+            - object
+            - 'null'
+          description: The default profile's state; `null` when there is none or the caller lacks `branding.admin`
+          required:
+            - provisioned
+            - updatedAt
+          properties:
+            provisioned:
+              type: boolean
+            updatedAt:
+              type: string
+              format: date-time
+        clients:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - clientId
+              - name
+              - provisioned
+              - updatedAt
+            properties:
+              id:
+                type: string
+                format: uuid
+              clientId:
+                type: string
+              name:
+                type: string
+              provisioned:
+                type: boolean
+              updatedAt:
+                type: string
+                format: date-time
+    BrandingImage:
+      type: object
+      required:
+        - sha256
+        - url
+      properties:
+        sha256:
+          type: string
+        url:
+          type: string
+          description: Same-origin path of the image, `/oauth/branding/assets/<sha256>.<ext>`
+    BrandingOwnValues:
+      type: object
+      required:
+        - appName
+        - headline
+        - subtitle
+        - signInLabel
+        - notice
+        - layout
+        - footerLinks
+        - colorsLight
+        - colorsDark
+        - applyToConsole
+        - logo
+        - logoDark
+        - favicon
+        - background
+      description: A profile's own values, as `BrandingProfileRequest` but with images as `{ sha256, url }`
+      properties:
+        appName:
+          type:
+            - string
+            - 'null'
+        headline:
+          type:
+            - string
+            - 'null'
+        subtitle:
+          type:
+            - string
+            - 'null'
+        signInLabel:
+          type:
+            - string
+            - 'null'
+        notice:
+          type:
+            - string
+            - 'null'
+        layout:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingLayout'
+            - type: 'null'
+        footerLinks:
+          type:
+            - array
+            - 'null'
+          items:
+            $ref: '#/components/schemas/BrandingFooterLink'
+        colorsLight:
+          $ref: '#/components/schemas/BrandingColors'
+        colorsDark:
+          $ref: '#/components/schemas/BrandingColors'
+        applyToConsole:
+          type: boolean
+        logo:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingImage'
+            - type: 'null'
+        logoDark:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingImage'
+            - type: 'null'
+        favicon:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingImage'
+            - type: 'null'
+        background:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingImage'
+            - type: 'null'
+    BrandingSource:
+      type: string
+      enum:
+        - client
+        - default
+        - tereo
+    BrandingProfileView:
+      type: object
+      required:
+        - client
+        - own
+        - effective
+        - inherited
+        - sources
+        - colorSources
+        - provisioned
+        - provisionedFrom
+        - updatedAt
+        - canEdit
+        - canManageGrants
+      properties:
+        client:
+          type:
+            - object
+            - 'null'
+          description: The client the profile belongs to; `null` for the default profile
+          required:
+            - id
+            - clientId
+            - name
+          properties:
+            id:
+              type: string
+              format: uuid
+            clientId:
+              type: string
+            name:
+              type: string
+        own:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingOwnValues'
+            - type: 'null'
+          description: The profile's own values; `null` when there is no profile
+        effective:
+          $ref: '#/components/schemas/EffectiveBranding'
+        inherited:
+          oneOf:
+            - $ref: '#/components/schemas/EffectiveBranding'
+            - type: 'null'
+          description: |
+            What applies beneath the profile's own layer: for a client, the default profile over stock;
+            `null` for the default profile, where stock applies. A client's effective value cannot be
+            read back to what lies under an overridden slot, so a preview takes this as its base.
+        sources:
+          type: object
+          description: Where each effective slot comes from
+          additionalProperties:
+            $ref: '#/components/schemas/BrandingSource'
+        colorSources:
+          type: object
+          required:
+            - light
+            - dark
+          description: Where each effective colour variable comes from
+          properties:
+            light:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/BrandingSource'
+            dark:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/BrandingSource'
+        provisioned:
+          type: boolean
+          description: Declared in a provisioning document, so read-only here
+        provisionedFrom:
+          type:
+            - string
+            - 'null'
+          description: The provisioning document's file name
+        updatedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        canEdit:
+          type: boolean
+        canManageGrants:
+          type: boolean
+    BrandingImageRef:
+      type: object
+      required:
+        - sha256
+      additionalProperties: false
+      properties:
+        sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          description: The `sha256` an upload (`POST /v1/admin/branding/assets`) answered
+    BrandingProfileRequest:
+      type: object
+      additionalProperties: false
+      description: A whole profile. Every field is optional and an omitted one is `null` (inherit), or `{}` for colours and `false` for `applyToConsole`.
+      properties:
+        appName:
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 60
+        headline:
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 80
+        subtitle:
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 160
+        signInLabel:
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 30
+        notice:
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 280
+          description: Plain text shown above the login form
+        layout:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingLayout'
+            - type: 'null'
+        footerLinks:
+          type:
+            - array
+            - 'null'
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/BrandingFooterLink'
+        colorsLight:
+          $ref: '#/components/schemas/BrandingColors'
+        colorsDark:
+          $ref: '#/components/schemas/BrandingColors'
+        applyToConsole:
+          type: boolean
+          default: false
+          description: Applies the colours and app name to the whole admin console. Read only from the profile that applies to `tereo-ui` (its own, else the default).
+        logo:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingImageRef'
+            - type: 'null'
+          description: PNG, WebP, JPEG or SVG
+        logoDark:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingImageRef'
+            - type: 'null'
+          description: Shown under the dark theme. PNG, WebP, JPEG or SVG
+        favicon:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingImageRef'
+            - type: 'null'
+          description: PNG, SVG or ICO
+        background:
+          oneOf:
+            - $ref: '#/components/schemas/BrandingImageRef'
+            - type: 'null'
+          description: PNG, WebP or JPEG
+    BrandingGrant:
+      type: object
+      required:
+        - userId
+        - email
+        - name
+        - grantedBy
+        - grantedAt
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+        name:
+          type:
+            - string
+            - 'null'
+        grantedBy:
+          type: string
+          format: uuid
+        grantedAt:
+          type: string
+          format: date-time
+    BrandingGrantList:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/BrandingGrant'
+    BrandingAddGrantRequest:
+      type: object
+      required:
+        - userId
+      additionalProperties: false
+      properties:
+        userId:
+          type: string
+          format: uuid
+    BrandingAddGrantResponse:
+      type: object
+      required:
+        - userId
+      properties:
+        userId:
+          type: string
+          format: uuid
+    BrandingAssetUploadResponse:
+      type: object
+      required:
+        - sha256
+        - ext
+        - url
+      properties:
+        sha256:
+          type: string
+        ext:
+          type: string
+          enum:
+            - png
+            - jpg
+            - webp
+            - svg
+            - ico
+        url:
+          type: string
     SystemSettingsWithRateLimits:
       allOf:
         - $ref: '#/components/schemas/SystemSettings'
@@ -31319,6 +32486,8 @@ x-tagGroups:
       - Admin - Settings
       - Admin - Services
       - Admin - Integrations
+      - Admin - Branding
+      - OAuth2/OIDC - Branding
   - name: Files
     tags:
       - Files - Buckets

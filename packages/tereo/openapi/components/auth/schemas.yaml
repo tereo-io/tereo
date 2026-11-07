@@ -3965,3 +3965,372 @@ PasswordChangeRequest:
       minLength: 12
       maxLength: 256
       description: The new password; it must differ from the current one (`password_unchanged`).
+
+BrandingFooterLink:
+  type: object
+  required: [label, url]
+  additionalProperties: false
+  properties:
+    label:
+      type: string
+      minLength: 1
+      maxLength: 40
+    url:
+      type: string
+      maxLength: 2048
+      description: An `https:` URL
+
+BrandingColors:
+  type: object
+  description: |
+    Colour variables of `@kosmeo-ui/react` (`--k-*`, 51 of them: every custom property whose name has
+    `color` or `shadow`) to a colour value. A value is `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, or
+    `rgb()`, `rgba()`, `hsl()`, `hsla()` or `oklch()` with only numbers, `%`, `deg`, spaces, commas, `/`
+    and `.`, at most 64 characters. Anything else, including `var()`, `url()` and keywords, is refused.
+  propertyNames:
+    pattern: '^--k-[a-z0-9-]+$'
+  additionalProperties:
+    type: string
+    maxLength: 64
+  examples:
+    - '--k-primary-color': '#0b5'
+
+BrandingImageRef:
+  type: object
+  required: [sha256]
+  additionalProperties: false
+  properties:
+    sha256:
+      type: string
+      pattern: '^[0-9a-f]{64}$'
+      description: The `sha256` an upload (`POST /v1/admin/branding/assets`) answered
+
+BrandingImage:
+  type: object
+  required: [sha256, url]
+  properties:
+    sha256:
+      type: string
+    url:
+      type: string
+      description: Same-origin path of the image, `/oauth/branding/assets/<sha256>.<ext>`
+
+BrandingLayout:
+  type: string
+  enum: [centered, split]
+  description: '`centered` is a card over a full-bleed background; `split` puts the image on one side and the form on the other (the image is hidden on narrow screens)'
+
+BrandingProfileRequest:
+  type: object
+  additionalProperties: false
+  description: A whole profile. Every field is optional and an omitted one is `null` (inherit), or `{}` for colours and `false` for `applyToConsole`.
+  properties:
+    appName:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 60
+    headline:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 80
+    subtitle:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 160
+    signInLabel:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 30
+    notice:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 280
+      description: Plain text shown above the login form
+    layout:
+      oneOf:
+        - $ref: '#/BrandingLayout'
+        - type: 'null'
+    footerLinks:
+      type: [array, 'null']
+      maxItems: 3
+      items:
+        $ref: '#/BrandingFooterLink'
+    colorsLight:
+      $ref: '#/BrandingColors'
+    colorsDark:
+      $ref: '#/BrandingColors'
+    applyToConsole:
+      type: boolean
+      default: false
+      description: Applies the colours and app name to the whole admin console. Read only from the profile that applies to `tereo-ui` (its own, else the default).
+    logo:
+      oneOf:
+        - $ref: '#/BrandingImageRef'
+        - type: 'null'
+      description: PNG, WebP, JPEG or SVG
+    logoDark:
+      oneOf:
+        - $ref: '#/BrandingImageRef'
+        - type: 'null'
+      description: Shown under the dark theme. PNG, WebP, JPEG or SVG
+    favicon:
+      oneOf:
+        - $ref: '#/BrandingImageRef'
+        - type: 'null'
+      description: PNG, SVG or ICO
+    background:
+      oneOf:
+        - $ref: '#/BrandingImageRef'
+        - type: 'null'
+      description: PNG, WebP or JPEG
+
+BrandingOwnValues:
+  type: object
+  required: [appName, headline, subtitle, signInLabel, notice, layout, footerLinks, colorsLight, colorsDark, applyToConsole, logo, logoDark, favicon, background]
+  description: A profile's own values, as `BrandingProfileRequest` but with images as `{ sha256, url }`
+  properties:
+    appName:
+      type: [string, 'null']
+    headline:
+      type: [string, 'null']
+    subtitle:
+      type: [string, 'null']
+    signInLabel:
+      type: [string, 'null']
+    notice:
+      type: [string, 'null']
+    layout:
+      oneOf:
+        - $ref: '#/BrandingLayout'
+        - type: 'null'
+    footerLinks:
+      type: [array, 'null']
+      items:
+        $ref: '#/BrandingFooterLink'
+    colorsLight:
+      $ref: '#/BrandingColors'
+    colorsDark:
+      $ref: '#/BrandingColors'
+    applyToConsole:
+      type: boolean
+    logo:
+      oneOf:
+        - $ref: '#/BrandingImage'
+        - type: 'null'
+    logoDark:
+      oneOf:
+        - $ref: '#/BrandingImage'
+        - type: 'null'
+    favicon:
+      oneOf:
+        - $ref: '#/BrandingImage'
+        - type: 'null'
+    background:
+      oneOf:
+        - $ref: '#/BrandingImage'
+        - type: 'null'
+
+EffectiveBranding:
+  type: object
+  required: [appName, headline, subtitle, signInLabel, notice, layout, footerLinks, colorsLight, colorsDark, logoUrl, logoDarkUrl, faviconUrl, backgroundUrl, applyToConsole]
+  description: Branding after inheritance, with images as asset URLs. `null` is stock Tereo for that slot.
+  properties:
+    appName:
+      type: [string, 'null']
+    headline:
+      type: [string, 'null']
+    subtitle:
+      type: [string, 'null']
+    signInLabel:
+      type: [string, 'null']
+    notice:
+      type: [string, 'null']
+    layout:
+      oneOf:
+        - $ref: '#/BrandingLayout'
+        - type: 'null'
+    footerLinks:
+      type: [array, 'null']
+      items:
+        $ref: '#/BrandingFooterLink'
+    colorsLight:
+      $ref: '#/BrandingColors'
+    colorsDark:
+      $ref: '#/BrandingColors'
+    logoUrl:
+      type: [string, 'null']
+    logoDarkUrl:
+      type: [string, 'null']
+    faviconUrl:
+      type: [string, 'null']
+    backgroundUrl:
+      type: [string, 'null']
+    applyToConsole:
+      type: boolean
+
+PublicBranding:
+  description: The branding of a sign-in page, as injected into it
+  allOf:
+    - $ref: '#/EffectiveBranding'
+    - type: object
+      required: [scope]
+      properties:
+        scope:
+          type: string
+          enum: [auth]
+
+BrandingSource:
+  type: string
+  enum: [client, default, tereo]
+
+BrandingProfileView:
+  type: object
+  required: [client, own, effective, inherited, sources, colorSources, provisioned, provisionedFrom, updatedAt, canEdit, canManageGrants]
+  properties:
+    client:
+      type: [object, 'null']
+      description: The client the profile belongs to; `null` for the default profile
+      required: [id, clientId, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        clientId:
+          type: string
+        name:
+          type: string
+    own:
+      oneOf:
+        - $ref: '#/BrandingOwnValues'
+        - type: 'null'
+      description: The profile's own values; `null` when there is no profile
+    effective:
+      $ref: '#/EffectiveBranding'
+    inherited:
+      oneOf:
+        - $ref: '#/EffectiveBranding'
+        - type: 'null'
+      description: |
+        What applies beneath the profile's own layer: for a client, the default profile over stock;
+        `null` for the default profile, where stock applies. A client's effective value cannot be
+        read back to what lies under an overridden slot, so a preview takes this as its base.
+    sources:
+      type: object
+      description: Where each effective slot comes from
+      additionalProperties:
+        $ref: '#/BrandingSource'
+    colorSources:
+      type: object
+      required: [light, dark]
+      description: Where each effective colour variable comes from
+      properties:
+        light:
+          type: object
+          additionalProperties:
+            $ref: '#/BrandingSource'
+        dark:
+          type: object
+          additionalProperties:
+            $ref: '#/BrandingSource'
+    provisioned:
+      type: boolean
+      description: Declared in a provisioning document, so read-only here
+    provisionedFrom:
+      type: [string, 'null']
+      description: The provisioning document's file name
+    updatedAt:
+      type: [string, 'null']
+      format: date-time
+    canEdit:
+      type: boolean
+    canManageGrants:
+      type: boolean
+
+BrandingList:
+  type: object
+  required: [default, clients]
+  properties:
+    default:
+      type: [object, 'null']
+      description: The default profile's state; `null` when there is none or the caller lacks `branding.admin`
+      required: [provisioned, updatedAt]
+      properties:
+        provisioned:
+          type: boolean
+        updatedAt:
+          type: string
+          format: date-time
+    clients:
+      type: array
+      items:
+        type: object
+        required: [id, clientId, name, provisioned, updatedAt]
+        properties:
+          id:
+            type: string
+            format: uuid
+          clientId:
+            type: string
+          name:
+            type: string
+          provisioned:
+            type: boolean
+          updatedAt:
+            type: string
+            format: date-time
+
+BrandingGrant:
+  type: object
+  required: [userId, email, name, grantedBy, grantedAt]
+  properties:
+    userId:
+      type: string
+      format: uuid
+    email:
+      type: string
+    name:
+      type: [string, 'null']
+    grantedBy:
+      type: string
+      format: uuid
+    grantedAt:
+      type: string
+      format: date-time
+
+BrandingGrantList:
+  type: object
+  required: [data]
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/BrandingGrant'
+
+BrandingAddGrantRequest:
+  type: object
+  required: [userId]
+  additionalProperties: false
+  properties:
+    userId:
+      type: string
+      format: uuid
+
+BrandingAddGrantResponse:
+  type: object
+  required: [userId]
+  properties:
+    userId:
+      type: string
+      format: uuid
+
+BrandingAssetUploadResponse:
+  type: object
+  required: [sha256, ext, url]
+  properties:
+    sha256:
+      type: string
+    ext:
+      type: string
+      enum: [png, jpg, webp, svg, ico]
+    url:
+      type: string

@@ -81,3 +81,12 @@ IdentityProviderDomainIdParam:
   schema:
     type: string
     format: uuid
+
+BrandingGrantUserIdParam:
+  name: userId
+  in: path
+  required: true
+  description: The user holding the grant
+  schema:
+    type: string
+    format: uuid

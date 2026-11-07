@@ -1,0 +1,150 @@
+# Sign-in page branding
+
+Core's sign-in pages (`/login`, `/consent`, `/logout`, `/set-password` and the steps under `/login/*`)
+say "Tereo" in kosmeo's stock colours until an admin brands them. Branding is made of fixed slots,
+set per client, with a default beneath; no free-form HTML or CSS reaches the page. It is set in the
+admin UI (**Branding**), through `/v1/admin/branding`, or by a
+[provisioning document](provisioning.md#branding). The route reference is in the API docs
+(`/docs`, tag *Admin - Branding*).
+
+## Slots
+
+| Slot | Type | Limits |
+|---|---|---|
+| `appName` | text | 60 characters. Replaces "Tereo" in page titles and `<title>` (and the console header, see below) |
+| `headline`, `subtitle` | text | 80 / 160. The login page's heading and subheading |
+| `signInLabel` | text | 30. The login button |
+| `notice` | text | 280. Plain text above the login form |
+| `logo`, `logoDark` | image | PNG, WebP, JPEG, SVG; `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB). `logoDark` shows under the dark theme |
+| `favicon` | image | PNG, SVG, ICO; 512 KB |
+| `background` | image | PNG, WebP, JPEG; `BRANDING_BACKGROUND_MAX_SIZE_MB` (5 MB) |
+| `layout` | enum | `centered` (card over a full-bleed background) or `split` (image one side, form the other; the image is hidden on narrow screens) |
+| `footerLinks` | list | Up to 3 `{ label, url }`; label 40 characters; `url` must be `https:` |
+| `colorsLight`, `colorsDark` | map | `--k-*` variable to colour value |
+| `applyToConsole` | boolean | Applies the colours and app name to the admin console (see below) |
+
+Text is rendered as text, never HTML. Every slot is nullable and `null` means inherit. The steps
+other than login (2FA, org select, change password, consent, logout, set password) take the app
+name, logos, favicon, colours, layout, background and footer links and keep their stock wording.
+
+**Colours.** The keys are the 51 `--k-*` custom properties of `@kosmeo-ui/react` whose name has
+`color` or `shadow` (`src/definitions/brandingTokens.ts`; a conventions test keeps it equal to the
+installed stylesheet). A value is `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, or `rgb()`, `rgba()`,
+`hsl()`, `hsla()`, `oklch()` holding only numbers, `%`, `deg`, spaces, commas, `/` and `.`, at most
+64 characters. Values are written into an injected `<style>`, so nothing else is accepted: no
+`var()`, `url()`, keywords, comments, quotes or `;{}`.
+
+## Inheritance
+
+Client profile, then the default profile, then stock Tereo, field by field and colour variable by
+colour variable (`footerLinks` is taken whole). A client with no profile gets the default; with no
+default either, the pages look as they always did. An unknown, malformed or absent `client_id` is
+treated as no client and gets the default, so branding never reveals which client ids exist.
+
+The admin API's profile `GET` returns `own` (the profile's values), `effective` (after inheritance),
+`sources` and `colorSources` (`client`, `default` or `tereo` per slot and variable) and `inherited`:
+what applies without the profile's own layer (the default over stock for a client; `null`, meaning
+stock, for the default profile). A preview needs `inherited` because `effective` cannot show what
+lies under an overridden slot.
+
+## Delivery to the browser
+
+**Injection.** Core serves the UI's `index.html` itself. On a sign-in route it resolves the branding
+for `?client_id=` and adds to `<head>` a `<style id="tereo-branding-style">` with the colours
+(`:root` for light, `[data-theme="dark"]` for dark), preloads for the logo and background, a
+`<link rel="icon">`, the app name as `<title>`, `data-brand-layout` on `<html>`, and
+`<script type="application/json" id="tereo-branding">` with the effective values and
+`scope: "auth"`. The first paint is already branded.
+
+On a sign-in route that block is **always present**: with the literal `null` when nothing resolves
+(style, preloads and title untouched), so an unbranded sign-in renders stock at once. The JSON is
+serialized with `<`, `>`, `&`, U+2028 and U+2029 escaped. If resolving fails, the error is logged and
+the stock page is served; branding never breaks sign-in.
+
+**Fallback.** `GET /oauth/branding?client_id=` (public) returns exactly what injection embeds, or
+`null`. The UI calls it only when the page has no `#tereo-branding` block (the Vite dev server on
+:4000, or a UI hosted apart from core); meanwhile it shows a neutral card, and after 1.5 s or on
+error it renders stock.
+
+Resolved branding is cached in memory per client id. Every profile write and provisioning apply
+publishes an invalidation, so every replica drops it. An unknown client id is cached briefly
+(60 s, bounded) under its own key.
+
+## Assets
+
+Images live in the core bucket `auth-service-branding` (private), keyed `<sha256>.<ext>`; the same
+bytes uploaded twice, or provisioned on every start, are one object. The type comes from the bytes,
+not the name or header, and must be allowed for the slot. An SVG is checked against an allowlist
+(no `script`, `foreignObject`, event handlers, `javascript:` or external references, no `@import` or
+`url()` in styles); one the sanitizer would change is refused (`400 invalid_branding_image`), so the
+stored file is what was uploaded. An upload over the slot's limit is `413 payload_too_large`.
+
+`POST /v1/admin/branding/assets` (multipart: `slot`, then `file`) answers `{ sha256, ext, url }`; a
+profile then references the image as `{ "sha256": "…" }`. A hash no live image has is `400
+invalid_request` naming the slot. An image no profile references expires after **24 hours**
+(`delete_after`, removed by the daily lifecycle sweep; a daily `branding-reconcile` job covers
+profiles removed by deleting their client). Referencing an image clears the clock in the saving
+transaction, and a dropped one starts it, which also keeps pages already rendered with a
+just-replaced image working.
+
+`GET /oauth/branding/assets/:file` serves them, public:
+`Cache-Control: public, max-age=31536000, immutable` (the name is a content hash),
+`X-Content-Type-Options: nosniff`, the type from the extension, and for an SVG
+`Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'`. A name that is not
+`<64 hex>.<png|jpg|webp|svg|ico>`, or has no live image, is `404`.
+
+## Who may edit
+
+Permissions `branding.read`, `branding.write` and `branding.admin` are global (no organization holds
+them); `admin` includes the other two.
+
+| Target | Read | Edit (`PUT`, `DELETE`, uploads) |
+|---|---|---|
+| A client's profile | `branding.read` and (owner, active grantee, or `branding.admin`) | `branding.write` and (owner, active grantee, or `branding.admin`) |
+| `tereo-ui`'s profile | `branding.admin` | `branding.admin` |
+| Default profile | `branding.admin` | `branding.admin` |
+| A client's grants (list, add, revoke) | owner or `branding.admin` | owner or `branding.admin` |
+
+Uploading needs `branding.write`; the image belongs to nothing until a profile the caller may edit
+references it. `GET /v1/admin/branding` lists the default (for `branding.admin`) and the clients
+with a profile the caller may read; `tereo-ui` is listed only for `branding.admin`.
+
+A provisioned profile refuses `PUT` and `DELETE` with `409 managed_by_provisioning` and the
+document's file name as `provisionedFrom`, for everyone, `branding.admin` included. Writes are
+last-write-wins. Each mutation writes an audit entry and emits `auth.branding.updated` (with the
+slots changed) or `auth.branding.deleted`; grants emit `auth.branding.grant-added` and
+`auth.branding.grant-revoked`. Reading these events needs `branding.read`.
+
+## Grants
+
+A grant lets one user edit one client's branding, and nothing else about the client. It never
+reaches the client's settings, the default profile or `tereo-ui`'s profile.
+
+- `POST /v1/admin/branding/clients/:id/grants` with `{ userId }`; `GET` lists the active grants;
+  `DELETE …/grants/:userId` revokes (recording who and when).
+- Only the client's **owner** or a `branding.admin` manages them; a grantee cannot grant. The grantee
+  still needs `branding.write` to use it.
+- **`tereo-ui` takes no grants**, for anyone: `403`, `branding.admin` included. Its branding is
+  `branding.admin`'s alone; give the person `branding.admin` instead.
+- A deactivated user cannot be granted (`400 user_inactive`); an existing active grant is
+  `409 conflict`. Deleting a client removes its grants and profile with it.
+
+## The console
+
+`applyToConsole` brands the admin console too, with the colours and app name only (the block is
+`scope: "console"`, no logos or layout). It is read from **`tereo-ui`'s profile, else the default
+profile**: the toggle of a client's own profile has no effect. The editor shows the toggle only on
+the profile that applies to `tereo-ui`. On every non-sign-in route core injects the console block
+only when the toggle is on.
+
+**Stock colours escape hatch.** While the Branding page is mounted, the UI disables
+`#tereo-branding-style`, and enables it again on leaving. A palette that makes the console
+unreadable can therefore always be fixed from the page that edits it. Skipping the injection
+server-side would not cover in-app navigation.
+
+## Provisioning
+
+A document's `branding` block declares the default and per-client profiles; see
+[provisioning.md](provisioning.md#branding) for the format, image paths and validation. A declared
+profile is read-only through the API. Removing it from the documents **keeps its values**, clears
+`provisioned` and leaves it editable: unlike other declared entries it is not retired.

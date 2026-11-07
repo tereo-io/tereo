@@ -356,7 +356,9 @@ Branding profiles for the sign-in pages: `default`, and one per client keyed by 
 is validated as the admin API validates it (`/v1/admin/branding`). The client must exist after this
 apply: a client in any document of the set, or one already in the database. `tereo-ui` may be
 branded, which is how `applyToConsole` is provisioned. `default`, and each client, may be branded
-by **one** document only.
+by **one** document only. The block must declare `default` or at least
+one client: an empty `branding` would release every provisioned profile unnoticed, so it is refused.
+See [branding](branding.md) for the slots and limits.
 
 Image paths (`logo`, `logoDark`, `favicon`, `background`) are relative to the document's file and
 must resolve inside `PROVISIONING_PATH` (its folder, when it names a file): no `..` out of it and no
@@ -406,7 +408,7 @@ the CLI the exit code is non-zero.
   - the URL is `http` or `https` with no credentials, and its host is not `localhost` or a
     private or reserved IP literal, unless it is the service's own
     [`internalHost`](#internal-webhook-targets). In-cluster DNS names are fine.
-- **Branding**: `default` and each client in one document; image paths inside the folder, each a
+- **Branding**: a block with `default` or at least one client; `default` and each client in one document; image paths inside the folder, each a
   valid image for its slot; every branded client in the set or the database.
 - **Secrets**: format, strength and the other rules of [Secrets](#secrets), across service, client
   and webhook secrets; every `secretFrom` variable must be set.

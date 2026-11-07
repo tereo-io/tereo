@@ -259,6 +259,9 @@ organization picker with the `core:organizations` scope.
 [Guest users](packages/tereo/docs/auth.md#guest-users) are temporary, single-organization logins that expire on their own
 and reach only roles flagged guest-assignable; an app invites, extends and promotes them with
 `core.guests`, and a guest sets a first password from a one-time link.
+[Sign-in page branding](packages/tereo/docs/branding.md) sets a client's app name, logos, colours,
+wording and background on core's login pages, from the admin UI or a provisioning document, with
+per-client edit grants.
 CI checks formatting, import order, lint and types, runs the suite in Docker with real users and
 tokens, and starts the release image against a fresh database.
 

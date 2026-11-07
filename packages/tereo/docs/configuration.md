@@ -234,6 +234,8 @@ env (no overlap).
 | `TOTP_VERIFICATION_TTL` | `300` | Seconds, 1–3600 |
 | `TOTP_SETUP_TTL` | `600` | Seconds, 1–3600 |
 | `PROFILE_PHOTO_MAX_SIZE_MB` | `5` | Above 0, at most 100 |
+| `BRANDING_IMAGE_MAX_SIZE_KB` | `512` | 1–10240. Largest logo, dark logo or favicon, in KB ([branding](branding.md)) |
+| `BRANDING_BACKGROUND_MAX_SIZE_MB` | `5` | 1–50. Largest sign-in background image, in MB |
 | `OIDC_ALLOW_PRIVATE_ISSUERS` | `false` | Lets an identity provider's issuer be private, loopback or plain `http` — tests and local development only. **Refused in production** |
 
 ### App services
