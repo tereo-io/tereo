@@ -25,6 +25,8 @@ describe("/v1/admin/branding/clients/:id access", () => {
   let clientUuid: string;
   let provisionedUuid: string;
   let consoleUuid: string;
+  let consoleGrantee: Principal;
+  let ownsConsoleProfile = false;
   const clientIds: string[] = [];
 
   const url = (id: string) => `${BRANDING_URL}/clients/${id}`;
@@ -59,10 +61,30 @@ describe("/v1/admin/branding/clients/:id access", () => {
         where: { clientId: LOGIN_CLIENT.clientId },
       })
     ).id;
+    // The API refuses grants on the console client; one in the database
+    // must still give nothing.
+    consoleGrantee = await brandingPrincipal(["branding.write"]);
+    await grantBranding(consoleUuid, consoleGrantee.userId);
+    ownsConsoleProfile = !(await prisma.brandingProfile.findUnique({
+      where: { clientId: consoleUuid },
+    }));
+    if (ownsConsoleProfile) {
+      await prisma.brandingProfile.create({
+        data: { clientId: consoleUuid, updatedBy: SYSTEM_USER_ID },
+      });
+    }
   });
 
   afterAll(async () => {
     await deleteBrandingClients(clientIds);
+    await prisma.brandingGrant.deleteMany({
+      where: { clientId: consoleUuid, userId: consoleGrantee.userId },
+    });
+    if (ownsConsoleProfile) {
+      await prisma.brandingProfile.deleteMany({
+        where: { clientId: consoleUuid },
+      });
+    }
   });
 
   it.each([
@@ -99,7 +121,7 @@ describe("/v1/admin/branding/clients/:id access", () => {
   });
 
   it("refuses the console client to anyone without branding.admin", async () => {
-    for (const principal of [owner, grantee]) {
+    for (const principal of [owner, grantee, consoleGrantee]) {
       expect(
         (await fetchJson("GET", url(consoleUuid), principal.token)).status
       ).toBe(403);
@@ -108,6 +130,14 @@ describe("/v1/admin/branding/clients/:id access", () => {
         (await fetchJson("DELETE", url(consoleUuid), principal.token)).status
       ).toBe(403);
     }
+  });
+
+  it("leaves the console client out of a console grantee's list", async () => {
+    const res = await fetchJson("GET", BRANDING_URL, consoleGrantee.token);
+    expect(res.status).toBe(200);
+    expect(res.body.clients.map((c: { id: string }) => c.id)).not.toContain(
+      consoleUuid
+    );
   });
 
   it("lets a branding.admin read the console client", async () => {

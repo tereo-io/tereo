@@ -37,7 +37,10 @@ describe("storeBrandingImage", () => {
     expect(second).toEqual(first);
     expect(first.objectKey).toBe(`${image.sha256}.png`);
     expect(await rowsFor(image.sha256)).toHaveLength(1);
-    expect(await getLiveImageByHash(image.sha256)).toEqual(first);
+    expect(await getLiveImageByHash(image.sha256)).toEqual({
+      ...first,
+      sizeBytes: image.buffer.length,
+    });
   });
 
   it("stores concurrent identical uploads once", async () => {

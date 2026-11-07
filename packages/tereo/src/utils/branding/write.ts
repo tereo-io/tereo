@@ -2,8 +2,10 @@ import type { AdminProfileBodySchema, BrandingFields } from "./schema.js";
 import { emitTx, logAuditTx, type AuditLogInput } from "../outbox.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { referenceImagesTx, releaseImagesTx } from "./expiry.js";
+import { imageMaxBytes, keyFitsSlot } from "./images.js";
 import { getLiveImageByHash } from "./storage.js";
-import { keyFitsSlot } from "./images.js";
+import { invalidateBranding } from "./resolve.js";
+import { logger } from "../logger.js";
 import db from "../db/index.js";
 import type { z } from "zod";
 import {
@@ -91,7 +93,10 @@ const imageIds = (values: AdminProfileValues | null) =>
       )
     : [];
 
-/** Resolve an admin body's image hashes to live objects; 400 naming the slot when one is missing. */
+/**
+ * Resolve an admin body's image hashes to live objects: 400 naming the slot
+ * when one is missing, of a type the slot refuses, or over its size limit.
+ */
 export const resolveImageRefs = async (
   body: z.output<typeof AdminProfileBodySchema>
 ): Promise<AdminProfileValues> => {
@@ -114,6 +119,11 @@ export const resolveImageRefs = async (
     if (!keyFitsSlot(slot, stored.objectKey)) {
       throw new ValidationError("Wrong image type for the slot", [
         { path: slot, message: `This image's type is not allowed for ${slot}` },
+      ]);
+    }
+    if (stored.sizeBytes > imageMaxBytes(slot)) {
+      throw new ValidationError("Image too large for the slot", [
+        { path: slot, message: `This image exceeds the ${slot} size limit` },
       ]);
     }
     values[slot] = stored.objectId;
@@ -279,4 +289,17 @@ export const deleteProfileTx = async (
     entityId: existing.id,
     data: { clientId: targetName(target) },
   });
+};
+
+/**
+ * Drop cached branding after a committed write. The write stands either way,
+ * so a failure is logged, not returned to the caller; replicas catch up when
+ * their cache next clears.
+ */
+export const invalidateAfterWrite = async (): Promise<void> => {
+  try {
+    await invalidateBranding();
+  } catch (err) {
+    logger.warn({ err }, "Branding saved, but invalidating the cache failed");
+  }
 };

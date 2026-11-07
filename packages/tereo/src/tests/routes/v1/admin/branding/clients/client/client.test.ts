@@ -12,7 +12,7 @@ import {
   deleteBrandingClients,
   deleteDefaultProfile,
   noDefaultProfile,
-  storeTestLogo,
+  storeTestImage,
 } from "../../../../../../support/branding.js";
 
 describe("/v1/admin/branding/clients/:id", () => {
@@ -65,7 +65,7 @@ describe("/v1/admin/branding/clients/:id", () => {
 
   it("references an uploaded image by its sha256", async () => {
     const client = await newClient();
-    const logo = await storeTestLogo();
+    const logo = await storeTestImage();
     const put = await fetchJson("PUT", url(client.id), owner.token, {
       logo: { sha256: logo.sha256 },
     });
@@ -87,6 +87,20 @@ describe("/v1/admin/branding/clients/:id", () => {
     });
     expect(res.status).toBe(400);
     expect(res.body.issues?.[0]?.path).toBe("logo");
+  });
+
+  it("returns 400 when an image exceeds the size limit of the slot it is put in", async () => {
+    const client = await newClient();
+    const background = await storeTestImage("background", 600 * 1024);
+    const res = await fetchJson("PUT", url(client.id), owner.token, {
+      logo: { sha256: background.sha256 },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.issues?.[0]?.path).toBe("logo");
+    const ok = await fetchJson("PUT", url(client.id), owner.token, {
+      background: { sha256: background.sha256 },
+    });
+    expect(ok.status).toBe(200);
   });
 
   it("returns 400 in core's error shape for a bad colour", async () => {

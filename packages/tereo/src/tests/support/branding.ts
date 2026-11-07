@@ -1,3 +1,4 @@
+import type { BrandingImageSlot } from "../../utils/branding/schema.js";
 import { storeBrandingImage } from "../../utils/branding/storage.js";
 import { SYSTEM_USER_ID } from "../../definitions/systemUser.js";
 import { checkImage } from "../../utils/branding/images.js";
@@ -49,15 +50,21 @@ export const grantBranding = async (
   });
 };
 
-/** A stored logo, unique to the caller: a 1x1 PNG with a random trailing chunk. */
-export const storeTestLogo = async () => {
+/**
+ * A stored image, unique to the caller: a 1x1 PNG with `padBytes` random
+ * trailing bytes, checked for `slot`.
+ */
+export const storeTestImage = async (
+  slot: BrandingImageSlot = "logo",
+  padBytes = 16
+) => {
   const base = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
     "base64"
   );
   const image = await checkImage(
-    "logo",
-    Buffer.concat([base, randomBytes(16)])
+    slot,
+    Buffer.concat([base, randomBytes(padBytes)])
   );
   const stored = await storeBrandingImage(image, SYSTEM_USER_ID);
   return { ...stored, sha256: image.sha256 };

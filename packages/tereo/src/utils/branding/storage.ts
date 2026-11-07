@@ -16,11 +16,13 @@ export const BRANDING_IMAGE_GRACE_MS = 24 * 60 * 60 * 1000;
 
 export type StoredImage = { objectId: string; objectKey: string };
 
+export type LiveImage = StoredImage & { sizeBytes: number };
+
 /** A live object holding this content, under whichever extension it was stored. */
 export const getLiveImageByHash = async (
   sha256: string,
   tx?: Prisma.TransactionClient
-): Promise<StoredImage | null> => {
+): Promise<LiveImage | null> => {
   const row = await (tx ?? prisma).object.findFirst({
     where: {
       bucket: { name: BRANDING_BUCKET },
@@ -28,9 +30,22 @@ export const getLiveImageByHash = async (
       deletedAt: null,
       thumbnailFor: null,
     },
-    select: { id: true, objectKey: true },
+    select: {
+      id: true,
+      objectKey: true,
+      versions: {
+        where: { isCurrent: true, deletedAt: null },
+        select: { contentBlob: { select: { sizeBytes: true } } },
+        take: 1,
+      },
+    },
   });
-  return row ? { objectId: row.id, objectKey: row.objectKey } : null;
+  if (!row) return null;
+  return {
+    objectId: row.id,
+    objectKey: row.objectKey,
+    sizeBytes: Number(row.versions[0]?.contentBlob?.sizeBytes ?? 0),
+  };
 };
 
 /**
@@ -73,7 +88,7 @@ export const storeBrandingImage = async (
     const stillLive = await db.$transaction((tx) =>
       extendExpiryTx(tx, existing.objectId)
     );
-    if (stillLive) return existing;
+    if (stillLive) return { objectId: existing.objectId, objectKey: key };
   }
 
   const saved = await saveBlobStream(Readable.from(image.buffer));

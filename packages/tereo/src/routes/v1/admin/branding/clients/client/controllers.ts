@@ -1,4 +1,3 @@
-import { invalidateBranding } from "../../../../../../utils/branding/resolve.js";
 import { profileView } from "../../../../../../utils/branding/view.js";
 import { ForbiddenError } from "../../../../../../utils/errors.js";
 import { validateUser } from "../../../../../../utils/auth.js";
@@ -12,6 +11,7 @@ import {
 } from "../../../../../../utils/branding/access.js";
 import {
   deleteProfileTx,
+  invalidateAfterWrite,
   resolveImageRefs,
   saveProfileTx,
 } from "../../../../../../utils/branding/write.js";
@@ -63,7 +63,7 @@ export const putClientBranding = async (req: Request, res: Response) => {
   await db.$transaction((tx) =>
     saveProfileTx(tx, { client }, values, user, null)
   );
-  await invalidateBranding();
+  await invalidateAfterWrite();
   res.json(await view(user, client));
 };
 
@@ -72,6 +72,6 @@ export const deleteClientBranding = async (req: Request, res: Response) => {
   const client = await loadClient(req);
   await assertMayEditClientBranding(user, client);
   await db.$transaction((tx) => deleteProfileTx(tx, { client }, user));
-  await invalidateBranding();
+  await invalidateAfterWrite();
   res.status(204).send();
 };
