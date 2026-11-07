@@ -297,7 +297,7 @@ const EditorForm = ({ target, profile }: FormProps) => {
               <Checkbox
                 label="Also brand the admin console"
                 checked={draft.applyToConsole}
-                readOnly={locked}
+                disabled={locked}
                 onChange={(e) => patch({ applyToConsole: e.target.checked })}
               />
             </section>
@@ -321,16 +321,16 @@ const EditorForm = ({ target, profile }: FormProps) => {
         body="This removes the profile; sign-in pages fall back to the inherited branding."
         confirmButtonText="Remove"
         isLoading={remove.isPending}
-        handleConfirm={() =>
-          remove.mutate(undefined, {
-            onSuccess: () => {
-              setShowDelete(false);
-              // The profile is gone; there is nothing left to guard.
-              setDraft(initial);
-              setTimeout(() => navigate("/auth-admin/branding"), 0);
-            },
-          })
-        }
+        handleConfirm={async () => {
+          try {
+            await remove.mutateAsync();
+          } catch {
+            return;
+          }
+          // The refetch remounts the form, so navigate from here, not from a mutate callback.
+          setShowDelete(false);
+          navigate("/auth-admin/branding");
+        }}
       />
       <ConfirmationModal
         show={blocker.state === "blocked"}

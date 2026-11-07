@@ -1,11 +1,11 @@
+import useInfiniteClients from "../../api/oauth-clients/useInfiniteClients";
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import useBrandingList from "../../api/branding/useBrandingList";
 import { PageHeader } from "@/components/PageHeader";
 import { Link, useNavigate } from "react-router-dom";
 import { formatDateTime } from "@/utils/formatDate";
-import { useQuery } from "@tanstack/react-query";
 import { useStockColors } from "@/features/auth";
-import { useAuth, useAxios } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 import "./styles.css";
 import {
@@ -18,30 +18,51 @@ import {
   Spinner,
 } from "@kosmeo-ui/react";
 
-interface PickableClient {
-  id: string;
-  clientId: string;
-  name: string;
-}
+const PAGE_QUERY = "limit=25";
+
+/** Core lists only the clients the caller owns without clients.admin. */
+const ClientPicker = ({
+  branded,
+  value,
+  onChange,
+}: {
+  branded: Set<string>;
+  value: string | undefined;
+  onChange: (id: string | undefined) => void;
+}) => {
+  const { data, hasMore, isLoading, onQueryChange } = useInfiniteClients();
+  const options = data
+    .filter((c) => !branded.has(c.id))
+    .map((c) => ({ value: c.id, label: `${c.name} (${c.clientId})` }));
+  return (
+    <>
+      <Select
+        label="Client"
+        placeholder="Choose a client"
+        value={value}
+        options={options}
+        onChange={onChange}
+      />
+      {hasMore && (
+        <Button
+          variant="secondary"
+          isLoading={isLoading}
+          onClick={() => onQueryChange(PAGE_QUERY)}
+        >
+          Load more clients
+        </Button>
+      )}
+    </>
+  );
+};
 
 export const BrandingList = () => {
   useStockColors();
   const navigate = useNavigate();
-  const axios = useAxios("auth");
   const { hasPermission } = useAuth();
   const { data, isLoading } = useBrandingList();
   const [picking, setPicking] = useState(false);
   const [chosen, setChosen] = useState<string | undefined>();
-
-  // Core lists only the clients the caller owns without clients.admin.
-  const { data: clients = [] } = useQuery({
-    queryKey: ["branding", "pickable-clients"],
-    enabled: picking,
-    queryFn: async (): Promise<PickableClient[]> => {
-      const res = await axios.get("/v1/admin/clients");
-      return res.data.data ?? [];
-    },
-  });
 
   if (!hasPermission("branding.read")) return null;
 
@@ -56,9 +77,6 @@ export const BrandingList = () => {
   }
 
   const branded = new Set((data?.clients ?? []).map((c) => c.id));
-  const options = clients
-    .filter((c) => !branded.has(c.id))
-    .map((c) => ({ value: c.id, label: `${c.name} (${c.clientId})` }));
   const empty = !data?.default && !data?.clients.length;
 
   return (
@@ -149,13 +167,7 @@ export const BrandingList = () => {
           </Button>,
         ]}
       >
-        <Select
-          label="Client"
-          placeholder="Choose a client"
-          value={chosen}
-          options={options}
-          onChange={setChosen}
-        />
+        <ClientPicker branded={branded} value={chosen} onChange={setChosen} />
       </Modal>
     </Page>
   );

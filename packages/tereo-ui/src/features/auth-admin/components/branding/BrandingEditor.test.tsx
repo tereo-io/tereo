@@ -75,6 +75,7 @@ const renderEditor = (data: BrandingProfile) => {
         ),
       },
       { path: "/other", element: <p>Other page</p> },
+      { path: "/auth-admin/branding", element: <p>Branding list</p> },
     ],
     { initialEntries: ["/edit"] }
   );
@@ -93,6 +94,7 @@ beforeEach(() => {
   authMock.permissions = ["branding.read", "branding.write"];
   authMock.axios.get.mockReset();
   authMock.axios.put.mockReset();
+  authMock.axios.delete.mockReset();
   authMock.axios.put.mockResolvedValue({ data: {} });
   authMock.axios.post.mockReset();
 });
@@ -187,5 +189,35 @@ describe("BrandingEditor", () => {
     await screen.findByLabelText("Headline");
     await user.click(screen.getByText("Leave"));
     expect(await screen.findByText("Other page")).toBeVisible();
+  });
+
+  it("ignores clicks on the console checkbox when the profile is locked", async () => {
+    const user = userEvent.setup();
+    renderEditor(
+      profile({
+        client: { id: "c1", clientId: "tereo-ui", name: "Console" },
+        provisioned: true,
+        provisionedFrom: "core.json",
+        canEdit: false,
+      })
+    );
+    const box = await screen.findByLabelText("Also brand the admin console");
+    await user.click(box);
+    expect(box).not.toBeChecked();
+    await user.click(screen.getByText("Leave"));
+    expect(await screen.findByText("Other page")).toBeVisible();
+  });
+
+  it("navigates to the list after a successful delete, even as the refetch remounts the form", async () => {
+    const user = userEvent.setup();
+    renderEditor(profile());
+    await screen.findByLabelText("App name");
+    authMock.axios.delete.mockResolvedValue({});
+    authMock.axios.get.mockResolvedValue({
+      data: profile({ own: null, updatedAt: null }),
+    });
+    await user.click(screen.getByRole("button", { name: "Remove branding" }));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    expect(await screen.findByText("Branding list")).toBeVisible();
   });
 });
