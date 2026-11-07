@@ -1,0 +1,87 @@
+.t-branding-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .t-branding-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.t-branding-form section,
+.t-color-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.t-branding-form h2,
+.t-color-group h3 {
+  margin: 0;
+}
+
+.t-branding-modes {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.t-color-row {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.t-color-row input[type="color"] {
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid var(--k-border-color);
+  background: none;
+}
+
+.t-footer-link-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.t-image-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.t-image-field img {
+  max-width: 12rem;
+  max-height: 6rem;
+  object-fit: contain;
+  align-self: flex-start;
+}
+
+.t-field-error {
+  color: var(--k-danger-color);
+  margin: 0;
+}
+
+.t-branding-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.t-branding-table th,
+.t-branding-table td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--k-border-color);
+}
+
+.t-branding-banner {
+  margin-bottom: 1rem;
+}

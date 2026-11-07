@@ -1,0 +1,191 @@
+import { RouterProvider, createMemoryRouter, Link } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import type { BrandingProfile } from "../../api/branding/types";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { EffectiveBranding } from "@/features/auth";
+import userEvent from "@testing-library/user-event";
+import { BrandingEditor } from "./BrandingEditor";
+import { authMock } from "@/test/authMock";
+
+vi.mock("@/lib/auth", async () =>
+  (await import("@/test/authMock")).mockAuthModule()
+);
+
+const own = {
+  appName: "Acme",
+  headline: null,
+  subtitle: null,
+  signInLabel: null,
+  notice: null,
+  layout: null,
+  footerLinks: null,
+  colorsLight: {},
+  colorsDark: {},
+  applyToConsole: false,
+  logo: null,
+  logoDark: null,
+  favicon: null,
+  background: null,
+};
+
+const effective: EffectiveBranding = {
+  scope: "auth",
+  appName: null,
+  headline: null,
+  subtitle: null,
+  signInLabel: null,
+  notice: null,
+  layout: null,
+  footerLinks: null,
+  colorsLight: {},
+  colorsDark: {},
+  logoUrl: null,
+  logoDarkUrl: null,
+  faviconUrl: null,
+  backgroundUrl: null,
+  applyToConsole: false,
+};
+
+const profile = (over: Partial<BrandingProfile> = {}): BrandingProfile => ({
+  client: { id: "c1", clientId: "web-app", name: "Web App" },
+  own,
+  effective: { ...effective, appName: "Acme" },
+  sources: { appName: "client" },
+  colorSources: { light: {}, dark: {} },
+  provisioned: false,
+  provisionedFrom: null,
+  updatedAt: "2026-11-01T00:00:00Z",
+  canEdit: true,
+  canManageGrants: true,
+  ...over,
+});
+
+const renderEditor = (data: BrandingProfile) => {
+  authMock.axios.get.mockResolvedValue({ data });
+  const router = createMemoryRouter(
+    [
+      {
+        path: "/edit",
+        element: (
+          <>
+            <BrandingEditor target={{ kind: "client", id: "c1" }} />
+            <Link to="/other">Leave</Link>
+          </>
+        ),
+      },
+      { path: "/other", element: <p>Other page</p> },
+    ],
+    { initialEntries: ["/edit"] }
+  );
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  );
+};
+
+beforeEach(() => {
+  authMock.permissions = ["branding.read", "branding.write"];
+  authMock.axios.get.mockReset();
+  authMock.axios.put.mockReset();
+  authMock.axios.put.mockResolvedValue({ data: {} });
+  authMock.axios.post.mockReset();
+});
+
+describe("BrandingEditor", () => {
+  it("renders a provisioned profile read-only and explains on Edit", async () => {
+    const user = userEvent.setup();
+    renderEditor(
+      profile({
+        provisioned: true,
+        provisionedFrom: "web-app.json",
+        canEdit: false,
+      })
+    );
+    expect(await screen.findByLabelText("App name")).toHaveAttribute(
+      "readonly"
+    );
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByText(/This branding is set in/);
+    expect(dialog.parentElement?.textContent).toContain("web-app.json");
+    expect(dialog.parentElement?.textContent).toContain(
+      "npm run cli -- provision"
+    );
+    expect(dialog.parentElement?.textContent).toContain(
+      "Removing it from the document makes it editable here."
+    );
+  });
+
+  it("reads inputs as read-only when canEdit is false", async () => {
+    renderEditor(profile({ canEdit: false }));
+    expect(await screen.findByLabelText("App name")).toHaveAttribute(
+      "readonly"
+    );
+  });
+
+  it("shows the server message on the image field when an upload is rejected", async () => {
+    const user = userEvent.setup();
+    authMock.axios.post.mockRejectedValue({
+      response: { data: { error_description: "File too large" } },
+    });
+    renderEditor(profile());
+    const input = await screen.findByLabelText("Logo");
+    await user.upload(
+      input,
+      new File(["x"], "logo.png", { type: "image/png" })
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "File too large"
+    );
+  });
+
+  it("saves the full body with PUT and Discard restores the loaded values", async () => {
+    const user = userEvent.setup();
+    renderEditor(profile());
+    const name = await screen.findByLabelText("App name");
+    await user.clear(name);
+    await user.type(name, "Beta");
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.getByLabelText("App name")).toHaveValue("Acme");
+
+    await user.type(screen.getByLabelText("Headline"), "Hi");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(authMock.axios.put).toHaveBeenCalled());
+    const [url, body] = authMock.axios.put.mock.calls[0];
+    expect(url).toBe("/v1/admin/branding/clients/c1");
+    expect(body).toEqual({
+      ...own,
+      headline: "Hi",
+      logo: null,
+      logoDark: null,
+      favicon: null,
+      background: null,
+    });
+  });
+
+  it("prompts before leaving with unsaved changes", async () => {
+    const user = userEvent.setup();
+    renderEditor(profile());
+    await user.type(await screen.findByLabelText("Headline"), "Hi");
+    await user.click(screen.getByText("Leave"));
+    expect(await screen.findByText("Discard unsaved changes?")).toBeVisible();
+    expect(screen.queryByText("Other page")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Discard and leave" }));
+    expect(await screen.findByText("Other page")).toBeVisible();
+  });
+
+  it("leaves freely when nothing changed", async () => {
+    const user = userEvent.setup();
+    renderEditor(profile());
+    await screen.findByLabelText("Headline");
+    await user.click(screen.getByText("Leave"));
+    expect(await screen.findByText("Other page")).toBeVisible();
+  });
+});

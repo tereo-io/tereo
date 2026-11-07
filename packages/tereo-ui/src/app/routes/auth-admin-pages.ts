@@ -6,6 +6,7 @@ import {
   faHome,
   faIdBadge,
   faKey,
+  faPalette,
   faServer,
   faUserClock,
   faUsers,
@@ -73,6 +74,12 @@ export const AUTH_ADMIN_PAGES: AuthAdminPage[] = [
     label: "Identity Providers",
     icon: faIdBadge,
     permission: "identity-providers.read",
+  },
+  {
+    path: "branding",
+    label: "Branding",
+    icon: faPalette,
+    permission: "branding.read",
   },
   {
     path: "settings",

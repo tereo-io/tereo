@@ -11,3 +11,5 @@ export { upstreamErrorMessage } from "./api/upstream/upstreamErrors";
 export { isReauthRequired, restartLoginFresh } from "./api/upstream/reauth";
 export { upstreamStartUrl } from "./api/upstream/upstreamUrls";
 export { redirectTo } from "./api/redirectTo";
+export { BRANDING_COLOR_TOKENS } from "./branding/colorTokens";
+export type { BrandingFooterLink, EffectiveBranding } from "./branding/types";
