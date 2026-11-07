@@ -31,7 +31,7 @@ const clearCache = () => {
 };
 onBrandingInvalidate(clearCache);
 
-const toValues = (
+export const toValues = (
   profile: BrandingProfile,
   keys: Map<string, string>
 ): ProfileValues => ({
@@ -56,7 +56,7 @@ const toValues = (
 });
 
 /** Object keys of the live (not soft-deleted) images the profiles reference. */
-const liveKeys = async (profiles: BrandingProfile[]) => {
+export const liveKeys = async (profiles: BrandingProfile[]) => {
   const ids = new Set<string>();
   for (const p of profiles) {
     for (const id of [

@@ -27,6 +27,12 @@ const ALLOWED_BY_SLOT: Record<BrandingImageSlot, CheckedImage["ext"][]> = {
   background: ["png", "webp", "jpg"],
 };
 
+/** Whether a stored object's key has a type the slot accepts. */
+export function keyFitsSlot(slot: BrandingImageSlot, objectKey: string) {
+  const ext = objectKey.slice(objectKey.lastIndexOf(".") + 1);
+  return (ALLOWED_BY_SLOT[slot] as string[]).includes(ext);
+}
+
 export function imageMaxBytes(slot: BrandingImageSlot): number {
   return slot === "background"
     ? env.BRANDING_BACKGROUND_MAX_SIZE_MB * 1024 * 1024

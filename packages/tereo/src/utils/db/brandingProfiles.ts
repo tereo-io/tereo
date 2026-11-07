@@ -32,17 +32,37 @@ export const getByClientIdString = async (
   });
 };
 
-export const list = async (filter: {
-  clientUuids?: string[];
-  includeDefault: boolean;
-}) => {
-  const or: Prisma.BrandingProfileWhereInput[] = [];
-  if (filter.includeDefault) or.push({ clientId: null });
-  if (filter.clientUuids) or.push({ clientId: { in: filter.clientUuids } });
-  if (or.length === 0) return [];
+/**
+ * Client profiles, oldest first: every one, or those of the clients a user
+ * owns or holds an active grant on (never the console client's, which only
+ * `branding.admin` reads).
+ */
+export const listClientProfiles = async (
+  filter: { all: true } | { readableBy: string; excludeClientId: string }
+) => {
+  const where: Prisma.BrandingProfileWhereInput =
+    "all" in filter
+      ? { clientId: { not: null } }
+      : {
+          client: {
+            clientId: { not: filter.excludeClientId },
+            OR: [
+              { ownerId: filter.readableBy },
+              {
+                brandingGrants: {
+                  some: { userId: filter.readableBy, revokedAt: null },
+                },
+              },
+            ],
+          },
+        };
   return await prisma.brandingProfile.findMany({
-    where: { OR: or },
-    include: { client: { select: { clientId: true, name: true } } },
+    where,
+    select: {
+      provisioned: true,
+      updatedAt: true,
+      client: { select: { id: true, clientId: true, name: true } },
+    },
     orderBy: { createdAt: "asc" },
   });
 };

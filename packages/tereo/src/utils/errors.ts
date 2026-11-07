@@ -97,9 +97,10 @@ export class ConflictError extends AppError {
 
 export class ManagedByProvisioningError extends AppError {
   constructor(
-    message = "Managed by the provisioning file; change it there and restart core"
+    message = "Managed by the provisioning file; change it there and restart core",
+    options: AppErrorOptions = {}
   ) {
-    super(409, "managed_by_provisioning", message);
+    super(409, "managed_by_provisioning", message, options);
     this.name = "ManagedByProvisioningError";
   }
 }
