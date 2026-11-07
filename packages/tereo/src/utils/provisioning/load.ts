@@ -3,14 +3,19 @@ import { ProvisioningDocumentSchema, type CustomRoleEntry } from "./schema.js";
 import { CORE_SCOPES } from "../../definitions/index.js";
 import { isSafeRedirectUri } from "../redirectUris.js";
 import { readFile, readdir, stat } from "fs/promises";
+import { basename, dirname, join } from "path";
 import { hashFlowToken } from "../crypto.js";
 import { AppError } from "../errors.js";
-import { basename, join } from "path";
 import type { z } from "zod";
 import {
   assertSafeWebhookUrlForRegistration,
   parseInternalHost,
 } from "../ssrfGuard.js";
+import {
+  loadBrandingImages,
+  profileFields,
+  type LoadedBranding,
+} from "./branding.js";
 
 export class ProvisioningError extends Error {
   constructor(public problems: string[]) {
@@ -176,6 +181,8 @@ export interface LoadedDocument {
   integrations?: ResolvedIntegration[];
   /** Absent is not declared. */
   guests?: { defaultRoles: string[] };
+  /** Absent is not declared. */
+  branding?: LoadedBranding;
 }
 
 export interface ProvisioningSet {
@@ -302,10 +309,18 @@ const jsonSyntaxProblem = (err: unknown): string => {
   return at ? `not valid JSON (at position ${at[1]})` : "not valid JSON";
 };
 
-export const parseDocuments = (
+type DeclaredBranding = NonNullable<
+  z.output<typeof ProvisioningDocumentSchema>["branding"]
+>;
+
+/**
+ * The set, and each document's branding block as declared: its image paths
+ * are read by `loadProvisioningSet`, which knows the folder.
+ */
+const parseFiles = (
   files: { file: string; text: string }[],
   env: NodeJS.ProcessEnv
-): ProvisioningSet => {
+): { set: ProvisioningSet; branding: Map<string, DeclaredBranding> } => {
   const problems: string[] = [];
   const parsedDocs: {
     file: string;
@@ -385,7 +400,11 @@ export const parseDocuments = (
 
   const hashOf = (envName: string) => hashFlowToken(values.get(envName)!);
 
-  return {
+  const branding = new Map<string, DeclaredBranding>();
+  for (const { file, data } of parsedDocs)
+    if (data.branding) branding.set(file, data.branding);
+
+  const set: ProvisioningSet = {
     documents: parsedDocs.map(({ file, data }) => ({
       file,
       version: data.version,
@@ -447,8 +466,62 @@ export const parseDocuments = (
         roles: i.roles,
         audiences: i.audiences,
       })),
+      ...(data.branding && {
+        branding: {
+          default: data.branding.default
+            ? profileFields(data.branding.default)
+            : null,
+          clients: Object.fromEntries(
+            Object.entries(data.branding.clients).map(([id, profile]) => [
+              id,
+              profileFields(profile),
+            ])
+          ),
+        },
+      }),
     })),
   };
+  return { set, branding };
+};
+
+/** The set without branding images; `loadProvisioningSet` reads those. */
+export const parseDocuments = (
+  files: { file: string; text: string }[],
+  env: NodeJS.ProcessEnv
+): ProvisioningSet => parseFiles(files, env).set;
+
+const loadImages = async (
+  set: ProvisioningSet,
+  declared: Map<string, DeclaredBranding>,
+  root: string
+) => {
+  const problems: string[] = [];
+  for (const doc of set.documents) {
+    const branding = declared.get(doc.file);
+    if (!branding) continue;
+    // Documents are read from the folder itself, never from below it.
+    const load = (
+      profile: DeclaredBranding["clients"][string],
+      label: string
+    ) =>
+      loadBrandingImages(
+        root,
+        root,
+        profile,
+        `${doc.file}: ${label}`,
+        problems
+      );
+    const clients: LoadedBranding["clients"] = {};
+    for (const [id, profile] of Object.entries(branding.clients))
+      clients[id] = await load(profile, `branding.clients[${id}]`);
+    doc.branding = {
+      default: branding.default
+        ? await load(branding.default, "branding.default")
+        : null,
+      clients,
+    };
+  }
+  if (problems.length > 0) throw new ProvisioningError(problems);
 };
 
 export const loadProvisioningSet = async (
@@ -457,5 +530,10 @@ export const loadProvisioningSet = async (
   env: NodeJS.ProcessEnv = process.env
 ): Promise<ProvisioningSet | null> => {
   if (!path) return null;
-  return parseDocuments(await readProvisioningPath(path), env);
+  const { set, branding } = parseFiles(await readProvisioningPath(path), env);
+  if (branding.size > 0) {
+    const root = (await stat(path)).isDirectory() ? path : dirname(path);
+    await loadImages(set, branding, root);
+  }
+  return set;
 };

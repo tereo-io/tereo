@@ -37,11 +37,12 @@ Every document has this shape; unknown keys are refused at every level, so a typ
   "clients": [ … ],                                // login clients
   "roles": [ … ],                                  // custom roles
   "integrations": [ … ],                           // machine clients for external parties
-  "guests": { "defaultRoles": [ … ] }              // roles an invite gets when it names none
+  "guests": { "defaultRoles": [ … ] },             // roles an invite gets when it names none
+  "branding": { "default": { … }, "clients": { … } } // sign-in page branding
 }
 ```
 
-A document needs at least one of `service`, `clients`, `roles`, `integrations`, `guests`, and an empty list does not count. Core prints the JSON Schema with
+A document needs at least one of `service`, `clients`, `roles`, `integrations`, `guests`, `branding`, and an empty list does not count. Core prints the JSON Schema with
 `npm run cli -- provisioning-schema`; it is also published as `packages/tereo/provisioning.schema.json`
 and exported by `@tereo-io/sdk`. An editor given it as `$schema` completes and checks documents.
 
@@ -332,13 +333,53 @@ later un-flagged or retired is skipped when a guest is invited. Dropping the sec
 defaults. A change to the stored ids is written to the audit log (`SystemSettings`, `guestDefaultRoles`);
 an apply that leaves them as they were writes nothing. A service that invites guests requests the core role `guest_inviter` in `access.roles`.
 
+### `branding`
+
+```json
+{
+  "version": "1.0.0",
+  "branding": {
+    "default": { "appName": "Acme", "colorsLight": { "--k-primary-color": "#0b5" } },
+    "clients": {
+      "acme-web": {
+        "headline": "Welcome back",
+        "logo": "./branding/acme-logo.svg",
+        "background": "./branding/hero.webp",
+        "layout": "split"
+      }
+    }
+  }
+}
+```
+
+Branding profiles for the sign-in pages: `default`, and one per client keyed by `clientId`. Each slot
+is validated as the admin API validates it (`/v1/admin/branding`). The client must exist after this
+apply: a client in any document of the set, or one already in the database. `tereo-ui` may be
+branded, which is how `applyToConsole` is provisioned. `default`, and each client, may be branded
+by **one** document only.
+
+Image paths (`logo`, `logoDark`, `favicon`, `background`) are relative to the document's file and
+must resolve inside `PROVISIONING_PATH` (its folder, when it names a file): no `..` out of it and no
+symlink pointing outside it. Each file is checked as an upload is: type from its bytes, the slot's
+types and size limit, SVG sanitizing. Images are stored by content before the apply's transaction,
+reusing an object with the same content; one nothing references (a dry run's, or a failed apply's)
+expires after 24 hours. A file changed in place is a new image: the profile points at it and the
+old one expires.
+
+Each declared profile is written whole (an omitted slot is `null`, inherit), with
+`provisioned = true` and `provisionedFrom` the document's file name; an apply that leaves a profile
+as it was writes nothing. Its profile is read-only through the admin API (`409
+managed_by_provisioning`). **Removing a profile from the documents does not retire it**, unlike the
+other entries: it keeps its values, `provisioned` is cleared, and it is the admin UI's to edit from
+then on.
+
 ## Validation
 
 Core loads every document, then checks the set as one. Every problem is reported, each prefixed with
 its file name, and any problem means **nothing is written**. At start, core then does not start; from
 the CLI the exit code is non-zero.
 
-- **Per document**: JSON syntax, the schema, a semver `version`, at least one of the five sections.
+- **Per document**: JSON syntax, the schema, a semver `version`, at least one of the six sections.
 - **Uniqueness across the set**: service and integration slug (one space), service namespace (and no overlap, as a namespace may
   not equal or hyphen-extend another's, nor one core reserves), client ID across services, integrations and login
   clients, `internalHost`, custom role name, webhook `key` within its service, permission, event-type and bucket
@@ -365,6 +406,8 @@ the CLI the exit code is non-zero.
   - the URL is `http` or `https` with no credentials, and its host is not `localhost` or a
     private or reserved IP literal, unless it is the service's own
     [`internalHost`](#internal-webhook-targets). In-cluster DNS names are fine.
+- **Branding**: `default` and each client in one document; image paths inside the folder, each a
+  valid image for its slot; every branded client in the set or the database.
 - **Secrets**: format, strength and the other rules of [Secrets](#secrets), across service, client
   and webhook secrets; every `secretFrom` variable must be set.
 - **Existing rows**: a service or client of the same slug or ID that exists but is not

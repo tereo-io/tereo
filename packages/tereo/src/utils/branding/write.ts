@@ -141,7 +141,7 @@ const canonical = (value: unknown): string =>
       : v
   );
 
-const changedSlots = (
+export const changedSlots = (
   before: AdminProfileValues | null,
   after: AdminProfileValues | null
 ) =>

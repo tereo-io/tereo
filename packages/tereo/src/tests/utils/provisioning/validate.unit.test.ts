@@ -1,5 +1,6 @@
 // @module-tag unit
 // @module-tag provisioning
+import { BrandingFieldsSchema } from "../../../utils/branding/schema.js";
 import { validateSet } from "../../../utils/provisioning/validate.js";
 import { describe, expect, it } from "vitest";
 import type {
@@ -589,5 +590,33 @@ describe("validateSet", () => {
       expect(p.startsWith("a.json: services[alpha-service]: ")).toBe(true);
     expect(problems.some((p) => p.includes("beta.items.read"))).toBe(true);
     expect(problems.some((p) => p.includes('"alpha_"'))).toBe(true);
+  });
+});
+
+describe("branding", () => {
+  const branded = (
+    file: string,
+    branding: NonNullable<LoadedDocument["branding"]>
+  ): LoadedDocument => ({ ...doc(file, {}), branding });
+  const profile = BrandingFieldsSchema.parse({});
+
+  it("refuses a default declared in two documents, naming both", () => {
+    const problems = validate(
+      branded("a.json", { default: profile, clients: {} }),
+      branded("b.json", { default: profile, clients: {} })
+    );
+    expect(problems).toEqual([
+      "a.json and b.json: branding.default is declared in more than one document",
+    ]);
+  });
+
+  it("refuses one client branded in two documents", () => {
+    const problems = validate(
+      branded("a.json", { default: null, clients: { "acme-web": profile } }),
+      branded("b.json", { default: null, clients: { "acme-web": profile } })
+    );
+    expect(problems).toEqual([
+      "a.json and b.json: branding.clients[acme-web] is declared in more than one document",
+    ]);
   });
 });

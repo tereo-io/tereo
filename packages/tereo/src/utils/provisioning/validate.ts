@@ -2,6 +2,7 @@ import { ROLES, isRequestableCoreRole } from "../../definitions/roles.js";
 import { isCorePermission } from "../../definitions/guests.js";
 import { guestAssignableProblems } from "../guestRoles.js";
 import { hasPermission } from "../permissions.js";
+import { checkBrandingSet } from "./branding.js";
 import {
   CORE_DECLARATION,
   CORE_RESERVED_NAMESPACES,
@@ -505,5 +506,6 @@ export const validateSet = (set: ProvisioningSet): string[] => {
       checkIntegration(set, doc.file, integration, services, problems);
   }
   checkGuests(set, problems);
+  checkBrandingSet(set, problems);
   return problems;
 };

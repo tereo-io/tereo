@@ -507,6 +507,343 @@
         "defaultRoles"
       ],
       "additionalProperties": false
+    },
+    "branding": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "object",
+          "properties": {
+            "appName": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "headline": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "subtitle": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "signInLabel": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 30
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "notice": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 280
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "layout": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "centered",
+                    "split"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "footerLinks": {
+              "default": null,
+              "anyOf": [
+                {
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40
+                      },
+                      "url": {
+                        "type": "string",
+                        "maxLength": 2048
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "url"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "colorsLight": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "colorsDark": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "applyToConsole": {
+              "default": false,
+              "type": "boolean"
+            },
+            "logo": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "logoDark": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "favicon": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "background": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "additionalProperties": false
+        },
+        "clients": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "appName": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "headline": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "subtitle": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "signInLabel": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 30
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "notice": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 280
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "layout": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "centered",
+                      "split"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "footerLinks": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "maxItems": 3,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 40
+                        },
+                        "url": {
+                          "type": "string",
+                          "maxLength": 2048
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "url"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "colorsLight": {
+                "default": {},
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "colorsDark": {
+                "default": {},
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "applyToConsole": {
+                "default": false,
+                "type": "boolean"
+              },
+              "logo": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "logoDark": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "favicon": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "background": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [

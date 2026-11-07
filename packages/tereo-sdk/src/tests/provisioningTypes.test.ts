@@ -95,6 +95,18 @@ const full: ProvisioningDocument = {
       audiences: ["billing"],
     },
   ],
+  branding: {
+    default: { appName: "Billing", layout: "split" },
+    clients: {
+      "billing-web": {
+        headline: "Welcome back",
+        logo: "./branding/logo.svg",
+        colorsLight: { "--k-primary-color": "#0b5" },
+        colorsDark: { "--k-primary-color": "oklch(70% 0.1 150)" },
+        footerLinks: [{ label: "Privacy", url: "https://example.com/privacy" }],
+      },
+    },
+  },
 };
 
 describe("ProvisioningDocument", () => {
@@ -185,6 +197,33 @@ describe("provisioning schema", () => {
         clients: [{ clientId: "a", name: "A", rateLimitPerSecond: 5 }],
       })
     ).toBe(false);
+  });
+});
+
+describe("BrandingColorVariable", () => {
+  it("lists core's branding colour variables", () => {
+    const tokensIn = (file: URL) =>
+      [...readFileSync(file, "utf8").matchAll(/"(--k-[a-z0-9-]+)"/g)]
+        .map((m) => m[1])
+        .sort();
+    expect(
+      tokensIn(new URL("../types/provisioning.ts", import.meta.url))
+    ).toEqual(
+      tokensIn(
+        new URL(
+          "../../../tereo/src/definitions/brandingTokens.ts",
+          import.meta.url
+        )
+      )
+    );
+  });
+
+  it("refuses an unknown colour variable", () => {
+    const branding: ProvisioningDocument["branding"] = {
+      // @ts-expect-error not a branding colour variable
+      default: { colorsLight: { "--k-made-up": "#000" } },
+    };
+    expect(branding).toBeDefined();
   });
 });
 
