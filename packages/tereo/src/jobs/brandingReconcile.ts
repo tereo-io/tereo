@@ -15,9 +15,9 @@ import {
   createQueue,
 } from "../utils/bullmq.js";
 
-// Daily — start the expiry clock on branding images no profile references.
-// Deleting a client cascades its profile away without releasing its images,
-// and this is what lets the per-object TTL sweep remove them.
+// Daily — start the expiry clock on branding images no profile references
+// that no write released (a profile removed by a cascade outside the client
+// delete path), so the per-object TTL sweep removes them.
 export const BRANDING_RECONCILE_QUEUE = "core-branding-reconcile";
 const JOB_INTERVAL_MS = 24 * 60 * 60 * 1000;
 

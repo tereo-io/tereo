@@ -1,4 +1,5 @@
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
+import { deleteClientBrandingTx } from "./branding/write.js";
 import { emitTx, logAuditTx } from "./outbox.js";
 import type { Prisma } from "./db/prisma.js";
 import db from "./db/index.js";
@@ -20,6 +21,7 @@ export const deleteLoginClientTx = async (
   client: ClientToDelete,
   actor: { userId: string; email: string | null }
 ): Promise<string[]> => {
+  await deleteClientBrandingTx(tx, client, actor);
   const jtis = await db.accessTokens.revokeByClientId(client.id, tx);
   const serviceAccount = await db.users.getByOAuthClientId(client.id);
   if (serviceAccount) {

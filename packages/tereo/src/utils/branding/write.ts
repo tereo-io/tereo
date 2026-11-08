@@ -170,6 +170,10 @@ export const lockImagesTx = async (tx: Tx, ids: string[]) => {
 const lockAndRead = async (tx: Tx, target: BrandingWriteTarget) => {
   const clientUuid = target.client?.id ?? null;
   await db.brandingProfiles.lockForWrite({ clientUuid }, tx);
+  // A client delete takes this lock first, so one that ran while this write
+  // waited is visible now; writing on would violate the foreign key.
+  if (clientUuid && !(await db.clients.exists(clientUuid, tx)))
+    throw new NotFoundError("Client not found");
   return clientUuid
     ? await db.brandingProfiles.getByClientUuid(clientUuid, tx)
     : await db.brandingProfiles.getDefault(tx);
@@ -289,6 +293,80 @@ export const deleteProfileTx = async (
     entityId: existing.id,
     data: { clientId: targetName(target) },
   });
+};
+
+/**
+ * Before a client is deleted, which cascades to its profile and grants: delete
+ * its profile and revoke its active grants, each audited and emitted as the
+ * admin API would, and release the profile's images to the grace period.
+ * Provisioned or not; a caller that must refuse a provisioned profile checks
+ * first. Callers invalidate after commit.
+ */
+export const deleteClientBrandingTx = async (
+  tx: Tx,
+  client: { id: string; clientId: string },
+  actor: Actor
+): Promise<void> => {
+  await db.brandingProfiles.lockForWrite({ clientUuid: client.id }, tx);
+  // Its row next, as a branding write's foreign key would: a grant added from
+  // here on waits, and then finds the client gone.
+  await tx.$queryRaw`
+    SELECT "id" FROM "auth"."oauth_clients"
+    WHERE "id" = ${client.id}::uuid
+    FOR UPDATE`;
+  const existing = await db.brandingProfiles.getByClientUuid(client.id, tx);
+  if (existing) {
+    const before = profileRowValues(existing);
+    const dropped = imageIds(before);
+    await lockImagesTx(tx, dropped);
+    await db.brandingProfiles.remove({ clientUuid: client.id }, tx);
+    await releaseImagesTx(tx, dropped, new Date());
+    await logAuditTx(tx, {
+      auth: actor,
+      action: "DELETE",
+      entityType: "BrandingProfile",
+      entityId: existing.id,
+      entityName: client.clientId,
+      metadata: { before, after: null, reason: "client_deleted" },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.branding.deleted",
+      entityType: "BrandingProfile",
+      entityId: existing.id,
+      data: { clientId: client.clientId },
+    });
+  }
+
+  const grants = await tx.brandingGrant.findMany({
+    where: { clientId: client.id, revokedAt: null },
+    orderBy: { grantedAt: "asc" },
+  });
+  for (const grant of grants) {
+    await logAuditTx(tx, {
+      auth: actor,
+      action: "DELETE",
+      entityType: "BrandingGrant",
+      entityId: grant.id,
+      entityName: client.clientId,
+      metadata: {
+        clientId: client.clientId,
+        userId: grant.userId,
+        reason: "client_deleted",
+      },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.branding.grant-revoked",
+      entityType: "BrandingGrant",
+      entityId: grant.id,
+      data: {
+        clientId: client.clientId,
+        userId: grant.userId,
+        revokedBy: actor.userId,
+      },
+    });
+  }
 };
 
 /**

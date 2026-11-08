@@ -13,6 +13,7 @@ import {
 import {
   BadRequestError,
   ConflictError,
+  NotFoundError,
 } from "../../../../../../../utils/errors.js";
 
 const loadClient = async (req: Request) => {
@@ -78,12 +79,11 @@ export const addGrant = async (req: Request, res: Response) => {
       });
     });
   } catch (err) {
-    // A concurrent grant slipped past the check; the partial unique index holds.
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === "P2002"
-    ) {
-      throw alreadyGranted();
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+      // A concurrent grant slipped past the check; the partial unique index holds.
+      if (err.code === "P2002") throw alreadyGranted();
+      // The client was deleted meanwhile; users never are.
+      if (err.code === "P2003") throw new NotFoundError("Client not found");
     }
     throw err;
   }

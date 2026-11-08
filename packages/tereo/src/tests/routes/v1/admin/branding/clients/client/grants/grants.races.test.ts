@@ -10,6 +10,10 @@ import {
   createBrandingClient,
   deleteBrandingClients,
 } from "../../../../../../../support/branding.js";
+import {
+  lockWaiters,
+  untilQueued,
+} from "../../../../../../../support/dbLocks.js";
 
 describe("concurrent grants", () => {
   let owner: Awaited<ReturnType<typeof brandingPrincipal>>;
@@ -47,5 +51,39 @@ describe("concurrent grants", () => {
         },
       })
     ).toBe(1);
+  });
+
+  it("is 404 when the client is deleted while the grant waits on it", async () => {
+    const doomed = await createBrandingClient(owner.userId);
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const held = new Promise<void>((r) => (locked = r));
+    // A client delete holding the client's row until it commits.
+    const deletion = prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`
+          SELECT "id" FROM "auth"."oauth_clients"
+          WHERE "id" = ${doomed.id}::uuid FOR UPDATE`;
+        locked();
+        await released;
+        await tx.oAuthClient.delete({ where: { id: doomed.id } });
+      },
+      { timeout: 30_000 }
+    );
+    await held;
+
+    const baseline = await lockWaiters();
+    const grant = fetchJson(
+      "POST",
+      `${BRANDING_URL}/clients/${doomed.id}/grants`,
+      owner.token,
+      { userId: grantee.userId }
+    );
+    await untilQueued(baseline, 1, 5_000);
+    release();
+    await deletion;
+
+    expect((await grant).status).toBe(404);
   });
 });

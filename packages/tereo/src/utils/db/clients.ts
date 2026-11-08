@@ -78,6 +78,9 @@ export const get = async (
   return existing;
 };
 
+export const exists = async (id: string, tx?: Prisma.TransactionClient) =>
+  (await (tx ?? prisma).oAuthClient.count({ where: { id } })) > 0;
+
 export const getWithRelations = async (id: string) => {
   const existing = await prisma.oAuthClient.findUnique({
     where: { id },

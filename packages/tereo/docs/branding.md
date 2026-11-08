@@ -94,7 +94,7 @@ Nothing is rewritten, so the stored file is exactly what was uploaded. An upload
 profile then references the image as `{ "sha256": "…" }`. A hash no live image has is `400
 invalid_request` naming the slot. An image no profile references expires after **24 hours**
 (`delete_after`, removed by the daily lifecycle sweep; a daily `branding-reconcile` job covers
-profiles removed by deleting their client). Referencing an image clears the clock in the saving
+any profile removed without releasing its images). Referencing an image clears the clock in the saving
 transaction, and a dropped one starts it, which also keeps pages already rendered with a
 just-replaced image working.
 
@@ -149,8 +149,10 @@ reaches the client's settings, the default profile or `tereo-ui`'s profile.
 - **`tereo-ui` takes no grants**, for anyone: `403`, `branding.admin` included. Its branding is
   `branding.admin`'s alone; give the person `branding.admin` instead.
 - A deactivated user cannot be granted (`400 user_inactive`); an existing active grant is
-  `409 conflict`. Deleting a client removes its grants and profile with it, and drops its cached
-  branding, so a client later created under the same id starts unbranded.
+  `409 conflict`. Deleting a client deletes its profile and revokes its grants in the same
+  transaction, each audited (`reason: "client_deleted"`) and emitted as above, releases the
+  profile's images to the 24-hour grace, and drops its cached branding, so a client later created
+  under the same id starts unbranded. A grant or profile save racing the delete is `404`.
 
 ## The console
 
