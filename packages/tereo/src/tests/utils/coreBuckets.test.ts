@@ -69,7 +69,7 @@ describe("resetCoreBuckets", () => {
     }
   });
 
-  it("purges object history so versioning can go off", async () => {
+  it("keeps object history and leaves versioning on when there is some", async () => {
     const id = await tamper(PHOTOS);
     const object = await prisma.object.create({
       data: {
@@ -88,11 +88,16 @@ describe("resetCoreBuckets", () => {
       },
     });
     await resetCoreBuckets();
-    expect((await bucket(PHOTOS)).versioningEnabled).toBe(false);
-    const purged = await prisma.objectVersion.findUniqueOrThrow({
+    expect((await bucket(PHOTOS)).versioningEnabled).toBe(true);
+    const kept = await prisma.objectVersion.findUniqueOrThrow({
       where: { id: old.id },
     });
-    expect(purged.deletedAt).not.toBeNull();
+    expect(kept.deletedAt).toBeNull();
+
+    // Without history the next reset turns versioning off.
+    await prisma.objectVersion.delete({ where: { id: old.id } });
+    await resetCoreBuckets();
+    expect((await bucket(PHOTOS)).versioningEnabled).toBe(false);
   });
 
   it("clears object expiry on user photos but not on branding images", async () => {

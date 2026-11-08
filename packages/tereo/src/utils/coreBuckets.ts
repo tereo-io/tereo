@@ -34,16 +34,14 @@ const resetCoreBucket = async (definition: BucketDefinition) => {
       serviceId: CORE_SERVICE_ID,
       deletedAt: null,
     },
-    select: { id: true, versioningEnabled: true },
+    select: { id: true },
   });
   if (!bucket) return;
 
-  // Versioning goes off only without history, which would otherwise become
-  // unreachable; core keeps no old versions of its objects.
-  const purged = bucket.versioningEnabled ? await purgeHistory(bucket.id) : 0;
-
   const reset = await prisma.$transaction(async (tx) => {
     const current = await db.buckets.getForUpdate(bucket.id, tx);
+    // Versioning goes off only without history, which would otherwise become
+    // unreachable. Old versions are never deleted here.
     const keepVersioning =
       current.versioningEnabled &&
       (await db.objectVersions.hasHistoricalVersions(bucket.id, tx));
@@ -75,7 +73,7 @@ const resetCoreBucket = async (definition: BucketDefinition) => {
         });
 
     const changes = computeChanges(current, next);
-    if (!changes && !lifecyclePolicyRemoved && !expiriesCleared && !purged) {
+    if (!changes && !lifecyclePolicyRemoved && !expiriesCleared) {
       return null;
     }
     const summary = {
@@ -83,7 +81,6 @@ const resetCoreBucket = async (definition: BucketDefinition) => {
       via: "core_bucket_reset",
       lifecyclePolicyRemoved,
       expiriesCleared,
-      versionsPurged: purged,
       ...(keepVersioning ? { versioningKept: true } : {}),
     };
     await logAuditTx(tx, {
@@ -111,22 +108,8 @@ const resetCoreBucket = async (definition: BucketDefinition) => {
   if (reset.versioningKept) {
     logger.warn(
       { bucketName: definition.bucketName },
-      "A core bucket still has object history; versioning stays on until the next start clears it"
+      "A core bucket has object history, so its versioning stays on; old versions are kept"
     );
-  }
-};
-
-const purgeHistory = async (bucketId: number) => {
-  let total = 0;
-  for (;;) {
-    const { purgedCount, truncated } =
-      await db.objectVersions.purgeNonCurrentBulk(
-        bucketId,
-        SYSTEM_USER.id,
-        true
-      );
-    total += purgedCount;
-    if (!truncated) return total;
   }
 };
 
