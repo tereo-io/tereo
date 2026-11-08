@@ -78,4 +78,33 @@ describe("ColorFields", () => {
       "#00bb55"
     );
   });
+
+  it("converts rgb() and hsl() values for the swatch", () => {
+    renderFields({
+      "--k-primary-color": "rgb(10 20 30)",
+      "--k-text-color": "hsl(0 100% 50%)",
+    });
+    expect(screen.getByLabelText("primary-color picker")).toHaveValue(
+      "#0a141e"
+    );
+    expect(screen.getByLabelText("text-color picker")).toHaveValue("#ff0000");
+  });
+
+  it("drops the alpha of a 4- or 8-digit hex", () => {
+    renderFields({
+      "--k-primary-color": "#11223344",
+      "--k-text-color": "#0b5f",
+    });
+    expect(screen.getByLabelText("primary-color picker")).toHaveValue(
+      "#112233"
+    );
+    expect(screen.getByLabelText("text-color picker")).toHaveValue("#00bb55");
+  });
+
+  it("shows a neutral, not unset, swatch for a value it cannot show", () => {
+    renderFields({ "--k-danger-color": "color-mix(in srgb, red, blue)" });
+    expect(screen.getByLabelText("danger-color picker")).not.toHaveAttribute(
+      "data-unset"
+    );
+  });
 });

@@ -75,6 +75,35 @@ describe("BrandingProvider", () => {
     expect(screen.getByTestId("name")).toHaveTextContent("none");
   });
 
+  it("sets the tab title and favicon from fetched branding, and restores them", async () => {
+    document.title = "Tereo";
+    const stock = document.createElement("link");
+    stock.rel = "icon";
+    stock.href = "/favicon.ico";
+    document.head.appendChild(stock);
+    authMock.axios.get.mockResolvedValue({
+      data: makeBranding({
+        appName: "Fetched",
+        faviconUrl: "/oauth/branding/assets/f.png",
+      }),
+    });
+    const { unmount } = render(
+      <BrandingProvider>
+        <Probe />
+      </BrandingProvider>
+    );
+    await waitFor(() => expect(document.title).toBe("Fetched"));
+    const icons = document.head.querySelectorAll('link[rel="icon"]');
+    expect(icons).toHaveLength(1);
+    expect(icons[0].getAttribute("href")).toContain(
+      "/oauth/branding/assets/f.png"
+    );
+    unmount();
+    expect(document.title).toBe("Tereo");
+    expect(document.head.querySelector('link[rel="icon"]')).toBe(stock);
+    stock.remove();
+  });
+
   it("provides the override", () => {
     render(
       <BrandingProvider override={makeBranding({ appName: "Preview" })}>

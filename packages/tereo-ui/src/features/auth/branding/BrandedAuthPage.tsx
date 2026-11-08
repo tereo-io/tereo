@@ -68,9 +68,9 @@ export const BrandedAuthPage = ({
       {footer}
       {links.length > 0 && (
         <nav className="t-brand-links">
-          {links.map((link) => (
+          {links.map((link, i) => (
             <a
-              key={link.url}
+              key={`${i}:${link.url}`}
               href={link.url}
               target="_blank"
               rel="noopener noreferrer"

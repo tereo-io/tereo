@@ -85,6 +85,19 @@ describe("BrandedAuthPage", () => {
     expect(screen.getByRole("link", { name: "Good" })).toBeInTheDocument();
   });
 
+  it("renders two footer links with the same URL", () => {
+    renderWith(
+      makeBranding({
+        footerLinks: [
+          { label: "One", url: "https://a.test" },
+          { label: "Two", url: "https://a.test" },
+        ],
+      })
+    );
+    expect(screen.getByRole("link", { name: "One" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Two" })).toBeInTheDocument();
+  });
+
   it("renders one logo, for both themes, without a dark logo", () => {
     const { container } = renderWith(
       makeBranding({ logoUrl: "/oauth/branding/assets/a.png" })

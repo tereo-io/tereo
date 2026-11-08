@@ -1,9 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BRANDING_COLOR_TOKENS } from "./colorTokens";
 import type { EffectiveBranding } from "./types";
 import { isSafeColorValue } from "./colorValue";
 import { BrandingContext } from "./useBranding";
 import { usePublicAxios } from "@/lib/auth";
+import { brandingImageUrl } from "./urls";
 import "./styles.css";
 import {
   BRANDING_STYLE_ID,
@@ -44,6 +45,38 @@ const applyColors = (branding: EffectiveBranding) => {
     (dark ? `[data-theme="dark"]{${dark}}` : "");
 };
 
+/**
+ * Core also rewrites the tab title and favicon when it injects branding; the
+ * fetched path does the same. Returns a function that puts the page back.
+ */
+const applyChrome = (branding: EffectiveBranding): (() => void) => {
+  const undo: (() => void)[] = [];
+  if (branding.appName) {
+    const previous = document.title;
+    document.title = branding.appName;
+    undo.push(() => {
+      document.title = previous;
+    });
+  }
+  const favicon =
+    branding.scope === "auth" ? brandingImageUrl(branding.faviconUrl) : null;
+  if (favicon) {
+    const stock = Array.from(
+      document.head.querySelectorAll<HTMLLinkElement>('link[rel="icon"]')
+    );
+    stock.forEach((l) => l.remove());
+    const link = document.createElement("link");
+    link.rel = "icon";
+    link.href = favicon;
+    document.head.appendChild(link);
+    undo.push(() => {
+      link.remove();
+      stock.forEach((l) => document.head.appendChild(l));
+    });
+  }
+  return () => undo.forEach((fn) => fn());
+};
+
 interface Props {
   children: ReactNode;
   /** The preview supplies its own branding instead of reading the page's. */
@@ -64,6 +97,9 @@ export const BrandingProvider = ({ children, override }: Props) => {
       : { status: "ready", branding: injected };
   });
 
+  const restoreChrome = useRef<(() => void) | null>(null);
+  useEffect(() => () => restoreChrome.current?.(), []);
+
   useEffect(() => {
     if (state.status !== "pending") return;
     let settled = false;
@@ -74,6 +110,11 @@ export const BrandingProvider = ({ children, override }: Props) => {
         if (branding) applyColors(branding);
       } catch {
         // Colours are cosmetic; the page must render regardless.
+      }
+      try {
+        if (branding) restoreChrome.current = applyChrome(branding);
+      } catch {
+        // Title and icon are cosmetic too.
       }
       setState({ status: "ready", branding });
     };

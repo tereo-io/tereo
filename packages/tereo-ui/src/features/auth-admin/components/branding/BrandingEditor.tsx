@@ -1,9 +1,9 @@
 import useDeleteBrandingProfile from "../../api/branding/useDeleteBrandingProfile";
 import { TEXT_LIMITS, validateDraft } from "../../api/branding/brandingErrors";
 import useSaveBrandingProfile from "../../api/branding/useSaveBrandingProfile";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useBrandingProfile from "../../api/branding/useBrandingProfile";
 import useBrandingList from "../../api/branding/useBrandingList";
-import { useEffect, useMemo, useRef, useState } from "react";
 import { useBlocker, useNavigate } from "react-router-dom";
 import { ProvisionedDialog } from "./ProvisionedDialog";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
@@ -126,6 +126,7 @@ const EditorForm = ({
   const [mode, setMode] = useState<"light" | "dark">("light");
   const [showProvisioned, setShowProvisioned] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  const [uploads, setUploads] = useState(0);
   const save = useSaveBrandingProfile(target);
   const remove = useDeleteBrandingProfile(target);
 
@@ -134,7 +135,14 @@ const EditorForm = ({
   const errors = useMemo(() => validateDraft(draft), [draft]);
   const hasErrors = Object.keys(errors).length > 0;
 
-  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+  // An upload in flight counts as unsaved: a remount would drop its result.
+  const busy = dirty || uploads > 0;
+  useEffect(() => onDirtyChange(busy), [busy, onDirtyChange]);
+  const trackUpload = useCallback(
+    (pending: boolean) =>
+      setUploads((n) => Math.max(0, n + (pending ? 1 : -1))),
+    []
+  );
 
   // Set once the profile is removed: there is nothing left to keep.
   const removed = useRef(false);
@@ -295,6 +303,7 @@ const EditorForm = ({
                 value={draft[f.slot]}
                 readOnly={locked}
                 onChange={(v) => patch({ [f.slot]: v })}
+                onPendingChange={trackUpload}
               />
             ))}
           </section>
@@ -334,6 +343,7 @@ const EditorForm = ({
                 value={draft[f.slot]}
                 readOnly={locked}
                 onChange={(v) => patch({ [f.slot]: v })}
+                onPendingChange={trackUpload}
               />
             ))}
           </section>
@@ -464,19 +474,24 @@ export const BrandingEditor = ({ target }: { target: BrandingTarget }) => {
   }
   if (!shown) {
     const notFound = !isError || statusOf(error) === 404;
+    const forbidden = isError && statusOf(error) === 403;
     return (
       <Page padded fillHeight>
         <EmptyState
           layout="block"
           action={
-            notFound ? undefined : (
+            notFound || forbidden ? undefined : (
               <Button isLoading={isRefetching} onClick={() => refetch()}>
                 Retry
               </Button>
             )
           }
         >
-          {notFound ? "Branding not found" : "Could not load this branding"}
+          {notFound
+            ? "Branding not found"
+            : forbidden
+              ? "You don't have access to this client's branding"
+              : "Could not load this branding"}
         </EmptyState>
       </Page>
     );

@@ -412,6 +412,38 @@ describe("BrandingEditor", () => {
       expect(screen.queryByText(/changed elsewhere/)).toBeNull();
     });
 
+    it("keeps the form while an image upload is in flight", async () => {
+      const user = userEvent.setup();
+      renderEditor(profile());
+      await screen.findByLabelText("App name");
+      let finish: (v: unknown) => void = () => {};
+      authMock.axios.post.mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+      );
+      const input = screen.getByLabelText("Logo") as HTMLInputElement;
+      await user.upload(
+        input,
+        new File(["x"], "logo.png", { type: "image/png" })
+      );
+      authMock.axios.get.mockResolvedValue({
+        data: profile({
+          own: { ...own, appName: "Theirs" },
+          updatedAt: "2026-11-02T00:00:00Z",
+        }),
+      });
+      refocus();
+      await screen.findByText(/changed elsewhere since you opened it/);
+      expect(screen.getByLabelText("App name")).toHaveValue("Acme");
+      await act(async () => {
+        finish({
+          data: { sha256: "a".repeat(64), url: "/oauth/branding/assets/a.png" },
+        });
+      });
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    });
+
     it("starts fresh after its own save, without the notice", async () => {
       const user = userEvent.setup();
       renderEditor(profile());
@@ -465,6 +497,19 @@ describe("BrandingEditor", () => {
     authMock.axios.get.mockResolvedValue({ data: profile() });
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByLabelText("App name")).toHaveValue("Acme");
+  });
+
+  it("says access is denied on a 403, without a retry", async () => {
+    authMock.axios.get.mockRejectedValue(
+      new AxiosError("no", "ERR", undefined, undefined, {
+        status: 403,
+      } as never)
+    );
+    mountEditor({ kind: "client", id: "c1" });
+    expect(
+      await screen.findByText("You don't have access to this client's branding")
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
   it("says not found on a 404", async () => {

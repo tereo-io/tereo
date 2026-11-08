@@ -36,17 +36,60 @@ interface ColorFieldsProps {
   readOnly: boolean;
 }
 
-/** A colour input's value: #rrggbb from a 3- or 6-digit hex, else null. */
+const hex2 = (n: number) =>
+  Math.round(Math.min(255, Math.max(0, n)))
+    .toString(16)
+    .padStart(2, "0");
+
+const channel = (v: string) =>
+  v.endsWith("%") ? (parseFloat(v) / 100) * 255 : parseFloat(v);
+
+const hslToRgb = (h: number, s: number, l: number): number[] => {
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) =>
+    l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [f(0) * 255, f(8) * 255, f(4) * 255];
+};
+
+/**
+ * A colour input's value (#rrggbb) from hex (3, 4, 6 or 8 digits; alpha is
+ * dropped) or rgb()/hsl(); null when the picker cannot show it.
+ */
 export const swatchOf = (value: string | undefined): string | null => {
-  if (!value) return null;
-  if (/^#[0-9a-fA-F]{6}$/.test(value)) return value.toLowerCase();
-  const short = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(value);
-  return short
-    ? `#${short
-        .slice(1)
+  const v = value?.trim();
+  if (!v) return null;
+  const hex = /^#([0-9a-fA-F]{3,8})$/.exec(v)?.[1];
+  if (hex) {
+    if (hex.length === 6 || hex.length === 8)
+      return `#${hex.slice(0, 6)}`.toLowerCase();
+    if (hex.length === 3 || hex.length === 4)
+      return `#${hex
+        .slice(0, 3)
+        .split("")
         .map((c) => c + c)
-        .join("")}`.toLowerCase()
-    : null;
+        .join("")}`.toLowerCase();
+    return null;
+  }
+  const fn = /^(rgba?|hsla?)\(\s*([^)]*)\)$/i.exec(v);
+  if (!fn) return null;
+  const parts = fn[2]
+    .split(/[\s,/]+/)
+    .filter(Boolean)
+    .slice(0, 3);
+  if (parts.length < 3) return null;
+  let rgb: number[];
+  if (fn[1].toLowerCase().startsWith("rgb")) {
+    rgb = parts.map(channel);
+  } else {
+    const h = parseFloat(parts[0]);
+    rgb = hslToRgb(
+      ((h % 360) + 360) % 360,
+      parseFloat(parts[1]) / 100,
+      parseFloat(parts[2]) / 100
+    );
+  }
+  return rgb.some((n) => Number.isNaN(n)) ? null : `#${rgb.map(hex2).join("")}`;
 };
 
 export const placeholderFor = (
@@ -85,14 +128,16 @@ export const ColorFields = ({
               // Unset shows what applies instead; with nothing to show, an
               // empty swatch, not black that reads as a choice.
               const swatch = own ? swatchOf(own) : swatchOf(inherited[token]);
+              // A set value the picker cannot show gets a neutral swatch, not the unset one.
+              const unset = !swatch && !own;
               return (
                 <div key={token} className="t-color-row">
                   <input
                     type="color"
                     aria-label={`${token.slice(4)} picker`}
-                    className={swatch ? undefined : "t-color-unset"}
-                    data-unset={swatch ? undefined : "true"}
-                    value={swatch ?? "#000000"}
+                    className={unset ? "t-color-unset" : undefined}
+                    data-unset={unset ? "true" : undefined}
+                    value={swatch ?? (own ? "#808080" : "#000000")}
                     disabled={readOnly}
                     onChange={(e) => set(token, e.target.value)}
                   />

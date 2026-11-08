@@ -19,7 +19,13 @@ export const GrantsPanel = ({
   readOnly = false,
 }: GrantsPanelProps) => {
   const { hasPermission } = useAuth();
-  const { data: grants, isLoading } = useBrandingGrants(clientId);
+  const {
+    data: grants,
+    isLoading,
+    isError,
+    refetch,
+    isRefetching,
+  } = useBrandingGrants(clientId);
   const add = useAddBrandingGrant(clientId);
   const revoke = useRevokeBrandingGrant(clientId);
   // Searching users needs users.read; without it the id is entered directly.
@@ -66,6 +72,17 @@ export const GrantsPanel = ({
       )}
       {isLoading ? (
         <Spinner />
+      ) : isError ? (
+        <EmptyState
+          layout="block"
+          action={
+            <Button isLoading={isRefetching} onClick={() => refetch()}>
+              Retry
+            </Button>
+          }
+        >
+          Could not load who can edit this branding
+        </EmptyState>
       ) : !grants?.length ? (
         <EmptyState layout="block">
           No one else can edit this branding

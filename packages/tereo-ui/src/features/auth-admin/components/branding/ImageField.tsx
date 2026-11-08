@@ -1,8 +1,8 @@
 import useUploadBrandingImage from "../../api/branding/useUploadBrandingImage";
 import { brandingErrorMessage } from "../../api/branding/brandingErrors";
+import { useEffect, useId, useRef, useState } from "react";
 import { brandingImageUrl } from "@/features/auth";
 import { Button } from "@kosmeo-ui/react";
-import { useId, useState } from "react";
 import type {
   BrandingImage,
   BrandingImageSlot,
@@ -21,6 +21,8 @@ interface ImageFieldProps {
   value: BrandingImage | null;
   onChange: (value: BrandingImage | null) => void;
   readOnly: boolean;
+  /** Reports an upload starting or ending, so the form is not replaced mid-upload. */
+  onPendingChange?: (pending: boolean) => void;
 }
 
 export const ImageField = ({
@@ -29,10 +31,19 @@ export const ImageField = ({
   value,
   onChange,
   readOnly,
+  onPendingChange,
 }: ImageFieldProps) => {
   const id = useId();
   const upload = useUploadBrandingImage();
   const [error, setError] = useState<string | null>(null);
+
+  const pending = upload.isPending;
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (pending === wasPending.current) return;
+    wasPending.current = pending;
+    onPendingChange?.(pending);
+  }, [pending, onPendingChange]);
 
   const src = brandingImageUrl(value?.url);
 

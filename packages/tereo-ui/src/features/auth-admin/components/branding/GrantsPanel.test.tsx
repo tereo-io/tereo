@@ -71,6 +71,20 @@ describe("GrantsPanel", () => {
     );
   });
 
+  it("shows an error with a retry when the grants cannot be loaded", async () => {
+    authMock.axios.get.mockRejectedValue(new Error("boom"));
+    renderPanel();
+    expect(
+      await screen.findByText("Could not load who can edit this branding")
+    ).toBeVisible();
+    expect(screen.queryByText(/No one else can edit/)).toBeNull();
+    authMock.axios.get.mockResolvedValue({ data: { data: [grant] } });
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("pat@example.com")).toBeInTheDocument();
+  });
+
   it("offers the user picker when the viewer can search users", async () => {
     authMock.permissions = ["branding.admin", "users.read"];
     renderPanel();
