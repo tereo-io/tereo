@@ -37,12 +37,13 @@ Every document has this shape; unknown keys are refused at every level, so a typ
   "clients": [ … ],                                // login clients
   "roles": [ … ],                                  // custom roles
   "integrations": [ … ],                           // machine clients for external parties
+  "groups": [ … ],                                 // named sets of users that carry roles
   "guests": { "defaultRoles": [ … ] },             // roles an invite gets when it names none
   "branding": { "default": { … }, "clients": { … } } // sign-in page branding
 }
 ```
 
-A document needs at least one of `service`, `clients`, `roles`, `integrations`, `guests`, `branding`, and an empty list does not count. Core prints the JSON Schema with
+A document needs at least one of `service`, `clients`, `roles`, `integrations`, `groups`, `guests`, `branding`, and an empty list does not count. Core prints the JSON Schema with
 `npm run cli -- provisioning-schema`; it is also published as `packages/tereo/provisioning.schema.json`
 and exported by `@tereo-io/sdk`. An editor given it as `$schema` completes and checks documents.
 
@@ -292,6 +293,40 @@ change revokes the integration's tokens. An integration removed from the documen
 deactivated after `REGISTRY_RETIREMENT_GRACE_HOURS`, like a service. A provisioned integration
 answers `409 managed_by_provisioning` to every admin write except `revoke-previous-secret`.
 
+### `groups`
+
+Named sets of users that carry roles: see [groups](groups.md). A document declares a group's
+identity and roles, **never its members**; admins and apps add those.
+
+```json
+{
+  "version": "1.0.0",
+  "groups": [
+    {
+      "slug": "support",
+      "name": "Support",
+      "description": "Front-line support",
+      "organizationId": "7b1c4d9e-3a52-4f0b-9c61-2d8e5a7f0b13",
+      "roles": ["support_agent"]
+    }
+  ]
+}
+```
+
+| Field | Rule |
+|-------|------|
+| `slug` | Required, as in the admin API (`[a-z0-9-]`, max 100); unique across the set within its scope (an organization, or global) |
+| `name` | Required, max 255 |
+| `description` | Optional, max 500 |
+| `organizationId` | Optional UUID. Set: an **organization group**. Absent: **global**. Fixed once created; the organization must exist and not be archived. Documents do not create organizations |
+| `roles` | Role names it holds, resolved as for an integration's: a bare name is the set's custom role when it declares one, else core's role; `<slug>/<name>` is a service's system role. An organization group's roles must all be `orgAssignable` custom roles of the set. Never a role carrying `admin` |
+
+A hand-made group with the same slug in the same scope is an error naming it; core never adopts one.
+Roles are set as the system user at apply, replaced to match the document, with the same two-factor
+token revocation and notifications as an admin change. A group removed from the documents is marked,
+then archived after `REGISTRY_RETIREMENT_GRACE_HOURS` with its members kept; it is restored if it
+returns.
+
 ### `roles`
 
 Custom roles composed across services, for people (assigned to users and organization members by
@@ -385,7 +420,7 @@ Core loads every document, then checks the set as one. Every problem is reported
 its file name, and any problem means **nothing is written**. At start, core then does not start; from
 the CLI the exit code is non-zero.
 
-- **Per document**: JSON syntax, the schema, a semver `version`, at least one of the six sections.
+- **Per document**: JSON syntax, the schema, a semver `version`, at least one of the sections.
 - **Uniqueness across the set**: service and integration slug (one space), service namespace (and no overlap, as a namespace may
   not equal or hyphen-extend another's, nor one core reserves), client ID across services, integrations and login
   clients, `internalHost`, custom role name, webhook `key` within its service, permission, event-type and bucket
@@ -397,6 +432,7 @@ the CLI the exit code is non-zero.
   - `access.audiences`, an integration's `audiences` and a login client's `audience`: a service in
     the set;
   - an integration's `roles`, as in [`integrations`](#integrations);
+  - a group's `roles`, as in [`groups`](#groups), and its slug unique within its scope;
   - a custom role's permissions; a system role's (its own service's only); an event type's
     `readPermission` (its own service's or core's).
 - **Guests**: `guestAssignable` on a service system role is refused; a guest-assignable role must be
@@ -545,7 +581,7 @@ runs older documents does nothing. After that the hourly retirement job
   history stay. Its buckets are marked missing, so they retire one grace period later, and can be
   deleted by an admin from now on ([registry](registry.md#declared-buckets));
 - **deletes** a login client, as the admin delete does;
-- **archives** a custom role.
+- **archives** a custom role or a group (its members are kept).
 
 An entry that returns, before or after, is reactivated: a deactivated service becomes active again and an archived role is restored. A deleted login client is created anew. Items a service's declaration
 stops listing retire as in [registry](registry.md#retirement); its dropped webhooks are archived at
@@ -561,6 +597,7 @@ Marking an entry removed, and clearing the mark when it returns, sets the row's 
 | Integration | `core.integration.updated` |
 | Login client | `auth.client.updated` |
 | Custom role | `auth.role.updated` (`auth.role.restored` when it returns archived) |
+| Group | `auth.group.updated` (`auth.group.restored` when it returns archived) |
 
 ## Managed rows
 
@@ -573,6 +610,7 @@ Provisioned rows change only in the documents. The admin API answers `409` with 
 | Integration | `PATCH`, roles, audiences and `regenerate-secret` on `/v1/admin/integrations/:id` | Reading it; `revoke-previous-secret` |
 | Login client | `PATCH`, `DELETE`, `regenerate-secret` on `/v1/admin/clients/:id` | Reading it |
 | Custom role | Edit, delete, archive, restore, and changing its permissions | Assigning it to users and organization members, and duplicating it |
+| Group | `PATCH`, role changes, archive and restore on `/v1/admin/groups/:id` | Reading it, and adding and removing members |
 | Webhook endpoint | `PATCH` (except a status-only re-enable), `DELETE`, archive, restore, `rotate-secret`, `revoke-previous-secret` | Delivery views, retries, test sends, a status-only `PATCH` to re-enable |
 
 Responses carry `provisioned: true` (an endpoint also `ownerService`), and the admin UI shows a

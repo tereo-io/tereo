@@ -776,7 +776,12 @@ does not manage an owner: changing an owner's tier (`PATCH …/members/:userId`)
 
 **Scope of roles.** `GET /v1/account/me` and `/oauth/userinfo` list the same roles that give their
 permissions: global ones plus the token's organization's, unexpired, of an active, unarchived,
-unretired role. For a guest, inert roles are left out ([Guest users](#guest-users)).
+unretired role. A user's permissions are their direct roles **and** the roles of the [groups](groups.md)
+they belong to, merged and deduplicated when read: a group's roles count while the group is not
+archived and, for an organization's group, while the user is still a member of an active, unarchived
+organization. Userinfo also carries a `groups` claim (`id`, `slug`, `name`, `organizationId`): the
+user's active global groups plus the token's organization's, for the same callers as `roles` and,
+for a `delegated` token, only with the `account` or `admin` area. For a guest, inert roles are left out ([Guest users](#guest-users)).
 
 ## Guest users
 
