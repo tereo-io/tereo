@@ -1,8 +1,9 @@
 import useInspectPasswordSetup from "../../api/password/useInspectPasswordSetup";
-import { AuthPage, Alert, Button, Col, Input, Spinner } from "@kosmeo-ui/react";
+import { Alert, Button, Col, Input, Spinner } from "@kosmeo-ui/react";
 import { errorDescriptionOf, issuesOf } from "@/utils/apiErrors";
 import useSetPassword from "../../api/password/useSetPassword";
 import { useLocation, useNavigate } from "react-router-dom";
+import { BrandedAuthPage } from "@/features/auth/branding";
 import { useMemo, useState } from "react";
 import { isAxiosError } from "axios";
 
@@ -53,7 +54,7 @@ export const SetPasswordPage = () => {
 
   if (done) {
     return (
-      <AuthPage title="Password set">
+      <BrandedAuthPage title="Password set">
         <Col>
           <Alert variant="success">
             Your password is set. You can now sign in.
@@ -62,38 +63,38 @@ export const SetPasswordPage = () => {
             Sign in
           </Button>
         </Col>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
   if (token && isError && isTransient(inspectError)) {
     return (
-      <AuthPage title="Set your password">
+      <BrandedAuthPage title="Set your password">
         <Col>
           <Alert variant="warning">{TRY_AGAIN}</Alert>
           <Button fullWidth onClick={() => void refetch()}>
             Try again
           </Button>
         </Col>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
   if (!token || isError) {
     return (
-      <AuthPage title={INVALID_LINK}>
+      <BrandedAuthPage title={INVALID_LINK}>
         <Alert variant="danger">
           Ask whoever invited you to send a new link.
         </Alert>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
   if (isLoading || !details) {
     return (
-      <AuthPage title="Set your password" subtitle="Please wait...">
+      <BrandedAuthPage title="Set your password" subtitle="Please wait...">
         <Spinner size="lg" />
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
@@ -114,7 +115,7 @@ export const SetPasswordPage = () => {
   };
 
   return (
-    <AuthPage
+    <BrandedAuthPage
       title="Set your password"
       subtitle={`Choose a password for ${details.email}`}
     >
@@ -145,6 +146,6 @@ export const SetPasswordPage = () => {
           </Button>
         </Col>
       </form>
-    </AuthPage>
+    </BrandedAuthPage>
   );
 };

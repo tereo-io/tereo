@@ -1,6 +1,7 @@
 import useInitiateTotpSetup from "../../api/totp/useInitiateTotpSetup";
 import type { StepperStep, StepperStatus } from "@kosmeo-ui/react";
 import useVerifyTotpSetup from "../../api/totp/useVerifyTotpSetup";
+import { BrandedAuthPage } from "@/features/auth/branding";
 import { pickOAuthParams } from "../../api/oauthParams";
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -14,7 +15,6 @@ import {
   oauthErrorMessage,
 } from "../../api/oauthErrorMessage";
 import {
-  AuthPage,
   Button,
   Alert,
   Checkbox,
@@ -151,7 +151,7 @@ export const TotpSetupPage = () => {
 
   if (step === "loading") {
     return (
-      <AuthPage
+      <BrandedAuthPage
         title="Setting up Two-Factor Authentication"
         subtitle="Please wait..."
         width="wide"
@@ -159,7 +159,7 @@ export const TotpSetupPage = () => {
         <div className="t-setup-loading">
           <Spinner size="lg" />
         </div>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
@@ -183,7 +183,7 @@ export const TotpSetupPage = () => {
         : "Store these codes securely - you'll need them if you lose your device";
 
   return (
-    <AuthPage title={title} subtitle={subtitle} width="wide">
+    <BrandedAuthPage title={title} subtitle={subtitle} width="wide">
       <Col>
         <Stepper steps={steps} />
 
@@ -294,6 +294,6 @@ export const TotpSetupPage = () => {
           </>
         )}
       </Col>
-    </AuthPage>
+    </BrandedAuthPage>
   );
 };

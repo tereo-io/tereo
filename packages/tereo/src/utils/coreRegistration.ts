@@ -1,6 +1,7 @@
 import { ensureDefaultOrganization } from "./defaultOrganization.js";
 import { ensureCurrentPartitions } from "./partitions.js";
 import { registerDeclaration } from "./registry.js";
+import { resetCoreBuckets } from "./coreBuckets.js";
 import { assertSystemUser } from "./users.js";
 import { logger } from "./logger.js";
 import db from "./db/index.js";
@@ -12,13 +13,15 @@ import {
 
 /**
  * Register core's own declaration, in-process, as the system user. Runs on
- * every start; unchanged since the last start, it is a no-op.
+ * every start; unchanged since the last start, it is a no-op. Core's buckets
+ * are then put back to their declared settings, whether or not it changed.
  */
 export const registerCore = async () => {
   const result = await registerDeclaration(CORE_SERVICE, CORE_DECLARATION, {
     userId: SYSTEM_USER.id,
     email: null,
   });
+  await resetCoreBuckets();
   await reportInertOrgAssignments();
   return result;
 };

@@ -169,6 +169,39 @@ export const authAdminRoute: RouteObject = {
       ),
     },
     {
+      path: "branding",
+      element: gated(
+        "branding",
+        namedLazy(
+          () =>
+            import("@/features/auth-admin/components/branding/BrandingList"),
+          "BrandingList"
+        )
+      ),
+    },
+    {
+      path: "branding/default",
+      element: gated(
+        "branding",
+        namedLazy(
+          () =>
+            import("@/features/auth-admin/components/branding/BrandingPages"),
+          "DefaultBrandingPage"
+        )
+      ),
+    },
+    {
+      path: "branding/clients/:id",
+      element: gated(
+        "branding",
+        namedLazy(
+          () =>
+            import("@/features/auth-admin/components/branding/BrandingPages"),
+          "ClientBrandingPage"
+        )
+      ),
+    },
+    {
       path: "settings",
       element: gated(
         "settings",

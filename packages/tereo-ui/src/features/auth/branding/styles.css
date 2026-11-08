@@ -1,0 +1,87 @@
+.t-brand-loading {
+  min-height: 100vh;
+  background-color: var(--k-background-color);
+}
+
+.t-brand-page {
+  background-size: cover;
+  background-position: center;
+}
+
+.t-brand-logo img {
+  display: block;
+  max-width: 12rem;
+  max-height: 4rem;
+  margin: 0 auto 0.5rem;
+}
+
+/*
+ * The nearest data-theme decides: the app's (on <html>) or the preview
+ * frame's. Without a dark logo the light one shows in both.
+ */
+.t-brand-logo .t-brand-logo-dark,
+[data-theme="dark"] .t-brand-logo-has-dark .t-brand-logo-light,
+[data-theme="dark"]
+  [data-theme="light"]
+  .t-brand-logo-has-dark
+  .t-brand-logo-dark {
+  display: none;
+}
+
+[data-theme="dark"] .t-brand-logo-has-dark .t-brand-logo-dark,
+[data-theme="dark"]
+  [data-theme="light"]
+  .t-brand-logo-has-dark
+  .t-brand-logo-light {
+  display: block;
+}
+
+.t-brand-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.t-brand-links a {
+  color: var(--k-text-color-link);
+}
+
+/*
+ * Split: the background in its own column, the form on a solid one. Below
+ * the breakpoint only the form shows. The preview always shows both columns
+ * (auth-admin branding styles).
+ */
+.t-brand-page[data-brand-layout="split"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+}
+
+.t-brand-split-image {
+  display: none;
+  background-size: cover;
+  background-position: center;
+}
+
+.t-brand-split-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem 1rem;
+  background-color: var(--k-background-color);
+}
+
+@media (min-width: 48rem) {
+  .t-brand-split-with-image[data-brand-layout="split"] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .t-brand-split-with-image .t-brand-split-image {
+    display: block;
+  }
+}

@@ -232,11 +232,15 @@
     summary: Delete client
     description: |
       Deletes a login client. A service's client (`service` set) is refused
-      with `409`, as is a provisioned one (`409 managed_by_provisioning`). Only its owner or a holder of `clients.admin` may delete it
+      with `409`, as is a provisioned one (`409 managed_by_provisioning`), and
+      one whose branding profile is provisioned (`409 managed_by_provisioning`
+      with `provisionedFrom`, until the provisioning documents drop it). Only its owner or a holder of `clients.admin` may delete it
       (`403` otherwise). The admin UI's login client (`tereo-ui`)
       cannot be deleted (`409`). The client's access tokens are
       revoked, and its service-account user, if any, is deactivated (never
-      deleted).
+      deleted). Its branding profile is deleted and its branding grants
+      revoked, each audited and emitted as through the branding API
+      (`auth.branding.deleted`, `auth.branding.grant-revoked`).
 
       An audit log entry is created for this action.
       An `auth.client.deleted` webhook event is emitted.

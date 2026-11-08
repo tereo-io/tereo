@@ -1,4 +1,3 @@
-import { getManagedBucket } from "../../../../../../utils/bucketAccess.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { NotFoundError } from "../../../../../../utils/errors.js";
@@ -6,6 +5,10 @@ import { lifecyclePolicyBodySchema } from "./schemas.js";
 import db from "../../../../../../utils/db/index.js";
 import { bucketNameSchema } from "../../schemas.js";
 import { Request, Response } from "express";
+import {
+  assertNotCoreBucket,
+  getManagedBucket,
+} from "../../../../../../utils/bucketAccess.js";
 import {
   validateBody,
   validateParams,
@@ -40,6 +43,7 @@ export const upsertLifecyclePolicy = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { name } = validateParams(bucketNameSchema, req);
   const bucket = await getManagedBucket(auth, name, "write");
+  assertNotCoreBucket(bucket);
 
   const body = validateBody(lifecyclePolicyBodySchema, req);
   const policy = await db.$transaction(async (tx) => {
@@ -107,6 +111,7 @@ export const deleteLifecyclePolicy = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { name } = validateParams(bucketNameSchema, req);
   const bucket = await getManagedBucket(auth, name, "delete");
+  assertNotCoreBucket(bucket);
 
   await db.$transaction(async (tx) => {
     const removed = await db.lifecyclePolicies.remove(bucket.id, tx);

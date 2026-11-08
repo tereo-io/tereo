@@ -155,9 +155,110 @@ export interface IntegrationProvisioning {
   audiences?: string[];
 }
 
+/** A colour or shadow custom property of `@kosmeo-ui/react` a branding profile may set. */
+export type BrandingColorVariable =
+  | "--k-background-color"
+  | "--k-background-color-dark"
+  | "--k-background-color-disabled"
+  | "--k-background-color-hover"
+  | "--k-background-color-light"
+  | "--k-background-color-overlay"
+  | "--k-border-color"
+  | "--k-border-color-active"
+  | "--k-border-color-disabled"
+  | "--k-border-color-hover"
+  | "--k-border-shadow-color-active"
+  | "--k-danger-color"
+  | "--k-danger-color-active"
+  | "--k-danger-color-background"
+  | "--k-danger-color-hover"
+  | "--k-danger-color-text"
+  | "--k-light-color"
+  | "--k-light-color-active"
+  | "--k-light-color-background"
+  | "--k-light-color-hover"
+  | "--k-primary-color"
+  | "--k-primary-color-active"
+  | "--k-primary-color-background"
+  | "--k-primary-color-background-light"
+  | "--k-primary-color-dark"
+  | "--k-primary-color-hover"
+  | "--k-primary-color-text"
+  | "--k-secondary-color"
+  | "--k-secondary-color-active"
+  | "--k-secondary-color-background"
+  | "--k-secondary-color-hover"
+  | "--k-shadow-color"
+  | "--k-shadow-color-active"
+  | "--k-shadow-color-hover"
+  | "--k-success-color"
+  | "--k-success-color-active"
+  | "--k-success-color-background"
+  | "--k-success-color-background-light"
+  | "--k-success-color-hover"
+  | "--k-text-color"
+  | "--k-text-color-disabled"
+  | "--k-text-color-light"
+  | "--k-text-color-link"
+  | "--k-text-color-secondary"
+  | "--k-warning-color"
+  | "--k-warning-color-active"
+  | "--k-warning-color-background"
+  | "--k-warning-color-background-light"
+  | "--k-warning-color-contrast"
+  | "--k-warning-color-hover"
+  | "--k-warning-color-text";
+
+/**
+ * A sign-in page's branding. Every field is optional: an omitted one inherits
+ * (a client's profile from the default, the default from stock).
+ */
+export interface BrandingProfileProvisioning {
+  /** At most 60 characters. */
+  appName?: string | null;
+  /** At most 80 characters. */
+  headline?: string | null;
+  /** At most 160 characters. */
+  subtitle?: string | null;
+  /** At most 30 characters. */
+  signInLabel?: string | null;
+  /** At most 280 characters. */
+  notice?: string | null;
+  layout?: "centered" | "split" | null;
+  /**
+   * Up to 3; labels at most 40 characters, each `url` starting `https://`
+   * with no space or control character in it.
+   */
+  footerLinks?: { label: string; url: string }[] | null;
+  /** Hex, `rgb()`, `hsl()` or `oklch()` values. */
+  colorsLight?: Partial<Record<BrandingColorVariable, string>>;
+  colorsDark?: Partial<Record<BrandingColorVariable, string>>;
+  /** On the `tereo-ui` client's profile: brand the admin console too. Default false. */
+  applyToConsole?: boolean;
+  /**
+   * Image paths, relative to the document's file, inside the provisioning
+   * folder. Logos: PNG, WebP, JPEG or SVG; favicon: PNG, SVG or ICO (512 KB
+   * by default); background: PNG, WebP or JPEG (5 MB by default).
+   */
+  logo?: string;
+  logoDark?: string;
+  favicon?: string;
+  background?: string;
+}
+
+/**
+ * Branding declared by the deploy; its profiles are read-only in the admin
+ * UI. Removing the block keeps the values and hands them to the admin UI.
+ */
+export interface BrandingProvisioning {
+  default?: BrandingProfileProvisioning;
+  /** Keyed by client id: a client in the set or already in core (`tereo-ui` too). */
+  clients?: Record<string, BrandingProfileProvisioning>;
+}
+
 /**
  * One file; it needs at least one of `service`, `clients`, `roles`,
- * `integrations`, `guests`, not empty.
+ * `integrations`, `guests`, `branding`, not empty.
  */
 export interface ProvisioningDocument {
   $schema?: string;
@@ -169,4 +270,5 @@ export interface ProvisioningDocument {
   integrations?: IntegrationProvisioning[];
   /** Guest defaults: custom, guest-assignable roles a guest gets when the invite names none. */
   guests?: { defaultRoles: string[] };
+  branding?: BrandingProvisioning;
 }

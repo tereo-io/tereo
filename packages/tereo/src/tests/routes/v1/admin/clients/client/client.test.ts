@@ -646,6 +646,75 @@ describe("DELETE /v1/admin/clients/:id", () => {
     expect(after).toMatchObject({ isActive: false, oauthClientId: null });
   });
 
+  it("drops the deleted client's cached branding, so a reused client id starts unbranded", async () => {
+    const doomed = await createTestClient();
+    const appName = `Deleted ${generateUniqueId()}`;
+    await prisma.brandingProfile.create({
+      data: { clientId: doomed.id, appName, updatedBy: doomed.ownerId },
+    });
+    const branding = async () =>
+      (await (
+        await fetch(`${BASE_URL}/oauth/branding?client_id=${doomed.clientId}`)
+      ).json()) as { appName?: string } | null;
+    // Warms core's cache with the profile.
+    expect((await branding())?.appName).toBe(appName);
+
+    const response = await fetch(`${BASE_URL}/v1/admin/clients/${doomed.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(response.status).toBe(HTTP_STATUS.NO_CONTENT);
+    const reused = await prisma.oAuthClient.create({
+      data: {
+        clientId: doomed.clientId,
+        name: "Reused client id",
+        redirectUris: [],
+        scopes: [],
+        grantTypes: ["authorization_code"],
+        ownerId: doomed.ownerId,
+      },
+    });
+    try {
+      expect((await branding())?.appName).not.toBe(appName);
+    } finally {
+      await prisma.oAuthClient.delete({ where: { id: reused.id } });
+    }
+  });
+
+  it("refuses with 409 while the client's branding profile is provisioned", async () => {
+    const client = await createTestClient();
+    await prisma.brandingProfile.create({
+      data: {
+        clientId: client.id,
+        appName: "Declared",
+        provisioned: true,
+        provisionedFrom: "acme.json",
+        updatedBy: client.ownerId,
+      },
+    });
+    try {
+      const response = await fetch(
+        `${BASE_URL}/v1/admin/clients/${client.id}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${adminToken}` },
+        }
+      );
+      expect(response.status).toBe(HTTP_STATUS.CONFLICT);
+      expect(await response.json()).toMatchObject({
+        error: "managed_by_provisioning",
+        provisionedFrom: "acme.json",
+      });
+      expect(await prisma.oAuthClient.count({ where: { id: client.id } })).toBe(
+        1
+      );
+    } finally {
+      await prisma.brandingProfile.deleteMany({
+        where: { clientId: client.id },
+      });
+    }
+  });
+
   it("should return 404 for non-existent client", async () => {
     const response = await fetch(
       `${BASE_URL}/v1/admin/clients/${NON_EXISTENT_UUID}`,

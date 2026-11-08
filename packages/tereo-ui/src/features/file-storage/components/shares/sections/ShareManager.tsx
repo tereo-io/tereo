@@ -36,14 +36,15 @@ const ShareManager = ({ bucketName }: ShareManagerProps) => {
   const [editingShare, setEditingShare] = useState<Share | null>(null);
 
   // Core lets a share's creator edit or revoke it; anyone else needs write
-  // (to edit) or delete (to revoke) access to the bucket's objects.
+  // (to edit) or delete (to revoke) access to the bucket's objects. On a core
+  // bucket no share is edited, but revoking goes on.
   const me = user?.sub;
-  const mayEdit = hasPermission("file-service.shares.write");
+  const mayEdit =
+    hasPermission("file-service.shares.write") && !grant?.coreManaged;
   const mayRevoke = hasPermission("file-service.shares.delete");
   const bucketWrite =
     hasPermission("file-service.objects.write") && !!grant?.canWrite;
-  const bucketDelete =
-    hasPermission("file-service.objects.delete") && !!grant?.canDelete;
+  const bucketDelete = !!grant?.canRevokeShares;
 
   const copyLink = async (url: string | null) => {
     if (url === null) return;

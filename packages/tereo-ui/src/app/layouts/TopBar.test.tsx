@@ -32,8 +32,43 @@ const renderBar = () =>
 
 const menu = () => screen.getByRole("button", { name: "Sections" });
 
+const injectBranding = (value: unknown) => {
+  const el = document.createElement("script");
+  el.type = "application/json";
+  el.id = "tereo-branding";
+  el.textContent = JSON.stringify(value);
+  document.head.appendChild(el);
+};
+
 describe("TopBar", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    document.getElementById("tereo-branding")?.remove();
+  });
+
+  it("shows Tereo without console branding", () => {
+    stubScreen(false);
+    renderBar();
+
+    expect(screen.getByText("Tereo")).toBeVisible();
+  });
+
+  it("shows the console appName from the injected block", () => {
+    stubScreen(false);
+    injectBranding({ scope: "console", appName: "Acme Console" });
+    renderBar();
+
+    expect(screen.getByText("Acme Console")).toBeVisible();
+    expect(screen.queryByText("Tereo")).not.toBeInTheDocument();
+  });
+
+  it("ignores an auth-scope block", () => {
+    stubScreen(false);
+    injectBranding({ scope: "auth", appName: "Acme" });
+    renderBar();
+
+    expect(screen.getByText("Tereo")).toBeVisible();
+  });
 
   it("shows the sections inline on a wide screen", () => {
     stubScreen(false);

@@ -1,4 +1,5 @@
-import { AuthPage, Button, Alert, Input, Col } from "@kosmeo-ui/react";
+import { Button, Alert, Input, Col } from "@kosmeo-ui/react";
+import { BrandedAuthPage } from "@/features/auth/branding";
 import useVerifyTotp from "../../api/totp/useVerifyTotp";
 import { useSearchParams, Link } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
@@ -67,7 +68,7 @@ export const TotpChallengePage = () => {
   };
 
   return (
-    <AuthPage
+    <BrandedAuthPage
       title="Two-Factor Authentication"
       subtitle="Enter the 6-digit code from your authenticator app"
       footer={
@@ -104,6 +105,6 @@ export const TotpChallengePage = () => {
           </Col>
         </form>
       </Col>
-    </AuthPage>
+    </BrandedAuthPage>
   );
 };

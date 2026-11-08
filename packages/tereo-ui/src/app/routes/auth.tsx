@@ -1,4 +1,5 @@
-import { type RouteObject } from "react-router-dom";
+import { BrandingProvider } from "@/features/auth/branding";
+import { Outlet, type RouteObject } from "react-router-dom";
 import { namedLazy, lazyPage } from "./lazy";
 
 /**
@@ -14,74 +15,85 @@ export const authRoutes: RouteObject[] = [
     ),
   },
   {
-    path: "/login",
-    element: namedLazy(
-      () => import("@/features/auth/components/login/LoginPage"),
-      "LoginPage"
+    // One provider for the whole sign-in flow, so branding is read once.
+    element: (
+      <BrandingProvider>
+        <Outlet />
+      </BrandingProvider>
     ),
-  },
-  {
-    path: "/login/org-select",
-    element: namedLazy(
-      () => import("@/features/auth/components/org-select/OrgSelectPage"),
-      "OrgSelectPage"
-    ),
-  },
-  {
-    path: "/login/2fa",
-    element: namedLazy(
-      () => import("@/features/auth/components/totp/TotpChallengePage"),
-      "TotpChallengePage"
-    ),
-  },
-  {
-    path: "/login/2fa/recovery",
-    element: namedLazy(
-      () => import("@/features/auth/components/totp/TotpRecoveryPage"),
-      "TotpRecoveryPage"
-    ),
-  },
-  {
-    path: "/login/2fa/setup",
-    element: namedLazy(
-      () => import("@/features/auth/components/totp/TotpSetupPage"),
-      "TotpSetupPage"
-    ),
-  },
-  {
-    path: "/login/change-password",
-    element: namedLazy(
-      () => import("@/features/auth/components/password/ChangePasswordPage"),
-      "ChangePasswordPage"
-    ),
-  },
-  {
-    path: "/set-password",
-    element: namedLazy(
-      () => import("@/features/auth/components/password/SetPasswordPage"),
-      "SetPasswordPage"
-    ),
-  },
-  {
-    path: "/login/link-required",
-    element: namedLazy(
-      () => import("@/features/auth/components/login/LinkRequiredPage"),
-      "LinkRequiredPage"
-    ),
-  },
-  {
-    path: "/consent",
-    element: namedLazy(
-      () => import("@/features/auth/components/consent/ConsentPage"),
-      "ConsentPage"
-    ),
-  },
-  {
-    path: "/logout",
-    element: namedLazy(
-      () => import("@/features/auth/components/logout/LogoutPage"),
-      "LogoutPage"
-    ),
+    children: [
+      {
+        path: "/login",
+        element: namedLazy(
+          () => import("@/features/auth/components/login/LoginPage"),
+          "LoginPage"
+        ),
+      },
+      {
+        path: "/login/org-select",
+        element: namedLazy(
+          () => import("@/features/auth/components/org-select/OrgSelectPage"),
+          "OrgSelectPage"
+        ),
+      },
+      {
+        path: "/login/2fa",
+        element: namedLazy(
+          () => import("@/features/auth/components/totp/TotpChallengePage"),
+          "TotpChallengePage"
+        ),
+      },
+      {
+        path: "/login/2fa/recovery",
+        element: namedLazy(
+          () => import("@/features/auth/components/totp/TotpRecoveryPage"),
+          "TotpRecoveryPage"
+        ),
+      },
+      {
+        path: "/login/2fa/setup",
+        element: namedLazy(
+          () => import("@/features/auth/components/totp/TotpSetupPage"),
+          "TotpSetupPage"
+        ),
+      },
+      {
+        path: "/login/change-password",
+        element: namedLazy(
+          () =>
+            import("@/features/auth/components/password/ChangePasswordPage"),
+          "ChangePasswordPage"
+        ),
+      },
+      {
+        path: "/set-password",
+        element: namedLazy(
+          () => import("@/features/auth/components/password/SetPasswordPage"),
+          "SetPasswordPage"
+        ),
+      },
+      {
+        path: "/login/link-required",
+        element: namedLazy(
+          () => import("@/features/auth/components/login/LinkRequiredPage"),
+          "LinkRequiredPage"
+        ),
+      },
+      {
+        path: "/consent",
+        element: namedLazy(
+          () => import("@/features/auth/components/consent/ConsentPage"),
+          "ConsentPage"
+        ),
+      },
+      {
+        path: "/logout",
+        element: namedLazy(
+          () => import("@/features/auth/components/logout/LogoutPage"),
+          "LogoutPage"
+        ),
+      },
+    ],
   },
   {
     path: "/shared/:token",

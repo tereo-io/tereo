@@ -95,6 +95,18 @@ const full: ProvisioningDocument = {
       audiences: ["billing"],
     },
   ],
+  branding: {
+    default: { appName: "Billing", layout: "split" },
+    clients: {
+      "billing-web": {
+        headline: "Welcome back",
+        logo: "./branding/logo.svg",
+        colorsLight: { "--k-primary-color": "#0b5" },
+        colorsDark: { "--k-primary-color": "oklch(70% 0.1 150)" },
+        footerLinks: [{ label: "Privacy", url: "https://example.com/privacy" }],
+      },
+    },
+  },
 };
 
 describe("ProvisioningDocument", () => {
@@ -185,6 +197,55 @@ describe("provisioning schema", () => {
         clients: [{ clientId: "a", name: "A", rateLimitPerSecond: 5 }],
       })
     ).toBe(false);
+  });
+
+  it("refuses unknown colour variables and non-https footer links", () => {
+    const branded = (profile: Record<string, unknown>) => ({
+      version: "1.0.0",
+      branding: { clients: { web: profile } },
+    });
+    expect(
+      validate(branded({ colorsLight: { "--k-primary-color": "#0b5" } }))
+    ).toBe(true);
+    expect(validate(branded({ colorsDark: { "--k-made-up": "#0b5" } }))).toBe(
+      false
+    );
+    const link = (url: string) =>
+      branded({ footerLinks: [{ label: "Privacy", url }] });
+    expect(validate(link("https://example.com/privacy"))).toBe(true);
+    expect(validate(link("http://example.com/privacy"))).toBe(false);
+    expect(validate(link("javascript:alert(1)"))).toBe(false);
+    expect(validate(link("HTTPS://example.com"))).toBe(true);
+    expect(validate(link("https:example.com"))).toBe(false);
+    expect(validate(link("https://example.com "))).toBe(false);
+    expect(validate(link("https://exa\tmple.com"))).toBe(false);
+  });
+});
+
+describe("BrandingColorVariable", () => {
+  it("lists core's branding colour variables", () => {
+    const tokensIn = (file: URL) =>
+      [...readFileSync(file, "utf8").matchAll(/"(--k-[a-z0-9-]+)"/g)]
+        .map((m) => m[1])
+        .sort();
+    expect(
+      tokensIn(new URL("../types/provisioning.ts", import.meta.url))
+    ).toEqual(
+      tokensIn(
+        new URL(
+          "../../../tereo/src/definitions/brandingTokens.ts",
+          import.meta.url
+        )
+      )
+    );
+  });
+
+  it("refuses an unknown colour variable", () => {
+    const branding: ProvisioningDocument["branding"] = {
+      // @ts-expect-error not a branding colour variable
+      default: { colorsLight: { "--k-made-up": "#000" } },
+    };
+    expect(branding).toBeDefined();
   });
 });
 

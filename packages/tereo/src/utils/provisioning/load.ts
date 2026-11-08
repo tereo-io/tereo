@@ -1,16 +1,21 @@
 import { CLIENT_SECRET_PREFIX, secretStrengthProblem } from "../secretRules.js";
 import { ProvisioningDocumentSchema, type CustomRoleEntry } from "./schema.js";
+import { readFile, readdir, realpath, stat } from "fs/promises";
 import { CORE_SCOPES } from "../../definitions/index.js";
 import { isSafeRedirectUri } from "../redirectUris.js";
-import { readFile, readdir, stat } from "fs/promises";
+import { basename, dirname, join } from "path";
 import { hashFlowToken } from "../crypto.js";
 import { AppError } from "../errors.js";
-import { basename, join } from "path";
 import type { z } from "zod";
 import {
   assertSafeWebhookUrlForRegistration,
   parseInternalHost,
 } from "../ssrfGuard.js";
+import {
+  loadBrandingImages,
+  profileFields,
+  type LoadedBranding,
+} from "./branding.js";
 
 export class ProvisioningError extends Error {
   constructor(public problems: string[]) {
@@ -176,6 +181,8 @@ export interface LoadedDocument {
   integrations?: ResolvedIntegration[];
   /** Absent is not declared. */
   guests?: { defaultRoles: string[] };
+  /** Absent is not declared. */
+  branding?: LoadedBranding;
 }
 
 export interface ProvisioningSet {
@@ -302,15 +309,26 @@ const jsonSyntaxProblem = (err: unknown): string => {
   return at ? `not valid JSON (at position ${at[1]})` : "not valid JSON";
 };
 
-export const parseDocuments = (
+type DeclaredBranding = NonNullable<
+  z.output<typeof ProvisioningDocumentSchema>["branding"]
+>;
+
+type ParsedDocument = {
+  file: string;
+  data: z.output<typeof ProvisioningDocumentSchema>;
+};
+
+/**
+ * Each document that parses, its secrets resolved, and every problem found;
+ * `buildSet` makes the set once there are none. Branding image paths are
+ * read by `loadProvisioningSet`, which knows the folder.
+ */
+const parseFiles = (
   files: { file: string; text: string }[],
   env: NodeJS.ProcessEnv
-): ProvisioningSet => {
+) => {
   const problems: string[] = [];
-  const parsedDocs: {
-    file: string;
-    data: z.output<typeof ProvisioningDocumentSchema>;
-  }[] = [];
+  const parsedDocs: ParsedDocument[] = [];
 
   for (const { file, text } of files) {
     let raw: unknown;
@@ -381,8 +399,14 @@ export const parseDocuments = (
   }
 
   const values = resolveSecrets(uses, env, problems);
-  if (problems.length > 0) throw new ProvisioningError(problems);
+  return { parsedDocs, internalHosts, values, problems };
+};
 
+const buildSet = ({
+  parsedDocs,
+  internalHosts,
+  values,
+}: ReturnType<typeof parseFiles>): ProvisioningSet => {
   const hashOf = (envName: string) => hashFlowToken(values.get(envName)!);
 
   return {
@@ -447,8 +471,67 @@ export const parseDocuments = (
         roles: i.roles,
         audiences: i.audiences,
       })),
+      ...(data.branding && {
+        branding: {
+          default: data.branding.default
+            ? profileFields(data.branding.default)
+            : null,
+          clients: Object.fromEntries(
+            Object.entries(data.branding.clients).map(([id, profile]) => [
+              id,
+              profileFields(profile),
+            ])
+          ),
+        },
+      }),
     })),
   };
+};
+
+/** The set without branding images; `loadProvisioningSet` reads those. */
+export const parseDocuments = (
+  files: { file: string; text: string }[],
+  env: NodeJS.ProcessEnv
+): ProvisioningSet => {
+  const parsed = parseFiles(files, env);
+  if (parsed.problems.length > 0) throw new ProvisioningError(parsed.problems);
+  return buildSet(parsed);
+};
+
+/** Each parsed document's branding with its images read; problems are added to `problems`. */
+const loadImages = async (
+  parsedDocs: ParsedDocument[],
+  root: string,
+  problems: string[]
+): Promise<Map<string, LoadedBranding>> => {
+  const loaded = new Map<string, LoadedBranding>();
+  const realRoot = await realpath(root);
+  for (const { file, data } of parsedDocs) {
+    const branding = data.branding;
+    if (!branding) continue;
+    // Documents are read from the folder itself, never from below it.
+    const load = (
+      profile: DeclaredBranding["clients"][string],
+      label: string
+    ) =>
+      loadBrandingImages(
+        root,
+        realRoot,
+        profile,
+        `${file}: ${label}`,
+        problems
+      );
+    const clients: LoadedBranding["clients"] = {};
+    for (const [id, profile] of Object.entries(branding.clients))
+      clients[id] = await load(profile, `branding.clients[${id}]`);
+    loaded.set(file, {
+      default: branding.default
+        ? await load(branding.default, "branding.default")
+        : null,
+      clients,
+    });
+  }
+  return loaded;
 };
 
 export const loadProvisioningSet = async (
@@ -457,5 +540,21 @@ export const loadProvisioningSet = async (
   env: NodeJS.ProcessEnv = process.env
 ): Promise<ProvisioningSet | null> => {
   if (!path) return null;
-  return parseDocuments(await readProvisioningPath(path), env);
+  const parsed = parseFiles(await readProvisioningPath(path), env);
+  // Images are read even when other documents have problems, so one run
+  // reports both.
+  const branding = parsed.parsedDocs.some(({ data }) => data.branding)
+    ? await loadImages(
+        parsed.parsedDocs,
+        (await stat(path)).isDirectory() ? path : dirname(path),
+        parsed.problems
+      )
+    : new Map<string, LoadedBranding>();
+  if (parsed.problems.length > 0) throw new ProvisioningError(parsed.problems);
+  const set = buildSet(parsed);
+  for (const doc of set.documents) {
+    const loaded = branding.get(doc.file);
+    if (loaded) doc.branding = loaded;
+  }
+  return set;
 };

@@ -312,6 +312,7 @@ describe("applyProvisioning", () => {
       declared: [],
       access: [],
       roles: [],
+      branding: [],
     });
     expect(await auditCount(ids)).toBe(before);
     expect((await clientRow(client.clientId)).updatedAt).toEqual(updatedAt);

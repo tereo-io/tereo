@@ -1,3 +1,4 @@
+import { ProvisionedProfileSchema } from "../branding/schema.js";
 import { SEMVER_PATTERN } from "../semver.js";
 import { z } from "zod";
 import {
@@ -123,6 +124,18 @@ const GuestsEntry = z
   })
   .strict();
 
+// Image paths are relative to the document's file.
+const BrandingEntry = z
+  .object({
+    default: ProvisionedProfileSchema.optional(),
+    clients: z.record(ClientId, ProvisionedProfileSchema).default({}),
+  })
+  .strict()
+  // An empty block would release every provisioned profile unnoticed.
+  .refine((b) => b.default || Object.keys(b.clients).length > 0, {
+    message: "needs default or at least one client",
+  });
+
 export const ProvisioningDocumentSchema = z
   .object({
     $schema: z.string().optional(),
@@ -138,6 +151,7 @@ export const ProvisioningDocumentSchema = z
     roles: z.array(CustomRoleEntry).optional(),
     integrations: z.array(IntegrationEntry).optional(),
     guests: GuestsEntry.optional(),
+    branding: BrandingEntry.optional(),
   })
   .strict()
   .refine(
@@ -146,10 +160,11 @@ export const ProvisioningDocumentSchema = z
       d.clients?.length ||
       d.roles?.length ||
       d.integrations?.length ||
-      d.guests,
+      d.guests ||
+      d.branding,
     {
       message:
-        "needs one of service, clients, roles, integrations, guests, not empty",
+        "needs one of service, clients, roles, integrations, guests, branding, not empty",
     }
   );
 

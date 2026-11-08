@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { trimTrailing } from "../utils/strings.js";
 import env from "../env.js";
 import cors from "cors";
 
@@ -35,7 +36,7 @@ export const sendsCors = (method: string, rawPath: string): boolean => {
   if (!API_PREFIXES.some((prefix) => isUnder(path, prefix))) return false;
   return !(
     (method === "GET" || method === "HEAD") &&
-    isUnder(path.replace(/\/+$/, ""), "/oauth/authorize")
+    isUnder(trimTrailing(path, "/"), "/oauth/authorize")
   );
 };
 

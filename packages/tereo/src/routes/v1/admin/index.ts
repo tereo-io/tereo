@@ -7,6 +7,7 @@ import signingKeysRouter from "./signing-keys/index.js";
 import permissionsRouter from "./permissions/index.js";
 import settingsRouter from "./settings/index.js";
 import servicesRouter from "./services/index.js";
+import brandingRouter from "./branding/index.js";
 import clientsRouter from "./clients/index.js";
 import guestsRouter from "./guests/index.js";
 import usersRouter from "./users/index.js";
@@ -23,6 +24,7 @@ adminRouter.use(rateLimitPreAuth);
 adminRouter.use(createRequireAuth({ area: "admin" }));
 adminRouter.use(rateLimitGeneral);
 
+adminRouter.use("/branding", brandingRouter);
 adminRouter.use("/clients", clientsRouter);
 adminRouter.use("/guests", guestsRouter);
 adminRouter.use("/identity-providers", identityProvidersRouter);

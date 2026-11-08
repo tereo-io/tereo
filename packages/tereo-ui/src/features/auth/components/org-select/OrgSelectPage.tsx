@@ -1,5 +1,7 @@
 import useOrgSelectSession from "../../api/org-select/useOrgSelectSession";
 import useSubmitOrgSelect from "../../api/org-select/useSubmitOrgSelect";
+import { Button, Alert, Spinner, Centered, Col } from "@kosmeo-ui/react";
+import { BrandedAuthPage } from "@/features/auth/branding";
 import { useSearchParams } from "react-router-dom";
 import { SessionExpired } from "../SessionExpired";
 import { useState } from "react";
@@ -8,14 +10,6 @@ import {
   isExpiredFlowError,
   oauthErrorMessage,
 } from "../../api/oauthErrorMessage";
-import {
-  AuthPage,
-  Button,
-  Alert,
-  Spinner,
-  Centered,
-  Col,
-} from "@kosmeo-ui/react";
 
 export const OrgSelectPage = () => {
   const [searchParams] = useSearchParams();
@@ -37,11 +31,11 @@ export const OrgSelectPage = () => {
 
   if (isLoading) {
     return (
-      <AuthPage title="Tereo">
+      <BrandedAuthPage>
         <Centered>
           <Spinner size="lg" />
         </Centered>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
@@ -74,7 +68,7 @@ export const OrgSelectPage = () => {
   };
 
   return (
-    <AuthPage title="Tereo" subtitle="Select an organization to continue">
+    <BrandedAuthPage subtitle="Select an organization to continue">
       <Col>
         <div className="t-org-select-info">
           <div className="t-org-select-user">
@@ -102,6 +96,6 @@ export const OrgSelectPage = () => {
           ))}
         </Col>
       </Col>
-    </AuthPage>
+    </BrandedAuthPage>
   );
 };

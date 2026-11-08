@@ -106,6 +106,9 @@
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket.
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -146,6 +149,9 @@
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket.
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':

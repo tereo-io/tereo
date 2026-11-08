@@ -35,6 +35,16 @@ export const PUBLIC: Allowlist = [
   ],
   [
     "get",
+    "/oauth/branding",
+    "Sign-in pages read branding before the user has a token",
+  ],
+  [
+    "get",
+    "/oauth/branding/assets/:file",
+    "Branding images load on sign-in pages before the user has a token",
+  ],
+  [
+    "get",
     "/oauth/authorize",
     "Starts the browser login; the user has no token yet",
   ],

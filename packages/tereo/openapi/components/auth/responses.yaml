@@ -266,3 +266,98 @@ IdentityConflictResponse:
       example:
         error: last_sign_in_method
         error_description: This is the account's only way to sign in
+
+BrandingBadRequestResponse:
+  description: |
+    Invalid request. `invalid_request` with `issues` naming each field: a value over its limit, an
+    unknown colour variable, a colour outside the allowed grammar, a link that is not `https:`, more
+    than 3 links, or an image `sha256` that no live uploaded image has, whose type the slot refuses
+    or that is over the slot's limit. `invalid_branding_image`: an upload that is not an allowed image
+    for its slot, or an SVG outside the allowlist (unsafe SVGs are rejected, never rewritten). `unknown_branding_image`: an image expired
+    between the check and the save; upload it again. `file_upload_required`: no file in the upload.
+    `user_inactive`: granting to a deactivated user.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - invalid_request
+              - invalid_branding_image
+              - unknown_branding_image
+              - file_upload_required
+              - user_inactive
+          error_description:
+            type: string
+          issues:
+            description: On `invalid_request`, each failed check
+            type: array
+            items:
+              type: object
+              required: [path, message]
+              properties:
+                path:
+                  type: string
+                message:
+                  type: string
+
+BrandingConflictResponse:
+  description: |
+    Conflict. `managed_by_provisioning`: the profile is declared in a provisioning document, so it is
+    read-only here for everyone; `provisionedFrom` names the document's file. `conflict`: the user
+    already holds an active grant on the client.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - managed_by_provisioning
+              - conflict
+          error_description:
+            type: string
+          provisionedFrom:
+            description: On `managed_by_provisioning`, the provisioning document's file name
+            type: string
+      example:
+        error: managed_by_provisioning
+        error_description: Managed by the provisioning file; change it there and restart core
+        provisionedFrom: acme.json
+
+BrandingPayloadTooLargeResponse:
+  description: The image is over the slot's limit (`BRANDING_IMAGE_MAX_SIZE_KB` or `BRANDING_BACKGROUND_MAX_SIZE_MB`), or the multipart body has too many parts or a field over 1 KB
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum: [payload_too_large]
+          error_description:
+            type: string

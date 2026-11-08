@@ -157,6 +157,12 @@ model User {
   upstreamAuthSessions           UpstreamAuthSession[]
   identityLinkGrants             IdentityLinkGrant[]
 
+  // Branding
+  brandingProfilesUpdated BrandingProfile[] @relation("BrandingProfileUpdater")
+  brandingGrants          BrandingGrant[]   @relation("BrandingGrantUser")
+  brandingGrantsGranted   BrandingGrant[]   @relation("BrandingGrantGranter")
+  brandingGrantsRevoked   BrandingGrant[]   @relation("BrandingGrantRevoker")
+
   // Actor columns in notifications.
   notificationConnectionsCreated NotificationConnection[] @relation("NotificationConnectionCreator")
   notificationConnectionsUpdated NotificationConnection[] @relation("NotificationConnectionUpdater")
@@ -218,6 +224,8 @@ model OAuthClient {
   serviceAccountUser   User?                 @relation("ServiceAccountClient")
   organization         Organization?         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   service              Service?
+  brandingProfile      BrandingProfile?
+  brandingGrants       BrandingGrant[]
 
   @@index([ownerId])
   @@index([organizationId])
@@ -1005,14 +1013,18 @@ model Object {
   deletedAt     DateTime? @map("deleted_at")
   deletedBy     String?   @map("deleted_by") @db.Uuid
 
-  bucket      Bucket          @relation(fields: [bucketId], references: [id], onDelete: Cascade)
-  accessLogs  AccessLog[]
-  versions    ObjectVersion[]
-  shares      Share[]
-  thumbnailOf Object?         @relation("ObjectThumbnails", fields: [thumbnailFor], references: [id], onDelete: Cascade)
-  thumbnails  Object[]        @relation("ObjectThumbnails")
-  creator     User            @relation("ObjectCreator", fields: [createdBy], references: [id], onDelete: Restrict)
-  deleter     User?           @relation("ObjectDeleter", fields: [deletedBy], references: [id], onDelete: Restrict)
+  bucket              Bucket            @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  accessLogs          AccessLog[]
+  versions            ObjectVersion[]
+  shares              Share[]
+  thumbnailOf         Object?           @relation("ObjectThumbnails", fields: [thumbnailFor], references: [id], onDelete: Cascade)
+  thumbnails          Object[]          @relation("ObjectThumbnails")
+  brandingLogos       BrandingProfile[] @relation("BrandingLogo")
+  brandingLogosDark   BrandingProfile[] @relation("BrandingLogoDark")
+  brandingFavicons    BrandingProfile[] @relation("BrandingFavicon")
+  brandingBackgrounds BrandingProfile[] @relation("BrandingBackground")
+  creator             User              @relation("ObjectCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  deleter             User?             @relation("ObjectDeleter", fields: [deletedBy], references: [id], onDelete: Restrict)
 
   // A partial unique index on (bucketId, objectKey) WHERE deletedAt IS NULL is
   // declared as raw SQL in the init migration (`objects_bucket_live_key`).
@@ -1855,5 +1867,75 @@ model PasswordSetupToken {
 
   @@index([expiresAt])
   @@map("password_setup_tokens")
+  @@schema("auth")
+}
+
+enum BrandingLayout {
+  centered
+  split
+
+  @@map("branding_layout")
+  @@schema("auth")
+}
+
+// Sign-in page branding. clientId null is the default profile. Raw SQL in the
+// migration: a partial unique index so only one default exists, and
+// CHECK provisioned = (provisioned_from IS NOT NULL).
+model BrandingProfile {
+  id                 String          @id @default(uuid(7)) @db.Uuid
+  clientId           String?         @unique @map("client_id") @db.Uuid
+  appName            String?         @map("app_name") @db.VarChar(60)
+  headline           String?         @db.VarChar(80)
+  subtitle           String?         @db.VarChar(160)
+  signInLabel        String?         @map("sign_in_label") @db.VarChar(30)
+  notice             String?         @db.VarChar(280)
+  layout             BrandingLayout?
+  footerLinks        Json?           @map("footer_links")
+  colorsLight        Json            @default("{}") @map("colors_light")
+  colorsDark         Json            @default("{}") @map("colors_dark")
+  logoObjectId       String?         @map("logo_object_id") @db.Uuid
+  logoDarkObjectId   String?         @map("logo_dark_object_id") @db.Uuid
+  faviconObjectId    String?         @map("favicon_object_id") @db.Uuid
+  backgroundObjectId String?         @map("background_object_id") @db.Uuid
+  applyToConsole     Boolean         @default(false) @map("apply_to_console")
+  provisioned        Boolean         @default(false)
+  provisionedFrom    String?         @map("provisioned_from") @db.VarChar(255)
+  updatedBy          String          @map("updated_by") @db.Uuid
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  client        OAuthClient? @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  logo          Object?      @relation("BrandingLogo", fields: [logoObjectId], references: [id], onDelete: SetNull)
+  logoDark      Object?      @relation("BrandingLogoDark", fields: [logoDarkObjectId], references: [id], onDelete: SetNull)
+  favicon       Object?      @relation("BrandingFavicon", fields: [faviconObjectId], references: [id], onDelete: SetNull)
+  background    Object?      @relation("BrandingBackground", fields: [backgroundObjectId], references: [id], onDelete: SetNull)
+  updatedByUser User         @relation("BrandingProfileUpdater", fields: [updatedBy], references: [id], onDelete: Restrict)
+
+  @@index([logoObjectId])
+  @@index([logoDarkObjectId])
+  @@index([faviconObjectId])
+  @@index([backgroundObjectId])
+  @@map("branding_profiles")
+  @@schema("auth")
+}
+
+// One active grant per (client, user): a partial unique index in the migration.
+model BrandingGrant {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  clientId  String    @map("client_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  grantedBy String    @map("granted_by") @db.Uuid
+  grantedAt DateTime  @default(now()) @map("granted_at")
+  revokedBy String?   @map("revoked_by") @db.Uuid
+  revokedAt DateTime? @map("revoked_at")
+
+  client  OAuthClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user    User        @relation("BrandingGrantUser", fields: [userId], references: [id], onDelete: Restrict)
+  granter User        @relation("BrandingGrantGranter", fields: [grantedBy], references: [id], onDelete: Restrict)
+  revoker User?       @relation("BrandingGrantRevoker", fields: [revokedBy], references: [id], onDelete: Restrict)
+
+  @@index([clientId])
+  @@index([userId])
+  @@map("branding_grants")
   @@schema("auth")
 }

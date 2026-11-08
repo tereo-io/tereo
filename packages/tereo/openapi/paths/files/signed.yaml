@@ -248,6 +248,8 @@
         description: |
           The bucket is retired (`bucket_retired`) and read-only, or a
           concurrent write conflicted (`conflict` / `version_conflict`).
+          The bucket is core's own and read-only through this API
+          (`bucket_managed_by_core`).
         content:
           application/json:
             schema:

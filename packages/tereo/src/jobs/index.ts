@@ -28,6 +28,10 @@ import {
   stopOrphanBlobBackstop,
 } from "./orphanBlobBackstop.js";
 import {
+  startBrandingReconcile,
+  stopBrandingReconcile,
+} from "./brandingReconcile.js";
+import {
   enqueueOrphanBlobCleanup as enqueueOrphanBlobCleanupInternal,
   startOrphanBlobCleanup,
   stopOrphanBlobCleanup,
@@ -57,6 +61,7 @@ export async function startBackgroundJobs(): Promise<void> {
     await startShareSweep();
     await startArchiveSweep();
     await startRegistryRetirement();
+    await startBrandingReconcile();
     await startAuthCleanup();
     await startSsoOnlySessionSweep();
   } catch (err) {
@@ -90,6 +95,7 @@ export async function stopBackgroundJobs(): Promise<void> {
     stopShareSweep(),
     stopArchiveSweep(),
     stopRegistryRetirement(),
+    stopBrandingReconcile(),
     stopAuthCleanup(),
     stopSsoOnlySessionSweep(),
   ]);

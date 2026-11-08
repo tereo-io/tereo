@@ -1,5 +1,6 @@
 import useVerifyRecoveryCode from "../../api/totp/useVerifyRecoveryCode";
-import { AuthPage, Button, Alert, Input, Col } from "@kosmeo-ui/react";
+import { Button, Alert, Input, Col } from "@kosmeo-ui/react";
+import { BrandedAuthPage } from "@/features/auth/branding";
 import { useSearchParams, Link } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { SessionExpired } from "../SessionExpired";
@@ -68,7 +69,7 @@ export const TotpRecoveryPage = () => {
   };
 
   return (
-    <AuthPage
+    <BrandedAuthPage
       title="Recovery Code"
       subtitle="Enter one of your backup recovery codes"
       footer={
@@ -101,6 +102,6 @@ export const TotpRecoveryPage = () => {
           </Col>
         </form>
       </Col>
-    </AuthPage>
+    </BrandedAuthPage>
   );
 };

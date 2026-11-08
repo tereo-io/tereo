@@ -11,6 +11,11 @@ import path from "node:path";
 
 const RESERVED = ["v1", "oauth", ".well-known", "health", "ws", "assets"];
 
+// Keep in step with BRANDED_AUTH_PATHS in packages/tereo/src/utils/ui.ts:
+// core injects branding on these paths only, so each must be a route.
+const BRANDED_AUTH_PATHS = ["/login", "/consent", "/logout", "/set-password"];
+const AUTH_ROUTES = "src/app/routes/auth.tsx";
+
 const uiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const appDir = path.join(uiRoot, "src/app");
 const publicDir = path.join(uiRoot, "public");
@@ -29,6 +34,16 @@ for (const file of readdirSync(appDir, { recursive: true, encoding: "utf8" })) {
     }
   });
 }
+const authRoutes = new Set(
+  [
+    ...readFileSync(path.join(uiRoot, AUTH_ROUTES), "utf8").matchAll(
+      /path:\s*["']([^"']+)["']/g
+    ),
+  ].map((m) => m[1])
+);
+for (const p of BRANDED_AUTH_PATHS) {
+  if (!authRoutes.has(p)) problems.push(`${AUTH_ROUTES}: no route "${p}"`);
+}
 if (existsSync(publicDir)) {
   for (const entry of readdirSync(publicDir)) {
     if (RESERVED.includes(entry)) problems.push(`public/${entry}`);
@@ -37,8 +52,10 @@ if (existsSync(publicDir)) {
 
 if (problems.length) {
   console.error(
-    `check-routes: these sit under a path core reserves (/${RESERVED.join(", /")}):\n  ${problems.join("\n  ")}`
+    `check-routes: routes under a path core reserves (/${RESERVED.join(", /")}), or branded sign-in routes missing:\n  ${problems.join("\n  ")}`
   );
   process.exit(1);
 }
-console.log("check-routes: no route under a reserved prefix");
+console.log(
+  "check-routes: no route under a reserved prefix; every branded sign-in route exists"
+);

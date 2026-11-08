@@ -28,6 +28,11 @@ export interface BucketDefinition {
   description?: string;
   policy: "public" | "private";
   storageQuotaBytes?: number;
+  /**
+   * Core's buckets only: the owning module sets objects' `deleteAfter`
+   * itself, so the reset at start (utils/coreBuckets.ts) leaves it alone.
+   */
+  managesObjectExpiry?: boolean;
 }
 
 export interface EventTypeDefinition {

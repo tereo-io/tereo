@@ -6,6 +6,7 @@ import endSessionRouter from "./end-session/index.js";
 import introspectRouter from "./introspect/index.js";
 import orgSelectRouter from "./org-select/index.js";
 import authorizeRouter from "./authorize/index.js";
+import brandingRouter from "./branding/index.js";
 import userinfoRouter from "./userinfo/index.js";
 import upstreamRouter from "./upstream/index.js";
 import consentRouter from "./consent/index.js";
@@ -27,6 +28,7 @@ router.use(requireAllowedOriginForCookies);
 router.use(noStore);
 
 router.use("/authorize", authorizeRouter);
+router.use("/branding", brandingRouter);
 router.use("/check-permission", checkPermissionRouter);
 router.use("/consent", consentRouter);
 router.use("/end-session", endSessionRouter);

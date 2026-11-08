@@ -3,9 +3,19 @@
 
 export { default as LoginButton } from "./components/login/LoginButton";
 export { OrgSwitcher } from "./components/org-select/OrgSwitcher";
+export { useConsoleBranding } from "./branding/useConsoleBranding";
+export { useStockColors } from "./branding/useStockColors";
 export { RequireAuth } from "./components/RequireAuth";
 export { default as useUpstreamProviders } from "./api/upstream/useUpstreamProviders";
 export { upstreamErrorMessage } from "./api/upstream/upstreamErrors";
 export { isReauthRequired, restartLoginFresh } from "./api/upstream/reauth";
 export { upstreamStartUrl } from "./api/upstream/upstreamUrls";
 export { redirectTo } from "./api/redirectTo";
+export { BRANDING_COLOR_TOKENS } from "./branding/colorTokens";
+export { COLOR_VALUE_MAX, isSafeColorValue } from "./branding/colorValue";
+export type { BrandingFooterLink, EffectiveBranding } from "./branding/types";
+export { BrandingProvider } from "./branding/BrandingProvider";
+export { BrandedAuthPage } from "./branding/BrandedAuthPage";
+export { brandingImageUrl } from "./branding/urls";
+export { LoginFormView } from "./components/login/LoginFormView";
+export { STOCK_COLORS } from "./branding/stockColors";

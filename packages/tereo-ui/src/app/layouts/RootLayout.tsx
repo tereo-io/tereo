@@ -1,5 +1,6 @@
+import { LoginButton, useConsoleBranding } from "@/features/auth";
+import { setDocumentAppName } from "@/hooks/useDocumentTitle";
 import { Centered, Col } from "@kosmeo-ui/react";
-import { LoginButton } from "@/features/auth";
 import { Outlet } from "react-router-dom";
 import { RouteTitle } from "./RouteTitle";
 import { useAuth } from "@/lib/auth";
@@ -8,6 +9,8 @@ import "./RootLayout.css";
 
 export const RootLayout = () => {
   const { user, isLoading } = useAuth();
+  // Set during render so RouteTitle's first effect already uses the branded name.
+  setDocumentAppName(useConsoleBranding().appName);
 
   // AppRouter's overlay covers the wait; the sign-in prompt would flash.
   if (!user && isLoading) return null;

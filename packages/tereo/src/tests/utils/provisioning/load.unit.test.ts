@@ -611,3 +611,165 @@ describe("parseDocuments", () => {
     });
   });
 });
+
+describe("branding", () => {
+  const PNG = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    "base64"
+  );
+  const brandingDoc = (logo: string) =>
+    doc({
+      roles: [{ name: "viewer", displayName: "Viewer", permissions: [] }],
+      branding: {
+        default: { appName: "Acme" },
+        clients: { "acme-web": { headline: "Hi", logo } },
+      },
+    });
+
+  /** A folder holding the documents, inside a parent other files can go in. */
+  const docsFolder = async () => {
+    const parent = await tempDir();
+    const dir = join(parent, "docs");
+    await mkdir(join(dir, "branding"), { recursive: true });
+    return { parent, dir };
+  };
+
+  it("loads a declared image, checked for its slot", async () => {
+    const { dir } = await docsFolder();
+    await writeFile(join(dir, "branding", "logo.png"), PNG);
+    await writeFile(join(dir, "a.json"), brandingDoc("./branding/logo.png"));
+    const set = await loadProvisioningSet(dir, baseEnv());
+    const branding = set?.documents[0].branding;
+    expect(branding?.default).toMatchObject({ appName: "Acme" });
+    expect(branding?.clients["acme-web"]).toMatchObject({ headline: "Hi" });
+    expect(branding?.clients["acme-web"].logo?.sha256).toMatch(
+      /^[0-9a-f]{64}$/
+    );
+    expect(branding?.clients["acme-web"].logo?.ext).toBe("png");
+  });
+
+  it("reads an image through a ConfigMap-style mount", async () => {
+    const { dir } = await docsFolder();
+    await mkdir(join(dir, "..2026_10_16"));
+    await writeFile(join(dir, "..2026_10_16", "logo.png"), PNG);
+    await symlink("..2026_10_16", join(dir, "..data"));
+    await symlink(join("..data", "logo.png"), join(dir, "logo.png"));
+    await writeFile(join(dir, "a.json"), brandingDoc("./logo.png"));
+    const set = await loadProvisioningSet(dir, baseEnv());
+    expect(
+      set?.documents[0].branding?.clients["acme-web"].logo?.sha256
+    ).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("reads a file whose name starts with two dots", async () => {
+    const { dir } = await docsFolder();
+    await writeFile(join(dir, "..logo.png"), PNG);
+    await writeFile(join(dir, "a.json"), brandingDoc("./..logo.png"));
+    const set = await loadProvisioningSet(dir, baseEnv());
+    expect(set?.documents[0].branding?.clients["acme-web"].logo?.ext).toBe(
+      "png"
+    );
+  });
+
+  it("refuses an image over the slot's size limit", async () => {
+    const { dir } = await docsFolder();
+    await writeFile(
+      join(dir, "branding", "logo.png"),
+      Buffer.concat([PNG, Buffer.alloc(600 * 1024)])
+    );
+    await writeFile(join(dir, "a.json"), brandingDoc("./branding/logo.png"));
+    const problems = await problemsOfPath(dir);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(
+      /^a\.json: branding\.clients\[acme-web\]\.logo: The logo image exceeds 512 KB/
+    );
+  });
+
+  it("reports image problems with other documents' problems, in one round", async () => {
+    const { dir } = await docsFolder();
+    await writeFile(join(dir, "a.json"), brandingDoc("./branding/none.png"));
+    await writeFile(join(dir, "b.json"), "{ not json");
+    const problems = await problemsOfPath(dir);
+    expect(problems).toHaveLength(2);
+    expect(problems).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^b\.json: not valid JSON/),
+        expect.stringMatching(/^a\.json: branding\.clients\[acme-web\]\.logo:/),
+      ])
+    );
+  });
+
+  it("refuses an empty branding block", () => {
+    expect(problemsOf({ "a.json": doc({ branding: {} }) })).toEqual([
+      "a.json: branding: needs default or at least one client",
+    ]);
+    expect(
+      problemsOf({ "a.json": doc({ branding: { clients: {} } }) })
+    ).toEqual(["a.json: branding: needs default or at least one client"]);
+  });
+
+  it("refuses a path that leaves the provisioning folder", async () => {
+    const { parent, dir } = await docsFolder();
+    await writeFile(join(parent, "outside.png"), PNG);
+    await writeFile(join(dir, "a.json"), brandingDoc("../outside.png"));
+    const problems = await problemsOfPath(dir);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(
+      'a.json: branding.clients[acme-web].logo: "../outside.png"'
+    );
+  });
+
+  it("refuses a symlink inside the folder that points outside it", async () => {
+    const { parent, dir } = await docsFolder();
+    await writeFile(join(parent, "outside.png"), PNG);
+    await symlink(
+      join(parent, "outside.png"),
+      join(dir, "branding", "logo.png")
+    );
+    await writeFile(join(dir, "a.json"), brandingDoc("./branding/logo.png"));
+    const problems = await problemsOfPath(dir);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(
+      'a.json: branding.clients[acme-web].logo: "./branding/logo.png"'
+    );
+  });
+
+  it("refuses an SVG with a script", async () => {
+    const { dir } = await docsFolder();
+    await writeFile(
+      join(dir, "branding", "logo.svg"),
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+    );
+    await writeFile(join(dir, "a.json"), brandingDoc("./branding/logo.svg"));
+    const problems = await problemsOfPath(dir);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(
+      /^a\.json: branding\.clients\[acme-web\]\.logo: Unsafe SVG/
+    );
+  });
+
+  it("refuses a missing image file", async () => {
+    const { dir } = await docsFolder();
+    await writeFile(join(dir, "a.json"), brandingDoc("./branding/none.png"));
+    const problems = await problemsOfPath(dir);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("branding.clients[acme-web].logo");
+  });
+
+  it("validates the profile's fields as the admin API does", () => {
+    const problems = problemsOf({
+      "a.json": doc({
+        branding: {
+          clients: {
+            "acme-web": {
+              footerLinks: [{ label: "x", url: "http://example.com" }],
+            },
+          },
+        },
+      }),
+    });
+    expect(problems).toEqual([
+      "a.json: branding.clients.acme-web.footerLinks[0].url: must be an https:// URL",
+    ]);
+  });
+});

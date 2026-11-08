@@ -10,16 +10,19 @@ const IDENTITY_PROVIDER_INVALIDATE_CHANNEL = redisKey(
   "auth:identity-provider-invalidate"
 );
 const SIGNING_KEYS_CHANGED_CHANNEL = redisKey("auth:signing-keys-changed");
+const BRANDING_INVALIDATE_CHANNEL = redisKey("auth:branding-invalidate");
 
 let publisher: Redis | null = null;
 let subscriber: Redis | null = null;
 const subscribers: Array<(bucketName: string) => void> = [];
 const identityProviderSubscribers: Array<(id: string) => void> = [];
 const signingKeySubscribers: Array<() => void> = [];
+const brandingSubscribers: Array<() => void> = [];
 const listenersByChannel: Record<string, Array<(message: string) => void>> = {
   [BUCKET_INVALIDATE_CHANNEL]: subscribers,
   [IDENTITY_PROVIDER_INVALIDATE_CHANNEL]: identityProviderSubscribers,
   [SIGNING_KEYS_CHANGED_CHANNEL]: signingKeySubscribers,
+  [BRANDING_INVALIDATE_CHANNEL]: brandingSubscribers,
 };
 
 /**
@@ -136,6 +139,75 @@ export function onSigningKeysChanged(listener: () => void): void {
   signingKeySubscribers.push(listener);
 }
 
+/**
+ * Has every process drop its whole branding cache. One channel and no payload:
+ * branding writes are rare. Fire-and-forget.
+ */
+export async function broadcastBrandingInvalidate(): Promise<void> {
+  try {
+    await getPublisher().publish(BRANDING_INVALIDATE_CHANNEL, "");
+  } catch (err) {
+    logger.warn({ err }, "Failed to broadcast a branding invalidation");
+  }
+}
+
+export function onBrandingInvalidate(listener: () => void): void {
+  brandingSubscribers.push(listener);
+}
+
+/**
+ * Calls `listener` each time `connection` is ready again after losing its
+ * connection, not on its first connect.
+ */
+export function onReconnected(
+  connection: { on(event: "close" | "ready", listener: () => void): unknown },
+  listener: () => void
+): void {
+  let lost = false;
+  connection.on("close", () => {
+    lost = true;
+  });
+  connection.on("ready", () => {
+    if (!lost) return;
+    lost = false;
+    listener();
+  });
+}
+
+/**
+ * Calls `listener` each time `connection` is ready again after losing its
+ * connection, and again once it is subscribed to `channel`: the automatic
+ * resubscribe is acknowledged after `ready`, and a message published in
+ * between is lost.
+ */
+export function onResubscribed(
+  connection: {
+    on(event: "close" | "ready", listener: () => void): unknown;
+    subscribe(channel: string): Promise<unknown>;
+  },
+  channel: string,
+  listener: () => void
+): void {
+  onReconnected(connection, () => {
+    listener();
+    // Commands on one connection are answered in order: this one's reply
+    // follows the automatic resubscribe's.
+    connection.subscribe(channel).then(listener, (err: unknown) => {
+      logger.warn({ err, channel }, "cacheBroadcast resubscribe failed");
+    });
+  });
+}
+
+const deliver = (channel: string, message: string) => {
+  for (const l of listenersByChannel[channel] ?? []) {
+    try {
+      l(message);
+    } catch (err) {
+      logger.warn({ err }, "cacheBroadcast listener threw");
+    }
+  }
+};
+
 /** Safe to call more than once: a no-op until `closeCacheBroadcast`. */
 export async function startCacheSubscriber(): Promise<void> {
   if (subscriber) return;
@@ -146,20 +218,12 @@ export async function startCacheSubscriber(): Promise<void> {
   fresh.on("end", () => {
     if (subscriber === fresh) subscriber = null;
   });
-  fresh.on("message", (channel, message) => {
-    for (const l of listenersByChannel[channel] ?? []) {
-      try {
-        l(message);
-      } catch (err) {
-        logger.warn(
-          {
-            err,
-          },
-          "cacheBroadcast listener threw"
-        );
-      }
-    }
-  });
+  fresh.on("message", deliver);
+  // Messages published while it was away are lost. Branding has no other
+  // signal, so its caches are dropped as if one had arrived.
+  onResubscribed(fresh, BRANDING_INVALIDATE_CHANNEL, () =>
+    deliver(BRANDING_INVALIDATE_CHANNEL, "")
+  );
   await fresh.subscribe(...Object.keys(listenersByChannel));
   subscriber = fresh;
 }

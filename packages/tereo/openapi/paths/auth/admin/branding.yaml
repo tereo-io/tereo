@@ -1,0 +1,454 @@
+# Sign-in page branding (/v1/admin/branding). The path keys carry the /v1 mount.
+
+/v1/admin/branding:
+  get:
+    tags:
+      - Admin - Branding
+    summary: List branding profiles
+    description: |
+      Needs `branding.read`. For a `branding.admin` holder: the default profile and every client's profile,
+      `tereo-ui`'s included. For anyone else: the profiles of clients they own or hold an active grant on
+      (never `tereo-ui`), and `default` is `null`. Clients without a profile are not in `clients`; those the
+      caller may brand are in `brandable`.
+    operationId: listBranding
+    security:
+      - BearerAuth: [branding.read]
+    responses:
+      '200':
+        description: The profiles the caller may read
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/BrandingList'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+
+/v1/admin/branding/default:
+  get:
+    tags:
+      - Admin - Branding
+    summary: Get the default branding profile
+    description: |
+      Needs `branding.admin`. The default profile: what every client inherits wherever its own profile is
+      `null`, and what sign-in pages show for a client with no profile. With no default, `own` is `null` and
+      `effective` is stock Tereo. `inherited` is always `null` here.
+    operationId: getDefaultBranding
+    security:
+      - BearerAuth: [branding.admin]
+    responses:
+      '200':
+        description: The default profile
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/BrandingProfileView'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+  put:
+    tags:
+      - Admin - Branding
+    summary: Replace the default branding profile
+    description: |
+      Replaces the whole profile (created when none exists): an omitted field is `null`, which inherits. Text and
+      colour limits are those of `BrandingProfileRequest`; an image slot is the `sha256` of an image uploaded with
+      `POST /v1/admin/branding/assets`, or `null`. Answers the profile as `GET` does. A provisioned profile is read-only here: `409 managed_by_provisioning`, with `provisionedFrom`, for everyone (`branding.admin` included).
+
+      Stored images the profile no longer references expire after 24 hours unless another profile references
+      them. An audit log entry (with the slots changed) is created and `auth.branding.updated` is emitted.
+
+      Needs `branding.admin`.
+    operationId: putDefaultBranding
+    security:
+      - BearerAuth: [branding.admin]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/BrandingProfileRequest'
+    responses:
+      '200':
+        description: The profile as saved
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/BrandingProfileView'
+      '400':
+        $ref: '../../../components/auth/responses.yaml#/BrandingBadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/BrandingConflictResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+  delete:
+    tags:
+      - Admin - Branding
+    summary: Delete the default branding profile
+    description: |
+      Needs `branding.admin`. Removes the default, so clients without their own values show stock Tereo.
+      `404` when there is none. A provisioned profile is `409 managed_by_provisioning`. An audit log entry is
+      created and `auth.branding.deleted` is emitted.
+    operationId: deleteDefaultBranding
+    security:
+      - BearerAuth: [branding.admin]
+    responses:
+      '204':
+        description: Deleted
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/BrandingConflictResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+
+/v1/admin/branding/clients/{id}:
+  parameters:
+    - $ref: '../../../components/auth/parameters.yaml#/ClientIdParam'
+  get:
+    tags:
+      - Admin - Branding
+    summary: Get a client's branding profile
+    description: |
+      Needs `branding.read` and, on the client, ownership, an active grant or `branding.admin`; `tereo-ui`'s
+      profile is `branding.admin`'s alone. `{id}` is the client's uuid, as in `/v1/admin/clients/{id}`.
+      With no profile, `own` is `null` and `effective` is what the client inherits.
+
+      `own` holds the profile's own values; `effective` the merge over the default profile (field by field,
+      colour variable by colour variable); `inherited` the same without `own`, which a preview uses as its
+      base; `sources` and `colorSources` say where each effective value comes from (`client`, `default` or
+      `tereo`). `canEdit` is false for a provisioned profile or a caller who may only read; `canManageGrants`
+      is true for the owner and `branding.admin` holding `branding.write`, and `canViewGrants` (listing only)
+      for the owner and `branding.admin`; neither for `tereo-ui`.
+    operationId: getClientBranding
+    security:
+      - BearerAuth: [branding.read]
+    responses:
+      '200':
+        description: The profile
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/BrandingProfileView'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+  put:
+    tags:
+      - Admin - Branding
+    summary: Replace a client's branding profile
+    description: |
+      Replaces the whole profile (created when none exists): an omitted field is `null`, which inherits. Text and
+      colour limits are those of `BrandingProfileRequest`; an image slot is the `sha256` of an image uploaded with
+      `POST /v1/admin/branding/assets`, or `null`. Answers the profile as `GET` does. A provisioned profile is read-only here: `409 managed_by_provisioning`, with `provisionedFrom`, for everyone (`branding.admin` included).
+
+      Stored images the profile no longer references expire after 24 hours unless another profile references
+      them. An audit log entry (with the slots changed) is created and `auth.branding.updated` is emitted.
+
+
+      Needs `branding.write` and, on the client, ownership, an active grant or `branding.admin`; `tereo-ui`'s
+      profile is `branding.admin`'s alone. `applyToConsole` is honoured only on the profile that applies to
+      `tereo-ui`.
+    operationId: putClientBranding
+    security:
+      - BearerAuth: [branding.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/BrandingProfileRequest'
+    responses:
+      '200':
+        description: The profile as saved
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/BrandingProfileView'
+      '400':
+        $ref: '../../../components/auth/responses.yaml#/BrandingBadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/BrandingConflictResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+  delete:
+    tags:
+      - Admin - Branding
+    summary: Delete a client's branding profile
+    description: |
+      Needs `branding.write` and the same standing on the client as `PUT`. The client then inherits the
+      default. `404` when the client or its profile does not exist. A provisioned profile is
+      `409 managed_by_provisioning`. An audit log entry is created and `auth.branding.deleted` is emitted.
+    operationId: deleteClientBranding
+    security:
+      - BearerAuth: [branding.write]
+    responses:
+      '204':
+        description: Deleted
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/BrandingConflictResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+
+/v1/admin/branding/clients/{id}/grants:
+  parameters:
+    - $ref: '../../../components/auth/parameters.yaml#/ClientIdParam'
+  get:
+    tags:
+      - Admin - Branding
+    summary: List a client's branding grants
+    description: |
+      Needs `branding.read`, and the caller must own the client or hold `branding.admin`. Lists the active
+      grants: users who may edit this client's branding and nothing else about it. A grantee cannot list or
+      change grants. `tereo-ui` takes no grants: `403` for everyone, `branding.admin` included.
+    operationId: listBrandingGrants
+    security:
+      - BearerAuth: [branding.read]
+    responses:
+      '200':
+        description: Active grants
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/BrandingGrantList'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+  post:
+    tags:
+      - Admin - Branding
+    summary: Grant a user branding rights on a client
+    description: |
+      Needs `branding.write`, and the caller must own the client or hold `branding.admin`. `tereo-ui` takes no
+      grants (`403`). The grantee needs `branding.write` themselves to use it. A deactivated user is
+      `400 user_inactive`; an unknown user `404`; a user who already holds an active grant `409 conflict`.
+      An audit log entry is created and `auth.branding.grant-added` is emitted (webhook subscribers need `branding.admin` to read it).
+    operationId: addBrandingGrant
+    security:
+      - BearerAuth: [branding.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/BrandingAddGrantRequest'
+    responses:
+      '201':
+        description: Granted
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/BrandingAddGrantResponse'
+      '400':
+        $ref: '../../../components/auth/responses.yaml#/BrandingBadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/BrandingConflictResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+
+/v1/admin/branding/clients/{id}/grants/{userId}:
+  parameters:
+    - $ref: '../../../components/auth/parameters.yaml#/ClientIdParam'
+    - $ref: '../../../components/auth/parameters.yaml#/BrandingGrantUserIdParam'
+  delete:
+    tags:
+      - Admin - Branding
+    summary: Revoke a user's branding grant
+    description: |
+      Needs `branding.write`, and the caller must own the client or hold `branding.admin`. Ends the grant
+      (recording who and when). `404` when the user holds no active grant. An audit log entry is created and
+      `auth.branding.grant-revoked` is emitted (webhook subscribers need `branding.admin` to read it).
+    operationId: revokeBrandingGrant
+    security:
+      - BearerAuth: [branding.write]
+    responses:
+      '204':
+        description: Revoked
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+
+/v1/admin/branding/assets:
+  post:
+    tags:
+      - Admin - Branding
+    summary: Upload a branding image
+    description: |
+      Needs `branding.write` and the right to edit at least one profile: `branding.admin`, or owner of (or
+      active grantee on) a client other than the console client; otherwise `403`. Stores one image for a slot and answers its `sha256`, which a profile then
+      references. The image belongs to no profile until one the caller may edit references it; an
+      unreferenced image is deleted after 24 hours. Uploading the same bytes again reuses the stored image.
+
+      | Slot | Types | Limit |
+      |---|---|---|
+      | `logo`, `logoDark` | PNG, WebP, JPEG, SVG | `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB) |
+      | `favicon` | PNG, SVG, ICO | `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB) |
+      | `background` | PNG, WebP, JPEG | `BRANDING_BACKGROUND_MAX_SIZE_MB` (5 MB) |
+
+      The type is detected from the bytes, not the file name or header. An SVG outside the allowlist
+      (a fixed element set; no style, script or foreignObject elements, event attributes, external
+      references, `data:` or `javascript:`) is rejected, never rewritten, so what is stored is what was
+      uploaded: `400 invalid_branding_image`. No file is
+      `400 file_upload_required`; more than one file or an unexpected field is `400 invalid_request`; over the
+      slot's limit is `413 payload_too_large`.
+    operationId: uploadBrandingAsset
+    security:
+      - BearerAuth: [branding.write]
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - slot
+              - file
+            properties:
+              slot:
+                type: string
+                enum: [logo, logoDark, favicon, background]
+                description: The slot the image is for; it sets the allowed types and size limit. Send it before `file`.
+              file:
+                type: string
+                format: binary
+    responses:
+      '201':
+        description: Image stored
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/BrandingAssetUploadResponse'
+      '400':
+        $ref: '../../../components/auth/responses.yaml#/BrandingBadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '413':
+        $ref: '../../../components/auth/responses.yaml#/BrandingPayloadTooLargeResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'

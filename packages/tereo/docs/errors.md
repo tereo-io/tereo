@@ -43,6 +43,7 @@ One condition, one code, in every area:
 | 409    | `not_archived`                                           | Restore of a resource that is not archived                                                                                                                                                            |
 | 409    | `idempotency_request_in_progress`                        | A request with the same idempotency key is still running                                                                                                                                              |
 | 413    | `payload_too_large`                                      | Body or upload over the limit                                                                                                                                                                         |
+| 414    | `uri_too_long`                                           | The URL's path is over 8 KiB. See [configuration.md](configuration.md#http-limits)                                                                                                                    |
 | 422    | `idempotency_key_conflict`                               | An idempotency key reused with a different request                                                                                                                                                    |
 | 429    | `too_many_requests`                                      | Rate limited; see below                                                                                                                                                                               |
 | 500    | `server_error`                                           | Unexpected failure                                                                                                                                                                                    |
@@ -80,9 +81,12 @@ limits add `X-RateLimit-*` headers.
 ## Specific codes
 
 An area keeps its own code where a client plausibly branches on it, e.g. `user_not_in_organization`,
-`masked_header_value`, `bucket_declared` / `bucket_retired`, `managed_by_provisioning` (409: a
-service or login client declared in the provisioning file), `role_assigned_in_org`,
-`blocked_file_type`, `invalid_event_type`, `reserved_event_type`. Pass it to the class
+`masked_header_value`, `bucket_declared` / `bucket_retired` / `bucket_managed_by_core` (409: a
+write through the files API to a bucket core declares for itself, other than an admin's version purge), `managed_by_provisioning` (409: a
+service, login client or branding profile declared in the provisioning file; branding adds
+`provisionedFrom`), `role_assigned_in_org`,
+`blocked_file_type`, `invalid_event_type`, `reserved_event_type`, and for branding
+`invalid_branding_image`, `unknown_branding_image` and `user_inactive`. Pass it to the class
 (`ConflictError(message, "bucket_retired")`, `BadRequestError(code, message)`) rather than
 building an `AppError` by status.
 

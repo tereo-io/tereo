@@ -74,6 +74,12 @@ part `PUT`, a presigned `PUT` and `POST /v1/account/photo` — get 10 minutes in
 `requestTimeout`). Request headers must arrive within 66 seconds and fit in 200 KiB, and an idle
 keep-alive connection is closed after 65 seconds. `HTTP_MAX_CONNECTIONS` caps open connections.
 
+A request whose path is over 8 KiB (bytes as sent, so percent-encoding counts) gets
+`414 uri_too_long` before anything else reads it. Every route's longest legal path fits: a
+500-character audit entity id or a 1024-character object key fully percent-encoded. The query
+string is not limited separately — long list filters and `/oauth/authorize` parameters are legal —
+so only the 200 KiB header limit bounds it.
+
 These bound what one slow client can hold, not a flood of them: run core behind a reverse proxy or
 load balancer that buffers requests (and, ideally, limits connections per client) rather than
 exposing it directly.
@@ -234,6 +240,8 @@ env (no overlap).
 | `TOTP_VERIFICATION_TTL` | `300` | Seconds, 1–3600 |
 | `TOTP_SETUP_TTL` | `600` | Seconds, 1–3600 |
 | `PROFILE_PHOTO_MAX_SIZE_MB` | `5` | Above 0, at most 100 |
+| `BRANDING_IMAGE_MAX_SIZE_KB` | `512` | 1–10240. Largest logo, dark logo or favicon, in KB ([branding](branding.md)) |
+| `BRANDING_BACKGROUND_MAX_SIZE_MB` | `5` | 1–50. Largest sign-in background image, in MB |
 | `OIDC_ALLOW_PRIVATE_ISSUERS` | `false` | Lets an identity provider's issuer be private, loopback or plain `http` — tests and local development only. **Refused in production** |
 
 ### App services

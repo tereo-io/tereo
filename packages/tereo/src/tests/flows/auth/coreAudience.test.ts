@@ -325,6 +325,9 @@ describe("a third-party token with core scopes", () => {
       canRead: true,
       canWrite: false,
       canDelete: false,
+      canRevokeShares: false,
+      canPurgeVersions: false,
+      coreManaged: false,
     });
 
     // The full token still reports the creator's grant.
@@ -333,6 +336,9 @@ describe("a third-party token with core scopes", () => {
       canRead: true,
       canWrite: true,
       canDelete: true,
+      canRevokeShares: true,
+      canPurgeVersions: true,
+      coreManaged: false,
     });
   });
 

@@ -27,4 +27,5 @@ export const mockAuthModule = () => ({
     organizations: authMock.organizations,
   }),
   useAxios: () => authMock.axios,
+  usePublicAxios: () => ({ get: vi.fn() }),
 });

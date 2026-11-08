@@ -1,3 +1,4 @@
+import { trimTrailing } from "./strings.js";
 import { fileURLToPath } from "url";
 
 // Paths core keeps for itself; the admin UI, served at the root, owns
@@ -19,6 +20,22 @@ export const isReservedPath = (path: string): boolean => {
   return RESERVED_PREFIXES.some(
     (prefix) => lower === prefix || lower.startsWith(`${prefix}/`)
   );
+};
+
+// The UI's sign-in routes, which core serves with the client's branding
+// injected; `/login/*` is branded too. The UI's `check` script fails when one
+// of these is not a route.
+export const BRANDED_AUTH_PATHS: readonly string[] = [
+  "/login",
+  "/consent",
+  "/logout",
+  "/set-password",
+];
+
+// Lowercased and without a trailing slash, as the UI's router matches them.
+export const isBrandedAuthPath = (path: string): boolean => {
+  const lower = trimTrailing(path.toLowerCase(), "/");
+  return BRANDED_AUTH_PATHS.includes(lower) || lower.startsWith("/login/");
 };
 
 // The UI's build output beside core in the monorepo, which is also where the

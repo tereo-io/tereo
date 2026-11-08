@@ -1,0 +1,110 @@
+# Public sign-in page branding (/oauth/branding). The path keys carry the full URL.
+
+/oauth/branding:
+  get:
+    tags:
+      - OAuth2/OIDC - Branding
+    summary: Get a sign-in page's branding
+    description: |
+      The branding of a client's sign-in pages: the same value core injects into those pages as the
+      `#tereo-branding` block, for a page served without it (the Vite dev server, or a UI hosted apart
+      from core). Public, with no credentials.
+
+      Answers `null` when nothing is branded: the client has no profile and there is no default. Otherwise
+      `EffectiveBranding` with `scope: "auth"`: the client's profile over the default, field by field and
+      colour variable by colour variable, with images as same-origin asset URLs. `client_id` is the OAuth
+      `client_id` string; a missing, malformed or unknown one counts as no client and gets the default's
+      branding, so this route never reveals which client ids exist and never answers `404`.
+    operationId: getBranding
+    security: []
+    parameters:
+      - name: client_id
+        in: query
+        required: false
+        schema:
+          type: string
+        description: The OAuth `client_id` of the app the user is signing in to
+    responses:
+      '200':
+        description: The branding, or `null` when nothing is branded
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '../../components/auth/schemas.yaml#/PublicBranding'
+                - type: 'null'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+
+/oauth/branding/assets/{file}:
+  get:
+    tags:
+      - OAuth2/OIDC - Branding
+    summary: Get a branding image
+    description: |
+      A stored branding image, by `<sha256>.<ext>` (`ext` one of `png`, `jpg`, `webp`, `svg`, `ico`).
+      Public. `404` when no live image has that name or the name is not of that form.
+
+      Content-addressed, so it is served `Cache-Control: public, max-age=31536000, immutable` with
+      `X-Content-Type-Options: nosniff` and `Cross-Origin-Resource-Policy: cross-origin` (a UI on another
+      origin loads them); the type comes from the extension. An SVG also carries
+      `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'`, so one opened
+      directly runs nothing. An image a profile replaced stays available for 24 hours, for pages
+      already rendered with it.
+    operationId: getBrandingAsset
+    security: []
+    parameters:
+      - name: file
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[0-9a-f]{64}\.(png|jpg|webp|svg|ico)$'
+    responses:
+      '200':
+        description: The image
+        headers:
+          Cache-Control:
+            schema:
+              type: string
+            description: '`public, max-age=31536000, immutable`'
+          X-Content-Type-Options:
+            schema:
+              type: string
+            description: '`nosniff`'
+          Cross-Origin-Resource-Policy:
+            schema:
+              type: string
+            description: '`cross-origin`'
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+          image/webp:
+            schema:
+              type: string
+              format: binary
+          image/svg+xml:
+            schema:
+              type: string
+              format: binary
+          image/x-icon:
+            schema:
+              type: string
+              format: binary
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'

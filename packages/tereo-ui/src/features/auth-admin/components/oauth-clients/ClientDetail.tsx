@@ -9,7 +9,7 @@ import useDocumentTitle from "@/hooks/useDocumentTitle";
 import { CORE_LOGIN_CLIENT_ID } from "../../constants";
 import { PageHeader } from "@/components/PageHeader";
 import { formatDateTime } from "@/utils/formatDate";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import "./styles.css";
 import {
@@ -59,8 +59,18 @@ export const ClientDetail = () => {
         title={client.name}
         subtitle={`${client.clientType} client`}
         badges={client.provisioned ? <ProvisionedBadge /> : undefined}
-        actions={
-          client.service || client.provisioned || !canManage
+        actions={[
+          ...(hasPermission("branding.read")
+            ? [
+                <Link
+                  key="branding"
+                  to={`/auth-admin/branding/clients/${client.id}`}
+                >
+                  Branding
+                </Link>,
+              ]
+            : []),
+          ...(client.service || client.provisioned || !canManage
             ? []
             : [
                 ...(hasPermission("clients.write")
@@ -75,8 +85,8 @@ export const ClientDetail = () => {
                 ...(hasPermission("clients.delete")
                   ? [<DeleteClientButton key="delete" client={client} />]
                   : []),
-              ]
-        }
+              ]),
+        ]}
       />
       <Row>
         <Col>

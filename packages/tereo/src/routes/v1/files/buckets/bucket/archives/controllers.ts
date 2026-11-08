@@ -2,6 +2,7 @@ import { getAccessibleBucket } from "../../../../../../utils/bucketAccess.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { BadRequestError } from "../../../../../../utils/errors.js";
+import { trimTrailing } from "../../../../../../utils/strings.js";
 import { logAuditTx } from "../../../../../../utils/outbox.js";
 import { createArchiveBodySchema } from "./schemas.js";
 import db from "../../../../../../utils/db/index.js";
@@ -153,7 +154,7 @@ export const createArchive = async (req: Request, res: Response) => {
 
 function deriveFilename(prefix: string | undefined, format: string): string {
   if (!prefix) return `${ARCHIVE_FILENAME_FALLBACK}.${format}`;
-  const trimmed = prefix.replace(/\/+$/, "");
+  const trimmed = trimTrailing(prefix, "/");
   const last = trimmed.split("/").filter(Boolean).pop();
   return `${last ?? ARCHIVE_FILENAME_FALLBACK}.${format}`;
 }

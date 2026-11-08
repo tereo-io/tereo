@@ -238,7 +238,7 @@
         description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`bucket_declared` - the description of a declared bucket is set by its service; `version_conflict` - concurrent update'
+        description: '`bucket_declared` - the description of a declared bucket is set by its service; `version_conflict` - concurrent update; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -282,7 +282,7 @@
         description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket. Also the answer to the loser of two deletes racing
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`bucket_declared` - a bucket its active service still declares cannot be deleted'
+        description: '`bucket_declared` - a bucket its active service still declares cannot be deleted; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -352,7 +352,7 @@
         description: Bucket not found
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`bucket_declared` - a declared bucket belongs to its service'
+        description: '`bucket_declared` - a declared bucket belongs to its service; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -374,7 +374,12 @@
       public bucket. Every field is a boolean. Being the bucket's creator or owner adds nothing: their access is
       their grant, and is gone once revoked. `canWrite` is
       `false` for everyone, admins included, on a retired bucket, which is
-      read-only.
+      read-only. On a bucket core declares for itself (`auth-service-user-photos`,
+      `auth-service-branding`) `canWrite` and `canDelete` are both `false` for
+      everyone: core alone writes it. `coreManaged` says so,
+      `canRevokeShares` keeps the delete access revoking another's share takes,
+      and `canPurgeVersions` stays `true` for an admin, who may purge its
+      non-current versions.
 
       A missing bucket, one of another organization, and a private bucket the
       caller holds no active grant on are all refused with the same `403`, so

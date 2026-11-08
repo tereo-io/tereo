@@ -57,6 +57,12 @@ export interface Bucket {
   missingSince: string | null;
   /** Set once the declaring service stops declaring it: read-only. */
   retiredAt: string | null;
+  /**
+   * Core's own bucket: nothing is written, shared, granted or reconfigured
+   * through the files API (`409 bucket_managed_by_core`); revoking grants and
+   * shares still works.
+   */
+  coreManaged: boolean;
 }
 
 export interface CreateBucketInput {
@@ -80,6 +86,11 @@ export interface BucketPermissions {
   canRead: boolean;
   canWrite: boolean;
   canDelete: boolean;
+  /** Revoking a share someone else created; unlike `canDelete`, kept on a core bucket. */
+  canRevokeShares: boolean;
+  /** Purging non-current versions; on a core bucket, `file-service.admin` only. */
+  canPurgeVersions: boolean;
+  coreManaged: boolean;
 }
 
 export interface LifecyclePolicy {

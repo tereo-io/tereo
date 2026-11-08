@@ -87,6 +87,12 @@ export interface Bucket {
   missingSince: string | null;
   /** Set once a declared bucket is retired; it is then read-only. */
   retiredAt: string | null;
+  /**
+   * Whether core declares the bucket for itself. Through the files API it is
+   * read-only (`409 bucket_managed_by_core`): reads and revoking grants and
+   * shares go on, and a `file-service.admin` holder may purge old versions.
+   */
+  coreManaged: boolean;
   /** ISO timestamp of bucket creation. */
   createdAt: string;
   /** ISO timestamp of last bucket update. */
@@ -140,9 +146,16 @@ export interface UpdateBucketInput {
  * `true`; anyone else their own grant's flags, plus `canRead` on a public
  * bucket. A missing bucket, another organization's, or a private one the
  * caller holds no grant on is the same 403, so it can't confirm a name exists.
+ * On a core-managed bucket `canWrite` and `canDelete` are `false` for everyone.
  */
 export interface MyBucketPermissions {
   canRead: boolean;
   canWrite: boolean;
   canDelete: boolean;
+  /** Revoking a share someone else created; unlike `canDelete`, kept on a core bucket. */
+  canRevokeShares: boolean;
+  /** Purging non-current versions; on a core bucket, `file-service.admin` only. */
+  canPurgeVersions: boolean;
+  /** Whether core declares the bucket for itself; see `Bucket.coreManaged`. */
+  coreManaged: boolean;
 }

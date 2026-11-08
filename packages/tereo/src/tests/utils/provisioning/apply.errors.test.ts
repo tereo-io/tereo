@@ -3,6 +3,7 @@
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
 import { type CustomRoleEntry } from "../../../utils/provisioning/schema.js";
 import { applyProvisioning } from "../../../utils/provisioning/index.js";
+import { BrandingFieldsSchema } from "../../../utils/branding/schema.js";
 import { clientCredentialsToken } from "../../support/clientToken.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateClientSecret } from "../../../utils/crypto.js";
@@ -499,6 +500,31 @@ describe("applyProvisioning", () => {
       const problems = await problemsOf(d);
       expect(problems).toEqual([
         `${d.file}: services[${d.service.slug}]: webhooks[org-events]: no organization with id ${missing}`,
+      ]);
+    });
+
+    it("reports a branding problem with the set's other problems in one run", async () => {
+      const missing = "00000000-0000-7000-8000-00000000dead";
+      const d = subscriber(webhook({ organizations: [missing] }));
+      const set = setOf(d);
+      set.documents.push({
+        file: "branding.json",
+        version: "1.0.0",
+        service: null,
+        clients: [],
+        roles: [],
+        branding: {
+          default: null,
+          clients: {
+            "no-such-client": BrandingFieldsSchema.parse({ appName: "X" }),
+          },
+        },
+      });
+      const err = await applyProvisioning(set).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ProvisioningError);
+      expect((err as ProvisioningError).problems).toEqual([
+        `${d.file}: services[${d.service.slug}]: webhooks[org-events]: no organization with id ${missing}`,
+        `branding.json: branding.clients[no-such-client]: no client "no-such-client" in the provisioning set or the database`,
       ]);
     });
   });

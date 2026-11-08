@@ -318,6 +318,15 @@ info:
     domain. Auth operations state their permission as the scope on `BearerAuth`; files, webhooks
     and audit operations list it in their description.
 
+    ### Branding
+
+    - `branding.read` / `branding.write` / `branding.admin` - Sign-in page branding. Global only
+      (no organization holds them). `read` and `write` also need standing on the client: its owner,
+      a user granted branding rights on it, or a `branding.admin` holder. The default profile,
+      `tereo-ui`'s profile and uploads that reference them are `branding.admin`'s alone, and only the
+      owner or `branding.admin` manages a client's grants (`tereo-ui` takes none). A provisioned
+      profile is read-only for everyone (`409 managed_by_provisioning`)
+
     ### Files
 
     - `file-service.buckets.read` / `.write` / `.delete` / `.admin` - Buckets
@@ -617,6 +626,8 @@ info:
       urlencoded form) is `400 invalid_request` on every route
     - `payload_too_large` - A JSON or form body over the body parser's limit (`413`, every route):
       10 MB under `/v1/files`, `/v1/webhooks` and `/v1/audit`, 10 KB for the auth routes
+    - `uri_too_long` - The URL's path (not its query string) is over 8 KiB, in bytes as sent
+      (`414`, every route)
     - `invalid_token` / `unauthorized` - Missing, invalid, expired or revoked access token, a
       token whose session was revoked, rotated or superseded or whose client was deleted, or an
       inactive user (`401`)
@@ -624,6 +635,8 @@ info:
     - `not_found` - The resource in the URL does not exist, or is hidden from the caller (`404`)
     - `unknown_user` / `unknown_organization` - An id in the request body names no user /
       organization (`400`)
+    - `managed_by_provisioning` - The row is declared in a provisioning document and read-only
+      through the admin API (`409`; branding profiles add `provisionedFrom`, the document's file)
     - `conflict` - Resource already exists, is in use, or is in a conflicting state (`409`)
     - `resource_archived` - The resource is archived and read-only; restore it first (`409`)
     - `already_archived` - Archiving a resource that is already archived (`409`)
@@ -643,6 +656,7 @@ info:
     Files adds:
     - `idempotency_key_required` / `invalid_expiration` - Operation-specific `400` codes
     - `bucket_declared` / `bucket_retired` - The bucket is owned by a service's declaration / is read-only (`409`)
+    - `bucket_managed_by_core` - The bucket is core's own (profile photos, branding images): read-only through the files API, for everyone (`409`)
     - `version_conflict` - Concurrent update; re-read and retry (`409`)
     - `precondition_failed` - `If-Match` / `If-None-Match` not satisfied (`412`)
     - `payload_too_large` - Upload over the size limit (`413`)
@@ -710,6 +724,12 @@ info:
     - `file-service.admin` may manage any bucket; a bucket a service declared cannot be deleted
     - A retired bucket (its service no longer declares it) is read-only: writes
       return `409 bucket_retired`
+    - A bucket core declares for itself (`auth-service-user-photos`,
+      `auth-service-branding`) is written only by core: through this API every
+      write, delete, share creation or edit, grant, owner transfer, lifecycle
+      change and bucket update or delete returns `409 bucket_managed_by_core`,
+      `file-service.admin` included. Reads, and revoking grants and shares,
+      work as on any bucket
 
     ### Storage and Limits
 
@@ -879,6 +899,10 @@ tags:
     description: Admin endpoints for app services — credentials, activation and access approval
   - name: Admin - Integrations
     description: Admin endpoints for integrations — machine clients for external parties, org-bound or platform, with their roles and audiences
+  - name: Admin - Branding
+    description: Admin endpoints for sign-in page branding — the default profile, per-client profiles, edit grants and image uploads
+  - name: OAuth2/OIDC - Branding
+    description: Public branding of the sign-in pages — the fallback fetch and the stored images
   - name: Setup
     description: First-boot setup — create the first admin (public; authorized by the setup token)
   - name: Health
@@ -985,6 +1009,8 @@ x-tagGroups:
       - Admin - Settings
       - Admin - Services
       - Admin - Integrations
+      - Admin - Branding
+      - OAuth2/OIDC - Branding
 
   - name: Files
     tags:
@@ -1029,6 +1055,10 @@ paths:
     $ref: './paths/auth/well-known.yaml#/~1.well-known~1openid-configuration'
   /.well-known/jwks.json:
     $ref: './paths/auth/well-known.yaml#/~1.well-known~1jwks.json'
+  /oauth/branding:
+    $ref: './paths/auth/oauth-branding.yaml#/~1oauth~1branding'
+  /oauth/branding/assets/{file}:
+    $ref: './paths/auth/oauth-branding.yaml#/~1oauth~1branding~1assets~1{file}'
   /oauth/authorize:
     $ref: './paths/auth/oauth.yaml#/~1oauth~1authorize'
   /oauth/upstream/providers:
@@ -1199,6 +1229,18 @@ paths:
     $ref: './paths/auth/admin/integrations.yaml#/~1admin~1integrations~1{id}~1roles'
   /v1/admin/integrations/{id}/audiences:
     $ref: './paths/auth/admin/integrations.yaml#/~1admin~1integrations~1{id}~1audiences'
+  /v1/admin/branding:
+    $ref: './paths/auth/admin/branding.yaml#/~1v1~1admin~1branding'
+  /v1/admin/branding/default:
+    $ref: './paths/auth/admin/branding.yaml#/~1v1~1admin~1branding~1default'
+  /v1/admin/branding/clients/{id}:
+    $ref: './paths/auth/admin/branding.yaml#/~1v1~1admin~1branding~1clients~1{id}'
+  /v1/admin/branding/clients/{id}/grants:
+    $ref: './paths/auth/admin/branding.yaml#/~1v1~1admin~1branding~1clients~1{id}~1grants'
+  /v1/admin/branding/clients/{id}/grants/{userId}:
+    $ref: './paths/auth/admin/branding.yaml#/~1v1~1admin~1branding~1clients~1{id}~1grants~1{userId}'
+  /v1/admin/branding/assets:
+    $ref: './paths/auth/admin/branding.yaml#/~1v1~1admin~1branding~1assets'
   /v1/admin/services:
     $ref: './paths/auth/admin/services.yaml#/~1admin~1services'
   /v1/admin/services/access:

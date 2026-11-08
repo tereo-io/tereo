@@ -10,4 +10,12 @@ export const BUCKETS: BucketDefinition[] = [
       "User profile photos. Written only by the auth module; read through short-lived presigned URLs it mints.",
     policy: "private",
   },
+  {
+    bucketName: "auth-service-branding",
+    description:
+      "Sign-in page branding images. Written only by the branding module; served by /oauth/branding/assets.",
+    policy: "private",
+    // Released images wait out a grace period in `deleteAfter`.
+    managesObjectExpiry: true,
+  },
 ];

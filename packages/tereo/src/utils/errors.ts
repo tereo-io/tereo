@@ -95,11 +95,27 @@ export class ConflictError extends AppError {
   }
 }
 
+/**
+ * A bucket core declares for itself is written only by core's own modules;
+ * through the files API it is read-only.
+ */
+export class BucketManagedByCoreError extends AppError {
+  constructor(bucketName: string) {
+    super(
+      409,
+      "bucket_managed_by_core",
+      `Bucket "${bucketName}" is managed by core: it is read-only through the files API`
+    );
+    this.name = "BucketManagedByCoreError";
+  }
+}
+
 export class ManagedByProvisioningError extends AppError {
   constructor(
-    message = "Managed by the provisioning file; change it there and restart core"
+    message = "Managed by the provisioning file; change it there and restart core",
+    options: AppErrorOptions = {}
   ) {
-    super(409, "managed_by_provisioning", message);
+    super(409, "managed_by_provisioning", message, options);
     this.name = "ManagedByProvisioningError";
   }
 }
@@ -500,6 +516,13 @@ export class InsufficientStorageError extends AppError {
   constructor(message: string) {
     super(507, "insufficient_storage", message);
     this.name = "InsufficientStorageError";
+  }
+}
+
+export class UriTooLongError extends AppError {
+  constructor(message = "Request URL too long") {
+    super(414, "uri_too_long", message);
+    this.name = "UriTooLongError";
   }
 }
 

@@ -9,9 +9,11 @@ import * as bucketPermissions from "./bucketPermissions.js";
 import * as lifecyclePolicies from "./lifecyclePolicies.js";
 import * as webhookDeliveries from "./webhookDeliveries.js";
 import * as identityProviders from "./identityProviders.js";
+import * as brandingProfiles from "./brandingProfiles.js";
 import * as multipartUploads from "./multipartUploads.js";
 import * as webhookEndpoints from "./webhookEndpoints.js";
 import * as auditLogEntries from "./auditLogEntries.js";
+import * as brandingGrants from "./brandingGrants.js";
 import * as objectVersions from "./objectVersions.js";
 import * as userIdentities from "./userIdentities.js";
 import * as notifications from "./notifications.js";
@@ -52,6 +54,8 @@ export default {
   // auth
   accessTokens,
   authorizationCode,
+  brandingGrants,
+  brandingProfiles,
   clients,
   consent,
   identityProviders,

@@ -4,6 +4,8 @@ import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
 import { broadcastBucketInvalidate } from "../cacheBroadcast.js";
 import { formatClient, formatRole } from "../transformers.js";
 import { syncProvisionedAccessTx } from "../serviceAccess.js";
+import { invalidateBranding } from "../branding/resolve.js";
+import { invalidateAfterWrite } from "../branding/write.js";
 import { setRateLimitTx } from "../rateLimitOverride.js";
 import { openSigningSecret } from "../webhookSecrets.js";
 import { prisma, type Prisma } from "../db/prisma.js";
@@ -23,6 +25,11 @@ import {
   emitEndpointEventTx,
   redactWebhookUrl,
 } from "../webhookEndpointEvents.js";
+import {
+  applyBranding,
+  brandingClientProblems,
+  storeProvisionedImages,
+} from "./brandingApply.js";
 import {
   createIntegrationTx,
   emitIntegration,
@@ -84,6 +91,8 @@ export interface ProvisioningResult {
   access: string[];
   /** Custom roles created or changed. */
   roles: string[];
+  /** Branding profiles (`default` or a client id) written or handed back. */
+  branding: string[];
 }
 
 /** An entry with the document it came from. */
@@ -1610,6 +1619,18 @@ export const applyProvisioning = async (
   const invalid = validateSet(set);
   if (invalid.length > 0) throw new ProvisioningError(invalid);
   const p = entriesOf(set);
+  // Checked before images are stored, so a refused set stores none. Refused,
+  // it is reported with the problems the transaction would find, which do not
+  // depend on branding.
+  const brandingProblems = await brandingClientProblems(prisma, set);
+  if (brandingProblems.length > 0)
+    throw new ProvisioningError([
+      ...(await findProblems(prisma, p, await loadState(prisma, p))),
+      ...brandingProblems,
+    ]);
+  // A dry run stores them too; ones nothing references expire after the
+  // grace period.
+  const brandingImages = await storeProvisionedImages(set);
 
   let applied;
   try {
@@ -1636,6 +1657,7 @@ export const applyProvisioning = async (
           declared: [],
           access: [],
           roles: [],
+          branding: [],
         };
         for (const entry of p.services)
           await applyService(tx, entry, state, now, result);
@@ -1656,6 +1678,7 @@ export const applyProvisioning = async (
         await applyWebhooks(tx, p, now, result);
         for (const entry of p.clients)
           await applyClient(tx, entry, state, now, result);
+        await applyBranding(tx, set, brandingImages, result);
         await markMissing(tx, p, now, result);
         // A dry run computed the result against the real rows; roll it back.
         if (options.dryRun) throw new DryRunRollback(result);
@@ -1699,6 +1722,8 @@ export const applyProvisioning = async (
     );
   for (const name of new Set(bucketNames))
     await broadcastBucketInvalidate(name);
+  if (result.branding.length > 0)
+    await after("invalidating branding", invalidateBranding);
   return result;
 };
 
@@ -1794,6 +1819,13 @@ export const deprovisionMissing = async (
       const dueClients = await tx.oAuthClient.findMany({
         where: { ...stale, service: { is: null } },
       });
+      // Each delete holds its client's images to commit, so every profile
+      // lock comes first: an admin save of a later client, holding that
+      // lock and waiting on images, would deadlock with the loop.
+      await db.brandingProfiles.lockManyForWrite(
+        dueClients.map((c) => c.id),
+        tx
+      );
       const jtis: string[] = [];
       for (const client of dueClients)
         jtis.push(...(await deleteLoginClientTx(tx, client, SYSTEM_ACTOR)));
@@ -1839,6 +1871,8 @@ export const deprovisionMissing = async (
   for (const id of serviceClientIds) await revokeServiceTokens(id);
   for (const name of missingBuckets) await broadcastBucketInvalidate(name);
   disconnectTokenSockets(jtis);
+  // Deleted clients took their profiles with them.
+  if (clients > 0) await invalidateAfterWrite();
   for (const { id } of archivedRoles) {
     await revokeHolderClientTokens(id);
     notifyRoleDeleted(

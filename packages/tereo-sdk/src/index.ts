@@ -18,6 +18,9 @@ export type { OutboxOptions, OutboxRow, SqlClient } from "./types/outbox.js";
 // --- Provisioning ----------------------------------------------------------
 
 export type {
+  BrandingColorVariable,
+  BrandingProfileProvisioning,
+  BrandingProvisioning,
   BucketProvisioning,
   CustomRole,
   EventTypeProvisioning,

@@ -1,13 +1,13 @@
 import useConfirmLogout from "../../api/logout/useConfirmLogout";
 import useLogoutDetails from "../../api/logout/useLogoutDetails";
 import { oauthErrorMessage } from "../../api/oauthErrorMessage";
+import { BrandedAuthPage } from "@/features/auth/branding";
 import { isNavigableUrl } from "../../api/redirectTo";
 import { useSearchParams } from "react-router-dom";
 import { BackToSignIn } from "../BackToSignIn";
 import { useState } from "react";
 import {
   Alert,
-  AuthPage,
   Button,
   Centered,
   Col,
@@ -38,18 +38,18 @@ export const LogoutPage = () => {
 
   if (signedOut !== null) {
     return (
-      <AuthPage title="Signed out">
+      <BrandedAuthPage title="Signed out">
         <Col>
           <Alert variant="success">You have been signed out.</Alert>
           <BackToSignIn href={signedOut} />
         </Col>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
   if (!request || fetchError) {
     return (
-      <AuthPage title="Sign out">
+      <BrandedAuthPage title="Sign out">
         <Col>
           <Alert variant="danger">
             {request
@@ -58,17 +58,17 @@ export const LogoutPage = () => {
           </Alert>
           <BackToSignIn />
         </Col>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
   if (isLoading || !details) {
     return (
-      <AuthPage title="Sign out">
+      <BrandedAuthPage title="Sign out">
         <Centered>
           <Spinner size="lg" />
         </Centered>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 
@@ -93,7 +93,7 @@ export const LogoutPage = () => {
   };
 
   return (
-    <AuthPage
+    <BrandedAuthPage
       title="Sign out"
       subtitle={
         <>
@@ -116,6 +116,6 @@ export const LogoutPage = () => {
           </Button>
         </FormActions>
       </Col>
-    </AuthPage>
+    </BrandedAuthPage>
   );
 };

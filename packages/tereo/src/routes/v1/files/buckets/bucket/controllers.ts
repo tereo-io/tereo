@@ -16,7 +16,9 @@ import {
 import {
   assertBucketDeletable,
   assertDeclaredFieldsUnchanged,
+  assertNotCoreBucket,
   getManagedBucket,
+  isCoreBucket,
   validateBucketManagement,
 } from "../../../../../utils/bucketAccess.js";
 import {
@@ -82,6 +84,8 @@ export function serializeBucket(
     service: toServiceRef(bucket.service),
     missingSince: bucket.missingSince,
     retiredAt: bucket.retiredAt,
+    // Core's own: read-only through the files API (`assertNotCoreBucket`).
+    coreManaged: isCoreBucket(bucket),
     createdAt: bucket.createdAt,
     updatedAt: bucket.updatedAt,
   };
@@ -120,6 +124,7 @@ export const updateBucket = async (req: Request, res: Response) => {
 
   await validateBucketManagement(auth, name, "write");
   const bucket = await db.buckets.getByName(name);
+  assertNotCoreBucket(bucket);
 
   const updated = await db.$transaction(async (tx) => {
     // Diffed against the row as it is under the lock, with the service, like
@@ -206,6 +211,7 @@ export const deleteBucket = async (req: Request, res: Response) => {
   const { name } = validateParams(bucketNameSchema, req);
 
   const bucket = await getManagedBucket(auth, name, "delete");
+  assertNotCoreBucket(bucket);
 
   setAccessLog(res, { bucketId: bucket.id, operation: "DELETE_BUCKET" });
 
@@ -285,11 +291,24 @@ export const getMyPermissions = async (req: Request, res: Response) => {
   const bucket = found ?? (await db.buckets.getByName(name));
   setAccessLog(res, { bucketId: bucket.id, operation: "GET_MY_PERMISSIONS" });
 
-  // A retired bucket is read-only for everyone (`assertBucketWritable`).
-  const writable = !bucket.retiredAt;
+  // A retired bucket is read-only for everyone (`assertBucketWritable`); a
+  // core bucket also refuses deletes (`assertNotCoreBucket`).
+  const coreManaged = isCoreBucket(bucket);
+  const writable = !bucket.retiredAt && !coreManaged;
 
+  // Revoking someone else's share takes delete access as the grant gives it;
+  // the core-bucket guard doesn't apply to revoking. Purging old versions is
+  // a delete everywhere but a core bucket, where only an admin may
+  // (`getPurgeableBucket`).
   if (isAdmin) {
-    return res.json({ canRead: true, canWrite: writable, canDelete: true });
+    return res.json({
+      canRead: true,
+      canWrite: writable,
+      canDelete: !coreManaged,
+      canRevokeShares: true,
+      canPurgeVersions: true,
+      coreManaged,
+    });
   }
 
   const grant = await db.bucketPermissions.getByBucketAndUser(
@@ -312,6 +331,10 @@ export const getMyPermissions = async (req: Request, res: Response) => {
     canRead:
       bucket.policy === "public" || ((active?.canRead ?? false) && may("read")),
     canWrite: writable && (active?.canWrite ?? false) && may("write"),
-    canDelete: (active?.canDelete ?? false) && may("delete"),
+    canDelete: !coreManaged && (active?.canDelete ?? false) && may("delete"),
+    canRevokeShares: (active?.canDelete ?? false) && may("delete"),
+    canPurgeVersions:
+      !coreManaged && (active?.canDelete ?? false) && may("delete"),
+    coreManaged,
   });
 };

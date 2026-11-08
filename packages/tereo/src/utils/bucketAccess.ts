@@ -1,10 +1,16 @@
-import { ForbiddenError, NotFoundError, ConflictError } from "./errors.js";
 import { validateUser, type AuthContext } from "../middleware/auth.js";
+import { CORE_SERVICE_ID } from "../definitions/coreService.js";
 import { hasPermission } from "./permissions.js";
 import { lockRegistries } from "./registry.js";
 import type { Prisma } from "./db/prisma.js";
 import type { Request } from "express";
 import db from "./db/index.js";
+import {
+  BucketManagedByCoreError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from "./errors.js";
 
 /**
  * A bucket its service no longer declares is read-only, for everyone:
@@ -22,12 +28,33 @@ export const assertBucketWritable = (bucket: {
   }
 };
 
+export const isCoreBucket = (bucket: { serviceId: string | null }) =>
+  bucket.serviceId === CORE_SERVICE_ID;
+
+/**
+ * A bucket core declares for itself (profile photos, branding images) is
+ * written only by core's own modules, which call the files module directly.
+ * Through the files API it is read-only for everyone, `file-service.admin`
+ * included: no object is written or deleted, nothing is shared, and its
+ * settings, lifecycle policy, grants and owner stay as core left them.
+ * Revoking a grant, revoking a share and every read go on, and an admin may
+ * purge old versions (`getPurgeableBucket`).
+ */
+export const assertNotCoreBucket = (bucket: {
+  name: string;
+  serviceId: string | null;
+}) => {
+  if (isCoreBucket(bucket)) {
+    throw new BucketManagedByCoreError(bucket.name);
+  }
+};
+
 /**
  * Object access: `file-service.admin`, or the role permission plus an active
  * grant on the bucket (reads of a public bucket need neither). A missing
  * bucket is refused like an inaccessible one, so a caller without access
- * can't tell the two apart. A retired bucket refuses writes (409) only after
- * the permission check has passed.
+ * can't tell the two apart. Only once the permission check has passed, a
+ * core bucket refuses writes and deletes, and a retired bucket writes (409).
  */
 export const validateBucketAccess = async (
   auth: AuthContext,
@@ -35,15 +62,16 @@ export const validateBucketAccess = async (
   operation: "read" | "write" | "delete"
 ) => {
   await validateBucketPermission(auth, bucketName, operation);
-  if (operation === "write") {
-    const bucket = await db.buckets.checkByName(bucketName);
-    if (bucket) assertBucketWritable(bucket);
-  }
+  if (operation === "read") return;
+  const bucket = await db.buckets.checkByName(bucketName);
+  if (!bucket) return;
+  assertNotCoreBucket(bucket);
+  if (operation === "write") assertBucketWritable(bucket);
 };
 
 /**
- * `validateBucketAccess` without the retired-bucket guard, for checks that
- * put nothing into the bucket (editing a share, aborting an upload).
+ * `validateBucketAccess` without the core- and retired-bucket guards, for
+ * checks that put nothing into the bucket (editing or revoking a share).
  */
 export const validateBucketPermission = async (
   auth: AuthContext,
@@ -67,6 +95,24 @@ export const getAccessibleBucket = async (
 ) => {
   await validateBucketAccess(auth, bucketName, operation);
   return await db.buckets.getByName(bucketName);
+};
+
+/**
+ * Purging old versions takes object delete access, as `getAccessibleBucket`.
+ * The one write a core bucket takes through the files API: from
+ * `file-service.admin` only, because versioning there stays on for as long
+ * as the bucket has history (`resetCoreBuckets`), and nothing else clears it.
+ */
+export const getPurgeableBucket = async (
+  auth: AuthContext,
+  bucketName: string
+) => {
+  await validateBucketPermission(auth, bucketName, "delete");
+  const bucket = await db.buckets.getByName(bucketName);
+  if (!hasPermission(auth.permissions, "file-service.admin")) {
+    assertNotCoreBucket(bucket);
+  }
+  return bucket;
 };
 
 /**

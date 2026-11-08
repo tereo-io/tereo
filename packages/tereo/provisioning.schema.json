@@ -507,6 +507,553 @@
         "defaultRoles"
       ],
       "additionalProperties": false
+    },
+    "branding": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "object",
+          "properties": {
+            "appName": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "headline": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "subtitle": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "signInLabel": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 30
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "notice": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 280
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "layout": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "centered",
+                    "split"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "footerLinks": {
+              "default": null,
+              "anyOf": [
+                {
+                  "maxItems": 3,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40
+                      },
+                      "url": {
+                        "type": "string",
+                        "maxLength": 2048,
+                        "pattern": "^[Hh][Tt][Tt][Pp][Ss]://[^\\u0000-\\u0020\\u007f]+$"
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "url"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "colorsLight": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "--k-background-color",
+                  "--k-background-color-dark",
+                  "--k-background-color-disabled",
+                  "--k-background-color-hover",
+                  "--k-background-color-light",
+                  "--k-background-color-overlay",
+                  "--k-border-color",
+                  "--k-border-color-active",
+                  "--k-border-color-disabled",
+                  "--k-border-color-hover",
+                  "--k-border-shadow-color-active",
+                  "--k-danger-color",
+                  "--k-danger-color-active",
+                  "--k-danger-color-background",
+                  "--k-danger-color-hover",
+                  "--k-danger-color-text",
+                  "--k-light-color",
+                  "--k-light-color-active",
+                  "--k-light-color-background",
+                  "--k-light-color-hover",
+                  "--k-primary-color",
+                  "--k-primary-color-active",
+                  "--k-primary-color-background",
+                  "--k-primary-color-background-light",
+                  "--k-primary-color-dark",
+                  "--k-primary-color-hover",
+                  "--k-primary-color-text",
+                  "--k-secondary-color",
+                  "--k-secondary-color-active",
+                  "--k-secondary-color-background",
+                  "--k-secondary-color-hover",
+                  "--k-shadow-color",
+                  "--k-shadow-color-active",
+                  "--k-shadow-color-hover",
+                  "--k-success-color",
+                  "--k-success-color-active",
+                  "--k-success-color-background",
+                  "--k-success-color-background-light",
+                  "--k-success-color-hover",
+                  "--k-text-color",
+                  "--k-text-color-disabled",
+                  "--k-text-color-light",
+                  "--k-text-color-link",
+                  "--k-text-color-secondary",
+                  "--k-warning-color",
+                  "--k-warning-color-active",
+                  "--k-warning-color-background",
+                  "--k-warning-color-background-light",
+                  "--k-warning-color-contrast",
+                  "--k-warning-color-hover",
+                  "--k-warning-color-text"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "colorsDark": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "--k-background-color",
+                  "--k-background-color-dark",
+                  "--k-background-color-disabled",
+                  "--k-background-color-hover",
+                  "--k-background-color-light",
+                  "--k-background-color-overlay",
+                  "--k-border-color",
+                  "--k-border-color-active",
+                  "--k-border-color-disabled",
+                  "--k-border-color-hover",
+                  "--k-border-shadow-color-active",
+                  "--k-danger-color",
+                  "--k-danger-color-active",
+                  "--k-danger-color-background",
+                  "--k-danger-color-hover",
+                  "--k-danger-color-text",
+                  "--k-light-color",
+                  "--k-light-color-active",
+                  "--k-light-color-background",
+                  "--k-light-color-hover",
+                  "--k-primary-color",
+                  "--k-primary-color-active",
+                  "--k-primary-color-background",
+                  "--k-primary-color-background-light",
+                  "--k-primary-color-dark",
+                  "--k-primary-color-hover",
+                  "--k-primary-color-text",
+                  "--k-secondary-color",
+                  "--k-secondary-color-active",
+                  "--k-secondary-color-background",
+                  "--k-secondary-color-hover",
+                  "--k-shadow-color",
+                  "--k-shadow-color-active",
+                  "--k-shadow-color-hover",
+                  "--k-success-color",
+                  "--k-success-color-active",
+                  "--k-success-color-background",
+                  "--k-success-color-background-light",
+                  "--k-success-color-hover",
+                  "--k-text-color",
+                  "--k-text-color-disabled",
+                  "--k-text-color-light",
+                  "--k-text-color-link",
+                  "--k-text-color-secondary",
+                  "--k-warning-color",
+                  "--k-warning-color-active",
+                  "--k-warning-color-background",
+                  "--k-warning-color-background-light",
+                  "--k-warning-color-contrast",
+                  "--k-warning-color-hover",
+                  "--k-warning-color-text"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "applyToConsole": {
+              "default": false,
+              "type": "boolean"
+            },
+            "logo": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "logoDark": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "favicon": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "background": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "additionalProperties": false
+        },
+        "clients": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "appName": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "headline": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "subtitle": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "signInLabel": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 30
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "notice": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 280
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "layout": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "centered",
+                      "split"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "footerLinks": {
+                "default": null,
+                "anyOf": [
+                  {
+                    "maxItems": 3,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 40
+                        },
+                        "url": {
+                          "type": "string",
+                          "maxLength": 2048,
+                          "pattern": "^[Hh][Tt][Tt][Pp][Ss]://[^\\u0000-\\u0020\\u007f]+$"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "url"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "colorsLight": {
+                "default": {},
+                "type": "object",
+                "propertyNames": {
+                  "enum": [
+                    "--k-background-color",
+                    "--k-background-color-dark",
+                    "--k-background-color-disabled",
+                    "--k-background-color-hover",
+                    "--k-background-color-light",
+                    "--k-background-color-overlay",
+                    "--k-border-color",
+                    "--k-border-color-active",
+                    "--k-border-color-disabled",
+                    "--k-border-color-hover",
+                    "--k-border-shadow-color-active",
+                    "--k-danger-color",
+                    "--k-danger-color-active",
+                    "--k-danger-color-background",
+                    "--k-danger-color-hover",
+                    "--k-danger-color-text",
+                    "--k-light-color",
+                    "--k-light-color-active",
+                    "--k-light-color-background",
+                    "--k-light-color-hover",
+                    "--k-primary-color",
+                    "--k-primary-color-active",
+                    "--k-primary-color-background",
+                    "--k-primary-color-background-light",
+                    "--k-primary-color-dark",
+                    "--k-primary-color-hover",
+                    "--k-primary-color-text",
+                    "--k-secondary-color",
+                    "--k-secondary-color-active",
+                    "--k-secondary-color-background",
+                    "--k-secondary-color-hover",
+                    "--k-shadow-color",
+                    "--k-shadow-color-active",
+                    "--k-shadow-color-hover",
+                    "--k-success-color",
+                    "--k-success-color-active",
+                    "--k-success-color-background",
+                    "--k-success-color-background-light",
+                    "--k-success-color-hover",
+                    "--k-text-color",
+                    "--k-text-color-disabled",
+                    "--k-text-color-light",
+                    "--k-text-color-link",
+                    "--k-text-color-secondary",
+                    "--k-warning-color",
+                    "--k-warning-color-active",
+                    "--k-warning-color-background",
+                    "--k-warning-color-background-light",
+                    "--k-warning-color-contrast",
+                    "--k-warning-color-hover",
+                    "--k-warning-color-text"
+                  ]
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "colorsDark": {
+                "default": {},
+                "type": "object",
+                "propertyNames": {
+                  "enum": [
+                    "--k-background-color",
+                    "--k-background-color-dark",
+                    "--k-background-color-disabled",
+                    "--k-background-color-hover",
+                    "--k-background-color-light",
+                    "--k-background-color-overlay",
+                    "--k-border-color",
+                    "--k-border-color-active",
+                    "--k-border-color-disabled",
+                    "--k-border-color-hover",
+                    "--k-border-shadow-color-active",
+                    "--k-danger-color",
+                    "--k-danger-color-active",
+                    "--k-danger-color-background",
+                    "--k-danger-color-hover",
+                    "--k-danger-color-text",
+                    "--k-light-color",
+                    "--k-light-color-active",
+                    "--k-light-color-background",
+                    "--k-light-color-hover",
+                    "--k-primary-color",
+                    "--k-primary-color-active",
+                    "--k-primary-color-background",
+                    "--k-primary-color-background-light",
+                    "--k-primary-color-dark",
+                    "--k-primary-color-hover",
+                    "--k-primary-color-text",
+                    "--k-secondary-color",
+                    "--k-secondary-color-active",
+                    "--k-secondary-color-background",
+                    "--k-secondary-color-hover",
+                    "--k-shadow-color",
+                    "--k-shadow-color-active",
+                    "--k-shadow-color-hover",
+                    "--k-success-color",
+                    "--k-success-color-active",
+                    "--k-success-color-background",
+                    "--k-success-color-background-light",
+                    "--k-success-color-hover",
+                    "--k-text-color",
+                    "--k-text-color-disabled",
+                    "--k-text-color-light",
+                    "--k-text-color-link",
+                    "--k-text-color-secondary",
+                    "--k-warning-color",
+                    "--k-warning-color-active",
+                    "--k-warning-color-background",
+                    "--k-warning-color-background-light",
+                    "--k-warning-color-contrast",
+                    "--k-warning-color-hover",
+                    "--k-warning-color-text"
+                  ]
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "applyToConsole": {
+                "default": false,
+                "type": "boolean"
+              },
+              "logo": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "logoDark": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "favicon": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "background": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [

@@ -1,6 +1,7 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { disconnectTokenSockets } from "../../../../../websocket/emitters/index.js";
 import { UserType } from "../../../../../../prisma/generated/client/index.js";
+import { invalidateAfterWrite } from "../../../../../utils/branding/write.js";
 import { UpdateClientSchema, type UpdateClientInput } from "./schemas.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { formatClient } from "../../../../../utils/transformers.js";
@@ -223,10 +224,22 @@ export const deleteClient = async (req: Request, res: Response) => {
   if (existingClient.clientId === LOGIN_CLIENT.clientId) {
     throw new ConflictError("The admin UI's login client cannot be deleted");
   }
-  const jtis = await db.$transaction((tx) =>
-    deleteLoginClientTx(tx, existingClient, user)
-  );
+  const jtis = await db.$transaction(async (tx) => {
+    // The provisioning set brands it by client ID; with the client gone, the
+    // next apply could not resolve it and core would not start.
+    await db.brandingProfiles.lockForWrite({ clientUuid: params.id }, tx);
+    const profile = await db.brandingProfiles.getByClientUuid(params.id, tx);
+    if (profile?.provisioned) {
+      throw new ManagedByProvisioningError(
+        "This client's branding is managed by the provisioning file; remove it there and restart core first",
+        { details: { provisionedFrom: profile.provisionedFrom } }
+      );
+    }
+    return await deleteLoginClientTx(tx, existingClient, user);
+  });
   disconnectTokenSockets(jtis);
+  // Its profile went with it; a client recreated under the same id is unbranded.
+  await invalidateAfterWrite();
 
   res.status(204).send();
 };

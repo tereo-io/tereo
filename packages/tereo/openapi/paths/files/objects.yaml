@@ -297,6 +297,9 @@
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -325,6 +328,11 @@
 
       **Required permissions:**
       - System: `file-service.objects.delete` AND bucket-level `canDelete`
+
+      On a bucket core declares for itself only a `file-service.admin`
+      holder may purge — the one write core takes there through this API.
+      Its versioning stays on while it has history, so purging lets the next
+      start turn it off. Anyone else gets `409 bucket_managed_by_core`.
 
       An audit log entry is created for each batch.
     operationId: purgeNonCurrentVersions
@@ -365,6 +373,9 @@
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_managed_by_core` - the bucket is core''s own, and only a `file-service.admin` holder may purge it'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -568,6 +579,8 @@
           (`idempotency_request_in_progress`), the bucket is
           retired (`bucket_retired`), or a concurrent write conflicted
           (`conflict` / `version_conflict`).
+          The bucket is core's own and read-only through this API
+          (`bucket_managed_by_core`).
         content:
           application/json:
             schema:
@@ -977,7 +990,7 @@
         description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: Conflict - rename target already exists as a live key in the bucket (`conflict`), or the bucket is retired (`bucket_retired`)
+        description: 'Conflict - rename target already exists as a live key in the bucket (`conflict`), or the bucket is retired (`bucket_retired`); `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -1017,6 +1030,9 @@
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -1084,7 +1100,7 @@
         description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`bucket_retired` - the bucket is read-only'
+        description: '`bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -1250,6 +1266,9 @@
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -1431,7 +1450,7 @@
         description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`conflict` - undeleting an object whose key another object has taken since; `bucket_retired` - the bucket is read-only'
+        description: '`conflict` - undeleting an object whose key another object has taken since; `bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':

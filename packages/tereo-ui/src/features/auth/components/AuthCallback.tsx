@@ -1,7 +1,8 @@
-import { Alert, AuthPage, Centered, Col, Spinner } from "@kosmeo-ui/react";
+import { Alert, Centered, Col, Spinner } from "@kosmeo-ui/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { clearPKCE, takePostLoginPath } from "@/lib/auth/pkce";
 import { oauthErrorMessage } from "../api/oauthErrorMessage";
+import { BrandedAuthPage } from "@/features/auth/branding";
 import useExchangeToken from "@/lib/auth/useExchangeToken";
 import { useEffect, useRef, useState } from "react";
 import { BackToSignIn } from "./BackToSignIn";
@@ -43,12 +44,12 @@ export const AuthCallback = () => {
 
   if (error) {
     return (
-      <AuthPage title="Sign-in failed">
+      <BrandedAuthPage title="Sign-in failed">
         <Col>
           <Alert variant="danger">{error}</Alert>
           <BackToSignIn />
         </Col>
-      </AuthPage>
+      </BrandedAuthPage>
     );
   }
 

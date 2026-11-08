@@ -17,7 +17,10 @@ import {
 
 interface PermissionManagerProps {
   bucket: Bucket;
-  /** From `canManageBucket`; others with access see the list read-only. */
+  /**
+   * From `canManageBucket`; others with access see the list read-only. On a
+   * core bucket grants can be revoked but not added.
+   */
   canManage: boolean;
 }
 
@@ -181,7 +184,9 @@ export const PermissionManager = ({
         columns={columns}
         onReload={reload}
         onAddNew={
-          canManage && hasPermission("file-service.permissions.write")
+          canManage &&
+          !bucket.coreManaged &&
+          hasPermission("file-service.permissions.write")
             ? () => setShowGrantModal(true)
             : undefined
         }

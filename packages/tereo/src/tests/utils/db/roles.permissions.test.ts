@@ -152,6 +152,9 @@ describe("db.roles guest permission floor", () => {
       canRead: true,
       canWrite: true,
       canDelete: false,
+      canRevokeShares: false,
+      canPurgeVersions: false,
+      coreManaged: false,
     });
 
     await setGuestAssignable(role.id, false);
@@ -162,6 +165,9 @@ describe("db.roles guest permission floor", () => {
       canRead: false,
       canWrite: false,
       canDelete: false,
+      canRevokeShares: false,
+      canPurgeVersions: false,
+      coreManaged: false,
     });
 
     await setGuestAssignable(role.id, true);
@@ -173,6 +179,9 @@ describe("db.roles guest permission floor", () => {
       canRead: true,
       canWrite: true,
       canDelete: false,
+      canRevokeShares: false,
+      canPurgeVersions: false,
+      coreManaged: false,
     });
   });
 
