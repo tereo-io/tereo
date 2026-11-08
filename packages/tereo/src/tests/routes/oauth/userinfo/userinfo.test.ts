@@ -579,6 +579,37 @@ describe("/oauth/userinfo", () => {
       expect(ids).not.toContain(archivedId);
     });
 
+    it("lists only global groups when the token's organization is inactive or archived", async () => {
+      for (const data of [{ isActive: false }, { archivedAt: new Date() }]) {
+        const lapsedOrgId = (await createTestOrganization(adminToken)).id;
+        await addTestOrgMember(adminToken, lapsedOrgId, user.id);
+        const lapsedGroup = await postGroup(adminToken, {
+          organizationId: lapsedOrgId,
+        });
+        groupIds.push(lapsedGroup.id);
+        await adminApi(
+          "POST",
+          `/groups/${lapsedGroup.id}/members`,
+          adminToken,
+          {
+            userIds: [user.id],
+          }
+        );
+        const token = await loginToken(lapsedOrgId);
+        expect((await userinfo(token)).groups?.map((g) => g.id)).toContain(
+          lapsedGroup.id
+        );
+
+        await prisma.organization.update({
+          where: { id: lapsedOrgId },
+          data,
+        });
+        expect((await userinfo(token)).groups?.map((g) => g.id)).toEqual([
+          globalGroup.id,
+        ]);
+      }
+    });
+
     it("a plain relying party gets no groups claim", async () => {
       const client = await createTestClient({ scopes: ["openid", "email"] });
       const outsider = await createTestUser();
