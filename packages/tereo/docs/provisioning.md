@@ -356,7 +356,7 @@ Branding profiles for the sign-in pages: `default`, and one per client keyed by 
 is validated as the admin API validates it (`/v1/admin/branding`). The client must exist after this
 apply: a client in any document of the set, or one already in the database that provisioning does
 not manage. A provisioned client the set no longer declares is refused, as it is retired and later
-deleted. This is checked before any image is stored. `tereo-ui` may be
+deleted. This is checked before any image is stored, and reported with the set's other problems. `tereo-ui` may be
 branded, which is how `applyToConsole` is provisioned. `default`, and each client, may be branded
 by **one** document only. The block must declare `default` or at least
 one client: an empty `branding` would release every provisioned profile unnoticed, so it is refused.

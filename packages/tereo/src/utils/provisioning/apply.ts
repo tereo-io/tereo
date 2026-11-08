@@ -1619,9 +1619,15 @@ export const applyProvisioning = async (
   const invalid = validateSet(set);
   if (invalid.length > 0) throw new ProvisioningError(invalid);
   const p = entriesOf(set);
+  // Checked before images are stored, so a refused set stores none. Refused,
+  // it is reported with the problems the transaction would find, which do not
+  // depend on branding.
   const brandingProblems = await brandingClientProblems(prisma, set);
   if (brandingProblems.length > 0)
-    throw new ProvisioningError(brandingProblems);
+    throw new ProvisioningError([
+      ...(await findProblems(prisma, p, await loadState(prisma, p))),
+      ...brandingProblems,
+    ]);
   // A dry run stores them too; ones nothing references expire after the
   // grace period.
   const brandingImages = await storeProvisionedImages(set);
