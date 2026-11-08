@@ -1,5 +1,4 @@
 import { CORE_SERVICE_ID, SYSTEM_USER_ID } from "../../definitions/index.js";
-import { applyBranding, storeProvisionedImages } from "./brandingApply.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
 import { broadcastBucketInvalidate } from "../cacheBroadcast.js";
@@ -26,6 +25,11 @@ import {
   emitEndpointEventTx,
   redactWebhookUrl,
 } from "../webhookEndpointEvents.js";
+import {
+  applyBranding,
+  brandingClientProblems,
+  storeProvisionedImages,
+} from "./brandingApply.js";
 import {
   createIntegrationTx,
   emitIntegration,
@@ -1615,6 +1619,9 @@ export const applyProvisioning = async (
   const invalid = validateSet(set);
   if (invalid.length > 0) throw new ProvisioningError(invalid);
   const p = entriesOf(set);
+  const brandingProblems = await brandingClientProblems(prisma, set);
+  if (brandingProblems.length > 0)
+    throw new ProvisioningError(brandingProblems);
   // A dry run stores them too; ones nothing references expire after the
   // grace period.
   const brandingImages = await storeProvisionedImages(set);

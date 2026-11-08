@@ -10,10 +10,10 @@ import { removeLoginClients } from "../../support/provisioning.js";
 import { LOGIN_CLIENT } from "../../../definitions/loginClient.js";
 import { generateUniqueId } from "../../support/auth/crypto.js";
 import { mkdir, mkdtemp, rm, writeFile } from "fs/promises";
+import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
 import { fetchJson } from "../../support/http.js";
-import { randomBytes } from "node:crypto";
 import { tmpdir } from "os";
 import { join } from "path";
 import axios from "axios";
@@ -241,6 +241,65 @@ describe("provisioned branding", () => {
     expect(
       await prisma.oAuthClient.findUnique({ where: { clientId: declared } })
     ).toBeNull();
+  });
+
+  it("stores no image when a branded client is unknown", async () => {
+    const declared = newClientId();
+    const missing = `prov-brand-missing-${generateUniqueId()}`;
+    const content = uniquePng();
+    await writeFile(join(dir, "branding", "orphan.png"), content);
+    await writeDocument({
+      clients: [loginClient(declared)],
+      branding: {
+        clients: { [missing]: { logo: "./branding/orphan.png" } },
+      },
+    });
+    const sha256 = createHash("sha256").update(content).digest("hex");
+    await expect(apply()).rejects.toMatchObject({
+      name: "ProvisioningError",
+    });
+    expect(
+      await prisma.object.count({
+        where: { objectKey: { startsWith: `${sha256}.` } },
+      })
+    ).toBe(0);
+  });
+
+  it("refuses branding for a client the set no longer declares", async () => {
+    const dropped = newClientId();
+    const kept = newClientId();
+    await writeDocument({ clients: [loginClient(dropped), loginClient(kept)] });
+    await apply();
+
+    await writeDocument({
+      clients: [loginClient(kept)],
+      branding: { clients: { [dropped]: { appName: "Retired" } } },
+    });
+    await expect(apply()).rejects.toMatchObject({
+      name: "ProvisioningError",
+      problems: [expect.stringContaining(`branding.clients[${dropped}]`)],
+    });
+    expect(
+      await prisma.brandingProfile.count({
+        where: { client: { clientId: dropped } },
+      })
+    ).toBe(0);
+    const client = await prisma.oAuthClient.findUniqueOrThrow({
+      where: { clientId: dropped },
+    });
+    expect(client.unprovisionedAt).toBeNull();
+
+    // Already retired by an earlier apply: still refused.
+    await writeDocument({ clients: [loginClient(kept)] });
+    await apply();
+    await writeDocument({
+      clients: [loginClient(kept)],
+      branding: { clients: { [dropped]: { appName: "Retired" } } },
+    });
+    await expect(apply()).rejects.toMatchObject({
+      name: "ProvisioningError",
+      problems: [expect.stringContaining(`branding.clients[${dropped}]`)],
+    });
   });
 
   it("brands the console when tereo-ui declares applyToConsole", async (ctx) => {

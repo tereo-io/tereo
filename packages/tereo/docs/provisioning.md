@@ -354,7 +354,9 @@ an apply that leaves them as they were writes nothing. A service that invites gu
 
 Branding profiles for the sign-in pages: `default`, and one per client keyed by `clientId`. Each slot
 is validated as the admin API validates it (`/v1/admin/branding`). The client must exist after this
-apply: a client in any document of the set, or one already in the database. `tereo-ui` may be
+apply: a client in any document of the set, or one already in the database that provisioning does
+not manage. A provisioned client the set no longer declares is refused, as it is retired and later
+deleted. This is checked before any image is stored. `tereo-ui` may be
 branded, which is how `applyToConsole` is provisioned. `default`, and each client, may be branded
 by **one** document only. The block must declare `default` or at least
 one client: an empty `branding` would release every provisioned profile unnoticed, so it is refused.
@@ -411,7 +413,8 @@ the CLI the exit code is non-zero.
     [`internalHost`](#internal-webhook-targets). In-cluster DNS names are fine.
 - **Branding**: a block with `default` or at least one client; `default` and each client in one
   document; image paths inside the folder, each a
-  valid image for its slot; every branded client in the set or the database.
+  valid image for its slot; every branded client in the set, or in the database and not a
+  provisioned client the set dropped.
 - **Secrets**: format, strength and the other rules of [Secrets](#secrets), across service, client
   and webhook secrets; every `secretFrom` variable must be set.
 - **Existing rows**: a service or client of the same slug or ID that exists but is not

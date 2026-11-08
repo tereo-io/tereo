@@ -10,6 +10,8 @@ import db from "../db/index.js";
 import {
   type AdminProfileValues,
   changedSlots,
+  imageIds,
+  lockImagesTx,
   profileRowValues,
   saveProfileTx,
 } from "../branding/write.js";
@@ -33,6 +35,52 @@ const declaredProfiles = (set: ProvisioningSet) =>
         ]
       : []
   );
+
+/**
+ * A branded client must be one the set declares (as a login client, or a
+ * service's or integration's), or one in the database that provisioning does
+ * not manage: a provisioned client the set dropped is retired, and later
+ * deleted. Also checked before images are stored, so a refused set stores
+ * none.
+ */
+export const brandingClientProblems = async (
+  tx: Pick<Tx, "oAuthClient">,
+  set: ProvisioningSet
+): Promise<string[]> => {
+  const inSet = new Set(
+    set.documents.flatMap((doc) => [
+      ...doc.clients.map((c) => c.clientId),
+      ...(doc.service ? [doc.service.clientId] : []),
+      ...(doc.integrations ?? []).map((i) => i.clientId),
+    ])
+  );
+  const outside = declaredProfiles(set).filter(
+    (d): d is typeof d & { clientId: string } =>
+      d.clientId !== null && !inSet.has(d.clientId)
+  );
+  if (outside.length === 0) return [];
+  const rows = new Map(
+    (
+      await tx.oAuthClient.findMany({
+        where: { clientId: { in: outside.map((d) => d.clientId) } },
+        select: { clientId: true, provisioned: true },
+      })
+    ).map((c) => [c.clientId, c])
+  );
+  return outside.flatMap(({ file, clientId }) => {
+    const row = rows.get(clientId);
+    const where = `${file}: branding.clients[${clientId}]`;
+    if (!row)
+      return [
+        `${where}: no client "${clientId}" in the provisioning set or the database`,
+      ];
+    if (row.provisioned)
+      return [
+        `${where}: client "${clientId}" is no longer in the provisioning set; declare it under clients or drop its branding`,
+      ];
+    return [];
+  });
+};
 
 /**
  * Store every declared image, reusing a live object with the same content.
@@ -79,6 +127,8 @@ export const applyBranding = async (
   result: { branding: string[] }
 ): Promise<void> => {
   const declared = declaredProfiles(set);
+  const problems = await brandingClientProblems(tx, set);
+  if (problems.length > 0) throw new ProvisioningError(problems);
   const clientIds = declared.flatMap((d) => (d.clientId ? [d.clientId] : []));
   const clients = new Map(
     (
@@ -88,16 +138,6 @@ export const applyBranding = async (
       })
     ).map((c) => [c.clientId, c])
   );
-  const unknown = declared.filter(
-    (d) => d.clientId !== null && !clients.has(d.clientId)
-  );
-  if (unknown.length > 0)
-    throw new ProvisioningError(
-      unknown.map(
-        ({ file, clientId }) =>
-          `${file}: branding.clients[${clientId}]: no client "${clientId}" in the provisioning set or the database`
-      )
-    );
 
   const stillDeclared = new Set(declared.map((d) => d.clientId));
   const released = (
@@ -123,6 +163,18 @@ export const applyBranding = async (
     (a, b) => (a ?? "").localeCompare(b ?? "") // null (default) first
   ))
     await db.brandingProfiles.lockForWrite({ clientUuid }, tx);
+  // Then every image any of these saves locks, in one statement: each save
+  // locks its own in id order, but across profiles the order would be the
+  // declaration's, which an admin save sharing images could cross.
+  const current = await tx.brandingProfile.findMany({
+    where: { OR: [...lockKeys].map((clientId) => ({ clientId })) },
+  });
+  await lockImagesTx(tx, [
+    ...declared.flatMap(({ profile }) =>
+      imageIds(valuesOf(profile, objectIds))
+    ),
+    ...current.flatMap((row) => imageIds(profileRowValues(row))),
+  ]);
 
   for (const { file, clientId, profile } of declared) {
     const target = { client: clientId ? clients.get(clientId)! : null };

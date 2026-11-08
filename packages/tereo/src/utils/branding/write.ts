@@ -86,7 +86,7 @@ export const profileRowValues = (row: BrandingProfile): AdminProfileValues => ({
   background: row.backgroundObjectId,
 });
 
-const imageIds = (values: AdminProfileValues | null) =>
+export const imageIds = (values: AdminProfileValues | null) =>
   values
     ? IMAGE_SLOTS.map((slot) => values[slot]).filter(
         (id): id is string => id !== null
@@ -156,7 +156,7 @@ export const changedSlots = (
  * helpers lock subsets of these rows, and taking them piecemeal could
  * deadlock against a concurrent write locking an overlapping set.
  */
-const lockImagesTx = async (tx: Tx, ids: string[]) => {
+export const lockImagesTx = async (tx: Tx, ids: string[]) => {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return;
   await tx.$queryRaw`
