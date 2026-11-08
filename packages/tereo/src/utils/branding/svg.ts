@@ -47,6 +47,12 @@ const ALLOWED_ELEMENTS = new Set([
   "desc",
 ]);
 
+// Checked before any pattern runs on a value. Path data is exempt: a logo's
+// can run far longer, and its own character set leaves nothing to check.
+const MAX_ATTRIBUTE_LENGTH = 8 * 1024;
+const GEOMETRY_ATTRIBUTES = new Set(["d", "points"]);
+const GEOMETRY_VALUE = /^[0-9A-Za-z.,+\-\s]*$/;
+
 /** A short reason the SVG is unsafe or malformed, or null when acceptable. */
 export function svgProblem(text: string): string | null {
   if (/<!doctype|<!entity/i.test(text)) return "DOCTYPE and ENTITY not allowed";
@@ -104,6 +110,13 @@ export function svgProblem(text: string): string | null {
       const attrName = attr.name;
       const local = attr.localName ?? attrName;
       const value = attr.value;
+      if (attr.namespaceURI == null && GEOMETRY_ATTRIBUTES.has(local)) {
+        if (GEOMETRY_VALUE.test(value)) continue;
+        return `attribute ${attrName} must be numbers and path commands`;
+      }
+      if (value.length > MAX_ATTRIBUTE_LENGTH) {
+        return `attribute ${attrName} too long`;
+      }
       if (local.toLowerCase().startsWith("on")) {
         return `attribute ${attrName} not allowed`;
       }
@@ -131,7 +144,9 @@ export function svgProblem(text: string): string | null {
         return `attribute ${attrName} has a disallowed scheme`;
       }
       if (/url\(/i.test(value)) {
-        const stripped = value.replace(/url\(\s*#[^)\s]+\s*\)/gi, "");
+        // The id excludes `(` and `#`, so a failed match stops at the next
+        // `url(` instead of rescanning the rest of the value.
+        const stripped = value.replace(/url\(\s*#[^()\s#]+\s*\)/gi, "");
         if (/url\(/i.test(stripped)) {
           return `attribute ${attrName} may only use url(#id)`;
         }

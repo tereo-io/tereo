@@ -70,7 +70,47 @@ describe("svgProblem", () => {
     ["encoding", `<?xml version="1.0" encoding="UTF-16"?><svg ${NS}/>`],
     ["xml:base", wrap(`<use xml:base="https://e/" href="#a"/>`)],
     ["javascript value", wrap(`<text title="javascript:x">a</text>`)],
+    ["unquoted url", wrap(`<rect fill="url('#g')"/>`)],
+    ["a url id with a parenthesis", wrap(`<rect fill="url(#a(b)"/>`)],
+    ["a non-numeric path", wrap(`<path d="M0 0 url(x)"/>`)],
+    ["a non-numeric points list", wrap(`<polygon points="0,0 1:1"/>`)],
   ])("rejects %s", (_name, svg) => {
     expect(typeof svgProblem(svg)).toBe("string");
+  });
+
+  it("accepts several url(#id) paints and long path data", () => {
+    const d = `M0 0${" l1.5e-1,-2".repeat(20_000)}z`;
+    expect(
+      svgProblem(
+        wrap(
+          `<rect fill="url(#a)" stroke="url( #b )"/><path d="${d}"/><polygon points="0,0 1,1 2,0"/>`
+        )
+      )
+    ).toBeNull();
+  });
+
+  it("refuses an attribute value over 8 KiB", () => {
+    expect(svgProblem(wrap(`<g id="${"a".repeat(8 * 1024 + 1)}"/>`))).toMatch(
+      /too long/
+    );
+  });
+
+  it.each([
+    ["fill", (v: string) => wrap(`<rect fill="${v}"/>`)],
+    ["d", (v: string) => wrap(`<path d="${v}"/>`)],
+  ])("checks a 512 KB %s of unclosed url(#a in linear time", (_name, svg) => {
+    const text = svg("url(#a".repeat((512 * 1024) / 6));
+    const started = performance.now();
+    expect(typeof svgProblem(text)).toBe("string");
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it("checks the attribute regexes in linear time under the length cap", () => {
+    const value = "url(#a".repeat((8 * 1024) / 6);
+    const started = performance.now();
+    for (let i = 0; i < 64; i++) {
+      expect(typeof svgProblem(wrap(`<rect fill="${value}"/>`))).toBe("string");
+    }
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 });

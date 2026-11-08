@@ -87,7 +87,9 @@ provisioning write to it. The type comes from the bytes,
 not the name or header, and must be allowed for the slot. An SVG is checked against an allowlist and
 refused (`400 invalid_branding_image`) when it falls outside it: a fixed element set, no `<style>`,
 `<script>` or `<foreignObject>`, no event attributes, `href` only to a local `#id`, `url()` only as
-`url(#id)`, no `data:` or `javascript:`, no DOCTYPE or ENTITY, no processing instructions, UTF-8 only.
+`url(#id)`, no `data:` or `javascript:`, no DOCTYPE or ENTITY, no processing instructions, UTF-8 only,
+attribute values up to 8 KiB but for path data (`d`, `points`), which may hold only numbers, path
+commands, separators and whitespace.
 Nothing is rewritten, so the stored file is exactly what was uploaded. An upload over the slot's limit is `413 payload_too_large`.
 
 `POST /v1/admin/branding/assets` (multipart: `slot`, then `file`) answers `{ sha256, ext, url }`; a
