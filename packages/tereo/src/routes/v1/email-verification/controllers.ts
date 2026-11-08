@@ -1,5 +1,5 @@
 import { emailVerificationFailure } from "../../../middleware/rateLimit.js";
-import { markEmailVerified } from "../../../utils/userLinks.js";
+import { lockUser, markEmailVerified } from "../../../utils/userLinks.js";
 import { validateBody } from "../../../utils/validateReq.js";
 import { EmailVerificationTokenSchema } from "./schemas.js";
 import { isUsableAccount } from "../../../utils/users.js";
@@ -40,8 +40,7 @@ export const verifyEmail = async (req: Request, res: Response) => {
 
   await db.$transaction(async (tx) => {
     // Locked: a deactivation or an email change since the lookup shows here.
-    await tx.$executeRaw`
-      SELECT 1 FROM "auth"."users" WHERE "id" = ${user.id}::uuid FOR UPDATE`;
+    await lockUser(tx, user.id);
     const current = await db.users.get(user.id, tx);
     if (
       !isUsableAccount(current) ||

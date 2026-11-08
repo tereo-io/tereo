@@ -1,5 +1,5 @@
+import { Prisma, UserType } from "../../prisma/generated/client/index.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
-import { Prisma } from "../../prisma/generated/client/index.js";
 import { PASSWORD_LINK_PURPOSES } from "./db/userLinkTokens.js";
 import { emitTx, logAuditTx, notifyTx } from "./outbox.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
@@ -39,18 +39,47 @@ export interface IssuedPasswordLink {
 
 const uiBase = () => env.UI_BASE_URL.replace(/\/$/, "");
 
-const lockUser = (tx: Prisma.TransactionClient, userId: string) =>
+export const lockUser = (tx: Prisma.TransactionClient, userId: string) =>
   // Two issues for one user serialise here: the second would otherwise hit
   // the one-live-token index.
   tx.$executeRaw`
     SELECT 1 FROM "auth"."users" WHERE "id" = ${userId}::uuid FOR UPDATE`;
 
 // Without a connection, a send is queued and never leaves.
-const assertEmailConfigured = async (tx: Prisma.TransactionClient) => {
+export const assertEmailConfigured = async (tx?: Prisma.TransactionClient) => {
   if (!(await db.notificationConnections.getDefault("email", tx))) {
     throw new ConflictError(
       "No default email connection is configured",
       "email_not_configured"
+    );
+  }
+};
+
+/**
+ * Refuses an account that has no address of its own to confirm, or an address
+ * already confirmed: the system user, service accounts and deactivated users
+ * (409 `user_not_verifiable`), then a verified address (409 `already_verified`).
+ */
+export const assertVerifiable = (user: {
+  id: string;
+  userType: UserType;
+  isActive: boolean;
+  emailVerifiedAt: Date | null;
+}) => {
+  if (
+    user.id === SYSTEM_USER_ID ||
+    user.userType === UserType.service_account ||
+    !user.isActive
+  ) {
+    throw new ConflictError(
+      "This account has no address to verify",
+      "user_not_verifiable"
+    );
+  }
+  if (user.emailVerifiedAt) {
+    throw new ConflictError(
+      "The email address is already verified",
+      "already_verified"
     );
   }
 };

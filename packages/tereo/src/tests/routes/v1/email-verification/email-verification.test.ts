@@ -110,9 +110,7 @@ describe("email verification links", () => {
       for (const call of [inspect, verify]) {
         const res = await call(token);
         expect(res.status).toBe(HTTP_STATUS.NOT_FOUND);
-        expect(res.data.error_description ?? res.data.message).toBe(
-          "Not found"
-        );
+        expect(res.data.error_description).toBe("Not found");
       }
     }
     const after = await prisma.user.findUniqueOrThrow({

@@ -3,7 +3,6 @@
 import { ensureDefaultOrganization } from "../../../../../../../utils/defaultOrganization.js";
 import { getTestPrincipalToken } from "../../../../../../support/principals.js";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { createTestClient } from "../../../../../../support/auth/clients.js";
 import { SYSTEM_USER_ID } from "../../../../../../../definitions/index.js";
 import { createTestUser } from "../../../../../../support/auth/users.js";
 import { BASE_URL } from "../../../../../../support/auth/constants.js";
@@ -11,6 +10,7 @@ import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { waitFor } from "../../../../../../support/webhooks.js";
 import { fetchJson } from "../../../../../../support/http.js";
 import env from "../../../../../../../env.js";
+import { randomUUID } from "node:crypto";
 import {
   startNotificationDeliveryWorker,
   stopNotificationDeliveryWorker,
@@ -100,22 +100,13 @@ describe("POST /v1/admin/users/:id/email-verification", () => {
   });
 
   it("service account → 409 user_not_verifiable", async () => {
-    const client = await createTestClient({
-      grantTypes: ["client_credentials"],
+    const account = await prisma.user.create({
+      data: {
+        email: `svc-${randomUUID()}@test.local`,
+        name: "Service",
+        userType: "service_account",
+      },
     });
-    const account = await prisma.user
-      .findFirstOrThrow({
-        where: { oauthClientId: client.id },
-      })
-      .catch(async () =>
-        prisma.user.create({
-          data: {
-            email: `svc-${Date.now()}@test.local`,
-            name: "Service",
-            userType: "service_account",
-          },
-        })
-      );
     const res = await send(account.id, writer);
     expect(res.status).toBe(409);
     expect(res.body.error).toBe("user_not_verifiable");

@@ -3,11 +3,13 @@
 import { ensureDefaultOrganization } from "../../../../../utils/defaultOrganization.js";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { getTestPrincipalToken } from "../../../../support/principals.js";
+import { SYSTEM_USER_ID } from "../../../../../definitions/index.js";
 import { createTestUser } from "../../../../support/auth/users.js";
 import { BASE_URL } from "../../../../support/auth/constants.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { waitFor } from "../../../../support/webhooks.js";
 import { fetchJson } from "../../../../support/http.js";
+import { randomUUID } from "node:crypto";
 import env from "../../../../../env.js";
 import {
   startNotificationDeliveryWorker,
@@ -107,6 +109,46 @@ describe("POST /v1/account/email-verification", () => {
 
     expect((await resend(user.id)).status).toBe(202);
     expect((await resend(user.id)).status).toBe(429);
+  });
+
+  it("a refusal does not cost a limiter slot", async () => {
+    await connect();
+    const user = await createTestUser({ emailVerified: false });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerifiedAt: new Date() },
+    });
+
+    expect((await resend(user.id)).status).toBe(409);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerifiedAt: null },
+    });
+    expect((await resend(user.id)).status).toBe(202);
+  });
+
+  it("no connection does not cost a limiter slot", async () => {
+    const user = await createTestUser({ emailVerified: false });
+
+    expect((await resend(user.id)).status).toBe(409);
+    await connect();
+    expect((await resend(user.id)).status).toBe(202);
+  });
+
+  it("service account and system user → 409 user_not_verifiable", async () => {
+    await connect();
+    const account = await prisma.user.create({
+      data: {
+        email: `svc-${randomUUID()}@test.local`,
+        name: "Service",
+        userType: "service_account",
+      },
+    });
+    for (const id of [account.id, SYSTEM_USER_ID]) {
+      const res = await resend(id);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("user_not_verifiable");
+    }
   });
 
   it("no connection → 409 email_not_configured", async () => {
