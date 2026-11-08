@@ -21,7 +21,9 @@ const httpsUrl = z
     } catch {
       return false;
     }
-  }, "must be an https: URL");
+  }, "must be an https: URL")
+  // For the provisioning JSON Schema; the refine above is what enforces it.
+  .meta({ pattern: "^https:" });
 
 const FooterLinkSchema = z
   .object({ label: z.string().trim().min(1).max(40), url: httpsUrl })

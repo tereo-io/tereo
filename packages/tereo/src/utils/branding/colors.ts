@@ -40,4 +40,6 @@ export const BrandingColorsSchema = z
         });
       }
     }
-  });
+  })
+  // For the provisioning JSON Schema; the check above is what enforces it.
+  .meta({ propertyNames: { enum: [...BRANDING_COLOR_TOKENS] } });

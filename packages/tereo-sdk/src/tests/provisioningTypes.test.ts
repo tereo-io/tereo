@@ -198,6 +198,24 @@ describe("provisioning schema", () => {
       })
     ).toBe(false);
   });
+
+  it("refuses unknown colour variables and non-https footer links", () => {
+    const branded = (profile: Record<string, unknown>) => ({
+      version: "1.0.0",
+      branding: { clients: { web: profile } },
+    });
+    expect(
+      validate(branded({ colorsLight: { "--k-primary-color": "#0b5" } }))
+    ).toBe(true);
+    expect(validate(branded({ colorsDark: { "--k-made-up": "#0b5" } }))).toBe(
+      false
+    );
+    const link = (url: string) =>
+      branded({ footerLinks: [{ label: "Privacy", url }] });
+    expect(validate(link("https://example.com/privacy"))).toBe(true);
+    expect(validate(link("http://example.com/privacy"))).toBe(false);
+    expect(validate(link("javascript:alert(1)"))).toBe(false);
+  });
 });
 
 describe("BrandingColorVariable", () => {
