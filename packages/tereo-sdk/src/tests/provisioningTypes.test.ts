@@ -215,6 +215,10 @@ describe("provisioning schema", () => {
     expect(validate(link("https://example.com/privacy"))).toBe(true);
     expect(validate(link("http://example.com/privacy"))).toBe(false);
     expect(validate(link("javascript:alert(1)"))).toBe(false);
+    expect(validate(link("HTTPS://example.com"))).toBe(true);
+    expect(validate(link("https:example.com"))).toBe(false);
+    expect(validate(link("https://example.com "))).toBe(false);
+    expect(validate(link("https://exa\tmple.com"))).toBe(false);
   });
 });
 

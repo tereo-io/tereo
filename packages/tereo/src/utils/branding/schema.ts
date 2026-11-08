@@ -12,18 +12,23 @@ export type BrandingImageSlot = (typeof BRANDING_IMAGE_SLOTS)[number];
 const text = (max: number) =>
   z.string().trim().min(1).max(max).nullable().default(null);
 
+// Exactly what the sign-in page renders: `https://` as written, and no space
+// or control character, which the URL parser would trim or drop and the page
+// refuses. One string, so the provisioning JSON Schema keeps the same rule.
+const HTTPS_URL_PATTERN = String.raw`^[Hh][Tt][Tt][Pp][Ss]://[^\u0000-\u0020\u007f]+$`;
+
 const httpsUrl = z
   .string()
   .max(2048)
+  .regex(new RegExp(HTTPS_URL_PATTERN), "must be an https:// URL")
   .refine((value) => {
     try {
       return new URL(value).protocol === "https:";
     } catch {
       return false;
     }
-  }, "must be an https: URL")
-  // For the provisioning JSON Schema; the refine above is what enforces it.
-  .meta({ pattern: "^[Hh][Tt][Tt][Pp][Ss]:" });
+  }, "must be an https:// URL")
+  .meta({ pattern: HTTPS_URL_PATTERN });
 
 const FooterLinkSchema = z
   .object({ label: z.string().trim().min(1).max(40), url: httpsUrl })

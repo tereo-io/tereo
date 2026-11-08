@@ -35,6 +35,14 @@ describe("AdminProfileBodySchema", () => {
     ["4 footer links", { footerLinks: Array(4).fill(link("https://a.test")) }],
     ["http link", { footerLinks: [link("http://a.test")] }],
     ["javascript link", { footerLinks: [link("javascript:alert(1)")] }],
+    ["link without slashes", { footerLinks: [link("https:a.test")] }],
+    ["link with one slash", { footerLinks: [link("https:/a.test")] }],
+    ["link with a leading space", { footerLinks: [link(" https://a.test")] }],
+    ["link with a trailing space", { footerLinks: [link("https://a.test ")] }],
+    ["link with a tab", { footerLinks: [link("https://a.\ttest")] }],
+    ["link with a newline", { footerLinks: [link("https://a.test/\nx")] }],
+    ["link with DEL", { footerLinks: [link("https://a.test/\u007f")] }],
+    ["link with no host", { footerLinks: [link("https://")] }],
     ["layout grid", { layout: "grid" }],
     ["unknown key", { customCss: "body{}" }],
     ["short sha256", { logo: { sha256: "abc" } }],
@@ -46,6 +54,7 @@ describe("AdminProfileBodySchema", () => {
     ["a full sha256", { logo: { sha256: "a".repeat(64) } }],
     ["appName of 60 chars", { appName: "a".repeat(60) }],
     ["3 https links", { footerLinks: Array(3).fill(link("https://a.test")) }],
+    ["an upper-case scheme", { footerLinks: [link("HTTPS://a.test/x?y=1")] }],
     ["layout split", { layout: "split" }],
   ])("accepts %s", (_name, body) =>
     expect(AdminProfileBodySchema.safeParse(body).success).toBe(true)

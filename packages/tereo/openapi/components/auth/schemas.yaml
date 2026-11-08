@@ -3978,7 +3978,8 @@ BrandingFooterLink:
     url:
       type: string
       maxLength: 2048
-      description: An `https:` URL
+      pattern: '^[Hh][Tt][Tt][Pp][Ss]://[^\u0000-\u0020\u007f]+$'
+      description: An absolute `https://` URL, with no space or control character anywhere
 
 BrandingColors:
   type: object

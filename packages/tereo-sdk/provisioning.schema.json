@@ -611,7 +611,7 @@
                       "url": {
                         "type": "string",
                         "maxLength": 2048,
-                        "pattern": "^[Hh][Tt][Tt][Pp][Ss]:"
+                        "pattern": "^[Hh][Tt][Tt][Pp][Ss]://[^\\u0000-\\u0020\\u007f]+$"
                       }
                     },
                     "required": [
@@ -885,7 +885,7 @@
                         "url": {
                           "type": "string",
                           "maxLength": 2048,
-                          "pattern": "^[Hh][Tt][Tt][Pp][Ss]:"
+                          "pattern": "^[Hh][Tt][Tt][Pp][Ss]://[^\\u0000-\\u0020\\u007f]+$"
                         }
                       },
                       "required": [

@@ -225,7 +225,10 @@ export interface BrandingProfileProvisioning {
   /** At most 280 characters. */
   notice?: string | null;
   layout?: "centered" | "split" | null;
-  /** Up to 3; labels at most 40 characters, `https:` URLs only. */
+  /**
+   * Up to 3; labels at most 40 characters, each `url` starting `https://`
+   * with no space or control character in it.
+   */
   footerLinks?: { label: string; url: string }[] | null;
   /** Hex, `rgb()`, `hsl()` or `oklch()` values. */
   colorsLight?: Partial<Record<BrandingColorVariable, string>>;
