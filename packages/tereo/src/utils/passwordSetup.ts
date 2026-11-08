@@ -1,5 +1,6 @@
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { Prisma } from "../../prisma/generated/client/index.js";
+import { PASSWORD_LINK_PURPOSES } from "./db/userLinkTokens.js";
 import { emitTx, logAuditTx, notifyTx } from "./outbox.js";
 import { ConflictError } from "./errors.js";
 import { hashFlowToken } from "./crypto.js";
@@ -17,7 +18,7 @@ export const retirePasswordLinks = async (
   tx: Prisma.TransactionClient,
   userId: string
 ): Promise<void> => {
-  await db.passwordSetupTokens.invalidateForUser(userId, tx);
+  await db.userLinkTokens.invalidateForUser(userId, PASSWORD_LINK_PURPOSES, tx);
   await db.passwordChangeGrants.deleteForUser(userId, tx);
 };
 
@@ -57,13 +58,19 @@ export const issuePasswordSetupLink = async (
     );
   }
 
-  await db.passwordSetupTokens.invalidateForUser(userId, tx);
+  await db.userLinkTokens.invalidateForUser(userId, PASSWORD_LINK_PURPOSES, tx);
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(
     Date.now() + env.PASSWORD_SETUP_TTL_SECONDS * 1000
   );
-  await db.passwordSetupTokens.create(
-    { userId, tokenHash: hashFlowToken(token), createdBy, expiresAt },
+  await db.userLinkTokens.create(
+    {
+      userId,
+      purpose: "setup",
+      tokenHash: hashFlowToken(token),
+      createdBy,
+      expiresAt,
+    },
     tx
   );
   const url = `${env.UI_BASE_URL.replace(/\/$/, "")}/set-password#token=${token}`;

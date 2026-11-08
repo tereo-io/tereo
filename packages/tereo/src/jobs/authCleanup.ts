@@ -45,7 +45,7 @@ export async function cleanupExpiredAuthRows(now = new Date()) {
     totpSetupSessions: await db.totp.cleanupExpiredSetupSessions(),
     totpSetupGrants: await db.totp.cleanupExpiredSetupGrants(),
     passwordChangeGrants: await db.passwordChangeGrants.cleanupExpired(),
-    passwordSetupTokens: await db.passwordSetupTokens.deleteSpentBefore(cutoff),
+    userLinkTokens: await db.userLinkTokens.deleteSpentBefore(cutoff),
     upstreamAuthSessions: await db.upstreamAuth.cleanupExpiredSessions(),
     identityLinkGrants: await db.upstreamAuth.cleanupExpiredLinkGrants(),
     identityInvites: await db.userIdentities.cleanupExpiredInvites(),

@@ -1,4 +1,5 @@
 import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js";
+import { PASSWORD_LINK_PURPOSES } from "../../../utils/db/userLinkTokens.js";
 import { recordSessionsRevoked } from "../../../utils/sessionEvents.js";
 import { passwordSetupFailure } from "../../../middleware/rateLimit.js";
 import { UserType } from "../../../../prisma/generated/client/index.js";
@@ -28,8 +29,9 @@ const isSettable = (user: {
  * probe learns nothing. A miss counts against the caller's IP.
  */
 export const findUsableSetupToken = async (req: Request, token: string) => {
-  const found = await db.passwordSetupTokens.findLiveByHash(
-    hashFlowToken(token)
+  const found = await db.userLinkTokens.findLiveByHash(
+    hashFlowToken(token),
+    PASSWORD_LINK_PURPOSES
   );
   if (!found || !isSettable(found.user)) {
     await passwordSetupFailure.recordFailure(req);
@@ -62,7 +64,7 @@ export const setPassword = async (req: Request, res: Response) => {
       const current = await db.users.get(user.id, tx);
       if (
         !isSettable(current) ||
-        !(await db.passwordSetupTokens.consume(tokenId, tx))
+        !(await db.userLinkTokens.consume(tokenId, tx))
       ) {
         await passwordSetupFailure.recordFailure(req);
         throw new NotFoundError("Not found");

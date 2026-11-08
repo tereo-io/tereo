@@ -53,7 +53,7 @@ describe("POST /v1/admin/guests/:id/password-setup-link", () => {
       Date.now()
     );
     expect(
-      await prisma.passwordSetupToken.count({
+      await prisma.userLinkToken.count({
         where: { userId: user.id, usedAt: null },
       })
     ).toBe(1);
@@ -71,7 +71,7 @@ describe("POST /v1/admin/guests/:id/password-setup-link", () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toBe("guest_not_usable");
     expect(
-      await prisma.passwordSetupToken.count({ where: { userId: user.id } })
+      await prisma.userLinkToken.count({ where: { userId: user.id } })
     ).toBe(0);
   });
 
@@ -98,7 +98,7 @@ describe("password-setup-link outside the caller's organizations", () => {
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("not_a_guest");
     expect(
-      await prisma.passwordSetupToken.count({ where: { userId: user.id } })
+      await prisma.userLinkToken.count({ where: { userId: user.id } })
     ).toBe(0);
   });
 });
@@ -132,7 +132,7 @@ describe("password-setup-link for a guest who has a password", () => {
     expect(res.body.error).toBe("guest_has_password");
     expect(res.body.url).toBeUndefined();
     expect(
-      await prisma.passwordSetupToken.count({ where: { userId: user.id } })
+      await prisma.userLinkToken.count({ where: { userId: user.id } })
     ).toBe(0);
   });
 
@@ -174,7 +174,7 @@ describe("password-setup-link for a guest who has a password", () => {
 
     expect(res.status).toBe(403);
     expect(
-      await prisma.passwordSetupToken.count({ where: { userId: user.id } })
+      await prisma.userLinkToken.count({ where: { userId: user.id } })
     ).toBe(0);
   });
 

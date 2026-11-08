@@ -83,10 +83,11 @@ const insertToken = (
   over: { usedAt?: Date; expiresAt?: Date } = {}
 ) => {
   const token = randomBytes(32).toString("base64url");
-  return prisma.passwordSetupToken
+  return prisma.userLinkToken
     .create({
       data: {
         userId,
+        purpose: "setup",
         tokenHash: hashFlowToken(token),
         createdBy: SYSTEM_USER_ID,
         expiresAt: over.expiresAt ?? new Date(Date.now() + 3_600_000),
@@ -108,7 +109,7 @@ describe("password setup", () => {
     it("returns email, name and the link's expiry without consuming", async () => {
       const guest = await createGuest();
       const token = await issue(guest.id);
-      const { expiresAt } = await prisma.passwordSetupToken.findFirstOrThrow({
+      const { expiresAt } = await prisma.userLinkToken.findFirstOrThrow({
         where: { userId: guest.id },
       });
 
@@ -252,7 +253,7 @@ describe("password setup", () => {
         await Promise.all([issue(guest.id), issue(guest.id)]);
 
         expect(
-          await prisma.passwordSetupToken.count({
+          await prisma.userLinkToken.count({
             where: { userId: guest.id, usedAt: null },
           })
         ).toBe(1);
@@ -322,7 +323,7 @@ describe("password setup", () => {
     const expectRetired = async (userId: string, token: string) => {
       expect((await inspect(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
       expect(
-        await prisma.passwordSetupToken.count({
+        await prisma.userLinkToken.count({
           where: { userId, usedAt: null },
         })
       ).toBe(0);
@@ -461,7 +462,7 @@ describe("password setup", () => {
         statusCode: 409,
       });
       expect(
-        await prisma.passwordSetupToken.count({ where: { userId: guest.id } })
+        await prisma.userLinkToken.count({ where: { userId: guest.id } })
       ).toBe(0);
       expect(await prisma.notification.count()).toBe(0);
     });

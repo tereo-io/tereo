@@ -2,6 +2,7 @@ import type { InviteGuestInput } from "../routes/v1/admin/guests/schemas.js";
 import { actingOrganizationIds, canActInOrganization } from "./users.js";
 import { AppError, BadRequestError, ConflictError } from "./errors.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
+import { PASSWORD_LINK_PURPOSES } from "./db/userLinkTokens.js";
 import { revokeOrganizationGrantsTx } from "./bucketGrants.js";
 import type { AuthContext } from "../middleware/auth.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
@@ -510,7 +511,11 @@ const applyInitialAccess = async (
       },
     });
     // A link from an earlier invite would replace the password just set.
-    await db.passwordSetupTokens.invalidateForUser(user.id, tx);
+    await db.userLinkTokens.invalidateForUser(
+      user.id,
+      PASSWORD_LINK_PURPOSES,
+      tx
+    );
     return { user: updated };
   }
   const { url } = await issuePasswordSetupLink(tx, {

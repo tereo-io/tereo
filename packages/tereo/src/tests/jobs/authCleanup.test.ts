@@ -249,9 +249,10 @@ describe("auth cleanup", () => {
       expiresAt: Date,
       usedAt: Date | null = null
     ) =>
-      prisma.passwordSetupToken.create({
+      prisma.userLinkToken.create({
         data: {
           userId: forUserId,
+          purpose: "setup",
           tokenHash: unique(),
           createdBy: userId,
           expiresAt,
@@ -267,7 +268,7 @@ describe("auth cleanup", () => {
 
     await cleanupExpiredAuthRows();
 
-    const left = await prisma.passwordSetupToken.findMany({
+    const left = await prisma.userLinkToken.findMany({
       where: {
         id: { in: [expiredLong.id, usedLong.id, usedRecently.id, live.id] },
       },

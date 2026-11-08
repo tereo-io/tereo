@@ -357,7 +357,7 @@ describe("POST /v1/admin/guests", () => {
 
     expect(res.status).toBe(200);
     expect(
-      await prisma.passwordSetupToken.count({
+      await prisma.userLinkToken.count({
         where: { userId: first.body.user.id, usedAt: null },
       })
     ).toBe(0);

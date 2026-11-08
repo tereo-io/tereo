@@ -1,4 +1,5 @@
 import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js";
+import { PASSWORD_LINK_PURPOSES } from "../../../utils/db/userLinkTokens.js";
 import { passwordChangeFailure } from "../../../middleware/rateLimit.js";
 import { BadRequestError, OAuth2Error } from "../../../utils/errors.js";
 import { hashPassword, verifyPassword } from "../../../utils/crypto.js";
@@ -91,7 +92,11 @@ export const passwordChangeHandler = async (req: Request, res: Response) => {
         },
       });
       // A setup link issued before would replace the password just chosen.
-      await db.passwordSetupTokens.invalidateForUser(user.id, tx);
+      await db.userLinkTokens.invalidateForUser(
+        user.id,
+        PASSWORD_LINK_PURPOSES,
+        tx
+      );
       await logAuditTx(tx, {
         auth: actor,
         action: "UPDATE",
