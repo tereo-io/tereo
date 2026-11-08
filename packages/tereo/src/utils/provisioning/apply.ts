@@ -1819,6 +1819,13 @@ export const deprovisionMissing = async (
       const dueClients = await tx.oAuthClient.findMany({
         where: { ...stale, service: { is: null } },
       });
+      // Each delete holds its client's images to commit, so every profile
+      // lock comes first: an admin save of a later client, holding that
+      // lock and waiting on images, would deadlock with the loop.
+      await db.brandingProfiles.lockManyForWrite(
+        dueClients.map((c) => c.id),
+        tx
+      );
       const jtis: string[] = [];
       for (const client of dueClients)
         jtis.push(...(await deleteLoginClientTx(tx, client, SYSTEM_ACTOR)));

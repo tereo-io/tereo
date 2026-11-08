@@ -170,10 +170,7 @@ export const applyBranding = async (
     ),
     ...releasedBefore.map((row) => row.clientId),
   ]);
-  for (const clientUuid of [...lockKeys].sort(
-    (a, b) => (a ?? "").localeCompare(b ?? "") // null (default) first
-  ))
-    await db.brandingProfiles.lockForWrite({ clientUuid }, tx);
+  await db.brandingProfiles.lockManyForWrite(lockKeys, tx);
 
   // A client delete takes its profile's lock before the client's row, so one
   // that ran before these locks is visible now. Locking client rows first

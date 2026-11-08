@@ -2,10 +2,18 @@
 // @module-tag provisioning
 // @module-tag race
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
+import { deprovisionMissing } from "../../../utils/provisioning/apply.js";
 import { applyProvisioning } from "../../../utils/provisioning/index.js";
+import { storeBrandingImage } from "../../../utils/branding/storage.js";
+import { SYSTEM_USER_ID } from "../../../definitions/systemUser.js";
+import { lockWaiters, untilQueued } from "../../support/dbLocks.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateClientSecret } from "../../../utils/crypto.js";
+import { checkImage } from "../../../utils/branding/images.js";
 import { prisma } from "../../../utils/db/prisma.js";
+import db from "../../../utils/db/index.js";
+import { randomBytes } from "node:crypto";
+import env from "../../../env.js";
 import {
   type LoadedDocument,
   type ProvisioningSet,
@@ -19,6 +27,15 @@ import {
   newClientSpec,
   ownerDeclaration,
 } from "../../support/provisioning.js";
+import {
+  brandingPrincipal,
+  createBrandingClient,
+} from "../../support/branding.js";
+
+const PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64"
+);
 
 const createdSlugs: string[] = [];
 
@@ -148,5 +165,67 @@ describe("applyProvisioning", () => {
       },
     });
     expect(approvals).toBe(1);
+  });
+});
+
+describe("deprovisionMissing racing a branding save", () => {
+  it("takes every due client's profile lock before any image lock, so a save sharing an image cannot deadlock with it", async () => {
+    const { userId } = await brandingPrincipal([]);
+    const unprovisionedAt = new Date();
+    // Created in order, so the loop meets `first` before `second`.
+    const first = await createBrandingClient(userId);
+    const second = await createBrandingClient(userId);
+    await prisma.oAuthClient.updateMany({
+      where: { id: { in: [first.id, second.id] } },
+      data: { provisioned: true, unprovisionedAt },
+    });
+    const image = await checkImage(
+      "logo",
+      Buffer.concat([PNG, randomBytes(16)])
+    );
+    const { objectId } = await storeBrandingImage(image, SYSTEM_USER_ID);
+    for (const client of [first, second])
+      await prisma.brandingProfile.create({
+        data: {
+          clientId: client.id,
+          logoObjectId: objectId,
+          updatedBy: SYSTEM_USER_ID,
+        },
+      });
+
+    let releaseSave!: () => void;
+    const saveDone = new Promise<void>((r) => (releaseSave = r));
+    let profileLocked!: () => void;
+    const profileHeld = new Promise<void>((r) => (profileLocked = r));
+    // An admin save of `second`: its profile lock, then its images.
+    const save = prisma.$transaction(
+      async (tx) => {
+        await db.brandingProfiles.lockForWrite({ clientUuid: second.id }, tx);
+        profileLocked();
+        await saveDone;
+        await tx.$queryRaw`
+          SELECT "id" FROM "files"."objects" WHERE "id" = ${objectId}::uuid FOR UPDATE`;
+      },
+      { timeout: 30_000 }
+    );
+    await profileHeld;
+
+    const baseline = await lockWaiters();
+    const later = new Date(
+      unprovisionedAt.getTime() +
+        (env.REGISTRY_RETIREMENT_GRACE_HOURS + 1) * 60 * 60 * 1000
+    );
+    const retire = deprovisionMissing(later);
+    await untilQueued(baseline, 1, 5_000);
+    releaseSave();
+
+    expect(
+      (await Promise.allSettled([save, retire])).map((r) => r.status)
+    ).toEqual(["fulfilled", "fulfilled"]);
+    expect(
+      await prisma.oAuthClient.count({
+        where: { id: { in: [first.id, second.id] } },
+      })
+    ).toBe(0);
   });
 });

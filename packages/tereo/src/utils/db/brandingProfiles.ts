@@ -174,3 +174,19 @@ export const lockForWrite = async (
 ) => {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`branding:${target.clientUuid ?? "default"}`}, 0))`;
 };
+
+/**
+ * `lockForWrite` for several targets, in one stable order (the default first),
+ * so two transactions locking overlapping sets cannot deadlock. Take them all
+ * before any image or client row lock: an admin save holds its profile's lock
+ * while it waits for those.
+ */
+export const lockManyForWrite = async (
+  clientUuids: Iterable<string | null>,
+  tx: Prisma.TransactionClient
+) => {
+  for (const clientUuid of [...new Set(clientUuids)].sort((a, b) =>
+    (a ?? "").localeCompare(b ?? "")
+  ))
+    await lockForWrite({ clientUuid }, tx);
+};
