@@ -15,5 +15,7 @@ export const BUCKETS: BucketDefinition[] = [
     description:
       "Sign-in page branding images. Written only by the branding module; served by /oauth/branding/assets.",
     policy: "private",
+    // Released images wait out a grace period in `deleteAfter`.
+    managesObjectExpiry: true,
   },
 ];

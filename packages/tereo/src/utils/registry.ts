@@ -740,7 +740,9 @@ const applyBuckets = async (
     names.length > 0 ? await serviceAccountUserId(service, tx) : null;
   for (const b of d.buckets) {
     // Only the description is re-applied; admins tune the rest, and
-    // utils/bucketAccess.ts refuses their edits to the description.
+    // utils/bucketAccess.ts refuses their edits to the description. Core's
+    // own buckets admins cannot tune: every start resets them whole
+    // (utils/coreBuckets.ts).
     const live = existing.find((e) => e.name === b.bucketName);
     const bucket = live
       ? await tx.bucket.update({
