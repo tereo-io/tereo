@@ -86,7 +86,10 @@ organization **owner** in the organization's groups (403); owners and the platfo
 
 The caller may only grant and take away what they hold, as elsewhere ([Granting](auth.md#granting-only-what-you-hold)):
 adding members, restoring and changing roles check the caller can grant every role the group holds
-or changes; removing members and archiving check they may disempower each affected user. The grant
+or changes; archiving checks they can take away every role the group holds. Removing members from a
+**global** group checks they may disempower each removed user (hold every permission the user holds,
+as for removing a global role); from an **organization** group, that they can take away the group's
+roles with what they hold in that organization, as for removing an org-scoped role. The grant
 check on add-members and restore counts **every** role the group holds, inactive or archived roles
 included. The change may not remove the last admin (`assertAdminRemains`, counting group roles).
 
@@ -121,9 +124,16 @@ Errors (`code`): `unknown_organization`, `unknown_role`, `unknown_user`, `role_n
 `system_user_not_allowed` (409), `managed_by_provisioning` (409). Archived groups answer 409 to edits
 and to adding members.
 
-Every change runs in one transaction that locks the group, then the affected users, so concurrent
-changes, and a member being added while their organization membership is removed, cannot interleave
-into an inconsistent state.
+Every change runs in one transaction that takes the affected users' authority locks first, then
+locks the group, so concurrent changes, and a member being added while their organization membership
+is removed, cannot interleave into an inconsistent state.
+
+### Limits
+
+Group-wide changes (setting roles, archive, restore) take one authority lock per member inside one
+transaction. Very large groups (thousands of members) make those changes slow and can exhaust
+Postgres's lock table (`max_locks_per_transaction` × `max_connections`). Provisioning skips a
+group whose roles are unchanged, so an unchanged document takes no member locks at start.
 
 ## Events and audit
 
@@ -144,14 +154,19 @@ effective roles does push a permission change to each affected member's open ses
 ## Userinfo and the SDK
 
 `/oauth/userinfo` returns `groups: [{ id, slug, name, organizationId }]`: the user's active global
-groups plus those of the token's organization. It goes to the same callers as `roles`; for a
+groups plus those of the token's organization while it is active and not archived (otherwise the
+global ones only, as `roles` leaves out its group roles too). It goes to the same callers as `roles`; for a
 delegated token only with the `account` or `admin` area, otherwise the list is empty. It is never in
 a token. Discovery lists `groups` in `claims_supported`. `groups` is an admin domain, so the
 `core:admin` and `core:admin.read` ceilings cover `groups.*`.
 
-`@tereo-io/sdk` offers `list`, `get`, `listMembers`, `listUserGroups`, `create`, `update`, `archive`,
-`restore`, `addMembers`, `removeMember` and `setRoles` on the core client's groups, with the service
-account's permissions. Its error codes for these requests start at `AS_0107`.
+`@tereo-io/sdk` offers the request functions `listGroups`, `getGroup`, `createGroup`, `updateGroup`,
+`archiveGroup`, `restoreGroup`, `listGroupMembers`, `addGroupMembers`, `removeGroupMember`,
+`setGroupRoles` and `listUserGroups`, sent with the service account's permissions. They are reached
+through the handler's `requests` once `createCoreClient()` has run
+(`import { requests } from "@tereo-io/sdk/handler"`, then `requests.auth.listGroups(...)`); their
+types (`Group`, `ListGroupsQuery`, …) come from `@tereo-io/sdk`. Their error codes start at
+`AS_0107`.
 
 ## Provisioning
 
