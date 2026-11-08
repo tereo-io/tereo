@@ -515,7 +515,7 @@ const completeLink = async (
         { userId: user.id, email: user.email },
         user.id,
         provider,
-        { subject: identity.subject, email: identity.email }
+        identity
       )
     );
   } catch (err) {
