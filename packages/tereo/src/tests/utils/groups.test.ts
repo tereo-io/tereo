@@ -1,12 +1,12 @@
 // @module-tag int
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
+import { createTestRole, createTestUser } from "../support/auth/users.js";
 import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, type Prisma } from "../../utils/db/prisma.js";
 import { createTestGuest } from "../support/auth/guests.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
-import { createTestUser } from "../support/auth/users.js";
 import { AppError } from "../../utils/errors.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
@@ -288,6 +288,35 @@ describe("roles", () => {
     );
     expect(err.statusCode).toBe(400);
     expect(err.code).toBe("role_not_org_assignable");
+  });
+
+  it("setGroupRoles refuses a system role on an org group", async () => {
+    const org = await newOrg();
+    const orgGroup = await newGroup(org);
+    const globalGroup = await newGroup(null);
+    const role = await createTestRole({ isSystem: true });
+    const permission = await prisma.permission.findUniqueOrThrow({
+      where: { name: GROUP_PERMISSION },
+    });
+    await prisma.rolePermission.create({
+      data: { roleId: role.id, permissionId: permission.id },
+    });
+
+    const err = await refusal(() =>
+      db.$transaction((tx) =>
+        setGroupRoles(PROVISIONING, orgGroup.id, [role.id], tx)
+      )
+    );
+    expect(err.statusCode).toBe(403);
+    expect(err.message).toContain(
+      "System roles cannot be assigned within an organization"
+    );
+    expect(await db.groups.getRoleIds(orgGroup.id)).toEqual([]);
+
+    const accepted = await db.$transaction((tx) =>
+      setGroupRoles(PROVISIONING, globalGroup.id, [role.id], tx)
+    );
+    expect(accepted.added).toEqual([role.id]);
   });
 
   it("setGroupRoles refuses an unknown role with unknown_role", async () => {

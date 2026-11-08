@@ -226,6 +226,16 @@ const checkAddedRoles = async (
     );
   }
   if (group.organizationId) {
+    // As for direct org-scoped assignment (utils/orgRoleAssignment.ts): a
+    // system role's platform-wide permissions are a path to platform admin.
+    const systemRoles = roles.filter((r) => r.serviceId !== null);
+    if (systemRoles.length > 0) {
+      throw new ForbiddenError(
+        `System roles cannot be assigned within an organization: ${systemRoles
+          .map((r) => r.name)
+          .join(", ")}`
+      );
+    }
     const notAssignable = db.roles.notOrgAssignablePermissionNames(roles);
     if (notAssignable.length > 0) {
       throw new BadRequestError(
