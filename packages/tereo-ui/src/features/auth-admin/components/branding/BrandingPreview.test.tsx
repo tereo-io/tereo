@@ -103,13 +103,13 @@ describe("BrandingPreview", () => {
         inherited={inherited}
         draft={{
           ...draft,
-          logo: { sha256: "a", url: "https://cdn.example/logo.png" },
+          logo: { sha256: "a", url: "/oauth/branding/assets/logo.png" },
         }}
       />
     );
     expect(screen.getByRole("img")).toHaveAttribute(
       "src",
-      "https://cdn.example/logo.png"
+      `${env.CORE_URL}/oauth/branding/assets/logo.png`
     );
     await userEvent
       .setup()
@@ -142,13 +142,39 @@ describe("BrandingPreview", () => {
     );
   });
 
-  it("decides the split against the frame's width, not the viewport's", () => {
+  it("shows both split columns in the frame whatever its width", () => {
     const previewCss = readFileSync(
       "src/features/auth-admin/components/branding/styles.css",
       "utf8"
     );
+    expect(previewCss).not.toMatch(/@container/);
     expect(previewCss).toMatch(
-      /@container \(min-width: [\d.]+rem\)\s*\{[^@]*\.t-brand-split-image/
+      /\.t-branding-preview-frame \.t-brand-split-with-image \.t-brand-split-image \{\s*display: block;/
+    );
+  });
+
+  it("follows the draft's layout again once it changes", async () => {
+    const { container, rerender } = render(
+      <BrandingPreview draft={draft} inherited={inherited} />
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Split" }));
+    expect(
+      container.querySelector("[data-brand-layout='split']")
+    ).not.toBeNull();
+    rerender(
+      <BrandingPreview
+        draft={{ ...draft, layout: "centered" }}
+        inherited={inherited}
+      />
+    );
+    expect(
+      container.querySelector("[data-brand-layout='centered']")
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Centered" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
     );
   });
 });

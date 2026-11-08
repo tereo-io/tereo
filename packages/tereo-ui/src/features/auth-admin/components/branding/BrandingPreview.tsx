@@ -47,7 +47,10 @@ const IMAGE_URL_KEY = {
 
 const blank = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
 
-/** Draft over inherited: a non-empty draft value wins; colours merge key by key. */
+/**
+ * Draft over inherited: a non-empty draft value wins, and footer links unless
+ * null; colours merge key by key.
+ */
 export const mergeDraft = (
   draft: BrandingDraft,
   base: EffectiveBranding | null
@@ -63,7 +66,8 @@ export const mergeDraft = (
     signInLabel: blank(draft.signInLabel) ?? inherited.signInLabel,
     notice: blank(draft.notice) ?? inherited.notice,
     layout: draft.layout ?? inherited.layout,
-    footerLinks: draft.footerLinks?.length
+    // null inherits; [] is "no links", as on the server.
+    footerLinks: draft.footerLinks
       ? draft.footerLinks.filter((l) => l.label.trim() && l.url.trim())
       : inherited.footerLinks,
     colorsLight: { ...inherited.colorsLight, ...draft.colorsLight },
@@ -91,8 +95,15 @@ export const BrandingPreview = ({ draft, inherited }: Props) => {
   const [page, setPage] = useState<PreviewPage>("login");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [layoutChoice, setLayoutChoice] = useState<BrandingLayout | null>(null);
-
   const merged = mergeDraft(draft, inherited);
+
+  // A layout picked here is a look only; once the draft's layout changes, the
+  // preview follows the draft again, so it shows what Save stores.
+  const [seenLayout, setSeenLayout] = useState(merged.layout);
+  if (seenLayout !== merged.layout) {
+    setSeenLayout(merged.layout);
+    setLayoutChoice(null);
+  }
   const layout = layoutChoice ?? merged.layout ?? "centered";
   const branding: EffectiveBranding = { ...merged, layout };
 

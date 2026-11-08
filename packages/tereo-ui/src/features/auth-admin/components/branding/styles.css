@@ -45,6 +45,25 @@
   background: none;
 }
 
+/* No hex to show: an empty, struck-through swatch instead of black. */
+.t-color-row input[type="color"].t-color-unset {
+  background: linear-gradient(
+    to top right,
+    transparent calc(50% - 1px),
+    var(--k-border-color) 50%,
+    transparent calc(50% + 1px)
+  );
+}
+
+/* Separate rules: a browser drops a whole list with a pseudo-element it lacks. */
+.t-color-row input[type="color"].t-color-unset::-webkit-color-swatch {
+  opacity: 0;
+}
+
+.t-color-row input[type="color"].t-color-unset::-moz-color-swatch {
+  opacity: 0;
+}
+
 .t-footer-link-row {
   display: grid;
   grid-template-columns: 1fr 2fr auto;
@@ -123,31 +142,19 @@
   overflow: hidden;
   background: var(--k-background-color);
   color: var(--k-text-color);
-  container-type: inline-size;
 }
 
 .t-branding-preview-frame .k-auth-page {
   min-height: 32rem;
 }
 
-/* The split follows the frame's width, not the viewport's. */
+/* The frame is narrower than the page would be, so a split always shows both columns here. */
 .t-branding-preview-frame .t-brand-split-with-image[data-brand-layout="split"] {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .t-branding-preview-frame .t-brand-split-with-image .t-brand-split-image {
-  display: none;
-}
-
-@container (min-width: 48rem) {
-  .t-branding-preview-frame
-    .t-brand-split-with-image[data-brand-layout="split"] {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .t-branding-preview-frame .t-brand-split-with-image .t-brand-split-image {
-    display: block;
-  }
+  display: block;
 }
 
 .t-grants {
