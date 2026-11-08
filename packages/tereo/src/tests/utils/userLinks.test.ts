@@ -181,6 +181,36 @@ describe("userLinks", () => {
     expect(await live("verify")).toBe(0);
   });
 
+  it("markEmailVerified marks only the address that was proven", async () => {
+    const user = await createUser();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerifiedAt: null },
+    });
+
+    const stale = await prisma.$transaction((tx) =>
+      markEmailVerified(tx, {
+        userId: user.id,
+        via: "provider",
+        email: `old-${user.email}`,
+      })
+    );
+    expect(stale).toBe(false);
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id: user.id } }))
+        .emailVerifiedAt
+    ).toBeNull();
+
+    const current = await prisma.$transaction((tx) =>
+      markEmailVerified(tx, {
+        userId: user.id,
+        via: "provider",
+        email: user.email,
+      })
+    );
+    expect(current).toBe(true);
+  });
+
   it("markEmailVerified writes once", async () => {
     const user = await createUser();
     const verifiedEvents = async () =>

@@ -130,7 +130,11 @@ export const setPassword = async (req: Request, res: Response) => {
         data: { userId: user.id, email: user.email, via: purpose },
       });
       // The link went to the user's current address: an email change retires it.
-      await markEmailVerified(tx, { userId: user.id, via: "password_link" });
+      await markEmailVerified(tx, {
+        userId: user.id,
+        via: "password_link",
+        email: user.email,
+      });
       // A grant from a sign-in with the old password must not outlive it.
       await db.passwordChangeGrants.deleteForUser(user.id, tx);
       await recordRevoked(tx, sessionIds, ssoSessionIds);

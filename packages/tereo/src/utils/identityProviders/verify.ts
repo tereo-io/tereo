@@ -2,7 +2,7 @@ import type { IdentityProvider, NormalizedIdentity } from "./types.js";
 import { markEmailVerified } from "../userLinks.js";
 import type { Prisma } from "../db/prisma.js";
 import { normalizeEmail } from "../email.js";
-import { emailTrusted } from "./resolve.js";
+import { emailTrusted } from "./trust.js";
 import db from "../db/index.js";
 
 /**
@@ -32,5 +32,5 @@ export const markVerifiedFromProvider = async (
   if (!emailTrusted(provider, identity, email, "invite")) {
     return;
   }
-  await markEmailVerified(tx, { userId, via: "provider" });
+  await markEmailVerified(tx, { userId, via: "provider", email });
 };

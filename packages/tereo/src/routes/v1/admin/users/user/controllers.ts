@@ -110,16 +110,10 @@ export const updateUser = async (req: Request, res: Response) => {
     // A body of only a rate limit is not a profile update.
     const profileChanged =
       rateLimitPerSecond === undefined || Object.keys(profile).length > 0;
-    let updated = profileChanged
-      ? await db.users.update(id, profile, tx)
-      : await db.users.get(id, tx);
     // The new address has proved nothing yet.
-    if (newEmail) {
-      updated = await tx.user.update({
-        where: { id },
-        data: { emailVerifiedAt: null },
-      });
-    }
+    let updated = profileChanged
+      ? await db.users.update(id, profile, tx, { unverify: newEmail !== null })
+      : await db.users.get(id, tx);
     // An invite is matched by email: it must not follow the account to an
     // address the admin who issued it never saw.
     const invitesWithdrawn = newEmail
@@ -136,6 +130,7 @@ export const updateUser = async (req: Request, res: Response) => {
     // once one exists.
     if (
       newEmail &&
+      updated.isActive &&
       (await db.notificationConnections.getDefault("email", tx))
     ) {
       await issueVerifyLink(tx, { userId: id, createdBy: auth.userId });

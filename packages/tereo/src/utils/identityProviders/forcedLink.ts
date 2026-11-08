@@ -63,7 +63,10 @@ export const commitForcedLink = async ({
         if (!(await db.upstreamAuth.consumeLinkGrant(linkGrantId, tx))) {
           throw new ForcedLinkRefused("session_expired");
         }
-        linked = await linkIdentity(tx, auth, user.id, provider, identity);
+        linked = await linkIdentity(tx, auth, user.id, provider, {
+          subject: identity.subject,
+          email: identity.email,
+        });
         await db.users.clearPassword(user.id, tx);
         await logAuditTx(tx, {
           auth,

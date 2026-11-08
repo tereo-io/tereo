@@ -188,6 +188,33 @@ describe("Provider-only users, identities and invites", () => {
     expect(after.identities[0].provider.slug).toBe(provider.slug);
   });
 
+  it("claiming an invite with a verified matching email verifies the user", async () => {
+    const user = await createUser();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerifiedAt: null },
+    });
+    await admin("POST", `/${user.id}/identity-invites`, {
+      providerId: provider.id,
+    });
+    await upstreamLogin({
+      provider: fake,
+      slug: provider.slug,
+      clientId: client.clientId,
+      redirectUri: "http://localhost:3000/callback",
+      scope: "openid profile email",
+      claims: {
+        sub: `sub-${randomUUID()}`,
+        email: user.email,
+        email_verified: true,
+      },
+    });
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+    });
+    expect(after.emailVerifiedAt).not.toBeNull();
+  });
+
   it("refuses POST /account/password for a user with no password", async () => {
     const user = await createTestUser();
     const token = await getAccessTokenForUser(user, client);

@@ -50,7 +50,11 @@ export const verifyEmail = async (req: Request, res: Response) => {
       await emailVerificationFailure.recordFailure(req);
       throw new NotFoundError("Not found");
     }
-    await markEmailVerified(tx, { userId: user.id, via: "link" });
+    await markEmailVerified(tx, {
+      userId: user.id,
+      via: "link",
+      email: user.email,
+    });
   });
 
   res.status(204).end();

@@ -154,7 +154,8 @@ export const createWithoutPassword = async (
 export const update = async (
   id: string,
   data: UpdateUserInput,
-  tx?: Prisma.TransactionClient
+  tx?: Prisma.TransactionClient,
+  options: { unverify?: boolean } = {}
 ) => {
   const db = tx ?? prisma;
   const updateData: {
@@ -163,9 +164,11 @@ export const update = async (
     passwordSetByUser?: boolean;
     name?: string;
     isActive?: boolean;
+    emailVerifiedAt?: null;
   } = {};
 
   if (data.email) updateData.email = data.email;
+  if (options.unverify) updateData.emailVerifiedAt = null;
   if (data.name !== undefined) updateData.name = data.name;
   if (data.isActive !== undefined) updateData.isActive = data.isActive;
   if (data.password) {

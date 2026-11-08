@@ -275,10 +275,16 @@ export const markEmailVerified = async (
   {
     userId,
     via,
-  }: { userId: string; via: "link" | "password_link" | "provider" | "setup" }
+    email,
+  }: {
+    userId: string;
+    via: "link" | "password_link" | "provider" | "setup";
+    /** The address that was proven: nothing is marked if it has changed since. */
+    email?: string;
+  }
 ): Promise<boolean> => {
   const { count } = await tx.user.updateMany({
-    where: { id: userId, emailVerifiedAt: null },
+    where: { id: userId, emailVerifiedAt: null, ...(email && { email }) },
     data: { emailVerifiedAt: new Date() },
   });
   if (count === 0) return false;

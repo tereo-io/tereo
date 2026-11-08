@@ -6,6 +6,7 @@ import { UpstreamAuthError } from "../../../../utils/identityProviders/errors.js
 import { beginUpstreamAuth } from "../../../../utils/identityProviders/begin.js";
 import type { AuthorizeRequestParams } from "../../../../utils/authorization.js";
 import { continueAfterFirstFactor } from "../../../../utils/firstFactor.js";
+import { emailTrusted } from "../../../../utils/identityProviders/trust.js";
 import { emailDomain, normalizeEmail } from "../../../../utils/email.js";
 import { authFailure } from "../../../../middleware/rateLimit.js";
 import { hashTotpSetupGrant } from "../../../../utils/totp.js";
@@ -25,7 +26,6 @@ import type {
   User,
 } from "../../../../../prisma/generated/client/index.js";
 import {
-  emailTrusted,
   linkIdentity,
   resolveLoginIdentity,
   ssoProviderElsewhere,
@@ -515,7 +515,7 @@ const completeLink = async (
         { userId: user.id, email: user.email },
         user.id,
         provider,
-        identity
+        { subject: identity.subject, email: identity.email }
       )
     );
   } catch (err) {

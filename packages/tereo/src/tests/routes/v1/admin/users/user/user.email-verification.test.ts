@@ -126,6 +126,11 @@ describe("PATCH /v1/admin/users/:id and email verification", () => {
     await waitFor(async () => smtp.messages.length === 1, 10_000, 50);
     smtp.messages.length = 0;
     await issue(user.id, false, "reset");
+    const mailTo = () =>
+      prisma.notification.count({
+        where: { recipients: { path: ["0", "address"], equals: user.email } },
+      });
+    const sent = await mailTo();
 
     const res = await patch(user.id, writer, {
       email: `  ${user.email.toUpperCase()}  `,
@@ -135,8 +140,7 @@ describe("PATCH /v1/admin/users/:id and email verification", () => {
     expect(res.body.emailVerified).toBe(true);
     expect(await liveLinks(user.id, "verify")).toBe(1);
     expect(await liveLinks(user.id, "reset")).toBe(1);
-    await new Promise((r) => setTimeout(r, 300));
-    expect(smtp.messages).toHaveLength(0);
+    expect(await mailTo()).toBe(sent);
   });
 
   it("a password-only change keeps the verify link", async () => {
@@ -162,5 +166,42 @@ describe("PATCH /v1/admin/users/:id and email verification", () => {
 
     expect(res.status).toBe(200);
     expect(await liveLinks(user.id, "verify")).toBe(0);
+  });
+
+  it("deactivating and changing the email together leaves no verify link or mail", async () => {
+    const user = await createTestUser();
+    const newEmail = `moved-${randomUUID()}@acme.com`;
+
+    const res = await patch(user.id, writer, {
+      email: newEmail,
+      isActive: false,
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.emailVerified).toBe(false);
+    expect(await liveLinks(user.id, "verify")).toBe(0);
+    expect(
+      await prisma.notification.count({
+        where: { recipients: { path: ["0", "address"], equals: newEmail } },
+      })
+    ).toBe(0);
+  });
+
+  it("a password and an email change together unverify, retire links and send a verify link", async () => {
+    const user = await createTestUser();
+    await issue(user.id, false, "reset");
+    const newEmail = `moved-${randomUUID()}@acme.com`;
+
+    const res = await patch(user.id, writer, {
+      email: newEmail,
+      password: "N3w-Str0ng-Passw0rd!",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.emailVerified).toBe(false);
+    expect(await liveLinks(user.id, "reset")).toBe(0);
+    await waitFor(async () => smtp.messages.length === 1, 10_000, 50);
+    expect(smtp.messages[0].rcpt).toEqual([newEmail]);
+    expect(await liveLinks(user.id, "verify")).toBe(1);
   });
 });
