@@ -962,12 +962,16 @@ These platform events keep the default organization, as their own endpoints emit
 guest's live access tokens and closes their sockets; their refresh tokens are lowered to the new
 expiry, so they are spent too.
 
-### Password setup link
+### Password links
 
-Issued by `issuePasswordLink` (`utils/userLinks.ts`) as
+Core issues three kinds of one-time link through `utils/userLinks.ts`, all stored in `auth.user_link_tokens` (purpose `setup`, `reset` or `verify`): a password **setup** link, a password **reset** link ([Password reset](#password-reset)) and an **email verification** link ([Email verification](#email-verification)). A user has at most one live password link (setup or reset; issuing either replaces it) and at most one live verify link.
+
+#### Setup link
+
+Issued by `issuePasswordLink` as
 `${UI_BASE_URL}/set-password#token=<token>`: 32 random bytes, base64url, valid for
 `PASSWORD_SETUP_TTL_SECONDS` (72 hours by default), single use, and only its SHA-256 is stored in
-`auth.password_setup_tokens`. A user has at most one live token; issuing replaces it. The token is
+`auth.user_link_tokens`. The token is
 in the URL **fragment**, so it never reaches server logs, `Referer` headers or link previews. The
 helper does not refuse unusable users itself; the invite endpoint checks.
 
@@ -976,19 +980,87 @@ null`, `contentRedacted: true`), nulled once the notification is terminal, and a
 answers `409 content_redacted` ([notifications.md](notifications.md)).
 
 Both routes are public, rate limited per IP, and give one uniform `404` for an unknown, used or
-expired token or a user no longer usable or no longer a guest (a miss counts against the caller's
-IP):
+expired token, a user the link no longer reaches (a setup link: no longer a guest; either kind: an
+email domain that is now SSO-only, where the provider holds the credential) (a miss counts against
+the caller's IP). They serve reset links as well:
 
 - `POST /v1/password-setup/inspect { token }` returns `{ email, name, expiresAt }` (the link's
   expiry) and uses nothing up.
 - `POST /v1/password-setup { token, password }` sets the password under the password rules, consumes
   the token with a conditional update (of two concurrent requests one wins), clears
   `passwordChangeRequired` and ends the user's other sessions, in one transaction; `204`. Emits
-  `auth.user.password-set` (never the password). The UI then shows a "Password set" screen whose
+  `auth.user.password-set` with `via` `setup` or `reset` (never the password); marks the address
+  verified (the link went to it), and deletes the user's pending forced-password-change grants.
+  The UI then shows a "Password set" screen whose
   Sign in button goes to `/`.
 
 Issuing emits `auth.user.password-setup-link-issued`. The hourly auth cleanup deletes a token
 `AUTH_TOKEN_GRACE_MS` (7 days) after it expired or was used (retired included).
+
+### Password reset
+
+`POST /v1/password-reset { email, client_id? }` (public) emails a reset link. It **always answers
+`202` with an empty body, and answers before doing any work**: the reset is processed after the
+response, so no account information leaks through the status, the timing or an error. A link is sent
+only when the address has an account that is active and unexpired, is a human or guest (not a
+service account or the system user), is not on an SSO-only domain, and a default email connection
+exists (the sign-in page asks `GET /v1/password-reset/status`, `{ enabled }`, before offering
+"Forgot password"). A user who has no password yet (signs in through a provider) qualifies.
+
+The link is `${UI_BASE_URL}/set-password[?client_id=…]#token=<token>`, valid for
+`PASSWORD_RESET_TTL_SECONDS` (1 hour by default, 5 minutes to 24 hours), single use, and replaces
+any earlier setup or reset link. `client_id` is carried only if a client with that ID exists, so the
+page can return to the app. The email ("Reset your password") is a sensitive notification. Redeeming
+it is `POST /v1/password-setup` ([Setup link](#setup-link)): it sets the password, marks the address
+verified, ends the other sessions and clears pending forced-password-change grants. A link whose
+user has since moved to an SSO-only domain answers the uniform `404`.
+
+**Per-address limit.** Each address may be asked for 3 times per hour, counted on every request
+whether or not it has an account, and a request over the limit is still `202` but sends nothing.
+Because anyone can make these requests, **anyone can use up the allowance for a victim's address**
+and delay that person's genuine reset for up to an hour; the cost of leaking nothing about which
+addresses exist. (The route also has the usual per-IP limits.) A reset issued is audited
+(`password_reset_requested`, with the requesting IP) and emits `auth.user.password-reset-requested`.
+
+### Email verification
+
+`users.email_verified_at` records when an address was proven; `email_verified` in the userinfo
+response, the ID token **and `/oauth/introspect`** (they share one claims builder) is
+`emailVerifiedAt !== null`, and the account and admin user objects carry `emailVerified` and
+`emailVerifiedAt`. Accounts that existed before the feature were marked verified by the migration.
+A changed address is unverified until proven again.
+
+An address becomes verified when:
+
+- the user opens a verify link (`POST /v1/email-verification { token }`, public; `inspect` returns
+  `{ email, expiresAt }` and consumes nothing), which ends no session;
+- the user redeems a setup or reset link, which went to that address;
+- a **non-forced** provider sign-in links to the account, an invite is claimed, autoAccept applies or
+  the user links an account from the account page, when the provider vouches for the same address
+  (`email_verified` from the provider).
+
+A **forced** provider link (an SSO-only domain's first sign-in) does **not** mark the address
+verified.
+
+Verify links are `${UI_BASE_URL}/verify-email#token=<token>`, valid for
+`EMAIL_VERIFICATION_TTL_SECONDS` (3 days by default, 1 hour to 14 days) and bound to the address
+they were issued for: a later change of email voids them. The email ("Confirm your email address")
+is sensitive. They are sent by:
+
+- `POST /v1/account/email-verification` (own address; 1 per minute and 5 per hour per user, `429`);
+- `POST /v1/admin/users/:id/email-verification` (`users.write`; the link is never returned, so an
+  admin cannot confirm for the user);
+- an admin changing a user's email (`PATCH /v1/admin/users/:id`), which also marks the new address
+  unverified. No link is sent when the user is inactive or is deactivated in the same request, or no
+  email connection exists.
+
+Both resends refuse with `409 already_verified`, `409 user_not_verifiable` (service accounts, the
+system user, deactivated users) and `409 email_not_configured`. Events: `auth.user.email-verification-sent`
+and `auth.user.email-verified` (`via`: `link`, `password_link`, `provider` or `setup`), each audited.
+Verification is recorded only; core does not yet require it for sign-in.
+
+The admin UI opens `/set-password`, `/forgot-password` and `/verify-email` signed out. (Before, a
+signed-out visitor following a guest's setup link was redirected to `/`.)
 
 ### Forced password change
 
@@ -1319,8 +1391,10 @@ the code from the response URL), nor on the UI's pages.
 
 Where core knowingly departs from OAuth 2.0 / OpenID Connect:
 
-- **`email_verified` is always `true`.** There is no verification column: an email is set by an
-  admin (or an invite) or comes from an identity provider that verified it.
+- **`email_verified` is not always `true`.** It reports whether the address was proven
+  ([Email verification](#email-verification)): by a link, a setup or reset link, or a provider that
+  vouches for it. An address an admin set or changed is unverified until then. Core does not require
+  it for sign-in.
 - **`sid` means two things.** In an access token it is the refresh token's id (the token family's
   session, which `/v1/account/sessions` and the WebSocket rooms use); in an ID token it is the SSO
   session (the browser), as OIDC Front-/Back-Channel Logout intend. The UI and the SDK depend on

@@ -1,0 +1,244 @@
+/email-verification/inspect:
+  post:
+    tags:
+      - Email Verification
+    summary: Inspect an email verification link
+    description: |
+      The address a verify link confirms and when it expires. Public: the token
+      from the link's URL fragment is the credential. Consumes nothing. Every
+      miss (unknown, used or expired token, a user who cannot sign in, or a
+      link for an address the user has since left) is the same `404`, counted
+      against the caller's IP (`429` past 10 misses per 900 seconds).
+    operationId: inspectEmailVerification
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/EmailVerificationTokenRequest'
+    responses:
+      '200':
+        description: The link's address and expiry
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/auth/schemas.yaml#/EmailVerificationInspectResponse'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/email-verification:
+  post:
+    tags:
+      - Email Verification
+    summary: Confirm an email address from a link
+    description: |
+      Marks the address verified and consumes the token (of two concurrent
+      requests with one token, one succeeds). Ends no session. Public, with
+      the same uniform `404` and per-IP limit as inspect. An audit entry is
+      written and `auth.user.email-verified` is emitted (`via: link`).
+    operationId: verifyEmail
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/auth/schemas.yaml#/EmailVerificationTokenRequest'
+    responses:
+      '204':
+        description: Address verified
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+      '400':
+        $ref: '../../components/responses.yaml#/BadRequestResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/account/email-verification:
+  post:
+    tags:
+      - Email Verification
+    summary: Send myself a verification email
+    description: |
+      Emails the signed-in user a link confirming their address, replacing any
+      earlier verify link (valid `EMAIL_VERIFICATION_TTL_SECONDS`, 3 days by
+      default; sensitive notification). Limited to 1 per minute and 5 per hour
+      per user (`429`); a refusal that sends nothing does not use a slot.
+      `409 already_verified`, `409 user_not_verifiable` (service accounts, the
+      system user and deactivated users), `409 email_not_configured` without a
+      default email connection.
+    operationId: sendMyEmailVerification
+    security:
+      - BearerAuth: []
+    responses:
+      '202':
+        description: Accepted; the email is queued
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '409':
+        $ref: '../../components/responses.yaml#/ConflictResponse'
+        description: '`already_verified`, `user_not_verifiable` or `email_not_configured`'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/users/{id}/email-verification:
+  post:
+    tags:
+      - Admin - Users
+    summary: Send a user a verification email
+    description: |
+      Emails the user a link confirming their address. The link is never in
+      the response, so an admin cannot confirm an address for the user. Needs
+      `users.write`. `409 already_verified`, `409 user_not_verifiable` (service
+      accounts, the system user, deactivated users) or `409 email_not_configured`.
+      A change of a user's email through `PATCH /v1/admin/users/{id}` marks
+      the new address unverified and sends this link itself, unless the user is
+      inactive (or deactivated in the same request) or no email connection exists.
+    operationId: sendAdminUserEmailVerification
+    security:
+      - BearerAuth: [users.write]
+    parameters:
+      - $ref: '../../components/auth/parameters.yaml#/UserIdParam'
+    responses:
+      '202':
+        description: Accepted; the email is queued
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../components/headers.yaml#/X-RateLimit-Reset'
+      '401':
+        $ref: '../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../components/responses.yaml#/ConflictResponse'
+        description: '`already_verified`, `user_not_verifiable` or `email_not_configured`'
+      '429':
+        $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../components/responses.yaml#/ServerErrorResponse'
+
+auth.user.email-verification-sent:
+  post:
+    tags:
+      - Email Verification
+    summary: Email verification sent
+    description: Fired when a verification link is emailed to a user. The link itself is never in the event.
+    operationId: webhookUserEmailVerificationSent
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.email-verification-sent
+                  entityType:
+                    const: User
+                  data:
+                    type: object
+                    required: [userId, email]
+                    properties:
+                      userId:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                      expiresAt:
+                        type: string
+                        format: date-time
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+
+auth.user.email-verified:
+  post:
+    tags:
+      - Email Verification
+    summary: Email verified
+    description: Fired when a user's address is marked verified.
+    operationId: webhookUserEmailVerified
+    security: []
+    parameters:
+      - $ref: '../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.user.email-verified
+                  entityType:
+                    const: User
+                  data:
+                    type: object
+                    required: [userId, email, via]
+                    properties:
+                      userId:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                      via:
+                        type: string
+                        enum: [link, password_link, provider, setup]
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

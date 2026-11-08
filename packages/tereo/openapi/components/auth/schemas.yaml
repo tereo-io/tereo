@@ -663,7 +663,7 @@ IntrospectResponse:
       description: With the `email` scope
     email_verified:
       type: boolean
-      description: With the `email` scope
+      description: With the `email` scope. True once the address has been proven (a link sent to it, or a provider that vouches for it), not merely set.
 
 RevokeRequest:
   type: object
@@ -699,6 +699,7 @@ UserInfoResponse:
       format: email
     email_verified:
       type: boolean
+      description: True once the address has been proven (a link sent to it, or a provider that vouches for it), not merely set.
     picture:
       type: string
       format: uri
@@ -1132,9 +1133,8 @@ UserProfile:
       type: boolean
       description: Whether the address has been proven, by a link sent to it or by an identity provider that vouches for it. It is the `email_verified` claim.
     emailVerifiedAt:
-      type: string
+      type: [string, 'null']
       format: date-time
-      nullable: true
       description: When the address was proven; null while it has not been.
     createdAt:
       type: string
@@ -1312,9 +1312,8 @@ User:
       type: boolean
       description: Whether the address has been proven, by a link sent to it or by an identity provider that vouches for it. It is the `email_verified` claim.
     emailVerifiedAt:
-      type: string
+      type: [string, 'null']
       format: date-time
-      nullable: true
       description: When the address was proven; null while it has not been.
     createdAt:
       type: string
@@ -3957,6 +3956,46 @@ PasswordSetupInspectResponse:
       type: string
       format: date-time
       description: When the link expires.
+
+PasswordResetRequest:
+  type: object
+  required: [email]
+  properties:
+    email:
+      type: string
+      format: email
+    client_id:
+      type: string
+      maxLength: 255
+      description: A login client the link's page returns the user to. Ignored unless a client with this ID exists.
+
+PasswordResetStatusResponse:
+  type: object
+  required: [enabled]
+  properties:
+    enabled:
+      type: boolean
+      description: Whether a default email connection exists, so a reset email can be sent.
+
+EmailVerificationTokenRequest:
+  type: object
+  required: [token]
+  properties:
+    token:
+      type: string
+      maxLength: 128
+
+EmailVerificationInspectResponse:
+  type: object
+  required: [email, expiresAt]
+  properties:
+    email:
+      type: string
+      format: email
+      description: The address the link confirms.
+    expiresAt:
+      type: string
+      format: date-time
 
 PasswordSetupRequest:
   type: object

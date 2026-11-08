@@ -332,7 +332,7 @@ Retry resets the notification's `failed` deliveries to `pending` with their atte
 many were reset) and is audited (`UPDATE` on `Notification`, `metadata: { retried }`). A
 notification with no failed delivery is `409 nothing_to_retry`.
 
-A notification sent with `sensitive: true` (core's password-setup email is one) is never shown: its `content` reads `null` with `contentRedacted: true` in the admin log, is nulled once the notification is terminal, and `POST /:id/retry` on it is `409 content_redacted`.
+A notification sent with `sensitive: true` (core's three link emails are: "Set your password", "Reset your password" and "Confirm your email address") is never shown: its `content` reads `null` with `contentRedacted: true` in the admin log, is nulled once the notification is terminal, and `POST /:id/retry` on it is `409 content_redacted`.
 
 `content` is kept while any delivery is unsent, so a failed delivery can be retried until retention
 removes it. Once every delivery is sent it is gone.
