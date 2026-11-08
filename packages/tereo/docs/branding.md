@@ -5,23 +5,23 @@ say "Tereo" in kosmeo's stock colours until an admin brands them. Branding is ma
 set per client, with a default beneath; no free-form HTML or CSS reaches the page. It is set in the
 admin UI (**Branding**), through `/v1/admin/branding`, or by a
 [provisioning document](provisioning.md#branding). The route reference is in the API docs
-(`/docs`, tag *Admin - Branding*).
+(`/docs`, tag _Admin - Branding_).
 
 ## Slots
 
-| Slot | Type | Limits |
-|---|---|---|
-| `appName` | text | 60 characters. Replaces "Tereo" in page titles and `<title>` (and the console header, see below) |
-| `headline`, `subtitle` | text | 80 / 160. The login page's heading and subheading |
-| `signInLabel` | text | 30. The login button |
-| `notice` | text | 280. Plain text above the login form |
-| `logo`, `logoDark` | image | PNG, WebP, JPEG, SVG; `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB). `logoDark` shows under the app's dark theme (its theme setting, not the OS's); without one, `logo` shows in both |
-| `favicon` | image | PNG, SVG, ICO; `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB) |
-| `background` | image | PNG, WebP, JPEG; `BRANDING_BACKGROUND_MAX_SIZE_MB` (5 MB) |
-| `layout` | enum | `centered` (card over a full-bleed background) or `split` (the background in its own column beside a solid form column; below 48rem only the form shows, and the editor's preview applies that against its own width) |
-| `footerLinks` | list | Up to 3 `{ label, url }`; label 40 characters; `url` must be `https:` |
-| `colorsLight`, `colorsDark` | map | `--k-*` variable to colour value |
-| `applyToConsole` | boolean | Applies the colours and app name to the admin console (see below) |
+| Slot                        | Type    | Limits                                                                                                                                                                                                                |
+| --------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `appName`                   | text    | 60 characters. Replaces "Tereo" in page titles and `<title>` (and the console header, see below)                                                                                                                      |
+| `headline`, `subtitle`      | text    | 80 / 160. The login page's heading and subheading                                                                                                                                                                     |
+| `signInLabel`               | text    | 30. The login button                                                                                                                                                                                                  |
+| `notice`                    | text    | 280. Plain text above the login form                                                                                                                                                                                  |
+| `logo`, `logoDark`          | image   | PNG, WebP, JPEG, SVG; `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB). `logoDark` shows under the app's dark theme (its theme setting, not the OS's); without one, `logo` shows in both                                         |
+| `favicon`                   | image   | PNG, SVG, ICO; `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB)                                                                                                                                                                  |
+| `background`                | image   | PNG, WebP, JPEG; `BRANDING_BACKGROUND_MAX_SIZE_MB` (5 MB)                                                                                                                                                             |
+| `layout`                    | enum    | `centered` (card over a full-bleed background) or `split` (the background in its own column beside a solid form column; below 48rem only the form shows, and the editor's preview applies that against its own width) |
+| `footerLinks`               | list    | Up to 3 `{ label, url }`; label 40 characters; `url` must be `https:`                                                                                                                                                 |
+| `colorsLight`, `colorsDark` | map     | `--k-*` variable to colour value                                                                                                                                                                                      |
+| `applyToConsole`            | boolean | Applies the colours and app name to the admin console (see below)                                                                                                                                                     |
 
 Text is rendered as text, never HTML. Every slot is nullable and `null` means inherit. The steps
 other than login (2FA, org select, change password, consent, logout, set password) take the app
@@ -81,7 +81,9 @@ clients and each costs at most one client lookup.
 ## Assets
 
 Images live in the core bucket `auth-service-branding` (private), keyed `<sha256>.<ext>`; the same
-bytes uploaded twice, or provisioned on every start, are one object. The type comes from the bytes,
+bytes uploaded twice, or provisioned on every start, are one object. Like every core bucket it is
+read-only through the files API (`409 bucket_managed_by_core`), so only the branding routes and
+provisioning write to it. The type comes from the bytes,
 not the name or header, and must be allowed for the slot. An SVG is checked against an allowlist and
 refused (`400 invalid_branding_image`) when it falls outside it: a fixed element set, no `<style>`,
 `<script>` or `<foreignObject>`, no event attributes, `href` only to a local `#id`, `url()` only as
@@ -108,12 +110,12 @@ origin can load them), the type from the extension, and for an SVG
 Permissions `branding.read`, `branding.write` and `branding.admin` are global (no organization holds
 them); `admin` includes the other two.
 
-| Target | Read | Edit (`PUT`, `DELETE`, uploads) |
-|---|---|---|
-| A client's profile | `branding.read` and (owner, active grantee, or `branding.admin`) | `branding.write` and (owner, active grantee, or `branding.admin`) |
-| `tereo-ui`'s profile | `branding.admin` | `branding.admin` |
-| Default profile | `branding.admin` | `branding.admin` |
-| A client's grants | `branding.read` (list) and (owner or `branding.admin`) | `branding.write` (add, revoke) and (owner or `branding.admin`) |
+| Target               | Read                                                             | Edit (`PUT`, `DELETE`, uploads)                                   |
+| -------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------- |
+| A client's profile   | `branding.read` and (owner, active grantee, or `branding.admin`) | `branding.write` and (owner, active grantee, or `branding.admin`) |
+| `tereo-ui`'s profile | `branding.admin`                                                 | `branding.admin`                                                  |
+| Default profile      | `branding.admin`                                                 | `branding.admin`                                                  |
+| A client's grants    | `branding.read` (list) and (owner or `branding.admin`)           | `branding.write` (add, revoke) and (owner or `branding.admin`)    |
 
 Uploading needs `branding.write` and the right to edit at least one profile (`branding.admin`, or
 owner of or active grantee on a client other than the console client), else `403`; the image
