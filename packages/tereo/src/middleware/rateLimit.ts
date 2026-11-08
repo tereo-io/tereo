@@ -1,3 +1,4 @@
+import { hashFlowToken } from "../utils/crypto.js";
 import { normalizeEmail } from "../utils/email.js";
 import {
   createPreAuthRateLimitMiddleware,
@@ -190,4 +191,15 @@ export const passwordSetupFailure = createFailureLimiter({
   errorDescription:
     "Too many failed password setup attempts. Please try again later.",
   getKey: (req) => `ip:${getIpIdentifier(req)}`,
+});
+
+// Reset emails per address, whoever asks: an address cannot be used to flood
+// someone's inbox. Spent by every request for the address, known or not, so
+// the limit tells nothing about the account; the route swallows the refusal.
+export const passwordResetAddress = createFailureLimiter({
+  keyPrefix: "rl:password-reset:address",
+  points: 3,
+  duration: 3600,
+  errorDescription: "Too many password reset requests. Try again later.",
+  getKey: (_req, email) => hashFlowToken(normalizeEmail(email ?? "")),
 });

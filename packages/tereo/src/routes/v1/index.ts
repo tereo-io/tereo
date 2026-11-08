@@ -1,4 +1,5 @@
 import { smallBodyParsers } from "../../middleware/bodyParsers.js";
+import passwordResetRouter from "./password-reset/index.js";
 import passwordSetupRouter from "./password-setup/index.js";
 import notificationsRouter from "./notifications/index.js";
 import webhooksRouter from "./webhooks/index.js";
@@ -20,10 +21,11 @@ v1Router.use("/audit", auditRouter);
 v1Router.use("/notifications", notificationsRouter);
 
 // Account, admin, setup and password setup — /v1/account, /v1/admin,
-// /v1/setup, /v1/password-setup.
+// /v1/setup, /v1/password-setup, /v1/password-reset.
 v1Router.use("/account", ...smallBodyParsers, accountRouter);
 v1Router.use("/admin", ...smallBodyParsers, adminRouter);
 v1Router.use("/setup", ...smallBodyParsers, setupRouter);
+v1Router.use("/password-reset", ...smallBodyParsers, passwordResetRouter);
 v1Router.use("/password-setup", ...smallBodyParsers, passwordSetupRouter);
 
 export default v1Router;

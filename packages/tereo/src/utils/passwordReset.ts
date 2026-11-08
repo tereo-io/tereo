@@ -1,0 +1,69 @@
+import { UserType } from "../../prisma/generated/client/index.js";
+import { SYSTEM_USER_ID } from "../definitions/index.js";
+import { issuePasswordLink } from "./userLinks.js";
+import { isUsableAccount } from "./users.js";
+import { ConflictError } from "./errors.js";
+import { emailDomain } from "./email.js";
+import { prisma } from "./db/prisma.js";
+import db from "./db/index.js";
+
+/**
+ * Whether a password reset may be sent for the user: a usable human or guest
+ * whose address is not on an SSO-only domain. A user with no password yet
+ * (one who signs in through a provider) qualifies.
+ */
+export const canResetPassword = (
+  user: { isActive: boolean; expiresAt: Date | null; userType: UserType },
+  ssoOnly: boolean
+): boolean =>
+  isUsableAccount(user) &&
+  (user.userType === UserType.human || user.userType === UserType.guest) &&
+  !ssoOnly;
+
+/**
+ * Emails a reset link to the address if an eligible account has it. Returns
+ * the same way for every address: the route answers 202 either way.
+ */
+export const requestPasswordReset = async ({
+  email,
+  clientId,
+  ip,
+}: {
+  email: string;
+  clientId?: string;
+  ip: string;
+}): Promise<void> => {
+  const user = await db.users.getByEmail(email);
+  if (!user || user.id === SYSTEM_USER_ID) return;
+  const domain = await db.identityProviders.findDomain(emailDomain(user.email));
+  if (!canResetPassword(user, domain?.ssoOnly ?? false)) return;
+
+  // Without a connection the mail would be queued and never leave.
+  if (!(await db.notificationConnections.getDefault("email"))) return;
+
+  // Only a client that exists goes into the link, so the page cannot be made
+  // to carry an arbitrary identifier.
+  const knownClient =
+    clientId !== undefined &&
+    (await prisma.oAuthClient.findUnique({
+      where: { clientId },
+      select: { clientId: true },
+    }));
+
+  try {
+    await prisma.$transaction((tx) =>
+      issuePasswordLink(tx, {
+        userId: user.id,
+        purpose: "reset",
+        createdBy: SYSTEM_USER_ID,
+        notify: true,
+        clientId: knownClient ? clientId : undefined,
+        requestIp: ip,
+      })
+    );
+  } catch (err) {
+    // The connection was removed since the check above.
+    if (!(err instanceof ConflictError && err.code === "email_not_configured"))
+      throw err;
+  }
+};

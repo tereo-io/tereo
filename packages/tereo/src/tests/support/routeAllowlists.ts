@@ -174,6 +174,16 @@ export const PUBLIC: Allowlist = [
     "Shows who a password setup link is for; the link's token is the credential (404 when unusable)",
   ],
   [
+    "get",
+    "/v1/password-reset/status",
+    "Tells the sign-in page whether reset emails can be sent; before any sign-in",
+  ],
+  [
+    "post",
+    "/v1/password-reset",
+    "Asks for a reset link by email; always 202, the address is the only input and the link goes to its owner",
+  ],
+  [
     "post",
     "/v1/password-setup",
     "Sets a password from a setup link; the link's token is the credential (404 when unusable)",
