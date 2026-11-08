@@ -12779,7 +12779,7 @@ paths:
           description: Bucket not found (only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: Conflict - permission already exists for this user
+          description: An active permission already exists for this user; `bucket_managed_by_core` - the bucket is core's own and read-only through this API
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
