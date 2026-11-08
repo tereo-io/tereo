@@ -53,7 +53,8 @@
       Public. `404` when no live image has that name or the name is not of that form.
 
       Content-addressed, so it is served `Cache-Control: public, max-age=31536000, immutable` with
-      `X-Content-Type-Options: nosniff`; the type comes from the extension. An SVG also carries
+      `X-Content-Type-Options: nosniff` and `Cross-Origin-Resource-Policy: cross-origin` (a UI on another
+      origin loads them); the type comes from the extension. An SVG also carries
       `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'`, so one opened
       directly runs nothing. An image a profile replaced stays available for 24 hours, for pages
       already rendered with it.
@@ -78,6 +79,10 @@
             schema:
               type: string
             description: '`nosniff`'
+          Cross-Origin-Resource-Policy:
+            schema:
+              type: string
+            description: '`cross-origin`'
         content:
           image/png:
             schema:

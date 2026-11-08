@@ -93,7 +93,8 @@ just-replaced image working.
 
 `GET /oauth/branding/assets/:file` serves them, public:
 `Cache-Control: public, max-age=31536000, immutable` (the name is a content hash),
-`X-Content-Type-Options: nosniff`, the type from the extension, and for an SVG
+`X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: cross-origin` (so a UI on another
+origin can load them), the type from the extension, and for an SVG
 `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'`. A name that is not
 `<64 hex>.<png|jpg|webp|svg|ico>`, or has no live image, is `404`.
 

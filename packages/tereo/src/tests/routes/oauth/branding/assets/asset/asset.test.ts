@@ -35,6 +35,18 @@ describe("GET /oauth/branding/assets/:file", () => {
     expect(Buffer.from(await response.arrayBuffer())).toEqual(image.buffer);
   });
 
+  // The UI may be served from another origin (the Vite dev server, or a UI
+  // hosted apart from core).
+  it("lets other origins load an asset", async () => {
+    const image = await store("logo", Buffer.concat([PNG, randomBytes(16)]));
+    const response = await fetchAsset(`${image.sha256}.png`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cross-origin-resource-policy")).toBe(
+      "cross-origin"
+    );
+    await response.arrayBuffer();
+  });
+
   it("serves an SVG sandboxed", async () => {
     const svg = Buffer.from(
       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><!-- ${randomBytes(8).toString("hex")} --><rect width="1" height="1"/></svg>`
