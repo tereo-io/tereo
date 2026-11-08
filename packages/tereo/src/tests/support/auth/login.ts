@@ -326,5 +326,6 @@ export const loginAndExchange = async (
     access_token: string;
     refresh_token: string;
     scope: string;
+    id_token?: string;
   };
 };

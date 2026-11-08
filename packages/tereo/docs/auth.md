@@ -941,7 +941,9 @@ The refusals above say whether the email has an account, so only a caller holdin
 of them, without `userId`.
 
 `notify: true` emails the link and needs a default email connection (`409 email_not_configured`);
-`passwordSetupUrl` is returned either way, so an app can deliver it itself. Each operation runs in
+`passwordSetupUrl` is returned either way, so an app can deliver it itself. A user has one live
+password link, so an anonymous reset request for that address (`POST /v1/password-reset`) replaces a
+live setup link with a reset link sent to the guest. Each operation runs in
 one transaction with its audit entries and events. The guest events carry the user plus
 `organizationId`: `auth.guest.invited` (`roleIds`), `auth.guest.extended` (`previousExpiresAt`,
 `rolesAdded`, and `change`: `extended`, `shortened` or `ended`; also emitted by `PATCH`, with no
@@ -979,23 +981,52 @@ The email is a **sensitive** notification: its content is redacted from the admi
 null`, `contentRedacted: true`), nulled once the notification is terminal, and an admin retry of one
 answers `409 content_redacted` ([notifications.md](notifications.md)).
 
-Both routes are public, rate limited per IP, and give one uniform `404` for an unknown, used or
-expired token, a user the link no longer reaches (a setup link: no longer a guest; either kind: an
-email domain that is now SSO-only, where the provider holds the credential) (a miss counts against
-the caller's IP). They serve reset links as well:
+Both routes are public, rate limited per IP, and serve reset links as well. They give one uniform
+`404`, which counts against the caller's IP, for an unknown, used or expired token and for a user the
+link no longer reaches: for a setup link, one no longer a guest; for either kind, one whose email
+domain is now SSO-only, where the provider holds the credential.
 
-- `POST /v1/password-setup/inspect { token }` returns `{ email, name, expiresAt }` (the link's
-  expiry) and uses nothing up.
+- `POST /v1/password-setup/inspect { token }` returns `{ email, name, expiresAt, purpose }` (the
+  link's expiry; `purpose` is `setup` or `reset`) and uses nothing up.
 - `POST /v1/password-setup { token, password }` sets the password under the password rules, consumes
   the token with a conditional update (of two concurrent requests one wins), clears
   `passwordChangeRequired` and ends the user's other sessions, in one transaction; `204`. Emits
-  `auth.user.password-set` with `via` `setup` or `reset` (never the password); marks the address
-  verified (the link went to it), and deletes the user's pending forced-password-change grants.
-  The UI then shows a "Password set" screen whose
-  Sign in button goes to `/`.
+  `auth.user.password-set` with `via` `setup` or `reset` (never the password), and deletes the
+  user's pending forced-password-change grants. A **reset** link marks the address verified: only
+  the inbox received it. A **setup** link does not, because its URL is returned to the inviter
+  (`passwordSetupUrl`, with `notify` too), so redeeming it proves nothing about the address.
+  The UI then shows a "Password set" screen. Its Sign in button goes to `/` after a setup link; after
+  a reset it returns to the sign-in page the reset was started from (see
+  [Password reset](#password-reset)).
 
 Issuing emits `auth.user.password-setup-link-issued`. The hourly auth cleanup deletes a token
 `AUTH_TOKEN_GRACE_MS` (7 days) after it expired or was used (retired included).
+
+#### Rolling deploys and rollback
+
+The migration `20261108120000_user_links` renames `auth.password_setup_tokens` to
+`auth.user_link_tokens`. During a rolling deploy, pods still on the older image fail on their
+setup-link routes (`/v1/password-setup`, the guest invite's link) and in the hourly auth cleanup
+until they are replaced. Rolling the image back past the migration needs the schema reversed first,
+which drops reset and verify links and every verification timestamp:
+
+```sql
+DELETE FROM "auth"."user_link_tokens" WHERE "purpose" <> 'setup';
+DROP INDEX "auth"."user_link_tokens_user_id_live_password_key";
+DROP INDEX "auth"."user_link_tokens_user_id_live_verify_key";
+ALTER TABLE "auth"."user_link_tokens" DROP CONSTRAINT "user_link_tokens_email_purpose_check";
+ALTER TABLE "auth"."user_link_tokens" DROP COLUMN "email", DROP COLUMN "purpose";
+ALTER INDEX "auth"."user_link_tokens_expires_at_idx" RENAME TO "password_setup_tokens_expires_at_idx";
+ALTER INDEX "auth"."user_link_tokens_token_hash_key" RENAME TO "password_setup_tokens_token_hash_key";
+ALTER TABLE "auth"."user_link_tokens" RENAME CONSTRAINT "user_link_tokens_created_by_fkey" TO "password_setup_tokens_created_by_fkey";
+ALTER TABLE "auth"."user_link_tokens" RENAME CONSTRAINT "user_link_tokens_user_id_fkey" TO "password_setup_tokens_user_id_fkey";
+ALTER TABLE "auth"."user_link_tokens" RENAME CONSTRAINT "user_link_tokens_pkey" TO "password_setup_tokens_pkey";
+ALTER TABLE "auth"."user_link_tokens" RENAME TO "password_setup_tokens";
+CREATE UNIQUE INDEX "password_setup_tokens_user_id_live_key" ON "auth"."password_setup_tokens" ("user_id") WHERE "used_at" IS NULL;
+ALTER TABLE "auth"."users" DROP COLUMN "email_verified_at";
+DROP TYPE "auth"."user_link_purpose";
+DELETE FROM "public"."_prisma_migrations" WHERE "migration_name" = '20261108120000_user_links';
+```
 
 ### Password reset
 
@@ -1010,7 +1041,11 @@ exists (the sign-in page asks `GET /v1/password-reset/status`, `{ enabled }`, be
 The link is `${UI_BASE_URL}/set-password[?client_id=…]#token=<token>`, valid for
 `PASSWORD_RESET_TTL_SECONDS` (1 hour by default, 5 minutes to 24 hours), single use, and replaces
 any earlier setup or reset link. `client_id` is carried only if a client with that ID exists, so the
-page can return to the app. The email ("Reset your password") is a sensitive notification. Redeeming
+page shows that client's branding. The return to the app comes from the browser instead: the sign-in
+page remembers its authorize request in `localStorage` for an hour (the reset link's default
+lifetime), so the link opened in another tab of the same browser still offers Sign in back to it,
+while the admin UI's own sign-in completes only in the tab that started it, which holds its PKCE
+verifier. The email ("Reset your password") is a sensitive notification. Redeeming
 it is `POST /v1/password-setup` ([Setup link](#setup-link)): it sets the password, marks the address
 verified, ends the other sessions and clears pending forced-password-change grants. A link whose
 user has since moved to an SSO-only domain answers the uniform `404`.
@@ -1034,10 +1069,13 @@ An address becomes verified when:
 
 - the user opens a verify link (`POST /v1/email-verification { token }`, public; `inspect` returns
   `{ email, expiresAt }` and consumes nothing), which ends no session;
-- the user redeems a setup or reset link, which went to that address;
+- the user redeems a reset link, which went only to that address (a setup link does not verify: its
+  URL is returned to the inviter);
+- the first admin completes setup (`POST /v1/setup`, `via: setup`);
 - a **non-forced** provider sign-in links to the account, an invite is claimed, autoAccept applies or
   the user links an account from the account page, when the provider vouches for the same address
-  (`email_verified` from the provider).
+  (`email_verified` from the provider). A sign-in of a deactivated or expired account verifies
+  nothing.
 
 A **forced** provider link (an SSO-only domain's first sign-in) does **not** mark the address
 verified.
@@ -1051,16 +1089,15 @@ is sensitive. They are sent by:
 - `POST /v1/admin/users/:id/email-verification` (`users.write`; the link is never returned, so an
   admin cannot confirm for the user);
 - an admin changing a user's email (`PATCH /v1/admin/users/:id`), which also marks the new address
-  unverified. No link is sent when the user is inactive or is deactivated in the same request, or no
-  email connection exists.
+  unverified. No link is sent when the user is inactive, expired or deactivated in the same
+  request, or no email connection exists; the update succeeds either way.
 
 Both resends refuse with `409 already_verified`, `409 user_not_verifiable` (service accounts, the
-system user, deactivated users) and `409 email_not_configured`. Events: `auth.user.email-verification-sent`
+system user, deactivated users and expired guests) and `409 email_not_configured`. Events: `auth.user.email-verification-sent`
 and `auth.user.email-verified` (`via`: `link`, `password_link`, `provider` or `setup`), each audited.
 Verification is recorded only; core does not yet require it for sign-in.
 
-The admin UI opens `/set-password`, `/forgot-password` and `/verify-email` signed out. (Before, a
-signed-out visitor following a guest's setup link was redirected to `/`.)
+The admin UI opens `/set-password`, `/forgot-password` and `/verify-email` signed out.
 
 ### Forced password change
 
@@ -1392,8 +1429,8 @@ the code from the response URL), nor on the UI's pages.
 Where core knowingly departs from OAuth 2.0 / OpenID Connect:
 
 - **`email_verified` is not always `true`.** It reports whether the address was proven
-  ([Email verification](#email-verification)): by a link, a setup or reset link, or a provider that
-  vouches for it. An address an admin set or changed is unverified until then. Core does not require
+  ([Email verification](#email-verification)): by a verify link, a reset link, first-admin setup,
+  or a provider that vouches for it. An address an admin set or changed is unverified until then. Core does not require
   it for sign-in.
 - **`sid` means two things.** In an access token it is the refresh token's id (the token family's
   session, which `/v1/account/sessions` and the WebSocket rooms use); in an ID token it is the SSO

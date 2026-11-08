@@ -92,7 +92,7 @@
       default; sensitive notification). Limited to 1 per minute and 5 per hour
       per user (`429`); a refusal that sends nothing does not use a slot.
       `409 already_verified`, `409 user_not_verifiable` (service accounts, the
-      system user and deactivated users), `409 email_not_configured` without a
+      system user, deactivated users and expired guests), `409 email_not_configured` without a
       default email connection.
     operationId: sendMyEmailVerification
     security:
@@ -126,10 +126,11 @@
       Emails the user a link confirming their address. The link is never in
       the response, so an admin cannot confirm an address for the user. Needs
       `users.write`. `409 already_verified`, `409 user_not_verifiable` (service
-      accounts, the system user, deactivated users) or `409 email_not_configured`.
+      accounts, the system user, deactivated users, expired guests) or `409 email_not_configured`.
       A change of a user's email through `PATCH /v1/admin/users/{id}` marks
       the new address unverified and sends this link itself, unless the user is
-      inactive (or deactivated in the same request) or no email connection exists.
+      inactive or expired (or deactivated in the same request) or no email
+      connection exists.
     operationId: sendAdminUserEmailVerification
     security:
       - BearerAuth: [users.write]

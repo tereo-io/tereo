@@ -7,6 +7,7 @@ import { type AuthContext } from "../../../../../../middleware/auth.js";
 import { waitForLockWait } from "../../../../../support/dbLocks.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { ForbiddenError } from "../../../../../../utils/errors.js";
+import { issue } from "../../../../../support/passwordSetup.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import { type Request, type Response } from "express";
@@ -239,5 +240,61 @@ describe("PUT /v1/admin/users/:id/roles and PATCH /v1/admin/users/:id", () => {
       where: { id: target.id },
     });
     expect(stored.passwordHash).toBe(target.passwordHash);
+  });
+});
+
+describe("PATCH /v1/admin/users/:id and POST /v1/password-setup", () => {
+  // A fresh address per iteration: each 404 counts against the caller's IP.
+  const postLink = (path: string, ip: string, body: unknown) =>
+    fetch(`${BASE_URL}/v1/password-setup${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": ip },
+      body: JSON.stringify(body),
+    });
+
+  it("an email change and a reset link's redemption have one outcome", async () => {
+    for (let i = 0; i < 20; i++) {
+      const user = await createTestUser({ emailVerified: false });
+      const token = await issue(user.id, false, "reset");
+      const newEmail = `moved-${randomUUID()}@test.local`;
+      const ip = `198.51.100.${i + 1}`;
+
+      const [patched, redemption] = await race(
+        i,
+        () =>
+          call("PATCH", `/v1/admin/users/${user.id}`, adminToken, {
+            email: newEmail,
+          }),
+        () => postLink("", ip, { token, password: "N3w-Str0ng-Passw0rd!" })
+      );
+
+      expect(patched.status).toBe(200);
+      expect([204, 404]).toContain(redemption.status);
+      const stored = await prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+      });
+      expect(stored.email).toBe(newEmail);
+      // The new address proved nothing, whichever side won.
+      expect(stored.emailVerifiedAt).toBeNull();
+      const setFromLink = (
+        await prisma.auditLogEntry.findMany({
+          where: { entityId: user.id, entityType: "User" },
+        })
+      ).filter(
+        (e) =>
+          (e.metadata as { action?: string } | null)?.action ===
+          "password_set_from_link"
+      );
+      if (redemption.status === 204) {
+        expect(stored.passwordHash).not.toBe(user.passwordHash);
+        expect(setFromLink.map((e) => e.entityName)).toEqual([user.email]);
+      } else {
+        expect(stored.passwordHash).toBe(user.passwordHash);
+        expect(setFromLink).toHaveLength(0);
+      }
+      // Either way the link is spent: it never reaches the new address.
+      const again = await postLink("/inspect", ip, { token });
+      expect(again.status).toBe(404);
+    }
   });
 });

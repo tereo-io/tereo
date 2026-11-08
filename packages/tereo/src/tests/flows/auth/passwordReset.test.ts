@@ -6,12 +6,15 @@ import { createTestUser, enableTotp } from "../../support/auth/users.js";
 import { loginAndExchange, postForm } from "../../support/auth/login.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../../definitions/index.js";
 import { BASE_URL, HTTP_STATUS } from "../../support/auth/constants.js";
+import { getTestPrincipalToken } from "../../support/principals.js";
 import { createTestClient } from "../../support/auth/clients.js";
 import { createTestGuest } from "../../support/auth/guests.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { waitFor } from "../../support/webhooks.js";
+import { fetchJson } from "../../support/http.js";
 import { randomBytes } from "node:crypto";
 import env from "../../../env.js";
+import jwt from "jsonwebtoken";
 import {
   startNotificationDeliveryWorker,
   stopNotificationDeliveryWorker,
@@ -210,5 +213,56 @@ describe("password reset, end to end", () => {
       SCOPE
     );
     expect(signedIn.access_token).toBeTruthy();
+  });
+
+  it("an admin email change retires a reset link; the new address's own link verifies it", async () => {
+    const admin = await getTestPrincipalToken({
+      permissions: ["users.write", "users.admin"],
+    });
+    const user = await createTestUser();
+    const resetToken = await requestResetToken(user.email);
+    const newEmail = `moved-${randomBytes(5).toString("hex")}@test.local`;
+
+    const patched = await fetchJson(
+      "PATCH",
+      `${BASE_URL}/v1/admin/users/${user.id}`,
+      admin,
+      { email: newEmail }
+    );
+    expect(patched.status).toBe(HTTP_STATUS.OK);
+    expect(patched.body.emailVerified).toBe(false);
+
+    expect((await redeem(resetToken)).status).toBe(HTTP_STATUS.NOT_FOUND);
+
+    const toNew = () => smtp.messages.filter((m) => m.rcpt.includes(newEmail));
+    await waitFor(async () => toNew().length >= 1, 10_000, 50);
+    const verifyToken = /\/verify-email#token=([\w-]+)/.exec(
+      toNew()[0].parsed.text ?? ""
+    )?.[1];
+    expect(verifyToken).toBeTruthy();
+    const confirmed = await fetch(`${BASE_URL}/v1/email-verification`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: verifyToken }),
+    });
+    expect(confirmed.status).toBe(HTTP_STATUS.NO_CONTENT);
+
+    const tokens = await loginAndExchange(
+      client,
+      { email: newEmail, plainPassword: user.plainPassword },
+      REDIRECT_URI,
+      "openid email"
+    );
+    const idClaims = jwt.decode(tokens.id_token!) as Record<string, unknown>;
+    expect(idClaims.email).toBe(newEmail);
+    expect(idClaims.email_verified).toBe(true);
+    const userinfo = await fetch(`${BASE_URL}/oauth/userinfo`, {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    expect(userinfo.status).toBe(HTTP_STATUS.OK);
+    expect(await userinfo.json()).toMatchObject({
+      email: newEmail,
+      email_verified: true,
+    });
   });
 });

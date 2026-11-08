@@ -4764,6 +4764,11 @@ paths:
         like `DELETE /v1/admin/users/{id}/sessions/all`: a caller resetting their
         own password keeps the session they act from.
 
+        Changing the `email` marks the new address unverified, retires the
+        user's live reset and verify links, and emails a verify link to the new
+        address when the user is active and unexpired and a default email
+        connection exists (without one the update still succeeds).
+
         Setting a `password`, changing the `email` or deactivating also retires
         the user's live password setup link and pending forced-change grants. A
         password set here is the admin's choice: a guest so set cannot be
@@ -5862,8 +5867,8 @@ paths:
         `/set-password#token=...`, works once, replaces any earlier setup or
         reset link and expires after `PASSWORD_RESET_TTL_SECONDS` (1 hour by
         default); the email is a sensitive notification. A `client_id` that
-        names a login client is carried in the link so the page can return to it;
-        any other value is ignored.
+        names a login client is carried in the link so the page shows that
+        client's branding; any other value is ignored.
 
         Each address may be asked for 3 times per hour, counted for every
         request whether or not the address has an account. Further requests are
@@ -6021,7 +6026,7 @@ paths:
         default; sensitive notification). Limited to 1 per minute and 5 per hour
         per user (`429`); a refusal that sends nothing does not use a slot.
         `409 already_verified`, `409 user_not_verifiable` (service accounts, the
-        system user and deactivated users), `409 email_not_configured` without a
+        system user, deactivated users and expired guests), `409 email_not_configured` without a
         default email connection.
       operationId: sendMyEmailVerification
       security:
@@ -6054,10 +6059,11 @@ paths:
         Emails the user a link confirming their address. The link is never in
         the response, so an admin cannot confirm an address for the user. Needs
         `users.write`. `409 already_verified`, `409 user_not_verifiable` (service
-        accounts, the system user, deactivated users) or `409 email_not_configured`.
+        accounts, the system user, deactivated users, expired guests) or `409 email_not_configured`.
         A change of a user's email through `PATCH /v1/admin/users/{id}` marks
         the new address unverified and sends this link itself, unless the user is
-        inactive (or deactivated in the same request) or no email connection exists.
+        inactive or expired (or deactivated in the same request) or no email
+        connection exists.
       operationId: sendAdminUserEmailVerification
       security:
         - BearerAuth:
@@ -6141,8 +6147,9 @@ paths:
       description: |
         Sets the user's password, consumes the token, clears
         `passwordChangeRequired` and any pending forced-password-change grants,
-        marks the address verified (the link went to it), and ends the user's
-        other sessions, in one transaction. The token works once: of two concurrent requests with it,
+        and ends the user's other sessions, in one transaction. A reset link
+        also marks the address verified, since only the inbox received it; a
+        setup link does not, as its URL is returned to the inviter. The token works once: of two concurrent requests with it,
         one succeeds. Public, with the same uniform `404` and per-IP limit as
         `POST /v1/password-setup/inspect`. The password follows the password
         rules (`400 invalid_request`).
@@ -18199,7 +18206,7 @@ webhooks:
       tags:
         - Password Setup
       summary: Password set from a link
-      description: Fired when a user sets their password from a setup link. Never carries the password.
+      description: Fired when a user sets their password from a setup or reset link. Never carries the password.
       operationId: webhookUserPasswordSet
       security: []
       parameters:
@@ -31584,6 +31591,7 @@ components:
         - email
         - name
         - expiresAt
+        - purpose
       properties:
         email:
           type: string
@@ -31596,6 +31604,12 @@ components:
           type: string
           format: date-time
           description: When the link expires.
+        purpose:
+          type: string
+          enum:
+            - setup
+            - reset
+          description: A guest's setup link or a password reset link.
     PasswordSetupRequest:
       type: object
       required:

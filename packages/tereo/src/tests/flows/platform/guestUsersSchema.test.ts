@@ -23,9 +23,9 @@ async function insertUser(userType: string, expiresAt: Date | null) {
 
 async function insertSetupToken(userId: string, used: boolean) {
   await prisma.$executeRaw`
-    INSERT INTO "auth"."password_setup_tokens"
-      ("id", "user_id", "token_hash", "created_by", "expires_at", "used_at")
-    VALUES (${randomUUID()}::uuid, ${userId}::uuid, ${randomUUID()}, ${userId}::uuid,
+    INSERT INTO "auth"."user_link_tokens"
+      ("id", "user_id", "purpose", "token_hash", "created_by", "expires_at", "used_at")
+    VALUES (${randomUUID()}::uuid, ${userId}::uuid, 'setup', ${randomUUID()}, ${userId}::uuid,
       now() + interval '1 day', ${used ? new Date() : null})`;
 }
 
@@ -33,7 +33,7 @@ const FUTURE = new Date(Date.now() + 86_400_000);
 
 describe("guest users schema", () => {
   afterAll(async () => {
-    await prisma.$executeRaw`DELETE FROM "auth"."password_setup_tokens" WHERE "user_id" = ANY(${userIds}::uuid[])`;
+    await prisma.$executeRaw`DELETE FROM "auth"."user_link_tokens" WHERE "user_id" = ANY(${userIds}::uuid[])`;
     await prisma.$executeRaw`DELETE FROM "auth"."roles" WHERE "id" = ANY(${roleIds}::uuid[])`;
     await prisma.$executeRaw`DELETE FROM "auth"."users" WHERE "id" = ANY(${userIds}::uuid[])`;
     await prisma.$executeRaw`DELETE FROM "core"."services" WHERE "id" = ANY(${serviceIds}::uuid[])`;
@@ -84,7 +84,7 @@ describe("guest users schema", () => {
     await insertSetupToken(userId, true);
     await insertSetupToken(userId, false);
     await expect(insertSetupToken(userId, false)).rejects.toThrow(
-      /password_setup_tokens_user_id_live_key/
+      /user_link_tokens_user_id_live_password_key/
     );
   });
 });

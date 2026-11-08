@@ -3945,7 +3945,7 @@ PasswordSetupInspectRequest:
 
 PasswordSetupInspectResponse:
   type: object
-  required: [email, name, expiresAt]
+  required: [email, name, expiresAt, purpose]
   properties:
     email:
       type: string
@@ -3956,6 +3956,10 @@ PasswordSetupInspectResponse:
       type: string
       format: date-time
       description: When the link expires.
+    purpose:
+      type: string
+      enum: [setup, reset]
+      description: A guest's setup link or a password reset link.
 
 PasswordResetRequest:
   type: object
