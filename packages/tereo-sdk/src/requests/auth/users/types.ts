@@ -30,6 +30,10 @@ export interface AuthServiceUser {
   expiresAt: string | null;
   /** `expired` only for an account with an expiry that has passed. */
   status: GuestStatus;
+  /** Whether the user has confirmed their email address. */
+  emailVerified: boolean;
+  /** ISO-8601 timestamp of the confirmation; null until then. */
+  emailVerifiedAt: string | null;
 }
 
 /** Role assignment shape returned by `GET /v1/admin/users/:id/roles`. */

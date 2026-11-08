@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { sendUserVerificationEmail } from "../requests/auth/users/index.js";
+import type { AuthServiceUser } from "../types/auth.js";
 import { AuthServiceClient } from "../clients/auth.js";
 import { useCacheRedis } from "../utils/cache.js";
 import type { Redis } from "ioredis";
 
-const { mockRedis, mockRequests } = vi.hoisted(() => {
+const { mockRedis, mockRequests, mockTryHandleRequest } = vi.hoisted(() => {
   const store = new Map<string, string>();
   return {
     mockRedis: {
@@ -15,16 +17,26 @@ const { mockRedis, mockRequests } = vi.hoisted(() => {
       }),
     },
     mockRequests: {
-      auth: { getUser: vi.fn(), getUsersByIds: vi.fn() },
+      auth: {
+        getUser: vi.fn(),
+        getUsersByIds: vi.fn(),
+        sendUserVerificationEmail: vi.fn(),
+      },
     },
+    mockTryHandleRequest: vi.fn(),
   };
 });
 
 vi.mock("../handler.js", () => ({
+  CORE_CLIENT: "core",
   requests: mockRequests,
   getOriginalStatus: vi.fn(
     (err: unknown) => (err as { originalStatus?: number })?.originalStatus
   ),
+}));
+
+vi.mock("../utils/tryHandleRequest.js", () => ({
+  tryHandleRequest: mockTryHandleRequest,
 }));
 
 const uuid = (n: number) =>
@@ -86,5 +98,38 @@ describe("AuthServiceClient.getUsers", () => {
     const result = await client.getUsers(["not-a-uuid"]);
     expect(result.get("not-a-uuid")).toBeNull();
     expect(mockRequests.auth.getUsersByIds).not.toHaveBeenCalled();
+  });
+});
+
+describe("AuthServiceUser", () => {
+  it("carries emailVerified and emailVerifiedAt", () => {
+    expectTypeOf<AuthServiceUser["emailVerified"]>().toEqualTypeOf<boolean>();
+    expectTypeOf<AuthServiceUser["emailVerifiedAt"]>().toEqualTypeOf<
+      string | null
+    >();
+  });
+});
+
+describe("sendVerificationEmail", () => {
+  it("sendVerificationEmail posts to the user's email-verification route", async () => {
+    mockTryHandleRequest.mockResolvedValue({ status: 202, data: "" });
+    await sendUserVerificationEmail(uuid(7));
+    expect(mockTryHandleRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientName: "core",
+        method: "POST",
+        url: `/v1/admin/users/${uuid(7)}/email-verification`,
+      }),
+      "AS_0005",
+      expect.any(String)
+    );
+  });
+
+  it("the users client hands the id to the request", async () => {
+    mockRequests.auth.sendUserVerificationEmail.mockResolvedValue(undefined);
+    await new AuthServiceClient().users.sendVerificationEmail(uuid(7));
+    expect(mockRequests.auth.sendUserVerificationEmail).toHaveBeenCalledWith(
+      uuid(7)
+    );
   });
 });

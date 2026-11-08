@@ -5,6 +5,7 @@ import type { Request, Response, NextFunction } from "express";
 import { getOriginalStatus, requests } from "../handler.js";
 import { hasPermission } from "../utils/permissions.js";
 import { logger } from "../utils/logger.js";
+import { UsersClient } from "./users.js";
 import crypto from "crypto";
 import {
   ForbiddenError,
@@ -76,6 +77,9 @@ export class AuthServiceClient {
   private readonly publicRoutes: PublicRouteConfig[];
   private readonly introspectionCacheTtlSeconds: number;
   private readonly allowedClients: ReadonlySet<string> | null;
+
+  /** Admin actions on users, such as sending a verification email. */
+  readonly users = new UsersClient();
 
   /**
    * `testMode` accepts forged test tokens and answers user and organization
@@ -163,6 +167,8 @@ export class AuthServiceClient {
         userType: "human",
         expiresAt: null,
         status: "active",
+        emailVerified: false,
+        emailVerifiedAt: null,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
