@@ -92,4 +92,31 @@ describe("BrandingList", () => {
       )
     ).toBeInTheDocument();
   });
+
+  it("shows an error with a retry, not 'No branding yet', when loading fails", async () => {
+    authMock.permissions = ["branding.read", "branding.write"];
+    authMock.axios.get.mockRejectedValue(new Error("boom"));
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <MemoryRouter>
+          <BrandingList />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    expect(await screen.findByText("Could not load branding")).toBeVisible();
+    expect(screen.queryByText("No branding yet")).toBeNull();
+    expect(screen.queryByText("Brand a client…")).toBeNull();
+
+    authMock.axios.get.mockResolvedValue({
+      data: { default: null, clients: [entry] },
+    });
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Web App")).toBeVisible();
+  });
 });

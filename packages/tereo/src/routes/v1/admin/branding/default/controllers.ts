@@ -12,7 +12,7 @@ import {
   saveProfileTx,
 } from "../../../../../utils/branding/write.js";
 
-const ACCESS = { canEdit: true, canManageGrants: false };
+const ACCESS = { canEdit: true, canManageGrants: false, canViewGrants: false };
 
 export const getDefaultBranding = async (req: Request, res: Response) => {
   assertBrandingAdmin(validateUser(req));

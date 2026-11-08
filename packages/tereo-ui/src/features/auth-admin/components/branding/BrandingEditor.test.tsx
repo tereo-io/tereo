@@ -1,13 +1,18 @@
 import type { BrandingProfile, BrandingTarget } from "../../api/branding/types";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { RouterProvider, createMemoryRouter, Link } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EffectiveBranding } from "@/features/auth";
 import userEvent from "@testing-library/user-event";
 import { BrandingEditor } from "./BrandingEditor";
 import { authMock } from "@/test/authMock";
+import { AxiosError } from "axios";
 import env from "@/lib/env";
+import {
+  QueryClient,
+  QueryClientProvider,
+  focusManager,
+} from "@tanstack/react-query";
 
 vi.mock("@/lib/auth", async () =>
   (await import("@/test/authMock")).mockAuthModule()
@@ -60,6 +65,7 @@ const profile = (over: Partial<BrandingProfile> = {}): BrandingProfile => ({
   updatedAt: "2026-11-01T00:00:00Z",
   canEdit: true,
   canManageGrants: true,
+  canViewGrants: true,
   ...over,
 });
 
@@ -245,8 +251,8 @@ describe("BrandingEditor", () => {
     );
   });
 
-  it("shows the grants panel only when the viewer can manage grants", async () => {
-    renderEditor(profile({ canManageGrants: false }));
+  it("hides the grants panel from a viewer who may not list grants", async () => {
+    renderEditor(profile({ canManageGrants: false, canViewGrants: false }));
     await screen.findByTestId("branding-preview");
     expect(screen.queryByText("Who can edit")).toBeNull();
   });
@@ -356,5 +362,184 @@ describe("BrandingEditor", () => {
         screen.queryByText(/has its own branding profile/)
       ).not.toBeInTheDocument();
     });
+  });
+
+  const refocus = () =>
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+
+  describe("when the profile changes elsewhere", () => {
+    it("keeps unsaved edits and offers a reload", async () => {
+      const user = userEvent.setup();
+      renderEditor(profile());
+      await user.type(await screen.findByLabelText("Headline"), "Mine");
+      authMock.axios.get.mockResolvedValue({
+        data: profile({
+          own: { ...own, appName: "Theirs" },
+          updatedAt: "2026-11-02T00:00:00Z",
+        }),
+      });
+      refocus();
+      expect(
+        await screen.findByText(/changed elsewhere since you opened it/)
+      ).toBeVisible();
+      expect(screen.getByLabelText("Headline")).toHaveValue("Mine");
+      expect(screen.getByLabelText("App name")).toHaveValue("Acme");
+
+      await user.click(
+        screen.getByRole("button", { name: "Reload and discard my edits" })
+      );
+      expect(screen.getByLabelText("App name")).toHaveValue("Theirs");
+      expect(screen.getByLabelText("Headline")).toHaveValue("");
+      expect(screen.queryByText(/changed elsewhere/)).toBeNull();
+    });
+
+    it("takes the new values when nothing is unsaved", async () => {
+      renderEditor(profile());
+      await screen.findByLabelText("App name");
+      authMock.axios.get.mockResolvedValue({
+        data: profile({
+          own: { ...own, appName: "Theirs" },
+          updatedAt: "2026-11-02T00:00:00Z",
+        }),
+      });
+      refocus();
+      await waitFor(() =>
+        expect(screen.getByLabelText("App name")).toHaveValue("Theirs")
+      );
+      expect(screen.queryByText(/changed elsewhere/)).toBeNull();
+    });
+
+    it("starts fresh after its own save, without the notice", async () => {
+      const user = userEvent.setup();
+      renderEditor(profile());
+      await user.type(await screen.findByLabelText("Headline"), "Hi");
+      authMock.axios.get.mockResolvedValue({
+        data: profile({
+          own: { ...own, headline: "Hi" },
+          updatedAt: "2026-11-02T00:00:00Z",
+        }),
+      });
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+      );
+      expect(screen.getByLabelText("Headline")).toHaveValue("Hi");
+      expect(screen.queryByText(/changed elsewhere/)).toBeNull();
+    });
+  });
+
+  it("is not dirty after a colour is cleared and retyped", async () => {
+    const user = userEvent.setup();
+    renderEditor(
+      profile({
+        own: {
+          ...own,
+          colorsLight: {
+            "--k-primary-color": "#112233",
+            "--k-danger-color": "#aa0000",
+          },
+        },
+      })
+    );
+    const primary = await screen.findByLabelText("primary-color");
+    await user.clear(primary);
+    await user.type(primary, "#112233");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("shows an error with a retry when loading fails, not 'not found'", async () => {
+    const user = userEvent.setup();
+    authMock.axios.get.mockRejectedValue(
+      new AxiosError("boom", "ERR", undefined, undefined, {
+        status: 500,
+      } as never)
+    );
+    mountEditor({ kind: "client", id: "c1" });
+    expect(
+      await screen.findByText("Could not load this branding")
+    ).toBeVisible();
+    expect(screen.queryByText("Branding not found")).toBeNull();
+    authMock.axios.get.mockResolvedValue({ data: profile() });
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByLabelText("App name")).toHaveValue("Acme");
+  });
+
+  it("says not found on a 404", async () => {
+    authMock.axios.get.mockRejectedValue(
+      new AxiosError("missing", "ERR", undefined, undefined, {
+        status: 404,
+      } as never)
+    );
+    mountEditor({ kind: "client", id: "c1" });
+    expect(await screen.findByText("Branding not found")).toBeVisible();
+  });
+
+  describe("footer links", () => {
+    const saved = async () => {
+      await waitFor(() => expect(authMock.axios.put).toHaveBeenCalled());
+      return authMock.axios.put.mock.calls[0][1];
+    };
+
+    it("saves No links as an empty list", async () => {
+      const user = userEvent.setup();
+      renderEditor(profile());
+      await user.click(await screen.findByLabelText("No links"));
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      expect((await saved()).footerLinks).toEqual([]);
+    });
+
+    it("keeps a stored empty list and can go back to inheriting", async () => {
+      const user = userEvent.setup();
+      renderEditor(profile({ own: { ...own, footerLinks: [] } }));
+      expect(await screen.findByLabelText("No links")).toBeChecked();
+      await user.click(screen.getByLabelText("Inherit"));
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      expect((await saved()).footerLinks).toBeNull();
+    });
+
+    it("previews No links over inherited ones", async () => {
+      const user = userEvent.setup();
+      renderEditor(
+        profile({
+          inherited: {
+            ...effective,
+            footerLinks: [{ label: "Privacy", url: "https://acme.test/p" }],
+          },
+        })
+      );
+      const preview = await screen.findByTestId("branding-preview");
+      expect(within(preview).getByText("Privacy")).toBeInTheDocument();
+      await user.click(screen.getByLabelText("No links"));
+      expect(within(preview).queryByText("Privacy")).toBeNull();
+    });
+  });
+
+  it("lists grants read-only for a viewer who may not manage them", async () => {
+    authMock.axios.get.mockImplementation(async (url: string) =>
+      url.endsWith("/grants")
+        ? {
+            data: {
+              data: [
+                {
+                  userId: "u1",
+                  email: "ann@acme.test",
+                  name: "Ann",
+                  grantedBy: "u0",
+                  grantedAt: "2026-11-01T00:00:00Z",
+                },
+              ],
+            },
+          }
+        : { data: profile({ canManageGrants: false, canViewGrants: true }) }
+    );
+    mountEditor({ kind: "client", id: "c1" });
+    expect(await screen.findByText("ann@acme.test")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Grant" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Revoke ann@acme.test" })
+    ).toBeNull();
   });
 });

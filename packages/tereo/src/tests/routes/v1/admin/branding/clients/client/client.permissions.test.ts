@@ -114,13 +114,23 @@ describe("/v1/admin/branding/clients/:id access", () => {
     expect((await put(own.id, reader.token)).status).toBe(403);
   });
 
-  it("does not offer grant management to an owner holding only branding.read", async () => {
+  it("lets an owner holding only branding.read list grants but not manage them", async () => {
     const reader = await brandingPrincipal(["branding.read"]);
     const own = await createBrandingClient(reader.userId);
     clientIds.push(own.id);
     const res = await fetchJson("GET", url(own.id), reader.token);
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ canEdit: false, canManageGrants: false });
+    expect(res.body).toMatchObject({
+      canEdit: false,
+      canManageGrants: false,
+      canViewGrants: true,
+    });
+    const grants = await fetchJson(
+      "GET",
+      `${url(own.id)}/grants`,
+      reader.token
+    );
+    expect(grants.status).toBe(200);
   });
 
   it("refuses a branding.admin on a provisioned profile with 409", async () => {
@@ -156,9 +166,21 @@ describe("/v1/admin/branding/clients/:id access", () => {
   });
 
   it.each([
-    ["the owner", () => owner, { canEdit: true, canManageGrants: true }],
-    ["a grantee", () => grantee, { canEdit: true, canManageGrants: false }],
-    ["a branding.admin", () => admin, { canEdit: true, canManageGrants: true }],
+    [
+      "the owner",
+      () => owner,
+      { canEdit: true, canManageGrants: true, canViewGrants: true },
+    ],
+    [
+      "a grantee",
+      () => grantee,
+      { canEdit: true, canManageGrants: false, canViewGrants: false },
+    ],
+    [
+      "a branding.admin",
+      () => admin,
+      { canEdit: true, canManageGrants: true, canViewGrants: true },
+    ],
   ])("GET tells %s what it may do", async (_who, principal, expected) => {
     const res = await fetchJson("GET", url(clientUuid), principal().token);
     expect(res.status).toBe(200);

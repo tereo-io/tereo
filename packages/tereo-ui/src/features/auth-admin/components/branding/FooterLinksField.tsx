@@ -1,11 +1,20 @@
+import { Button, Input, RadioGroup } from "@kosmeo-ui/react";
 import type { BrandingFooterLink } from "@/features/auth";
-import { Button, Input } from "@kosmeo-ui/react";
 import {
   FOOTER_LABEL_MAX,
   FOOTER_LINKS_MAX,
 } from "../../api/branding/brandingErrors";
 
+type Mode = "inherit" | "none" | "custom";
+
+const MODES: { value: Mode; label: string }[] = [
+  { value: "inherit", label: "Inherit" },
+  { value: "none", label: "No links" },
+  { value: "custom", label: "These links" },
+];
+
 interface FooterLinksFieldProps {
+  /** null inherits the links beneath this profile; [] shows none. */
   value: BrandingFooterLink[] | null;
   onChange: (value: BrandingFooterLink[] | null) => void;
   errors: Record<string, string>;
@@ -18,12 +27,26 @@ export const FooterLinksField = ({
   errors,
   readOnly,
 }: FooterLinksFieldProps) => {
+  const mode: Mode =
+    value === null ? "inherit" : value.length === 0 ? "none" : "custom";
   const links = value ?? [];
-  const update = (next: BrandingFooterLink[]) =>
-    onChange(next.length ? next : null);
+
+  const choose = (next: Mode) => {
+    if (next === "inherit") onChange(null);
+    else if (next === "none") onChange([]);
+    else if (mode !== "custom") onChange([{ label: "", url: "" }]);
+  };
 
   return (
     <div className="t-footer-links">
+      <RadioGroup<Mode>
+        label="Links shown"
+        name="footer-links-mode"
+        options={MODES}
+        value={mode}
+        disabled={readOnly}
+        onChange={choose}
+      />
       {links.map((link, i) => (
         <div key={i} className="t-footer-link-row">
           <Input
@@ -33,7 +56,7 @@ export const FooterLinksField = ({
             readOnly={readOnly}
             error={errors[`footerLinks.${i}.label`]}
             onChange={(e) =>
-              update(
+              onChange(
                 links.map((l, j) =>
                   j === i ? { ...l, label: e.target.value } : l
                 )
@@ -48,7 +71,7 @@ export const FooterLinksField = ({
             placeholder="https://"
             error={errors[`footerLinks.${i}.url`]}
             onChange={(e) =>
-              update(
+              onChange(
                 links.map((l, j) =>
                   j === i ? { ...l, url: e.target.value } : l
                 )
@@ -58,17 +81,17 @@ export const FooterLinksField = ({
           {!readOnly && (
             <Button
               variant="secondary"
-              onClick={() => update(links.filter((_, j) => j !== i))}
+              onClick={() => onChange(links.filter((_, j) => j !== i))}
             >
               Remove
             </Button>
           )}
         </div>
       ))}
-      {!readOnly && links.length < FOOTER_LINKS_MAX && (
+      {!readOnly && mode === "custom" && links.length < FOOTER_LINKS_MAX && (
         <Button
           variant="secondary"
-          onClick={() => update([...links, { label: "", url: "" }])}
+          onClick={() => onChange([...links, { label: "", url: "" }])}
         >
           Add link
         </Button>

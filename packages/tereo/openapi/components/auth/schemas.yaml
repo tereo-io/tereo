@@ -4185,7 +4185,7 @@ BrandingSource:
 
 BrandingProfileView:
   type: object
-  required: [client, own, effective, inherited, sources, colorSources, provisioned, provisionedFrom, updatedAt, canEdit, canManageGrants]
+  required: [client, own, effective, inherited, sources, colorSources, provisioned, provisionedFrom, updatedAt, canEdit, canManageGrants, canViewGrants]
   properties:
     client:
       type: [object, 'null']
@@ -4248,6 +4248,11 @@ BrandingProfileView:
       description: |
         Whether the caller may add and revoke the client's grants: owner or `branding.admin`, holding
         `branding.write`. Always `false` for the default profile and `tereo-ui`.
+    canViewGrants:
+      type: boolean
+      description: |
+        Whether the caller may list the client's grants: owner or `branding.admin`. Always `false` for
+        the default profile and `tereo-ui`.
 
 BrandingList:
   type: object

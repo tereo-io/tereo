@@ -122,7 +122,8 @@ belongs to nothing until a profile the caller may edit references it. A new imag
 with a profile the caller may read, and `brandable`: the clients with no profile yet that the caller
 may start one on (owned or actively granted with `branding.write`; every one for `branding.admin`).
 `tereo-ui` is listed only for `branding.admin`. A profile's `GET` says what the caller may do:
-`canEdit`, and `canManageGrants` (owner or `branding.admin`, holding `branding.write`).
+`canEdit`, `canManageGrants` (owner or `branding.admin`, holding `branding.write`) and
+`canViewGrants` (owner or `branding.admin`: may list the grants).
 
 A provisioned profile refuses `PUT` and `DELETE` with `409 managed_by_provisioning` and the
 document's file name as `provisionedFrom`, for everyone, `branding.admin` included. Writes are

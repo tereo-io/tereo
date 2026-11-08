@@ -1,4 +1,3 @@
-import { isSafeColorValue } from "../../api/branding/brandingErrors";
 import type { BrandingSource } from "../../api/branding/types";
 import { BRANDING_COLOR_TOKENS } from "@/features/auth";
 import { Input } from "@kosmeo-ui/react";
@@ -37,6 +36,19 @@ interface ColorFieldsProps {
   readOnly: boolean;
 }
 
+/** A colour input's value: #rrggbb from a 3- or 6-digit hex, else null. */
+export const swatchOf = (value: string | undefined): string | null => {
+  if (!value) return null;
+  if (/^#[0-9a-fA-F]{6}$/.test(value)) return value.toLowerCase();
+  const short = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(value);
+  return short
+    ? `#${short
+        .slice(1)
+        .map((c) => c + c)
+        .join("")}`.toLowerCase()
+    : null;
+};
+
 export const placeholderFor = (
   inherited: string | undefined,
   source: BrandingSource | undefined
@@ -70,16 +82,17 @@ export const ColorFields = ({
           {BRANDING_COLOR_TOKENS.filter((t) => groupOf(t) === group).map(
             (token) => {
               const own = value[token] ?? "";
-              const swatch =
-                isSafeColorValue(own) && own.startsWith("#") && own.length === 7
-                  ? own
-                  : "#000000";
+              // Unset shows what applies instead; with nothing to show, an
+              // empty swatch, not black that reads as a choice.
+              const swatch = own ? swatchOf(own) : swatchOf(inherited[token]);
               return (
                 <div key={token} className="t-color-row">
                   <input
                     type="color"
                     aria-label={`${token.slice(4)} picker`}
-                    value={swatch}
+                    className={swatch ? undefined : "t-color-unset"}
+                    data-unset={swatch ? undefined : "true"}
+                    value={swatch ?? "#000000"}
                     disabled={readOnly}
                     onChange={(e) => set(token, e.target.value)}
                   />

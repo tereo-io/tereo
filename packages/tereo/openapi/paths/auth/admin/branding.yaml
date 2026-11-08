@@ -160,7 +160,8 @@
       colour variable by colour variable); `inherited` the same without `own`, which a preview uses as its
       base; `sources` and `colorSources` say where each effective value comes from (`client`, `default` or
       `tereo`). `canEdit` is false for a provisioned profile or a caller who may only read; `canManageGrants`
-      is true for the owner and `branding.admin`, never for `tereo-ui`.
+      is true for the owner and `branding.admin` holding `branding.write`, and `canViewGrants` (listing only)
+      for the owner and `branding.admin`; neither for `tereo-ui`.
     operationId: getClientBranding
     security:
       - BearerAuth: [branding.read]

@@ -47,7 +47,7 @@ export const BrandingList = () => {
   useStockColors();
   const navigate = useNavigate();
   const { hasPermission } = useAuth();
-  const { data, isLoading } = useBrandingList();
+  const { data, isLoading, isError, refetch, isRefetching } = useBrandingList();
   const [picking, setPicking] = useState(false);
   const [chosen, setChosen] = useState<string | undefined>();
 
@@ -59,6 +59,24 @@ export const BrandingList = () => {
         <Centered>
           <Spinner size="lg" />
         </Centered>
+      </Page>
+    );
+  }
+
+  if (isError && !data) {
+    return (
+      <Page padded fillHeight>
+        <PageHeader title="Branding" />
+        <EmptyState
+          layout="block"
+          action={
+            <Button isLoading={isRefetching} onClick={() => refetch()}>
+              Retry
+            </Button>
+          }
+        >
+          Could not load branding
+        </EmptyState>
       </Page>
     );
   }

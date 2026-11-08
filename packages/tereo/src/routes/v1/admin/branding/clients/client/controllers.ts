@@ -42,12 +42,14 @@ const view = async (
     if (!(err instanceof ForbiddenError)) throw err;
     canEdit = false;
   }
+  // Listing grants needs only branding.read; adding and revoking need write.
+  const canViewGrants = mayManageGrants(user, client);
   return await profileView(client, {
     canEdit,
-    // Listing grants needs only branding.read; adding and revoking need write.
     canManageGrants:
-      mayManageGrants(user, client) &&
+      canViewGrants &&
       hasPermission(user.permissions, PERMISSIONS.BRANDING.WRITE),
+    canViewGrants,
   });
 };
 

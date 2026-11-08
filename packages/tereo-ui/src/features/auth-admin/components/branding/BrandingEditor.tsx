@@ -3,6 +3,7 @@ import { TEXT_LIMITS, validateDraft } from "../../api/branding/brandingErrors";
 import useSaveBrandingProfile from "../../api/branding/useSaveBrandingProfile";
 import useBrandingProfile from "../../api/branding/useBrandingProfile";
 import useBrandingList from "../../api/branding/useBrandingList";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useBlocker, useNavigate } from "react-router-dom";
 import { ProvisionedDialog } from "./ProvisionedDialog";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
@@ -15,7 +16,7 @@ import { useStockColors } from "@/features/auth";
 import { GrantsPanel } from "./GrantsPanel";
 import { ColorFields } from "./ColorFields";
 import { ImageField } from "./ImageField";
-import { useMemo, useState } from "react";
+import { AxiosError } from "axios";
 import "./styles.css";
 import type {
   AdminProfileBody,
@@ -55,6 +56,26 @@ const IMAGE_FIELDS: { slot: BrandingImageSlot; label: string }[] = [
 
 const blankToNull = (v: string | null) => (v?.trim() ? v.trim() : null);
 
+/** Deep equality that ignores object key order, as a cleared and retyped colour reorders keys. */
+export const sameValue = (a: unknown, b: unknown): boolean => {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  return (
+    ka.length === kb.length &&
+    ka.every(
+      (k) =>
+        Object.hasOwn(b, k) &&
+        sameValue(
+          (a as Record<string, unknown>)[k],
+          (b as Record<string, unknown>)[k]
+        )
+    )
+  );
+};
+
 /** The full PUT body: core replaces the whole profile. */
 const toBody = (draft: BrandingDraft): AdminProfileBody => ({
   appName: blankToNull(draft.appName),
@@ -63,12 +84,12 @@ const toBody = (draft: BrandingDraft): AdminProfileBody => ({
   signInLabel: blankToNull(draft.signInLabel),
   notice: blankToNull(draft.notice),
   layout: draft.layout,
-  footerLinks: draft.footerLinks?.length
-    ? draft.footerLinks.map((l) => ({
-        label: l.label.trim(),
-        url: l.url.trim(),
-      }))
-    : null,
+  // null inherits the default's links; [] shows none.
+  footerLinks:
+    draft.footerLinks?.map((l) => ({
+      label: l.label.trim(),
+      url: l.url.trim(),
+    })) ?? null,
   colorsLight: draft.colorsLight,
   colorsDark: draft.colorsDark,
   applyToConsole: draft.applyToConsole,
@@ -81,9 +102,21 @@ const toBody = (draft: BrandingDraft): AdminProfileBody => ({
 interface FormProps {
   target: BrandingTarget;
   profile: BrandingProfile;
+  /** The profile changed on the server since this form loaded it. */
+  stale: boolean;
+  onReload: () => void;
+  onDirtyChange: (dirty: boolean) => void;
+  onSaved: () => void;
 }
 
-const EditorForm = ({ target, profile }: FormProps) => {
+const EditorForm = ({
+  target,
+  profile,
+  stale,
+  onReload,
+  onDirtyChange,
+  onSaved,
+}: FormProps) => {
   const navigate = useNavigate();
   const initial = useMemo<BrandingDraft>(
     () => profile.own ?? emptyDraft(),
@@ -97,13 +130,19 @@ const EditorForm = ({ target, profile }: FormProps) => {
   const remove = useDeleteBrandingProfile(target);
 
   const locked = profile.provisioned || !profile.canEdit;
-  const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
+  const dirty = !sameValue(draft, initial);
   const errors = useMemo(() => validateDraft(draft), [draft]);
   const hasErrors = Object.keys(errors).length > 0;
 
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+
+  // Set once the profile is removed: there is nothing left to keep.
+  const removed = useRef(false);
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
-      dirty && currentLocation.pathname !== nextLocation.pathname
+      dirty &&
+      !removed.current &&
+      currentLocation.pathname !== nextLocation.pathname
   );
 
   const patch = (changes: Partial<BrandingDraft>) =>
@@ -153,7 +192,7 @@ const EditorForm = ({ target, profile }: FormProps) => {
           key="save"
           isLoading={save.isPending}
           disabled={!dirty || hasErrors}
-          onClick={() => save.mutate(toBody(draft))}
+          onClick={() => save.mutate(toBody(draft), { onSuccess: onSaved })}
         >
           Save
         </Button>,
@@ -214,6 +253,17 @@ const EditorForm = ({ target, profile }: FormProps) => {
             This branding is managed by provisioning
             {profile.provisionedFrom ? ` (${profile.provisionedFrom})` : ""} and
             is read-only here.
+          </Alert>
+        </div>
+      )}
+      {stale && !save.isPending && (
+        <div className="t-branding-banner">
+          <Alert variant="warning">
+            This branding was changed elsewhere since you opened it. Saving
+            replaces those changes.{" "}
+            <Button size="sm" variant="secondary" onClick={onReload}>
+              Reload and discard my edits
+            </Button>
           </Alert>
         </div>
       )}
@@ -333,9 +383,13 @@ const EditorForm = ({ target, profile }: FormProps) => {
         </div>
         <div className="t-branding-side">
           <BrandingPreview draft={draft} inherited={profile.inherited} />
-          {profile.canManageGrants && profile.client && (
-            <GrantsPanel clientId={profile.client.id} />
-          )}
+          {profile.client &&
+            (profile.canManageGrants || profile.canViewGrants) && (
+              <GrantsPanel
+                clientId={profile.client.id}
+                readOnly={!profile.canManageGrants}
+              />
+            )}
         </div>
       </div>
       <ProvisionedDialog
@@ -357,6 +411,7 @@ const EditorForm = ({ target, profile }: FormProps) => {
             return;
           }
           // The refetch remounts the form, so navigate from here, not from a mutate callback.
+          removed.current = true;
           setShowDelete(false);
           navigate("/auth-admin/branding");
         }}
@@ -374,12 +429,29 @@ const EditorForm = ({ target, profile }: FormProps) => {
   );
 };
 
+const statusOf = (error: unknown) =>
+  error instanceof AxiosError ? error.response?.status : undefined;
+
 export const BrandingEditor = ({ target }: { target: BrandingTarget }) => {
   useStockColors();
-  const { data, isLoading } = useBrandingProfile(target);
+  const { data, isLoading, isError, error, refetch, isRefetching } =
+    useBrandingProfile(target);
   useDocumentTitle(
     target.kind === "default" ? "Default branding" : data?.client?.name
   );
+
+  // The form edits the profile as it was loaded. A refetch (window focus,
+  // another tab's save) replaces it only while there is nothing to lose;
+  // with unsaved edits the form stays and offers a reload instead.
+  const [shown, setShown] = useState<BrandingProfile | undefined>(data);
+  const [generation, setGeneration] = useState(0);
+  const [dirty, setDirty] = useState(false);
+  const show = (next: BrandingProfile | undefined) => {
+    setShown(next);
+    setGeneration((g) => g + 1);
+    setDirty(false);
+  };
+  if (data !== shown && (!shown || !dirty)) show(data);
 
   if (isLoading) {
     return (
@@ -390,19 +462,35 @@ export const BrandingEditor = ({ target }: { target: BrandingTarget }) => {
       </Page>
     );
   }
-  if (!data) {
+  if (!shown) {
+    const notFound = !isError || statusOf(error) === 404;
     return (
       <Page padded fillHeight>
-        <EmptyState layout="block">Branding not found</EmptyState>
+        <EmptyState
+          layout="block"
+          action={
+            notFound ? undefined : (
+              <Button isLoading={isRefetching} onClick={() => refetch()}>
+                Retry
+              </Button>
+            )
+          }
+        >
+          {notFound ? "Branding not found" : "Could not load this branding"}
+        </EmptyState>
       </Page>
     );
   }
-  // A saved or reloaded profile starts a fresh draft.
   return (
     <EditorForm
-      key={data.updatedAt ?? "unsaved"}
+      key={generation}
       target={target}
-      profile={data}
+      profile={shown}
+      stale={!!data && data !== shown}
+      onReload={() => show(data)}
+      onDirtyChange={setDirty}
+      // A save replaces the profile with what was just stored.
+      onSaved={() => setDirty(false)}
     />
   );
 };

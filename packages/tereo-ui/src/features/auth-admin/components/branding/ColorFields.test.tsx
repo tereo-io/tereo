@@ -53,4 +53,29 @@ describe("ColorFields", () => {
     );
     expect(screen.getByLabelText("primary-color")).toHaveValue("");
   });
+
+  it("seeds an unset swatch from the inherited hex", () => {
+    renderFields();
+    expect(screen.getByLabelText("primary-color picker")).toHaveValue(
+      "#112233"
+    );
+    expect(screen.getByLabelText("primary-color picker")).not.toHaveAttribute(
+      "data-unset"
+    );
+  });
+
+  it("shows an unset swatch when nothing gives a hex", () => {
+    renderFields();
+    expect(screen.getByLabelText("danger-color picker")).toHaveAttribute(
+      "data-unset",
+      "true"
+    );
+  });
+
+  it("shows the profile's own colour, expanding a short hex", () => {
+    renderFields({ "--k-primary-color": "#0b5" });
+    expect(screen.getByLabelText("primary-color picker")).toHaveValue(
+      "#00bb55"
+    );
+  });
 });

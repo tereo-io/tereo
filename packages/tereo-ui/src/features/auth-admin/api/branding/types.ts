@@ -67,6 +67,8 @@ export interface BrandingProfile {
   updatedAt: string | null;
   canEdit: boolean;
   canManageGrants: boolean;
+  /** May list the client's grants (owner or branding.admin), even without managing them. */
+  canViewGrants: boolean;
 }
 
 export interface BrandingListEntry {

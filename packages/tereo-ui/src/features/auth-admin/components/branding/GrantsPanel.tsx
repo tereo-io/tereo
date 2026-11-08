@@ -7,8 +7,17 @@ import UserTypeahead from "../users/UserTypeahead";
 import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 
+interface GrantsPanelProps {
+  clientId: string;
+  /** Lists the grants without Grant and Revoke. */
+  readOnly?: boolean;
+}
+
 /** Who may edit this client's branding besides its owner and branding admins. */
-export const GrantsPanel = ({ clientId }: { clientId: string }) => {
+export const GrantsPanel = ({
+  clientId,
+  readOnly = false,
+}: GrantsPanelProps) => {
   const { hasPermission } = useAuth();
   const { data: grants, isLoading } = useBrandingGrants(clientId);
   const add = useAddBrandingGrant(clientId);
@@ -34,25 +43,27 @@ export const GrantsPanel = ({ clientId }: { clientId: string }) => {
   return (
     <section className="t-grants" aria-label="Who can edit">
       <h2>Who can edit</h2>
-      <div className="t-grants-add">
-        {canSearchUsers ? (
-          <UserTypeahead value={selected} onSelect={setSelected} />
-        ) : (
-          <Input
-            label="User ID"
-            value={manualId}
-            placeholder="User UUID"
-            onChange={(e) => setManualId(e.target.value)}
-          />
-        )}
-        <Button
-          isLoading={add.isPending}
-          disabled={!userId || add.isPending}
-          onClick={grant}
-        >
-          Grant
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="t-grants-add">
+          {canSearchUsers ? (
+            <UserTypeahead value={selected} onSelect={setSelected} />
+          ) : (
+            <Input
+              label="User ID"
+              value={manualId}
+              placeholder="User UUID"
+              onChange={(e) => setManualId(e.target.value)}
+            />
+          )}
+          <Button
+            isLoading={add.isPending}
+            disabled={!userId || add.isPending}
+            onClick={grant}
+          >
+            Grant
+          </Button>
+        </div>
+      )}
       {isLoading ? (
         <Spinner />
       ) : !grants?.length ? (
@@ -67,15 +78,17 @@ export const GrantsPanel = ({ clientId }: { clientId: string }) => {
                 {g.name ? `${g.name} ` : ""}
                 <small>{g.email}</small>
               </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={revoke.isPending}
-                aria-label={`Revoke ${g.email}`}
-                onClick={() => revoke.mutate(g.userId)}
-              >
-                Revoke
-              </Button>
+              {!readOnly && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={revoke.isPending}
+                  aria-label={`Revoke ${g.email}`}
+                  onClick={() => revoke.mutate(g.userId)}
+                >
+                  Revoke
+                </Button>
+              )}
             </li>
           ))}
         </ul>

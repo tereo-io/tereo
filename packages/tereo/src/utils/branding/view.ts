@@ -33,7 +33,7 @@ const image = (key: string | null) =>
  */
 export const profileView = async (
   client: { id: string; clientId: string; name: string } | null,
-  access: { canEdit: boolean; canManageGrants: boolean }
+  access: { canEdit: boolean; canManageGrants: boolean; canViewGrants: boolean }
 ) => {
   const [own, defaultProfile] = await Promise.all([
     client ? db.brandingProfiles.getByClientUuid(client.id) : null,
@@ -85,5 +85,6 @@ export const profileView = async (
     updatedAt: self?.updatedAt ?? null,
     canEdit: access.canEdit && !provisioned,
     canManageGrants: access.canManageGrants,
+    canViewGrants: access.canViewGrants,
   };
 };

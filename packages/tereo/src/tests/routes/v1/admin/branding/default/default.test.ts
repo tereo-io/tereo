@@ -40,6 +40,7 @@ describe("/v1/admin/branding/default", () => {
       sources: { appName: "default" },
       canEdit: true,
       canManageGrants: false,
+      canViewGrants: false,
     });
 
     const del = await fetchJson("DELETE", url, admin.token);
