@@ -10378,7 +10378,8 @@ paths:
         `false` for everyone, admins included, on a retired bucket, which is
         read-only. On a bucket core declares for itself (`auth-service-user-photos`,
         `auth-service-branding`) `canWrite` and `canDelete` are both `false` for
-        everyone: core alone writes it.
+        everyone: core alone writes it. `coreManaged` says so, and
+        `canRevokeShares` keeps the delete access revoking another's share takes.
 
         A missing bucket, one of another organization, and a private bucket the
         caller holds no active grant on are all refused with the same `403`, so
@@ -26854,6 +26855,13 @@ components:
             - string
             - 'null'
           format: date-time
+        coreManaged:
+          description: |
+            Whether core declares the bucket for itself (`auth-service-user-photos`,
+            `auth-service-branding`). Through this API it is read-only for everyone:
+            writes, shares, grants and settings changes get
+            `409 bucket_managed_by_core`; reads and revoking grants and shares go on.
+          type: boolean
         createdAt:
           description: Bucket creation timestamp
           type: string
@@ -26887,6 +26895,7 @@ components:
         - service
         - missingSince
         - retiredAt
+        - coreManaged
         - createdAt
         - updatedAt
     CorsConfig:
@@ -27151,10 +27160,28 @@ components:
           type: boolean
           examples:
             - false
+        canRevokeShares:
+          description: |
+            Whether the caller may revoke a share someone else created (their own
+            they always may): `true` for a `file-service.admin` holder, otherwise
+            the grant's delete flag AND `file-service.objects.delete`. Unlike
+            `canDelete`, it stays `true` on a core bucket, where revoking goes on.
+          type: boolean
+          examples:
+            - false
+        coreManaged:
+          description: |
+            Whether core declares the bucket for itself; see `Bucket.coreManaged`.
+            Nothing new can be shared or granted on one.
+          type: boolean
+          examples:
+            - false
       required:
         - canRead
         - canWrite
         - canDelete
+        - canRevokeShares
+        - coreManaged
     LifecyclePolicy:
       type: object
       description: |

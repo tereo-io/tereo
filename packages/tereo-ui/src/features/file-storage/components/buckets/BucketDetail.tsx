@@ -91,6 +91,12 @@ export const BucketDetail = () => {
   );
   // A retired bucket is read-only: core answers writes with 409.
   const retired = isBucketRetired(bucket);
+  // Grants: listing takes any grant, revoking the bucket's management. On a
+  // core bucket no one writes, so that is left to those who manage it, who
+  // may list and revoke but not grant.
+  const canSeeGrants =
+    hasPermission("file-service.permissions.read") &&
+    (canWrite || (bucket.coreManaged && canManage));
   const canEditBucket =
     hasPermission("file-service.buckets.write") && canWrite && canManage;
   // Purging is a destructive cleanup of historical version rows; only offer it
@@ -149,7 +155,7 @@ export const BucketDetail = () => {
         >
           Details
         </TabButton>
-        {hasPermission("file-service.permissions.read") && canWrite && (
+        {canSeeGrants && (
           <TabButton
             active={activeTab === "permissions"}
             onClick={() => setActiveTab("permissions")}
@@ -170,11 +176,9 @@ export const BucketDetail = () => {
       {hasPermission("file-service.objects.read") &&
         permissions?.canRead &&
         activeTab === "objects" && <ObjectTree />}
-      {hasPermission("file-service.permissions.read") &&
-        canWrite &&
-        activeTab === "permissions" && (
-          <PermissionManager bucket={bucket} canManage={canManage} />
-        )}
+      {canSeeGrants && activeTab === "permissions" && (
+        <PermissionManager bucket={bucket} canManage={canManage} />
+      )}
       {hasPermission("file-service.shares.read") &&
         permissions?.canRead &&
         activeTab === "shares" && <ShareManager bucketName={bucketName!} />}

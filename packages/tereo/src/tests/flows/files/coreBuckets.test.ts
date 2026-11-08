@@ -297,7 +297,11 @@ describe("a core bucket through the files API", () => {
       canRead: true,
       canWrite: false,
       canDelete: false,
+      canRevokeShares: true,
+      coreManaged: true,
     });
+    const bucket = await call("GET", "");
+    expect(bucket.data?.coreManaged).toBe(true);
   });
 
   it("answers 403 before 409 for a caller without access", async () => {

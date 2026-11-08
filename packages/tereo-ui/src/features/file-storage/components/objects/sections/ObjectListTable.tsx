@@ -116,7 +116,9 @@ const ObjectListTable = ({
     { prefix: string; keys?: never } | { keys: string[]; prefix?: never } | null
   >(null);
 
-  const canShare = hasPermission("file-service.shares.write");
+  // Core refuses new shares on its own buckets.
+  const canShare =
+    hasPermission("file-service.shares.write") && !permissions?.coreManaged;
 
   // InfiniteScroll fires this on every select/deselect. Memoized because the
   // component re-runs its onRowSelect effect on every data update and would
@@ -308,12 +310,14 @@ const ObjectListTable = ({
                   label={label}
                   objectCount={entry.objectCount}
                 />
-                <ShareFolderButton
-                  bucketName={bucketName}
-                  prefix={entry.prefix}
-                  label={label}
-                  objectCount={entry.objectCount}
-                />
+                {canShare && (
+                  <ShareFolderButton
+                    bucketName={bucketName}
+                    prefix={entry.prefix}
+                    label={label}
+                    objectCount={entry.objectCount}
+                  />
+                )}
                 {canDelete && (
                   <DeleteFolderButton
                     bucketName={bucketName}
@@ -343,10 +347,12 @@ const ObjectListTable = ({
                 bucketName={bucketName}
                 object={{ id: entry.id }}
               />
-              <ShareObjectButton
-                bucketName={bucketName}
-                object={{ id: entry.id, key: entry.key }}
-              />
+              {canShare && (
+                <ShareObjectButton
+                  bucketName={bucketName}
+                  object={{ id: entry.id, key: entry.key }}
+                />
+              )}
               {canWrite && (
                 <EditObjectButton
                   bucketName={bucketName}
@@ -370,6 +376,7 @@ const ObjectListTable = ({
     [
       bucketName,
       canDelete,
+      canShare,
       canWrite,
       extraObjectActions,
       nameDisplayPrefix,

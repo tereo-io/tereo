@@ -84,6 +84,8 @@ export function serializeBucket(
     service: toServiceRef(bucket.service),
     missingSince: bucket.missingSince,
     retiredAt: bucket.retiredAt,
+    // Core's own: read-only through the files API (`assertNotCoreBucket`).
+    coreManaged: isCoreBucket(bucket),
     createdAt: bucket.createdAt,
     updatedAt: bucket.updatedAt,
   };
@@ -294,11 +296,15 @@ export const getMyPermissions = async (req: Request, res: Response) => {
   const coreManaged = isCoreBucket(bucket);
   const writable = !bucket.retiredAt && !coreManaged;
 
+  // Revoking someone else's share takes delete access as the grant gives it;
+  // the core-bucket guard doesn't apply to revoking.
   if (isAdmin) {
     return res.json({
       canRead: true,
       canWrite: writable,
       canDelete: !coreManaged,
+      canRevokeShares: true,
+      coreManaged,
     });
   }
 
@@ -323,5 +329,7 @@ export const getMyPermissions = async (req: Request, res: Response) => {
       bucket.policy === "public" || ((active?.canRead ?? false) && may("read")),
     canWrite: writable && (active?.canWrite ?? false) && may("write"),
     canDelete: !coreManaged && (active?.canDelete ?? false) && may("delete"),
+    canRevokeShares: (active?.canDelete ?? false) && may("delete"),
+    coreManaged,
   });
 };
