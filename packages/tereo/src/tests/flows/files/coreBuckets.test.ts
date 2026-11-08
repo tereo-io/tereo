@@ -7,11 +7,12 @@ import { getAccessTokenForUser } from "../../support/auth/login.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { sign as presignSign } from "../../../utils/presigning.js";
 import { createTestClient } from "../../support/auth/clients.js";
+import { SYSTEM_USER_ID } from "../../../definitions/index.js";
 import { createTestUser } from "../../support/auth/users.js";
 import { beforeAll, describe, expect, it } from "vitest";
+import { randomBytes, randomUUID } from "node:crypto";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
-import { randomUUID } from "node:crypto";
 
 // Core's own buckets are written only by core's modules: through the files
 // API every write is `409 bucket_managed_by_core`, `file-service.admin`
@@ -29,26 +30,28 @@ let objectId: string;
 let objectKey: string;
 let deleteAfter: Date | null;
 
-const call = async (method: string, path: string, body?: unknown) => {
-  const response = await fetch(
-    `${BASE_URL}/buckets/${BRANDING_BUCKET}${path}`,
-    {
-      method,
-      headers: {
-        Authorization: `Bearer ${admin}`,
-        "Idempotency-Key": randomUUID(),
-        ...(body instanceof FormData || body === undefined
-          ? {}
-          : { "Content-Type": "application/json" }),
-      },
-      body:
-        body === undefined
-          ? undefined
-          : body instanceof FormData
-            ? body
-            : JSON.stringify(body),
-    }
-  );
+const call = async (
+  method: string,
+  path: string,
+  body?: unknown,
+  bucket = BRANDING_BUCKET
+) => {
+  const response = await fetch(`${BASE_URL}/buckets/${bucket}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${admin}`,
+      "Idempotency-Key": randomUUID(),
+      ...(body instanceof FormData || body === undefined
+        ? {}
+        : { "Content-Type": "application/json" }),
+    },
+    body:
+      body === undefined
+        ? undefined
+        : body instanceof FormData
+          ? body
+          : JSON.stringify(body),
+  });
   // A download answers with the object's bytes, not JSON.
   if (!response.headers.get("content-type")?.startsWith("application/json")) {
     await response.arrayBuffer();
@@ -152,6 +155,93 @@ describe("a core bucket through the files API", () => {
     const res = await call(method, path.replace(":id", objectId), body());
     expect(res.status, JSON.stringify(res.data)).toBe(409);
     expect(res.data?.error).toBe("bucket_managed_by_core");
+  });
+
+  it.each([
+    ["update bucket", "PUT", "", { policy: "public" }],
+    [
+      "grant access",
+      "POST",
+      "/permissions",
+      { userId: "00000000-0000-7001-0000-000000000001", canRead: true },
+    ],
+  ])(
+    "refuses %s on the profile-photo bucket",
+    async (_label, method, path, body) => {
+      const res = await call(method, path, body, PHOTOS);
+      expect(res.status, JSON.stringify(res.data)).toBe(409);
+      expect(res.data?.error).toBe("bucket_managed_by_core");
+    }
+  );
+
+  // Shares and grants can't be made through the API on a core bucket; these
+  // stand for ones made before it became read-only.
+  const seedShare = async () => {
+    const bucket = await prisma.bucket.findFirstOrThrow({
+      where: { name: BRANDING_BUCKET, deletedAt: null },
+    });
+    return await prisma.share.create({
+      data: {
+        token: randomBytes(24).toString("base64url"),
+        bucketId: bucket.id,
+        kind: "OBJECT",
+        objectId,
+        createdByUserId: SYSTEM_USER_ID,
+      },
+    });
+  };
+
+  it("refuses editing a share with 409", async () => {
+    const share = await seedShare();
+    try {
+      const res = await call("PATCH", `/shares/by-id/${share.id}`, {
+        note: "x",
+      });
+      expect(res.status, JSON.stringify(res.data)).toBe(409);
+      expect(res.data?.error).toBe("bucket_managed_by_core");
+    } finally {
+      await prisma.share.delete({ where: { id: share.id } });
+    }
+  });
+
+  it("revokes a share", async () => {
+    const share = await seedShare();
+    try {
+      const res = await call("DELETE", `/shares/by-id/${share.id}`);
+      expect(res.status).toBe(204);
+      const revoked = await prisma.share.findUniqueOrThrow({
+        where: { id: share.id },
+      });
+      expect(revoked.revokedAt).not.toBeNull();
+    } finally {
+      await prisma.share.delete({ where: { id: share.id } });
+    }
+  });
+
+  it("revokes a grant", async () => {
+    const user = await createTestUser();
+    const bucket = await prisma.bucket.findFirstOrThrow({
+      where: { name: PHOTOS, deletedAt: null },
+    });
+    await prisma.bucketPermission.create({
+      data: {
+        bucketId: bucket.id,
+        userId: user.id,
+        canRead: true,
+        grantedBy: SYSTEM_USER_ID,
+      },
+    });
+    const res = await call(
+      "DELETE",
+      `/permissions/${user.id}`,
+      undefined,
+      PHOTOS
+    );
+    expect(res.status).toBe(204);
+    const grant = await prisma.bucketPermission.findUniqueOrThrow({
+      where: { bucketId_userId: { bucketId: bucket.id, userId: user.id } },
+    });
+    expect(grant.revokedAt).not.toBeNull();
   });
 
   it("refuses an upload through a signed write URL", async () => {
