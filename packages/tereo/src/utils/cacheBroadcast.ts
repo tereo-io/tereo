@@ -174,6 +174,30 @@ export function onReconnected(
   });
 }
 
+/**
+ * Calls `listener` each time `connection` is ready again after losing its
+ * connection, and again once it is subscribed to `channel`: the automatic
+ * resubscribe is acknowledged after `ready`, and a message published in
+ * between is lost.
+ */
+export function onResubscribed(
+  connection: {
+    on(event: "close" | "ready", listener: () => void): unknown;
+    subscribe(channel: string): Promise<unknown>;
+  },
+  channel: string,
+  listener: () => void
+): void {
+  onReconnected(connection, () => {
+    listener();
+    // Commands on one connection are answered in order: this one's reply
+    // follows the automatic resubscribe's.
+    connection.subscribe(channel).then(listener, (err: unknown) => {
+      logger.warn({ err, channel }, "cacheBroadcast resubscribe failed");
+    });
+  });
+}
+
 const deliver = (channel: string, message: string) => {
   for (const l of listenersByChannel[channel] ?? []) {
     try {
@@ -197,7 +221,9 @@ export async function startCacheSubscriber(): Promise<void> {
   fresh.on("message", deliver);
   // Messages published while it was away are lost. Branding has no other
   // signal, so its caches are dropped as if one had arrived.
-  onReconnected(fresh, () => deliver(BRANDING_INVALIDATE_CHANNEL, ""));
+  onResubscribed(fresh, BRANDING_INVALIDATE_CHANNEL, () =>
+    deliver(BRANDING_INVALIDATE_CHANNEL, "")
+  );
   await fresh.subscribe(...Object.keys(listenersByChannel));
   subscriber = fresh;
 }
