@@ -5,6 +5,7 @@ import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrgani
 import { HTTP_STATUS } from "../../../../../support/auth/constants.js";
 import { createTestUser } from "../../../../../support/auth/users.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { prisma } from "../../../../../../utils/db/prisma.js";
 import { randomUUID } from "node:crypto";
 import {
   ensureTestOrganization,
@@ -14,14 +15,19 @@ import {
   adminApi,
   deleteGroups,
   delegatedToken,
+  ensureGroupPermission,
+  GROUP_PERMISSION,
   groupSlug,
   joinOrg,
   postGroup,
+  roleGranting,
   type ApiGroup,
 } from "../../../../../support/groups.js";
 
 const groupIds: string[] = [];
 let admin: string;
+/** Also holds GROUP_PERMISSION, so can give groups roles granting it. */
+let roleAdmin: string;
 
 const track = (group: ApiGroup) => {
   groupIds.push(group.id);
@@ -53,6 +59,10 @@ const orgUser = async (
 beforeAll(async () => {
   await ensureDefaultOrganization();
   admin = await getTestPrincipalToken({ permissions: ["groups.admin"] });
+  await ensureGroupPermission();
+  roleAdmin = await getTestPrincipalToken({
+    permissions: ["groups.admin", GROUP_PERMISSION],
+  });
 });
 
 afterAll(async () => {
@@ -159,6 +169,64 @@ describe("/v1/admin/groups/:id authorization", () => {
       { userIds: [owner] }
     );
     expect(byOwner.status).toBe(HTTP_STATUS.OK);
+  });
+
+  it("an org admin removes a member from an org group holding a role they hold in the org", async () => {
+    const orgId = await newOrg();
+    const role = await roleGranting();
+    const adminId = randomUUID();
+    const token = await getTestPrincipalToken({
+      userId: adminId,
+      permissions: [],
+    });
+    await joinOrg(orgId, adminId, "admin");
+    // Held only in this organization: globally the org admin holds nothing.
+    await prisma.userRole.create({
+      data: { userId: adminId, roleId: role.id, organizationId: orgId },
+    });
+    const member = await orgUser(orgId);
+    const group = track(
+      await postGroup(roleAdmin, { organizationId: orgId, roleIds: [role.id] })
+    );
+
+    const added = await adminApi("POST", `/groups/${group.id}/members`, token, {
+      userIds: [member],
+    });
+    expect(added.status).toBe(HTTP_STATUS.OK);
+    const removed = await adminApi(
+      "DELETE",
+      `/groups/${group.id}/members/${member}`,
+      token
+    );
+    expect(removed.status).toBe(HTTP_STATUS.NO_CONTENT);
+  });
+
+  it("an org admin cannot add or remove members of an org group holding a role they do not hold there", async () => {
+    const orgId = await newOrg();
+    const role = await roleGranting();
+    const token = await orgMemberToken(orgId, "admin");
+    const [existing, newcomer] = [await orgUser(orgId), await orgUser(orgId)];
+    const group = track(
+      await postGroup(roleAdmin, { organizationId: orgId, roleIds: [role.id] })
+    );
+    const seeded = await adminApi(
+      "POST",
+      `/groups/${group.id}/members`,
+      roleAdmin,
+      { userIds: [existing] }
+    );
+    expect(seeded.status).toBe(HTTP_STATUS.OK);
+
+    const add = await adminApi("POST", `/groups/${group.id}/members`, token, {
+      userIds: [newcomer],
+    });
+    expect(add.status).toBe(HTTP_STATUS.FORBIDDEN);
+    const remove = await adminApi(
+      "DELETE",
+      `/groups/${group.id}/members/${existing}`,
+      token
+    );
+    expect(remove.status).toBe(HTTP_STATUS.FORBIDDEN);
   });
 
   it("returns 403, not 404, for a missing group to a caller without groups.read", async () => {

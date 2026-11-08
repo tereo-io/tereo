@@ -44,8 +44,11 @@ import {
  * 2. `lockGroup`.
  * 3. For role changes, archive and restore: the members re-read, and the
  *    authority of any not locked in step 1 locked. Such a user was added by
- *    a transaction that held the group lock and has committed, so nothing
- *    holding their lock waits on this group.
+ *    a transaction that has committed, but another may have locked them
+ *    since (step 1 of an add or removal naming them) and now queue on the
+ *    group: then each waits on the other, Postgres aborts one side with a
+ *    deadlock error (40P01), and that request fails. The window is narrow
+ *    and nothing retries it.
  * 4. `lockOrgOwners` when an org admin acts on an org group, then
  *    `assertAdminRemains` last.
  */
@@ -542,8 +545,13 @@ export const removeMembers = async (
   tx: Tx
 ): Promise<GroupChange & { removed: string[] }> => {
   const ids = unique(userIds);
+  // A group's organization never changes, so it can be read before the locks.
+  const { organizationId } = await db.groups.getAny(groupId, tx);
   await lockUsers(ids, tx);
-  if (actor.mode === "admin") {
+  // As for direct role removal: a global group's members must hold nothing
+  // the caller does not; an org group's roles are checked against what the
+  // caller holds in the org, as an org admin holds nothing globally.
+  if (actor.mode === "admin" && !organizationId) {
     for (const id of ids) {
       await assertMayDisempower(actor.auth, id, "remove roles from", tx);
     }
@@ -551,6 +559,12 @@ export const removeMembers = async (
   await db.groups.lockGroup(groupId, tx);
   const group = await db.groups.getAny(groupId, tx);
   await assertOrgAdminSparesOwners(actor, group, ids, tx);
+  if (actor.mode === "admin" && group.organizationId) {
+    assertCanTakeAway(
+      actor.grantable,
+      db.roles.grantedPermissionNames(await groupRoles(groupId, tx))
+    );
+  }
   // Only an unarchived global group's roles count as administrators.
   if (!group.organizationId && !group.archivedAt) {
     await assertAdminRemains(
