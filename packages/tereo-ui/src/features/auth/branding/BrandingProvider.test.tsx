@@ -168,4 +168,28 @@ describe("BrandingProvider", () => {
       expect.objectContaining({ params: undefined })
     );
   });
+
+  it("keeps fetched light colours off dark pages and drops unsafe values", async () => {
+    authMock.axios.get.mockResolvedValue({
+      data: makeBranding({
+        colorsLight: {
+          "--k-primary-color": "#112233",
+          "--k-danger-color": "url(//evil.test/a)",
+        },
+        colorsDark: { "--k-primary-color": "oklch(0.6 0.2 30)" },
+      }),
+    });
+    render(
+      <BrandingProvider>
+        <Probe />
+      </BrandingProvider>
+    );
+    await waitFor(() =>
+      expect(document.getElementById("tereo-branding-style")).not.toBeNull()
+    );
+    expect(document.getElementById("tereo-branding-style")?.textContent).toBe(
+      ':root:not([data-theme="dark"]){--k-primary-color:#112233;}' +
+        '[data-theme="dark"]{--k-primary-color:oklch(0.6 0.2 30);}'
+    );
+  });
 });

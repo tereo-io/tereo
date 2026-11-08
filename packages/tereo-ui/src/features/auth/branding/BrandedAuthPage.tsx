@@ -25,10 +25,11 @@ export const BrandedAuthPage = ({
   const appName = branding?.appName ?? null;
   const authScope = branding?.scope === "auth";
   const layout = authScope ? (branding?.layout ?? "centered") : "centered";
-  const logoUrl = authScope ? brandingImageUrl(branding?.logoUrl) : null;
-  const logoDarkUrl = authScope
-    ? brandingImageUrl(branding?.logoDarkUrl)
-    : null;
+  const lightUrl = authScope ? brandingImageUrl(branding?.logoUrl) : null;
+  const darkUrl = authScope ? brandingImageUrl(branding?.logoDarkUrl) : null;
+  // With one logo, it shows in both themes.
+  const logoUrl = lightUrl ?? darkUrl;
+  const logoDarkUrl = lightUrl ? darkUrl : null;
   const backgroundUrl = authScope
     ? brandingImageUrl(branding?.backgroundUrl)
     : null;

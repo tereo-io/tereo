@@ -12,6 +12,7 @@ export { isReauthRequired, restartLoginFresh } from "./api/upstream/reauth";
 export { upstreamStartUrl } from "./api/upstream/upstreamUrls";
 export { redirectTo } from "./api/redirectTo";
 export { BRANDING_COLOR_TOKENS } from "./branding/colorTokens";
+export { COLOR_VALUE_MAX, isSafeColorValue } from "./branding/colorValue";
 export type { BrandingFooterLink, EffectiveBranding } from "./branding/types";
 export { BrandingProvider } from "./branding/BrandingProvider";
 export { BrandedAuthPage } from "./branding/BrandedAuthPage";

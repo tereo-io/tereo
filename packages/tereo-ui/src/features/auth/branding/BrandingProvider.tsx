@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { BRANDING_COLOR_TOKENS } from "./colorTokens";
 import type { EffectiveBranding } from "./types";
+import { isSafeColorValue } from "./colorValue";
 import { BrandingContext } from "./useBranding";
 import { usePublicAxios } from "@/lib/auth";
 import "./styles.css";
@@ -11,18 +12,23 @@ import {
 } from "./readInjected";
 
 const FETCH_TIMEOUT_MS = 1500;
-const SAFE_VALUE = /^[#0-9a-zA-Z.,%/ ()]+$/;
 
 const declarations = (colors: Record<string, string>) =>
   Object.entries(colors)
     .filter(
       ([name, value]) =>
-        BRANDING_COLOR_TOKENS.includes(name) && SAFE_VALUE.test(value)
+        BRANDING_COLOR_TOKENS.includes(name) &&
+        typeof value === "string" &&
+        isSafeColorValue(value)
     )
     .map(([name, value]) => `${name}:${value};`)
     .join("");
 
-/** Core injects this style itself; on the fetched path the page adds it. */
+/**
+ * Core injects this style itself; on the fetched path the page adds it. Light
+ * stays off dark pages: a bare `:root` rule would come after kosmeo's
+ * `[data-theme="dark"]` one at the same specificity and win.
+ */
 const applyColors = (branding: EffectiveBranding) => {
   const light = declarations(branding.colorsLight);
   const dark = declarations(branding.colorsDark);
@@ -34,7 +40,7 @@ const applyColors = (branding: EffectiveBranding) => {
     document.head.appendChild(style);
   }
   style.textContent =
-    (light ? `:root{${light}}` : "") +
+    (light ? `:root:not([data-theme="dark"]){${light}}` : "") +
     (dark ? `[data-theme="dark"]{${dark}}` : "");
 };
 

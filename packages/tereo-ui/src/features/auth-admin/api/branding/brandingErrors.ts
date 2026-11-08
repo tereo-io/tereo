@@ -1,6 +1,10 @@
-import { BRANDING_COLOR_TOKENS } from "@/features/auth";
 import type { BrandingDraft } from "./types";
 import { AxiosError } from "axios";
+import {
+  BRANDING_COLOR_TOKENS,
+  COLOR_VALUE_MAX,
+  isSafeColorValue,
+} from "@/features/auth";
 
 export const TEXT_LIMITS = {
   appName: 60,
@@ -12,18 +16,7 @@ export const TEXT_LIMITS = {
 export const FOOTER_LABEL_MAX = 40;
 export const FOOTER_LINKS_MAX = 3;
 export const FOOTER_URL_MAX = 2048;
-export const COLOR_VALUE_MAX = 64;
-
-// Copies of core's isSafeColorValue grammar (utils/branding/colors.ts); core stays authoritative.
-const HEX = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
-const FUNCTIONAL = /^(?:rgba?|hsla?|oklch)\(([0-9.%deg ,/]+)\)$/;
-
-export const isSafeColorValue = (value: string): boolean => {
-  if (value.length > COLOR_VALUE_MAX) return false;
-  if (HEX.test(value)) return true;
-  const m = FUNCTIONAL.exec(value);
-  return !!m && /[0-9]/.test(m[1]);
-};
+export { COLOR_VALUE_MAX, isSafeColorValue };
 
 export const isHttpsUrl = (value: string): boolean => {
   if (value.length > FOOTER_URL_MAX) return false;

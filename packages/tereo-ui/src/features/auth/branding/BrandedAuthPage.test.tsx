@@ -177,4 +177,17 @@ describe("BrandedAuthPage", () => {
       '[data-theme="dark"] .t-brand-logo-has-dark .t-brand-logo-dark'
     );
   });
+
+  it("shows a lone dark logo in both themes", () => {
+    const { container } = renderWith(
+      makeBranding({ logoDarkUrl: "/oauth/branding/assets/b.png" })
+    );
+    const logo = container.querySelector(".t-brand-logo");
+    expect(logo).not.toHaveClass("t-brand-logo-has-dark");
+    expect(logo?.querySelector(".t-brand-logo-light")).toHaveAttribute(
+      "src",
+      `${env.CORE_URL}/oauth/branding/assets/b.png`
+    );
+    expect(logo?.querySelector(".t-brand-logo-dark")).toBeNull();
+  });
 });
