@@ -73,6 +73,21 @@ export const authRoutes: RouteObject[] = [
         ),
       },
       {
+        path: "/forgot-password",
+        element: namedLazy(
+          () =>
+            import("@/features/auth/components/password/ForgotPasswordPage"),
+          "ForgotPasswordPage"
+        ),
+      },
+      {
+        path: "/verify-email",
+        element: namedLazy(
+          () => import("@/features/auth/components/email/VerifyEmailPage"),
+          "VerifyEmailPage"
+        ),
+      },
+      {
         path: "/login/link-required",
         element: namedLazy(
           () => import("@/features/auth/components/login/LinkRequiredPage"),

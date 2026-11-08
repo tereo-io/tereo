@@ -22,6 +22,8 @@ export interface AccountProfile {
   photoUrl: string | null;
   /** False for an account that signs in only through a provider. */
   hasPassword: boolean;
+  emailVerified: boolean;
+  emailVerifiedAt: string | null;
   roles: AccountRole[];
   permissions: string[];
   totp: AccountTotp;

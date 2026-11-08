@@ -26,12 +26,14 @@ const renderAt = (url: string) =>
         <Routes>
           <Route path="/set-password" element={<SetPasswordPage />} />
           <Route path="/" element={<Where />} />
+          <Route path="/login" element={<Where />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
   );
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   authMock.axios.post.mockReset();
 });
 
@@ -169,6 +171,47 @@ describe("SetPasswordPage", () => {
       expect(await screen.findByLabelText(/^New password/)).toBeVisible();
     }
   );
+
+  const resetDetails = { data: { ...DETAILS.data, purpose: "reset" } };
+
+  const completeReset = async () => {
+    const user = userEvent.setup();
+    authMock.axios.post.mockImplementation(async (path: string) =>
+      path === "/v1/password-setup/inspect" ? resetDetails : { data: undefined }
+    );
+    renderAt("/set-password#token=abc123");
+    await user.type(
+      await screen.findByLabelText(/^New password/),
+      "Str0ng-pass-phrase"
+    );
+    await user.type(
+      screen.getByLabelText(/^Confirm password/),
+      "Str0ng-pass-phrase"
+    );
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+    return user;
+  };
+
+  it("titles a reset link 'Reset your password'", async () => {
+    authMock.axios.post.mockResolvedValue(resetDetails);
+    renderAt("/set-password#token=abc123");
+
+    expect(await screen.findByText("Reset your password")).toBeVisible();
+  });
+
+  it("Sign in returns to the stored login query after a reset", async () => {
+    window.sessionStorage.setItem(
+      "tereo.resetReturnTo",
+      "?client_id=c1&state=s"
+    );
+    const user = await completeReset();
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByTestId("where")).toHaveTextContent(
+      "/login?client_id=c1&state=s"
+    );
+    expect(window.sessionStorage.getItem("tereo.resetReturnTo")).toBeNull();
+  });
 
   it("ignores a token in the query string", async () => {
     renderAt("/set-password?token=abc123");

@@ -1,3 +1,4 @@
+import SendVerificationEmailButton from "./buttons/SendVerificationEmailButton";
 import RevokeAllSessionsButton from "./buttons/RevokeAllSessionsButton";
 import SendPasswordLinkButton from "./buttons/SendPasswordLinkButton";
 import useUserPermissions from "../../api/users/useUserPermissions";
@@ -124,6 +125,11 @@ export const UserDetail = () => {
                   : []),
               ]
             : []),
+          ...(editable &&
+          user.userType !== "service_account" &&
+          !user.emailVerified
+            ? [<SendVerificationEmailButton key="verify" userId={id} />]
+            : []),
           ...(editable
             ? [
                 // Users are deactivated (Edit → Status), never deleted.
@@ -146,6 +152,22 @@ export const UserDetail = () => {
                 label: "Status",
                 value: <UserStatusBadge user={user} />,
               },
+              ...(user.userType !== "service_account"
+                ? [
+                    {
+                      label: "Email",
+                      value: (
+                        <Badge
+                          size="sm"
+                          subtle={true}
+                          variant={user.emailVerified ? "success" : "warning"}
+                        >
+                          {user.emailVerified ? "Verified" : "Unverified"}
+                        </Badge>
+                      ),
+                    },
+                  ]
+                : []),
               ...(isGuest && user.expiresAt
                 ? [
                     {

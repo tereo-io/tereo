@@ -6,6 +6,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { BrandedAuthPage } from "@/features/auth/branding";
 import { useMemo, useState } from "react";
 import { isAxiosError } from "axios";
+import {
+  clearResetReturn,
+  readResetReturn,
+} from "../../api/password/resetReturn";
 
 const INVALID_LINK = "This link is no longer valid";
 const TRY_AGAIN =
@@ -52,6 +56,17 @@ export const SetPasswordPage = () => {
   } = useInspectPasswordSetup(token);
   const { mutate, isPending } = useSetPassword();
 
+  const isReset = details?.purpose === "reset";
+  const title = isReset ? "Reset your password" : "Set your password";
+
+  // A reset started from a login page returns to it, with its authorize request.
+  const signInTarget = (): string => {
+    if (!isReset) return "/";
+    const search = readResetReturn();
+    clearResetReturn();
+    return search ? `/login${search}` : "/";
+  };
+
   if (done) {
     return (
       <BrandedAuthPage title="Password set">
@@ -59,7 +74,7 @@ export const SetPasswordPage = () => {
           <Alert variant="success">
             Your password is set. You can now sign in.
           </Alert>
-          <Button fullWidth onClick={() => navigate("/")}>
+          <Button fullWidth onClick={() => navigate(signInTarget())}>
             Sign in
           </Button>
         </Col>
@@ -116,7 +131,7 @@ export const SetPasswordPage = () => {
 
   return (
     <BrandedAuthPage
-      title="Set your password"
+      title={title}
       subtitle={`Choose a password for ${details.email}`}
     >
       <form onSubmit={handleSubmit}>

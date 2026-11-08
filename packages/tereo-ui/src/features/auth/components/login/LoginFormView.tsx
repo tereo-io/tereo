@@ -17,6 +17,9 @@ interface Props {
   onPassword: (value: string) => void;
   onSubmit: (e: FormEvent) => void;
   onProvider: (slug: string) => void;
+  /** Set when this deploy can send reset links; renders the link. */
+  forgotPasswordHref?: string;
+  onForgotPassword?: () => void;
 }
 
 /** The sign-in form without its data hooks, so the preview can render it too. */
@@ -34,6 +37,8 @@ export const LoginFormView = ({
   onPassword,
   onSubmit,
   onProvider,
+  forgotPasswordHref,
+  onForgotPassword,
 }: Props) => (
   <BrandedAuthPage
     title={headline ?? undefined}
@@ -79,6 +84,19 @@ export const LoginFormView = ({
             required
             autoComplete="current-password"
           />
+
+          {forgotPasswordHref && (
+            <a
+              className="v-link"
+              href={forgotPasswordHref}
+              onClick={(e) => {
+                e.preventDefault();
+                onForgotPassword?.();
+              }}
+            >
+              Forgot password?
+            </a>
+          )}
 
           <Button type="submit" fullWidth disabled={pending}>
             {pending ? "Signing In..." : (signInLabel ?? "Sign In")}

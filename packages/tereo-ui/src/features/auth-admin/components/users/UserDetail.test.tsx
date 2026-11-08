@@ -28,6 +28,8 @@ const person: UserDetailData = {
   isActive: true,
   userType: "human",
   hasPassword: true,
+  emailVerified: true,
+  emailVerifiedAt: "2026-10-01T00:00:00Z",
   expiresAt: null,
   status: "active",
   passwordChangeRequired: false,
@@ -83,6 +85,31 @@ const settingsCalls = () =>
   );
 
 describe("UserDetail", () => {
+  it("shows Unverified and sends a verification email", async () => {
+    authMock.axios.post.mockReset();
+    authMock.axios.post.mockResolvedValue({ data: undefined });
+    renderDetail({ ...person, emailVerified: false, emailVerifiedAt: null });
+
+    expect(await screen.findByText("Unverified")).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Send verification email" })
+    );
+    await waitFor(() =>
+      expect(authMock.axios.post).toHaveBeenCalledWith(
+        "/v1/admin/users/u1/email-verification"
+      )
+    );
+  });
+
+  it("shows Verified without the send button", async () => {
+    renderDetail(person);
+
+    expect(await screen.findByText("Verified")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Send verification email" })
+    ).toBeNull();
+  });
+
   it("offers Edit and Manage Roles for a person", async () => {
     renderDetail(person);
 

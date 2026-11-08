@@ -12,6 +12,9 @@ export interface User {
   passwordChangeRequired: boolean;
   /** False for a user who signs in only through an identity provider. */
   hasPassword: boolean;
+  /** Whether the user has confirmed their current address. */
+  emailVerified: boolean;
+  emailVerifiedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
