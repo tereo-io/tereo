@@ -8,6 +8,7 @@ import { bucketNameSchema } from "../../schemas.js";
 import { Request, Response } from "express";
 import {
   getAccessibleBucket,
+  getPurgeableBucket,
   getReadableBucket,
   isBucketReader,
 } from "../../../../../../utils/bucketAccess.js";
@@ -355,13 +356,14 @@ export const bulkDeleteObjects = async (req: Request, res: Response) => {
  *
  * The current version of every object is untouched, so callers who only ever
  * read the latest content see no change. One audit entry and one webhook
- * event per batch, matching `bulk-delete`.
+ * event per batch, matching `bulk-delete`. On a core bucket only
+ * `file-service.admin` may purge.
  */
 export const purgeNonCurrentVersions = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { name } = validateParams(bucketNameSchema, req);
 
-  const bucket = await getAccessibleBucket(auth, name, "delete");
+  const bucket = await getPurgeableBucket(auth, name);
 
   let batchIndex = 0;
   // An audit entry and an event per batch, in the batch's transaction, as

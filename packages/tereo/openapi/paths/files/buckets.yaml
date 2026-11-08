@@ -376,8 +376,10 @@
       `false` for everyone, admins included, on a retired bucket, which is
       read-only. On a bucket core declares for itself (`auth-service-user-photos`,
       `auth-service-branding`) `canWrite` and `canDelete` are both `false` for
-      everyone: core alone writes it. `coreManaged` says so, and
-      `canRevokeShares` keeps the delete access revoking another's share takes.
+      everyone: core alone writes it. `coreManaged` says so,
+      `canRevokeShares` keeps the delete access revoking another's share takes,
+      and `canPurgeVersions` stays `true` for an admin, who may purge its
+      non-current versions.
 
       A missing bucket, one of another organization, and a private bucket the
       caller holds no active grant on are all refused with the same `403`, so

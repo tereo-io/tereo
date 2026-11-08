@@ -626,8 +626,8 @@ info:
       urlencoded form) is `400 invalid_request` on every route
     - `payload_too_large` - A JSON or form body over the body parser's limit (`413`, every route):
       10 MB under `/v1/files`, `/v1/webhooks` and `/v1/audit`, 10 KB for the auth routes
-    - `uri_too_long` - The URL's path is over 8 KiB, or the whole URL over 32 KiB, in bytes as
-      sent (`414`, every route)
+    - `uri_too_long` - The URL's path (not its query string) is over 8 KiB, in bytes as sent
+      (`414`, every route)
     - `invalid_token` / `unauthorized` - Missing, invalid, expired or revoked access token, a
       token whose session was revoked, rotated or superseded or whose client was deleted, or an
       inactive user (`401`)
@@ -10380,8 +10380,10 @@ paths:
         `false` for everyone, admins included, on a retired bucket, which is
         read-only. On a bucket core declares for itself (`auth-service-user-photos`,
         `auth-service-branding`) `canWrite` and `canDelete` are both `false` for
-        everyone: core alone writes it. `coreManaged` says so, and
-        `canRevokeShares` keeps the delete access revoking another's share takes.
+        everyone: core alone writes it. `coreManaged` says so,
+        `canRevokeShares` keeps the delete access revoking another's share takes,
+        and `canPurgeVersions` stays `true` for an admin, who may purge its
+        non-current versions.
 
         A missing bucket, one of another organization, and a private bucket the
         caller holds no active grant on are all refused with the same `403`, so
@@ -10935,6 +10937,11 @@ paths:
         **Required permissions:**
         - System: `file-service.objects.delete` AND bucket-level `canDelete`
 
+        On a bucket core declares for itself only a `file-service.admin`
+        holder may purge — the one write core takes there through this API.
+        Its versioning stays on while it has history, so purging lets the next
+        start turn it off. Anyone else gets `409 bucket_managed_by_core`.
+
         An audit log entry is created for each batch.
       operationId: purgeNonCurrentVersions
       security:
@@ -10980,7 +10987,7 @@ paths:
           description: Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
+          description: '`bucket_managed_by_core` - the bucket is core''s own, and only a `file-service.admin` holder may purge it'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -26862,7 +26869,8 @@ components:
             Whether core declares the bucket for itself (`auth-service-user-photos`,
             `auth-service-branding`). Through this API it is read-only for everyone:
             writes, shares, grants and settings changes get
-            `409 bucket_managed_by_core`; reads and revoking grants and shares go on.
+            `409 bucket_managed_by_core`; reads and revoking grants and shares go
+            on, and a `file-service.admin` holder may purge non-current versions.
           type: boolean
         createdAt:
           description: Bucket creation timestamp
@@ -27164,10 +27172,22 @@ components:
             - false
         canRevokeShares:
           description: |
-            Whether the caller may revoke a share someone else created (their own
-            they always may): `true` for a `file-service.admin` holder, otherwise
-            the grant's delete flag AND `file-service.objects.delete`. Unlike
-            `canDelete`, it stays `true` on a core bucket, where revoking goes on.
+            Whether the caller may revoke a share someone else created: `true`
+            for a `file-service.admin` holder, otherwise the grant's delete flag
+            AND `file-service.objects.delete`. Revoking any share, their own
+            included, also takes read access other than through the bucket being
+            public (an active grant that reads, and `file-service.objects.read`).
+            Unlike `canDelete`, it stays `true` on a core bucket, where revoking
+            goes on.
+          type: boolean
+          examples:
+            - false
+        canPurgeVersions:
+          description: |
+            Whether the caller may purge the bucket's non-current versions
+            (`POST .../objects/purge-non-current-versions`): as `canDelete`,
+            except that on a core bucket it stays `true` for a
+            `file-service.admin` holder, the one write core takes there.
           type: boolean
           examples:
             - false
@@ -27183,6 +27203,7 @@ components:
         - canWrite
         - canDelete
         - canRevokeShares
+        - canPurgeVersions
         - coreManaged
     LifecyclePolicy:
       type: object

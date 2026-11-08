@@ -100,12 +100,11 @@ export const BucketDetail = () => {
   const canEditBucket =
     hasPermission("file-service.buckets.write") && canWrite && canManage;
   // Purging is a destructive cleanup of historical version rows; only offer it
-  // on versioning-enabled buckets (otherwise there is no history to purge) and
-  // require both the system-level delete permission and bucket-level delete.
+  // on versioning-enabled buckets (otherwise there is no history to purge).
+  // Core may grant it where it refuses other deletes: an admin may clear a
+  // core bucket's history.
   const canPurgeVersions =
-    bucket.versioningEnabled &&
-    hasPermission("file-service.objects.delete") &&
-    canDelete;
+    bucket.versioningEnabled && !!permissions?.canPurgeVersions;
 
   // In a versioning-enabled bucket `currentUsageBytes` counts history too
   // (blobs backing non-current versions stay on disk until a lifecycle policy

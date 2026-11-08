@@ -326,6 +326,7 @@ describe("a third-party token with core scopes", () => {
       canWrite: false,
       canDelete: false,
       canRevokeShares: false,
+      canPurgeVersions: false,
       coreManaged: false,
     });
 
@@ -336,6 +337,7 @@ describe("a third-party token with core scopes", () => {
       canWrite: true,
       canDelete: true,
       canRevokeShares: true,
+      canPurgeVersions: true,
       coreManaged: false,
     });
   });

@@ -37,7 +37,8 @@ export const isCoreBucket = (bucket: { serviceId: string | null }) =>
  * Through the files API it is read-only for everyone, `file-service.admin`
  * included: no object is written or deleted, nothing is shared, and its
  * settings, lifecycle policy, grants and owner stay as core left them.
- * Revoking a grant, revoking a share and every read go on.
+ * Revoking a grant, revoking a share and every read go on, and an admin may
+ * purge old versions (`getPurgeableBucket`).
  */
 export const assertNotCoreBucket = (bucket: {
   name: string;
@@ -94,6 +95,24 @@ export const getAccessibleBucket = async (
 ) => {
   await validateBucketAccess(auth, bucketName, operation);
   return await db.buckets.getByName(bucketName);
+};
+
+/**
+ * Purging old versions takes object delete access, as `getAccessibleBucket`.
+ * The one write a core bucket takes through the files API: from
+ * `file-service.admin` only, because versioning there stays on for as long
+ * as the bucket has history (`resetCoreBuckets`), and nothing else clears it.
+ */
+export const getPurgeableBucket = async (
+  auth: AuthContext,
+  bucketName: string
+) => {
+  await validateBucketPermission(auth, bucketName, "delete");
+  const bucket = await db.buckets.getByName(bucketName);
+  if (!hasPermission(auth.permissions, "file-service.admin")) {
+    assertNotCoreBucket(bucket);
+  }
+  return bucket;
 };
 
 /**

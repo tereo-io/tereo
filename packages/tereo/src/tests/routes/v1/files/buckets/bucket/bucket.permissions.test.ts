@@ -88,6 +88,7 @@ describe("GET /v1/files/buckets/:name and /v1/files/buckets/:name/my-permissions
           canWrite: true,
           canDelete: true,
           canRevokeShares: true,
+          canPurgeVersions: true,
           coreManaged: false,
         });
       });
@@ -121,6 +122,7 @@ describe("GET /v1/files/buckets/:name and /v1/files/buckets/:name/my-permissions
           canWrite: false,
           canDelete: false,
           canRevokeShares: false,
+          canPurgeVersions: false,
           coreManaged: false,
         });
       });
@@ -147,6 +149,7 @@ describe("GET /v1/files/buckets/:name and /v1/files/buckets/:name/my-permissions
           canWrite: false,
           canDelete: false,
           canRevokeShares: false,
+          canPurgeVersions: false,
           coreManaged: false,
         });
 
@@ -175,6 +178,7 @@ describe("GET /v1/files/buckets/:name and /v1/files/buckets/:name/my-permissions
           canWrite: false,
           canDelete: true,
           canRevokeShares: true,
+          canPurgeVersions: true,
           coreManaged: false,
         });
         const admin = await axios.get(
@@ -186,6 +190,7 @@ describe("GET /v1/files/buckets/:name and /v1/files/buckets/:name/my-permissions
           canWrite: false,
           canDelete: true,
           canRevokeShares: true,
+          canPurgeVersions: true,
           coreManaged: false,
         });
       });
@@ -354,6 +359,7 @@ describe("GET /v1/files/buckets/:name and /v1/files/buckets/:name/my-permissions
           canWrite: false,
           canDelete: false,
           canRevokeShares: false,
+          canPurgeVersions: false,
           coreManaged: false,
         });
       });

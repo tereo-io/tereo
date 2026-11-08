@@ -329,6 +329,11 @@
       **Required permissions:**
       - System: `file-service.objects.delete` AND bucket-level `canDelete`
 
+      On a bucket core declares for itself only a `file-service.admin`
+      holder may purge — the one write core takes there through this API.
+      Its versioning stays on while it has history, so purging lets the next
+      start turn it off. Anyone else gets `409 bucket_managed_by_core`.
+
       An audit log entry is created for each batch.
     operationId: purgeNonCurrentVersions
     security:
@@ -370,7 +375,7 @@
         description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
+        description: '`bucket_managed_by_core` - the bucket is core''s own, and only a `file-service.admin` holder may purge it'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':

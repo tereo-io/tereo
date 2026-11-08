@@ -88,6 +88,8 @@ export interface BucketPermissions {
   canDelete: boolean;
   /** Revoking a share someone else created; unlike `canDelete`, kept on a core bucket. */
   canRevokeShares: boolean;
+  /** Purging non-current versions; on a core bucket, `file-service.admin` only. */
+  canPurgeVersions: boolean;
   coreManaged: boolean;
 }
 

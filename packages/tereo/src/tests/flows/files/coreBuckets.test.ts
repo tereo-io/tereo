@@ -6,10 +6,11 @@ import { BRANDING_BUCKET } from "../../../utils/branding/storage.js";
 import { getAccessTokenForUser } from "../../support/auth/login.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { sign as presignSign } from "../../../utils/presigning.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { resetCoreBuckets } from "../../../utils/coreBuckets.js";
 import { createTestClient } from "../../support/auth/clients.js";
 import { SYSTEM_USER_ID } from "../../../definitions/index.js";
 import { createTestUser } from "../../support/auth/users.js";
-import { beforeAll, describe, expect, it } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
 import { prisma } from "../../../utils/db/prisma.js";
 import { CORE_URL } from "../../support/coreUrl.js";
@@ -91,12 +92,6 @@ describe("a core bucket through the files API", () => {
     ],
     ["delete object", "DELETE", `/objects/by-id/:id`, () => undefined],
     ["bulk delete", "POST", "/objects/bulk-delete", () => ({ prefix: "a" })],
-    [
-      "purge versions",
-      "POST",
-      "/objects/purge-non-current-versions",
-      () => ({}),
-    ],
     [
       "restore version",
       "POST",
@@ -298,6 +293,7 @@ describe("a core bucket through the files API", () => {
       canWrite: false,
       canDelete: false,
       canRevokeShares: true,
+      canPurgeVersions: true,
       coreManaged: true,
     });
     const bucket = await call("GET", "");
@@ -314,6 +310,119 @@ describe("a core bucket through the files API", () => {
       { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
     );
     expect(res.status).toBe(403);
+  });
+});
+
+// Versioning on a core bucket stays on while it has history, so an admin may
+// purge that history; the next start's reset then turns versioning off.
+describe("purging old versions of a core bucket", () => {
+  const seedHistory = async () => {
+    const bucket = await prisma.bucket.findFirstOrThrow({
+      where: { name: PHOTOS, deletedAt: null },
+    });
+    await prisma.bucket.update({
+      where: { id: bucket.id },
+      data: { versioningEnabled: true },
+    });
+    const object = await prisma.object.create({
+      data: {
+        bucketId: bucket.id,
+        objectKey: `test-history/${randomUUID()}.png`,
+        createdBy: SYSTEM_USER_ID,
+      },
+    });
+    const version = await prisma.objectVersion.create({
+      data: {
+        objectId: object.id,
+        isCurrent: false,
+        isDeleteMarker: true,
+        createdBy: SYSTEM_USER_ID,
+      },
+    });
+    return { bucket, object, version };
+  };
+
+  afterAll(async () => {
+    await prisma.object.deleteMany({
+      where: {
+        bucket: { name: PHOTOS },
+        objectKey: { startsWith: "test-history/" },
+      },
+    });
+    await resetCoreBuckets();
+  });
+
+  it("lets file-service.admin purge, after which the reset turns versioning off", async () => {
+    const { version } = await seedHistory();
+    await resetCoreBuckets();
+    const before = await prisma.bucket.findFirstOrThrow({
+      where: { name: PHOTOS, deletedAt: null },
+    });
+    expect(before.versioningEnabled).toBe(true);
+
+    const res = await call(
+      "POST",
+      "/objects/purge-non-current-versions",
+      {},
+      PHOTOS
+    );
+    expect(res.status, JSON.stringify(res.data)).toBe(200);
+    expect(res.data?.purgedCount).toBeGreaterThanOrEqual(1);
+    const purged = await prisma.objectVersion.findUniqueOrThrow({
+      where: { id: version.id },
+    });
+    expect(purged.deletedAt).not.toBeNull();
+
+    await resetCoreBuckets();
+    const after = await prisma.bucket.findFirstOrThrow({
+      where: { name: PHOTOS, deletedAt: null },
+    });
+    expect(after.versioningEnabled).toBe(false);
+  });
+
+  it("refuses a caller with a delete grant who isn't file-service.admin", async () => {
+    const { bucket, version } = await seedHistory();
+    const user = await createTestUser();
+    await prisma.bucketPermission.create({
+      data: {
+        bucketId: bucket.id,
+        userId: user.id,
+        canRead: true,
+        canWrite: true,
+        canDelete: true,
+        grantedBy: SYSTEM_USER_ID,
+      },
+    });
+    const token = await getTestPrincipalToken({
+      userId: user.id,
+      permissions: ["file-service.objects.delete"],
+    });
+    const mine = await fetch(`${BASE_URL}/buckets/${PHOTOS}/my-permissions`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(await mine.json()).toMatchObject({
+      canDelete: false,
+      canPurgeVersions: false,
+    });
+    const res = await fetch(
+      `${BASE_URL}/buckets/${PHOTOS}/objects/purge-non-current-versions`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      }
+    );
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "bucket_managed_by_core"
+    );
+    const kept = await prisma.objectVersion.findUniqueOrThrow({
+      where: { id: version.id },
+    });
+    expect(kept.deletedAt).toBeNull();
   });
 });
 

@@ -153,6 +153,7 @@ describe("db.roles guest permission floor", () => {
       canWrite: true,
       canDelete: false,
       canRevokeShares: false,
+      canPurgeVersions: false,
       coreManaged: false,
     });
 
@@ -165,6 +166,7 @@ describe("db.roles guest permission floor", () => {
       canWrite: false,
       canDelete: false,
       canRevokeShares: false,
+      canPurgeVersions: false,
       coreManaged: false,
     });
 
@@ -178,6 +180,7 @@ describe("db.roles guest permission floor", () => {
       canWrite: true,
       canDelete: false,
       canRevokeShares: false,
+      canPurgeVersions: false,
       coreManaged: false,
     });
   });

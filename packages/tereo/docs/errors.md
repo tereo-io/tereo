@@ -82,7 +82,7 @@ limits add `X-RateLimit-*` headers.
 
 An area keeps its own code where a client plausibly branches on it, e.g. `user_not_in_organization`,
 `masked_header_value`, `bucket_declared` / `bucket_retired` / `bucket_managed_by_core` (409: a
-write through the files API to a bucket core declares for itself), `managed_by_provisioning` (409: a
+write through the files API to a bucket core declares for itself, other than an admin's version purge), `managed_by_provisioning` (409: a
 service, login client or branding profile declared in the provisioning file; branding adds
 `provisionedFrom`), `role_assigned_in_org`,
 `blocked_file_type`, `invalid_event_type`, `reserved_event_type`, and for branding

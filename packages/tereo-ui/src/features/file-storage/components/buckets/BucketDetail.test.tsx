@@ -11,7 +11,10 @@ vi.mock("@/lib/auth", async () =>
 
 const user = { id: "sys", email: "core@example.com", name: null };
 
-const serve = (coreManaged: boolean) =>
+const serve = (
+  coreManaged: boolean,
+  { versioningEnabled = false, canPurgeVersions = true } = {}
+) =>
   authMock.axios.get.mockImplementation(async (url: string) => {
     if (url.endsWith("/my-permissions")) {
       return {
@@ -20,6 +23,7 @@ const serve = (coreManaged: boolean) =>
           canWrite: !coreManaged,
           canDelete: !coreManaged,
           canRevokeShares: true,
+          canPurgeVersions,
           coreManaged,
         },
       };
@@ -32,7 +36,7 @@ const serve = (coreManaged: boolean) =>
           description: null,
           policy: "private",
           currentUsageBytes: "0",
-          versioningEnabled: false,
+          versioningEnabled,
           autoThumbnails: false,
           corsConfig: null,
           rateLimitConfig: null,
@@ -100,5 +104,24 @@ describe("BucketDetail", () => {
       await screen.findByRole("button", { name: "Details" })
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Permissions" })).toBeNull();
+  });
+
+  it("offers an admin purging old versions of a versioned core bucket", async () => {
+    serve(true, { versioningEnabled: true });
+    renderDetail();
+    expect(
+      await screen.findByRole("button", { name: "Purge old versions" })
+    ).toBeInTheDocument();
+  });
+
+  it("doesn't offer it when core says the caller may not purge", async () => {
+    serve(true, { versioningEnabled: true, canPurgeVersions: false });
+    renderDetail();
+    expect(
+      await screen.findByRole("button", { name: "Details" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Purge old versions" })
+    ).toBeNull();
   });
 });

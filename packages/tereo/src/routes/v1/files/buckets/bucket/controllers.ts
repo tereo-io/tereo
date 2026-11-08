@@ -297,13 +297,16 @@ export const getMyPermissions = async (req: Request, res: Response) => {
   const writable = !bucket.retiredAt && !coreManaged;
 
   // Revoking someone else's share takes delete access as the grant gives it;
-  // the core-bucket guard doesn't apply to revoking.
+  // the core-bucket guard doesn't apply to revoking. Purging old versions is
+  // a delete everywhere but a core bucket, where only an admin may
+  // (`getPurgeableBucket`).
   if (isAdmin) {
     return res.json({
       canRead: true,
       canWrite: writable,
       canDelete: !coreManaged,
       canRevokeShares: true,
+      canPurgeVersions: true,
       coreManaged,
     });
   }
@@ -330,6 +333,8 @@ export const getMyPermissions = async (req: Request, res: Response) => {
     canWrite: writable && (active?.canWrite ?? false) && may("write"),
     canDelete: !coreManaged && (active?.canDelete ?? false) && may("delete"),
     canRevokeShares: (active?.canDelete ?? false) && may("delete"),
+    canPurgeVersions:
+      !coreManaged && (active?.canDelete ?? false) && may("delete"),
     coreManaged,
   });
 };

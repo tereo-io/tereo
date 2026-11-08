@@ -29,6 +29,7 @@ const PurgeNonCurrentVersionsButton = ({
     <>
       <IconButton
         icon={faBroom}
+        title="Purge old versions"
         onClick={(e) => {
           e.stopPropagation();
           setShowConfirm(true);
