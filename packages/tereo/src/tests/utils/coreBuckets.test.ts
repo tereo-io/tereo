@@ -3,9 +3,10 @@
 import { BRANDING_BUCKET } from "../../utils/branding/storage.js";
 import { resetCoreBuckets } from "../../utils/coreBuckets.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { storeTestImage } from "../support/branding.js";
-import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "../../utils/db/prisma.js";
+import { logger } from "../../utils/logger.js";
 import { randomUUID } from "node:crypto";
 
 const PHOTOS = "auth-service-user-photos";
@@ -93,6 +94,22 @@ describe("resetCoreBuckets", () => {
       where: { id: old.id },
     });
     expect(kept.deletedAt).toBeNull();
+
+    // Said again on a start that changes nothing.
+    const warn = vi.spyOn(logger, "warn");
+    try {
+      await resetCoreBuckets();
+      expect(warn).toHaveBeenCalledWith(
+        { bucketName: PHOTOS },
+        expect.stringContaining("versioning stays on")
+      );
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.anything(),
+        "Reset a core bucket to its declared settings"
+      );
+    } finally {
+      warn.mockRestore();
+    }
 
     // Without history the next reset turns versioning off.
     await prisma.objectVersion.delete({ where: { id: old.id } });

@@ -38,7 +38,15 @@ const resetCoreBucket = async (definition: BucketDefinition) => {
   });
   if (!bucket) return;
 
-  const reset = await prisma.$transaction(async (tx) => {
+  const { reset, keepVersioning } = await prisma.$transaction(async (tx) => {
+    // Objects before the bucket row, the order every object write and the
+    // expiry sweep take them in.
+    const { count: expiriesCleared } = definition.managesObjectExpiry
+      ? { count: 0 }
+      : await tx.object.updateMany({
+          where: { bucketId: bucket.id, deleteAfter: { not: null } },
+          data: { deleteAfter: null },
+        });
     const current = await db.buckets.getForUpdate(bucket.id, tx);
     // Versioning goes off only without history, which would otherwise become
     // unreachable. Old versions are never deleted here.
@@ -65,16 +73,10 @@ const resetCoreBucket = async (definition: BucketDefinition) => {
       bucket.id,
       tx
     );
-    const { count: expiriesCleared } = definition.managesObjectExpiry
-      ? { count: 0 }
-      : await tx.object.updateMany({
-          where: { bucketId: bucket.id, deleteAfter: { not: null } },
-          data: { deleteAfter: null },
-        });
 
     const changes = computeChanges(current, next);
     if (!changes && !lifecyclePolicyRemoved && !expiriesCleared) {
-      return null;
+      return { reset: null, keepVersioning };
     }
     const summary = {
       bucketName: next.name,
@@ -99,16 +101,20 @@ const resetCoreBucket = async (definition: BucketDefinition) => {
       entityId: String(next.id),
       data: { bucketName: next.name },
     });
-    return { ...summary, changed: Object.keys(changes ?? {}) };
+    return {
+      reset: { ...summary, changed: Object.keys(changes ?? {}) },
+      keepVersioning,
+    };
   });
 
-  if (!reset) return;
-  await broadcastBucketInvalidate(definition.bucketName);
-  logger.warn(reset, "Reset a core bucket to its declared settings");
-  if (reset.versioningKept) {
+  if (reset) {
+    await broadcastBucketInvalidate(definition.bucketName);
+    logger.warn(reset, "Reset a core bucket to its declared settings");
+  }
+  if (keepVersioning) {
     logger.warn(
       { bucketName: definition.bucketName },
-      "A core bucket has object history, so its versioning stays on; old versions are kept"
+      "A core bucket has object history, so its versioning stays on; old versions are kept. A file-service.admin can purge them (POST /v1/files/buckets/:name/objects/purge-non-current-versions), and the next start turns versioning off"
     );
   }
 };
