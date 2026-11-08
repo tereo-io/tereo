@@ -78,7 +78,7 @@ export const findUsableSetupToken = async (req: Request, token: string) => {
 };
 
 /**
- * Sets the password from a setup link and signs the user out everywhere, in
+ * Sets the password from a setup or reset link and signs the user out everywhere, in
  * one transaction: the token is consumed with a conditional update, so of
  * two concurrent requests with one token exactly one wins.
  */
@@ -129,12 +129,16 @@ export const setPassword = async (req: Request, res: Response) => {
         entityId: user.id,
         data: { userId: user.id, email: user.email, via: purpose },
       });
-      // The link went to the user's current address: an email change retires it.
-      await markEmailVerified(tx, {
-        userId: user.id,
-        via: "password_link",
-        email: user.email,
-      });
+      // A reset link only ever goes to the inbox. A setup link's URL is
+      // returned to the inviter, so redeeming it proves nothing about the
+      // address.
+      if (purpose === "reset") {
+        await markEmailVerified(tx, {
+          userId: user.id,
+          via: "password_link",
+          email: user.email,
+        });
+      }
       // A grant from a sign-in with the old password must not outlive it.
       await db.passwordChangeGrants.deleteForUser(user.id, tx);
       await recordRevoked(tx, sessionIds, ssoSessionIds);

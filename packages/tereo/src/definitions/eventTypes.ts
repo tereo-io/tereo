@@ -172,7 +172,7 @@ const authEvents: EventTypeDefinition[] = [
   },
   {
     eventType: "auth.user.password-set",
-    description: "User set their password from a setup link",
+    description: "User set their password from a setup or reset link",
   },
   {
     eventType: "auth.user.password-reset-requested",

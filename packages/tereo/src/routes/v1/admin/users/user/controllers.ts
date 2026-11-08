@@ -3,6 +3,7 @@ import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
+import { isUsableAccount } from "../../../../../utils/users.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
@@ -126,14 +127,19 @@ export const updateUser = async (req: Request, res: Response) => {
     } else if (body.password) {
       await retirePasswordLinks(tx, id);
     }
-    // Without a connection the mail could never leave; the admin can resend
-    // once one exists.
-    if (
-      newEmail &&
-      updated.isActive &&
-      (await db.notificationConnections.getDefault("email", tx))
-    ) {
-      await issueVerifyLink(tx, { userId: id, createdBy: auth.userId });
+    if (newEmail && isUsableAccount(updated)) {
+      try {
+        await issueVerifyLink(tx, { userId: id, createdBy: auth.userId });
+      } catch (err) {
+        // Without a connection the mail could never leave; the admin can
+        // resend once one exists. The refusal comes before any write, so the
+        // transaction carries on.
+        if (!(
+          err instanceof ConflictError && err.code === "email_not_configured"
+        )) {
+          throw err;
+        }
+      }
     }
     if (profileChanged) {
       const metadata = {

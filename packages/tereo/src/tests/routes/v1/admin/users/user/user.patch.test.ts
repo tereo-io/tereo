@@ -3,10 +3,10 @@
 import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrganization.js";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
+import { createGuest, issue } from "../../../../../support/passwordSetup.js";
 import { issueVerifyLinkFor } from "../../../../../support/verifyLink.js";
 import { createTestUser } from "../../../../../support/auth/users.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
-import { issue } from "../../../../../support/passwordSetup.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { waitFor } from "../../../../../support/webhooks.js";
 import { fetchJson } from "../../../../../support/http.js";
@@ -121,10 +121,15 @@ describe("PATCH /v1/admin/users/:id and email verification", () => {
   });
 
   it("the same email in another case or with spaces is not a change", async () => {
-    const user = await createTestUser();
+    const user = await createTestUser({ emailVerified: false });
     await issueVerifyLinkFor(user.id);
     await waitFor(async () => smtp.messages.length === 1, 10_000, 50);
     smtp.messages.length = 0;
+    // Verified with the link still live: a change would unverify and retire it.
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerifiedAt: new Date() },
+    });
     await issue(user.id, false, "reset");
     const mailTo = () =>
       prisma.notification.count({
@@ -144,7 +149,7 @@ describe("PATCH /v1/admin/users/:id and email verification", () => {
   });
 
   it("a password-only change keeps the verify link", async () => {
-    const user = await createTestUser();
+    const user = await createTestUser({ emailVerified: false });
     await issueVerifyLinkFor(user.id);
     await issue(user.id, false, "reset");
 
@@ -180,6 +185,22 @@ describe("PATCH /v1/admin/users/:id and email verification", () => {
     expect(res.status).toBe(200);
     expect(res.body.emailVerified).toBe(false);
     expect(await liveLinks(user.id, "verify")).toBe(0);
+    expect(
+      await prisma.notification.count({
+        where: { recipients: { path: ["0", "address"], equals: newEmail } },
+      })
+    ).toBe(0);
+  });
+
+  it("changing an expired guest's email sends no verify link", async () => {
+    const guest = await createGuest({ expiresAt: new Date(Date.now() - 1000) });
+    const newEmail = `moved-${randomUUID()}@acme.com`;
+
+    const res = await patch(guest.id, writer, { email: newEmail });
+
+    expect(res.status).toBe(200);
+    expect(res.body.emailVerified).toBe(false);
+    expect(await liveLinks(guest.id, "verify")).toBe(0);
     expect(
       await prisma.notification.count({
         where: { recipients: { path: ["0", "address"], equals: newEmail } },

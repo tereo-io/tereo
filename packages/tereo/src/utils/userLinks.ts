@@ -3,6 +3,7 @@ import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { PASSWORD_LINK_PURPOSES } from "./db/userLinkTokens.js";
 import { emitTx, logAuditTx, notifyTx } from "./outbox.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
+import { isUsableAccount } from "./users.js";
 import { ConflictError } from "./errors.js";
 import { hashFlowToken } from "./crypto.js";
 import { randomBytes } from "node:crypto";
@@ -57,19 +58,21 @@ export const assertEmailConfigured = async (tx?: Prisma.TransactionClient) => {
 
 /**
  * Refuses an account that has no address of its own to confirm, or an address
- * already confirmed: the system user, service accounts and deactivated users
- * (409 `user_not_verifiable`), then a verified address (409 `already_verified`).
+ * already confirmed: the system user, service accounts and deactivated or
+ * expired users (409 `user_not_verifiable`), then a verified address (409
+ * `already_verified`).
  */
 export const assertVerifiable = (user: {
   id: string;
   userType: UserType;
   isActive: boolean;
+  expiresAt: Date | null;
   emailVerifiedAt: Date | null;
 }) => {
   if (
     user.id === SYSTEM_USER_ID ||
     user.userType === UserType.service_account ||
-    !user.isActive
+    !isUsableAccount(user)
   ) {
     throw new ConflictError(
       "This account has no address to verify",
@@ -199,7 +202,9 @@ export const issuePasswordLink = async (
 
 /**
  * Emails the user a one-time link confirming their current address, in the
- * caller's transaction, replacing any earlier verify link. The address is
+ * caller's transaction, replacing any earlier verify link. Refuses, under the
+ * user's lock, what `assertVerifiable` refuses, then 409 `email_not_configured`
+ * without a default email connection. The address is
  * stored with the token, so a later change of email voids it. The URL is
  * never returned: only the inbox holds it.
  */
@@ -211,6 +216,9 @@ export const issueVerifyLink = async (
   const user = await db.users.get(userId, tx);
   const creator = await db.users.get(createdBy, tx);
 
+  // Both refusals come before any write, so a caller may catch them and keep
+  // its transaction.
+  assertVerifiable(user);
   await assertEmailConfigured(tx);
 
   await db.userLinkTokens.invalidateForUser(userId, ["verify"], tx);

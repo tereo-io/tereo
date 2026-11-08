@@ -115,6 +115,25 @@ describe("resolveLoginIdentity", () => {
     expect(row.email).toBe("seen@elsewhere.test");
   });
 
+  it("verifies a linked user's matching email, unless the account is unusable", async () => {
+    const provider = await makeProvider();
+    const signIn = async (isActive: boolean) => {
+      const user = await createTestUser({ emailVerified: false, isActive });
+      const id = identity({ email: user.email, emailVerified: true });
+      await db.userIdentities.create({
+        userId: user.id,
+        providerId: provider.id,
+        subject: id.subject,
+        email: null,
+      });
+      await resolveLoginIdentity(provider, id);
+      return prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    };
+
+    expect((await signIn(true)).emailVerifiedAt).not.toBeNull();
+    expect((await signIn(false)).emailVerifiedAt).toBeNull();
+  });
+
   it("claims an invite for a verified matching email", async () => {
     const provider = await makeProvider();
     const user = await createTestUser();

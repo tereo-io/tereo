@@ -5,6 +5,7 @@ import { getTestPrincipalToken } from "../../../../../../support/principals.js";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { SYSTEM_USER_ID } from "../../../../../../../definitions/index.js";
 import { createTestUser } from "../../../../../../support/auth/users.js";
+import { createGuest } from "../../../../../../support/passwordSetup.js";
 import { BASE_URL } from "../../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { waitFor } from "../../../../../../support/webhooks.js";
@@ -112,12 +113,15 @@ describe("POST /v1/admin/users/:id/email-verification", () => {
     expect(res.body.error).toBe("user_not_verifiable");
   });
 
-  it("system user and deactivated user → 409 user_not_verifiable", async () => {
+  it("system user, deactivated user and expired guest → 409 user_not_verifiable", async () => {
     const inactive = await createTestUser({
       emailVerified: false,
       isActive: false,
     });
-    for (const id of [SYSTEM_USER_ID, inactive.id]) {
+    const expired = await createGuest({
+      expiresAt: new Date(Date.now() - 1000),
+    });
+    for (const id of [SYSTEM_USER_ID, inactive.id, expired.id]) {
       const res = await send(id, writer);
       expect(res.status).toBe(409);
       expect(res.body.error).toBe("user_not_verifiable");

@@ -7,6 +7,7 @@ import { emailDomain, normalizeEmail } from "../email.js";
 import { markVerifiedFromProvider } from "./verify.js";
 import { formatUser } from "../transformers.js";
 import type { Prisma } from "../db/prisma.js";
+import { isUsableAccount } from "../users.js";
 import { emailTrusted } from "./trust.js";
 import { logger } from "../logger.js";
 import db from "../db/index.js";
@@ -99,7 +100,9 @@ const signInLinked = async (
     linked.id,
     identity.email === null ? null : normalizeEmail(identity.email)
   );
-  if (user.emailVerifiedAt === null) {
+  // A deactivated or expired account is not signed in: the provider's word
+  // about it changes nothing.
+  if (user.emailVerifiedAt === null && isUsableAccount(user)) {
     await db.$transaction((tx) =>
       markVerifiedFromProvider(tx, { userId: user.id, provider, identity })
     );

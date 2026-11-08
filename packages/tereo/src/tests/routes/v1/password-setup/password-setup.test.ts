@@ -3,6 +3,7 @@
 import { ensureDefaultOrganization } from "../../../../utils/defaultOrganization.js";
 import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
 import { hashFlowToken, hashPassword } from "../../../../utils/crypto.js";
+import { ensureTestOrganization } from "../../../support/principals.js";
 import { createGuest, issue } from "../../../support/passwordSetup.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { SYSTEM_USER_ID } from "../../../../definitions/index.js";
@@ -466,6 +467,46 @@ describe("password setup", () => {
 
     const patchUser = (id: string, body: object) =>
       fetchJson("PATCH", `${BASE_URL}/v1/admin/users/${id}`, adminToken, body);
+
+    it("does not verify the address from a setup link: the inviter holds the URL", async () => {
+      const organizationId = await ensureTestOrganization("password-setup");
+      const invited = await fetchJson(
+        "POST",
+        `${BASE_URL}/v1/admin/guests`,
+        adminToken,
+        {
+          organizationId,
+          email: `guest-${randomBytes(6).toString("hex")}@example.com`,
+          expiresIn: 86_400,
+          initialAccess: { type: "password_setup_link" },
+        }
+      );
+      expect(invited.status).toBe(201);
+      const guestId: string = invited.body.user.id;
+
+      // The test stands in for the inviter, who was handed the URL.
+      const token = new URL(invited.body.passwordSetupUrl).hash.replace(
+        "#token=",
+        ""
+      );
+      expect((await setPassword(token)).status).toBe(HTTP_STATUS.NO_CONTENT);
+
+      const after = await prisma.user.findUniqueOrThrow({
+        where: { id: guestId },
+      });
+      expect(after.passwordSetByUser).toBe(true);
+      expect(after.emailVerifiedAt).toBeNull();
+      const verified = (
+        await prisma.auditLogEntry.findMany({
+          where: { entityId: guestId, entityType: "User" },
+        })
+      ).filter(
+        (e) =>
+          (e.metadata as { action?: string } | null)?.action ===
+          "email_verified"
+      );
+      expect(verified).toHaveLength(0);
+    });
 
     /** A guest with a password, a live link and a pending change grant. */
     const guestWithLinks = async () => {

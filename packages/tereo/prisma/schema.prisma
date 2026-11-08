@@ -101,7 +101,7 @@ model User {
   rateLimitPerSecond     Int?      @map("rate_limit_per_second")
   // A guest is usable until this time; set exactly when user_type is guest.
   expiresAt              DateTime? @map("expires_at")
-  emailVerifiedAt        DateTime? @map("email_verified_at") @db.Timestamptz(3)
+  emailVerifiedAt        DateTime? @map("email_verified_at")
   passwordChangeRequired Boolean   @default(false) @map("password_change_required")
   // False while the password is one someone else chose (an invite's initial
   // password, an admin's): promoting a guest is refused until they set their own.

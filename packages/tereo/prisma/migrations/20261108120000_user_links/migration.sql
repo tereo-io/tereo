@@ -2,7 +2,7 @@
 CREATE TYPE "auth"."user_link_purpose" AS ENUM ('setup', 'reset', 'verify');
 
 -- AlterTable
-ALTER TABLE "auth"."users" ADD COLUMN     "email_verified_at" TIMESTAMPTZ(3);
+ALTER TABLE "auth"."users" ADD COLUMN     "email_verified_at" TIMESTAMP(3);
 
 -- Renamed rather than recreated so existing setup links survive.
 ALTER TABLE "auth"."password_setup_tokens" RENAME TO "user_link_tokens";

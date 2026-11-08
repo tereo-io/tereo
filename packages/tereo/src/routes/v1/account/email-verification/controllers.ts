@@ -22,7 +22,6 @@ export const resendEmailVerification = async (req: Request, res: Response) => {
   await accountVerifyResendHour.check(req, auth.userId);
 
   await db.$transaction(async (tx) => {
-    assertVerifiable(await db.users.get(auth.userId, tx));
     await issueVerifyLink(tx, { userId: auth.userId, createdBy: auth.userId });
   });
 
