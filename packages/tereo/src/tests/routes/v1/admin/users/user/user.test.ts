@@ -9,6 +9,7 @@ import { createTestClient } from "../../../../../support/auth/clients.js";
 import { generateUniqueId } from "../../../../../support/auth/crypto.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../../../utils/db/prisma.js";
+import { fetchJson } from "../../../../../support/http.js";
 import db from "../../../../../../utils/db/index.js";
 import {
   BASE_URL,
@@ -34,6 +35,8 @@ import {
 } from "../../../../../support/webhooks.js";
 import {
   deleteGroups,
+  ensureGroupPermission,
+  GROUP_PERMISSION,
   groupSlug,
   PROVISIONING,
   roleGranting,
@@ -61,8 +64,9 @@ interface UserRolesResponse {
     name: string;
     displayName: string;
     expiresAt: string | null;
-    via: { kind: "direct" } | { kind: "group"; groupId: string };
+    via: { kind: "direct" };
   }>;
+  groupRoles: Array<{ id: string; via: { kind: "group"; groupId: string } }>;
 }
 
 interface UserSessionsResponse {
@@ -94,6 +98,7 @@ let adminToken: string;
 
 beforeAll(async () => {
   await ensureDefaultOrganization();
+  await ensureGroupPermission();
   testClient = await createTestClient();
   adminUser = await createAdminUser();
   regularUser = await createTestUser();
@@ -538,55 +543,68 @@ describe("GET /v1/admin/users/:id/roles", () => {
     const groupIds: string[] = [];
     afterAll(() => deleteGroups(groupIds));
 
-    /** The user's role entries for `roleId`, each as how it is held. */
-    const viaOf = async (
-      userId: string,
-      roleId: string,
-      groupRoleIds: string[]
-    ) => {
-      const { group } = await db.$transaction(async (tx) => {
-        const change = await createGroup(
+    /** A user holding a fresh role through a new global group. */
+    const memberOfGroupWithRole = async () => {
+      const [user, role] = [await createTestUser(), await roleGranting()];
+      const group = await db.$transaction(async (tx) => {
+        const { group } = await createGroup(
           PROVISIONING,
           {
             organizationId: null,
             slug: groupSlug("via"),
             name: "Support",
-            roleIds: groupRoleIds,
+            roleIds: [role.id],
           },
           tx
         );
-        await addMembers(PROVISIONING, change.group.id, [userId], tx);
-        return change;
+        await addMembers(PROVISIONING, group.id, [user.id], tx);
+        return group;
       });
       groupIds.push(group.id);
-      const response = await fetch(
-        `${BASE_URL}/v1/admin/users/${userId}/roles`,
-        {
-          headers: { Authorization: `Bearer ${adminToken}` },
-        }
-      );
-      const data = (await response.json()) as UserRolesResponse;
-      return {
-        groupId: group.id,
-        via: data.roles.filter((r) => r.id === roleId).map((r) => r.via),
+      const groupRow = {
+        id: role.id,
+        name: role.name,
+        displayName: role.displayName,
+        organizationId: null,
+        via: { kind: "group", groupId: group.id },
+        group: { id: group.id, slug: group.slug, name: group.name },
       };
+      return { userId: user.id, role, groupRow };
+    };
+
+    const rolesOf = async (userId: string, roleIds?: string[]) => {
+      const url = `${BASE_URL}/v1/admin/users/${userId}/roles`;
+      const body = roleIds && { roleIds };
+      const res = await fetchJson(body ? "PUT" : "GET", url, adminToken, body);
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      return res.body as UserRolesResponse;
     };
 
     it("a role held via a group has via.kind group and groupId", async () => {
-      const user = await createTestUser();
-      const role = await roleGranting();
-      const { groupId, via } = await viaOf(user.id, role.id, [role.id]);
-      expect(via).toEqual([{ kind: "group", groupId }]);
+      const { userId, groupRow } = await memberOfGroupWithRole();
+      const data = await rolesOf(userId);
+      expect(data.roles).toEqual([]);
+      expect(data.groupRoles).toEqual([groupRow]);
     });
 
     it("a role held both ways lists via direct and via group", async () => {
-      const user = await createTestUser();
-      const role = await roleGranting();
-      await prisma.userRole.create({
-        data: { userId: user.id, roleId: role.id },
-      });
-      const { groupId, via } = await viaOf(user.id, role.id, [role.id]);
-      expect(via).toEqual([{ kind: "direct" }, { kind: "group", groupId }]);
+      const { userId, role, groupRow } = await memberOfGroupWithRole();
+      await prisma.userRole.create({ data: { userId, roleId: role.id } });
+      const data = await rolesOf(userId);
+      expect(data.roles.map((r) => [r.id, r.via])).toEqual([
+        [role.id, { kind: "direct" }],
+      ]);
+      expect(data.groupRoles).toEqual([groupRow]);
+    });
+
+    it("PUT with no roles leaves a group-held role and creates no direct row", async () => {
+      const { userId, groupRow } = await memberOfGroupWithRole();
+      const data = await rolesOf(userId, []);
+      expect(data.roles).toEqual([]);
+      expect(data.groupRoles).toEqual([groupRow]);
+      const permissions = await db.roles.getUserPermissions(userId);
+      expect(permissions).toContain(GROUP_PERMISSION);
+      expect(await prisma.userRole.count({ where: { userId } })).toBe(0);
     });
   });
 });

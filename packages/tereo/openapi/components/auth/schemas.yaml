@@ -1444,10 +1444,7 @@ RoleAssignment:
           description: When the role assignment expires (null if permanent)
 
 UserRoleAssignment:
-  description: |
-    A global role the user holds, once per way it is held: each direct assignment
-    (whatever the role's state), then each live role held through a live global group.
-    A role held both ways appears twice.
+  description: A direct global role assignment, whatever the role's state — what `PUT /v1/admin/users/{id}/roles` replaces
   allOf:
     - $ref: '../schemas.yaml#/RoleRef'
     - type: object
@@ -1456,42 +1453,68 @@ UserRoleAssignment:
         expiresAt:
           type: [string, 'null']
           format: date-time
-          description: When the role assignment expires (null if permanent; always null through a group)
+          description: When the role assignment expires (null if permanent)
         via:
-          $ref: '#/RoleAssignmentVia'
+          type: object
+          required: [kind]
+          properties:
+            kind:
+              type: string
+              enum: [direct]
 
-RoleAssignmentVia:
-  description: How the user holds the role. A `group` entry goes away by taking the user out of the group, or the role from the group; `PUT /v1/admin/users/{id}/roles` changes only direct assignments.
-  oneOf:
+UserGroupRoleAssignment:
+  description: A live role the user holds through a live global group, once per role and group. It goes away by taking the user out of the group, or the role from the group; `PUT /v1/admin/users/{id}/roles` never touches it.
+  allOf:
+    - $ref: '../schemas.yaml#/RoleRef'
     - type: object
-      required: [kind]
+      required: [organizationId, via, group]
       properties:
-        kind:
-          type: string
-          enum: [direct]
-    - type: object
-      required: [kind, groupId]
-      properties:
-        kind:
-          type: string
-          enum: [group]
-        groupId:
-          type: string
+        organizationId:
+          type: [string, 'null']
           format: uuid
+          description: The group's organization; null for a global group (the only kind listed here)
+        via:
+          type: object
+          required: [kind, groupId]
+          properties:
+            kind:
+              type: string
+              enum: [group]
+            groupId:
+              type: string
+              format: uuid
+        group:
+          type: object
+          required: [id, slug, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            slug:
+              type: string
+            name:
+              type: string
 
 UserRolesResponse:
   type: object
   required:
     - userId
     - roles
+    - groupRoles
   properties:
     userId:
       type: string
       format: uuid
     roles:
       type: array
+      description: Direct assignments only; send their ids back to keep them
       items:
         $ref: '#/UserRoleAssignment'
+    groupRoles:
+      type: array
+      description: Roles held through global groups. A role held both directly and through a group appears in both lists.
+      items:
+        $ref: '#/UserGroupRoleAssignment'
 
 UserPermissionsResponse:
   type: object

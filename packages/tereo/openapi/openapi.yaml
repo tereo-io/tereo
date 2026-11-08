@@ -1750,8 +1750,8 @@ components:
       $ref: './components/auth/schemas.yaml#/RoleUsersResponse'
     UserRoleAssignment:
       $ref: './components/auth/schemas.yaml#/UserRoleAssignment'
-    RoleAssignmentVia:
-      $ref: './components/auth/schemas.yaml#/RoleAssignmentVia'
+    UserGroupRoleAssignment:
+      $ref: './components/auth/schemas.yaml#/UserGroupRoleAssignment'
     Group:
       $ref: './components/auth/schemas.yaml#/Group'
     ListGroupsResponse:

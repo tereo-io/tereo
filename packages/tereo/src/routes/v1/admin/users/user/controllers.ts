@@ -197,35 +197,54 @@ export const getUserPermissions = async (req: Request, res: Response) => {
 };
 
 /**
- * A user's global roles, one entry per way each is held: every direct
- * assignment whatever its state (what `PUT` replaces), then each role held
- * through a live global group.
+ * A user's global roles: `roles` holds the direct assignments, whatever their
+ * state (exactly what `PUT` replaces), and `groupRoles` each live role held
+ * through a live global group, once per role and group. A role held both
+ * ways appears in each.
  */
 const userRolesResponse = async (
   userId: string,
   direct: Awaited<ReturnType<typeof db.roles.getGlobalUserRoles>>
 ) => {
-  const viaGroups = (await db.roles.effectiveAssignments(userId, null)).filter(
-    (a) => a.via.kind === "group"
+  const groups = new Map(
+    (await db.groups.getUserGroups(userId, { organizationId: null })).map(
+      (g) => [g.id, { id: g.id, slug: g.slug, name: g.name }]
+    )
   );
+  const groupRoles = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      displayName: string;
+      organizationId: string | null;
+      via: { kind: "group"; groupId: string };
+      group: { id: string; slug: string; name: string };
+    }
+  >();
+  for (const a of await db.roles.effectiveAssignments(userId, null)) {
+    if (a.via.kind !== "group") continue;
+    const group = groups.get(a.via.groupId);
+    if (!group) continue;
+    groupRoles.set(`${a.roleId}:${group.id}`, {
+      id: a.role.id,
+      name: a.role.name,
+      displayName: a.role.displayName,
+      organizationId: a.organizationId,
+      via: { kind: "group", groupId: group.id },
+      group,
+    });
+  }
   return {
     userId,
-    roles: [
-      ...direct.map((ur) => ({
-        id: ur.role.id,
-        name: ur.role.name,
-        displayName: ur.role.displayName,
-        expiresAt: ur.expiresAt,
-        via: { kind: "direct" as const },
-      })),
-      ...viaGroups.map((a) => ({
-        id: a.role.id,
-        name: a.role.name,
-        displayName: a.role.displayName,
-        expiresAt: null,
-        via: a.via,
-      })),
-    ],
+    roles: direct.map((ur) => ({
+      id: ur.role.id,
+      name: ur.role.name,
+      displayName: ur.role.displayName,
+      expiresAt: ur.expiresAt,
+      via: { kind: "direct" as const },
+    })),
+    groupRoles: [...groupRoles.values()],
   };
 };
 

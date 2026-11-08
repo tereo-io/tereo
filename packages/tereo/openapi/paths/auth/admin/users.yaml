@@ -301,10 +301,10 @@
       - Admin - User Permissions
     summary: Get user roles
     description: |
-      Returns the user's global roles, one entry per way each is held (`via`):
-      every direct assignment, whatever the role's state, then each live role
-      held through a live global group. A role held both directly and through a
-      group appears once for each. Organization-scoped assignments are listed
+      Returns the user's global roles: `roles` lists the direct assignments,
+      whatever the role's state (what `PUT` replaces), and `groupRoles` each
+      live role held through a live global group, once per role and group. A
+      role held both ways appears in each list. Organization-scoped assignments are listed
       per organization, under
       `GET /v1/admin/organizations/{id}/members/{userId}/roles`; the user's
       groups under `GET /v1/admin/users/{id}/groups`.
@@ -350,7 +350,9 @@
       are ignored) and returns them. Organization-scoped assignments (made
       under `/v1/admin/organizations/{id}/members/{userId}/roles`) are kept. A
       role the user already holds keeps its assignment, `expiresAt`
-      included; only roles left out are removed.
+      included; only roles left out are removed. Roles held through a group
+      are not assignments here: they are listed under `groupRoles` and stay
+      whatever `roleIds` says.
 
       Refused for the system user (`400 system_user`) and for a service's
       service-account user (`403` — a service's roles are approved under
