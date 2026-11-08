@@ -268,6 +268,21 @@ describe("db.roles group-derived roles", () => {
     expect(await db.roles.getUserPermissions(user.id)).toContain(PERMISSION);
   });
 
+  it("a group's row stands in getLiveUserRoles over an expiring direct one", async () => {
+    const user = await createTestUser();
+    const role = await grantingRole();
+    const expiresAt = new Date(Date.now() + 3_600_000);
+    await prisma.userRole.create({
+      data: { userId: user.id, roleId: role.id, expiresAt },
+    });
+    const group = await groupWith(null, [user.id], [role.id]);
+
+    const live = await db.roles.getLiveUserRoles(user.id, null);
+    expect(live.map((a) => [a.roleId, a.via, a.expiresAt])).toEqual([
+      [role.id, { kind: "group", groupId: group.id }, null],
+    ]);
+  });
+
   it("a guest's group rows obey the guest floor", async () => {
     const orgA = await newOrg();
     const { user } = await createTestGuest({ organizationId: orgA });

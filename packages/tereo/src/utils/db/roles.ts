@@ -592,7 +592,19 @@ export const effectiveAssignments = async (
   return await assignmentsFor(userId, scope, guest, tx ?? prisma, options);
 };
 
-/** One entry per role and scope; a direct assignment wins over a group's. */
+/**
+ * Whether `a` should stand for its role and scope over `b`: one that never
+ * expires first (a group's never does), so an expiring direct row does not
+ * suggest the role ends when a group keeps it; then a direct one.
+ */
+const preferred = (a: EffectiveAssignment, b: EffectiveAssignment) => {
+  if ((a.expiresAt === null) !== (b.expiresAt === null)) {
+    return a.expiresAt === null;
+  }
+  return a.via.kind === "direct" && b.via.kind === "group";
+};
+
+/** One entry per role and scope, the one `preferred` picks. */
 export const dedupeAssignments = (
   assignments: EffectiveAssignment[]
 ): EffectiveAssignment[] => {
@@ -600,9 +612,7 @@ export const dedupeAssignments = (
   for (const a of assignments) {
     const key = `${a.roleId}:${a.organizationId ?? ""}`;
     const seen = byKey.get(key);
-    if (!seen || (seen.via.kind === "group" && a.via.kind === "direct")) {
-      byKey.set(key, a);
-    }
+    if (!seen || preferred(a, seen)) byKey.set(key, a);
   }
   return [...byKey.values()];
 };
