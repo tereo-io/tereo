@@ -67,4 +67,27 @@ describe("VerifyEmailPage", () => {
       await screen.findByText(/no longer valid or has expired/)
     ).toBeVisible();
   });
+
+  it("a 404 on confirm shows the expired-link message and disables the button", async () => {
+    const user = userEvent.setup();
+    authMock.axios.post.mockImplementation(async (path: string) => {
+      if (path === "/v1/email-verification/inspect")
+        return {
+          data: { email: "ada@example.com", expiresAt: "2026-11-12T00:00:00Z" },
+        };
+      throw notFound();
+    });
+    renderAt("/verify-email#token=abc");
+
+    await user.click(
+      await screen.findByRole("button", { name: "Confirm my email" })
+    );
+
+    expect(
+      await screen.findByText(/no longer valid or has expired/)
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Confirm my email" })
+    ).toBeDisabled();
+  });
 });

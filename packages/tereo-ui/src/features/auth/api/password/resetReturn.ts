@@ -11,7 +11,9 @@ export const rememberResetReturn = (search: string): void => {
 
 export const readResetReturn = (): string | null => {
   try {
-    return window.sessionStorage.getItem(KEY);
+    const value = window.sessionStorage.getItem(KEY);
+    // Only a query string is ever appended to /login.
+    return value === "" || value?.startsWith("?") ? value : null;
   } catch {
     return null;
   }

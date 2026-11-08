@@ -155,7 +155,7 @@ export const UserDetail = () => {
               ...(user.userType !== "service_account"
                 ? [
                     {
-                      label: "Email",
+                      label: "Email status",
                       value: (
                         <Badge
                           size="sm"

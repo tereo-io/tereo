@@ -81,7 +81,7 @@ export const VerifyEmailPage = () => {
         {failure && <Alert variant="danger">{failure}</Alert>}
         <Button
           fullWidth
-          disabled={confirm.isPending}
+          disabled={confirm.isPending || confirm.isError}
           onClick={() => confirm.mutate(token)}
         >
           {confirm.isPending ? "Confirming..." : "Confirm my email"}

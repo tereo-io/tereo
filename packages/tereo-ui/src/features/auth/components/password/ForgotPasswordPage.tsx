@@ -29,7 +29,9 @@ export const ForgotPasswordPage = () => {
   };
 
   const back = (
-    <Link to={`/login${readResetReturn() ?? ""}`}>Back to sign in</Link>
+    <Link className="v-link" to={`/login${readResetReturn() ?? ""}`}>
+      Back to sign in
+    </Link>
   );
 
   if (sent) {
