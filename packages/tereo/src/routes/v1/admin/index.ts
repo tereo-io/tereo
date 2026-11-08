@@ -9,6 +9,7 @@ import settingsRouter from "./settings/index.js";
 import servicesRouter from "./services/index.js";
 import brandingRouter from "./branding/index.js";
 import clientsRouter from "./clients/index.js";
+import groupsRouter from "./groups/index.js";
 import guestsRouter from "./guests/index.js";
 import usersRouter from "./users/index.js";
 import rolesRouter from "./roles/index.js";
@@ -26,6 +27,7 @@ adminRouter.use(rateLimitGeneral);
 
 adminRouter.use("/branding", brandingRouter);
 adminRouter.use("/clients", clientsRouter);
+adminRouter.use("/groups", groupsRouter);
 adminRouter.use("/guests", guestsRouter);
 adminRouter.use("/identity-providers", identityProvidersRouter);
 adminRouter.use("/integrations", integrationsRouter);

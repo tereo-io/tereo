@@ -143,10 +143,11 @@ export const listMembers = async (
   tx?: Prisma.TransactionClient
 ) => {
   const rows = await (tx ?? prisma).groupMember.findMany({
-    where: { groupId },
+    // `id > cursor`, not Prisma's cursor: a member removed since the
+    // previous page would otherwise end the list.
+    where: { groupId, ...(opts.cursor ? { id: { gt: opts.cursor } } : {}) },
     orderBy: { id: "asc" },
     take: opts.limit + 1,
-    ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
     include: {
       user: { select: { id: true, email: true, name: true, isActive: true } },
     },
@@ -272,3 +273,25 @@ export const getOrgGroupIdsForUser = async (
   });
   return rows.map((r) => r.id);
 };
+
+/** Member counts by group id; a group with no members is absent. */
+export const countMembers = async (
+  groupIds: string[],
+  tx?: Prisma.TransactionClient
+): Promise<Map<string, number>> => {
+  if (groupIds.length === 0) return new Map();
+  const rows = await (tx ?? prisma).groupMember.groupBy({
+    by: ["groupId"],
+    where: { groupId: { in: groupIds } },
+    _count: { _all: true },
+  });
+  return new Map(rows.map((r) => [r.groupId, r._count._all]));
+};
+
+/** Every role the group holds, whatever its state, by name. */
+export const listRoles = (groupId: string, tx?: Prisma.TransactionClient) =>
+  (tx ?? prisma).role.findMany({
+    where: { groupRoles: { some: { groupId } } },
+    select: { id: true, name: true, displayName: true, serviceId: true },
+    orderBy: [{ name: "asc" }, { id: "asc" }],
+  });

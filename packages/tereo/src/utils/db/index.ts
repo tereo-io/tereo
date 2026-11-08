@@ -45,8 +45,9 @@ import * as users from "./users.js";
 import * as totp from "./totp.js";
 
 const $transaction = <T>(
-  fn: (tx: Prisma.TransactionClient) => Promise<T>
-): Promise<T> => prisma.$transaction(fn);
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  options?: { maxWait?: number; timeout?: number }
+): Promise<T> => prisma.$transaction(fn, options);
 
 // One namespace per table group. `permissions` are auth's role permissions;
 // `bucketPermissions` are per-bucket grants.

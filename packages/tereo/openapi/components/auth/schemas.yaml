@@ -1443,6 +1443,42 @@ RoleAssignment:
           format: date-time
           description: When the role assignment expires (null if permanent)
 
+UserRoleAssignment:
+  description: |
+    A global role the user holds, once per way it is held: each direct assignment
+    (whatever the role's state), then each live role held through a live global group.
+    A role held both ways appears twice.
+  allOf:
+    - $ref: '../schemas.yaml#/RoleRef'
+    - type: object
+      required: [expiresAt, via]
+      properties:
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the role assignment expires (null if permanent; always null through a group)
+        via:
+          $ref: '#/RoleAssignmentVia'
+
+RoleAssignmentVia:
+  description: How the user holds the role. A `group` entry goes away by taking the user out of the group, or the role from the group; `PUT /v1/admin/users/{id}/roles` changes only direct assignments.
+  oneOf:
+    - type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [direct]
+    - type: object
+      required: [kind, groupId]
+      properties:
+        kind:
+          type: string
+          enum: [group]
+        groupId:
+          type: string
+          format: uuid
+
 UserRolesResponse:
   type: object
   required:
@@ -1455,7 +1491,7 @@ UserRolesResponse:
     roles:
       type: array
       items:
-        $ref: '#/RoleAssignment'
+        $ref: '#/UserRoleAssignment'
 
 UserPermissionsResponse:
   type: object
@@ -4378,3 +4414,303 @@ BrandingAssetUploadResponse:
       enum: [png, jpg, webp, svg, ico]
     url:
       type: string
+
+Group:
+  type: object
+  description: A set of users who all hold the group's roles. A global group's roles count everywhere; an organization's group's roles count only within that organization, for its members.
+  required: [id, organizationId, slug, name, description, definitionSource, membershipSource, unprovisionedAt, archivedAt, createdAt, updatedAt, memberCount]
+  properties:
+    id:
+      type: string
+      format: uuid
+    organizationId:
+      type: [string, 'null']
+      format: uuid
+      description: The organization the group belongs to; null for a global group
+    slug:
+      type: string
+      pattern: '^[a-z0-9-]{1,100}$'
+      description: Unique among the scope's groups, archived ones included
+    name:
+      type: string
+      maxLength: 255
+    description:
+      type: [string, 'null']
+      maxLength: 500
+    definitionSource:
+      type: string
+      enum: [local, provisioned]
+      description: '`provisioned` groups are declared in provisioning documents: their slug, name, description, roles and archive state change only there'
+    membershipSource:
+      type: string
+      enum: [local]
+      description: Members are always managed through this API
+    unprovisionedAt:
+      type: [string, 'null']
+      format: date-time
+      description: When provisioning found a provisioned group missing from its documents; null otherwise
+    archivedAt:
+      type: [string, 'null']
+      format: date-time
+      description: Archive timestamp; null for a live group. An archived group's roles count for no one.
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    memberCount:
+      type: integer
+      minimum: 0
+
+ListGroupsResponse:
+  type: object
+  description: Cursor-paginated list of groups
+  required: [data, hasMore, limit, nextCursor]
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/Group'
+    hasMore:
+      type: boolean
+    limit:
+      type: integer
+    nextCursor:
+      type: [string, 'null']
+
+UserGroupsResponse:
+  type: object
+  description: Every group the user belongs to, global and in any organization (not paginated; `nextCursor` is always null)
+  required: [data, nextCursor]
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/Group'
+    nextCursor:
+      type: 'null'
+
+CreateGroupRequest:
+  type: object
+  required: [slug, name]
+  properties:
+    organizationId:
+      type: [string, 'null']
+      format: uuid
+      description: The organization the group belongs to; omit or null for a global group. Fixed once created.
+    slug:
+      type: string
+      pattern: '^[a-z0-9-]{1,100}$'
+    name:
+      type: string
+      minLength: 1
+      maxLength: 255
+    description:
+      type: [string, 'null']
+      maxLength: 500
+    roleIds:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        format: uuid
+
+UpdateGroupRequest:
+  type: object
+  description: At least one field
+  minProperties: 1
+  properties:
+    slug:
+      type: string
+      pattern: '^[a-z0-9-]{1,100}$'
+    name:
+      type: string
+      minLength: 1
+      maxLength: 255
+    description:
+      type: [string, 'null']
+      maxLength: 500
+
+GroupMember:
+  type: object
+  required: [userId, email, name, isActive, addedAt]
+  properties:
+    userId:
+      type: string
+      format: uuid
+    email:
+      type: string
+      format: email
+    name:
+      type: [string, 'null']
+    isActive:
+      type: boolean
+    addedAt:
+      type: string
+      format: date-time
+
+ListGroupMembersResponse:
+  type: object
+  description: Cursor-paginated list of a group's members
+  required: [data, hasMore, limit, nextCursor]
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/GroupMember'
+    hasMore:
+      type: boolean
+    limit:
+      type: integer
+    nextCursor:
+      type: [string, 'null']
+
+AddGroupMembersRequest:
+  type: object
+  required: [userIds]
+  properties:
+    userIds:
+      type: array
+      minItems: 1
+      maxItems: 500
+      items:
+        type: string
+        format: uuid
+
+AddGroupMembersResponse:
+  type: object
+  required: [added]
+  properties:
+    added:
+      type: array
+      description: The users who were not members before
+      items:
+        type: string
+        format: uuid
+
+GroupRole:
+  type: object
+  required: [id, name, displayName, serviceId]
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    displayName:
+      type: string
+    serviceId:
+      type: [string, 'null']
+      format: uuid
+      description: The service that declares a system role; null for a custom role
+
+ListGroupRolesResponse:
+  type: object
+  description: Every role the group holds, whatever its state (not paginated; `nextCursor` is always null)
+  required: [data, nextCursor]
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/GroupRole'
+    nextCursor:
+      type: 'null'
+
+SetGroupRolesRequest:
+  type: object
+  required: [roleIds]
+  properties:
+    roleIds:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        format: uuid
+
+SetGroupRolesResponse:
+  type: object
+  required: [roles, added, removed]
+  properties:
+    roles:
+      type: array
+      items:
+        $ref: '#/GroupRole'
+    added:
+      type: array
+      items:
+        type: string
+        format: uuid
+    removed:
+      type: array
+      items:
+        type: string
+        format: uuid
+
+GroupEventData:
+  type: object
+  required: [id, slug, name, organizationId, definitionSource, membershipSource, unprovisionedAt]
+  properties:
+    id:
+      type: string
+      format: uuid
+    slug:
+      type: string
+    name:
+      type: string
+    organizationId:
+      type: [string, 'null']
+      format: uuid
+    definitionSource:
+      type: string
+      enum: [local, provisioned]
+    membershipSource:
+      type: string
+      enum: [local]
+    unprovisionedAt:
+      type: [string, 'null']
+      format: date-time
+
+GroupMembersEventData:
+  type: object
+  required: [groupId, organizationId, userIds]
+  properties:
+    groupId:
+      type: string
+      format: uuid
+    organizationId:
+      type: [string, 'null']
+      format: uuid
+    userIds:
+      type: array
+      maxItems: 1000
+      items:
+        type: string
+        format: uuid
+
+GroupRolesEventData:
+  type: object
+  required: [groupId, organizationId, roleIds, added, removed]
+  properties:
+    groupId:
+      type: string
+      format: uuid
+    organizationId:
+      type: [string, 'null']
+      format: uuid
+    roleIds:
+      type: array
+      description: The group's roles after the change
+      items:
+        type: string
+        format: uuid
+    added:
+      type: array
+      items:
+        type: string
+        format: uuid
+    removed:
+      type: array
+      items:
+        type: string
+        format: uuid

@@ -196,20 +196,44 @@ export const getUserPermissions = async (req: Request, res: Response) => {
   res.json({ userId: id, permissions });
 };
 
+/**
+ * A user's global roles, one entry per way each is held: every direct
+ * assignment whatever its state (what `PUT` replaces), then each role held
+ * through a live global group.
+ */
+const userRolesResponse = async (
+  userId: string,
+  direct: Awaited<ReturnType<typeof db.roles.getGlobalUserRoles>>
+) => {
+  const viaGroups = (await db.roles.effectiveAssignments(userId, null)).filter(
+    (a) => a.via.kind === "group"
+  );
+  return {
+    userId,
+    roles: [
+      ...direct.map((ur) => ({
+        id: ur.role.id,
+        name: ur.role.name,
+        displayName: ur.role.displayName,
+        expiresAt: ur.expiresAt,
+        via: { kind: "direct" as const },
+      })),
+      ...viaGroups.map((a) => ({
+        id: a.role.id,
+        name: a.role.name,
+        displayName: a.role.displayName,
+        expiresAt: null,
+        via: a.via,
+      })),
+    ],
+  };
+};
+
 export const getUserRoles = async (req: Request, res: Response) => {
   const { id } = validateParams(UserIdParamSchema, req);
   await db.users.get(id);
 
-  const userRoles = await db.roles.getGlobalUserRoles(id);
-  res.json({
-    userId: id,
-    roles: userRoles.map((ur) => ({
-      id: ur.role.id,
-      name: ur.role.name,
-      displayName: ur.role.displayName,
-      expiresAt: ur.expiresAt,
-    })),
-  });
+  res.json(await userRolesResponse(id, await db.roles.getGlobalUserRoles(id)));
 };
 
 export const setUserRoles = async (req: Request, res: Response) => {
@@ -305,15 +329,7 @@ export const setUserRoles = async (req: Request, res: Response) => {
   disconnectTokenSockets(revokedJtis);
   notifyUserRolesChanged(id);
 
-  res.json({
-    userId: id,
-    roles: userRoles.map((ur) => ({
-      id: ur.role.id,
-      name: ur.role.name,
-      displayName: ur.role.displayName,
-      expiresAt: ur.expiresAt,
-    })),
-  });
+  res.json(await userRolesResponse(id, userRoles));
 };
 
 export const getUserSessions = async (req: Request, res: Response) => {

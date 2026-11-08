@@ -1,12 +1,17 @@
 import type { OrgMemberRole } from "../../../prisma/generated/client/index.js";
 import { globalGrantablePermissions } from "../../utils/grants.js";
 import { ensurePermission, TEST_SERVICE } from "./testService.js";
+import { generateAccessToken } from "../../utils/tokens.js";
 import type { AuthContext } from "../../middleware/auth.js";
+import { CORE_AUDIENCE } from "../../definitions/index.js";
 import type { GroupActor } from "../../utils/groups.js";
 import { getTestPrincipalToken } from "./principals.js";
+import { createTestClient } from "./auth/clients.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { createTestRole } from "./auth/users.js";
+import { BASE_URL } from "./auth/constants.js";
 import { randomUUID } from "node:crypto";
+import { fetchJson } from "./http.js";
 
 /** An org-assignable permission the group tests grant through roles. */
 export const GROUP_PERMISSION = `${TEST_SERVICE.namespace}.group-service.read`;
@@ -110,4 +115,68 @@ export const passwordOnlyToken = async (userId: string) => {
     },
   });
   return jti;
+};
+
+/** A request to core's admin API: `path` is under `/v1/admin`. */
+export const adminApi = (
+  method: string,
+  path: string,
+  token: string,
+  body?: unknown
+) => fetchJson(method, `${BASE_URL}/v1/admin${path}`, token, body);
+
+/**
+ * A token a third-party client holds for `userId` with core API `scopes`:
+ * delegated, so the user's permissions are capped at the scopes' ceilings.
+ */
+export const delegatedToken = async (userId: string, scopes: string[]) => {
+  const client = await createTestClient({ scopes: ["openid", ...scopes] });
+  const tokenScopes = ["openid", ...scopes];
+  const { token, jti, expiresAt } = generateAccessToken({
+    subject: userId,
+    clientId: client.clientId,
+    scopes: tokenScopes,
+    audience: [CORE_AUDIENCE],
+  });
+  await prisma.accessToken.create({
+    data: {
+      jti,
+      clientId: client.id,
+      userId,
+      scopes: tokenScopes,
+      expiresAt,
+    },
+  });
+  return token;
+};
+
+export interface ApiGroup {
+  id: string;
+  organizationId: string | null;
+  slug: string;
+  name: string;
+  description: string | null;
+  definitionSource: "local" | "provisioned";
+  membershipSource: "local";
+  unprovisionedAt: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  memberCount: number;
+}
+
+/** Creates a group through the admin API; the caller tracks its id. */
+export const postGroup = async (
+  token: string,
+  body: Record<string, unknown> = {}
+): Promise<ApiGroup> => {
+  const res = await adminApi("POST", "/groups", token, {
+    slug: groupSlug("api"),
+    name: "API test group",
+    ...body,
+  });
+  if (res.status !== 201) {
+    throw new Error(`POST /groups: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  return res.body as ApiGroup;
 };
