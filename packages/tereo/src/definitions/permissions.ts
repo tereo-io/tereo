@@ -201,6 +201,12 @@ const AUTH_SERVICE_PERMISSIONS: PermissionDefinition[] = [
     "Write Identity Providers",
     "Create and modify identity providers, their domains and default roles"
   ),
+  ...domainPermissions("groups", "Groups", "Groups of users and their roles", [
+    "read",
+    "write",
+    "archive",
+    "admin",
+  ]),
 ];
 
 const FILE_SERVICE_PERMISSIONS: PermissionDefinition[] = [

@@ -53,6 +53,7 @@ model Organization {
   auditLogEntries         AuditLogEntry[]
   identityProviderDomains IdentityProviderDomain[]
   integrations            Service[]
+  groups                  Group[]
 
   notifications Notification[]
 
@@ -147,6 +148,12 @@ model User {
   instanceSetUp             Instance[]          @relation("InstanceSetupCompletedBy")
   servicesCreated           Service[]           @relation("ServiceCreator")
   serviceAccessDecided      ServiceAccess[]     @relation("ServiceAccessDecider")
+
+  // Groups
+  groupsCreated     Group[]       @relation("GroupCreator")
+  groupMemberships  GroupMember[] @relation("GroupMemberUser")
+  groupMembersAdded GroupMember[] @relation("GroupMemberAdder")
+  groupRolesAdded   GroupRole[]   @relation("GroupRoleAdder")
 
   // Identity providers
   identityProvidersCreated       IdentityProvider[]       @relation("IdentityProviderCreator")
@@ -395,6 +402,7 @@ model Role {
   userRoles                   UserRole[]
   service                     Service?                     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
   identityProviderDomainRoles IdentityProviderDomainRole[]
+  groupRoles                  GroupRole[]
 
   @@unique([serviceId, name])
   @@index([name])
@@ -442,6 +450,85 @@ model UserRole {
   @@index([roleId])
   @@index([organizationId])
   @@map("user_roles")
+  @@schema("auth")
+}
+
+// A set of users that holds roles together. Global (no organization) or
+// scoped to one organization. Archived, never deleted.
+model Group {
+  id               String                @id @default(uuid(7)) @db.Uuid
+  organizationId   String?               @map("organization_id") @db.Uuid
+  slug             String                @db.VarChar(100)
+  name             String                @db.VarChar(255)
+  description      String?               @db.VarChar(500)
+  definitionSource GroupDefinitionSource @map("definition_source")
+  membershipSource GroupMembershipSource @default(local) @map("membership_source")
+  unprovisionedAt  DateTime?             @map("unprovisioned_at")
+  createdBy        String                @map("created_by") @db.Uuid
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+  archivedAt       DateTime?             @map("archived_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  creator      User          @relation("GroupCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  members      GroupMember[]
+  roles        GroupRole[]
+
+  // Slug uniqueness per scope is enforced via partial unique indexes in migration SQL:
+  // - groups_org_slug_key: (organization_id, slug) WHERE organization_id IS NOT NULL
+  // - groups_global_slug_key: (slug) WHERE organization_id IS NULL
+  @@index([organizationId])
+  @@index([archivedAt])
+  @@map("groups")
+  @@schema("auth")
+}
+
+model GroupMember {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  groupId   String   @map("group_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  addedBy   String   @map("added_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  group       Group @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  user        User  @relation("GroupMemberUser", fields: [userId], references: [id], onDelete: Restrict)
+  addedByUser User  @relation("GroupMemberAdder", fields: [addedBy], references: [id], onDelete: Restrict)
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@map("group_members")
+  @@schema("auth")
+}
+
+model GroupRole {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  groupId   String   @map("group_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  addedBy   String   @map("added_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  group       Group @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  role        Role  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  addedByUser User  @relation("GroupRoleAdder", fields: [addedBy], references: [id], onDelete: Restrict)
+
+  @@unique([groupId, roleId])
+  @@index([roleId])
+  @@map("group_roles")
+  @@schema("auth")
+}
+
+enum GroupDefinitionSource {
+  local
+  provisioned
+
+  @@map("group_definition_source")
+  @@schema("auth")
+}
+
+enum GroupMembershipSource {
+  local
+
+  @@map("group_membership_source")
   @@schema("auth")
 }
 

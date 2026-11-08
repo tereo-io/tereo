@@ -35,6 +35,7 @@ import * as clients from "./clients.js";
 import * as consent from "./consent.js";
 import * as buckets from "./buckets.js";
 import * as objects from "./objects.js";
+import * as groups from "./groups.js";
 import * as outbox from "./outbox.js";
 import * as scopes from "./scopes.js";
 import * as shares from "./shares.js";
@@ -58,6 +59,7 @@ export default {
   brandingProfiles,
   clients,
   consent,
+  groups,
   identityProviders,
   loginFlows,
   organizations,

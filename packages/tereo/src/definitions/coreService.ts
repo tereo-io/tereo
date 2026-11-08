@@ -47,6 +47,7 @@ export const CORE_RESERVED_NAMESPACES = [
   "webhooks",
   "webhook",
   "identity-providers",
+  "groups",
   "branding",
   "notifications",
   "notification",
