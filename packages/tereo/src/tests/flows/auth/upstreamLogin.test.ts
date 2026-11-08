@@ -11,7 +11,12 @@ import { randomUUID } from "node:crypto";
 import {
   startFakeOidcProvider,
   type FakeOidcProvider,
+  type FakeClaims,
 } from "../../support/fakeOidcProvider.js";
+import {
+  DEFAULT_ORGANIZATION_ID,
+  SYSTEM_USER_ID,
+} from "../../../definitions/index.js";
 import {
   absorbCookies,
   cookieHeader,
@@ -78,8 +83,8 @@ const createProvider = async (
 };
 
 /** A user linked to `provider` under a fresh subject. */
-const linkedUser = async (provider: Provider) => {
-  const user = await createTestUser();
+const linkedUser = async (provider: Provider, emailVerified = true) => {
+  const user = await createTestUser({ emailVerified });
   const subject = `sub-${randomUUID()}`;
   await prisma.userIdentity.create({
     data: { userId: user.id, providerId: provider.id, subject },
@@ -151,7 +156,7 @@ const loginFlow = (
   fake: FakeOidcProvider,
   provider: Provider,
   extra: {
-    claims?: { sub: string; auth_time?: number };
+    claims?: Partial<FakeClaims> & { sub: string };
     acrValues?: string;
     maxAge?: number;
     prompt?: string;
@@ -244,6 +249,69 @@ describe("sign-in through a provider", () => {
       client_id: client.clientId,
       consent: true,
     });
+  });
+
+  it("a linked provider sign-in with a verified matching email verifies the user", async () => {
+    const { user, claims } = await linkedUser(provider, false);
+    await loginFlow(fake, provider, {
+      claims: { ...claims, email_verified: true },
+    });
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+    });
+    expect(after.emailVerifiedAt).not.toBeNull();
+    const entry = await prisma.auditLogEntry.findFirstOrThrow({
+      where: {
+        entityId: user.id,
+        metadata: { path: ["via"], equals: "provider" },
+      },
+    });
+    expect(entry.metadata).toMatchObject({ action: "email_verified" });
+  });
+
+  it("a linked provider sign-in with email_verified false does not", async () => {
+    const { user, claims } = await linkedUser(provider, false);
+    await loginFlow(fake, provider, {
+      claims: { ...claims, email_verified: false },
+    });
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+    });
+    expect(after.emailVerifiedAt).toBeNull();
+  });
+
+  it("a provider email that is not the account's email does not verify", async () => {
+    const { user, claims } = await linkedUser(provider, false);
+    await loginFlow(fake, provider, {
+      claims: {
+        ...claims,
+        email: `other-${randomUUID()}@test.local`,
+        email_verified: true,
+      },
+    });
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+    });
+    expect(after.emailVerifiedAt).toBeNull();
+  });
+
+  it("autoAccept creates the user verified", async () => {
+    const domain = `auto-${generateUniqueId().toLowerCase()}.example`;
+    await prisma.identityProviderDomain.create({
+      data: {
+        providerId: provider.id,
+        domain,
+        organizationId: DEFAULT_ORGANIZATION_ID,
+        autoAccept: true,
+        createdBy: SYSTEM_USER_ID,
+      },
+    });
+    const email = `new@${domain}`;
+    await loginFlow(fake, provider, {
+      claims: { sub: `sub-${randomUUID()}`, email, email_verified: true },
+    });
+    const created = await prisma.user.findUniqueOrThrow({ where: { email } });
+    expect(created.emailVerifiedAt).not.toBeNull();
   });
 
   it("sends a user with TOTP to the 2FA step, and records fed then otp", async () => {

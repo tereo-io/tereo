@@ -222,6 +222,7 @@ describe("resolveLoginIdentity", () => {
       "auth.organization.member-added",
       "auth.organization.member-roles-changed",
       "auth.user.identity-linked",
+      "auth.user.email-verified",
     ]);
     expect(events[1].data).toMatchObject({
       organizationId: domain.organizationId,
@@ -247,6 +248,7 @@ describe("resolveLoginIdentity", () => {
       "OrganizationMember",
       "OrganizationMember",
       "User",
+      "User",
       "UserIdentity",
     ]);
   });
@@ -264,6 +266,7 @@ describe("resolveLoginIdentity", () => {
       "auth.user.created",
       "auth.organization.member-added",
       "auth.user.identity-linked",
+      "auth.user.email-verified",
     ]);
   });
 

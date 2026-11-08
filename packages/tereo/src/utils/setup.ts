@@ -1,5 +1,6 @@
 import { ConflictError, NotFoundError, UnauthorizedError } from "./errors.js";
 import { computeChanges, emitTx, logAuditTx } from "./outbox.js";
+import { markEmailVerified } from "./userLinks.js";
 import { formatUser } from "./transformers.js";
 import { createHash, randomInt } from "crypto";
 import { hashPassword } from "./crypto.js";
@@ -181,6 +182,8 @@ export const completeSetup = async (input: CompleteSetupInput) => {
       data: { setupCompletedAt: new Date(), setupCompletedBy: user.id },
     });
     await tx.setupToken.deleteMany({});
+
+    await markEmailVerified(tx, { userId: user.id, via: "setup" });
 
     const auth = { userId: user.id, email: user.email };
     await logAuditTx(tx, {

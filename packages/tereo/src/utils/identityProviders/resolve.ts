@@ -4,6 +4,7 @@ import { emitTx, logAuditTx, type AuditLogInput } from "../outbox.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { uniqueViolationFields } from "../prismaErrors.js";
 import { emailDomain, normalizeEmail } from "../email.js";
+import { markVerifiedFromProvider } from "./verify.js";
 import { formatUser } from "../transformers.js";
 import type { Prisma } from "../db/prisma.js";
 import { logger } from "../logger.js";
@@ -42,7 +43,7 @@ const isGoogle = (provider: IdentityProvider): boolean =>
  */
 export const emailTrusted = (
   provider: IdentityProvider,
-  identity: NormalizedIdentity,
+  identity: Pick<NormalizedIdentity, "emailVerified" | "hostedDomain">,
   email: string,
   match: "invite" | "domain"
 ): boolean => {
@@ -125,6 +126,11 @@ const signInLinked = async (
     linked.id,
     identity.email === null ? null : normalizeEmail(identity.email)
   );
+  if (user.emailVerifiedAt === null) {
+    await db.$transaction((tx) =>
+      markVerifiedFromProvider(tx, { userId: user.id, provider, identity })
+    );
+  }
   return { userId: linked.userId };
 };
 
@@ -301,7 +307,8 @@ export const linkIdentity = async (
   auth: AuditActor,
   userId: string,
   provider: IdentityProvider,
-  identity: Pick<NormalizedIdentity, "subject" | "email">
+  identity: Pick<NormalizedIdentity, "subject" | "email"> &
+    Partial<Pick<NormalizedIdentity, "emailVerified" | "hostedDomain">>
 ): Promise<{ id: string }> => {
   const email = identity.email === null ? null : normalizeEmail(identity.email);
   const created = await db.userIdentities.create(
@@ -337,5 +344,17 @@ export const linkIdentity = async (
       createdAt: created.createdAt.toISOString(),
     },
   });
+  // A link made without the provider's claims (forced links) proves nothing.
+  if (identity.emailVerified !== undefined) {
+    await markVerifiedFromProvider(tx, {
+      userId,
+      provider,
+      identity: {
+        email: identity.email,
+        emailVerified: identity.emailVerified,
+        hostedDomain: identity.hostedDomain ?? null,
+      },
+    });
+  }
   return created;
 };

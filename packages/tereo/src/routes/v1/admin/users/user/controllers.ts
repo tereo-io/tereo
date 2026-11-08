@@ -1,7 +1,6 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
-import { retirePasswordLinks } from "../../../../../utils/userLinks.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../utils/auth.js";
@@ -19,6 +18,11 @@ import {
   validateBody,
   validateParams,
 } from "../../../../../utils/validateReq.js";
+import {
+  issueVerifyLink,
+  retireAllLinks,
+  retirePasswordLinks,
+} from "../../../../../utils/userLinks.js";
 import {
   endDeactivatedUserSessions,
   endSession,
@@ -109,6 +113,13 @@ export const updateUser = async (req: Request, res: Response) => {
     let updated = profileChanged
       ? await db.users.update(id, profile, tx)
       : await db.users.get(id, tx);
+    // The new address has proved nothing yet.
+    if (newEmail) {
+      updated = await tx.user.update({
+        where: { id },
+        data: { emailVerifiedAt: null },
+      });
+    }
     // An invite is matched by email: it must not follow the account to an
     // address the admin who issued it never saw.
     const invitesWithdrawn = newEmail
@@ -116,8 +127,18 @@ export const updateUser = async (req: Request, res: Response) => {
       : 0;
     // Whoever holds a setup link or a forced-change grant must not keep a way
     // in past a new password, a new sign-in email or a deactivation.
-    if (body.password || newEmail || deactivating) {
+    if (newEmail || deactivating) {
+      await retireAllLinks(tx, id);
+    } else if (body.password) {
       await retirePasswordLinks(tx, id);
+    }
+    // Without a connection the mail could never leave; the admin can resend
+    // once one exists.
+    if (
+      newEmail &&
+      (await db.notificationConnections.getDefault("email", tx))
+    ) {
+      await issueVerifyLink(tx, { userId: id, createdBy: auth.userId });
     }
     if (profileChanged) {
       const metadata = {
