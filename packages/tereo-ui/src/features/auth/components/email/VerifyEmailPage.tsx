@@ -69,11 +69,12 @@ export const VerifyEmailPage = () => {
     );
   }
 
-  const failure = confirm.isError
-    ? isTransient(confirm.error)
-      ? TRY_AGAIN
-      : EXPIRED
-    : null;
+  // Only a spent or expired link is final; anything else may work on a retry.
+  const spent =
+    confirm.isError &&
+    isAxiosError(confirm.error) &&
+    confirm.error.response?.status === 404;
+  const failure = confirm.isError ? (spent ? EXPIRED : TRY_AGAIN) : null;
 
   return (
     <BrandedAuthPage title={TITLE} subtitle={details.email}>
@@ -81,7 +82,7 @@ export const VerifyEmailPage = () => {
         {failure && <Alert variant="danger">{failure}</Alert>}
         <Button
           fullWidth
-          disabled={confirm.isPending || confirm.isError}
+          disabled={confirm.isPending || spent}
           onClick={() => confirm.mutate(token)}
         >
           {confirm.isPending ? "Confirming..." : "Confirm my email"}

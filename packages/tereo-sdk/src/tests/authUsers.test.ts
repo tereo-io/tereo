@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { sendUserVerificationEmail } from "../requests/auth/users/index.js";
+import { AuthServiceClient, UsersClient } from "../index.js";
 import type { AuthServiceUser } from "../types/auth.js";
-import { AuthServiceClient } from "../clients/auth.js";
 import { useCacheRedis } from "../utils/cache.js";
 import type { Redis } from "ioredis";
 
@@ -127,7 +127,9 @@ describe("sendVerificationEmail", () => {
 
   it("the users client hands the id to the request", async () => {
     mockRequests.auth.sendUserVerificationEmail.mockResolvedValue(undefined);
-    await new AuthServiceClient().users.sendVerificationEmail(uuid(7));
+    const { users } = new AuthServiceClient();
+    expect(users).toBeInstanceOf(UsersClient);
+    await users.sendVerificationEmail(uuid(7));
     expect(mockRequests.auth.sendUserVerificationEmail).toHaveBeenCalledWith(
       uuid(7)
     );

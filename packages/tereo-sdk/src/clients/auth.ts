@@ -167,8 +167,8 @@ export class AuthServiceClient {
         userType: "human",
         expiresAt: null,
         status: "active",
-        emailVerified: false,
-        emailVerifiedAt: null,
+        emailVerified: true,
+        emailVerifiedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

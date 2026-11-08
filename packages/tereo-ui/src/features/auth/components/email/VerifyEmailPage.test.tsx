@@ -18,11 +18,12 @@ const renderAt = (url: string) =>
     </QueryClientProvider>
   );
 
-const notFound = () =>
-  new AxiosError("nf", undefined, undefined, undefined, {
-    status: 404,
-    data: { error: "not_found" },
+const failed = (status: number) =>
+  new AxiosError(String(status), undefined, undefined, undefined, {
+    status,
+    data: { error: status === 404 ? "not_found" : "rate_limited" },
   } as never);
+const notFound = () => failed(404);
 
 beforeEach(() => {
   authMock.axios.post.mockReset();
@@ -90,4 +91,38 @@ describe("VerifyEmailPage", () => {
       screen.getByRole("button", { name: "Confirm my email" })
     ).toBeDisabled();
   });
+
+  it.each([429, 503])(
+    "a %i on confirm says try again and keeps the button enabled",
+    async (status) => {
+      const user = userEvent.setup();
+      let attempts = 0;
+      authMock.axios.post.mockImplementation(async (path: string) => {
+        if (path === "/v1/email-verification/inspect")
+          return {
+            data: {
+              email: "ada@example.com",
+              expiresAt: "2026-11-12T00:00:00Z",
+            },
+          };
+        attempts++;
+        if (attempts === 1) throw failed(status);
+        return { data: undefined };
+      });
+      renderAt("/verify-email#token=abc");
+
+      await user.click(
+        await screen.findByRole("button", { name: "Confirm my email" })
+      );
+
+      expect(await screen.findByText(/Try again shortly/)).toBeVisible();
+      const button = screen.getByRole("button", { name: "Confirm my email" });
+      expect(button).toBeEnabled();
+
+      await user.click(button);
+      expect(
+        await screen.findByText("Your email address is confirmed.")
+      ).toBeVisible();
+    }
+  );
 });

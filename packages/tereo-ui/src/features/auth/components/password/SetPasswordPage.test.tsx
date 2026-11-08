@@ -33,7 +33,7 @@ const renderAt = (url: string) =>
   );
 
 beforeEach(() => {
-  window.sessionStorage.clear();
+  window.localStorage.clear();
   authMock.axios.post.mockReset();
 });
 
@@ -200,9 +200,9 @@ describe("SetPasswordPage", () => {
   });
 
   it("Sign in returns to the stored login query after a reset", async () => {
-    window.sessionStorage.setItem(
+    window.localStorage.setItem(
       "tereo.resetReturnTo",
-      "?client_id=c1&state=s"
+      JSON.stringify({ search: "?client_id=c1&state=s", savedAt: Date.now() })
     );
     const user = await completeReset();
     await user.click(await screen.findByRole("button", { name: "Sign in" }));
@@ -210,7 +210,7 @@ describe("SetPasswordPage", () => {
     expect(await screen.findByTestId("where")).toHaveTextContent(
       "/login?client_id=c1&state=s"
     );
-    expect(window.sessionStorage.getItem("tereo.resetReturnTo")).toBeNull();
+    expect(window.localStorage.getItem("tereo.resetReturnTo")).toBeNull();
   });
 
   it("ignores a token in the query string", async () => {

@@ -245,7 +245,11 @@ describe("testMode", () => {
       active: true,
       sub: "u1",
     });
-    expect((await testing.auth.getUser("u1"))?.id).toBe("u1");
+    expect(await testing.auth.getUser("u1")).toMatchObject({
+      id: "u1",
+      emailVerified: true,
+      emailVerifiedAt: expect.any(String),
+    });
     expect((await testing.files.downloadObject("b", "k")).toString()).toBe(
       "test-file-contents:b/k"
     );

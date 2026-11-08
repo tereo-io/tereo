@@ -87,9 +87,9 @@ describe("LoginPage forgot password", () => {
       await screen.findByRole("link", { name: "Forgot password?" })
     );
 
-    expect(window.sessionStorage.getItem("tereo.resetReturnTo")).toBe(
-      "?client_id=acme&state=s1"
-    );
+    expect(
+      JSON.parse(window.localStorage.getItem("tereo.resetReturnTo") ?? "null")
+    ).toMatchObject({ search: "?client_id=acme&state=s1" });
     expect(await screen.findByTestId("where")).toHaveTextContent(
       "/forgot-password?client_id=acme"
     );
