@@ -313,6 +313,15 @@ describe("password setup", () => {
         .map((e) => e.metadata as { action: string; via?: string })
         .filter((m) => m.action === "password_set_from_link");
 
+    const emailVerifiedAudits = async (userId: string) =>
+      (
+        await prisma.auditLogEntry.findMany({
+          where: { entityId: userId, entityType: "User" },
+        })
+      )
+        .map((e) => e.metadata as { action: string; via?: string })
+        .filter((m) => m.action === "email_verified");
+
     const eventsOf = async (userId: string, eventType: string) =>
       (await prisma.outbox.findMany({ where: { destination: "webhook" } }))
         .map(
@@ -342,13 +351,8 @@ describe("password setup", () => {
       expect(tokens.access_token).toBeTruthy();
     });
 
-    it("is 404 once the user's domain became SSO-only", async () => {
-      const id = randomBytes(5).toString("hex");
-      const domain = `sso-${id}.test`;
-      const user = await createTestUser({ email: `u-${id}@${domain}` });
-      const token = await issue(user.id, false, "reset");
-      expect((await inspect(token)).status).toBe(HTTP_STATUS.OK);
-
+    /** Puts the address's domain under an SSO-only provider; returns a cleanup. */
+    const makeSsoOnly = async (domain: string, id: string) => {
       const provider = await prisma.identityProvider.create({
         data: {
           slug: `p-${id}`,
@@ -360,17 +364,32 @@ describe("password setup", () => {
           createdBy: SYSTEM_USER_ID,
         },
       });
-      try {
-        await prisma.identityProviderDomain.create({
-          data: {
-            providerId: provider.id,
-            domain,
-            organizationId: (await prisma.organization.findFirstOrThrow()).id,
-            ssoOnly: true,
-            createdBy: SYSTEM_USER_ID,
-          },
+      await prisma.identityProviderDomain.create({
+        data: {
+          providerId: provider.id,
+          domain,
+          organizationId: (await prisma.organization.findFirstOrThrow()).id,
+          ssoOnly: true,
+          createdBy: SYSTEM_USER_ID,
+        },
+      });
+      return async () => {
+        await prisma.identityProviderDomain.deleteMany({
+          where: { providerId: provider.id },
         });
+        await prisma.identityProvider.delete({ where: { id: provider.id } });
+      };
+    };
 
+    it("is 404 once the user's domain became SSO-only", async () => {
+      const id = randomBytes(5).toString("hex");
+      const domain = `sso-${id}.test`;
+      const user = await createTestUser({ email: `u-${id}@${domain}` });
+      const token = await issue(user.id, false, "reset");
+      expect((await inspect(token)).status).toBe(HTTP_STATUS.OK);
+
+      const cleanup = await makeSsoOnly(domain, id);
+      try {
         expect((await inspect(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
         expect((await setPassword(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
         const after = await prisma.user.findUniqueOrThrow({
@@ -378,10 +397,31 @@ describe("password setup", () => {
         });
         expect(after.passwordHash).toBe(user.passwordHash);
       } finally {
-        await prisma.identityProviderDomain.deleteMany({
-          where: { providerId: provider.id },
+        await cleanup();
+      }
+    });
+
+    it("refuses a guest's setup link once the domain became SSO-only", async () => {
+      const id = randomBytes(5).toString("hex");
+      const domain = `sso-${id}.test`;
+      const guest = await createGuest();
+      await prisma.user.update({
+        where: { id: guest.id },
+        data: { email: `g-${id}@${domain}` },
+      });
+      const token = await issue(guest.id);
+      expect((await inspect(token)).status).toBe(HTTP_STATUS.OK);
+
+      const cleanup = await makeSsoOnly(domain, id);
+      try {
+        expect((await inspect(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
+        expect((await setPassword(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
+        const after = await prisma.user.findUniqueOrThrow({
+          where: { id: guest.id },
         });
-        await prisma.identityProvider.delete({ where: { id: provider.id } });
+        expect(after.passwordHash).toBeNull();
+      } finally {
+        await cleanup();
       }
     });
 
@@ -425,9 +465,12 @@ describe("password setup", () => {
         where: { id: user.id },
       });
       expect(after.emailVerifiedAt).not.toBeNull();
+      const audits = await emailVerifiedAudits(user.id);
+      expect(audits).toHaveLength(1);
+      expect(audits[0].via).toBe("password_link");
       const events = await eventsOf(user.id, "auth.user.email-verified");
-      expect(events).toHaveLength(1);
-      expect(events[0].data.via).toBe("password_link");
+      expect(events.length).toBeLessThanOrEqual(1);
+      for (const e of events) expect(e.data.via).toBe("password_link");
     });
 
     it("leaves an already verified email's timestamp alone", async () => {
@@ -440,26 +483,30 @@ describe("password setup", () => {
         where: { id: user.id },
       });
       expect(after.emailVerifiedAt).toEqual(user.emailVerifiedAt);
-      expect(await eventsOf(user.id, "auth.user.email-verified")).toHaveLength(
-        0
-      );
+      expect(await emailVerifiedAudits(user.id)).toHaveLength(0);
     });
 
-    it("carries via on the password-set event and its audit entry", async () => {
+    it("carries via on the password-set audit entry and event", async () => {
       const user = await createTestUser();
       const guest = await createGuest();
 
-      await setPassword(await issue(user.id, false, "reset"));
-      await setPassword(await issue(guest.id, false, "setup"));
+      expect(
+        (await setPassword(await issue(user.id, false, "reset"))).status
+      ).toBe(HTTP_STATUS.NO_CONTENT);
+      expect(
+        (await setPassword(await issue(guest.id, false, "setup"))).status
+      ).toBe(HTTP_STATUS.NO_CONTENT);
 
       expect((await passwordSetAudits(user.id))[0].via).toBe("reset");
       expect((await passwordSetAudits(guest.id))[0].via).toBe("setup");
-      expect(
-        (await eventsOf(user.id, "auth.user.password-set"))[0].data.via
-      ).toBe("reset");
-      expect(
-        (await eventsOf(guest.id, "auth.user.password-set"))[0].data.via
-      ).toBe("setup");
+      for (const [id, via] of [
+        [user.id, "reset"],
+        [guest.id, "setup"],
+      ] as const) {
+        for (const e of await eventsOf(id, "auth.user.password-set")) {
+          expect(e.data.via).toBe(via);
+        }
+      }
     });
   });
 

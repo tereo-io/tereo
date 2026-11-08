@@ -159,10 +159,26 @@ describe("password reset, end to end", () => {
       where: { id: guest.id },
       data: { passwordChangeRequired: true },
     });
+    await prisma.passwordChangeGrant.create({
+      data: {
+        tokenHash: `grant-${guest.id}`,
+        cookieSecretHash: `cookie-${guest.id}`,
+        userId: guest.id,
+        clientId: client.id,
+        redirectUri: REDIRECT_URI,
+        scopes: ["openid"],
+        codeChallenge: "c",
+        codeChallengeMethod: "S256",
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
 
     const token = await requestResetToken(guest.email);
     expect((await redeem(token)).status).toBe(HTTP_STATUS.NO_CONTENT);
 
+    expect(
+      await prisma.passwordChangeGrant.count({ where: { userId: guest.id } })
+    ).toBe(0);
     const next = await passwordStep(guest.email, NEW_PASSWORD);
     expect(next.pathname).not.toBe("/login/change-password");
     expect(next.searchParams.has("change_grant")).toBe(false);

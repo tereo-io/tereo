@@ -28,25 +28,32 @@ type LinkUser = {
   userType: UserType;
 };
 
+const isPasswordLinkPurpose = (value: string): value is PasswordLinkPurpose =>
+  (PASSWORD_LINK_PURPOSES as readonly string[]).includes(value);
+
 /**
  * Whether a link of the purpose still reaches the user. Setup links are for
  * guests: once promoted, the account is a regular user's, and a link the
  * inviter saw must not reach it. Reset links reach any account a reset may
- * be sent for, which includes the SSO-only rule.
+ * be sent for. Neither reaches an address on an SSO-only domain, where the
+ * provider holds the credential.
  */
 const isRedeemable = async (
   purpose: PasswordLinkPurpose,
   user: LinkUser,
   tx?: Prisma.TransactionClient
 ) => {
-  if (purpose === "setup") {
-    return isUsableAccount(user) && user.userType === UserType.guest;
-  }
   const domain = await db.identityProviders.findDomain(
     emailDomain(user.email),
     tx
   );
-  return canResetPassword(user, domain?.ssoOnly ?? false);
+  const ssoOnly = domain?.ssoOnly ?? false;
+  if (purpose === "setup") {
+    return (
+      isUsableAccount(user) && user.userType === UserType.guest && !ssoOnly
+    );
+  }
+  return canResetPassword(user, ssoOnly);
 };
 
 /**
@@ -59,13 +66,15 @@ export const findUsableSetupToken = async (req: Request, token: string) => {
     hashFlowToken(token),
     PASSWORD_LINK_PURPOSES
   );
-  // The lookup is limited to the password purposes.
-  const purpose = found?.purpose as PasswordLinkPurpose | undefined;
-  if (!found || !purpose || !(await isRedeemable(purpose, found.user))) {
+  if (
+    !found ||
+    !isPasswordLinkPurpose(found.purpose) ||
+    !(await isRedeemable(found.purpose, found.user))
+  ) {
     await passwordSetupFailure.recordFailure(req);
     throw new NotFoundError("Not found");
   }
-  return { ...found, purpose };
+  return { ...found, purpose: found.purpose };
 };
 
 /**
