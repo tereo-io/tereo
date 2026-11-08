@@ -263,7 +263,7 @@ const groupData = (group: Group) => ({
   unprovisionedAt: group.unprovisionedAt,
 });
 
-const emitGroupEvent = (
+export const emitGroupEvent = (
   tx: Tx,
   group: Group,
   eventType:

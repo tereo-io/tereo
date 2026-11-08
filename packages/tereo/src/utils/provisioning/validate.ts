@@ -1,6 +1,7 @@
 import { ROLES, isRequestableCoreRole } from "../../definitions/roles.js";
 import { isCorePermission } from "../../definitions/guests.js";
 import { guestAssignableProblems } from "../guestRoles.js";
+import { checkGroups, groupScopeKey } from "./groups.js";
 import { hasPermission } from "../permissions.js";
 import { checkBrandingSet } from "./branding.js";
 import {
@@ -134,6 +135,13 @@ const checkSetUniqueness = (
     "custom role",
     set.documents.flatMap((d) =>
       d.roles.map((r) => ({ value: r.name, file: d.file }))
+    ),
+    problems
+  );
+  checkUnique(
+    "group",
+    set.documents.flatMap((d) =>
+      (d.groups ?? []).map((g) => ({ value: groupScopeKey(g), file: d.file }))
     ),
     problems
   );
@@ -505,6 +513,7 @@ export const validateSet = (set: ProvisioningSet): string[] => {
     for (const integration of doc.integrations ?? [])
       checkIntegration(set, doc.file, integration, services, problems);
   }
+  checkGroups(set, services, problems);
   checkGuests(set, problems);
   checkBrandingSet(set, problems);
   return problems;

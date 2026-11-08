@@ -24,6 +24,7 @@ export type {
   BucketProvisioning,
   CustomRole,
   EventTypeProvisioning,
+  GroupProvisioning,
   IntegrationProvisioning,
   LoginClientProvisioning,
   PermissionProvisioning,
