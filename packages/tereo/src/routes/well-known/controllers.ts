@@ -87,6 +87,7 @@ export const handleOpenIdConfiguration = async (
       "picture",
       "updated_at",
       "org_id",
+      "groups",
       "sid",
     ],
     acr_values_supported: ["urn:auth-service:pwd", "urn:auth-service:mfa"],

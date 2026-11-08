@@ -164,6 +164,24 @@ export type {
   PasswordSetupLink,
 } from "./requests/auth/guests/types.js";
 
+// --- Groups ------------------------------------------------------------------
+
+export type {
+  AddGroupMembersResult,
+  CreateGroupBody,
+  Group,
+  GroupMember,
+  GroupRole,
+  GroupRolesResult,
+  ListGroupMembersQuery,
+  ListGroupsQuery,
+  PaginatedGroupMembers,
+  PaginatedGroups,
+  SetGroupRolesResult,
+  UpdateGroupBody,
+  UserGroupsResult,
+} from "./requests/auth/groups/types.js";
+
 // --- Audit -------------------------------------------------------------------
 
 export { AuditLogServiceClient } from "./clients/audit.js";

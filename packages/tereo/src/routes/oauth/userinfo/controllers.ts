@@ -72,7 +72,8 @@ export const getUserInfo = async (req: Request, res: Response) => {
   // A delegated token is told what requireAuth would let it use: its
   // permissions cut down to its scopes' ceilings, no roles (a role is not
   // capped, its permissions are), and the memberships only with the scope
-  // that lists them.
+  // that lists them. Groups are the global ones and the token's
+  // organization's, like the roles, and need the account or admin area.
   const delegated = access.kind === "delegated";
   const authorization =
     access.kind !== "none"
@@ -97,6 +98,20 @@ export const getUserInfo = async (req: Request, res: Response) => {
                     slug: org.slug,
                     memberRole: org.memberRole,
                   })),
+          // Groups are an account fact (the user's own) and an admin one.
+          groups:
+            delegated && !allowsArea(access, ["account", "admin"])
+              ? []
+              : (
+                  await db.groups.getUserGroups(userId, {
+                    organizationId: orgId ?? null,
+                  })
+                ).map((g) => ({
+                  id: g.id,
+                  slug: g.slug,
+                  name: g.name,
+                  organizationId: g.organizationId,
+                })),
         }
       : {};
 

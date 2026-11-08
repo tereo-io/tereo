@@ -1,0 +1,5 @@
+---
+core: minor
+---
+
+Groups: a named set of users who all hold the group's roles. A global group's roles count everywhere; an organization's group's roles count only within that organization, for its members (custom, org-assignable roles only). Admins manage them under `/v1/admin/groups` (`groups.read`, `write`, `archive` and `admin`; an organization's admins and owners manage its own groups), provisioning documents declare them (`provisioned` groups change only there), and `GET /v1/admin/users/:id/groups` lists a user's. `GET` and `PUT /v1/admin/users/:id/roles` now return `{ roles, groupRoles }`: `roles` are the direct assignments, each with `via: { kind: "direct" }`, and `groupRoles` the roles held through global groups. The OIDC userinfo response gains a `groups` claim (`id`, `slug`, `name`, `organizationId`: the global groups and the token's organization's) for core's UI and clients granted a core scope, and discovery lists it in `claims_supported`. The admin UI has a Groups page and shows groups on user and organization views.
