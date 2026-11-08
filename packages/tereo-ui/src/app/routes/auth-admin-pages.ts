@@ -9,6 +9,7 @@ import {
   faPalette,
   faServer,
   faUserClock,
+  faUserGroup,
   faUsers,
   faUserShield,
 } from "@fortawesome/free-solid-svg-icons";
@@ -45,6 +46,12 @@ export const AUTH_ADMIN_PAGES: AuthAdminPage[] = [
     permission: "organizations.read",
   },
   { path: "users", label: "Users", icon: faUsers, permission: "users.read" },
+  {
+    path: "groups",
+    label: "Groups",
+    icon: faUserGroup,
+    permission: "groups.read",
+  },
   {
     path: "guests",
     label: "Guests",

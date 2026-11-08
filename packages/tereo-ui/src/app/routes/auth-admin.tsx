@@ -61,6 +61,26 @@ export const authAdminRoute: RouteObject = {
       ),
     },
     {
+      path: "groups",
+      element: gated(
+        "groups",
+        namedLazy(
+          () => import("@/features/auth-admin/components/groups/GroupList"),
+          "GroupList"
+        )
+      ),
+    },
+    {
+      path: "groups/:groupId",
+      element: gated(
+        "groups",
+        namedLazy(
+          () => import("@/features/auth-admin/components/groups/GroupDetail"),
+          "GroupDetail"
+        )
+      ),
+    },
+    {
       path: "guests",
       element: gated(
         "guests",

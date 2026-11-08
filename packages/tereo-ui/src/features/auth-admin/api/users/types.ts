@@ -34,6 +34,23 @@ export interface UserRole {
   expiresAt: string | null;
 }
 
+/** A role held through a global group; `PUT .../roles` never touches these. */
+export interface UserGroupRole {
+  id: string;
+  name: string;
+  displayName: string;
+  organizationId: string | null;
+  via: { kind: "group"; groupId: string };
+  group: { id: string; slug: string; name: string };
+}
+
+export interface UserRolesResponse {
+  userId: string;
+  /** Direct assignments only: the set the roles editor sends back. */
+  roles: UserRole[];
+  groupRoles?: UserGroupRole[];
+}
+
 export interface UserSession {
   id: string;
   clientId: string;

@@ -70,4 +70,6 @@ export interface RoleUser {
   organizationId: string | null;
   organization: OrgRef | null;
   expiresAt: string | null;
+  /** How the user holds the role; a group row is removed in the group. */
+  via?: { kind: "direct" } | { kind: "group"; groupId: string };
 }

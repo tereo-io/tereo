@@ -43,10 +43,25 @@ const users = [
   },
 ];
 
-const renderDetail = (data: Role) => {
-  authMock.axios.get.mockImplementation(async (url: string) => ({
-    data: String(url).endsWith("/users") ? { roleId: "r1", users } : data,
-  }));
+const groupRow = {
+  id: "u2",
+  email: "bob@example.com",
+  name: "Bob",
+  isActive: true,
+  organizationId: null,
+  organization: null,
+  expiresAt: null,
+  via: { kind: "group", groupId: "g1" },
+};
+
+const renderDetail = (data: Role, rows: object[] = users) => {
+  authMock.axios.get.mockImplementation(async (url: string) => {
+    const path = String(url);
+    if (path.endsWith("/users")) return { data: { roleId: "r1", users: rows } };
+    if (path === "/v1/admin/groups/g1")
+      return { data: { id: "g1", name: "Support" } };
+    return { data };
+  });
   render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={["/roles/r1"]}>
@@ -91,5 +106,16 @@ describe("RoleDetail", () => {
 
     expect(await screen.findByText("ada@example.com")).toBeVisible();
     expect(screen.getByTitle(/remove/i)).toBeInTheDocument();
+  });
+
+  it("shows a group-held row as via its group, with no remove control", async () => {
+    renderDetail(role, [{ ...users[0], via: { kind: "direct" } }, groupRow]);
+
+    expect(await screen.findByText("bob@example.com")).toBeVisible();
+    expect(
+      await screen.findByRole("link", { name: "Support" })
+    ).toHaveAttribute("href", "/auth-admin/groups/g1");
+    // Ada's direct row keeps its control; Bob's group row has none.
+    expect(screen.getAllByTitle(/remove/i)).toHaveLength(1);
   });
 });

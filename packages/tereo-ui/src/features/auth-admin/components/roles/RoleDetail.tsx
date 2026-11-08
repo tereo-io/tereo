@@ -13,6 +13,7 @@ import type { RoleUser } from "../../api/roles/types";
 import EditRoleButton from "./buttons/EditRoleButton";
 import { PageHeader } from "@/components/PageHeader";
 import { useParams, Link } from "react-router-dom";
+import useGroup from "../../api/groups/useGroup";
 import useRole from "../../api/roles/useRole";
 import { useAuth } from "@/lib/auth";
 import { useMemo } from "react";
@@ -31,6 +32,23 @@ import {
   TagCard,
   type TableColumn,
 } from "@kosmeo-ui/react";
+
+/** The group a user holds the role through; reading it needs `groups.read`. */
+const ViaGroup = ({ groupId }: { groupId: string }) => {
+  const { hasPermission } = useAuth();
+  const canRead = hasPermission("groups.read");
+  const { data: group } = useGroup(groupId, canRead);
+
+  if (!canRead) return <span>via group</span>;
+  return (
+    <span>
+      via{" "}
+      <Link to={`/auth-admin/groups/${groupId}`} className="v-link">
+        {group?.name ?? groupId}
+      </Link>
+    </span>
+  );
+};
 
 export const RoleDetail = () => {
   const { roleId } = useParams<{ roleId: string }>();
@@ -77,6 +95,15 @@ export const RoleDetail = () => {
         ),
       },
       {
+        title: "Via",
+        cellElement: (user) =>
+          user.via?.kind === "group" ? (
+            <ViaGroup groupId={user.via.groupId} />
+          ) : (
+            "direct"
+          ),
+      },
+      {
         title: "Scope",
         dataKey: "organizationId",
         cellElement: (user) =>
@@ -101,13 +128,15 @@ export const RoleDetail = () => {
         ? [
             {
               title: "Actions",
-              cellElement: (user: RoleUser) => (
-                <RemoveUserFromRoleButton
-                  roleId={id}
-                  roleDisplayName={role?.displayName || ""}
-                  user={user}
-                />
-              ),
+              // A group row goes by taking the user out of the group.
+              cellElement: (user: RoleUser) =>
+                user.via?.kind === "group" ? null : (
+                  <RemoveUserFromRoleButton
+                    roleId={id}
+                    roleDisplayName={role?.displayName || ""}
+                    user={user}
+                  />
+                ),
             },
           ]
         : []),
@@ -271,6 +300,11 @@ export const RoleDetail = () => {
               <Table<RoleUser>
                 rows={usersData?.users || []}
                 columns={userColumns}
+                rowKey={(u) =>
+                  `${u.id}:${u.organizationId ?? ""}:${
+                    u.via?.kind === "group" ? u.via.groupId : "direct"
+                  }`
+                }
                 emptyMessage="No users assigned to this role"
                 maxHeight="25rem"
               />

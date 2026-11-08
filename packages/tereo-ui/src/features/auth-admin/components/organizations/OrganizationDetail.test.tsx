@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OrganizationDetail } from "./OrganizationDetail";
-import { render, screen } from "@testing-library/react";
 import { authMock } from "@/test/authMock";
 
 vi.mock("@/lib/auth", async () =>
@@ -48,6 +48,31 @@ beforeEach(() => {
     if (url === "/v1/admin/organizations/o1/members") {
       return { data: { members: [] } };
     }
+    if (url.startsWith("/v1/admin/groups?")) {
+      return {
+        data: {
+          data: [
+            {
+              id: "g1",
+              organizationId: "o1",
+              slug: "support",
+              name: "Support",
+              description: null,
+              definitionSource: "local",
+              membershipSource: "local",
+              unprovisionedAt: null,
+              archivedAt: null,
+              createdAt: "2026-10-01T00:00:00Z",
+              updatedAt: "2026-10-01T00:00:00Z",
+              memberCount: 3,
+            },
+          ],
+          hasMore: false,
+          limit: 25,
+          nextCursor: null,
+        },
+      };
+    }
     throw new Error(`unexpected GET ${url}`);
   });
 });
@@ -90,5 +115,29 @@ describe("OrganizationDetail guest invites", () => {
     expect(
       await screen.findByRole("button", { name: "Invite Guest" })
     ).toBeVisible();
+  });
+});
+
+describe("OrganizationDetail groups", () => {
+  it("lists the organization's groups on the Groups tab", async () => {
+    authMock.permissions = ["organizations.read", "groups.read"];
+    renderDetail();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Groups" }));
+
+    expect(await screen.findByText("Support")).toBeVisible();
+    expect(
+      authMock.axios.get.mock.calls.some(([url]) =>
+        String(url).includes("organizationId=o1")
+      )
+    ).toBe(true);
+  });
+
+  it("hides the tab from someone who cannot read the groups", async () => {
+    authMock.permissions = ["organizations.read"];
+    renderDetail();
+
+    await screen.findByText("Organization Details");
+    expect(screen.queryByRole("tab", { name: "Groups" })).toBeNull();
   });
 });
