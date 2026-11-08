@@ -1,5 +1,5 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Group } from "../../api/groups/types";
@@ -39,7 +39,12 @@ const roles = [
   { id: "r1", name: "agent", displayName: "Agent", serviceId: null },
 ];
 
-const renderDetail = (data: Group) => {
+const renderDetail = (
+  data: Group,
+  held: object[] = roles,
+  allRoles: object[] = [],
+  pendingRoles = false
+) => {
   authMock.axios.get.mockImplementation(async (url: string) => {
     const path = String(url);
     if (path.endsWith("/members")) {
@@ -47,8 +52,13 @@ const renderDetail = (data: Group) => {
         data: { data: members, hasMore: false, limit: 50, nextCursor: null },
       };
     }
-    if (path.endsWith("/roles"))
-      return { data: { data: roles, nextCursor: null } };
+    if (path === "/v1/admin/roles") {
+      return { data: { data: allRoles, hasMore: false, nextCursor: null } };
+    }
+    if (path.endsWith("/roles")) {
+      if (pendingRoles) return new Promise(() => undefined);
+      return { data: { data: held, nextCursor: null } };
+    }
     return { data };
   });
   render(
@@ -125,5 +135,38 @@ describe("GroupDetail", () => {
     expect(await screen.findByTitle("Restore")).toBeVisible();
     expect(screen.getByRole("button", { name: "Add members" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
+  });
+
+  it("keeps a held archived role in the PUT when another role is ticked", async () => {
+    authMock.axios.put.mockResolvedValue({ data: {} });
+    renderDetail(
+      group,
+      [{ id: "r-old", name: "old", displayName: "Old", serviceId: null }],
+      [{ id: "r-new", name: "new", displayName: "New", isActive: true }]
+    );
+
+    fireEvent.click(await screen.findByRole("tab", { name: /^Roles/ }));
+    const edit = await screen.findByRole("button", { name: "Edit roles" });
+    await waitFor(() => expect(edit).toBeEnabled());
+    fireEvent.click(edit);
+    fireEvent.click(await screen.findByLabelText("New"));
+    expect(screen.getByLabelText(/Old \(archived/)).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save Roles" }));
+
+    await waitFor(() =>
+      expect(authMock.axios.put).toHaveBeenCalledWith(
+        "/v1/admin/groups/g1/roles",
+        { roleIds: ["r-new", "r-old"] }
+      )
+    );
+  });
+
+  it("disables Edit roles until the roles have loaded", async () => {
+    renderDetail(group, roles, [], true);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /^Roles/ }));
+    expect(
+      await screen.findByRole("button", { name: "Edit roles" })
+    ).toBeDisabled();
   });
 });

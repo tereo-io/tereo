@@ -41,7 +41,7 @@ export const GroupDetail = () => {
 
   const { data: group, isLoading } = useGroup(id);
   const membersQuery = useGroupMembers(id);
-  const { data: roles } = useGroupRoles(id);
+  const { data: roles, isSuccess: rolesLoaded } = useGroupRoles(id);
   const { canWrite } = useGroupAuthority(group);
   const [tab, setTab] = useState("members");
   const [showAdd, setShowAdd] = useState(false);
@@ -295,7 +295,7 @@ export const GroupDetail = () => {
                             <Button
                               size="sm"
                               variant="secondary"
-                              disabled={provisioned || archived}
+                              disabled={provisioned || archived || !rolesLoaded}
                               onClick={() => setShowRoles(true)}
                             >
                               Edit roles
@@ -330,11 +330,11 @@ export const GroupDetail = () => {
         onAdd={() => setShowAdd(false)}
         onClose={() => setShowAdd(false)}
       />
-      {showRoles && (
+      {showRoles && roles && (
         <GroupRolesModal
           groupId={id}
           organizational={!!group.organizationId}
-          currentRoles={roles ?? []}
+          currentRoles={roles}
           show
           onClose={() => setShowRoles(false)}
         />
