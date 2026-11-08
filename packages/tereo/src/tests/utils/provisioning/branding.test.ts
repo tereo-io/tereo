@@ -26,7 +26,7 @@ import {
   BRANDING_URL,
   brandingPrincipal,
   deleteDefaultProfile,
-  noDefaultProfile,
+  clearDefaultProfile,
 } from "../../support/branding.js";
 
 const PNG = Buffer.from(
@@ -253,7 +253,8 @@ describe("provisioned branding", () => {
       (await prisma.brandingProfile.findFirst({
         where: { clientId: consoleClient.id },
       }));
-    if (!consoleClient || existing || !(await noDefaultProfile())) ctx.skip();
+    if (!consoleClient || existing) ctx.skip();
+    await clearDefaultProfile();
 
     const getConsole = async (done: (html: string) => boolean) => {
       const get = () =>

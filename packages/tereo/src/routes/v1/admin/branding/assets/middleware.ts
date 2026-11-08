@@ -1,4 +1,6 @@
+import { assertMayEditSomeBranding } from "../../../../../utils/branding/access.js";
 import { imageMaxBytes } from "../../../../../utils/branding/images.js";
+import { validateUser } from "../../../../../utils/auth.js";
 import { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import {
@@ -49,4 +51,19 @@ export const handleMulterErrors = (
       )
     );
   });
+};
+
+// Before multer reads the body, so a caller who could never use the image
+// is refused without the upload being buffered.
+export const requireBrandingEditor = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    await assertMayEditSomeBranding(validateUser(req));
+    next();
+  } catch (err) {
+    next(err);
+  }
 };

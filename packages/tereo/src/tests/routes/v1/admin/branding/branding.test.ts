@@ -11,7 +11,7 @@ import {
   deleteBrandingClients,
   deleteDefaultProfile,
   grantBranding,
-  noDefaultProfile,
+  clearDefaultProfile,
 } from "../../../../support/branding.js";
 
 type Principal = Awaited<ReturnType<typeof brandingPrincipal>>;
@@ -20,7 +20,6 @@ describe("GET /v1/admin/branding", () => {
   let user: Principal;
   let writer: Principal;
   let admin: Principal;
-  let ownedDefault = false;
   const ids = {} as Record<
     | "owned"
     | "granted"
@@ -63,17 +62,15 @@ describe("GET /v1/admin/branding", () => {
     for (const key of ["owned", "granted", "revoked", "other"] as const) {
       await brand(ids[key]);
     }
-    ownedDefault = await noDefaultProfile();
-    if (ownedDefault) {
-      await prisma.brandingProfile.create({
-        data: { clientId: null, appName: "Default", updatedBy: SYSTEM_USER_ID },
-      });
-    }
+    await clearDefaultProfile();
+    await prisma.brandingProfile.create({
+      data: { clientId: null, appName: "Default", updatedBy: SYSTEM_USER_ID },
+    });
   });
 
   afterAll(async () => {
     await deleteBrandingClients(Object.values(ids));
-    if (ownedDefault) await deleteDefaultProfile();
+    await deleteDefaultProfile();
   });
 
   it("lists only the branded clients a non-admin owns or holds an active grant on, and no default", async () => {

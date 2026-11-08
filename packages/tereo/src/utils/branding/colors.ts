@@ -2,15 +2,18 @@ import { BRANDING_COLOR_TOKENS } from "../../definitions/brandingTokens.js";
 import { z } from "zod";
 
 const HEX = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
-const FUNCTIONAL = /^(?:rgba?|hsla?|oklch)\(([0-9.%deg ,/]+)\)$/;
+// A signed number, optionally followed by % or deg; hue angles may be negative.
+const ARG = String.raw`[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:%|deg)?`;
+const FUNCTIONAL = new RegExp(
+  String.raw`^(?:rgba?|hsla?|oklch)\( ?${ARG}(?:(?: ?[,/] ?| +)${ARG})* ?\)$`
+);
 const MAX_VALUE_LENGTH = 64;
 
 // Whole-string match, so nothing can close the declaration or the rule.
 export function isSafeColorValue(value: string): boolean {
   if (value.length === 0 || value.length > MAX_VALUE_LENGTH) return false;
   if (HEX.test(value)) return true;
-  const match = FUNCTIONAL.exec(value);
-  return match !== null && /[0-9]/.test(match[1]);
+  return FUNCTIONAL.test(value);
 }
 
 const TOKENS = new Set(BRANDING_COLOR_TOKENS);

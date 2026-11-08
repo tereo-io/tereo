@@ -7,26 +7,24 @@ import {
   BRANDING_URL,
   brandingPrincipal,
   deleteDefaultProfile,
-  noDefaultProfile,
+  clearDefaultProfile,
 } from "../../../../../support/branding.js";
 
 const url = `${BRANDING_URL}/default`;
 
 describe("/v1/admin/branding/default", () => {
   let admin: Awaited<ReturnType<typeof brandingPrincipal>>;
-  let owned = false;
 
   beforeAll(async () => {
     admin = await brandingPrincipal(["branding.admin"]);
-    owned = await noDefaultProfile();
+    await clearDefaultProfile();
   });
 
   afterAll(async () => {
-    if (owned) await deleteDefaultProfile();
+    await deleteDefaultProfile();
   });
 
-  it("lets a branding.admin save, read and delete the default", async (ctx) => {
-    if (!owned) ctx.skip();
+  it("lets a branding.admin save, read and delete the default", async () => {
     const put = await fetchJson("PUT", url, admin.token, {
       appName: "Everyone",
     });

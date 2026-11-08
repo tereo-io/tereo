@@ -30,8 +30,8 @@ name, logos, favicon, colours, layout, background and footer links and keep thei
 **Colours.** The keys are the 51 `--k-*` custom properties of `@kosmeo-ui/react` whose name has
 `color` or `shadow` (`src/definitions/brandingTokens.ts`; a conventions test keeps it equal to the
 installed stylesheet). A value is `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, or `rgb()`, `rgba()`,
-`hsl()`, `hsla()`, `oklch()` holding only numbers, `%`, `deg`, spaces, commas, `/` and `.`, at most
-64 characters. Values are written into an injected `<style>`, so nothing else is accepted: no
+`hsl()`, `hsla()`, `oklch()` holding only numbers (optionally signed, so a hue may be negative, each
+optionally followed by `%` or `deg`) separated by spaces, commas or `/`, at most 64 characters. Values are written into an injected `<style>`, so nothing else is accepted: no
 `var()`, `url()`, keywords, comments, quotes or `;{}`.
 
 ## Inheritance
@@ -115,8 +115,10 @@ them); `admin` includes the other two.
 | Default profile | `branding.admin` | `branding.admin` |
 | A client's grants | `branding.read` (list) and (owner or `branding.admin`) | `branding.write` (add, revoke) and (owner or `branding.admin`) |
 
-Uploading needs `branding.write`; the image belongs to nothing until a profile the caller may edit
-references it. `GET /v1/admin/branding` lists the default (for `branding.admin`), the clients
+Uploading needs `branding.write` and the right to edit at least one profile (`branding.admin`, or
+owner of or active grantee on a client other than the console client), else `403`; the image
+belongs to nothing until a profile the caller may edit references it. A new image writes a
+`CREATE object` audit entry. `GET /v1/admin/branding` lists the default (for `branding.admin`), the clients
 with a profile the caller may read, and `brandable`: the clients with no profile yet that the caller
 may start one on (owned or actively granted with `branding.write`; every one for `branding.admin`).
 `tereo-ui` is listed only for `branding.admin`. A profile's `GET` says what the caller may do:
@@ -127,7 +129,8 @@ document's file name as `provisionedFrom`, for everyone, `branding.admin` includ
 last-write-wins. Each mutation writes an audit entry and emits `auth.branding.updated` (with the
 slots changed) or `auth.branding.deleted`; a profile released from provisioning emits
 `auth.branding.updated` with `changedSlots: []` and `released: true`. Grants emit `auth.branding.grant-added` and
-`auth.branding.grant-revoked`. Reading these events needs `branding.read`.
+`auth.branding.grant-revoked`. Reading the grant events needs `branding.admin`
+(they name who may edit which client); `updated` and `deleted` need `branding.read`.
 
 ## Grants
 

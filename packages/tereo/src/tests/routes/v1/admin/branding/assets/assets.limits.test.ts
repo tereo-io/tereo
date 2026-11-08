@@ -20,7 +20,7 @@ describe("POST /v1/admin/branding/assets limits", () => {
   let token: string;
 
   beforeAll(async () => {
-    token = (await brandingPrincipal(["branding.write"])).token;
+    token = (await brandingPrincipal(["branding.admin"])).token;
   });
 
   it("refuses a logo over 512 KB", async () => {

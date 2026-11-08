@@ -1,9 +1,15 @@
 // @module-tag int
 // @module-tag auth
-import { brandingPrincipal } from "../../../../../support/branding.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { prisma } from "../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../support/coreUrl.js";
-import { beforeAll, describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
+import {
+  brandingPrincipal,
+  createBrandingClient,
+  deleteBrandingClients,
+  grantBranding,
+} from "../../../../../support/branding.js";
 
 type Principal = Awaited<ReturnType<typeof brandingPrincipal>>;
 
@@ -34,9 +40,15 @@ const upload = async (
 
 describe("POST /v1/admin/branding/assets", () => {
   let writer: Principal;
+  const clientIds: string[] = [];
 
   beforeAll(async () => {
     writer = await brandingPrincipal(["branding.write"]);
+    clientIds.push((await createBrandingClient(writer.userId)).id);
+  });
+
+  afterAll(async () => {
+    await deleteBrandingClients(clientIds);
   });
 
   describe("validation", () => {
@@ -103,6 +115,46 @@ describe("POST /v1/admin/branding/assets", () => {
       const reader = await brandingPrincipal(["branding.read"]);
       const res = await upload(reader.token, PNG, "logo");
       expect(res.status).toBe(403);
+    });
+
+    it("refuses branding.write without a client to edit", async () => {
+      const nobody = await brandingPrincipal(["branding.write"]);
+      const res = await upload(nobody.token, PNG, "logo");
+      expect(res.status).toBe(403);
+    });
+
+    it("refuses a revoked grant and the owner of no client", async () => {
+      const stranger = await brandingPrincipal([]);
+      const client = await createBrandingClient(stranger.userId);
+      clientIds.push(client.id);
+      const revoked = await brandingPrincipal(["branding.write"]);
+      await grantBranding(client.id, revoked.userId, true);
+      const res = await upload(revoked.token, PNG, "logo");
+      expect(res.status).toBe(403);
+    });
+
+    it("allows an active grantee, an owner and a branding.admin", async () => {
+      const owner = await brandingPrincipal([]);
+      const client = await createBrandingClient(owner.userId);
+      clientIds.push(client.id);
+      const grantee = await brandingPrincipal(["branding.write"]);
+      await grantBranding(client.id, grantee.userId);
+      const admin = await brandingPrincipal(["branding.admin"]);
+      for (const p of [grantee, writer, admin]) {
+        const png = Buffer.concat([PNG, randomBytes(16)]);
+        expect((await upload(p.token, png, "logo")).status).toBe(201);
+      }
+    });
+
+    it("writes an audit entry for a new image", async () => {
+      const png = Buffer.concat([PNG, randomBytes(16)]);
+      const res = await upload(writer.token, png, "logo");
+      expect(res.status).toBe(201);
+      const key = `${res.body.sha256}.png`;
+      const entry = await prisma.auditLogEntry.findFirst({
+        where: { entityType: "object", entityName: key, action: "CREATE" },
+      });
+      expect(entry).not.toBeNull();
     });
 
     it("refuses a request without a token", async () => {

@@ -11,7 +11,7 @@ import {
   createBrandingClient,
   deleteBrandingClients,
   deleteDefaultProfile,
-  noDefaultProfile,
+  clearDefaultProfile,
   storeTestImage,
 } from "../../../../../../support/branding.js";
 
@@ -125,8 +125,8 @@ describe("/v1/admin/branding/clients/:id", () => {
     expect(get.body.sources.appName).not.toBe("client");
   });
 
-  it("reports what the client inherits beneath its own values", async (ctx) => {
-    if (!(await noDefaultProfile())) ctx.skip();
+  it("reports what the client inherits beneath its own values", async () => {
+    await clearDefaultProfile();
     const client = await newClient();
     await prisma.brandingProfile.create({
       data: { clientId: null, appName: "Default", updatedBy: SYSTEM_USER_ID },

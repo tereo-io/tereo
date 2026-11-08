@@ -3985,8 +3985,8 @@ BrandingColors:
   description: |
     Colour variables of `@kosmeo-ui/react` (`--k-*`, 51 of them: every custom property whose name has
     `color` or `shadow`) to a colour value. A value is `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, or
-    `rgb()`, `rgba()`, `hsl()`, `hsla()` or `oklch()` with only numbers, `%`, `deg`, spaces, commas, `/`
-    and `.`, at most 64 characters. Anything else, including `var()`, `url()` and keywords, is refused.
+    `rgb()`, `rgba()`, `hsl()`, `hsla()` or `oklch()` holding only numbers (optionally signed, each
+    optionally followed by `%` or `deg`) separated by spaces, commas or `/`, at most 64 characters. Anything else, including `var()`, `url()` and keywords, is refused.
   propertyNames:
     pattern: '^--k-[a-z0-9-]+$'
   additionalProperties:

@@ -80,6 +80,27 @@ export const assertMayManageGrants = (
   }
 };
 
+/**
+ * Whether the caller may edit at least one client's profile: what an image
+ * upload needs, since the image is useless to anyone who cannot reference it.
+ */
+export const assertMayEditSomeBranding = async (user: BrandingUser) => {
+  if (!hasPermission(user.permissions, PERMISSIONS.BRANDING.WRITE)) {
+    throw new ForbiddenError(
+      `The following permission is required: ${PERMISSIONS.BRANDING.WRITE}`
+    );
+  }
+  if (isBrandingAdmin(user)) return;
+  if (
+    await db.brandingProfiles.hasEditableClient(user.userId, CONSOLE_CLIENT_ID)
+  ) {
+    return;
+  }
+  throw new ForbiddenError(
+    "Only a branding.admin, or the owner of or a user granted branding on a client, can upload branding images"
+  );
+};
+
 export const assertBrandingAdmin = (user: BrandingUser) => {
   if (!isBrandingAdmin(user)) {
     throw new ForbiddenError(

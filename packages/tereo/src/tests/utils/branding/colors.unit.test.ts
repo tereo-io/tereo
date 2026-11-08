@@ -18,6 +18,10 @@ describe("isSafeColorValue", () => {
     "hsl(150deg 100% 37%)",
     "hsla(150, 100%, 37%, .5)",
     "oklch(0.7 0.18 150 / 50%)",
+    "oklch(0.6 0.2 -30)",
+    "hsl(-10 50% 50%)",
+    "hsl(-10deg, 50%, 50%)",
+    "rgb(+1 2 3)",
   ])("accepts %s", (v) => expect(isSafeColorValue(v)).toBe(true));
 
   it.each([
@@ -34,6 +38,13 @@ describe("isSafeColorValue", () => {
     "",
     "rgb(1,2,3)}",
     "rgb()",
+    "rgb(e)",
+    "rgb(deg)",
+    "rgb(1e3 2 3)",
+    "rgb(--1 2 3)",
+    "rgb(1 2 3 /)",
+    "rgb(1,,2)",
+    "rgb(-)",
     `#${"0".repeat(70)}`,
   ])("rejects %s", (v) => expect(isSafeColorValue(v)).toBe(false));
 });

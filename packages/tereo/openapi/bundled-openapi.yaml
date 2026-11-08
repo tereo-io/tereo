@@ -9234,7 +9234,7 @@ paths:
         Needs `branding.write`, and the caller must own the client or hold `branding.admin`. `tereo-ui` takes no
         grants (`403`). The grantee needs `branding.write` themselves to use it. A deactivated user is
         `400 user_inactive`; an unknown user `404`; a user who already holds an active grant `409 conflict`.
-        An audit log entry is created and `auth.branding.grant-added` is emitted.
+        An audit log entry is created and `auth.branding.grant-added` is emitted (webhook subscribers need `branding.admin` to read it).
       operationId: addBrandingGrant
       security:
         - BearerAuth:
@@ -9282,7 +9282,7 @@ paths:
       description: |
         Needs `branding.write`, and the caller must own the client or hold `branding.admin`. Ends the grant
         (recording who and when). `404` when the user holds no active grant. An audit log entry is created and
-        `auth.branding.grant-revoked` is emitted.
+        `auth.branding.grant-revoked` is emitted (webhook subscribers need `branding.admin` to read it).
       operationId: revokeBrandingGrant
       security:
         - BearerAuth:
@@ -9311,7 +9311,8 @@ paths:
         - Admin - Branding
       summary: Upload a branding image
       description: |
-        Needs `branding.write`. Stores one image for a slot and answers its `sha256`, which a profile then
+        Needs `branding.write` and the right to edit at least one profile: `branding.admin`, or owner of (or
+        active grantee on) a client other than the console client; otherwise `403`. Stores one image for a slot and answers its `sha256`, which a profile then
         references. The image belongs to no profile until one the caller may edit references it; an
         unreferenced image is deleted after 24 hours. Uploading the same bytes again reuses the stored image.
 
@@ -9322,7 +9323,7 @@ paths:
         | `background` | PNG, WebP, JPEG | `BRANDING_BACKGROUND_MAX_SIZE_MB` (5 MB) |
 
         The type is detected from the bytes, not the file name or header. An SVG outside the allowlist
-        (a fixed element set; no `<style>`, `<script>` or `<foreignObject>`, event attributes, external
+        (a fixed element set; no style, script or foreignObject elements, event attributes, external
         references, `data:` or `javascript:`) is rejected, never rewritten, so what is stored is what was
         uploaded: `400 invalid_branding_image`. No file is
         `400 file_upload_required`; more than one file or an unexpected field is `400 invalid_request`; over the
@@ -30410,8 +30411,8 @@ components:
       description: |
         Colour variables of `@kosmeo-ui/react` (`--k-*`, 51 of them: every custom property whose name has
         `color` or `shadow`) to a colour value. A value is `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, or
-        `rgb()`, `rgba()`, `hsl()`, `hsla()` or `oklch()` with only numbers, `%`, `deg`, spaces, commas, `/`
-        and `.`, at most 64 characters. Anything else, including `var()`, `url()` and keywords, is refused.
+        `rgb()`, `rgba()`, `hsl()`, `hsla()` or `oklch()` holding only numbers (optionally signed, each
+        optionally followed by `%` or `deg`) separated by spaces, commas or `/`, at most 64 characters. Anything else, including `var()`, `url()` and keywords, is refused.
       propertyNames:
         pattern: ^--k-[a-z0-9-]+$
       additionalProperties:

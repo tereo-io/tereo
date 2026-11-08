@@ -96,6 +96,24 @@ export const listBrandableClients = async (
   });
 };
 
+/** Whether the user owns, or actively holds a grant on, any client but the excluded one. */
+export const hasEditableClient = async (
+  userId: string,
+  excludeClientId: string
+) => {
+  const found = await prisma.oAuthClient.findFirst({
+    where: {
+      clientId: { not: excludeClientId },
+      OR: [
+        { ownerId: userId },
+        { brandingGrants: { some: { userId, revokedAt: null } } },
+      ],
+    },
+    select: { id: true },
+  });
+  return found !== null;
+};
+
 /** Create or replace the profile for the target. Call `lockForWrite` first in the same transaction. */
 export const upsert = async (
   target: BrandingTarget,

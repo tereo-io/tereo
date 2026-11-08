@@ -70,14 +70,12 @@ export const storeTestImage = async (
   return { ...stored, sha256: image.sha256 };
 };
 
-/**
- * True when there is no default profile, so the calling file may create and
- * delete one. A pre-existing default is never touched and
- * the tests that need to own it skip.
- */
-export const noDefaultProfile = async () =>
-  !(await prisma.brandingProfile.findFirst({ where: { clientId: null } }));
-
 export const deleteDefaultProfile = async () => {
   await prisma.brandingProfile.deleteMany({ where: { clientId: null } });
 };
+
+/**
+ * The test database is the tests' own, so a default left by an earlier run or
+ * file is removed rather than the default-profile tests skipping around it.
+ */
+export const clearDefaultProfile = deleteDefaultProfile;

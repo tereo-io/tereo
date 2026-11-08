@@ -18,7 +18,7 @@ import {
 // Daily — start the expiry clock on branding images no profile references.
 // Deleting a client cascades its profile away without releasing its images,
 // and this is what lets the per-object TTL sweep remove them.
-const BRANDING_RECONCILE_QUEUE = "core-branding-reconcile";
+export const BRANDING_RECONCILE_QUEUE = "core-branding-reconcile";
 const JOB_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /** Returns how many objects were marked. */

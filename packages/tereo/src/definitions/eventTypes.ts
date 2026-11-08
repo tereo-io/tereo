@@ -427,7 +427,7 @@ const notificationEvents: EventTypeDefinition[] = [
 ];
 
 // The permission that reads what an event carries, by event-type prefix; the
-// first match wins. Platform-wide events are emitted under the default
+// first match wins, so a narrower prefix goes before the one it sits under. Platform-wide events are emitted under the default
 // organization, so without these any member of it allowed to manage webhooks
 // would receive every user, client and service change. File events are also
 // checked against the bucket they name (`utils/webhookAccess.ts`).
@@ -437,6 +437,7 @@ const READ_PERMISSIONS: [prefix: string, permission: string][] = [
   ["auth.user.", "users.read"],
   ["auth.role.", "roles.read"],
   ["auth.client.", "clients.read"],
+  ["auth.branding.grant-", "branding.admin"],
   ["auth.branding.", "branding.read"],
   ["auth.settings.", "settings.read"],
   ["auth.identity-provider.", "identity-providers.read"],
