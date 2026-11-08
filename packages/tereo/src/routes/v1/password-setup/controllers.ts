@@ -2,42 +2,70 @@ import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js"
 import { PASSWORD_LINK_PURPOSES } from "../../../utils/db/userLinkTokens.js";
 import { recordSessionsRevoked } from "../../../utils/sessionEvents.js";
 import { passwordSetupFailure } from "../../../middleware/rateLimit.js";
-import { UserType } from "../../../../prisma/generated/client/index.js";
 import { hashPassword, hashFlowToken } from "../../../utils/crypto.js";
+import { canResetPassword } from "../../../utils/passwordReset.js";
+import { markEmailVerified } from "../../../utils/userLinks.js";
 import { emitTx, logAuditTx } from "../../../utils/outbox.js";
 import { endUserSessions } from "../../../utils/sessions.js";
 import { validateBody } from "../../../utils/validateReq.js";
 import { isUsableAccount } from "../../../utils/users.js";
 import { NotFoundError } from "../../../utils/errors.js";
+import { emailDomain } from "../../../utils/email.js";
 import { SetPasswordSchema } from "./schemas.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
+import {
+  UserType,
+  type Prisma,
+} from "../../../../prisma/generated/client/index.js";
 
-/**
- * Setup links are for guests: once promoted, the account is a regular user's,
- * and a link the inviter saw must not reach it.
- */
-const isSettable = (user: {
+type PasswordLinkPurpose = (typeof PASSWORD_LINK_PURPOSES)[number];
+
+type LinkUser = {
+  email: string;
   isActive: boolean;
   expiresAt: Date | null;
   userType: UserType;
-}) => isUsableAccount(user) && user.userType === UserType.guest;
+};
+
+/**
+ * Whether a link of the purpose still reaches the user. Setup links are for
+ * guests: once promoted, the account is a regular user's, and a link the
+ * inviter saw must not reach it. Reset links reach any account a reset may
+ * be sent for, which includes the SSO-only rule.
+ */
+const isRedeemable = async (
+  purpose: PasswordLinkPurpose,
+  user: LinkUser,
+  tx?: Prisma.TransactionClient
+) => {
+  if (purpose === "setup") {
+    return isUsableAccount(user) && user.userType === UserType.guest;
+  }
+  const domain = await db.identityProviders.findDomain(
+    emailDomain(user.email),
+    tx
+  );
+  return canResetPassword(user, domain?.ssoOnly ?? false);
+};
 
 /**
  * The live token and its user, or the one 404 every miss gets: unknown, used
- * or expired token, and a user no longer usable or no longer a guest, so a
- * probe learns nothing. A miss counts against the caller's IP.
+ * or expired token, and a user the link no longer reaches, so a probe learns
+ * nothing. A miss counts against the caller's IP.
  */
 export const findUsableSetupToken = async (req: Request, token: string) => {
   const found = await db.userLinkTokens.findLiveByHash(
     hashFlowToken(token),
     PASSWORD_LINK_PURPOSES
   );
-  if (!found || !isSettable(found.user)) {
+  // The lookup is limited to the password purposes.
+  const purpose = found?.purpose as PasswordLinkPurpose | undefined;
+  if (!found || !purpose || !(await isRedeemable(purpose, found.user))) {
     await passwordSetupFailure.recordFailure(req);
     throw new NotFoundError("Not found");
   }
-  return found;
+  return { ...found, purpose };
 };
 
 /**
@@ -48,7 +76,7 @@ export const findUsableSetupToken = async (req: Request, token: string) => {
 export const setPassword = async (req: Request, res: Response) => {
   const { token, password } = validateBody(SetPasswordSchema, req);
   await passwordSetupFailure.assertUnderLimit(req);
-  const { id: tokenId, user } = await findUsableSetupToken(req, token);
+  const { id: tokenId, user, purpose } = await findUsableSetupToken(req, token);
   const passwordHash = await hashPassword(password);
   const recordRevoked = recordSessionsRevoked(
     { userId: user.id, email: user.email },
@@ -59,11 +87,11 @@ export const setPassword = async (req: Request, res: Response) => {
     user.id,
     null,
     async (tx, sessionIds, ssoSessionIds) => {
-      // The user's row is locked: a deactivation, expiry or promotion since
-      // the lookup shows here.
+      // The user's row is locked: a deactivation, expiry, promotion or
+      // SSO-only domain since the lookup shows here.
       const current = await db.users.get(user.id, tx);
       if (
-        !isSettable(current) ||
+        !(await isRedeemable(purpose, current, tx)) ||
         !(await db.userLinkTokens.consume(tokenId, tx))
       ) {
         await passwordSetupFailure.recordFailure(req);
@@ -83,15 +111,19 @@ export const setPassword = async (req: Request, res: Response) => {
         entityType: "User",
         entityId: user.id,
         entityName: user.email,
-        metadata: { action: "password_set_from_link" },
+        metadata: { action: "password_set_from_link", via: purpose },
       });
       await emitTx(tx, {
         organizationId: getDefaultOrganizationId(),
         eventType: "auth.user.password-set",
         entityType: "User",
         entityId: user.id,
-        data: { userId: user.id, email: user.email },
+        data: { userId: user.id, email: user.email, via: purpose },
       });
+      // The link went to the user's current address: an email change retires it.
+      await markEmailVerified(tx, { userId: user.id, via: "password_link" });
+      // A grant from a sign-in with the old password must not outlive it.
+      await db.passwordChangeGrants.deleteForUser(user.id, tx);
       await recordRevoked(tx, sessionIds, ssoSessionIds);
     }
   );

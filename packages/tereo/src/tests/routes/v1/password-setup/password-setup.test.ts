@@ -71,11 +71,15 @@ const createGuest = async (over: { expiresAt?: Date | null } = {}) => {
   });
 };
 
-const issue = async (userId: string, notify = false) => {
+const issue = async (
+  userId: string,
+  notify = false,
+  purpose: "setup" | "reset" = "setup"
+) => {
   const { url } = await prisma.$transaction((tx) =>
     issuePasswordLink(tx, {
       userId,
-      purpose: "setup",
+      purpose,
       createdBy: SYSTEM_USER_ID,
       notify,
     })
@@ -125,8 +129,19 @@ describe("password setup", () => {
           email: guest.email,
           name: guest.name,
           expiresAt: expiresAt.toISOString(),
+          purpose: "setup",
         });
       }
+    });
+
+    it("returns the purpose", async () => {
+      const guest = await createGuest();
+      expect((await inspect(await issue(guest.id))).data.purpose).toBe("setup");
+
+      const user = await createTestUser();
+      const res = await inspect(await issue(user.id, false, "reset"));
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      expect(res.data.purpose).toBe("reset");
     });
   });
 
@@ -285,6 +300,166 @@ describe("password setup", () => {
         expect((await bad()).status).toBe(HTTP_STATUS.NOT_FOUND);
       }
       expect((await bad()).status).toBe(429);
+    });
+  });
+
+  describe("reset links", () => {
+    const passwordSetAudits = async (userId: string) =>
+      (
+        await prisma.auditLogEntry.findMany({
+          where: { entityId: userId, entityType: "User" },
+        })
+      )
+        .map((e) => e.metadata as { action: string; via?: string })
+        .filter((m) => m.action === "password_set_from_link");
+
+    const eventsOf = async (userId: string, eventType: string) =>
+      (await prisma.outbox.findMany({ where: { destination: "webhook" } }))
+        .map(
+          (r) =>
+            r.payload as {
+              eventType: string;
+              entityId: string;
+              data: { via: string };
+            }
+        )
+        .filter((p) => p.eventType === eventType && p.entityId === userId);
+
+    it("sets a regular user's password; a setup link still refuses one", async () => {
+      const user = await createTestUser();
+      const setup = await issue(user.id, false, "setup");
+      expect((await setPassword(setup)).status).toBe(HTTP_STATUS.NOT_FOUND);
+      expect((await inspect(setup)).status).toBe(HTTP_STATUS.NOT_FOUND);
+
+      const reset = await issue(user.id, false, "reset");
+      expect((await setPassword(reset)).status).toBe(HTTP_STATUS.NO_CONTENT);
+      const tokens = await loginAndExchange(
+        client,
+        { email: user.email, plainPassword: NEW_PASSWORD },
+        REDIRECT_URI,
+        SCOPE
+      );
+      expect(tokens.access_token).toBeTruthy();
+    });
+
+    it("is 404 once the user's domain became SSO-only", async () => {
+      const id = randomBytes(5).toString("hex");
+      const domain = `sso-${id}.test`;
+      const user = await createTestUser({ email: `u-${id}@${domain}` });
+      const token = await issue(user.id, false, "reset");
+      expect((await inspect(token)).status).toBe(HTTP_STATUS.OK);
+
+      const provider = await prisma.identityProvider.create({
+        data: {
+          slug: `p-${id}`,
+          displayName: "P",
+          kind: "oidc",
+          issuer: "https://idp.test",
+          clientId: "c",
+          clientSecret: "s",
+          createdBy: SYSTEM_USER_ID,
+        },
+      });
+      try {
+        await prisma.identityProviderDomain.create({
+          data: {
+            providerId: provider.id,
+            domain,
+            organizationId: (await prisma.organization.findFirstOrThrow()).id,
+            ssoOnly: true,
+            createdBy: SYSTEM_USER_ID,
+          },
+        });
+
+        expect((await inspect(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
+        expect((await setPassword(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
+        const after = await prisma.user.findUniqueOrThrow({
+          where: { id: user.id },
+        });
+        expect(after.passwordHash).toBe(user.passwordHash);
+      } finally {
+        await prisma.identityProviderDomain.deleteMany({
+          where: { providerId: provider.id },
+        });
+        await prisma.identityProvider.delete({ where: { id: provider.id } });
+      }
+    });
+
+    it("is 404 for a user deactivated or expired after the link was issued", async () => {
+      const deactivated = await createTestUser();
+      const deactivatedToken = await issue(deactivated.id, false, "reset");
+      await prisma.user.update({
+        where: { id: deactivated.id },
+        data: { isActive: false },
+      });
+      const lapsed = await createGuest();
+      const lapsedToken = await issue(lapsed.id, false, "reset");
+      await prisma.user.update({
+        where: { id: lapsed.id },
+        data: { expiresAt: new Date(Date.now() - 1000) },
+      });
+
+      for (const token of [deactivatedToken, lapsedToken]) {
+        expect((await inspect(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
+        expect((await setPassword(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
+      }
+    });
+
+    it("refuses a reset link for a service account", async () => {
+      const user = await createTestUser();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { userType: "service_account" },
+      });
+      const token = await issue(user.id, false, "reset");
+      expect((await setPassword(token)).status).toBe(HTTP_STATUS.NOT_FOUND);
+    });
+
+    it("marks the email verified on redeem", async () => {
+      const user = await createTestUser({ emailVerified: false });
+      const token = await issue(user.id, false, "reset");
+
+      expect((await setPassword(token)).status).toBe(HTTP_STATUS.NO_CONTENT);
+
+      const after = await prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+      });
+      expect(after.emailVerifiedAt).not.toBeNull();
+      const events = await eventsOf(user.id, "auth.user.email-verified");
+      expect(events).toHaveLength(1);
+      expect(events[0].data.via).toBe("password_link");
+    });
+
+    it("leaves an already verified email's timestamp alone", async () => {
+      const user = await createTestUser();
+      const token = await issue(user.id, false, "reset");
+
+      expect((await setPassword(token)).status).toBe(HTTP_STATUS.NO_CONTENT);
+
+      const after = await prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+      });
+      expect(after.emailVerifiedAt).toEqual(user.emailVerifiedAt);
+      expect(await eventsOf(user.id, "auth.user.email-verified")).toHaveLength(
+        0
+      );
+    });
+
+    it("carries via on the password-set event and its audit entry", async () => {
+      const user = await createTestUser();
+      const guest = await createGuest();
+
+      await setPassword(await issue(user.id, false, "reset"));
+      await setPassword(await issue(guest.id, false, "setup"));
+
+      expect((await passwordSetAudits(user.id))[0].via).toBe("reset");
+      expect((await passwordSetAudits(guest.id))[0].via).toBe("setup");
+      expect(
+        (await eventsOf(user.id, "auth.user.password-set"))[0].data.via
+      ).toBe("reset");
+      expect(
+        (await eventsOf(guest.id, "auth.user.password-set"))[0].data.via
+      ).toBe("setup");
     });
   });
 
