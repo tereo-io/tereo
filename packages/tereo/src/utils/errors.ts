@@ -519,6 +519,13 @@ export class InsufficientStorageError extends AppError {
   }
 }
 
+export class UriTooLongError extends AppError {
+  constructor(message = "Request URL too long") {
+    super(414, "uri_too_long", message);
+    this.name = "UriTooLongError";
+  }
+}
+
 export class PayloadTooLargeError extends AppError {
   constructor(message: string) {
     super(413, "payload_too_large", message);

@@ -4,6 +4,7 @@ import { authRequestLog } from "./middleware/authRequestLog.js";
 import { rateLimitPreflight } from "./middleware/rateLimit.js";
 import { bucketCors } from "./middleware/bucketCors.js";
 import { requestDeadline } from "./utils/httpServer.js";
+import { uriLength } from "./middleware/uriLength.js";
 import { apiCors } from "./middleware/apiCors.js";
 import routes from "./routes/index.js";
 import express from "express";
@@ -28,6 +29,8 @@ const trustProxy = /^\d+$/.test(env.TRUST_PROXY)
       : env.TRUST_PROXY;
 app.set("trust proxy", trustProxy);
 
+// First: everything after it reads the URL.
+app.use(uriLength);
 app.use(createRequestIdMiddleware());
 app.use(requestDeadline());
 

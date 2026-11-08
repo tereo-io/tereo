@@ -87,4 +87,12 @@ describe("isBrandedAuthPath", () => {
   ])("leaves %s unbranded", (path) =>
     expect(isBrandedAuthPath(path)).toBe(false)
   );
+
+  it("checks a long run of slashes that is not at the end in linear time", () => {
+    const path = `/login${"/".repeat(200_000)}x`;
+    const started = performance.now();
+    expect(isBrandedAuthPath(path)).toBe(true);
+    expect(isBrandedAuthPath(`/x${"/".repeat(200_000)}x`)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
 });

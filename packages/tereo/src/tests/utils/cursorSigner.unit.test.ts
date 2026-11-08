@@ -68,5 +68,14 @@ describe("createCursorSigner", () => {
     expect(requestPath("/admin/users/?limit=5")).toBe("/admin/users");
     expect(requestPath("/admin/users")).toBe("/admin/users");
     expect(requestPath("/")).toBe("/");
+    expect(requestPath("//?x=1")).toBe("/");
+    expect(requestPath("/a//")).toBe("/a");
+  });
+
+  it("normalizes a long run of slashes that is not at the end in linear time", () => {
+    const path = `/a${"/".repeat(200_000)}b`;
+    const started = performance.now();
+    expect(requestPath(path)).toBe(path);
+    expect(performance.now() - started).toBeLessThan(100);
   });
 });

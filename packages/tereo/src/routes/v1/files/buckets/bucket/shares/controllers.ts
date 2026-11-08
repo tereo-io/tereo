@@ -1,6 +1,7 @@
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { hashPassword } from "../../../../../../utils/password.js";
+import { trimTrailing } from "../../../../../../utils/strings.js";
 import { toUserRef } from "../../../../../../utils/refs.js";
 import db from "../../../../../../utils/db/index.js";
 import { bucketNameSchema } from "../../schemas.js";
@@ -83,7 +84,7 @@ function deriveArchiveFilename(
   format: string
 ): string {
   if (!prefix) return `${ARCHIVE_FILENAME_FALLBACK}.${format}`;
-  const trimmed = prefix.replace(/\/+$/, "");
+  const trimmed = trimTrailing(prefix, "/");
   const last = trimmed.split("/").filter(Boolean).pop();
   return `${last ?? ARCHIVE_FILENAME_FALLBACK}.${format}`;
 }

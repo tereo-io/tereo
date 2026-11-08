@@ -1,5 +1,6 @@
 import { Request, RequestHandler, Response, NextFunction } from "express";
 import { AsyncLocalStorage } from "async_hooks";
+import { trimTrailing } from "./strings.js";
 import crypto from "crypto";
 
 declare global {
@@ -48,8 +49,11 @@ export function getRequestPath(): string | undefined {
 }
 
 /** `/a/b/?x=1` → `/a/b`. */
-export const requestPath = (originalUrl: string): string =>
-  originalUrl.split("?")[0].replace(/(.)\/+$/, "$1");
+export const requestPath = (originalUrl: string): string => {
+  const path = originalUrl.split("?")[0];
+  // `/` and `//` stay `/`.
+  return trimTrailing(path, "/") || path.slice(0, 1);
+};
 
 /**
  * The client's IP. `req.ip` honors Express's `trust proxy` setting, so a

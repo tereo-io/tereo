@@ -626,6 +626,8 @@ info:
       urlencoded form) is `400 invalid_request` on every route
     - `payload_too_large` - A JSON or form body over the body parser's limit (`413`, every route):
       10 MB under `/v1/files`, `/v1/webhooks` and `/v1/audit`, 10 KB for the auth routes
+    - `uri_too_long` - The URL's path is over 8 KiB, or the whole URL over 32 KiB, in bytes as
+      sent (`414`, every route)
     - `invalid_token` / `unauthorized` - Missing, invalid, expired or revoked access token, a
       token whose session was revoked, rotated or superseded or whose client was deleted, or an
       inactive user (`401`)

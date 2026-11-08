@@ -1,3 +1,4 @@
+import { trimTrailing } from "./strings.js";
 import { fileURLToPath } from "url";
 
 // Paths core keeps for itself; the admin UI, served at the root, owns
@@ -33,7 +34,7 @@ export const BRANDED_AUTH_PATHS: readonly string[] = [
 
 // Lowercased and without a trailing slash, as the UI's router matches them.
 export const isBrandedAuthPath = (path: string): boolean => {
-  const lower = path.toLowerCase().replace(/\/+$/, "");
+  const lower = trimTrailing(path.toLowerCase(), "/");
   return BRANDED_AUTH_PATHS.includes(lower) || lower.startsWith("/login/");
 };
 
