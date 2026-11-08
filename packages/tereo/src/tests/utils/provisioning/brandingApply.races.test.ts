@@ -6,11 +6,13 @@ import { applyBranding } from "../../../utils/provisioning/brandingApply.js";
 import type { ProvisioningSet } from "../../../utils/provisioning/load.js";
 import { BrandingFieldsSchema } from "../../../utils/branding/schema.js";
 import { storeBrandingImage } from "../../../utils/branding/storage.js";
+import { ProvisioningError } from "../../../utils/provisioning/load.js";
 import { SYSTEM_USER_ID } from "../../../definitions/systemUser.js";
 import { lockWaiters, untilQueued } from "../../support/dbLocks.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { checkImage } from "../../../utils/branding/images.js";
 import { prisma } from "../../../utils/db/prisma.js";
+import db from "../../../utils/db/index.js";
 import { randomBytes } from "node:crypto";
 import {
   brandingPrincipal,
@@ -120,5 +122,62 @@ describe("applyBranding image locks", () => {
       where: { clientId: { in: clientUuids } },
     });
     expect(profiles).toHaveLength(2);
+  });
+});
+
+describe("applyBranding racing a client delete", () => {
+  it("refuses with a provisioning problem when a branded client is deleted while it waits for the profile lock", async () => {
+    await ensureDefaultOrganization();
+    const { userId } = await brandingPrincipal([]);
+    const client = await createBrandingClient(userId);
+    const set: ProvisioningSet = {
+      documents: [
+        {
+          file: "app.json",
+          version: "1.0.0",
+          service: null,
+          clients: [],
+          roles: [],
+          integrations: [],
+          branding: {
+            default: null,
+            clients: {
+              [client.clientId]: BrandingFieldsSchema.parse({ appName: "X" }),
+            },
+          },
+        },
+      ],
+    };
+
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const held = new Promise<void>((r) => (locked = r));
+    // A client delete: the profile lock, then the client's row.
+    const deletion = prisma.$transaction(
+      async (tx) => {
+        await db.brandingProfiles.lockForWrite({ clientUuid: client.id }, tx);
+        locked();
+        await released;
+        await tx.oAuthClient.delete({ where: { id: client.id } });
+      },
+      { timeout: 30_000 }
+    );
+    await held;
+
+    const baseline = await lockWaiters();
+    const apply = prisma.$transaction(
+      (tx) => applyBranding(tx, set, new Map(), { branding: [] }),
+      { timeout: 30_000 }
+    );
+    await untilQueued(baseline, 1, 5_000);
+    release();
+    await deletion;
+
+    const err = await apply.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ProvisioningError);
+    expect((err as ProvisioningError).problems).toEqual([
+      `app.json: branding.clients[${client.clientId}]: client "${client.clientId}" was deleted while provisioning ran`,
+    ]);
   });
 });

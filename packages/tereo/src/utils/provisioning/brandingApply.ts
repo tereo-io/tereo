@@ -130,39 +130,69 @@ export const applyBranding = async (
   const problems = await brandingClientProblems(tx, set);
   if (problems.length > 0) throw new ProvisioningError(problems);
   const clientIds = declared.flatMap((d) => (d.clientId ? [d.clientId] : []));
-  const clients = new Map(
-    (
-      await tx.oAuthClient.findMany({
-        where: { clientId: { in: clientIds } },
-        select: { id: true, clientId: true },
-      })
-    ).map((c) => [c.clientId, c])
-  );
+  const readClients = async () =>
+    new Map(
+      (
+        await tx.oAuthClient.findMany({
+          where: { clientId: { in: clientIds } },
+          select: { id: true, clientId: true },
+        })
+      ).map((c) => [c.clientId, c])
+    );
+  const clients = await readClients();
 
   const stillDeclared = new Set(declared.map((d) => d.clientId));
-  const released = (
-    await tx.brandingProfile.findMany({
-      where: { provisioned: true },
-      select: {
-        id: true,
-        clientId: true,
-        provisionedFrom: true,
-        client: { select: { clientId: true } },
-      },
-    })
-  ).filter((row) => !stillDeclared.has(row.client?.clientId ?? null));
+  const readReleased = async (where: Prisma.BrandingProfileWhereInput) =>
+    (
+      await tx.brandingProfile.findMany({
+        where: { ...where, provisioned: true },
+        select: {
+          id: true,
+          clientId: true,
+          provisionedFrom: true,
+          client: { select: { clientId: true } },
+        },
+      })
+    ).filter((row) => !stillDeclared.has(row.client?.clientId ?? null));
+  const releasedBefore = await readReleased({});
 
   // Every profile lock before any image row lock, in one stable order: an
   // admin save takes its profile's lock and then its images', so taking them
-  // interleaved could deadlock with it.
+  // interleaved could deadlock with it. A client deleted since the check
+  // above has no key; it is reported below.
   const lockKeys = new Set<string | null>([
-    ...declared.map((d) => (d.clientId ? clients.get(d.clientId)!.id : null)),
-    ...released.map((row) => row.clientId),
+    ...declared.flatMap((d) =>
+      d.clientId
+        ? clients.has(d.clientId)
+          ? [clients.get(d.clientId)!.id]
+          : []
+        : [null]
+    ),
+    ...releasedBefore.map((row) => row.clientId),
   ]);
   for (const clientUuid of [...lockKeys].sort(
     (a, b) => (a ?? "").localeCompare(b ?? "") // null (default) first
   ))
     await db.brandingProfiles.lockForWrite({ clientUuid }, tx);
+
+  // A client delete takes its profile's lock before the client's row, so one
+  // that ran before these locks is visible now. Locking client rows first
+  // instead would deadlock with it.
+  const lockedClients = await readClients();
+  const vanished = declared.flatMap(({ file, clientId }) => {
+    if (clientId === null) return [];
+    const locked = lockedClients.get(clientId);
+    return locked && locked.id === clients.get(clientId)?.id
+      ? []
+      : [
+          `${file}: branding.clients[${clientId}]: client "${clientId}" was deleted while provisioning ran`,
+        ];
+  });
+  if (vanished.length > 0) throw new ProvisioningError(vanished);
+  // A released profile goes with its client.
+  const released = await readReleased({
+    id: { in: releasedBefore.map((row) => row.id) },
+  });
   // Then every image any of these saves locks, in one statement: each save
   // locks its own in id order, but across profiles the order would be the
   // declaration's, which an admin save sharing images could cross.
