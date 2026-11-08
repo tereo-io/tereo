@@ -27,6 +27,7 @@ interface AuthorizationCode {
     lastName: string | null;
     id: string;
     email: string;
+    emailVerifiedAt: Date | null;
     passwordHash: string | null;
     isActive: boolean;
     expiresAt: Date | null;

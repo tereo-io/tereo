@@ -165,6 +165,22 @@ describe("GET /v1/account/me", () => {
   });
 });
 
+describe("GET /v1/account/me email verification", () => {
+  it("account me carries emailVerified", async () => {
+    const response = await fetch(`${BASE_URL}/v1/account/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const data = (await response.json()) as AccountResponse;
+
+    expect(response.status).toBe(HTTP_STATUS.OK);
+    expect(data.emailVerified).toBe(true);
+    expect(typeof data.emailVerifiedAt).toBe("string");
+    expect(new Date(data.emailVerifiedAt as string).toISOString()).toBe(
+      data.emailVerifiedAt
+    );
+  });
+});
+
 describe("POST /v1/account/password", () => {
   it("should return 200 with success message when changing password with valid current password", async () => {
     // Create a separate user for password change test

@@ -68,6 +68,7 @@ export interface IdTokenGenerationOptions {
     givenName?: string;
     familyName?: string;
     email?: string;
+    emailVerified?: boolean;
     picture?: string;
     updatedAt?: Date;
   };
@@ -231,7 +232,7 @@ export const generateIdToken = (
       payload.family_name = options.claims.familyName;
     if (options.claims.email) {
       payload.email = options.claims.email;
-      payload.email_verified = true;
+      payload.email_verified = options.claims.emailVerified ?? false;
     }
     if (options.claims.picture) payload.picture = options.claims.picture;
     if (options.claims.updatedAt) {

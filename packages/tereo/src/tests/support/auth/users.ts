@@ -12,6 +12,8 @@ export async function createTestUser(
     password?: string;
     name?: string;
     isActive?: boolean;
+    /** Defaults to true: the address counts as proven. */
+    emailVerified?: boolean;
   } = {}
 ) {
   const uniqueId = generateUniqueId();
@@ -25,6 +27,7 @@ export async function createTestUser(
       passwordHash,
       name: options.name || `Test User ${uniqueId}`,
       isActive: options.isActive ?? true,
+      emailVerifiedAt: options.emailVerified === false ? null : new Date(),
     },
   });
 

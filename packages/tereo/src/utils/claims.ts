@@ -17,6 +17,7 @@ export interface UserData {
   lastName?: string | null;
   photoUrl?: string | null;
   updatedAt: Date;
+  emailVerifiedAt: Date | null;
 }
 
 export const buildUserClaims = (
@@ -37,7 +38,7 @@ export const buildUserClaims = (
 
   if (scopes.includes("email")) {
     claims.email = user.email;
-    claims.email_verified = true;
+    claims.email_verified = user.emailVerifiedAt !== null;
   }
 
   return claims;

@@ -1106,6 +1106,8 @@ UserProfile:
     - name
     - isActive
     - hasPassword
+    - emailVerified
+    - emailVerifiedAt
     - createdAt
     - updatedAt
     - photoUrl
@@ -1126,6 +1128,14 @@ UserProfile:
     hasPassword:
       type: boolean
       description: Whether the account has a password. False for an account created without one, which signs in through a linked identity provider only.
+    emailVerified:
+      type: boolean
+      description: Whether the address has been proven, by a link sent to it or by an identity provider that vouches for it. It is the `email_verified` claim.
+    emailVerifiedAt:
+      type: string
+      format: date-time
+      nullable: true
+      description: When the address was proven; null while it has not been.
     createdAt:
       type: string
       format: date-time
@@ -1269,7 +1279,7 @@ ChangePasswordRequest:
 # Admin - User Schemas
 User:
   type: object
-  required: [id, email, name, isActive, userType, expiresAt, status, passwordChangeRequired, hasPassword, createdAt, updatedAt]
+  required: [id, email, name, isActive, userType, expiresAt, status, passwordChangeRequired, hasPassword, emailVerified, emailVerifiedAt, createdAt, updatedAt]
   properties:
     id:
       type: string
@@ -1298,6 +1308,14 @@ User:
     hasPassword:
       type: boolean
       description: Whether the user has a password. False for a user created without one, who can sign in only through a linked identity provider (or an invite's first sign-in).
+    emailVerified:
+      type: boolean
+      description: Whether the address has been proven, by a link sent to it or by an identity provider that vouches for it. It is the `email_verified` claim.
+    emailVerifiedAt:
+      type: string
+      format: date-time
+      nullable: true
+      description: When the address was proven; null while it has not been.
     createdAt:
       type: string
       format: date-time

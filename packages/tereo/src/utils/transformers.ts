@@ -126,6 +126,7 @@ export const formatUser = (user: {
   passwordHash: string | null;
   expiresAt: Date | null;
   passwordChangeRequired: boolean;
+  emailVerifiedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }) => ({
@@ -138,6 +139,10 @@ export const formatUser = (user: {
   expiresAt: user.expiresAt ? user.expiresAt.toISOString() : null,
   status: userStatus(user),
   passwordChangeRequired: user.passwordChangeRequired,
+  emailVerified: user.emailVerifiedAt !== null,
+  emailVerifiedAt: user.emailVerifiedAt
+    ? user.emailVerifiedAt.toISOString()
+    : null,
   createdAt: user.createdAt.toISOString(),
   updatedAt: user.updatedAt.toISOString(),
 });

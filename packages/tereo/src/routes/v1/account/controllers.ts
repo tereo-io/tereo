@@ -35,6 +35,8 @@ export const getProfile = async (req: Request, res: Response) => {
     name: user.name,
     isActive: user.isActive,
     hasPassword: user.passwordHash !== null,
+    emailVerified: user.emailVerifiedAt !== null,
+    emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
     photoUrl,
