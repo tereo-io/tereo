@@ -74,7 +74,7 @@ export const updateSettings = async (req: Request, res: Response) => {
         ? await db.accessTokens.revokeWithoutMfa(
             next === "required"
               ? {}
-              : { userRoles: { some: { role: { requires2fa: true } } } },
+              : db.roles.holdsRoleWhere({ requires2fa: true }),
             tx
           )
         : [];

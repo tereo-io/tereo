@@ -1952,8 +1952,8 @@ RoleUsersResponse:
       type: array
       items:
         type: object
-        description: One per assignment — a user holding the role globally and in an organization appears once for each.
-        required: [id, email, name, isActive, organizationId, organization, expiresAt]
+        description: One per way a user holds the role — each assignment, and each unarchived group holding the role that the user belongs to. A user holding it globally and in an organization, or directly and through a group, appears once for each.
+        required: [id, email, name, isActive, organizationId, organization, expiresAt, via]
         properties:
           id:
             type: string
@@ -1978,7 +1978,25 @@ RoleUsersResponse:
           expiresAt:
             type: [string, 'null']
             format: date-time
-            description: When the role assignment expires
+            description: When the role assignment expires; always null for a row held through a group
+          via:
+            description: How the user holds the role. A `group` row's `organizationId` is the group's; it is removed by taking the user out of the group, or the role from the group, not through `DELETE /v1/admin/roles/{id}/users/{userId}`.
+            oneOf:
+              - type: object
+                required: [kind]
+                properties:
+                  kind:
+                    type: string
+                    enum: [direct]
+              - type: object
+                required: [kind, groupId]
+                properties:
+                  kind:
+                    type: string
+                    enum: [group]
+                  groupId:
+                    type: string
+                    format: uuid
 
 CreateRoleRequest:
   type: object

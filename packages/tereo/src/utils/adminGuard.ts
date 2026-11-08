@@ -2,7 +2,8 @@ import type { Prisma } from "./db/prisma.js";
 import { ConflictError } from "./errors.js";
 import db from "./db/index.js";
 
-type Assignment = { userId: string; roleId: string };
+/** `groupId` is set for a role held through a global group, null if direct. */
+type Assignment = { userId: string; roleId: string; groupId: string | null };
 
 /**
  * Refuses a change that would leave no active human holding `admin`. Setup

@@ -159,7 +159,7 @@ export const updateRole = async (req: Request, res: Response) => {
     const revokedJtis = [
       ...(gains2fa
         ? await db.accessTokens.revokeWithoutMfa(
-            { userRoles: { some: { roleId: params.id } } },
+            db.roles.holdsRoleWhere({ id: params.id }),
             tx
           )
         : []),
@@ -526,10 +526,11 @@ export const setRolePermissions = async (req: Request, res: Response) => {
 const ORG_LIST_LIMIT = 10;
 
 /**
- * A role held within an organization may grant only org-assignable
- * permissions, so one that is may not gain any other: the assignment would
- * silently hold a permission that grants nothing there. Remove the org-scoped
- * assignments, or use another role, first.
+ * A role held within an organization (assigned there, or held by one of its
+ * groups) may grant only org-assignable permissions, so one that is may not
+ * gain any other: the assignment would silently hold a permission that grants
+ * nothing there. Remove the org-scoped assignments and take the role from the
+ * org groups, or use another role, first.
  */
 const assertOrgAssignableWhileAssignedInOrg = async (
   tx: Prisma.TransactionClient,
@@ -546,15 +547,13 @@ const assertOrgAssignableWhileAssignedInOrg = async (
     orderBy: { name: "asc" },
   });
   if (notAssignable.length === 0) return;
-  const orgs = await tx.userRole.findMany({
-    where: { roleId, organizationId: { not: null } },
-    distinct: ["organizationId"],
-    select: { organizationId: true },
-    orderBy: { organizationId: "asc" },
-    take: ORG_LIST_LIMIT + 1,
-  });
+  const orgs = await db.roles.getOrgIdsHoldingRole(
+    roleId,
+    ORG_LIST_LIMIT + 1,
+    tx
+  );
   if (orgs.length === 0) return;
-  const named = orgs.slice(0, ORG_LIST_LIMIT).map((o) => o.organizationId);
+  const named = orgs.slice(0, ORG_LIST_LIMIT);
   const more = orgs.length > ORG_LIST_LIMIT ? ", and more" : "";
   throw new ConflictError(
     `This role is assigned within organizations (${named.join(", ")}${more}), where it may grant only org-assignable permissions; not org-assignable: ${notAssignable.map((p) => p.name).join(", ")}`,

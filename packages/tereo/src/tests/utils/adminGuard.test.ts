@@ -139,6 +139,47 @@ describe("assertAdminRemains", () => {
     await prisma.userRole.deleteMany({ where: { userId: user.id } });
   });
 
+  it("removing the last admin's direct assignment passes while a global group grants the same role", async () => {
+    const { user, role } = await makeAdmin();
+    const group = await prisma.group.create({
+      data: {
+        slug: `guard-${generateUniqueId()}`,
+        name: "Guard test group",
+        definitionSource: "local",
+        createdBy: user.id,
+      },
+    });
+    await prisma.groupMember.create({
+      data: { groupId: group.id, userId: user.id, addedBy: user.id },
+    });
+    await prisma.groupRole.create({
+      data: { groupId: group.id, roleId: role.id, addedBy: user.id },
+    });
+
+    try {
+      expect((await removeAllRoles(user.id)).status).toBe(HTTP_STATUS.OK);
+
+      await prisma.userRole.create({
+        data: { userId: user.id, roleId: role.id },
+      });
+      const res = await fetch(
+        `${BASE_URL}/v1/admin/roles/${role.id}/users/${user.id}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${callerToken}` },
+        }
+      );
+      expect(res.status).toBe(HTTP_STATUS.NO_CONTENT);
+    } finally {
+      // A group's admin is not set aside like the others; none may outlive
+      // the test.
+      await prisma.groupMember.deleteMany({ where: { groupId: group.id } });
+      await prisma.groupRole.deleteMany({ where: { groupId: group.id } });
+      await prisma.group.delete({ where: { id: group.id } });
+      await prisma.userRole.deleteMany({ where: { userId: user.id } });
+    }
+  });
+
   it("deleting the last admin role is refused before any token is revoked", async () => {
     const { role } = await makeAdmin();
 

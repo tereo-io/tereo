@@ -80,10 +80,14 @@ export const removeRoleUser = async (req: Request, res: Response) => {
       }
     }
     // Org-scoped assignments never count as administrators, so removing one
-    // always passes; the guard still runs, under its lock, for both.
+    // always passes; the guard still runs, under its lock, for both. The
+    // same role held through a group stays.
     await assertAdminRemains(
       (a) =>
-        organizationId !== null || a.userId !== userId || a.roleId !== roleId,
+        organizationId !== null ||
+        a.groupId !== null ||
+        a.userId !== userId ||
+        a.roleId !== roleId,
       tx
     );
     await db.roles.removeUserRole(

@@ -267,7 +267,8 @@ export const setUserRoles = async (req: Request, res: Response) => {
       (await db.roles.getAdminRoleIds(added, tx)).length > 0;
     if (!gainsAdmin) {
       await assertAdminRemains(
-        (a) => a.userId !== id || roleIds.includes(a.roleId),
+        (a) =>
+          a.userId !== id || a.groupId !== null || roleIds.includes(a.roleId),
         tx
       );
     }
