@@ -1,9 +1,9 @@
 // @module-tag int
 // @module-tag platform
 // @module-tag security
-import { MAX_PATH_BYTES, MAX_URL_BYTES } from "../../middleware/uriLength.js";
 import { getTestAccessToken as getAuditToken } from "../support/audit.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { MAX_PATH_BYTES } from "../../middleware/uriLength.js";
 import { createTestClient } from "../support/auth/clients.js";
 import { CORE_URL } from "../support/coreUrl.js";
 import {
@@ -30,11 +30,9 @@ describe("uriLength", () => {
     await expectUriTooLong(res);
   });
 
-  it("answers 414 for a URL over the limit with a short path", async () => {
-    const res = await fetch(
-      `${CORE_URL}/health?x=${"a".repeat(MAX_URL_BYTES)}`
-    );
-    await expectUriTooLong(res);
+  it("doesn't limit the query string", async () => {
+    const res = await fetch(`${CORE_URL}/health?x=${"a".repeat(64 * 1024)}`);
+    expect(res.status).toBe(200);
   });
 
   it("counts bytes, not characters", async () => {

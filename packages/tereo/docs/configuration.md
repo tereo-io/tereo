@@ -74,10 +74,11 @@ part `PUT`, a presigned `PUT` and `POST /v1/account/photo` — get 10 minutes in
 `requestTimeout`). Request headers must arrive within 66 seconds and fit in 200 KiB, and an idle
 keep-alive connection is closed after 65 seconds. `HTTP_MAX_CONNECTIONS` caps open connections.
 
-A request whose path is over 8 KiB, or whose whole URL is over 32 KiB (bytes as sent, so
-percent-encoding counts), gets `414 uri_too_long` before anything else reads it. Every route's
-longest legal URL fits: a 500-character audit entity id or a 1024-character object key fully
-percent-encoded, or an `/oauth/authorize` request with every parameter at its limit.
+A request whose path is over 8 KiB (bytes as sent, so percent-encoding counts) gets
+`414 uri_too_long` before anything else reads it. Every route's longest legal path fits: a
+500-character audit entity id or a 1024-character object key fully percent-encoded. The query
+string is not limited separately — long list filters and `/oauth/authorize` parameters are legal —
+so only the 200 KiB header limit bounds it.
 
 These bound what one slow client can hold, not a flood of them: run core behind a reverse proxy or
 load balancer that buffers requests (and, ideally, limits connections per client) rather than
