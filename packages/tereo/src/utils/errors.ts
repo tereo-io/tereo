@@ -95,6 +95,21 @@ export class ConflictError extends AppError {
   }
 }
 
+/**
+ * A bucket core declares for itself is written only by core's own modules;
+ * through the files API it is read-only.
+ */
+export class BucketManagedByCoreError extends AppError {
+  constructor(bucketName: string) {
+    super(
+      409,
+      "bucket_managed_by_core",
+      `Bucket "${bucketName}" is managed by core: it is read-only through the files API`
+    );
+    this.name = "BucketManagedByCoreError";
+  }
+}
+
 export class ManagedByProvisioningError extends AppError {
   constructor(
     message = "Managed by the provisioning file; change it there and restart core",

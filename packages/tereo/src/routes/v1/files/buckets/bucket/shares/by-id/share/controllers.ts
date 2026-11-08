@@ -9,10 +9,10 @@ import db from "../../../../../../../../utils/db/index.js";
 import type { UpdateShareBody } from "./schemas.js";
 import { Request, Response } from "express";
 import {
+  assertNotCoreBucket,
   canManageBucket,
   canWriteBucket,
   getGrantedBucket,
-  validateBucketAccess,
   validateBucketPermission,
 } from "../../../../../../../../utils/bucketAccess.js";
 import {
@@ -93,6 +93,7 @@ export const updateShare = async (req: Request, res: Response) => {
   const body = validateBody(updateShareBodySchema, req);
 
   const bucket = await getGrantedBucket(auth, name, "read");
+  assertNotCoreBucket(bucket);
 
   const existing = await db.shares.get(id);
   if (existing.bucketId !== bucket.id) {
@@ -218,7 +219,7 @@ export const revokeShare = async (req: Request, res: Response) => {
     throw new NotFoundError("Share not found");
   }
   if (existing.createdByUserId !== auth.userId) {
-    await validateBucketAccess(auth, name, "delete");
+    await validateBucketPermission(auth, name, "delete");
   }
   if (existing.revokedAt) {
     // Idempotent — already revoked.

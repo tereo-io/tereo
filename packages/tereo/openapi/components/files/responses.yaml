@@ -66,7 +66,8 @@ FilesConflictResponse:
     `bucket_declared` - the change touches what a service's declaration owns;
     `bucket_retired` - the bucket is retired and read-only; `version_conflict` -
     a concurrent update, retry after re-reading; `share_revoked` - the share
-    is revoked and can no longer be edited.
+    is revoked and can no longer be edited; `bucket_managed_by_core` - the
+    bucket is core's own and read-only through the files API.
   headers:
     X-RateLimit-Limit:
       $ref: '../headers.yaml#/X-RateLimit-Limit'
@@ -86,6 +87,7 @@ FilesConflictResponse:
               - conflict
               - bucket_declared
               - bucket_retired
+              - bucket_managed_by_core
               - version_conflict
               - share_revoked
               - too_many_multipart_uploads

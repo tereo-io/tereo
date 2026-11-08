@@ -1,11 +1,14 @@
 import type { BucketPermission } from "../../../../../../../prisma/generated/client/index.js";
 import { notifyBucketAccessChanged } from "../../../../../../websocket/emitters/index.js";
-import { getManagedBucket } from "../../../../../../utils/bucketAccess.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import db from "../../../../../../utils/db/index.js";
 import { bucketNameSchema } from "../../schemas.js";
 import { Request, Response } from "express";
+import {
+  assertNotCoreBucket,
+  getManagedBucket,
+} from "../../../../../../utils/bucketAccess.js";
 import {
   assertWithinOwnGrant,
   grantTx,
@@ -108,6 +111,7 @@ export const grantPermission = async (req: Request, res: Response) => {
   const body = validateBody(grantPermissionSchema, req);
 
   const bucket = await getManagedBucket(auth, name, "write");
+  assertNotCoreBucket(bucket);
   await assertWithinOwnGrant(auth, bucket.id, body);
 
   const userExists = await authUserExists(body.userId);

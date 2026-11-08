@@ -1,0 +1,5 @@
+---
+core: minor
+---
+
+Core's own buckets are read-only through the files API. `auth-service-user-photos` and `auth-service-branding` are written only by core's profile-photo and branding modules; through `/v1/files` every write — uploads (by key, signed URL, or presigning a write), object `PATCH` (including `deleteAfter`), object and version deletes, `bulk-delete`, `purge-non-current-versions`, version restore, every multipart step, creating or editing a share, bucket update and delete, lifecycle changes, granting access and owner transfer — is now `409 bucket_managed_by_core`, `file-service.admin` included, after the usual permission check. Reads are unchanged, revoking a grant or a share still works, and `GET /buckets/:name/my-permissions` reports `canWrite` and `canDelete` false on these buckets.

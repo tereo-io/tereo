@@ -1,7 +1,6 @@
 import { answerReadPreconditions } from "../../../../../../../../utils/conditionalRequests.js";
 import { broadcastObjectInvalidate } from "../../../../../../../../utils/cacheBroadcast.js";
 import { emitObjectWrittenTx } from "../../../../../buckets/bucket/objects/events.js";
-import { assertBucketWritable } from "../../../../../../../../utils/bucketAccess.js";
 import { createEncryptStream } from "../../../../../../../../utils/encryption.js";
 import { parseContentType } from "../../../../../../../../utils/contentType.js";
 import { setAccessLog } from "../../../../../../../../middleware/accessLog.js";
@@ -23,6 +22,10 @@ import {
   setContentDisposition,
   validateMimeType,
 } from "../../../../../buckets/bucket/objects/utils.js";
+import {
+  assertBucketWritable,
+  assertNotCoreBucket,
+} from "../../../../../../../../utils/bucketAccess.js";
 import {
   assertUnreadBody,
   getBlobPath,
@@ -154,6 +157,7 @@ export const uploadViaSignedUrl = async (req: Request, res: Response) => {
 
   const bucket = await db.buckets.getByName(bucketName);
   if (verified.by) await assertSignerMayAccess(verified.by, bucket, "write");
+  assertNotCoreBucket(bucket);
   assertBucketWritable(bucket);
   // Fails fast before the body streams; the write itself goes by id, so a
   // rename meanwhile lands it under the object's new key.

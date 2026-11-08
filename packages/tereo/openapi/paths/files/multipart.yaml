@@ -89,7 +89,7 @@
         description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`bucket_retired` - the bucket is read-only; `too_many_multipart_uploads` - the caller already has the most uploads allowed in progress in this bucket'
+        description: '`bucket_retired` - the bucket is read-only; `too_many_multipart_uploads` - the caller already has the most uploads allowed in progress in this bucket; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '412':
         description: Precondition failed (`If-Match` or `If-None-Match`); no upload is created
         content:
@@ -172,7 +172,8 @@
       - Bucket-level `canDelete` (aborting deletes staged parts and writes nothing)
       - The caller must be the user who initiated the upload, or hold `file-service.admin`
 
-      Aborting works on a retired bucket too: deletes go on there.
+      Aborting works on a retired bucket too: deletes go on there. On a
+      bucket core declares for itself it is `409 bucket_managed_by_core`.
 
       An audit log entry is created and, for a bucket in an organization, a
       `file-service.multipart.aborted` webhook event is emitted with
@@ -196,6 +197,9 @@
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
         description: Upload not found or in another bucket; a missing bucket only for a `file-service.admin` holder
+      '409':
+        $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
+        description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -271,7 +275,7 @@
         description: Upload not found, not active, or in another bucket; a missing bucket only for a `file-service.admin` holder
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`bucket_retired` - the bucket is read-only'
+        description: '`bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '413':
         $ref: '../../components/files/responses.yaml#/PayloadTooLargeResponse'
         description: '`payload_too_large` - the part is over `FILE_SERVICE_MAX_UPLOAD_SIZE_MB`; `exceeds_expected_size` - the upload''s parts would total more than its `expectedSize`; `object_too_large` - they would total more than an object can be'
@@ -417,6 +421,8 @@
           with this `Idempotency-Key` is still in flight
           (`idempotency_request_in_progress`), or the bucket is retired
           (`bucket_retired`).
+          The bucket is core's own and read-only through this API
+          (`bucket_managed_by_core`).
         content:
           application/json:
             schema:

@@ -654,6 +654,7 @@ info:
     Files adds:
     - `idempotency_key_required` / `invalid_expiration` - Operation-specific `400` codes
     - `bucket_declared` / `bucket_retired` - The bucket is owned by a service's declaration / is read-only (`409`)
+    - `bucket_managed_by_core` - The bucket is core's own (profile photos, branding images): read-only through the files API, for everyone (`409`)
     - `version_conflict` - Concurrent update; re-read and retry (`409`)
     - `precondition_failed` - `If-Match` / `If-None-Match` not satisfied (`412`)
     - `payload_too_large` - Upload over the size limit (`413`)
@@ -721,6 +722,12 @@ info:
     - `file-service.admin` may manage any bucket; a bucket a service declared cannot be deleted
     - A retired bucket (its service no longer declares it) is read-only: writes
       return `409 bucket_retired`
+    - A bucket core declares for itself (`auth-service-user-photos`,
+      `auth-service-branding`) is written only by core: through this API every
+      write, delete, share creation or edit, grant, owner transfer, lifecycle
+      change and bucket update or delete returns `409 bucket_managed_by_core`,
+      `file-service.admin` included. Reads, and revoking grants and shares,
+      work as on any bucket
 
     ### Storage and Limits
 
@@ -10299,7 +10306,7 @@ paths:
           description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`bucket_declared` - the description of a declared bucket is set by its service; `version_conflict` - concurrent update'
+          description: '`bucket_declared` - the description of a declared bucket is set by its service; `version_conflict` - concurrent update; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -10344,7 +10351,7 @@ paths:
           description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket. Also the answer to the loser of two deletes racing
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`bucket_declared` - a bucket its active service still declares cannot be deleted'
+          description: '`bucket_declared` - a bucket its active service still declares cannot be deleted; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -10365,7 +10372,9 @@ paths:
         public bucket. Every field is a boolean. Being the bucket's creator or owner adds nothing: their access is
         their grant, and is gone once revoked. `canWrite` is
         `false` for everyone, admins included, on a retired bucket, which is
-        read-only.
+        read-only. On a bucket core declares for itself (`auth-service-user-photos`,
+        `auth-service-branding`) `canWrite` and `canDelete` are both `false` for
+        everyone: core alone writes it.
 
         A missing bucket, one of another organization, and a private bucket the
         caller holds no active grant on are all refused with the same `403`, so
@@ -10518,6 +10527,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket.
+        '409':
+          $ref: '#/components/responses/FilesConflictResponse'
+          description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -10559,6 +10571,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Bucket not found — only for a `file-service.admin` holder; anyone else gets `403` for a missing bucket.
+        '409':
+          $ref: '#/components/responses/FilesConflictResponse'
+          description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -10628,7 +10643,7 @@ paths:
           description: Bucket not found
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`bucket_declared` - a declared bucket belongs to its service'
+          description: '`bucket_declared` - a declared bucket belongs to its service; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -10882,6 +10897,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
+        '409':
+          $ref: '#/components/responses/FilesConflictResponse'
+          description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -10953,6 +10971,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
+        '409':
+          $ref: '#/components/responses/FilesConflictResponse'
+          description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -11213,6 +11234,8 @@ paths:
             (`idempotency_request_in_progress`), the bucket is
             retired (`bucket_retired`), or a concurrent write conflicted
             (`conflict` / `version_conflict`).
+            The bucket is core's own and read-only through this API
+            (`bucket_managed_by_core`).
           content:
             application/json:
               schema:
@@ -11618,7 +11641,7 @@ paths:
           description: Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: Conflict - rename target already exists as a live key in the bucket (`conflict`), or the bucket is retired (`bucket_retired`)
+          description: Conflict - rename target already exists as a live key in the bucket (`conflict`), or the bucket is retired (`bucket_retired`); `bucket_managed_by_core` - the bucket is core's own and read-only through this API
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -11659,6 +11682,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
+        '409':
+          $ref: '#/components/responses/FilesConflictResponse'
+          description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -11727,7 +11753,7 @@ paths:
           description: Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`bucket_retired` - the bucket is read-only'
+          description: '`bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -11893,6 +11919,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
+        '409':
+          $ref: '#/components/responses/FilesConflictResponse'
+          description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -12073,7 +12102,7 @@ paths:
           description: Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`conflict` - undeleting an object whose key another object has taken since; `bucket_retired` - the bucket is read-only'
+          description: '`conflict` - undeleting an object whose key another object has taken since; `bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -12172,7 +12201,7 @@ paths:
           description: Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`bucket_retired` - the bucket is read-only; `too_many_multipart_uploads` - the caller already has the most uploads allowed in progress in this bucket'
+          description: '`bucket_retired` - the bucket is read-only; `too_many_multipart_uploads` - the caller already has the most uploads allowed in progress in this bucket; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '412':
           description: Precondition failed (`If-Match` or `If-None-Match`); no upload is created
           content:
@@ -12255,7 +12284,8 @@ paths:
         - Bucket-level `canDelete` (aborting deletes staged parts and writes nothing)
         - The caller must be the user who initiated the upload, or hold `file-service.admin`
 
-        Aborting works on a retired bucket too: deletes go on there.
+        Aborting works on a retired bucket too: deletes go on there. On a
+        bucket core declares for itself it is `409 bucket_managed_by_core`.
 
         An audit log entry is created and, for a bucket in an organization, a
         `file-service.multipart.aborted` webhook event is emitted with
@@ -12280,6 +12310,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Upload not found or in another bucket; a missing bucket only for a `file-service.admin` holder
+        '409':
+          $ref: '#/components/responses/FilesConflictResponse'
+          description: '`bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -12355,7 +12388,7 @@ paths:
           description: Upload not found, not active, or in another bucket; a missing bucket only for a `file-service.admin` holder
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`bucket_retired` - the bucket is read-only'
+          description: '`bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
           description: '`payload_too_large` - the part is over `FILE_SERVICE_MAX_UPLOAD_SIZE_MB`; `exceeds_expected_size` - the upload''s parts would total more than its `expectedSize`; `object_too_large` - they would total more than an object can be'
@@ -12503,6 +12536,8 @@ paths:
             with this `Idempotency-Key` is still in flight
             (`idempotency_request_in_progress`), or the bucket is retired
             (`bucket_retired`).
+            The bucket is core's own and read-only through this API
+            (`bucket_managed_by_core`).
           content:
             application/json:
               schema:
@@ -12871,7 +12906,7 @@ paths:
           description: Bucket, object or pinned version not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: Token collision (retry)
+          description: Token collision (retry); `bucket_managed_by_core` - the bucket is core's own and read-only through this API
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -13059,7 +13094,7 @@ paths:
           description: Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`share_revoked` - the share is revoked and can no longer be edited'
+          description: '`share_revoked` - the share is revoked and can no longer be edited; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
         '429':
           $ref: '#/components/responses/FilesRateLimitResponse'
         '500':
@@ -13712,6 +13747,8 @@ paths:
           description: |
             The bucket is retired (`bucket_retired`) and read-only, or a
             concurrent write conflicted (`conflict` / `version_conflict`).
+            The bucket is core's own and read-only through this API
+            (`bucket_managed_by_core`).
           content:
             application/json:
               schema:
@@ -22338,7 +22375,8 @@ components:
         `bucket_declared` - the change touches what a service's declaration owns;
         `bucket_retired` - the bucket is retired and read-only; `version_conflict` -
         a concurrent update, retry after re-reading; `share_revoked` - the share
-        is revoked and can no longer be edited.
+        is revoked and can no longer be edited; `bucket_managed_by_core` - the
+        bucket is core's own and read-only through the files API.
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -22358,6 +22396,7 @@ components:
                   - conflict
                   - bucket_declared
                   - bucket_retired
+                  - bucket_managed_by_core
                   - version_conflict
                   - share_revoked
                   - too_many_multipart_uploads

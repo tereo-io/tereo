@@ -1,6 +1,5 @@
 import { notifyBucketAccessChanged } from "../../../../../../websocket/emitters/index.js";
 import { broadcastBucketInvalidate } from "../../../../../../utils/cacheBroadcast.js";
-import { assertOwnerTransferable } from "../../../../../../utils/bucketAccess.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { canActInOrganization } from "../../../../../../utils/users.js";
 import { BadRequestError } from "../../../../../../utils/errors.js";
@@ -11,6 +10,10 @@ import db from "../../../../../../utils/db/index.js";
 import { serializeBucket } from "../controllers.js";
 import { bucketNameSchema } from "../../schemas.js";
 import { Request, Response } from "express";
+import {
+  assertNotCoreBucket,
+  assertOwnerTransferable,
+} from "../../../../../../utils/bucketAccess.js";
 import {
   validateBody,
   validateParams,
@@ -31,6 +34,7 @@ export const transferBucketOwnership = async (req: Request, res: Response) => {
   const body = validateBody(transferOwnershipBodySchema, req);
 
   const bucket = await db.buckets.getByName(name);
+  assertNotCoreBucket(bucket);
   assertOwnerTransferable(bucket);
 
   const user = await db.users.getFromBody(body.userId);

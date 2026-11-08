@@ -12,6 +12,7 @@ import {
   ShareKind,
 } from "../../../../../../../prisma/generated/client/index.js";
 import {
+  assertNotCoreBucket,
   canWriteBucket,
   getGrantedBucket,
 } from "../../../../../../utils/bucketAccess.js";
@@ -209,6 +210,7 @@ export const createShare = async (req: Request, res: Response) => {
   const body = validateBody(createShareBodySchema, req);
 
   const bucket = await getGrantedBucket(auth, name, "read");
+  assertNotCoreBucket(bucket);
 
   const expiresAt = validateShareTtl(body.expiresAt);
 

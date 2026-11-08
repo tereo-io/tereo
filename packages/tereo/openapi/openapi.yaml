@@ -654,6 +654,7 @@ info:
     Files adds:
     - `idempotency_key_required` / `invalid_expiration` - Operation-specific `400` codes
     - `bucket_declared` / `bucket_retired` - The bucket is owned by a service's declaration / is read-only (`409`)
+    - `bucket_managed_by_core` - The bucket is core's own (profile photos, branding images): read-only through the files API, for everyone (`409`)
     - `version_conflict` - Concurrent update; re-read and retry (`409`)
     - `precondition_failed` - `If-Match` / `If-None-Match` not satisfied (`412`)
     - `payload_too_large` - Upload over the size limit (`413`)
@@ -721,6 +722,12 @@ info:
     - `file-service.admin` may manage any bucket; a bucket a service declared cannot be deleted
     - A retired bucket (its service no longer declares it) is read-only: writes
       return `409 bucket_retired`
+    - A bucket core declares for itself (`auth-service-user-photos`,
+      `auth-service-branding`) is written only by core: through this API every
+      write, delete, share creation or edit, grant, owner transfer, lifecycle
+      change and bucket update or delete returns `409 bucket_managed_by_core`,
+      `file-service.admin` included. Reads, and revoking grants and shares,
+      work as on any bucket
 
     ### Storage and Limits
 

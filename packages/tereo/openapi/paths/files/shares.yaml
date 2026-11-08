@@ -71,7 +71,7 @@
         description: 'Bucket, object or pinned version not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: Token collision (retry)
+        description: 'Token collision (retry); `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
@@ -257,7 +257,7 @@
         description: 'Not found (a missing bucket is `404` only for a `file-service.admin` holder; anyone else gets `403`, as for a bucket they cannot access)'
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`share_revoked` - the share is revoked and can no longer be edited'
+        description: '`share_revoked` - the share is revoked and can no longer be edited; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
       '429':
         $ref: '../../components/files/responses.yaml#/FilesRateLimitResponse'
       '500':
