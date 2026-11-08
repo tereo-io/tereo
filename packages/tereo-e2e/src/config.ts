@@ -44,6 +44,10 @@ export const e2e = {
   port,
   baseURL: `http://localhost:${port}`,
 
+  /** The fake SMTP server the default email connection points at. */
+  smtpPort: port + 2000,
+  mailDir: path.join(stateDir, "mail"),
+
   databaseUrl,
   databaseName,
   redisUrl: process.env.E2E_REDIS_URL ?? "redis://localhost:6389",

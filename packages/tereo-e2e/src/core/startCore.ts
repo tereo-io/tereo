@@ -1,5 +1,6 @@
 import { createWriteStream, existsSync, mkdirSync, rmSync } from "fs";
 import { execFileSync, spawn } from "child_process";
+import { startMailCatcher } from "./mailCatcher.js";
 import { coreEnv } from "./coreEnv.js";
 import { e2e } from "../config.js";
 import { Redis } from "ioredis";
@@ -102,6 +103,9 @@ async function main() {
   run("npx", ["prisma", "migrate", "deploy"], e2e.corePackage);
   run("npx", ["tsx", "src/scripts/seed.ts"], e2e.corePackage);
 
+  const mail = await startMailCatcher();
+  log(`Catching mail on port ${e2e.smtpPort}`);
+
   log(`Starting core on ${e2e.baseURL} (log: ${e2e.coreLogPath})`);
   const logFile = createWriteStream(e2e.coreLogPath);
   // One process, with tsx as a loader rather than a wrapper around a child,
@@ -120,7 +124,10 @@ async function main() {
   core.stderr.pipe(logFile);
   core.stderr.pipe(process.stderr);
 
-  const stop = () => core.kill("SIGTERM");
+  const stop = () => {
+    core.kill("SIGTERM");
+    void mail.close();
+  };
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   core.on("exit", (code, signal) => {

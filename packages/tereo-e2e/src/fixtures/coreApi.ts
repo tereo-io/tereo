@@ -216,4 +216,41 @@ export class CoreApi {
       })
     );
   }
+
+  /**
+   * An email connection to the mail catcher. The first one becomes the
+   * default, which is what turns password reset and email verification on.
+   */
+  async ensureEmailConnection(smtpPort: number): Promise<void> {
+    const slug = "e2e-mail";
+    const existing = await json<{ data: { slug: string }[] }>(
+      await this.request.get("admin/notifications/connections", {
+        params: { channel: "email" },
+      })
+    );
+    if (existing.data.some((c) => c.slug === slug)) return;
+    await json(
+      await this.request.post("admin/notifications/connections", {
+        data: {
+          channel: "email",
+          slug,
+          displayName: "E2E mail catcher",
+          settings: {
+            host: "127.0.0.1",
+            port: smtpPort,
+            security: "none",
+            defaultFrom: { address: "tereo@e2e.test" },
+            allowedSenders: ["@e2e.test"],
+          },
+        },
+      })
+    );
+  }
+
+  /** The admin's change of a user's email, which leaves it unverified. */
+  async changeUserEmail(userId: string, email: string): Promise<void> {
+    await json(
+      await this.request.patch(`admin/users/${userId}`, { data: { email } })
+    );
+  }
 }
