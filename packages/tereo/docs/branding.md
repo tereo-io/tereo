@@ -57,10 +57,12 @@ for `?client_id=` and adds to `<head>` a `<style id="tereo-branding-style">` wit
 `<script type="application/json" id="tereo-branding">` with the effective values and
 `scope: "auth"`. The first paint is already branded.
 
-On a sign-in route that block is **always present**: with the literal `null` when nothing resolves
-(style, preloads and title untouched), so an unbranded sign-in renders stock at once. The JSON is
-serialized with `<`, `>`, `&`, U+2028 and U+2029 escaped. If resolving fails, the error is logged and
-the stock page is served; branding never breaks sign-in.
+When branding resolves, a sign-in route always carries that block: with the literal `null` when
+nothing applies (style, preloads and title untouched), so an unbranded sign-in renders stock at once.
+The JSON is serialized with `<`, `>`, `&`, U+2028 and U+2029 escaped. If resolving fails, the error is
+logged and the stock shell is served without the block, so the UI falls back to the fetch below;
+branding never breaks sign-in. The sign-in routes go through the general rate limiter (per IP), since
+each request can make core look up its `client_id`; the rest of the UI does not.
 
 **Fallback.** `GET /oauth/branding?client_id=` (public) returns exactly what injection embeds, or
 `null`. The UI calls it only when the page has no `#tereo-branding` block (the Vite dev server on
@@ -69,9 +71,12 @@ error it renders stock. Asset URLs are root-relative (`/oauth/branding/assets/â€
 them against core's URL (`VITE_CORE_URL`, else its own origin), so they load wherever the UI is
 served.
 
-Resolved branding is cached in memory per client id. Every profile write and provisioning apply
-publishes an invalidation, so every replica drops it. An unknown client id is cached briefly
-(60 s, bounded) under its own key.
+Resolved branding is cached in memory: per known client id (up to 1000), and the default profile in
+a slot of its own. Every profile write and provisioning apply publishes an invalidation, so every
+replica drops it; a replica also drops it when its Redis subscription reconnects, and every entry
+expires after 5 minutes, so one that missed an invalidation catches up. Ids that match no client go
+in a separate, bounded cache for 60 s and resolve to the default, so made-up ids cannot evict real
+clients and each costs at most one client lookup.
 
 ## Assets
 

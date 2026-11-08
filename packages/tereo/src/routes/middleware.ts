@@ -1,4 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
+import { rateLimitGeneral } from "../middleware/rateLimit.js";
+import { isBrandedAuthPath } from "../utils/ui.js";
 import { uiBuild } from "./controllers.js";
 import express from "express";
 import path from "path";
@@ -29,3 +31,16 @@ const serveBuild = (distPath: string) => {
 };
 
 export const uiFiles = uiBuild ? serveBuild(uiBuild.distPath) : passThrough;
+
+/**
+ * The general limiter on the branded sign-in pages, and only there: each one
+ * resolves `?client_id=`, which anyone can vary to make core look it up.
+ */
+export const limitBrandedShell = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) =>
+  (req.method === "GET" || req.method === "HEAD") && isBrandedAuthPath(req.path)
+    ? rateLimitGeneral(req, res, next)
+    : next();

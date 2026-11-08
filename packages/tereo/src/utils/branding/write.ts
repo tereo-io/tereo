@@ -294,7 +294,7 @@ export const deleteProfileTx = async (
 /**
  * Drop cached branding after a committed write. The write stands either way,
  * so a failure is logged, not returned to the caller; replicas catch up when
- * their cache next clears.
+ * their entries expire, within five minutes.
  */
 export const invalidateAfterWrite = async (): Promise<void> => {
   try {

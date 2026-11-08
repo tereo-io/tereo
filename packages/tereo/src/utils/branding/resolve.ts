@@ -2,6 +2,7 @@ import type { BrandingProfile } from "../../../prisma/generated/client/index.js"
 import { getByClientUuid, getDefault } from "../db/brandingProfiles.js";
 import { LOGIN_CLIENT } from "../../definitions/loginClient.js";
 import type { BrandingFields } from "./schema.js";
+import { BoundedCache } from "../boundedCache.js";
 import { prisma } from "../db/prisma.js";
 import {
   broadcastBrandingInvalidate,
@@ -13,21 +14,33 @@ import {
   mergeBranding,
 } from "./merge.js";
 
-const MAX_ENTRIES = 1000;
+// Every entry also expires, so a replica that missed an invalidation (a
+// failed publish, or one sent while its subscriber was reconnecting) catches
+// up within this.
+const TTL_MS = 5 * 60_000;
 const UNKNOWN_CLIENT_TTL_MS = 60_000;
 
-interface Entry {
-  value: EffectiveBranding | null;
+// Clients that exist, by client_id, with their merged branding.
+const known = new BoundedCache<EffectiveBranding | null>(1000, TTL_MS);
+// Ids that matched no client. Kept apart, so a stream of made-up ids cannot
+// evict real clients; they resolve to the default.
+const unknown = new BoundedCache<true>(500, UNKNOWN_CLIENT_TTL_MS);
+
+interface DefaultSlot {
+  values: ProfileValues | null;
+  branding: EffectiveBranding | null;
   expires: number;
 }
+let defaultSlot: DefaultSlot | null = null;
 
-const cache = new Map<string, Entry>();
 // Bumped by every clear so a load that raced an invalidation is not stored.
 let generation = 0;
 
 const clearCache = () => {
   generation++;
-  cache.clear();
+  known.clear();
+  unknown.clear();
+  defaultSlot = null;
 };
 onBrandingInvalidate(clearCache);
 
@@ -78,35 +91,25 @@ export const liveKeys = async (profiles: BrandingProfile[]) => {
   return keys;
 };
 
-const load = async (
-  clientId: string
-): Promise<{ value: EffectiveBranding | null; knownClient: boolean }> => {
-  const client = clientId
-    ? await prisma.oAuthClient.findUnique({
-        where: { clientId },
-        select: { id: true },
-      })
-    : null;
-  const [own, fallback] = await Promise.all([
-    client ? getByClientUuid(client.id) : null,
-    getDefault(),
-  ]);
-  const profiles = [own, fallback].filter((p): p is BrandingProfile => !!p);
-  const keys = await liveKeys(profiles);
-  return {
-    value: mergeBranding(
-      own ? toValues(own, keys) : null,
-      fallback ? toValues(fallback, keys) : null
-    ),
-    knownClient: client !== null,
+const loadDefault = async (): Promise<DefaultSlot> => {
+  if (defaultSlot && defaultSlot.expires > Date.now()) return defaultSlot;
+  const startedAt = generation;
+  const profile = await getDefault();
+  const values = profile ? toValues(profile, await liveKeys([profile])) : null;
+  const slot = {
+    values,
+    branding: mergeBranding(null, values),
+    expires: Date.now() + TTL_MS,
   };
+  if (startedAt === generation) defaultSlot = slot;
+  return slot;
 };
 
 /**
  * Effective branding for a sign-in page. Takes the raw query value: anything
  * but a string of 1-64 characters counts as no client. Unknown ids resolve to
- * the default and are cached briefly, so they look like any unbranded client.
- * Database errors propagate and are never cached.
+ * the default, so they look like any unbranded client; each costs at most one
+ * client lookup a minute. Database errors propagate and are never cached.
  */
 export async function resolveBranding(
   clientId: unknown
@@ -117,25 +120,27 @@ export async function resolveBranding(
     clientId.length <= 64
       ? clientId
       : "";
-  const hit = cache.get(id);
-  if (hit && hit.expires > Date.now()) return hit.value;
+  if (id === "" || unknown.get(id)) return (await loadDefault()).branding;
+  const hit = known.get(id);
+  if (hit !== undefined) return hit;
 
   const startedAt = generation;
-  const { value, knownClient } = await load(id);
-  if (startedAt === generation) {
-    cache.delete(id);
-    if (cache.size >= MAX_ENTRIES) {
-      const oldest = cache.keys().next().value;
-      if (oldest !== undefined) cache.delete(oldest);
-    }
-    cache.set(id, {
-      value,
-      expires:
-        id === "" || knownClient
-          ? Number.POSITIVE_INFINITY
-          : Date.now() + UNKNOWN_CLIENT_TTL_MS,
-    });
+  const client = await prisma.oAuthClient.findUnique({
+    where: { clientId: id },
+    select: { id: true },
+  });
+  if (!client) {
+    if (startedAt === generation) unknown.set(id, true);
+    return (await loadDefault()).branding;
   }
+  const [own, fallback] = await Promise.all([
+    getByClientUuid(client.id),
+    loadDefault(),
+  ]);
+  const value = own
+    ? mergeBranding(toValues(own, await liveKeys([own])), fallback.values)
+    : fallback.branding;
+  if (startedAt === generation) known.set(id, value);
   return value;
 }
 

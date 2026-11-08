@@ -1,7 +1,7 @@
 // @module-tag int
 // @module-tag auth
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { SYSTEM_USER_ID } from "../../../definitions/systemUser.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateUniqueId } from "../../support/auth/crypto.js";
 import { createTestUser } from "../../support/auth/users.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -146,5 +146,71 @@ describe("resolveBranding", () => {
       where: { clientId: clientUuid },
     });
     await invalidateBranding();
+  });
+
+  describe("caching", () => {
+    const setAppName = async (appName: string) => {
+      await prisma.brandingProfile.upsert({
+        where: { clientId: clientUuid },
+        create: { clientId: clientUuid, appName, updatedBy: SYSTEM_USER_ID },
+        update: { appName },
+      });
+    };
+
+    const removeProfile = async () => {
+      await prisma.brandingProfile.deleteMany({
+        where: { clientId: clientUuid },
+      });
+      await invalidateBranding();
+    };
+
+    it("expires a known client's entry after five minutes", async () => {
+      await setAppName("First");
+      await invalidateBranding();
+      expect((await resolveBranding(clientId))?.appName).toBe("First");
+
+      // Written without an invalidation, as a replica that missed one sees it.
+      await setAppName("Second");
+      expect((await resolveBranding(clientId))?.appName).toBe("First");
+
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now + 5 * 60_000 + 1);
+      try {
+        expect((await resolveBranding(clientId))?.appName).toBe("Second");
+      } finally {
+        clock.mockRestore();
+        await removeProfile();
+      }
+    });
+
+    it("keeps unknown ids from evicting known clients", async () => {
+      await setAppName("Cached");
+      await invalidateBranding();
+      expect((await resolveBranding(clientId))?.appName).toBe("Cached");
+      await setAppName("Not yet seen");
+
+      for (let i = 0; i < 1100; i++) {
+        await resolveBranding(`junk-${i}-${generateUniqueId()}`);
+      }
+
+      expect((await resolveBranding(clientId))?.appName).toBe("Cached");
+      await removeProfile();
+    });
+
+    it("costs an unknown id one client lookup and no profile reads", async () => {
+      await resolveBranding(null);
+      const clients = vi.spyOn(prisma.oAuthClient, "findUnique");
+      const profiles = vi.spyOn(prisma.brandingProfile, "findFirst");
+      try {
+        const junk = `junk-${generateUniqueId()}`;
+        await resolveBranding(junk);
+        await resolveBranding(junk);
+        expect(clients).toHaveBeenCalledTimes(1);
+        expect(profiles).not.toHaveBeenCalled();
+      } finally {
+        clients.mockRestore();
+        profiles.mockRestore();
+      }
+    });
   });
 });

@@ -155,6 +155,35 @@ export function onBrandingInvalidate(listener: () => void): void {
   brandingSubscribers.push(listener);
 }
 
+/**
+ * Calls `listener` each time `connection` is ready again after losing its
+ * connection, not on its first connect.
+ */
+export function onReconnected(
+  connection: { on(event: "close" | "ready", listener: () => void): unknown },
+  listener: () => void
+): void {
+  let lost = false;
+  connection.on("close", () => {
+    lost = true;
+  });
+  connection.on("ready", () => {
+    if (!lost) return;
+    lost = false;
+    listener();
+  });
+}
+
+const deliver = (channel: string, message: string) => {
+  for (const l of listenersByChannel[channel] ?? []) {
+    try {
+      l(message);
+    } catch (err) {
+      logger.warn({ err }, "cacheBroadcast listener threw");
+    }
+  }
+};
+
 /** Safe to call more than once: a no-op until `closeCacheBroadcast`. */
 export async function startCacheSubscriber(): Promise<void> {
   if (subscriber) return;
@@ -165,20 +194,10 @@ export async function startCacheSubscriber(): Promise<void> {
   fresh.on("end", () => {
     if (subscriber === fresh) subscriber = null;
   });
-  fresh.on("message", (channel, message) => {
-    for (const l of listenersByChannel[channel] ?? []) {
-      try {
-        l(message);
-      } catch (err) {
-        logger.warn(
-          {
-            err,
-          },
-          "cacheBroadcast listener threw"
-        );
-      }
-    }
-  });
+  fresh.on("message", deliver);
+  // Messages published while it was away are lost. Branding has no other
+  // signal, so its caches are dropped as if one had arrived.
+  onReconnected(fresh, () => deliver(BRANDING_INVALIDATE_CHANNEL, ""));
   await fresh.subscribe(...Object.keys(listenersByChannel));
   subscriber = fresh;
 }

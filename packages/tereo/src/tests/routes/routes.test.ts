@@ -136,6 +136,24 @@ describe("root router", () => {
       expect(response.data).toContain(SHELL);
     });
 
+    // The general limiter sets X-RateLimit-Limit on a request it lets through.
+    it("rate-limits the branded sign-in pages and nothing else of the UI", async () => {
+      for (const path of [
+        "/login",
+        "/login/2fa",
+        "/consent",
+        "/set-password",
+      ]) {
+        const response = await get(`${path}?client_id=x`);
+        expect(response.status, path).toBe(HTTP_STATUS.OK);
+        expect(response.headers["x-ratelimit-limit"], path).toBeDefined();
+      }
+      for (const path of ["/", "/auth-admin/users/123", "/favicon.ico"]) {
+        const response = await get(path);
+        expect(response.headers["x-ratelimit-limit"], path).toBeUndefined();
+      }
+    });
+
     it.each(["/auth-admin/users/123", "/shared/abc123/report.pdf", "/setup"])(
       "answers the client-side route %s with the app shell",
       async (path) => {
