@@ -769,7 +769,7 @@ describe("branding", () => {
       }),
     });
     expect(problems).toEqual([
-      "a.json: branding.clients.acme-web.footerLinks[0].url: must be an https: URL",
+      "a.json: branding.clients.acme-web.footerLinks[0].url: must be an https:// URL",
     ]);
   });
 });

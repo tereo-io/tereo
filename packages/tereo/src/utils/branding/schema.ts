@@ -20,7 +20,10 @@ const HTTPS_URL_PATTERN = String.raw`^[Hh][Tt][Tt][Pp][Ss]://[^\u0000-\u0020\u00
 const httpsUrl = z
   .string()
   .max(2048)
-  .regex(new RegExp(HTTPS_URL_PATTERN), "must be an https:// URL")
+  .regex(new RegExp(HTTPS_URL_PATTERN), {
+    message: "must be an https:// URL",
+    abort: true,
+  })
   .refine((value) => {
     try {
       return new URL(value).protocol === "https:";
