@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { GrantsPanel } from "./GrantsPanel";
@@ -83,6 +83,32 @@ describe("GrantsPanel", () => {
       .setup()
       .click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("pat@example.com")).toBeInTheDocument();
+  });
+
+  it("keeps a loaded list when a background refetch fails", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <GrantsPanel clientId="c1" />
+      </QueryClientProvider>
+    );
+    expect(await screen.findByText("pat@example.com")).toBeInTheDocument();
+    authMock.axios.get.mockRejectedValue(new Error("boom"));
+    await act(async () => {
+      await client.refetchQueries();
+    });
+    await waitFor(() =>
+      expect(client.getQueryState(["branding", "grants", "c1"])?.status).toBe(
+        "error"
+      )
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.getByText("pat@example.com")).toBeInTheDocument();
+    expect(screen.queryByText(/Could not load/)).toBeNull();
   });
 
   it("offers the user picker when the viewer can search users", async () => {

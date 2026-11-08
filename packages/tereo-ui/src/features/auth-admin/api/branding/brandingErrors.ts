@@ -18,8 +18,14 @@ export const FOOTER_LINKS_MAX = 3;
 export const FOOTER_URL_MAX = 2048;
 export { COLOR_VALUE_MAX, isSafeColorValue };
 
+// Mirrors core's footer URL rule (utils/branding/schema.ts): `https://` as
+// written and no space or control character, then a successful URL parse.
+// eslint-disable-next-line no-control-regex -- the control range is the point
+const HTTPS_URL_PATTERN = /^https:\/\/[^\u0000-\u0020\u007f]+$/i;
+
 export const isHttpsUrl = (value: string): boolean => {
-  if (value.length > FOOTER_URL_MAX) return false;
+  if (value.length > FOOTER_URL_MAX || !HTTPS_URL_PATTERN.test(value))
+    return false;
   try {
     return new URL(value).protocol === "https:";
   } catch {

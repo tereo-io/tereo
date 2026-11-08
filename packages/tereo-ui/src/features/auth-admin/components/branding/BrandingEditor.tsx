@@ -148,7 +148,7 @@ const EditorForm = ({
   const removed = useRef(false);
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
-      dirty &&
+      busy &&
       !removed.current &&
       currentLocation.pathname !== nextLocation.pathname
   );
@@ -199,7 +199,7 @@ const EditorForm = ({
         <Button
           key="save"
           isLoading={save.isPending}
-          disabled={!dirty || hasErrors}
+          disabled={!dirty || hasErrors || uploads > 0}
           onClick={() => save.mutate(toBody(draft), { onSuccess: onSaved })}
         >
           Save

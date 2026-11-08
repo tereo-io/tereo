@@ -444,6 +444,30 @@ describe("BrandingEditor", () => {
       expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     });
 
+    it("disables Save while an image upload is in flight", async () => {
+      const user = userEvent.setup();
+      renderEditor(profile());
+      await user.type(await screen.findByLabelText("Headline"), "Hi");
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      let finish: (v: unknown) => void = () => {};
+      authMock.axios.post.mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+      );
+      await user.upload(
+        screen.getByLabelText("Logo") as HTMLInputElement,
+        new File(["x"], "logo.png", { type: "image/png" })
+      );
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      await act(async () => {
+        finish({
+          data: { sha256: "a".repeat(64), url: "/oauth/branding/assets/a.png" },
+        });
+      });
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    });
+
     it("starts fresh after its own save, without the notice", async () => {
       const user = userEvent.setup();
       renderEditor(profile());

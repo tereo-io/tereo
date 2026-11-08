@@ -72,7 +72,7 @@ export const GrantsPanel = ({
       )}
       {isLoading ? (
         <Spinner />
-      ) : isError ? (
+      ) : isError && !grants ? (
         <EmptyState
           layout="block"
           action={
