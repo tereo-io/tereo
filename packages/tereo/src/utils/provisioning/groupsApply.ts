@@ -211,9 +211,18 @@ export const applyGroups = async (
       );
       changed = true;
     }
-    const roles = await setGroupRoles(PROVISIONING, existing.id, roleIds, tx);
-    collect(roles);
-    if (roles.added.length > 0 || roles.removed.length > 0) changed = true;
+    // setGroupRoles locks every member's authority: skipped when nothing
+    // would change, as on most starts.
+    const current = new Set(await db.groups.getRoleIds(existing.id, tx));
+    const wanted = new Set(roleIds);
+    const sameRoles =
+      current.size === wanted.size &&
+      [...wanted].every((id) => current.has(id));
+    if (!sameRoles) {
+      const roles = await setGroupRoles(PROVISIONING, existing.id, roleIds, tx);
+      collect(roles);
+      if (roles.added.length > 0 || roles.removed.length > 0) changed = true;
+    }
     if (existing.archivedAt) {
       collect(await restoreGroup(PROVISIONING, existing.id, tx));
       changed = true;

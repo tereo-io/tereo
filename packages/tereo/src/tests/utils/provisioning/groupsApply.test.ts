@@ -10,6 +10,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createTestUser } from "../../support/auth/users.js";
 import { addMembers } from "../../../utils/groups.js";
 import { prisma } from "../../../utils/db/prisma.js";
+import db from "../../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
 import type {
   LoadedDocument,
@@ -170,6 +171,55 @@ describe("applyGroups", () => {
         select: { userId: true },
       })
     ).toEqual([{ userId: member.id }]);
+  });
+
+  it("re-applies an unchanged group without touching it or locking its members", async () => {
+    const role = customRole(["roles.read"]);
+    const group = groupSpec({ roles: [role.name] });
+    await applyProvisioning(setOf([role], [group]));
+    const before = await groupRow(group.slug);
+    const member = await createTestUser();
+    await prisma.$transaction((tx) =>
+      addMembers(PROVISIONING, before.id, [member.id], tx)
+    );
+    const auditCount = () =>
+      prisma.auditLogEntry.count({
+        where: { entityType: "Group", entityId: before.id },
+      });
+    const auditBefore = await auditCount();
+
+    // A member's authority lock held elsewhere: a role change would wait on it.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((resolve) => (locked = resolve));
+    const holder = prisma.$transaction(
+      async (tx) => {
+        await db.users.lockAuthority(member.id, tx);
+        locked();
+        await held;
+      },
+      { timeout: 30_000 }
+    );
+    await lockTaken;
+    try {
+      const outcome = await Promise.race([
+        applyProvisioning(setOf([role], [group])),
+        new Promise<"blocked">((resolve) =>
+          setTimeout(() => resolve("blocked"), 5_000)
+        ),
+      ]);
+      expect(outcome).not.toBe("blocked");
+      expect(outcome).toMatchObject({ groups: [] });
+    } finally {
+      release();
+      await holder;
+    }
+
+    const after = await groupRow(group.slug);
+    expect(after.updatedAt).toEqual(before.updatedAt);
+    expect(after.roles).toEqual(before.roles);
+    expect(await auditCount()).toBe(auditBefore);
   });
 
   it("refuses a slug a hand-made group holds in that scope", async () => {
