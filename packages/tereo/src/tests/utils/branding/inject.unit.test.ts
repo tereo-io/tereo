@@ -65,21 +65,23 @@ describe("serializeForScript", () => {
 });
 
 describe("brandingStyle", () => {
-  it("writes :root for light and [data-theme=dark] for dark", () => {
+  // Kosmeo's dark values sit under [data-theme="dark"], as specific as :root;
+  // a bare :root rule later in the document would win over them.
+  it("scopes light away from the dark theme and writes dark under [data-theme=dark]", () => {
     expect(
       brandingStyle(
         { "--k-primary-color": "#00bb55" },
         { "--k-primary-color": "rgb(1, 2, 3)" }
       )
     ).toBe(
-      ':root{--k-primary-color:#00bb55;}[data-theme="dark"]{--k-primary-color:rgb(1, 2, 3);}'
+      ':root:not([data-theme="dark"]){--k-primary-color:#00bb55;}[data-theme="dark"]{--k-primary-color:rgb(1, 2, 3);}'
     );
   });
 
   it("produces no rule for an empty map", () => {
     expect(brandingStyle({}, {})).toBe("");
     expect(brandingStyle({ "--k-primary-color": "#fff" }, {})).toBe(
-      ":root{--k-primary-color:#fff;}"
+      ':root:not([data-theme="dark"]){--k-primary-color:#fff;}'
     );
   });
 
@@ -93,7 +95,7 @@ describe("brandingStyle", () => {
         },
         { "--k-primary-color": "url(x)" }
       )
-    ).toBe(":root{--k-primary-color-hover:#abc;}");
+    ).toBe(':root:not([data-theme="dark"]){--k-primary-color-hover:#abc;}');
   });
 });
 
@@ -182,7 +184,7 @@ describe("injectBranding", () => {
       "auth"
     );
     expect(head(html)).toContain(
-      '<style id="tereo-branding-style">:root{--k-primary-color:#00bb55;}</style>'
+      '<style id="tereo-branding-style">:root:not([data-theme="dark"]){--k-primary-color:#00bb55;}</style>'
     );
     expect(head(html)).toContain('id="tereo-branding"');
   });
@@ -203,6 +205,7 @@ describe("injectBranding", () => {
         backgroundUrl: "/oauth/branding/assets/b.jpg",
         faviconUrl: "/oauth/branding/assets/c.svg",
         layout: "split",
+        colorsLight: { "--k-primary-color": "#445566" },
         colorsDark: { "--k-primary-color": "#112233" },
         applyToConsole: true,
       }),
@@ -211,7 +214,7 @@ describe("injectBranding", () => {
     expect(JSON.parse(jsonBlock(html))).toEqual({
       scope: "console",
       appName: "Acme",
-      colorsLight: {},
+      colorsLight: { "--k-primary-color": "#445566" },
       colorsDark: { "--k-primary-color": "#112233" },
     });
     expect(html).not.toContain('rel="preload"');
@@ -219,6 +222,9 @@ describe("injectBranding", () => {
     expect(html).not.toContain("data-brand-layout");
     expect(html).toContain('href="/favicon.ico"');
     expect(html).toContain("<title>Acme</title>");
+    expect(html).toContain(
+      ':root:not([data-theme="dark"]){--k-primary-color:#445566;}'
+    );
     expect(html).toContain('[data-theme="dark"]{--k-primary-color:#112233;}');
   });
 

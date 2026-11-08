@@ -41,6 +41,8 @@ const declarations = (colors: Record<string, string>) =>
     .map(([name, value]) => `${name}:${value};`)
     .join("");
 
+// Light is kept off the dark theme: as a bare `:root` rule it would match
+// kosmeo's `[data-theme="dark"]` specificity and, coming later, win over it.
 export function brandingStyle(
   light: Record<string, string>,
   dark: Record<string, string>
@@ -48,7 +50,7 @@ export function brandingStyle(
   const lightRule = declarations(light);
   const darkRule = declarations(dark);
   return (
-    (lightRule ? `:root{${lightRule}}` : "") +
+    (lightRule ? `:root:not([data-theme="dark"]){${lightRule}}` : "") +
     (darkRule ? `[data-theme="dark"]{${darkRule}}` : "")
   );
 }

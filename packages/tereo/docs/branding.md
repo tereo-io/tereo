@@ -16,7 +16,7 @@ admin UI (**Branding**), through `/v1/admin/branding`, or by a
 | `signInLabel` | text | 30. The login button |
 | `notice` | text | 280. Plain text above the login form |
 | `logo`, `logoDark` | image | PNG, WebP, JPEG, SVG; `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB). `logoDark` shows under the app's dark theme (its theme setting, not the OS's); without one, `logo` shows in both |
-| `favicon` | image | PNG, SVG, ICO; 512 KB |
+| `favicon` | image | PNG, SVG, ICO; `BRANDING_IMAGE_MAX_SIZE_KB` (512 KB) |
 | `background` | image | PNG, WebP, JPEG; `BRANDING_BACKGROUND_MAX_SIZE_MB` (5 MB) |
 | `layout` | enum | `centered` (card over a full-bleed background) or `split` (the background in its own column beside a solid form column; below 48rem only the form shows, and the editor's preview applies that against its own width) |
 | `footerLinks` | list | Up to 3 `{ label, url }`; label 40 characters; `url` must be `https:` |
@@ -51,7 +51,8 @@ lies under an overridden slot.
 
 **Injection.** Core serves the UI's `index.html` itself. On a sign-in route it resolves the branding
 for `?client_id=` and adds to `<head>` a `<style id="tereo-branding-style">` with the colours
-(`:root` for light, `[data-theme="dark"]` for dark), preloads for the logo and background, a
+(`:root:not([data-theme="dark"])` for light, so it never overrides the dark theme's values, and
+`[data-theme="dark"]` for dark), preloads for the logo and background, a
 `<link rel="icon">`, the app name as `<title>`, `data-brand-layout` on `<html>`, and
 `<script type="application/json" id="tereo-branding">` with the effective values and
 `scope: "auth"`. The first paint is already branded.
