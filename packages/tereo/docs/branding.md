@@ -128,7 +128,9 @@ may start one on (owned or actively granted with `branding.write`; every one for
 `canViewGrants` (owner or `branding.admin`: may list the grants).
 
 A provisioned profile refuses `PUT` and `DELETE` with `409 managed_by_provisioning` and the
-document's file name as `provisionedFrom`, for everyone, `branding.admin` included. Writes are
+document's file name as `provisionedFrom`, for everyone, `branding.admin` included; so does
+deleting its client (`DELETE /v1/admin/clients/:id`), which would leave the documents branding a
+client that no longer exists. Writes are
 last-write-wins. Each mutation writes an audit entry and emits `auth.branding.updated` (with the
 slots changed) or `auth.branding.deleted`; a profile released from provisioning emits
 `auth.branding.updated` with `changedSlots: []` and `released: true`. Grants emit `auth.branding.grant-added` and
