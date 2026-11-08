@@ -6,6 +6,7 @@ import { formatOrganizationMember } from "../../../../../../../utils/transformer
 import { revokeCreatorSharesTx } from "../../../../../../../utils/shareRevocation.js";
 import { recordSessionsRevoked } from "../../../../../../../utils/sessionEvents.js";
 import { endOrganizationSessions } from "../../../../../../../utils/sessions.js";
+import { removeFromOrgGroupsTx } from "../../../../../../../utils/groups.js";
 import type { Prisma } from "../../../../../../../utils/db/prisma.js";
 import { assertNotGuest } from "../../../../users/user/guards.js";
 import { validateUser } from "../../../../../../../utils/auth.js";
@@ -81,6 +82,8 @@ export const removeMember = async (req: Request, res: Response) => {
     // Org-scoped roles grant nothing without the membership; leaving them
     // would hand them back if the user were ever re-added.
     await tx.userRole.deleteMany({ where: { userId, organizationId: orgId } });
+    // The same holds for the organization's groups.
+    await removeFromOrgGroupsTx(tx, auth, orgId, userId);
     await logAuditTx(tx, {
       auth,
       organizationId: orgId,

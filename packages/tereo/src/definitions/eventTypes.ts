@@ -78,6 +78,29 @@ const authEvents: EventTypeDefinition[] = [
     description:
       "An admin reset a user's TOTP (MFA): disabled, recovery codes deleted",
   },
+  { eventType: "auth.group.created", description: "Group created" },
+  {
+    eventType: "auth.group.updated",
+    description:
+      "Group's slug, name, description or provisioning state changed",
+  },
+  { eventType: "auth.group.archived", description: "Group archived" },
+  {
+    eventType: "auth.group.restored",
+    description: "Group restored from the archive",
+  },
+  {
+    eventType: "auth.group.members-added",
+    description: "Users added to a group (up to 1,000 per event)",
+  },
+  {
+    eventType: "auth.group.members-removed",
+    description: "Users removed from a group (up to 1,000 per event)",
+  },
+  {
+    eventType: "auth.group.roles-changed",
+    description: "Group's role set changed",
+  },
   { eventType: "auth.role.created", description: "Role created" },
   { eventType: "auth.role.updated", description: "Role updated" },
   { eventType: "auth.role.archived", description: "Role archived" },
@@ -434,6 +457,7 @@ const notificationEvents: EventTypeDefinition[] = [
 const READ_PERMISSIONS: [prefix: string, permission: string][] = [
   ["auth.organization.", "organizations.read"],
   ["auth.guest.", "users.guests.read"],
+  ["auth.group.", "groups.read"],
   ["auth.user.", "users.read"],
   ["auth.role.", "roles.read"],
   ["auth.client.", "clients.read"],

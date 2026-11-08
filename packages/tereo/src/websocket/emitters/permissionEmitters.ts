@@ -63,6 +63,15 @@ export const notifyUserRolesChanged = (userId: string) => {
   });
 };
 
+/** `notifyUserRolesChanged` for many users at once (a group's members). */
+export const notifyUsersRolesChanged = (userIds: string[]) => {
+  if (userIds.length === 0) return;
+  emitPermissionChangeToUsers([...new Set(userIds)], {
+    reason: "user_roles_changed",
+    timestamp: Date.now(),
+  });
+};
+
 export const notifyRolePermissionsChanged = async (roleId: string) => {
   const affectedUserIds = await db.roles.getUserIdsByRoleId(roleId);
   if (affectedUserIds.length === 0) {

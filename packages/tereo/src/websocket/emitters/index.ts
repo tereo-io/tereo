@@ -1,5 +1,6 @@
 export {
   notifyUserRolesChanged,
+  notifyUsersRolesChanged,
   notifyRolePermissionsChanged,
   notifyRoleStatusChanged,
   notifyRoleDeleted,
