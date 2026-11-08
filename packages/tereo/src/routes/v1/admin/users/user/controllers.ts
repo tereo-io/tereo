@@ -1,7 +1,7 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
-import { retirePasswordLinks } from "../../../../../utils/passwordSetup.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
+import { retirePasswordLinks } from "../../../../../utils/userLinks.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../utils/auth.js";

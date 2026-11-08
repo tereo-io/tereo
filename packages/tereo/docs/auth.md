@@ -964,7 +964,7 @@ expiry, so they are spent too.
 
 ### Password setup link
 
-Issued by `issuePasswordSetupLink` (`utils/passwordSetup.ts`) as
+Issued by `issuePasswordLink` (`utils/userLinks.ts`) as
 `${UI_BASE_URL}/set-password#token=<token>`: 32 random bytes, base64url, valid for
 `PASSWORD_SETUP_TTL_SECONDS` (72 hours by default), single use, and only its SHA-256 is stored in
 `auth.password_setup_tokens`. A user has at most one live token; issuing replaces it. The token is

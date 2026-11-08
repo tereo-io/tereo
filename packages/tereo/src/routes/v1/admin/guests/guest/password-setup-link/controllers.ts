@@ -1,7 +1,7 @@
-import { issuePasswordSetupLink } from "../../../../../../utils/passwordSetup.js";
 import { getGuest, getManagedGuest } from "../../../../../../utils/guests.js";
 import { AppError, ConflictError } from "../../../../../../utils/errors.js";
 import { assertMayResetCredentials } from "../../../users/user/guards.js";
+import { issuePasswordLink } from "../../../../../../utils/userLinks.js";
 import { hasPermission } from "../../../../../../utils/permissions.js";
 import { isUsableAccount } from "../../../../../../utils/users.js";
 import { validateUser } from "../../../../../../utils/auth.js";
@@ -55,8 +55,9 @@ export const issueGuestPasswordSetupLink = async (
         "guest_not_usable"
       );
     }
-    return issuePasswordSetupLink(tx, {
+    return issuePasswordLink(tx, {
       userId: id,
+      purpose: "setup",
       createdBy: auth.userId,
       notify,
     });

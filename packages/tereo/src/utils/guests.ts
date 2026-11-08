@@ -1,5 +1,6 @@
 import type { InviteGuestInput } from "../routes/v1/admin/guests/schemas.js";
 import { actingOrganizationIds, canActInOrganization } from "./users.js";
+import { issuePasswordLink, retirePasswordLinks } from "./userLinks.js";
 import { AppError, BadRequestError, ConflictError } from "./errors.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { PASSWORD_LINK_PURPOSES } from "./db/userLinkTokens.js";
@@ -18,10 +19,6 @@ import {
   OrgMemberRole,
   UserType,
 } from "../../prisma/generated/client/index.js";
-import {
-  issuePasswordSetupLink,
-  retirePasswordLinks,
-} from "./passwordSetup.js";
 import {
   getGuestDefaultRoleIds,
   guestAssignableProblemsOf,
@@ -518,8 +515,9 @@ const applyInitialAccess = async (
     );
     return { user: updated };
   }
-  const { url } = await issuePasswordSetupLink(tx, {
+  const { url } = await issuePasswordLink(tx, {
     userId: user.id,
+    purpose: "setup",
     createdBy: auth.userId,
     notify: access.notify,
   });

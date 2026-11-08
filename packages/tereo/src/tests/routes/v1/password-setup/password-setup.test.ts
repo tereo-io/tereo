@@ -2,11 +2,11 @@
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../../../utils/defaultOrganization.js";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { issuePasswordSetupLink } from "../../../../utils/passwordSetup.js";
 import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
 import { hashFlowToken, hashPassword } from "../../../../utils/crypto.js";
 import { getTestPrincipalToken } from "../../../support/principals.js";
 import { createTestClient } from "../../../support/auth/clients.js";
+import { issuePasswordLink } from "../../../../utils/userLinks.js";
 import { SYSTEM_USER_ID } from "../../../../definitions/index.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { waitFor } from "../../../support/webhooks.js";
@@ -73,7 +73,12 @@ const createGuest = async (over: { expiresAt?: Date | null } = {}) => {
 
 const issue = async (userId: string, notify = false) => {
   const { url } = await prisma.$transaction((tx) =>
-    issuePasswordSetupLink(tx, { userId, createdBy: SYSTEM_USER_ID, notify })
+    issuePasswordLink(tx, {
+      userId,
+      purpose: "setup",
+      createdBy: SYSTEM_USER_ID,
+      notify,
+    })
   );
   return new URL(url).hash.replace("#token=", "");
 };
@@ -429,7 +434,7 @@ describe("password setup", () => {
     });
   });
 
-  describe("issuePasswordSetupLink with notify", () => {
+  describe("issuePasswordLink with notify", () => {
     const allowPrivateHosts = env.NOTIFICATIONS_ALLOW_PRIVATE_HOSTS;
     let smtp: FakeSmtpServer;
 
