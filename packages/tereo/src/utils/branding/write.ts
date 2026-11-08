@@ -338,10 +338,13 @@ export const deleteClientBrandingTx = async (
     });
   }
 
-  const grants = await tx.brandingGrant.findMany({
-    where: { clientId: client.id, revokedAt: null },
-    orderBy: { grantedAt: "asc" },
-  });
+  // Locked, because a revoke changes no foreign key and so does not wait on
+  // the client row: one committing meanwhile makes this wait and re-check.
+  const grants = await tx.$queryRaw<{ id: string; userId: string }[]>`
+    SELECT "id", "user_id" AS "userId" FROM "auth"."branding_grants"
+    WHERE "client_id" = ${client.id}::uuid AND "revoked_at" IS NULL
+    ORDER BY "id"
+    FOR UPDATE`;
   for (const grant of grants) {
     await logAuditTx(tx, {
       auth: actor,
