@@ -365,7 +365,8 @@ See [branding](branding.md) for the slots and limits.
 Image paths (`logo`, `logoDark`, `favicon`, `background`) are relative to the document's file and
 must resolve inside `PROVISIONING_PATH` (its folder, when it names a file): no `..` out of it and no
 symlink pointing outside it. Each file is checked as an upload is: type from its bytes, the slot's
-types and size limit, the SVG allowlist. Images are stored by content before the apply's transaction,
+types and size limit, the SVG allowlist. They are read even when another document has problems,
+so one run reports both. Images are stored by content before the apply's transaction,
 reusing an object with the same content; one nothing references (a dry run's, or a failed apply's)
 expires after 24 hours. A file changed in place is a new image: the profile points at it and the
 old one expires.

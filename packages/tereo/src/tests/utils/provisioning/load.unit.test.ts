@@ -685,6 +685,20 @@ describe("branding", () => {
     );
   });
 
+  it("reports image problems with other documents' problems, in one round", async () => {
+    const { dir } = await docsFolder();
+    await writeFile(join(dir, "a.json"), brandingDoc("./branding/none.png"));
+    await writeFile(join(dir, "b.json"), "{ not json");
+    const problems = await problemsOfPath(dir);
+    expect(problems).toHaveLength(2);
+    expect(problems).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^b\.json: not valid JSON/),
+        expect.stringMatching(/^a\.json: branding\.clients\[acme-web\]\.logo:/),
+      ])
+    );
+  });
+
   it("refuses an empty branding block", () => {
     expect(problemsOf({ "a.json": doc({ branding: {} }) })).toEqual([
       "a.json: branding: needs default or at least one client",
