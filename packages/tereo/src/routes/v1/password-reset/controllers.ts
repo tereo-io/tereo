@@ -1,7 +1,6 @@
 import { passwordResetAddress } from "../../../middleware/rateLimit.js";
 import { requestPasswordReset } from "../../../utils/passwordReset.js";
 import { TooManyRequestsError } from "../../../utils/errors.js";
-import { getIpIdentifier } from "../../../utils/rateLimit.js";
 import { validateBody } from "../../../utils/validateReq.js";
 import { RequestPasswordResetSchema } from "./schemas.js";
 import { logger } from "../../../utils/logger.js";
@@ -22,10 +21,12 @@ export const postPasswordReset = async (req: Request, res: Response) => {
     res.status(202).end();
     return;
   }
-  await requestPasswordReset({
+  // Answered before any work, so neither the status nor the time of the
+  // response, nor a failure of the work, depends on the account.
+  res.status(202).end();
+  void requestPasswordReset({
     email,
     clientId: client_id,
-    ip: getIpIdentifier(req),
-  });
-  res.status(202).end();
+    ip: req.ip,
+  }).catch((err) => logger.error({ err }, "Password reset request failed"));
 };

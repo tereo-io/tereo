@@ -31,7 +31,7 @@ export const requestPasswordReset = async ({
 }: {
   email: string;
   clientId?: string;
-  ip: string;
+  ip?: string;
 }): Promise<void> => {
   const user = await db.users.getByEmail(email);
   if (!user || user.id === SYSTEM_USER_ID) return;
@@ -44,11 +44,7 @@ export const requestPasswordReset = async ({
   // Only a client that exists goes into the link, so the page cannot be made
   // to carry an arbitrary identifier.
   const knownClient =
-    clientId !== undefined &&
-    (await prisma.oAuthClient.findUnique({
-      where: { clientId },
-      select: { clientId: true },
-    }));
+    clientId !== undefined && (await db.clients.clientIdExists(clientId));
 
   try {
     await prisma.$transaction((tx) =>

@@ -39,6 +39,7 @@ describe("canResetPassword", () => {
       false,
       false,
     ],
+    ["a provider-only human with no password", human, false, true],
     ["a user on an SSO-only domain", human, true, false],
   ])("%s", (_name, user, ssoOnly, expected) => {
     expect(canResetPassword(user, ssoOnly)).toBe(expected);

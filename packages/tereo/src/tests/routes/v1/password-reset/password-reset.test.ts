@@ -57,7 +57,22 @@ describe("password reset request", () => {
       },
     });
 
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 400));
+  const mailsTo = (email: string) =>
+    smtp.messages.filter((m) => m.rcpt.includes(email));
+  const waitForMails = (email: string, count: number) =>
+    waitFor(async () => mailsTo(email).length >= count, 10_000, 50);
+
+  // The work runs after the 202, so absence is shown by watching the database
+  // for a while rather than by one read.
+  const expectNoLink = async (userId: string, ms = 1500) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      expect(await prisma.userLinkToken.count({ where: { userId } })).toBe(0);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+
+  const createdProviders: string[] = [];
 
   beforeAll(async () => {
     await ensureDefaultOrganization();
@@ -71,6 +86,12 @@ describe("password reset request", () => {
     await addConnection();
   });
   afterAll(async () => {
+    await prisma.identityProviderDomain.deleteMany({
+      where: { providerId: { in: createdProviders } },
+    });
+    await prisma.identityProvider.deleteMany({
+      where: { id: { in: createdProviders } },
+    });
     await stopNotificationDeliveryWorker();
     await getNotificationQueue("email")
       .obliterate({ force: true })
@@ -97,6 +118,7 @@ describe("password reset request", () => {
         createdBy: SYSTEM_USER_ID,
       },
     });
+    createdProviders.push(provider.id);
     const org = await prisma.organization.findFirstOrThrow();
     await prisma.identityProviderDomain.create({
       data: {
@@ -108,24 +130,28 @@ describe("password reset request", () => {
       },
     });
 
+    const unknown = `nobody-${rand()}@test.local`;
     const results = [];
     for (const email of [
-      eligible.email,
-      `nobody-${rand()}@test.local`,
+      unknown,
       deactivated.email,
       ssoUser.email,
+      eligible.email,
     ]) {
       const res = await request({ email });
       results.push([res.status, res.data]);
     }
 
     for (const r of results) expect(r).toEqual([202, ""]);
-    await waitFor(async () => smtp.messages.length >= 1, 10_000, 50);
-    await settle();
-    expect(smtp.messages).toHaveLength(1);
-    expect(smtp.messages[0].rcpt).toEqual([eligible.email]);
+    await waitForMails(eligible.email, 1);
+    expect(await liveLinks(eligible.id)).toBe(1);
+    // The ineligible requests came first and do less work than the eligible one.
     expect(await liveLinks(deactivated.id)).toBe(0);
     expect(await liveLinks(ssoUser.id)).toBe(0);
+    for (const other of [deactivated, ssoUser]) {
+      expect(mailsTo(other.email)).toHaveLength(0);
+    }
+    expect(mailsTo(unknown)).toHaveLength(0);
   });
 
   it("no email connection: 202 and no link", async () => {
@@ -136,9 +162,7 @@ describe("password reset request", () => {
 
     expect(res.status).toBe(202);
     expect(res.data).toBe("");
-    expect(
-      await prisma.userLinkToken.count({ where: { userId: user.id } })
-    ).toBe(0);
+    await expectNoLink(user.id);
   });
 
   it("the fourth request in an hour for one address sends nothing", async () => {
@@ -151,9 +175,12 @@ describe("password reset request", () => {
     }
 
     expect(statuses).toEqual([202, 202, 202, 202]);
-    await waitFor(async () => smtp.messages.length >= 3, 10_000, 50);
-    await settle();
-    expect(smtp.messages).toHaveLength(3);
+    await waitForMails(user.email, 3);
+    // A later address's mail arriving means the fourth request's work is done.
+    const later = await createTestUser();
+    await request({ email: later.email });
+    await waitForMails(later.email, 1);
+    expect(mailsTo(user.email)).toHaveLength(3);
   });
 
   it("concurrent requests leave one live password link", async () => {
@@ -165,6 +192,7 @@ describe("password reset request", () => {
     ]);
 
     expect(results.map((r) => r.status)).toEqual([202, 202]);
+    await waitForMails(user.email, 2);
     expect(await liveLinks(user.id)).toBe(1);
   });
 
@@ -180,9 +208,9 @@ describe("password reset request", () => {
       (await request({ email: b.email, client_id: "no-such-client" })).status
     ).toBe(202);
 
-    await waitFor(async () => smtp.messages.length >= 2, 10_000, 50);
-    const textFor = (email: string) =>
-      smtp.messages.find((m) => m.rcpt.includes(email))?.parsed.text;
+    await waitForMails(a.email, 1);
+    await waitForMails(b.email, 1);
+    const textFor = (email: string) => mailsTo(email)[0]?.parsed.text;
     expect(textFor(a.email)).toContain(`?client_id=${client.clientId}#token=`);
     expect(textFor(b.email)).toContain("/set-password#token=");
     expect(textFor(b.email)).not.toContain("client_id");
@@ -191,6 +219,7 @@ describe("password reset request", () => {
   it("records the requester's address in the audit entry", async () => {
     const user = await createTestUser();
     await request({ email: user.email });
+    await waitForMails(user.email, 1);
 
     const entry = await prisma.auditLogEntry.findFirstOrThrow({
       where: { entityId: user.id },
