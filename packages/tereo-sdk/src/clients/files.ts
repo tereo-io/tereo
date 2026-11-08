@@ -367,6 +367,9 @@ export class FileServiceClient {
         canRead: true,
         canWrite: true,
         canDelete: true,
+        canRevokeShares: true,
+        canPurgeVersions: true,
+        coreManaged: false,
       };
     }
     return requests.files.getMyBucketPermissions(
@@ -893,6 +896,7 @@ export class FileServiceClient {
       service: null,
       missingSince: null,
       retiredAt: null,
+      coreManaged: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
