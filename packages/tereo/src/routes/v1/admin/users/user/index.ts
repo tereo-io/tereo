@@ -1,4 +1,5 @@
 import { requirePermission } from "../../../../../middleware/auth.js";
+import emailVerificationRouter from "./email-verification/index.js";
 import identityInvitesRouter from "./identity-invites/index.js";
 import identitiesRouter from "./identities/index.js";
 import promoteRouter from "./promote/index.js";
@@ -20,6 +21,7 @@ const userRouter = Router({ mergeParams: true });
 userRouter.use("/totp", totpRouter);
 userRouter.use("/identities", identitiesRouter);
 userRouter.use("/identity-invites", identityInvitesRouter);
+userRouter.use("/email-verification", emailVerificationRouter);
 userRouter.use("/promote", promoteRouter);
 
 userRouter.delete(

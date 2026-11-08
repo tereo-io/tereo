@@ -1,3 +1,4 @@
+import emailVerificationRouter from "./email-verification/index.js";
 import { smallBodyParsers } from "../../middleware/bodyParsers.js";
 import passwordResetRouter from "./password-reset/index.js";
 import passwordSetupRouter from "./password-setup/index.js";
@@ -26,6 +27,11 @@ v1Router.use("/account", ...smallBodyParsers, accountRouter);
 v1Router.use("/admin", ...smallBodyParsers, adminRouter);
 v1Router.use("/setup", ...smallBodyParsers, setupRouter);
 v1Router.use("/password-reset", ...smallBodyParsers, passwordResetRouter);
+v1Router.use(
+  "/email-verification",
+  ...smallBodyParsers,
+  emailVerificationRouter
+);
 v1Router.use("/password-setup", ...smallBodyParsers, passwordSetupRouter);
 
 export default v1Router;
