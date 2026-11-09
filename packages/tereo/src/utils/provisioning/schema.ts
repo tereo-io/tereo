@@ -129,8 +129,12 @@ const GroupEntry = z
       ),
     name: z.string().min(1).max(255),
     description: Description.optional(),
-    // Absent: a global group. Fixed once created.
-    organizationId: z.guid().optional(),
+    // Absent: a global group. Fixed once created. Lower-cased, as Postgres
+    // returns ids and as the group's scope is compared.
+    organizationId: z
+      .guid()
+      .transform((id) => id.toLowerCase())
+      .optional(),
     // Resolved as an integration's: custom roles of the set, core's roles,
     // `<slug>/<name>` services' system roles.
     roles: z.array(Text).default([]),

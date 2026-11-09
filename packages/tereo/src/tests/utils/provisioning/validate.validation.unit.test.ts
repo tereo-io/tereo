@@ -153,6 +153,14 @@ describe("ProvisioningDocumentSchema groups", () => {
     ]);
   });
 
+  it("lower-cases an organizationId, as Postgres returns ids", () => {
+    const id = "7B1C4D9E-0A2B-4C3D-8E4F-5A6B7C8D9E0F";
+    const result = parse({
+      groups: [{ slug: "support", name: "Support", organizationId: id }],
+    });
+    expect(result.data?.groups?.[0].organizationId).toBe(id.toLowerCase());
+  });
+
   it("still refuses a document with nothing in it, naming groups", () => {
     const result = parse({ groups: [] });
     expect(result.success).toBe(false);
