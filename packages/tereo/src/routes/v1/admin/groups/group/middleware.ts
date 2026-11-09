@@ -23,10 +23,44 @@ const permissionRequired = (permission: string) =>
   new ForbiddenError(`The following permission is required: ${permission}`);
 
 /**
+ * The caller's role as an admin or owner of `organizationId`, for acting on
+ * its groups without `groups.<need>`: null for a holder of
+ * `organizations.write`, whose platform authority covers every organization.
+ * As `requireOrgRole("admin")`, except that an inactive organization's
+ * admins may still read its groups. Any refusal is the 403 a missing group
+ * gets, so it tells nothing of the organization or the caller's place in it.
+ */
+export const requireGroupOrgAdmin = async (
+  req: Request,
+  organizationId: string,
+  need: GroupNeed
+): Promise<OrgMemberRole | null> => {
+  const refused = permissionRequired(`groups.${need}`);
+  if (need !== "read") {
+    return requireOrgRole("admin", req, organizationId).catch(
+      (err: unknown) => {
+        throw err instanceof ForbiddenError ? refused : err;
+      }
+    );
+  }
+  const auth = validateUser(req);
+  if (hasPermission(auth.permissions, "organizations.write")) return null;
+  if (auth.ceiling && !hasPermission(auth.ceiling, "organizations.write")) {
+    throw refused;
+  }
+  const membership = await db.organizations.getMembership(
+    organizationId,
+    auth.userId
+  );
+  if (!membership || membership.memberRole === "member") throw refused;
+  return membership.memberRole;
+};
+
+/**
  * Who may act on a group: a holder of `groups.<need>`, or, for an
  * organization's group, an admin or owner of that organization (for reading
- * too, since a group's members are the org's membership). A global group
- * needs the platform permission.
+ * too, since a group's members are the org's membership) or a holder of
+ * `organizations.write`. A global group needs the platform permission.
  */
 export const authorizeGroup = async (
   req: Request,
@@ -44,10 +78,10 @@ export const authorizeGroup = async (
     };
   }
   if (!group.organizationId) throw permissionRequired(permission);
-  const callerOrgRole = await requireOrgRole(
-    "admin",
+  const callerOrgRole = await requireGroupOrgAdmin(
     req,
-    group.organizationId
+    group.organizationId,
+    need
   );
   return {
     grantable: await callerPermissionsIn(auth, group.organizationId),
@@ -57,8 +91,8 @@ export const authorizeGroup = async (
 
 /**
  * The group `:id` names, archived or not, once the caller may act on it. A
- * caller without `groups.<need>` gets 403 for a missing group as for one
- * outside their organizations, so ids cannot be probed.
+ * caller without `groups.<need>` gets the same 403 for a missing group as for
+ * one they may not act on, so ids cannot be probed.
  */
 export const loadAuthorizedGroup = async (req: Request, need: GroupNeed) => {
   const auth = validateUser(req);

@@ -219,4 +219,108 @@ describe("webhook recipients act as the endpoint's creator", () => {
       expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
     });
   });
+
+  describe("group events", () => {
+    const WEBHOOKS = ["webhooks.read", "webhooks.write"];
+    const EVENT = "auth.group.members-added";
+
+    /** An org-scoped webhooks user holding `memberRole` in a fresh org. */
+    const orgAdmin = async (memberRole: "member" | "admin" | "owner") => {
+      const orgId = testOrgId(`group-events-${randomUUID()}`);
+      const user = await orgScopedUser(orgId, WEBHOOKS);
+      await prisma.organizationMember.update({
+        where: {
+          organizationId_userId: { organizationId: orgId, userId: user.userId },
+        },
+        data: { memberRole },
+      });
+      return { ...user, orgId };
+    };
+
+    const groupEvent = (
+      emittedIn: string,
+      groupOrganizationId: string | null
+    ) => ({
+      organizationId: emittedIn,
+      eventType: EVENT,
+      data: {
+        groupId: randomUUID(),
+        organizationId: groupOrganizationId,
+        userIds: [],
+      },
+    });
+
+    it("an org admin or owner subscribes and is sent their org's group events", async () => {
+      for (const tier of ["admin", "owner"] as const) {
+        const { token, orgId } = await orgAdmin(tier);
+        const created = await subscribe(token, [EVENT]);
+        expect(created.status, tier).toBe(HTTP_STATUS.CREATED);
+        expect(await fanOut(created.data.id, groupEvent(orgId, orgId))).toBe(1);
+      }
+    });
+
+    it("a plain org member may not subscribe", async () => {
+      const { token } = await orgAdmin("member");
+      const res = await subscribe(token, [EVENT]);
+      expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(res.data.error_description).toContain("groups.read");
+    });
+
+    it("an org admin is sent no group event of another organization, and nothing once demoted", async () => {
+      const { token, orgId, userId } = await orgAdmin("admin");
+      const created = await subscribe(token, [EVENT]);
+      expect(created.status).toBe(HTTP_STATUS.CREATED);
+      expect(
+        await fanOut(created.data.id, groupEvent(orgId, randomUUID()))
+      ).toBe(0);
+
+      await prisma.organizationMember.update({
+        where: { organizationId_userId: { organizationId: orgId, userId } },
+        data: { memberRole: "member" },
+      });
+      expect(await fanOut(created.data.id, groupEvent(orgId, orgId))).toBe(0);
+    });
+
+    it("the default organization's admin is sent its own groups' events, not global groups'", async () => {
+      const userId = randomUUID();
+      await ensureTestMembership(userId, DEFAULT_ORGANIZATION_ID);
+      await prisma.organizationMember.update({
+        where: {
+          organizationId_userId: {
+            organizationId: DEFAULT_ORGANIZATION_ID,
+            userId,
+          },
+        },
+        data: { memberRole: "admin" },
+      });
+      const token = await getTestPrincipalToken({
+        userId,
+        organizationId: DEFAULT_ORGANIZATION_ID,
+        permissions: WEBHOOKS,
+      });
+      const created = await subscribe(token, [EVENT]);
+      expect(created.status).toBe(HTTP_STATUS.CREATED);
+      expect(
+        await fanOut(
+          created.data.id,
+          groupEvent(DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_ID)
+        )
+      ).toBe(1);
+      expect(
+        await fanOut(created.data.id, groupEvent(DEFAULT_ORGANIZATION_ID, null))
+      ).toBe(0);
+    });
+
+    it("a holder of groups.read is sent global and org group events as before", async () => {
+      const token = await getTestPrincipalToken({
+        organizationId: DEFAULT_ORGANIZATION_ID,
+        permissions: [...WEBHOOKS, "groups.read"],
+      });
+      const created = await subscribe(token, [EVENT]);
+      expect(created.status).toBe(HTTP_STATUS.CREATED);
+      expect(
+        await fanOut(created.data.id, groupEvent(DEFAULT_ORGANIZATION_ID, null))
+      ).toBe(1);
+    });
+  });
 });

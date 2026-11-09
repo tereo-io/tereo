@@ -90,9 +90,23 @@ global roles only). A caller needs:
 
 Without the permission, an **admin or owner of the group's organization** may do the same for that
 organization's groups, including reading them (and listing them with `?organizationId=<their org>`).
-A global group always needs the platform permission. A caller without it gets 403 for a missing group
-as for one they may not see, so ids cannot be probed. An org admin cannot add or remove an
-organization **owner** in the organization's groups (403); owners and the platform can.
+So may a holder of the platform `organizations.write`, which covers every organization as it does on
+the organization routes (`requireOrgRole`). A **deactivated** organization's admins and owners may
+still read its groups, members and roles, but not change them. A delegated token acts as an org admin
+only if its scopes allow `organizations.write`. A global group always needs the platform permission.
+
+A caller without the permission gets one and the same 403 (`The following permission is required:
+groups.<need>`) for a missing group and for any group they may not act on (a global group, another
+organization's, one where they are a plain member, a deactivated organization's for a change), so ids
+cannot be probed. Adding members to an organization group checks organization membership first: an
+id outside the organization is `409 not_org_member` whatever it names, so an org admin learns nothing
+of users elsewhere.
+
+An org admin cannot add or remove an organization **owner** in the organization's groups (403);
+owners and the platform can. The platform means any holder of `groups.write` or `organizations.write`:
+platform permissions come from global roles granted by platform admins and override the org tiers, as
+`organizations.write` does for org roles, so a `groups.write` holder may change an owner's membership
+of an org group (still only granting and taking away what they hold in that organization).
 
 The caller may only grant and take away what they hold, as elsewhere ([Granting](auth.md#granting-only-what-you-hold)):
 adding members, restoring and changing roles check the caller can grant every role the group holds
@@ -101,7 +115,9 @@ or changes; archiving checks they can take away every role the group holds. Remo
 as for removing a global role); from an **organization** group, that they can take away the group's
 roles with what they hold in that organization, as for removing an org-scoped role. The grant
 check on add-members and restore counts **every** role the group holds, inactive or archived roles
-included. The change may not remove the last admin (`assertAdminRemains`, counting group roles).
+included. Restoring an organization group is refused (`400 role_not_org_assignable`) if a role it
+holds gained a permission that is not org-assignable while the group was archived; change the group's
+roles first. The change may not remove the last admin (`assertAdminRemains`, counting group roles).
 
 A group with a role that requires two-factor authentication revokes the password-only tokens of
 users gaining it (new members, or all members when the role is added), so their next refresh meets
@@ -150,7 +166,10 @@ group whose roles are unchanged, so an unchanged document takes no member locks 
 
 Audit entries use entity type `Group`, written in the mutation's transaction. Events go through
 `core.outbox`. An organization group's events are emitted under its organization, a global group's
-under the default organization. Readers need `groups.read` (`auth.group.*`).
+under the default organization. Readers need `groups.read` (`auth.group.*`), except that an
+organization's admins and owners (and `organizations.write` holders) may subscribe to `auth.group.*`
+in that organization and are sent its own groups' events, never a global group's or another
+organization's ([webhooks](webhooks.md)).
 
 | Event | `data` |
 |---|---|

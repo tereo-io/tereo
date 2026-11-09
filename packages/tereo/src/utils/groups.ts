@@ -458,6 +458,27 @@ export const addMembers = async (
     );
   }
 
+  // For an org group, membership first: an id outside the organization is
+  // refused the same way whatever it names, so an org admin cannot tell an
+  // unknown user, a guest or a service account elsewhere apart.
+  if (group.organizationId) {
+    const members = new Set(
+      (
+        await tx.organizationMember.findMany({
+          where: { organizationId: group.organizationId, userId: { in: ids } },
+          select: { userId: true },
+        })
+      ).map((m) => m.userId)
+    );
+    const outside = ids.filter((id) => !members.has(id));
+    if (outside.length > 0) {
+      throw new ConflictError(
+        `Not members of the group's organization: ${outside.join(", ")}`,
+        "not_org_member"
+      );
+    }
+  }
+
   const users = await tx.user.findMany({ where: { id: { in: ids } } });
   const found = new Map(users.map((u) => [u.id, u]));
   const missing = ids.filter((id) => !found.has(id));
@@ -487,25 +508,7 @@ export const addMembers = async (
       );
     }
   }
-
-  if (group.organizationId) {
-    await assertOrgAdminSparesOwners(actor, group, ids, tx);
-    const members = new Set(
-      (
-        await tx.organizationMember.findMany({
-          where: { organizationId: group.organizationId, userId: { in: ids } },
-          select: { userId: true },
-        })
-      ).map((m) => m.userId)
-    );
-    const outside = ids.filter((id) => !members.has(id));
-    if (outside.length > 0) {
-      throw new ConflictError(
-        `Not members of the group's organization: ${outside.join(", ")}`,
-        "not_org_member"
-      );
-    }
-  }
+  await assertOrgAdminSparesOwners(actor, group, ids, tx);
 
   const roles = await groupRoles(groupId, tx);
   if (actor.mode === "admin") {
@@ -607,6 +610,12 @@ export const setGroupRoles = async (
   const locked = await lockCurrentMembers(groupId, tx);
   await db.groups.lockGroup(groupId, tx);
   const group = await db.groups.getAny(groupId, tx);
+  // Archived while this waited on the locks.
+  if (actor.mode === "admin" && group.archivedAt) {
+    throw new ArchivedError(
+      "Group is archived; restore it before changing its roles"
+    );
+  }
   const memberIds = await lockLateMembers(groupId, locked, tx);
 
   const wanted = unique(roleIds);
@@ -731,6 +740,17 @@ export const restoreGroup = async (
   const memberIds = await lockLateMembers(groupId, locked, tx);
 
   const roles = await groupRoles(groupId, tx);
+  // A held role may have gained a permission while the group was archived,
+  // when nothing counted it as assigned in the organization.
+  if (group.organizationId) {
+    const notAssignable = db.roles.notOrgAssignablePermissionNames(roles);
+    if (notAssignable.length > 0) {
+      throw new BadRequestError(
+        "role_not_org_assignable",
+        `An organization's group cannot hold roles with these permissions: ${notAssignable.join(", ")}; change its roles before restoring it`
+      );
+    }
+  }
   if (actor.mode === "admin") {
     assertCanGrant(actor.grantable, db.roles.grantedPermissionNames(roles));
   }

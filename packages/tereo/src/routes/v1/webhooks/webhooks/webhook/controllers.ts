@@ -116,8 +116,9 @@ export const updateWebhookEndpoint = async (req: Request, res: Response) => {
   // The endpoint is sent what its creator may read; whoever changes where it
   // goes or what it carries must be able to read all of it too.
   if (!existing.provisioned && !adminPause) {
-    assertMaySubscribe(
-      auth.permissions,
+    await assertMaySubscribe(
+      auth,
+      existing.organizationId,
       await db.eventTypes.findMany(body.eventTypes ?? existing.eventTypes)
     );
   }

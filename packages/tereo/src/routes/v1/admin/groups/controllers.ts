@@ -1,10 +1,9 @@
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
 import { formatGroup, formatGroups } from "../../../../utils/transformers.js";
-import { requireOrgRole } from "../../../../utils/orgRoleAuth.js";
+import { authorizeGroup, requireGroupOrgAdmin } from "./group/middleware.js";
 import { hasPermission } from "../../../../utils/permissions.js";
 import { validateUser } from "../../../../middleware/auth.js";
 import { ForbiddenError } from "../../../../utils/errors.js";
-import { authorizeGroup } from "./group/middleware.js";
 import { cursorId, nextCursor } from "./utils.js";
 import type { Request, Response } from "express";
 import db from "../../../../utils/db/index.js";
@@ -20,7 +19,7 @@ import {
 
 /**
  * Lists groups. A caller without `groups.read` names one organization they
- * administer, and sees only its groups.
+ * administer (or hold `organizations.write` over), and sees only its groups.
  */
 export const listGroups = async (req: Request, res: Response) => {
   const auth = validateUser(req);
@@ -31,7 +30,7 @@ export const listGroups = async (req: Request, res: Response) => {
         "The following permission is required: groups.read"
       );
     }
-    await requireOrgRole("admin", req, query.organizationId);
+    await requireGroupOrgAdmin(req, query.organizationId, "read");
   }
 
   const page = await db.groups.list({

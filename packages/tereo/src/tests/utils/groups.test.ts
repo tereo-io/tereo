@@ -2,6 +2,7 @@
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { createTestRole, createTestUser } from "../support/auth/users.js";
+import { connect, received, type TestSocket } from "../support/socket.js";
 import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, type Prisma } from "../../utils/db/prisma.js";
@@ -19,17 +20,20 @@ import {
   archiveGroup,
   createGroup,
   removeMembers,
+  restoreGroup,
   setGroupRoles,
   updateGroup,
 } from "../../utils/groups.js";
 import {
   adminActor,
+  adminApi,
   deleteGroups,
   ensureGroupPermission,
   GROUP_PERMISSION,
   groupSlug,
   joinOrg,
   passwordOnlyToken,
+  postGroup,
   PROVISIONING,
   roleGranting,
 } from "../support/groups.js";
@@ -370,6 +374,25 @@ describe("roles", () => {
       GROUP_PERMISSION
     );
   });
+
+  it("restoreGroup refuses an org group whose role gained a non-org-assignable permission while archived", async () => {
+    const role = await roleGranting();
+    const group = await newGroup(await newOrg(), [role.id]);
+    await db.$transaction((tx) => archiveGroup(PROVISIONING, group.id, tx));
+    const globalOnly = await prisma.permission.findUniqueOrThrow({
+      where: { name: "groups.read" },
+    });
+    await prisma.rolePermission.create({
+      data: { roleId: role.id, permissionId: globalOnly.id },
+    });
+
+    const err = await refusal(() =>
+      db.$transaction((tx) => restoreGroup(PROVISIONING, group.id, tx))
+    );
+    expect(err.statusCode).toBe(400);
+    expect(err.code).toBe("role_not_org_assignable");
+    expect((await db.groups.getAny(group.id)).archivedAt).not.toBeNull();
+  });
 });
 
 describe("provisioned groups", () => {
@@ -432,5 +455,69 @@ describe("organization membership", () => {
     );
     expect(readded.status).toBe(HTTP_STATUS.CREATED);
     expect(await db.groups.getMemberIds(orgGroup.id)).toEqual([]);
+  });
+});
+
+describe("group changes reach members' sockets", () => {
+  const PERMISSIONS_CHANGED = "auth:permissions:changed";
+
+  /** Runs `change` and expects `socket` to be told its permissions changed. */
+  const toldOf = async (
+    socket: TestSocket,
+    change: () => Promise<{ status: number }>,
+    status: number
+  ) => {
+    socket.events.length = 0;
+    expect((await change()).status).toBe(status);
+    await received(socket, PERMISSIONS_CHANGED);
+    expect(socket.events.find((e) => e.name === PERMISSIONS_CHANGED)).toEqual({
+      name: PERMISSIONS_CHANGED,
+      payload: expect.objectContaining({ reason: "user_roles_changed" }),
+    });
+  };
+
+  it("adding, setting roles, archiving, restoring and removing each tell the member", async () => {
+    const admin = await getTestPrincipalToken({
+      permissions: ["groups.admin", GROUP_PERMISSION],
+    });
+    const role = await roleGranting();
+    const group = await postGroup(admin, { roleIds: [role.id] });
+    groupIds.push(group.id);
+    const userId = randomUUID();
+    const socket = connect(
+      await getTestPrincipalToken({ userId, permissions: [] })
+    );
+    try {
+      expect(await socket.connected).toBeNull();
+      const path = `/groups/${group.id}`;
+
+      await toldOf(
+        socket,
+        () => adminApi("POST", `${path}/members`, admin, { userIds: [userId] }),
+        HTTP_STATUS.OK
+      );
+      await toldOf(
+        socket,
+        () => adminApi("PUT", `${path}/roles`, admin, { roleIds: [] }),
+        HTTP_STATUS.OK
+      );
+      await toldOf(
+        socket,
+        () => adminApi("POST", `${path}/archive`, admin),
+        HTTP_STATUS.OK
+      );
+      await toldOf(
+        socket,
+        () => adminApi("POST", `${path}/restore`, admin),
+        HTTP_STATUS.OK
+      );
+      await toldOf(
+        socket,
+        () => adminApi("DELETE", `${path}/members/${userId}`, admin),
+        HTTP_STATUS.NO_CONTENT
+      );
+    } finally {
+      socket.close();
+    }
   });
 });

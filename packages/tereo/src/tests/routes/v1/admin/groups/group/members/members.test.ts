@@ -2,6 +2,7 @@
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../../../../../../utils/defaultOrganization.js";
 import { createTestGuest } from "../../../../../../support/auth/guests.js";
+import { SYSTEM_USER_ID } from "../../../../../../../definitions/index.js";
 import { HTTP_STATUS } from "../../../../../../support/auth/constants.js";
 import { createTestUser } from "../../../../../../support/auth/users.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -94,6 +95,20 @@ describe("POST /v1/admin/groups/:id/members", () => {
     });
     expect(res.status).toBe(HTTP_STATUS.CONFLICT);
     expect(res.body.error).toBe("not_org_member");
+  });
+
+  it("returns 409 not_org_member for any id outside the organization, whatever it names", async () => {
+    const orgId = await ensureTestOrganization(`members-${randomUUID()}`);
+    const otherOrg = await ensureTestOrganization(`members-${randomUUID()}`);
+    const group = track(await postGroup(admin, { organizationId: orgId }));
+    const { user: guest } = await createTestGuest({ organizationId: otherOrg });
+    for (const id of [randomUUID(), guest.id, SYSTEM_USER_ID]) {
+      const res = await adminApi("POST", `/groups/${group.id}/members`, admin, {
+        userIds: [id],
+      });
+      expect(res.status, id).toBe(HTTP_STATUS.CONFLICT);
+      expect(res.body.error, id).toBe("not_org_member");
+    }
   });
 
   it("returns 409 guest_not_allowed for a guest", async () => {
