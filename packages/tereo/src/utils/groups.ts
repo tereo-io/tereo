@@ -51,6 +51,13 @@ import {
  *    and nothing retries it.
  * 4. `lockOrgOwners` when an org admin acts on an org group, then
  *    `assertAdminRemains` last.
+ *
+ * A transaction changing several groups (provisioning's apply, and its
+ * archival of dropped groups) first takes step 1 for the members of all of
+ * them, ascending, before any group's step 2; each group's own step 1 then
+ * re-enters locks already held. Otherwise a member locked for a later group
+ * after an earlier group's row could close a cycle with a change to that
+ * member.
  */
 
 type Tx = Prisma.TransactionClient;
