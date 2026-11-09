@@ -4,14 +4,23 @@ import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js
 import { ensureTestOrganization, testOrgId } from "../../support/principals.js";
 import { deleteGroups, groupSlug, PROVISIONING } from "../../support/groups.js";
 import type { CustomRoleEntry } from "../../../utils/provisioning/schema.js";
-import { applyProvisioning } from "../../../utils/provisioning/index.js";
 import { ProvisioningError } from "../../../utils/provisioning/load.js";
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createTestUser } from "../../support/auth/users.js";
 import { addMembers } from "../../../utils/groups.js";
 import { prisma } from "../../../utils/db/prisma.js";
+import { logger } from "../../../utils/logger.js";
 import db from "../../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
+import env from "../../../env.js";
+import {
+  applyGroups,
+  archiveDueGroups,
+} from "../../../utils/provisioning/groupsApply.js";
+import {
+  applyProvisioning,
+  deprovisionMissing,
+} from "../../../utils/provisioning/index.js";
 import type {
   LoadedDocument,
   ProvisioningSet,
@@ -188,32 +197,15 @@ describe("applyGroups", () => {
       });
     const auditBefore = await auditCount();
 
-    // A member's authority lock held elsewhere: a role change would wait on it.
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => (release = resolve));
-    let locked!: () => void;
-    const lockTaken = new Promise<void>((resolve) => (locked = resolve));
-    const holder = prisma.$transaction(
-      async (tx) => {
-        await db.users.lockAuthority(member.id, tx);
-        locked();
-        await held;
-      },
-      { timeout: 30_000 }
-    );
-    await lockTaken;
+    const lockAuthority = vi.spyOn(db.users, "lockAuthority");
     try {
-      const outcome = await Promise.race([
-        applyProvisioning(setOf([role], [group])),
-        new Promise<"blocked">((resolve) =>
-          setTimeout(() => resolve("blocked"), 5_000)
-        ),
-      ]);
-      expect(outcome).not.toBe("blocked");
+      const outcome = await applyProvisioning(setOf([role], [group]));
       expect(outcome).toMatchObject({ groups: [] });
+      expect(
+        lockAuthority.mock.calls.filter(([id]) => id === member.id)
+      ).toEqual([]);
     } finally {
-      release();
-      await holder;
+      lockAuthority.mockRestore();
     }
 
     const after = await groupRow(group.slug);
@@ -328,6 +320,198 @@ describe("applyGroups", () => {
       ]);
     } finally {
       await prisma.role.updateMany({ where: core, data: { retiredAt: null } });
+    }
+  });
+
+  it("keeps a group whose organization was archived after it was created", async () => {
+    const org = await ensureTestOrganization(testOrgId(`gone-${rand()}`));
+    const group = groupSpec({ organizationId: org });
+    await applyProvisioning(setOf([], [group]));
+    await prisma.organization.update({
+      where: { id: org },
+      data: { archivedAt: new Date() },
+    });
+
+    expect((await applyProvisioning(setOf([], [group]))).groups).toEqual([]);
+    const renamed = await applyProvisioning(
+      setOf([], [{ ...group, name: "Renamed" }])
+    );
+    expect(renamed.groups).toEqual([`group:${org}/${group.slug}`]);
+    expect((await groupRow(group.slug, org)).name).toBe("Renamed");
+  });
+
+  it("emits one update for a group that returns renamed", async () => {
+    const group = groupSpec();
+    await applyProvisioning(setOf([], [group]));
+    const { id } = await prisma.group.update({
+      where: {
+        id: (await groupRow(group.slug)).id,
+      },
+      data: { unprovisionedAt: new Date() },
+    });
+
+    const events = await prisma.$transaction(async (tx) => {
+      await applyGroups(
+        tx,
+        setOf([], [{ ...group, name: "Back renamed" }]),
+        new Date(),
+        { groups: [] }
+      );
+      const rows = await tx.outbox.findMany({
+        where: {
+          destination: "webhook",
+          payload: { path: ["entityId"], equals: id },
+        },
+      });
+      return rows.map(
+        (r) => r.payload as { eventType: string; data: Record<string, unknown> }
+      );
+    });
+    const updates = events.filter((e) => e.eventType === "auth.group.updated");
+    expect(updates).toHaveLength(1);
+    expect(updates[0].data).toMatchObject({
+      name: "Back renamed",
+      unprovisionedAt: null,
+    });
+  });
+});
+
+describe("deprovisionMissing", () => {
+  it("archives dropped groups in a transaction of their own", async () => {
+    const role = customRole(["roles.read"]);
+    const group = groupSpec();
+    await applyProvisioning(setOf([role], [group]));
+    const now = new Date();
+    await applyProvisioning(setOf([], []), now);
+    const later = new Date(
+      now.getTime() + (env.REGISTRY_RETIREMENT_GRACE_HOURS + 1) * 3_600_000
+    );
+
+    const setArchived = vi
+      .spyOn(db.groups, "setArchived")
+      .mockRejectedValueOnce(new Error("archive failed"));
+    const logged = vi.spyOn(logger, "error");
+    try {
+      const failed = await deprovisionMissing(later);
+      expect(failed.roles).toBeGreaterThanOrEqual(1);
+      expect(failed.groups).toBe(0);
+      expect(logged).toHaveBeenCalledWith(
+        expect.anything(),
+        "Provisioning: archiving dropped groups failed"
+      );
+    } finally {
+      setArchived.mockRestore();
+      logged.mockRestore();
+    }
+    const kept = await prisma.role.findFirstOrThrow({
+      where: { name: role.name, serviceId: null },
+    });
+    expect(kept.archivedAt).not.toBeNull();
+    expect((await groupRow(group.slug)).archivedAt).toBeNull();
+
+    expect((await deprovisionMissing(later)).groups).toBeGreaterThanOrEqual(1);
+    expect((await groupRow(group.slug)).archivedAt).not.toBeNull();
+  });
+});
+
+/**
+ * Two groups, each with one member, the first group's member the higher id:
+ * locking per group would take the higher id first.
+ */
+const crossedGroups = async (first: CustomRoleEntry) => {
+  const [lo, hi] = [
+    (await createTestUser()).id,
+    (await createTestUser()).id,
+  ].sort();
+  const g1 = groupSpec({ roles: [first.name] });
+  const g2 = groupSpec({ roles: [first.name] });
+  await applyProvisioning(setOf([first], [g1, g2]));
+  const id1 = (await groupRow(g1.slug)).id;
+  const id2 = (await groupRow(g2.slug)).id;
+  await prisma.$transaction(async (tx) => {
+    await addMembers(PROVISIONING, id1, [hi], tx);
+    await addMembers(PROVISIONING, id2, [lo], tx);
+  });
+  return { lo, hi, g1, g2, groupIds: [id1, id2] };
+};
+
+/** Spies on the locks and group writes, in call order. */
+const spyLocks = () => {
+  const spies = [
+    vi.spyOn(db.users, "lockAuthority"),
+    vi.spyOn(db.groups, "lockGroup"),
+    vi.spyOn(db.groups, "update"),
+    vi.spyOn(db.groups, "setArchived"),
+  ];
+  const [authority, ...groupLocks] = spies;
+  return {
+    /** When `userId`'s authority was first locked. */
+    lockedAt: (userId: string) =>
+      authority.mock.invocationCallOrder[
+        authority.mock.calls.findIndex(([id]) => id === userId)
+      ],
+    /** When any of `groupIds` was first locked or written. */
+    firstGroupTouch: (groupIds: string[]) =>
+      Math.min(
+        ...groupLocks.flatMap((spy) =>
+          spy.mock.calls.flatMap(([id], i) =>
+            groupIds.includes(id as string)
+              ? [spy.mock.invocationCallOrder[i]]
+              : []
+          )
+        )
+      ),
+    restore: () => spies.forEach((spy) => spy.mockRestore()),
+  };
+};
+
+describe("lock order across groups", () => {
+  it("locks every member's authority, ascending, before any group row", async () => {
+    const first = customRole(["roles.read"]);
+    const second = customRole(["users.read"]);
+    const { lo, hi, g1, g2, groupIds } = await crossedGroups(first);
+    await prisma.group.update({
+      where: { id: groupIds[0] },
+      data: { unprovisionedAt: new Date() },
+    });
+
+    const locks = spyLocks();
+    try {
+      await applyProvisioning(
+        setOf(
+          [first, second],
+          [
+            { ...g1, name: "Renamed", roles: [second.name] },
+            { ...g2, roles: [second.name] },
+          ]
+        )
+      );
+      expect(locks.lockedAt(lo)).toBeLessThan(locks.lockedAt(hi));
+      expect(locks.lockedAt(hi)).toBeLessThan(locks.firstGroupTouch(groupIds));
+    } finally {
+      locks.restore();
+    }
+  });
+
+  it("archives due groups with every member locked first, ascending", async () => {
+    const first = customRole(["roles.read"]);
+    const { lo, hi, groupIds } = await crossedGroups(first);
+    // Due in this transaction only, so no other retirement run archives them.
+    const cutoff = new Date("2000-01-02T00:00:00Z");
+    const locks = spyLocks();
+    try {
+      const archived = await prisma.$transaction(async (tx) => {
+        await tx.group.updateMany({
+          where: { id: { in: groupIds } },
+          data: { unprovisionedAt: new Date("2000-01-01T00:00:00Z") },
+        });
+        return archiveDueGroups(tx, cutoff);
+      });
+      expect(archived.affectedUserIds).toEqual([lo, hi]);
+      expect(locks.lockedAt(lo)).toBeLessThan(locks.lockedAt(hi));
+      expect(locks.lockedAt(hi)).toBeLessThan(locks.firstGroupTouch(groupIds));
+    } finally {
+      locks.restore();
     }
   });
 });

@@ -318,7 +318,7 @@ identity and roles, **never its members**; admins and apps add those.
 | `slug` | Required, as in the admin API (`[a-z0-9-]`, max 100); unique across the set within its scope (an organization, or global) |
 | `name` | Required, max 255 |
 | `description` | Optional, max 500 |
-| `organizationId` | Optional UUID. Set: an **organization group**. Absent: **global**. Fixed once created; the organization must exist and not be archived. Documents do not create organizations |
+| `organizationId` | Optional UUID. Set: an **organization group**. Absent: **global**. Fixed once created; the organization must exist and not be archived when the group is created, and one archived later leaves the group in place. Compared lower-cased. Documents do not create organizations |
 | `roles` | Role names it holds, resolved as for an integration's: a bare name is the set's custom role when it declares one, else core's role; `<slug>/<name>` is a service's system role. An organization group's roles must all be `orgAssignable` custom roles of the set. Never a role carrying `admin` |
 
 A hand-made group with the same slug in the same scope is an error naming it; core never adopts one.
@@ -581,7 +581,9 @@ runs older documents does nothing. After that the hourly retirement job
   history stay. Its buckets are marked missing, so they retire one grace period later, and can be
   deleted by an admin from now on ([registry](registry.md#declared-buckets));
 - **deletes** a login client, as the admin delete does;
-- **archives** a custom role or a group (its members are kept).
+- **archives** a custom role or a group (its members are kept). Groups are archived in a
+  transaction of their own, after the rest: one that fails is logged and retried the next hour,
+  and holds back nothing else.
 
 An entry that returns, before or after, is reactivated: a deactivated service becomes active again and an archived role is restored. A deleted login client is created anew. Items a service's declaration
 stops listing retire as in [registry](registry.md#retirement); its dropped webhooks are archived at

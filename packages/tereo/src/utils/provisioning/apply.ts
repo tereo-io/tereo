@@ -1752,7 +1752,6 @@ export const deprovisionMissing = async (
     integrations,
     clients,
     archivedRoles,
-    archivedGroups,
   } = await prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
@@ -1852,7 +1851,6 @@ export const deprovisionMissing = async (
         });
         archivedRoles.push({ id: role.id, name: role.name });
       }
-      const archivedGroups = await archiveDueGroups(tx, cutoff);
       return {
         serviceClientIds,
         missingBuckets,
@@ -1861,7 +1859,6 @@ export const deprovisionMissing = async (
         integrations: dueIntegrations.length,
         clients: dueClients.length,
         archivedRoles,
-        archivedGroups,
       };
     },
     { timeout: 30_000 }
@@ -1877,9 +1874,23 @@ export const deprovisionMissing = async (
       (await db.roles.getUserIdsByRoleId(id)).map((h) => h.userId)
     );
   }
-  afterGroupChange(archivedGroups);
+  // Their own transaction: a group with many members, or one waiting on a
+  // member's lock, fails alone, and the next run retries it.
+  let groups = 0;
+  try {
+    const archivedGroups = await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
+        return archiveDueGroups(tx, cutoff);
+      },
+      { timeout: 30_000 }
+    );
+    afterGroupChange(archivedGroups);
+    groups = archivedGroups.count;
+  } catch (err) {
+    logger.error({ err }, "Provisioning: archiving dropped groups failed");
+  }
   const roles = archivedRoles.length;
-  const groups = archivedGroups.count;
   if (
     services > 0 ||
     integrations > 0 ||

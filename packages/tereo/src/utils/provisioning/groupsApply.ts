@@ -37,10 +37,26 @@ const resultEntry = (group: { slug: string; organizationId?: string | null }) =>
   `group:${groupScopeKey(group)}`;
 
 /**
+ * Locks the authority of every member of `groupIds`, ascending across all of
+ * them: per group, a later group's member locked after an earlier group's row
+ * would invert the lock order against an admin holding that member.
+ */
+const lockMembers = async (tx: Tx, groupIds: string[]): Promise<void> => {
+  if (groupIds.length === 0) return;
+  const rows = await tx.groupMember.findMany({
+    where: { groupId: { in: groupIds } },
+    select: { userId: true },
+    distinct: ["userId"],
+  });
+  for (const id of rows.map((r) => r.userId).sort())
+    await db.users.lockAuthority(id, tx);
+};
+
+/**
  * What the set's groups need from the database before anything is written:
- * a live organization; their slug in their scope not held by a group made by
- * hand (core never adopts one); and no group moved to another scope, which
- * is fixed once created.
+ * their slug in their scope not held by a group made by hand (core never
+ * adopts one); for a new group, a live organization; and no group moved to
+ * another scope, which is fixed once created.
  */
 export const groupProblems = async (
   tx: Tx,
@@ -77,12 +93,6 @@ export const groupProblems = async (
   for (const { file, group } of declared) {
     const label = groupLabel(file, group);
     const organizationId = group.organizationId ?? null;
-    if (organizationId && !liveOrgs.has(organizationId)) {
-      problems.push(
-        `${label}: organization "${organizationId}" does not exist or is archived`
-      );
-      continue;
-    }
     const sameSlug = rows.filter((r) => r.slug === group.slug);
     const own = sameSlug.find((r) => r.organizationId === organizationId);
     if (own?.definitionSource === "local") {
@@ -91,7 +101,15 @@ export const groupProblems = async (
       );
       continue;
     }
+    // As for integrations, the organization is checked on creation only: one
+    // archived since leaves its provisioned groups as they are.
     if (own) continue;
+    if (organizationId && !liveOrgs.has(organizationId)) {
+      problems.push(
+        `${label}: organization "${organizationId}" does not exist or is archived`
+      );
+      continue;
+    }
     // A live provisioned group this apply would drop, in another scope.
     const moved = sameSlug.find(
       (r) =>
@@ -148,16 +166,39 @@ export const applyGroups = async (
     revokedJtis.push(...change.revokedJtis);
   };
 
+  const planned = [];
   for (const { group, roleIds } of resolved) {
-    const organizationId = group.organizationId ?? null;
-    const description = group.description ?? null;
     const existing = await tx.group.findFirst({
       where: {
         slug: group.slug,
-        organizationId,
+        organizationId: group.organizationId ?? null,
         definitionSource: "provisioned",
       },
     });
+    // setGroupRoles locks every member's authority: skipped when nothing
+    // would change, as on most starts.
+    const current = new Set(
+      existing ? await db.groups.getRoleIds(existing.id, tx) : []
+    );
+    const wanted = new Set(roleIds);
+    const sameRoles =
+      current.size === wanted.size &&
+      [...wanted].every((id) => current.has(id));
+    planned.push({ group, roleIds, existing, sameRoles });
+  }
+  // Lock step 1 for the whole apply: every member of a group whose roles
+  // change or that is restored, ascending, before any group row is written
+  // or locked. setGroupRoles and restoreGroup re-enter these locks.
+  await lockMembers(
+    tx,
+    planned.flatMap(({ existing, sameRoles }) =>
+      existing && (!sameRoles || existing.archivedAt) ? [existing.id] : []
+    )
+  );
+
+  for (const { group, roleIds, existing, sameRoles } of planned) {
+    const organizationId = group.organizationId ?? null;
+    const description = group.description ?? null;
     if (!existing) {
       collect(
         await createGroup(
@@ -177,6 +218,8 @@ export const applyGroups = async (
     }
 
     let changed = false;
+    const edited =
+      existing.name !== group.name || existing.description !== description;
     if (existing.unprovisionedAt) {
       const back = await db.groups.update(
         existing.id,
@@ -195,12 +238,13 @@ export const applyGroups = async (
         },
         metadata: { action: "provisioned" },
       });
-      // A restore below announces the return of an archived one.
-      if (!existing.archivedAt)
+      // A restore below announces the return of an archived one, and the
+      // edit below that of one renamed or redescribed.
+      if (!existing.archivedAt && !edited)
         await emitGroupEvent(tx, back, "auth.group.updated");
       changed = true;
     }
-    if (existing.name !== group.name || existing.description !== description) {
+    if (edited) {
       collect(
         await updateGroup(
           PROVISIONING,
@@ -211,13 +255,6 @@ export const applyGroups = async (
       );
       changed = true;
     }
-    // setGroupRoles locks every member's authority: skipped when nothing
-    // would change, as on most starts.
-    const current = new Set(await db.groups.getRoleIds(existing.id, tx));
-    const wanted = new Set(roleIds);
-    const sameRoles =
-      current.size === wanted.size &&
-      [...wanted].every((id) => current.has(id));
     if (!sameRoles) {
       const roles = await setGroupRoles(PROVISIONING, existing.id, roleIds, tx);
       collect(roles);
@@ -288,6 +325,11 @@ export const archiveDueGroups = async (
     },
     select: { id: true },
   });
+  // Lock step 1 for every group archived, as in applyGroups.
+  await lockMembers(
+    tx,
+    due.map((g) => g.id)
+  );
   const affected = new Set<string>();
   for (const { id } of due) {
     const change = await archiveGroup(PROVISIONING, id, tx);
