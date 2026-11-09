@@ -816,9 +816,11 @@ this lifts on promotion.
 
 **SSO-only domains.** A setup link is never redeemable for an address on an SSO-only domain, so one is
 not issued: an invite with `initialAccess.type: "password_setup_link"` (for a new guest, or an existing
-one who has no password) and `POST /v1/admin/guests/:id/password-setup-link` answer `409
-sso_only_domain`, before anything is written. Give such a guest a password with
-`initialAccess.password` instead.
+one who has neither a password nor a linked identity) and `POST /v1/admin/guests/:id/password-setup-link`
+answer `409 sso_only_domain`, before anything is written. Give such a guest a password with
+`initialAccess.password` instead. A guest whose first password sign-in went through the domain's
+forced link has a linked identity and no password: re-inviting them extends them (and adds roles) and
+skips `initialAccess`, issuing no link.
 
 ### The permission floor
 
@@ -937,7 +939,7 @@ depends on who holds the email:
 | Existing account                                            | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | none                                                        | Creates the guest, membership and roles (the default roles when `roles` is omitted), sets up initial access: `201 { user, created: true, passwordSetupUrl? }` (`user` carries `organizationId`)                                                                                                                                                                                                                                                                                                            |
-| a guest in the same organization or in none, expired or not | Extends (a guest in no organization first joins this one as a `member`, which needs `organizations.write`: otherwise `409 guest_unassigned`): `expiresAt` becomes the later value, and refresh tokens capped at the old expiry are lifted (each to its family's start plus `JWT_REFRESH_TOKEN_TTL`, capped at the new expiry). Roles named are added, none removed; omitted `roles` adds nothing (defaults apply only on create). Name and password are untouched; `initialAccess` applies only if they never set a password: `200 { user, created: false, passwordSetupUrl? }` |
+| a guest in the same organization or in none, expired or not | Extends (a guest in no organization first joins this one as a `member`, which needs `organizations.write`: otherwise `409 guest_unassigned`): `expiresAt` becomes the later value, and refresh tokens capped at the old expiry are lifted (each to its family's start plus `JWT_REFRESH_TOKEN_TTL`, capped at the new expiry). Roles named are added, none removed; omitted `roles` adds nothing (defaults apply only on create). Name and password are untouched; `initialAccess` applies only if they have neither a password nor a linked identity (a forced SSO link removes the password): `200 { user, created: false, passwordSetupUrl? }` |
 | a guest in another organization                             | `409 guest_in_other_organization`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | a human                                                     | `409 user_exists` with `userId`; the app grants that user directly                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | a service account, the system user or a deactivated user    | `409 user_not_invitable`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -1055,7 +1057,9 @@ sign in with your new password." with no button; without a `client_id`, or with 
 Sign in button starts a fresh sign-in to the console in this tab. The email ("Reset your password") is a sensitive notification. Redeeming
 it is `POST /v1/password-setup` ([Setup link](#setup-link)): it sets the password, marks the address
 verified, ends the other sessions, clears pending forced-password-change grants and clears the
-account's login backoff (the failed sign-ins that usually come before a reset). A link whose
+account's login backoff (the per-account delay from the failed sign-ins that usually come before a
+reset). The per-client-and-IP failure window (5 per 300 seconds) is shared by every account tried
+from that address, so it is not cleared and can still refuse a sign-in for up to 5 minutes. A link whose
 user has since moved to an SSO-only domain answers the uniform `404`.
 
 **Limits.** Reset requests are limited per hour, each limit counted on every request whether or not
@@ -1068,11 +1072,14 @@ at info):
 | Per address and IP       | 3        | the normalised address and client IP  |
 | Per address, all sources | 10       | the normalised address                |
 
-They are spent in that order, and a request refused by one spends none after it, so one source
+The limits are spent in that order, and a request refused by one spends none after it, so one source
 spends at most 3 of an address's 10. Using up a victim's allowance, and so delaying their genuine
 reset for up to an hour, takes requests from at least four IPs; it is the cost of leaking nothing
 about which addresses exist. Each request that gets through still issues a new link and retires the
-one before it. Without Redis the route answers `503`, whatever the address. (The route also has the
+one before it. The per-IP limit counts everyone behind one address: on a shared network (an office,
+a VPN exit, carrier NAT) ten requests in an hour from anyone there stop reset emails for everyone
+there for the rest of the hour, as silently as any other refusal. Without Redis the route answers
+`503`, whatever the address. (The route also has the
 usual per-IP request limits.) A reset issued is audited
 (`password_reset_requested`, with the requesting IP) and emits `auth.user.password-reset-requested`.
 

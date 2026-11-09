@@ -395,7 +395,8 @@ info:
       has it): 5 attempts, then a delay before each further attempt that starts at 1 second and
       doubles with each failure, up to 15 minutes. An attempt during the delay — even with the
       right password — gets `429` with `Retry-After`; it does not lengthen the delay. A correct
-      password clears the count, and an account left alone for a day starts over. A browser
+      password, or a redeemed password reset link, clears the count, and an account left alone
+      for a day starts over. A browser
       that has completed a login as the account (2FA included) holds a known-device cookie
       (`tereo_known_device`, 90 days) that lets its attempts through the account's
       delay, so someone keeping the account in backoff does not lock its owner out. Its wrong

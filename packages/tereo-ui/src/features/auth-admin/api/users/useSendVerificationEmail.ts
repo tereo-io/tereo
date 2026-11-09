@@ -3,7 +3,9 @@ import { toast } from "react-toastify";
 import { useAxios } from "@/lib/auth";
 import { isAxiosError } from "axios";
 
-const messageFor = (err: unknown): string => {
+export const sendVerificationErrorMessage = (err: unknown): string => {
+  if (isAxiosError(err) && err.response?.status === 429)
+    return "Too many verification emails for this user. Try again later.";
   const code = isAxiosError(err) ? err.response?.data?.error : undefined;
   if (code === "already_verified") return "This address is already verified";
   if (code === "email_not_configured")
@@ -23,7 +25,7 @@ const useSendVerificationEmail = () => {
     },
     onSuccess: () => toast.success("Verification email sent"),
     onError: async (err, userId) => {
-      toast.error(messageFor(err));
+      toast.error(sendVerificationErrorMessage(err));
       await queryClient.invalidateQueries({ queryKey: ["users", userId] });
     },
   });

@@ -149,8 +149,10 @@ export const setPassword = async (req: Request, res: Response) => {
     }
   );
 
-  // A reset proved the inbox: failed sign-ins before it, the usual way into
-  // "Forgot password", must not delay the first one with the new password.
+  // A reset proved the inbox, so the account's own backoff from the failed
+  // sign-ins before it goes. The per-client-and-IP failure window
+  // (authFailure) is shared with other accounts and stays, for up to its 5
+  // minutes.
   if (purpose === "reset") {
     await loginAccountBackoff
       .reset(req, user.email)

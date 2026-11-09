@@ -5,14 +5,15 @@ import { BASE_URL, HTTP_STATUS } from "../../../support/auth/constants.js";
 import { hashFlowToken, hashPassword } from "../../../../utils/crypto.js";
 import { ensureTestOrganization } from "../../../support/principals.js";
 import { createGuest, issue } from "../../../support/passwordSetup.js";
+import { getRedisClient, redisKey } from "../../../../utils/redis.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { SYSTEM_USER_ID } from "../../../../definitions/index.js";
-import { getRedisClient } from "../../../../utils/redis.js";
+import { hashKeyPart } from "../../../../utils/rateLimit.js";
 import { normalizeEmail } from "../../../../utils/email.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
-import { createHash, randomBytes } from "node:crypto";
 import { fetchJson } from "../../../support/http.js";
+import { randomBytes } from "node:crypto";
 import axios from "axios";
 import {
   getAccessTokenForUser,
@@ -304,9 +305,9 @@ describe("password setup", () => {
 
     it("clears the account's login backoff", async () => {
       const user = await createTestUser();
-      const backoffKey = `rl:login:account:${createHash("sha256")
-        .update(normalizeEmail(user.email))
-        .digest("hex")}`;
+      const backoffKey = redisKey(
+        `rl:login:account:${hashKeyPart(normalizeEmail(user.email))}`
+      );
       await getRedisClient().hset(backoffKey, {
         failures: 20,
         next: Date.now() + 15 * 60 * 1000,
