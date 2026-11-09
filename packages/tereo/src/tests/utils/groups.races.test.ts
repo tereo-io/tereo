@@ -2,6 +2,7 @@
 // @module-tag auth
 // @module-tag race
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
+import { addMembers, createGroup, setGroupRoles } from "../../utils/groups.js";
 import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, type Prisma } from "../../utils/db/prisma.js";
@@ -14,7 +15,6 @@ import {
   getTestPrincipalToken,
   ensureTestOrganization,
 } from "../support/principals.js";
-import { addMembers, createGroup, setGroupRoles } from "../../utils/groups.js";
 import {
   adminActor,
   deleteGroups,

@@ -252,12 +252,9 @@ describe("/v1/admin/groups/:id authorization", () => {
       data: { isActive: false },
     });
 
-    const missing = await adminApi(
-      "PATCH",
-      `/groups/${randomUUID()}`,
-      token,
-      { name: "Probe" }
-    );
+    const missing = await adminApi("PATCH", `/groups/${randomUUID()}`, token, {
+      name: "Probe",
+    });
     expect(missing.status).toBe(HTTP_STATUS.FORBIDDEN);
     for (const group of [...groups, global]) {
       const res = await adminApi("PATCH", `/groups/${group.id}`, token, {
@@ -267,11 +264,7 @@ describe("/v1/admin/groups/:id authorization", () => {
       expect(res.body).toEqual(missing.body);
     }
 
-    const missingRead = await adminApi(
-      "GET",
-      `/groups/${randomUUID()}`,
-      token
-    );
+    const missingRead = await adminApi("GET", `/groups/${randomUUID()}`, token);
     for (const group of groups.slice(0, 2)) {
       const res = await adminApi("GET", `/groups/${group.id}`, token);
       expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);

@@ -2,12 +2,12 @@
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../../../../../../utils/defaultOrganization.js";
 import { createTestGuest } from "../../../../../../support/auth/guests.js";
+import { SYSTEM_USER_ID } from "../../../../../../../definitions/index.js";
 import { HTTP_STATUS } from "../../../../../../support/auth/constants.js";
 import { createTestUser } from "../../../../../../support/auth/users.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import db from "../../../../../../../utils/db/index.js";
-import { SYSTEM_USER_ID } from "../../../../../../../definitions/index.js";
 import { randomUUID } from "node:crypto";
 import {
   ensureTestOrganization,

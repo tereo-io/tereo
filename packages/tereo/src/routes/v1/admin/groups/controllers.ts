@@ -1,9 +1,9 @@
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
 import { formatGroup, formatGroups } from "../../../../utils/transformers.js";
+import { authorizeGroup, requireGroupOrgAdmin } from "./group/middleware.js";
 import { hasPermission } from "../../../../utils/permissions.js";
 import { validateUser } from "../../../../middleware/auth.js";
 import { ForbiddenError } from "../../../../utils/errors.js";
-import { authorizeGroup, requireGroupOrgAdmin } from "./group/middleware.js";
 import { cursorId, nextCursor } from "./utils.js";
 import type { Request, Response } from "express";
 import db from "../../../../utils/db/index.js";
