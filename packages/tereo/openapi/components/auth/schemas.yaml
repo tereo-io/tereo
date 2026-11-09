@@ -716,6 +716,24 @@ UserInfoResponse:
       items:
         type: string
       description: Effective permissions — from global roles and roles in the token's organization when it carries `org_id` (only the org-assignable permissions of those), from global roles alone otherwise. Only for a token of core's UI or a service's client, or one carrying a core API scope
+    groups:
+      type: array
+      description: The unarchived groups the user belongs to that count for this token, global ones and those of the token's organization while it is active and the user still a member. For a token of core's UI or a service's client, or one carrying a core API scope; a delegated token gets them (and no `roles`) only with the `account` or `admin` area, an empty list otherwise.
+      items:
+        type: object
+        required: [id, slug, name, organizationId]
+        properties:
+          id:
+            type: string
+            format: uuid
+          slug:
+            type: string
+          name:
+            type: string
+          organizationId:
+            type: [string, 'null']
+            format: uuid
+            description: The group's organization; null for a global group
     org_id:
       type: string
       format: uuid
@@ -1432,16 +1450,23 @@ PaginatedUsersResponse:
       type: [string, 'null']
 
 RoleAssignment:
-  description: Role assignment with basic role info (used in user roles endpoints)
+  description: A direct role assignment within an organization, whatever the role's state (used in the organization member roles endpoints)
   allOf:
     - $ref: '../schemas.yaml#/RoleRef'
     - type: object
-      required: [expiresAt]
+      required: [expiresAt, via]
       properties:
         expiresAt:
           type: [string, 'null']
           format: date-time
           description: When the role assignment expires (null if permanent)
+        via:
+          type: object
+          required: [kind]
+          properties:
+            kind:
+              type: string
+              enum: [direct]
 
 UserRoleAssignment:
   description: A direct global role assignment, whatever the role's state — what `PUT /v1/admin/users/{id}/roles` replaces
@@ -1463,7 +1488,11 @@ UserRoleAssignment:
               enum: [direct]
 
 UserGroupRoleAssignment:
-  description: A live role the user holds through a live global group, once per role and group. It goes away by taking the user out of the group, or the role from the group; `PUT /v1/admin/users/{id}/roles` never touches it.
+  description: >-
+    A live role the user holds through a live group, once per role and group. A global group's
+    on the user's roles, an organization's group's on the member's roles in that organization. It goes
+    away by taking the user out of the group, or the role from the group; the `PUT` of the roles
+    never touches it.
   allOf:
     - $ref: '../schemas.yaml#/RoleRef'
     - type: object
@@ -1472,7 +1501,7 @@ UserGroupRoleAssignment:
         organizationId:
           type: [string, 'null']
           format: uuid
-          description: The group's organization; null for a global group (the only kind listed here)
+          description: The group's organization; null for a global group (the only kind listed on a user's roles)
         via:
           type: object
           required: [kind, groupId]
@@ -2418,6 +2447,7 @@ OrganizationMemberRolesResponse:
     - organizationId
     - userId
     - roles
+    - groupRoles
   properties:
     organizationId:
       type: string
@@ -2427,8 +2457,14 @@ OrganizationMemberRolesResponse:
       format: uuid
     roles:
       type: array
+      description: Direct assignments only; send their ids back to keep them
       items:
         $ref: '#/RoleAssignment'
+    groupRoles:
+      type: array
+      description: Roles held through the groups of this organization the user belongs to. A role held both directly and through a group appears in both lists. Global groups' roles are not listed here.
+      items:
+        $ref: '#/UserGroupRoleAssignment'
 
 # Admin - Settings Schemas
 SystemSettings:
@@ -4516,6 +4552,7 @@ UserGroupsResponse:
 
 CreateGroupRequest:
   type: object
+  additionalProperties: false
   required: [slug, name]
   properties:
     organizationId:
@@ -4541,7 +4578,8 @@ CreateGroupRequest:
 
 UpdateGroupRequest:
   type: object
-  description: At least one field
+  description: At least one field; a key not listed is refused (`400`)
+  additionalProperties: false
   minProperties: 1
   properties:
     slug:
@@ -4591,6 +4629,7 @@ ListGroupMembersResponse:
 
 AddGroupMembersRequest:
   type: object
+  additionalProperties: false
   required: [userIds]
   properties:
     userIds:
@@ -4642,6 +4681,7 @@ ListGroupRolesResponse:
 
 SetGroupRolesRequest:
   type: object
+  additionalProperties: false
   required: [roleIds]
   properties:
     roleIds:

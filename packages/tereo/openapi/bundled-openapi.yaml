@@ -6396,11 +6396,12 @@ paths:
         **Filters:**
         - `organizationId`: an organization's id for its groups, or `global` for groups with none
         - `definitionSource`: `local` (made through this API) or `provisioned` (declared in provisioning documents)
-        - `archived`: `true` for archived groups only, `false` for unarchived only; both when omitted
+        - `includeArchived`: `true` to list archived groups too; archived groups are left out by default
         - `q`: case-insensitive match on slug or name
 
         **Authorization:** `groups.read`. Without it, the caller must name one organization in
-        `organizationId` and be an `admin` or `owner` of it, and sees only its groups.
+        `organizationId` and be an `admin` or `owner` of it, and sees only its groups; an inactive
+        organization's groups stay readable this way.
       operationId: getAdminGroups
       security:
         - BearerAuth:
@@ -6420,14 +6421,16 @@ paths:
             enum:
               - local
               - provisioned
-        - name: archived
+        - name: includeArchived
           in: query
           required: false
+          description: '`true` lists archived groups along with the others; default `false`'
           schema:
             type: string
             enum:
               - 'true'
               - 'false'
+            default: 'false'
         - name: q
           in: query
           required: false
@@ -6474,8 +6477,11 @@ paths:
 
         The slug is unique among the scope's groups, archived ones included (`409 group_slug_taken`).
 
+        A body key not listed is refused (`400`).
+
         **Authorization:** `groups.write`. Without it, an `admin` or `owner` of the organization
-        named in `organizationId` may create a group in it.
+        named in `organizationId` may create a group in it, unless the organization is inactive
+        (`403`: only `groups.write` passes).
 
         An audit log entry is created for this action.
         An `auth.group.created` webhook event is emitted, and with `roleIds` an `auth.group.roles-changed`.
@@ -6526,10 +6532,11 @@ paths:
       description: |
         Returns the group, archived or not, with its member count.
 
-              **Authorization:** `groups.read`, or, for an organization's group, being an
-              `admin` or `owner` of that organization (`organizations.write` also passes, as on
-              the organization routes). A global group needs `groups.read`. A caller without
-              `groups.read` gets `403` for a missing group as for one they cannot reach.
+        **Authorization:** `groups.read`, or, for an organization's group, being an
+        `admin` or `owner` of that organization (`organizations.write` also passes, as on
+        the organization routes). A global group needs `groups.read`. A caller without
+        `groups.read` gets `403` for a missing group as for one they cannot reach.
+        An `admin` or `owner` of an inactive organization may still read its groups.
       operationId: getAdminGroup
       security:
         - BearerAuth:
@@ -6573,10 +6580,12 @@ paths:
         changed only through its provisioning documents (`409 managed_by_provisioning`), and an
         archived group must be restored first (`409 resource_archived`).
 
-              **Authorization:** `groups.write`, or, for an organization's group, being an
-              `admin` or `owner` of that organization (`organizations.write` also passes, as on
-              the organization routes). A global group needs `groups.write`. A caller without
-              `groups.write` gets `403` for a missing group as for one they cannot reach.
+        **Authorization:** `groups.write`, or, for an organization's group, being an
+        `admin` or `owner` of that organization (`organizations.write` also passes, as on
+        the organization routes). A global group needs `groups.write`. A caller without
+        `groups.write` gets `403` for a missing group as for one they cannot reach.
+        On an inactive organization the org role is not enough: an `admin` or `owner`
+        gets `403`, and only `groups.write` passes.
 
         An audit log entry is created for this action (none when nothing changes).
         An `auth.group.updated` webhook event is emitted.
@@ -6635,10 +6644,12 @@ paths:
         last live administrator's role is refused. A provisioned group is archived only by
         provisioning (`409 managed_by_provisioning`).
 
-              **Authorization:** `groups.archive`, or, for an organization's group, being an
-              `admin` or `owner` of that organization (`organizations.write` also passes, as on
-              the organization routes). A global group needs `groups.archive`. A caller without
-              `groups.archive` gets `403` for a missing group as for one they cannot reach.
+        **Authorization:** `groups.archive`, or, for an organization's group, being an
+        `admin` or `owner` of that organization (`organizations.write` also passes, as on
+        the organization routes). A global group needs `groups.archive`. A caller without
+        `groups.archive` gets `403` for a missing group as for one they cannot reach.
+        On an inactive organization the org role is not enough: an `admin` or `owner`
+        gets `403`, and only `groups.archive` passes.
 
         An audit log entry is created for this action.
         An `auth.group.archived` webhook event is emitted.
@@ -6690,10 +6701,12 @@ paths:
         included, since one may come back. Access tokens of members from a password-only sign-in
         are revoked when a restored role requires two-factor authentication.
 
-              **Authorization:** `groups.archive`, or, for an organization's group, being an
-              `admin` or `owner` of that organization (`organizations.write` also passes, as on
-              the organization routes). A global group needs `groups.archive`. A caller without
-              `groups.archive` gets `403` for a missing group as for one they cannot reach.
+        **Authorization:** `groups.archive`, or, for an organization's group, being an
+        `admin` or `owner` of that organization (`organizations.write` also passes, as on
+        the organization routes). A global group needs `groups.archive`. A caller without
+        `groups.archive` gets `403` for a missing group as for one they cannot reach.
+        On an inactive organization the org role is not enough: an `admin` or `owner`
+        gets `403`, and only `groups.archive` passes.
 
         An audit log entry is created for this action.
         An `auth.group.restored` webhook event is emitted.
@@ -6742,10 +6755,11 @@ paths:
       description: |
         Returns a page of the group's members, in the order they were added.
 
-              **Authorization:** `groups.read`, or, for an organization's group, being an
-              `admin` or `owner` of that organization (`organizations.write` also passes, as on
-              the organization routes). A global group needs `groups.read`. A caller without
-              `groups.read` gets `403` for a missing group as for one they cannot reach.
+        **Authorization:** `groups.read`, or, for an organization's group, being an
+        `admin` or `owner` of that organization (`organizations.write` also passes, as on
+        the organization routes). A global group needs `groups.read`. A caller without
+        `groups.read` gets `403` for a missing group as for one they cannot reach.
+        An `admin` or `owner` of an inactive organization may still read its groups.
       operationId: getAdminGroupMembers
       security:
         - BearerAuth:
@@ -6798,10 +6812,12 @@ paths:
         tokens of new members from a password-only sign-in are revoked when a group role requires
         two-factor authentication.
 
-              **Authorization:** `groups.write`, or, for an organization's group, being an
-              `admin` or `owner` of that organization (`organizations.write` also passes, as on
-              the organization routes). A global group needs `groups.write`. A caller without
-              `groups.write` gets `403` for a missing group as for one they cannot reach.
+        **Authorization:** `groups.write`, or, for an organization's group, being an
+        `admin` or `owner` of that organization (`organizations.write` also passes, as on
+        the organization routes). A global group needs `groups.write`. A caller without
+        `groups.write` gets `403` for a missing group as for one they cannot reach.
+        On an inactive organization the org role is not enough: an `admin` or `owner`
+        gets `403`, and only `groups.write` passes.
 
         An audit log entry is created for this action when anyone is added.
         `auth.group.members-added` webhook events are emitted, up to 1,000 user ids each.
@@ -6860,10 +6876,12 @@ paths:
         refused (`409`). An organization `admin` (not `owner`) may not remove one of the
         organization's owners.
 
-              **Authorization:** `groups.write`, or, for an organization's group, being an
-              `admin` or `owner` of that organization (`organizations.write` also passes, as on
-              the organization routes). A global group needs `groups.write`. A caller without
-              `groups.write` gets `403` for a missing group as for one they cannot reach.
+        **Authorization:** `groups.write`, or, for an organization's group, being an
+        `admin` or `owner` of that organization (`organizations.write` also passes, as on
+        the organization routes). A global group needs `groups.write`. A caller without
+        `groups.write` gets `403` for a missing group as for one they cannot reach.
+        On an inactive organization the org role is not enough: an `admin` or `owner`
+        gets `403`, and only `groups.write` passes.
 
         An audit log entry is created for this action.
         An `auth.group.members-removed` webhook event is emitted.
@@ -6902,10 +6920,11 @@ paths:
       description: |
         Returns every role the group holds, whatever its state, by name.
 
-              **Authorization:** `groups.read`, or, for an organization's group, being an
-              `admin` or `owner` of that organization (`organizations.write` also passes, as on
-              the organization routes). A global group needs `groups.read`. A caller without
-              `groups.read` gets `403` for a missing group as for one they cannot reach.
+        **Authorization:** `groups.read`, or, for an organization's group, being an
+        `admin` or `owner` of that organization (`organizations.write` also passes, as on
+        the organization routes). A global group needs `groups.read`. A caller without
+        `groups.read` gets `403` for a missing group as for one they cannot reach.
+        An `admin` or `owner` of an inactive organization may still read its groups.
       operationId: getAdminGroupRoles
       security:
         - BearerAuth:
@@ -6954,10 +6973,12 @@ paths:
         of members from a password-only sign-in are revoked when an added role requires
         two-factor authentication.
 
-              **Authorization:** `groups.write`, or, for an organization's group, being an
-              `admin` or `owner` of that organization (`organizations.write` also passes, as on
-              the organization routes). A global group needs `groups.write`. A caller without
-              `groups.write` gets `403` for a missing group as for one they cannot reach.
+        **Authorization:** `groups.write`, or, for an organization's group, being an
+        `admin` or `owner` of that organization (`organizations.write` also passes, as on
+        the organization routes). A global group needs `groups.write`. A caller without
+        `groups.write` gets `403` for a missing group as for one they cannot reach.
+        On an inactive organization the org role is not enough: an `admin` or `owner`
+        gets `403`, and only `groups.write` passes.
 
         An audit log entry is created for this action when the roles change.
         An `auth.group.roles-changed` webhook event is emitted.
@@ -8455,6 +8476,13 @@ paths:
         Returns the roles assigned to a member within this specific
         organization. An archived organization's member roles stay readable.
 
+        `roles` holds the direct assignments, whatever their state (exactly
+        what `PUT` replaces). `groupRoles` lists each live role the member
+        holds through a live group of this organization, once per role and
+        group, with the group; a global group's roles are not listed here (see
+        `GET /v1/admin/users/{id}/roles`). A role held both ways appears in
+        each list.
+
         **Authorization:** Either the platform-level permission `organizations.read` OR the org role `member` on the target organization grants access. Org role is checked via `requireOrgRole()` inside the handler.
       operationId: getAdminOrganizationMemberRoles
       security:
@@ -8503,7 +8531,9 @@ paths:
       summary: Set member's org-scoped roles
       description: |
         Replaces all org-scoped role assignments for a member within this
-        organization (duplicate `roleIds` are ignored). A role the member
+        organization (duplicate `roleIds` are ignored). Roles held through a
+        group are not touched: the response lists them in `groupRoles`, apart
+        from the direct `roles`. A role the member
         already holds here keeps its assignment, `expiresAt` included; only
         roles left out are removed. Only custom roles can
         be assigned here: a system role (declared by a service) returns `403`.
@@ -25010,6 +25040,30 @@ components:
           items:
             type: string
           description: Effective permissions — from global roles and roles in the token's organization when it carries `org_id` (only the org-assignable permissions of those), from global roles alone otherwise. Only for a token of core's UI or a service's client, or one carrying a core API scope
+        groups:
+          type: array
+          description: The unarchived groups the user belongs to that count for this token, global ones and those of the token's organization while it is active and the user still a member. For a token of core's UI or a service's client, or one carrying a core API scope; a delegated token gets them (and no `roles`) only with the `account` or `admin` area, an empty list otherwise.
+          items:
+            type: object
+            required:
+              - id
+              - slug
+              - name
+              - organizationId
+            properties:
+              id:
+                type: string
+                format: uuid
+              slug:
+                type: string
+              name:
+                type: string
+              organizationId:
+                type:
+                  - string
+                  - 'null'
+                format: uuid
+                description: The group's organization; null for a global group
         org_id:
           type: string
           format: uuid
@@ -25666,12 +25720,13 @@ components:
             - string
             - 'null'
     RoleAssignment:
-      description: Role assignment with basic role info (used in user roles endpoints)
+      description: A direct role assignment within an organization, whatever the role's state (used in the organization member roles endpoints)
       allOf:
         - $ref: '#/components/schemas/RoleRef'
         - type: object
           required:
             - expiresAt
+            - via
           properties:
             expiresAt:
               type:
@@ -25679,6 +25734,15 @@ components:
                 - 'null'
               format: date-time
               description: When the role assignment expires (null if permanent)
+            via:
+              type: object
+              required:
+                - kind
+              properties:
+                kind:
+                  type: string
+                  enum:
+                    - direct
     UserRolesResponse:
       type: object
       required:
@@ -26312,7 +26376,7 @@ components:
                   enum:
                     - direct
     UserGroupRoleAssignment:
-      description: A live role the user holds through a live global group, once per role and group. It goes away by taking the user out of the group, or the role from the group; `PUT /v1/admin/users/{id}/roles` never touches it.
+      description: A live role the user holds through a live group, once per role and group. A global group's on the user's roles, an organization's group's on the member's roles in that organization. It goes away by taking the user out of the group, or the role from the group; the `PUT` of the roles never touches it.
       allOf:
         - $ref: '#/components/schemas/RoleRef'
         - type: object
@@ -26326,7 +26390,7 @@ components:
                 - string
                 - 'null'
               format: uuid
-              description: The group's organization; null for a global group (the only kind listed here)
+              description: The group's organization; null for a global group (the only kind listed on a user's roles)
             via:
               type: object
               required:
@@ -26460,6 +26524,7 @@ components:
           type: 'null'
     CreateGroupRequest:
       type: object
+      additionalProperties: false
       required:
         - slug
         - name
@@ -26490,7 +26555,8 @@ components:
             format: uuid
     UpdateGroupRequest:
       type: object
-      description: At least one field
+      description: At least one field; a key not listed is refused (`400`)
+      additionalProperties: false
       minProperties: 1
       properties:
         slug:
@@ -26552,6 +26618,7 @@ components:
             - 'null'
     AddGroupMembersRequest:
       type: object
+      additionalProperties: false
       required:
         - userIds
       properties:
@@ -26609,6 +26676,7 @@ components:
           type: 'null'
     SetGroupRolesRequest:
       type: object
+      additionalProperties: false
       required:
         - roleIds
       properties:
@@ -27042,6 +27110,7 @@ components:
         - organizationId
         - userId
         - roles
+        - groupRoles
       properties:
         organizationId:
           type: string
@@ -27051,8 +27120,14 @@ components:
           format: uuid
         roles:
           type: array
+          description: Direct assignments only; send their ids back to keep them
           items:
             $ref: '#/components/schemas/RoleAssignment'
+        groupRoles:
+          type: array
+          description: Roles held through the groups of this organization the user belongs to. A role held both directly and through a group appears in both lists. Global groups' roles are not listed here.
+          items:
+            $ref: '#/components/schemas/UserGroupRoleAssignment'
     Permission:
       type: object
       description: |
