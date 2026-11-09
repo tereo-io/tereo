@@ -92,6 +92,11 @@ named in its `data.bucketName` (`src/utils/webhookAccess.ts`). Core's event type
 prefix (`READ_PERMISSIONS` in `definitions/eventTypes.ts`): `auth.user.*` needs `users.read`,
 `core.service.*` `services.read`, `file-service.object.*` `file-service.objects.read`, and so on; a
 service's event types take the one their declaration gives, if any ([registry.md](registry.md)).
+One exception: an `auth.group.*` event of an organization's own group (its `data.organizationId` is
+the organization it is emitted in) is also readable by that organization's admins and owners, as
+they manage its groups ([groups.md](groups.md#authorization)), and by `organizations.write` holders;
+a delegated token acts as an org admin only if its scopes allow `organizations.write`. A global
+group's events (`data.organizationId` null) still need `groups.read`.
 Platform-wide events are emitted under the default organization, so without this any member of it
 allowed to manage webhooks would receive every user, client and service change. Create and PATCH
 check the caller the same way, against every event type the endpoint will be subscribed to:
