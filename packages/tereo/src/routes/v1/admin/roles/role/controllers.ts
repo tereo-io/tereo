@@ -29,6 +29,7 @@ import {
 } from "../../../../../utils/grants.js";
 import {
   ValidationError,
+  ArchivedError,
   ConflictError,
   ForbiddenError,
   ManagedByProvisioningError,
@@ -85,26 +86,6 @@ export const updateRole = async (req: Request, res: Response) => {
     );
   }
 
-  // The 2FA policy guards everything the role grants: only a caller holding
-  // all of it may change it (`admin` for core's admin role).
-  if (
-    body.requires2fa !== undefined &&
-    body.requires2fa !== existing.requires2fa
-  ) {
-    assertCanGrant(
-      await globalGrantablePermissions(auth),
-      db.roles.grantedPermissionNames([existing])
-    );
-  }
-
-  // Reactivating hands the role's permissions back to everyone holding it,
-  // the caller included: the same as granting them.
-  if (body.isActive === true && !existing.isActive) {
-    assertCanGrant(
-      await globalGrantablePermissions(auth),
-      db.roles.grantedPermissionNames([existing])
-    );
-  }
   if (body.name && body.name !== existing.name) {
     const conflict = await db.roles.getCustomByNameAny(body.name);
     if (conflict) {
@@ -117,40 +98,42 @@ export const updateRole = async (req: Request, res: Response) => {
     }
   }
 
-  const { role, revokedJtis, deactivated } = await db.$transaction(
+  const { role, revokedJtis, statusChanged } = await db.$transaction(
     async (tx) => {
-      // Whatever `existing` says: the role may have been reactivated since.
-      // The guard counts it only if it is active under its lock, and whether
-      // this deactivates it is read under the row lock a reactivation's write
-      // takes.
-      let deactivated = false;
+      // Every decision below reads the role under its row lock, which every
+      // writer to the role takes: the read before the transaction may be
+      // stale. The admin guard's lock, when taken, comes first.
       if (body.isActive === false) {
         await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
-        await db.roles.lockRoles([params.id], "update", tx);
-        const current = await db.roles.get(params.id, tx);
-        deactivated = current.isActive;
-        if (deactivated) {
-          assertCanTakeAway(
-            await globalGrantablePermissions(auth, tx),
-            db.roles.grantedPermissionNames([current])
-          );
-        }
       }
-      // A role gains `admin` only under its lock, and only while no
-      // integration holds it, so the role read above settles whether to check.
+      await db.roles.lockRoles([params.id], "update", tx);
+      const current = await db.roles.getAny(params.id, tx);
+      // Archived while this waited, answered as guardArchived would have.
+      if (current.archivedAt) throw new ArchivedError();
+      refuseProvisioned(current);
+      const granted = db.roles.grantedPermissionNames([current]);
+      const deactivated = body.isActive === false && current.isActive;
+      const reactivated = body.isActive === true && !current.isActive;
+      if (deactivated) {
+        assertCanTakeAway(await globalGrantablePermissions(auth, tx), granted);
+      }
+      // The 2FA policy guards everything the role grants: only a caller
+      // holding all of it may change it (`admin` for core's admin role).
+      // Reactivating hands the role's permissions back to everyone holding
+      // it, the caller included: the same as granting them.
       if (
-        body.isActive === true &&
-        !existing.isActive &&
-        db.roles.grantedPermissionNames([existing]).includes("admin")
+        reactivated ||
+        (body.requires2fa !== undefined &&
+          body.requires2fa !== current.requires2fa)
       ) {
+        assertCanGrant(await globalGrantablePermissions(auth, tx), granted);
+      }
+      if (reactivated && granted.includes("admin")) {
         await refuseAdminForIntegrations(params.id, tx);
       }
       if (body.guestAssignable === true) {
-        await db.roles.lockRoles([params.id], "update", tx);
         assertGuestAssignable(
-          (await db.roles.get(params.id, tx)).rolePermissions.map(
-            (rp) => rp.permission
-          )
+          current.rolePermissions.map((rp) => rp.permission)
         );
       }
       await db.roles.update(params.id, body, tx);
@@ -160,18 +143,14 @@ export const updateRole = async (req: Request, res: Response) => {
       const gains2fa =
         updated.isActive &&
         updated.requires2fa &&
-        !(existing.isActive && existing.requires2fa);
+        !(current.isActive && current.requires2fa);
       // A guest is held only to guest-assignable roles assigned in an
       // organization, so flagging one that requires 2FA is a gain for them too.
       const guestsGain2fa =
         updated.isActive &&
         updated.requires2fa &&
         updated.guestAssignable &&
-        !(
-          existing.isActive &&
-          existing.requires2fa &&
-          existing.guestAssignable
-        );
+        !(current.isActive && current.requires2fa && current.guestAssignable);
       const revokedJtis = [
         ...(gains2fa
           ? await db.accessTokens.revokeWithoutMfa(
@@ -203,7 +182,7 @@ export const updateRole = async (req: Request, res: Response) => {
         entityType: "Role",
         entityId: updated.id,
         entityName: updated.name,
-        changes: computeChanges(existing, updated),
+        changes: computeChanges(current, updated),
         ...(revokedJtis.length > 0 && {
           metadata: { accessTokensRevoked: revokedJtis.length },
         }),
@@ -215,7 +194,7 @@ export const updateRole = async (req: Request, res: Response) => {
         entityId: updated.id,
         data: formatRole(updated) as Record<string, unknown>,
       });
-      if (updated.guestAssignable !== existing.guestAssignable) {
+      if (updated.guestAssignable !== current.guestAssignable) {
         await emitTx(tx, {
           organizationId: getDefaultOrganizationId(),
           eventType: "auth.role.guest-assignable-changed",
@@ -228,13 +207,17 @@ export const updateRole = async (req: Request, res: Response) => {
           },
         });
       }
-      return { role: updated, revokedJtis, deactivated };
+      return {
+        role: updated,
+        revokedJtis,
+        statusChanged: deactivated || reactivated,
+      };
     }
   );
 
   disconnectTokenSockets(revokedJtis);
 
-  if (deactivated || (body.isActive === true && !existing.isActive)) {
+  if (statusChanged) {
     await notifyRoleStatusChanged(params.id);
   }
 
