@@ -39,61 +39,64 @@ export const unlinkIdentity = async (
   const identity = await db.userIdentities.get(userId, identityId);
   const provider = await db.identityProviders.get(identity.providerId);
 
-  await db.$transaction(async (tx) => {
-    await prepare?.(tx);
-    // Two unlinks at once must not both find another way in.
-    await db.users.lockForSignInChange(userId, tx);
-    const user = await db.users.get(userId, tx);
-    const others = await db.userIdentities.countUsableForUser(
-      userId,
-      identity.id,
-      tx
-    );
-    if (user.passwordHash === null && others === 0) {
-      throw new ConflictError(
-        "This is the account's only way to sign in",
-        "last_sign_in_method"
+  await db.$transaction(
+    async (tx) => {
+      await prepare?.(tx);
+      // Two unlinks at once must not both find another way in.
+      await db.users.lockForSignInChange(userId, tx);
+      const user = await db.users.get(userId, tx);
+      const others = await db.userIdentities.countUsableForUser(
+        userId,
+        identity.id,
+        tx
       );
-    }
-    const domain = await db.identityProviders.findDomain(
-      emailDomain(user.email),
-      tx
-    );
-    if (domain?.ssoOnly && domain.providerId === provider.id) {
-      throw new ConflictError(
-        `Accounts at ${domain.domain} must sign in with ${provider.displayName}`,
-        "sso_required"
+      if (user.passwordHash === null && others === 0) {
+        throw new ConflictError(
+          "This is the account's only way to sign in",
+          "last_sign_in_method"
+        );
+      }
+      const domain = await db.identityProviders.findDomain(
+        emailDomain(user.email),
+        tx
       );
-    }
+      if (domain?.ssoOnly && domain.providerId === provider.id) {
+        throw new ConflictError(
+          `Accounts at ${domain.domain} must sign in with ${provider.displayName}`,
+          "sso_required"
+        );
+      }
 
-    if (!(await db.userIdentities.delete(identity.id, tx))) {
-      throw new NotFoundError("Identity not found");
-    }
-    await logAuditTx(tx, {
-      auth,
-      action: "DELETE",
-      entityType: "UserIdentity",
-      entityId: identity.id,
-      entityName: user.email,
-      metadata: {
-        userId,
-        providerId: provider.id,
-        provider: provider.slug,
-        email: identity.email,
-      },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.user.identity-unlinked",
-      entityType: "UserIdentity",
-      entityId: identity.id,
-      data: {
-        id: identity.id,
-        userId,
-        providerId: provider.id,
-        provider: provider.slug,
-        email: identity.email,
-      },
-    });
-  });
+      if (!(await db.userIdentities.delete(identity.id, tx))) {
+        throw new NotFoundError("Identity not found");
+      }
+      await logAuditTx(tx, {
+        auth,
+        action: "DELETE",
+        entityType: "UserIdentity",
+        entityId: identity.id,
+        entityName: user.email,
+        metadata: {
+          userId,
+          providerId: provider.id,
+          provider: provider.slug,
+          email: identity.email,
+        },
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.user.identity-unlinked",
+        entityType: "UserIdentity",
+        entityId: identity.id,
+        data: {
+          id: identity.id,
+          userId,
+          providerId: provider.id,
+          provider: provider.slug,
+          email: identity.email,
+        },
+      });
+    },
+    { timeout: 30_000 }
+  );
 };

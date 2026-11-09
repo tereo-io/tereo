@@ -64,49 +64,52 @@ export const addMember = async (req: Request, res: Response) => {
     }
   }
 
-  const member = await db.$transaction(async (tx) => {
-    // An owner or admin tier is authority a credential reset checks for.
-    await db.users.lockAuthority(user.id, tx);
-    // A membership in an archived organization does not count: that guest
-    // belongs to none and may be added elsewhere.
-    if (
-      user.userType === UserType.guest &&
-      (await guestOrganizationId(user.id, tx)) !== null
-    ) {
-      throw new BadRequestError(
-        "user_not_addable",
-        "A guest belongs to one organization only"
+  const member = await db.$transaction(
+    async (tx) => {
+      // An owner or admin tier is authority a credential reset checks for.
+      await db.users.lockAuthority(user.id, tx);
+      // A membership in an archived organization does not count: that guest
+      // belongs to none and may be added elsewhere.
+      if (
+        user.userType === UserType.guest &&
+        (await guestOrganizationId(user.id, tx)) !== null
+      ) {
+        throw new BadRequestError(
+          "user_not_addable",
+          "A guest belongs to one organization only"
+        );
+      }
+      const created = await db.organizations.addMember(
+        params.id,
+        body.userId,
+        body.memberRole as OrgMemberRole,
+        tx
       );
-    }
-    const created = await db.organizations.addMember(
-      params.id,
-      body.userId,
-      body.memberRole as OrgMemberRole,
-      tx
-    );
-    await logAuditTx(tx, {
-      auth,
-      organizationId: params.id,
-      action: "CREATE",
-      entityType: "OrganizationMember",
-      entityId: created.id,
-      entityName: created.user.email,
-      metadata: { userId: created.userId, memberRole: created.memberRole },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.organization.member-added",
-      entityType: "OrganizationMember",
-      entityId: created.id,
-      data: {
+      await logAuditTx(tx, {
+        auth,
         organizationId: params.id,
-        userId: created.userId,
-        email: created.user.email,
-        memberRole: created.memberRole,
-      },
-    });
-    return created;
-  });
+        action: "CREATE",
+        entityType: "OrganizationMember",
+        entityId: created.id,
+        entityName: created.user.email,
+        metadata: { userId: created.userId, memberRole: created.memberRole },
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.organization.member-added",
+        entityType: "OrganizationMember",
+        entityId: created.id,
+        data: {
+          organizationId: params.id,
+          userId: created.userId,
+          email: created.user.email,
+          memberRole: created.memberRole,
+        },
+      });
+      return created;
+    },
+    { timeout: 30_000 }
+  );
   notifyOrgMembershipChanged(member.userId, params.id);
   res.status(201).json(formatOrganizationMember(member));
 };

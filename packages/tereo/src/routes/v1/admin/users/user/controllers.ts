@@ -157,10 +157,13 @@ export const updateUser = async (req: Request, res: Response) => {
     // endUserSessions, which locks the row before its callback. The user's
     // tokens fail requireAuth as soon as it commits; the sessions end right
     // after.
-    newUser = await db.$transaction(async (tx) => {
-      await authorize(tx);
-      return await update(tx);
-    });
+    newUser = await db.$transaction(
+      async (tx) => {
+        await authorize(tx);
+        return await update(tx);
+      },
+      { timeout: 30_000 }
+    );
     await endDeactivatedUserSessions(id, recordSessionsRevoked(auth, existing));
   } else if (body.password) {
     // A password reset signs the user out everywhere, in the transaction
@@ -180,10 +183,13 @@ export const updateUser = async (req: Request, res: Response) => {
     );
     newUser = reset as typeof newUser;
   } else {
-    newUser = await db.$transaction(async (tx) => {
-      await authorize(tx);
-      return await update(tx);
-    });
+    newUser = await db.$transaction(
+      async (tx) => {
+        await authorize(tx);
+        return await update(tx);
+      },
+      { timeout: 30_000 }
+    );
   }
 
   res.json(formatAdminUser(newUser));

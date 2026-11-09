@@ -38,77 +38,80 @@ export const createIdentityInvite = async (req: Request, res: Response) => {
     "A guest signs in with a password and cannot be invited to an identity provider"
   );
 
-  const invite = await db.$transaction(async (tx) => {
-    // An invite is a new way into the account, as a password reset is.
-    await assertMayResetCredentials(auth, id, tx);
-    const provider = await db.identityProviders
-      .get(providerId, tx)
-      .catch((err) => {
-        if (err instanceof NotFoundError) {
-          throw new BadRequestError(
-            "unknown_provider",
-            `Unknown identity provider: ${providerId}`
-          );
-        }
-        throw err;
+  const invite = await db.$transaction(
+    async (tx) => {
+      // An invite is a new way into the account, as a password reset is.
+      await assertMayResetCredentials(auth, id, tx);
+      const provider = await db.identityProviders
+        .get(providerId, tx)
+        .catch((err) => {
+          if (err instanceof NotFoundError) {
+            throw new BadRequestError(
+              "unknown_provider",
+              `Unknown identity provider: ${providerId}`
+            );
+          }
+          throw err;
+        });
+      if (!provider.isActive) {
+        throw new BadRequestError(
+          "provider_inactive",
+          "The identity provider is deactivated"
+        );
+      }
+      // Claiming it would be refused: the domain's provider is the only way in.
+      const required = await ssoProviderElsewhere(user.email, provider.id, tx);
+      if (required) {
+        throw new ConflictError(
+          `Accounts at this domain must sign in with ${required.displayName}`,
+          "sso_required"
+        );
+      }
+      if (await db.userIdentities.getForUserAtProvider(id, provider.id, tx)) {
+        throw new ConflictError(
+          "The user is already linked to this provider",
+          "already_linked"
+        );
+      }
+      const issued = await db.userIdentities.upsertInvite(
+        {
+          userId: id,
+          providerId: provider.id,
+          createdBy: auth.userId,
+          expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+        },
+        tx
+      );
+      await logAuditTx(tx, {
+        auth,
+        action: "CREATE",
+        entityType: "IdentityInvite",
+        entityId: issued.id,
+        entityName: user.email,
+        metadata: {
+          userId: id,
+          providerId: provider.id,
+          provider: provider.slug,
+          expiresAt: issued.expiresAt.toISOString(),
+        },
       });
-    if (!provider.isActive) {
-      throw new BadRequestError(
-        "provider_inactive",
-        "The identity provider is deactivated"
-      );
-    }
-    // Claiming it would be refused: the domain's provider is the only way in.
-    const required = await ssoProviderElsewhere(user.email, provider.id, tx);
-    if (required) {
-      throw new ConflictError(
-        `Accounts at this domain must sign in with ${required.displayName}`,
-        "sso_required"
-      );
-    }
-    if (await db.userIdentities.getForUserAtProvider(id, provider.id, tx)) {
-      throw new ConflictError(
-        "The user is already linked to this provider",
-        "already_linked"
-      );
-    }
-    const issued = await db.userIdentities.upsertInvite(
-      {
-        userId: id,
-        providerId: provider.id,
-        createdBy: auth.userId,
-        expiresAt: new Date(Date.now() + INVITE_TTL_MS),
-      },
-      tx
-    );
-    await logAuditTx(tx, {
-      auth,
-      action: "CREATE",
-      entityType: "IdentityInvite",
-      entityId: issued.id,
-      entityName: user.email,
-      metadata: {
-        userId: id,
-        providerId: provider.id,
-        provider: provider.slug,
-        expiresAt: issued.expiresAt.toISOString(),
-      },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.user.identity-invite-created",
-      entityType: "IdentityInvite",
-      entityId: issued.id,
-      data: {
-        userId: id,
-        email: user.email,
-        providerId: provider.id,
-        provider: provider.slug,
-        expiresAt: issued.expiresAt.toISOString(),
-      },
-    });
-    return issued;
-  });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.user.identity-invite-created",
+        entityType: "IdentityInvite",
+        entityId: issued.id,
+        data: {
+          userId: id,
+          email: user.email,
+          providerId: provider.id,
+          provider: provider.slug,
+          expiresAt: issued.expiresAt.toISOString(),
+        },
+      });
+      return issued;
+    },
+    { timeout: 30_000 }
+  );
 
   res.status(201).json({
     providerId: invite.providerId,
