@@ -215,9 +215,10 @@ describe("auth cleanup", () => {
 
     const deleted = await cleanupExpiredAuthRows();
 
-    expect(deleted.upstreamAuthSessions).toBe(1);
-    expect(deleted.identityLinkGrants).toBe(1);
-    expect(deleted.identityInvites).toBe(1);
+    // At least: the sweep also takes other test files' expired rows.
+    expect(deleted.upstreamAuthSessions).toBeGreaterThanOrEqual(1);
+    expect(deleted.identityLinkGrants).toBeGreaterThanOrEqual(1);
+    expect(deleted.identityInvites).toBeGreaterThanOrEqual(1);
     const gone = [
       await prisma.upstreamAuthSession.findUnique({
         where: { id: expiredSession.id },
