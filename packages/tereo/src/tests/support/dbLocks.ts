@@ -1,4 +1,4 @@
-import { prisma } from "../../utils/db/prisma.js";
+import { prisma, type Prisma } from "../../utils/db/prisma.js";
 
 /** How many sessions are blocked on a lock right now. Take it before sending the requests. */
 export async function lockWaiters(): Promise<number> {
@@ -44,4 +44,30 @@ export const waitForLockWait = async (
     await new Promise((r) => setTimeout(r, 25));
   }
   throw new Error(`Fewer than ${count} backends waited on a lock for ${like}`);
+};
+
+/**
+ * Holds a transaction open after `take` until the returned `release` is
+ * called, so the operations started meanwhile queue behind its locks.
+ */
+export const holdLocks = async (
+  take: (tx: Prisma.TransactionClient) => Promise<unknown>
+) => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let held!: () => void;
+  const isHeld = new Promise<void>((r) => (held = r));
+  const done = prisma.$transaction(
+    async (tx) => {
+      await take(tx);
+      held();
+      await gate;
+    },
+    { timeout: 30_000 }
+  );
+  await isHeld;
+  return async () => {
+    release();
+    await done;
+  };
 };

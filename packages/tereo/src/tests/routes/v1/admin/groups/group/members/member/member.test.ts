@@ -7,6 +7,7 @@ import { createTestUser } from "../../../../../../../support/auth/users.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import db from "../../../../../../../../utils/db/index.js";
+import { randomUUID } from "node:crypto";
 import {
   adminApi,
   deleteGroups,
@@ -68,6 +69,20 @@ describe("DELETE /v1/admin/groups/:id/members/:userId", () => {
       admin
     );
     expect(res.status).toBe(HTTP_STATUS.NOT_FOUND);
+  });
+
+  it("returns 404 for a non-member who holds more than the caller, and 403 once they are a member", async () => {
+    const group = track(await postGroup(admin));
+    const userId = randomUUID();
+    await getTestPrincipalToken({ userId, permissions: ["admin"] });
+    const remove = () =>
+      adminApi("DELETE", `/groups/${group.id}/members/${userId}`, admin);
+
+    expect((await remove()).status).toBe(HTTP_STATUS.NOT_FOUND);
+    await prisma.groupMember.create({
+      data: { groupId: group.id, userId, addedBy: userId },
+    });
+    expect((await remove()).status).toBe(HTTP_STATUS.FORBIDDEN);
   });
 
   it("removes a member from an archived group", async () => {
