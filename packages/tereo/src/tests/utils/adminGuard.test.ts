@@ -2,20 +2,20 @@
 // @module-tag auth
 // @module-tag race
 
+import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { assertAdminRemains } from "../../utils/adminGuard.js";
+import { generateUniqueId } from "../support/auth/crypto.js";
+import { createTestUser } from "../support/auth/users.js";
+import { removeMembers } from "../../utils/groups.js";
+import { prisma } from "../../utils/db/prisma.js";
+import db from "../../utils/db/index.js";
+import { randomUUID } from "crypto";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../support/principals.js";
-import { removeMembers } from "../../utils/groups.js";
-import { generateUniqueId } from "../support/auth/crypto.js";
-import { createTestUser } from "../support/auth/users.js";
-import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
-import { assertAdminRemains } from "../../utils/adminGuard.js";
-import { prisma } from "../../utils/db/prisma.js";
-import db from "../../utils/db/index.js";
-import { randomUUID } from "crypto";
 
 /**
  * The last-admin guard. Other suites leave admins behind, so this file sets
