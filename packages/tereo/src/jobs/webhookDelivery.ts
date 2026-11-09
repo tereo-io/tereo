@@ -1,5 +1,6 @@
 import { emitEndpointEventTx } from "../utils/webhookEndpointEvents.js";
 import { openEndpointSecrets } from "../utils/webhookSecrets.js";
+import { mayResendDelivery } from "../utils/webhookAccess.js";
 import { signatureHeader } from "../utils/webhookSigning.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { TrackedWorker } from "./workerRegistry.js";
@@ -233,6 +234,19 @@ export async function processWebhookDelivery(
       errorMessage: endpoint.archivedAt
         ? "Endpoint is archived"
         : `Endpoint status is ${endpoint.status}`,
+      completedAt: new Date(),
+    });
+    return;
+  }
+
+  // Written while the endpoint's creator could read the event; a retry
+  // after they lost that access must not send it.
+  if (!(await mayResendDelivery(endpoint, delivery))) {
+    await write({
+      attempts: delivery.attempts + 1,
+      lastAttemptAt: new Date(),
+      status: "FAILED",
+      errorMessage: "The endpoint's creator may no longer receive this event",
       completedAt: new Date(),
     });
     return;
