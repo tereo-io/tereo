@@ -1,6 +1,6 @@
+import { isSsoOnlyEmail, issuePasswordLink, lockUser } from "./userLinks.js";
 import { UserType } from "../../prisma/generated/client/index.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
-import { issuePasswordLink } from "./userLinks.js";
 import { isUsableAccount } from "./users.js";
 import { ConflictError } from "./errors.js";
 import { emailDomain } from "./email.js";
@@ -47,16 +47,27 @@ export const requestPasswordReset = async ({
     clientId !== undefined && (await db.clients.clientIdExists(clientId));
 
   try {
-    await prisma.$transaction((tx) =>
-      issuePasswordLink(tx, {
+    await prisma.$transaction(async (tx) => {
+      // The checks above ran unlocked: a deactivation or email change that
+      // committed since then retired the user's links and must not be undone.
+      await lockUser(tx, user.id);
+      const current = await db.users.get(user.id, tx);
+      if (
+        !current ||
+        current.email !== user.email ||
+        !canResetPassword(current, await isSsoOnlyEmail(current.email, tx))
+      ) {
+        return;
+      }
+      await issuePasswordLink(tx, {
         userId: user.id,
         purpose: "reset",
         createdBy: SYSTEM_USER_ID,
         notify: true,
         clientId: knownClient ? clientId : undefined,
         requestIp: ip,
-      })
-    );
+      });
+    });
   } catch (err) {
     // The connection was removed since the check above.
     if (!(err instanceof ConflictError && err.code === "email_not_configured"))

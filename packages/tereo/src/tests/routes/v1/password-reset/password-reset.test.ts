@@ -3,6 +3,8 @@
 // @module-tag race
 import { ensureDefaultOrganization } from "../../../../utils/defaultOrganization.js";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import { requestPasswordReset } from "../../../../utils/passwordReset.js";
+import { holdLocks, waitForLockWait } from "../../../support/dbLocks.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { SYSTEM_USER_ID } from "../../../../definitions/index.js";
 import { createTestUser } from "../../../support/auth/users.js";
@@ -177,6 +179,32 @@ describe("password reset request", () => {
     await waitForMails(user.email, 2);
     expect(await liveLinks(user.id)).toBe(1);
   });
+
+  it.each([
+    ["deactivated", { isActive: false }],
+    ["given a new address", { email: `moved-${rand()}@test.local` }],
+  ])(
+    "a user %s while the request waits for the lock gets no link",
+    async (_, change) => {
+      const user = await createTestUser();
+      const release = await holdLocks(async (tx) => {
+        await tx.$executeRaw`SELECT 1 FROM "auth"."users" WHERE "id" = ${user.id}::uuid FOR UPDATE`;
+        await tx.user.update({ where: { id: user.id }, data: change });
+      });
+      const pending = requestPasswordReset({ email: user.email });
+      try {
+        await waitForLockWait(`%"auth"."users"%FOR UPDATE%`);
+      } finally {
+        await release();
+      }
+      await pending;
+
+      expect(
+        await prisma.userLinkToken.count({ where: { userId: user.id } })
+      ).toBe(0);
+      expect(mailsTo(user.email)).toHaveLength(0);
+    }
+  );
 
   it("client_id of a real client is in the link; an unknown one is dropped", async () => {
     const client = await createTestClient();
