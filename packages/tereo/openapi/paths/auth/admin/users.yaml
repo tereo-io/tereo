@@ -261,7 +261,8 @@
     summary: Get user groups
     description: |
       Returns every group the user belongs to, global and in any organization,
-      ordered by id. Archived groups are left out unless `includeArchived=true`.
+      ordered by id, each with its organization's id and name (`organization`,
+      null for a global group). Archived groups are left out unless `includeArchived=true`.
     operationId: getAdminUserGroups
     security:
       - BearerAuth: [users.read]
@@ -304,8 +305,10 @@
       Returns the user's global roles: `roles` lists the direct assignments,
       whatever the role's state (what `PUT` replaces), and `groupRoles` each
       live role held through a live global group, once per role and group. A
-      role held both ways appears in each list. Organization-scoped assignments are listed
-      per organization, under
+      role held both ways appears in each list. `orgGroupRoles` lists the roles
+      held through organizations' groups, each with its organization; they
+      count only within that organization, while the user is a member there.
+      Direct organization-scoped assignments are listed per organization, under
       `GET /v1/admin/organizations/{id}/members/{userId}/roles`; the user's
       groups under `GET /v1/admin/users/{id}/groups`.
     operationId: getAdminUserRoles

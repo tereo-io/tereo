@@ -40,3 +40,37 @@ export const listGroupRoles = async (
   }
   return [...entries.values()];
 };
+
+export interface OrgGroupRoleEntry extends GroupRoleEntry {
+  organizationId: string;
+  organization: { id: string; name: string };
+}
+
+/**
+ * Each live role a user holds through a live group of any organization, as
+ * `listGroupRoles` reads it for each organization in turn (so only while the
+ * user is a member there), with the organization's name.
+ */
+export const listOrgGroupRoles = async (
+  userId: string
+): Promise<OrgGroupRoleEntry[]> => {
+  const orgIds = [
+    ...new Set(
+      (await db.groups.getUserGroups(userId))
+        .map((g) => g.organizationId)
+        .filter((id): id is string => id !== null)
+    ),
+  ].sort();
+  const names = await db.organizations.getNames(orgIds);
+  const perOrg = await Promise.all(
+    orgIds.map((orgId) => listGroupRoles(userId, orgId))
+  );
+  return perOrg.flatMap((entries, i) => {
+    const id = orgIds[i];
+    return entries.map((e) => ({
+      ...e,
+      organizationId: id,
+      organization: { id, name: names.get(id) ?? "" },
+    }));
+  });
+};

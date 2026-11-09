@@ -335,7 +335,9 @@ export const UserDetail = () => {
           )}
           <Card>
             <SectionHeader title="Roles" />
-            {rolesData?.roles.length || rolesData?.groupRoles?.length ? (
+            {rolesData?.roles.length ||
+            rolesData?.groupRoles?.length ||
+            rolesData?.orgGroupRoles?.length ? (
               <div className="t-role-chips">
                 {rolesData?.roles.map((r) => (
                   <Badge key={`direct-${r.id}`} variant="primary">
@@ -346,6 +348,14 @@ export const UserDetail = () => {
                   <Badge key={`${r.group.id}-${r.id}`} variant="secondary">
                     {r.displayName}{" "}
                     <span className="t-role-via">via {r.group.name}</span>
+                  </Badge>
+                ))}
+                {rolesData?.orgGroupRoles?.map((r) => (
+                  <Badge key={`${r.group.id}-${r.id}`} variant="secondary">
+                    {r.displayName}{" "}
+                    <span className="t-role-via">
+                      via {r.group.name}, in {r.organization.name} only
+                    </span>
                   </Badge>
                 ))}
               </div>
@@ -369,8 +379,11 @@ export const UserDetail = () => {
                     ) : (
                       g.name
                     )}
-                    {g.organizationId && (
-                      <span className="t-role-via"> (organization)</span>
+                    {g.organization && (
+                      <span className="t-role-via">
+                        {" "}
+                        ({g.organization.name})
+                      </span>
                     )}
                     {g.archivedAt && (
                       <span className="t-role-via"> archived</span>

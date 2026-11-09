@@ -51,3 +51,8 @@ export interface UpdateGroupInput {
   name?: string;
   description?: string | null;
 }
+
+/** One of a user's groups, with its organization (null for a global group). */
+export interface UserGroup extends Group {
+  organization: { id: string; name: string } | null;
+}

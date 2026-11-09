@@ -1501,7 +1501,7 @@ UserGroupRoleAssignment:
         organizationId:
           type: [string, 'null']
           format: uuid
-          description: The group's organization; null for a global group (the only kind listed on a user's roles)
+          description: The group's organization; null for a global group
         via:
           type: object
           required: [kind, groupId]
@@ -1524,12 +1524,39 @@ UserGroupRoleAssignment:
             name:
               type: string
 
+UserOrgGroupRoleAssignment:
+  description: >-
+    A live role the user holds through a live group of an organization, counted only within that
+    organization and only while the user is a member there.
+  allOf:
+    - $ref: '#/UserGroupRoleAssignment'
+    - type: object
+      required: [organizationId, organization]
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        organization:
+          $ref: '#/GroupOrganizationRef'
+
+GroupOrganizationRef:
+  type: object
+  description: The organization a group belongs to
+  required: [id, name]
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+
 UserRolesResponse:
   type: object
   required:
     - userId
     - roles
     - groupRoles
+    - orgGroupRoles
   properties:
     userId:
       type: string
@@ -1544,6 +1571,11 @@ UserRolesResponse:
       description: Roles held through global groups. A role held both directly and through a group appears in both lists.
       items:
         $ref: '#/UserGroupRoleAssignment'
+    orgGroupRoles:
+      type: array
+      description: Roles held through organizations' groups, each with its organization. They count only within that organization.
+      items:
+        $ref: '#/UserOrgGroupRoleAssignment'
 
 UserPermissionsResponse:
   type: object
@@ -4565,7 +4597,16 @@ UserGroupsResponse:
     data:
       type: array
       items:
-        $ref: '#/Group'
+        allOf:
+          - $ref: '#/Group'
+          - type: object
+            required: [organization]
+            properties:
+              organization:
+                description: The group's organization; null for a global group
+                oneOf:
+                  - $ref: '#/GroupOrganizationRef'
+                  - type: 'null'
     nextCursor:
       type: 'null'
 

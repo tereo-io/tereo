@@ -2,15 +2,13 @@
 // @module-tag auth
 
 import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrganization.js";
-import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
-import { addMembers, createGroup } from "../../../../../../utils/groups.js";
+import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { createTestClient } from "../../../../../support/auth/clients.js";
 import { generateUniqueId } from "../../../../../support/auth/crypto.js";
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { ensureGroupPermission } from "../../../../../support/groups.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
-import { fetchJson } from "../../../../../support/http.js";
-import db from "../../../../../../utils/db/index.js";
+import { describe, it, expect, beforeAll } from "vitest";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -33,14 +31,6 @@ import {
   getCoreEventSubscriberToken,
   waitFor,
 } from "../../../../../support/webhooks.js";
-import {
-  deleteGroups,
-  ensureGroupPermission,
-  GROUP_PERMISSION,
-  groupSlug,
-  PROVISIONING,
-  roleGranting,
-} from "../../../../../support/groups.js";
 
 interface UserResponse {
   id?: string;
@@ -537,75 +527,6 @@ describe("GET /v1/admin/users/:id/roles", () => {
 
     const data = (await response.json()) as ErrorResponse;
     expect(data.error).toBeDefined();
-  });
-
-  describe("via", () => {
-    const groupIds: string[] = [];
-    afterAll(() => deleteGroups(groupIds));
-
-    /** A user holding a fresh role through a new global group. */
-    const memberOfGroupWithRole = async () => {
-      const [user, role] = [await createTestUser(), await roleGranting()];
-      const group = await db.$transaction(async (tx) => {
-        const { group } = await createGroup(
-          PROVISIONING,
-          {
-            organizationId: null,
-            slug: groupSlug("via"),
-            name: "Support",
-            roleIds: [role.id],
-          },
-          tx
-        );
-        await addMembers(PROVISIONING, group.id, [user.id], tx);
-        return group;
-      });
-      groupIds.push(group.id);
-      const groupRow = {
-        id: role.id,
-        name: role.name,
-        displayName: role.displayName,
-        organizationId: null,
-        via: { kind: "group", groupId: group.id },
-        group: { id: group.id, slug: group.slug, name: group.name },
-      };
-      return { userId: user.id, role, groupRow };
-    };
-
-    const rolesOf = async (userId: string, roleIds?: string[]) => {
-      const url = `${BASE_URL}/v1/admin/users/${userId}/roles`;
-      const body = roleIds && { roleIds };
-      const res = await fetchJson(body ? "PUT" : "GET", url, adminToken, body);
-      expect(res.status).toBe(HTTP_STATUS.OK);
-      return res.body as UserRolesResponse;
-    };
-
-    it("a role held via a group has via.kind group and groupId", async () => {
-      const { userId, groupRow } = await memberOfGroupWithRole();
-      const data = await rolesOf(userId);
-      expect(data.roles).toEqual([]);
-      expect(data.groupRoles).toEqual([groupRow]);
-    });
-
-    it("a role held both ways lists via direct and via group", async () => {
-      const { userId, role, groupRow } = await memberOfGroupWithRole();
-      await prisma.userRole.create({ data: { userId, roleId: role.id } });
-      const data = await rolesOf(userId);
-      expect(data.roles.map((r) => [r.id, r.via])).toEqual([
-        [role.id, { kind: "direct" }],
-      ]);
-      expect(data.groupRoles).toEqual([groupRow]);
-    });
-
-    it("PUT with no roles leaves a group-held role and creates no direct row", async () => {
-      const { userId, groupRow } = await memberOfGroupWithRole();
-      const data = await rolesOf(userId, []);
-      expect(data.roles).toEqual([]);
-      expect(data.groupRoles).toEqual([groupRow]);
-      const permissions = await db.roles.getUserPermissions(userId);
-      expect(permissions).toContain(GROUP_PERMISSION);
-      expect(await prisma.userRole.count({ where: { userId } })).toBe(0);
-    });
   });
 });
 

@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
+import type { UserGroup } from "./types";
 import { useAxios } from "@/lib/auth";
-import type { Group } from "./types";
 
 const useUserGroups = (userId: string) => {
   const axios = useAxios("auth");
 
-  const queryFn = async (): Promise<Group[]> => {
+  const queryFn = async (): Promise<UserGroup[]> => {
     // Archived groups too: their roles come back on restore.
     const res = await axios.get(`/v1/admin/users/${userId}/groups`, {
       params: { includeArchived: true },

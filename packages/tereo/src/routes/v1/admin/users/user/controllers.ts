@@ -3,7 +3,6 @@ import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
 import { retirePasswordLinks } from "../../../../../utils/passwordSetup.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
-import { listGroupRoles } from "../../../../../utils/groupRoles.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
@@ -20,6 +19,10 @@ import {
   validateBody,
   validateParams,
 } from "../../../../../utils/validateReq.js";
+import {
+  listGroupRoles,
+  listOrgGroupRoles,
+} from "../../../../../utils/groupRoles.js";
 import {
   endDeactivatedUserSessions,
   endSession,
@@ -207,7 +210,8 @@ export const getUserPermissions = async (req: Request, res: Response) => {
  * A user's global roles: `roles` holds the direct assignments, whatever their
  * state (exactly what `PUT` replaces), and `groupRoles` each live role held
  * through a live global group, once per role and group. A role held both
- * ways appears in each.
+ * ways appears in each. `orgGroupRoles` are the roles held through
+ * organizations' groups, which count only within that organization.
  */
 const userRolesResponse = async (
   userId: string,
@@ -223,6 +227,7 @@ const userRolesResponse = async (
       via: { kind: "direct" as const },
     })),
     groupRoles: await listGroupRoles(userId, null),
+    orgGroupRoles: await listOrgGroupRoles(userId),
   };
 };
 

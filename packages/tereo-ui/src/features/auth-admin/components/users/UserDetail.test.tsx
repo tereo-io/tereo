@@ -161,9 +161,51 @@ describe("UserDetail", () => {
       expect(screen.getByText("direct")).toBeVisible();
     });
 
+    it("shows a role held through an organization's group with the group and organization", async () => {
+      renderDetail(person, new QueryClient(), undefined, {
+        roles: [],
+        groupRoles: [],
+        orgGroupRoles: [
+          {
+            id: "r-org",
+            name: "common",
+            displayName: "Common",
+            organizationId: "o1",
+            via: { kind: "group", groupId: "g2" },
+            group: { id: "g2", slug: "marketing", name: "Marketing" },
+            organization: { id: "o1", name: "VIVO" },
+          },
+        ],
+      });
+
+      expect(
+        await screen.findByText("via Marketing, in VIVO only")
+      ).toBeVisible();
+      expect(screen.getByText("Common", { exact: false })).toBeVisible();
+      expect(screen.queryByText("No roles assigned")).not.toBeInTheDocument();
+    });
+
+    it("names an organization's group's organization", async () => {
+      renderDetail(person, new QueryClient(), undefined, roles, [
+        {
+          ...supportGroup,
+          organizationId: "o1",
+          organization: { id: "o1", name: "VIVO" },
+          archivedAt: null,
+        },
+      ]);
+
+      expect(await screen.findByText("(VIVO)")).toBeVisible();
+    });
+
     it("lists the user's groups with a link", async () => {
       renderDetail(person, new QueryClient(), undefined, roles, [
-        { ...supportGroup, organizationId: null, archivedAt: null },
+        {
+          ...supportGroup,
+          organizationId: null,
+          organization: null,
+          archivedAt: null,
+        },
       ]);
 
       expect(

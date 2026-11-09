@@ -180,6 +180,7 @@ export type {
   PaginatedGroups,
   SetGroupRolesResult,
   UpdateGroupBody,
+  UserGroup,
   UserGroupsResult,
 } from "./requests/auth/groups/types.js";
 

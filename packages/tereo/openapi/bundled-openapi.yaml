@@ -4829,7 +4829,8 @@ paths:
       summary: Get user groups
       description: |
         Returns every group the user belongs to, global and in any organization,
-        ordered by id. Archived groups are left out unless `includeArchived=true`.
+        ordered by id, each with its organization's id and name (`organization`,
+        null for a global group). Archived groups are left out unless `includeArchived=true`.
       operationId: getAdminUserGroups
       security:
         - BearerAuth:
@@ -4873,8 +4874,10 @@ paths:
         Returns the user's global roles: `roles` lists the direct assignments,
         whatever the role's state (what `PUT` replaces), and `groupRoles` each
         live role held through a live global group, once per role and group. A
-        role held both ways appears in each list. Organization-scoped assignments are listed
-        per organization, under
+        role held both ways appears in each list. `orgGroupRoles` lists the roles
+        held through organizations' groups, each with its organization; they
+        count only within that organization, while the user is a member there.
+        Direct organization-scoped assignments are listed per organization, under
         `GET /v1/admin/organizations/{id}/members/{userId}/roles`; the user's
         groups under `GET /v1/admin/users/{id}/groups`.
       operationId: getAdminUserRoles
@@ -25781,6 +25784,7 @@ components:
         - userId
         - roles
         - groupRoles
+        - orgGroupRoles
       properties:
         userId:
           type: string
@@ -25795,6 +25799,11 @@ components:
           description: Roles held through global groups. A role held both directly and through a group appears in both lists.
           items:
             $ref: '#/components/schemas/UserGroupRoleAssignment'
+        orgGroupRoles:
+          type: array
+          description: Roles held through organizations' groups, each with its organization. They count only within that organization.
+          items:
+            $ref: '#/components/schemas/UserOrgGroupRoleAssignment'
     UserPermissionsResponse:
       type: object
       required:
@@ -26446,7 +26455,7 @@ components:
                 - string
                 - 'null'
               format: uuid
-              description: The group's organization; null for a global group (the only kind listed on a user's roles)
+              description: The group's organization; null for a global group
             via:
               type: object
               required:
@@ -26575,7 +26584,17 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/Group'
+            allOf:
+              - $ref: '#/components/schemas/Group'
+              - type: object
+                required:
+                  - organization
+                properties:
+                  organization:
+                    description: The group's organization; null for a global group
+                    oneOf:
+                      - $ref: '#/components/schemas/GroupOrganizationRef'
+                      - type: 'null'
         nextCursor:
           type: 'null'
     CreateGroupRequest:
@@ -32413,6 +32432,32 @@ components:
                       format: uuid
                     name:
                       type: string
+    GroupOrganizationRef:
+      type: object
+      description: The organization a group belongs to
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    UserOrgGroupRoleAssignment:
+      description: A live role the user holds through a live group of an organization, counted only within that organization and only while the user is a member there.
+      allOf:
+        - $ref: '#/components/schemas/UserGroupRoleAssignment'
+        - type: object
+          required:
+            - organizationId
+            - organization
+          properties:
+            organizationId:
+              type: string
+              format: uuid
+            organization:
+              $ref: '#/components/schemas/GroupOrganizationRef'
     UserIdentityInvite:
       type: object
       description: An invite to sign in with a provider, as an admin sees it. It stays listed after `expiresAt` until the hourly cleanup removes it.

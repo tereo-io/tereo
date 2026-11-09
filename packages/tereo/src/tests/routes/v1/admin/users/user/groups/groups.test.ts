@@ -1,14 +1,18 @@
 // @module-tag int
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../../../../../../utils/defaultOrganization.js";
-import { getTestPrincipalToken } from "../../../../../../support/principals.js";
 import { createTestUser } from "../../../../../../support/auth/users.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import db from "../../../../../../../utils/db/index.js";
+import { randomUUID } from "node:crypto";
 import {
   HTTP_STATUS,
   NON_EXISTENT_UUID,
 } from "../../../../../../support/auth/constants.js";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../../../../../../support/principals.js";
 import {
   archiveGroup,
   createGroup,
@@ -18,6 +22,7 @@ import {
   adminApi,
   deleteGroups,
   groupSlug,
+  joinOrg,
   PROVISIONING,
   type ApiGroup,
 } from "../../../../../../support/groups.js";
@@ -25,12 +30,15 @@ import {
 const groupIds: string[] = [];
 let reader: string;
 
-/** A global group, provisioned, with `userId` as a member. */
-const groupWith = async (userId: string) => {
+/** A group, provisioned, with `userId` as a member; global unless `organizationId`. */
+const groupWith = async (
+  userId: string,
+  organizationId: string | null = null
+) => {
   const group = await db.$transaction(async (tx) => {
     const { group } = await createGroup(
       PROVISIONING,
-      { organizationId: null, slug: groupSlug("user"), name: "Member of" },
+      { organizationId, slug: groupSlug("user"), name: "Member of" },
       tx
     );
     await addMembers(PROVISIONING, group.id, [userId], tx);
@@ -64,6 +72,24 @@ describe("GET /v1/admin/users/:id/groups", () => {
     expect(res.body.data[0]).toMatchObject({
       definitionSource: "provisioned",
       memberCount: 1,
+    });
+  });
+
+  it("names each group's organization, null for a global group", async () => {
+    const user = (await createTestUser()).id;
+    const label = `user-groups-${randomUUID()}`;
+    const orgId = await ensureTestOrganization(label);
+    await joinOrg(orgId, user);
+    const global = await groupWith(user);
+    const inOrg = await groupWith(user, orgId);
+
+    const res = await adminApi("GET", `/users/${user}/groups`, reader);
+    expect(res.status).toBe(HTTP_STATUS.OK);
+    const byId = new Map(res.body.data.map((g: ApiGroup) => [g.id, g]));
+    expect(byId.get(global.id)).toMatchObject({ organization: null });
+    expect(byId.get(inOrg.id)).toMatchObject({
+      organizationId: orgId,
+      organization: { id: orgId, name: `Test Org ${label}` },
     });
   });
 

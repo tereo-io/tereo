@@ -118,7 +118,12 @@ export interface SetGroupRolesResult {
 }
 
 /** The groups the user belongs to; not paginated. */
+/** One of a user's groups, with its organization (null for a global group). */
+export interface UserGroup extends Group {
+  organization: { id: string; name: string } | null;
+}
+
 export interface UserGroupsResult {
-  data: Group[];
+  data: UserGroup[];
   nextCursor: null;
 }

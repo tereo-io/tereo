@@ -142,9 +142,9 @@ All under `/v1/admin`. Lists are cursor-paginated (`limit` 1-100, default 50; `n
 | `GET /groups/:id/roles` | The group's roles |
 | `PUT /groups/:id/roles` | `{ roleIds }` replaces the set (max 100). Returns `{ roles, added, removed }` |
 | `GET /roles/:id/users` | `{ roleId, users, groups }`: `users` are the role's **direct** holders (each `via: { kind: "direct" }`); `groups` are the unarchived groups holding it, each with `organization` and `memberCount` (list their members through `GET /groups/:id/members`) |
-| `GET /users/:id/groups` | A user's groups, global and organization (`users.read`; `?includeArchived`) |
+| `GET /users/:id/groups` | A user's groups, global and organization, each with `organization: { id, name }` (null for a global group) (`users.read`; `?includeArchived`) |
 | `GET`/`PUT /organizations/:id/members/:userId/roles` | The same shape for one organization: `roles` are the member's **direct** roles there (each `via: { kind: "direct" }`); `groupRoles` the roles held through that **organization's** groups (not global ones'), each with `group`. They are listed only to a caller who may read the organization's groups (platform `groups.read`, an organization admin or owner, `organizations.write`) or who asks about themselves; anyone else gets an empty list. They are also empty while the organization is inactive or archived, as its groups' roles count for nothing then (`roles` still lists the direct ones). The role editor lists them apart; `PUT` replaces the direct ones only |
-| `GET`/`PUT /users/:id/roles` | Return `{ roles, groupRoles }`: `roles` are the **direct** assignments (each `via: { kind: "direct" }`); `groupRoles` are the roles held through **global** groups, each with `group: { id, slug, name }` |
+| `GET`/`PUT /users/:id/roles` | Return `{ roles, groupRoles, orgGroupRoles }`: `roles` are the **direct** assignments (each `via: { kind: "direct" }`); `groupRoles` are the roles held through **global** groups, each with `group: { id, slug, name }`; `orgGroupRoles` those held through **organizations'** groups, each also with `organization: { id, name }`, listed only while the user is a member of a live organization (as they count only there) |
 
 Bodies are strict: a key a route does not know is a 400, not ignored. Who may read or change an
 inactive organization's groups is under [Authorization](#authorization).

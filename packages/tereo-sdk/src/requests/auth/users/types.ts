@@ -46,26 +46,37 @@ export interface AuthServiceUserRole {
   via: { kind: "direct" };
 }
 
-/** A role the user holds through a global group. */
+/** A role the user holds through a group. */
 export interface AuthServiceUserGroupRole {
   id: string;
   name: string;
   displayName: string;
-  /** Always null: only global groups' roles are listed. */
+  /** The group's organization; null for a global group. */
   organizationId: string | null;
   via: { kind: "group"; groupId: string };
   group: { id: string; slug: string; name: string };
 }
 
 /**
+ * A role the user holds through an organization's group: it counts only
+ * within that organization, while the user is a member there.
+ */
+export interface AuthServiceUserOrgGroupRole extends AuthServiceUserGroupRole {
+  organizationId: string;
+  organization: { id: string; name: string };
+}
+
+/**
  * Response of `GET` and `PUT /v1/admin/users/:id/roles`. `roles` are the
  * direct assignments (the only ones `PUT` changes); `groupRoles` come from
- * group membership. A role held both ways appears in both lists.
+ * global groups and `orgGroupRoles` from organizations' groups. A role held
+ * both ways appears in both lists.
  */
 export interface AuthServiceUserRolesResponse {
   userId: string;
   roles: AuthServiceUserRole[];
   groupRoles: AuthServiceUserGroupRole[];
+  orgGroupRoles: AuthServiceUserOrgGroupRole[];
 }
 
 /** Response shape of `GET /v1/admin/users/:id/permissions`. */
