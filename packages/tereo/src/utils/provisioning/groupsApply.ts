@@ -5,6 +5,7 @@ import type { GroupEntryOutput } from "./schema.js";
 import type { Prisma } from "../db/prisma.js";
 import { groupScopeKey } from "./groups.js";
 import { logAuditTx } from "../outbox.js";
+import { logger } from "../logger.js";
 import db from "../db/index.js";
 import {
   archiveGroup,
@@ -101,8 +102,8 @@ export const groupProblems = async (
       );
       continue;
     }
-    // The organization is checked on creation only: one archived since leaves
-    // its provisioned groups as they are (integrations do the same).
+    // As for integrations, the organization is checked on creation only: one
+    // archived since leaves its provisioned groups as they are.
     if (own) continue;
     if (organizationId && !liveOrgs.has(organizationId)) {
       problems.push(
@@ -310,35 +311,49 @@ export const markGroupsMissing = async (
 
 /**
  * Archives each group unprovisioned since `cutoff` or before; members stay,
- * so a return restores them. Returns the count and the members whose
- * permissions changed, for `afterGroupChange` once committed.
+ * so a return restores them. Each group in its own transaction from
+ * `inTransaction`, which holds the provisioning lock: one transaction never
+ * holds a group's admin-remains lock while it waits on the next group's
+ * locks, and a group that fails is logged and left to the next run. Returns
+ * the count and the members whose permissions changed, for
+ * `afterGroupChange` once committed.
  */
 export const archiveDueGroups = async (
-  tx: Tx,
-  cutoff: Date,
-  onlyId?: string
+  inTransaction: <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>,
+  cutoff: Date
 ): Promise<{ count: number } & Changes> => {
-  const due = await tx.group.findMany({
-    where: {
-      definitionSource: "provisioned",
-      unprovisionedAt: { lte: cutoff },
-      archivedAt: null,
-      ...(onlyId ? { id: onlyId } : {}),
-    },
-    select: { id: true },
-  });
-  // Lock step 1 for every group archived, as in applyGroups.
-  await lockMembers(
-    tx,
-    due.map((g) => g.id)
+  const dueWhere = {
+    definitionSource: "provisioned" as const,
+    unprovisionedAt: { lte: cutoff },
+    archivedAt: null,
+  };
+  const due = await inTransaction((tx) =>
+    tx.group.findMany({ where: dueWhere, select: { id: true } })
   );
   const affected = new Set<string>();
+  let count = 0;
   for (const { id } of due) {
-    const change = await archiveGroup(PROVISIONING, id, tx);
-    for (const userId of change.affectedUserIds) affected.add(userId);
+    try {
+      const change = await inTransaction(async (tx) => {
+        // An apply in between may have declared it again.
+        if (!(await tx.group.findFirst({ where: { id, ...dueWhere } }))) {
+          return null;
+        }
+        await lockMembers(tx, [id]);
+        return archiveGroup(PROVISIONING, id, tx);
+      });
+      if (!change) continue;
+      count++;
+      for (const userId of change.affectedUserIds) affected.add(userId);
+    } catch (err) {
+      logger.error(
+        { err, groupId: id },
+        "Provisioning: archiving a dropped group failed"
+      );
+    }
   }
   return {
-    count: due.length,
+    count,
     affectedUserIds: [...affected].sort(),
     revokedJtis: [],
   };

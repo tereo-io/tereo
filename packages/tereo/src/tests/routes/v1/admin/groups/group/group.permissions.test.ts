@@ -314,6 +314,29 @@ describe("/v1/admin/groups/:id authorization", () => {
     expect(archived.status).toBe(HTTP_STATUS.FORBIDDEN);
   });
 
+  it("an archived organization's former admin reads none of its groups", async () => {
+    const orgId = await newOrg();
+    const token = await orgMemberToken(orgId, "admin");
+    const group = track(await postGroup(admin, { organizationId: orgId }));
+    await prisma.organization.update({
+      where: { id: orgId },
+      data: { isActive: false, archivedAt: new Date() },
+    });
+
+    const missing = await adminApi("GET", `/groups/${randomUUID()}`, token);
+    expect(missing.status).toBe(HTTP_STATUS.FORBIDDEN);
+    for (const path of [
+      `/groups/${group.id}`,
+      `/groups/${group.id}/members`,
+      `/groups/${group.id}/roles`,
+      `/groups?organizationId=${orgId}`,
+    ]) {
+      const res = await adminApi("GET", path, token);
+      expect(res.status, path).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(res.body, path).toEqual(missing.body);
+    }
+  });
+
   it("a delegated core:admin.read token can GET but not POST", async () => {
     const userId = randomUUID();
     await getTestPrincipalToken({ userId, permissions: ["groups.admin"] });

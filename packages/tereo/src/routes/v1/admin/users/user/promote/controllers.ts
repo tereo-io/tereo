@@ -17,12 +17,15 @@ export const promoteUser = async (req: Request, res: Response) => {
   assertNotSystemUser(id);
   await getGuest(id);
 
-  const { user, revokedJtis } = await db.$transaction(async (tx) => {
-    // The account keeps everything it holds, now with no expiry: the caller
-    // must hold all of it, as for a credential reset.
-    await assertMayResetCredentials(auth, id, tx);
-    return promoteGuest(tx, auth, id);
-  });
+  const { user, revokedJtis } = await db.$transaction(
+    async (tx) => {
+      // The account keeps everything it holds, now with no expiry: the caller
+      // must hold all of it, as for a credential reset.
+      await assertMayResetCredentials(auth, id, tx);
+      return promoteGuest(tx, auth, id);
+    },
+    { timeout: 30_000 }
+  );
 
   disconnectTokenSockets(revokedJtis);
   notifyUserRolesChanged(id);

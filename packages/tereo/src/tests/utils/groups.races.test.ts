@@ -2,12 +2,11 @@
 // @module-tag auth
 // @module-tag race
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
-import { addMembers, createGroup, setGroupRoles } from "../../utils/groups.js";
 import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { prisma, type Prisma } from "../../utils/db/prisma.js";
+import { holdLocks, waitForLockWait } from "../support/dbLocks.js";
 import { createTestUser } from "../support/auth/users.js";
-import { waitForLockWait } from "../support/dbLocks.js";
+import { prisma } from "../../utils/db/prisma.js";
 import { AppError } from "../../utils/errors.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
@@ -15,6 +14,12 @@ import {
   getTestPrincipalToken,
   ensureTestOrganization,
 } from "../support/principals.js";
+import {
+  addMembers,
+  createGroup,
+  restoreGroup,
+  setGroupRoles,
+} from "../../utils/groups.js";
 import {
   adminActor,
   deleteGroups,
@@ -46,32 +51,6 @@ const newGroup = async (organizationId: string | null) => {
   );
   groupIds.push(group.id);
   return group;
-};
-
-/**
- * Holds a transaction open after `take` until the returned `release` is
- * called, so the operations started meanwhile queue behind its locks.
- */
-const holdLocks = async (
-  take: (tx: Prisma.TransactionClient) => Promise<unknown>
-) => {
-  let release!: () => void;
-  const gate = new Promise<void>((r) => (release = r));
-  let held!: () => void;
-  const isHeld = new Promise<void>((r) => (held = r));
-  const done = prisma.$transaction(
-    async (tx) => {
-      await take(tx);
-      held();
-      await gate;
-    },
-    { timeout: 30_000 }
-  );
-  await isHeld;
-  return async () => {
-    release();
-    await done;
-  };
 };
 
 /** The error a promise rejects with, or null once it resolves. */
@@ -203,6 +182,110 @@ describe("group races", () => {
       expect(await db.groups.getMemberIds(group.id)).toEqual([]);
     }
   );
+
+  it("setGroupRoles removing a role that grants no admin still queues on the admin guard's lock", async () => {
+    // Under that lock the role may since have gained admin, as a concurrent
+    // permission change gives it; only there is that read exact.
+    const group = await newGroup(null);
+    const role = await roleGranting();
+    await db.$transaction((tx) =>
+      setGroupRoles(PROVISIONING, group.id, [role.id], tx)
+    );
+
+    const release = await holdLocks(
+      (tx) =>
+        tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('core:admin-remains', 0))`
+    );
+    let settled = false;
+    const pending = db
+      .$transaction((tx) => setGroupRoles(PROVISIONING, group.id, [], tx))
+      .finally(() => (settled = true));
+    try {
+      await waitForLockWait("%core:admin-remains%", 5_000);
+      expect(settled).toBe(false);
+    } finally {
+      await release();
+    }
+    expect((await pending).removed).toEqual([role.id]);
+  });
+
+  describe("restoring an org group against its role gaining a permission no organization may hold", () => {
+    const ROLE_UPDATE_LOCK = `%FROM "auth"."roles"%FOR UPDATE%`;
+    const ROLE_SHARE_LOCK = `%FROM "auth"."roles"%FOR SHARE%`;
+
+    /** An archived org group holding a fresh org-assignable role. */
+    const archivedOrgGroup = async () => {
+      const org = await ensureTestOrganization(`group-race-${randomUUID()}`);
+      const group = await newGroup(org);
+      const role = await roleGranting();
+      await db.$transaction((tx) =>
+        setGroupRoles(PROVISIONING, group.id, [role.id], tx)
+      );
+      await prisma.group.update({
+        where: { id: group.id },
+        data: { archivedAt: new Date() },
+      });
+      const usersRead = await prisma.permission.findUniqueOrThrow({
+        where: { name: "users.read" },
+      });
+      const permissionIds = [
+        ...(
+          await prisma.rolePermission.findMany({ where: { roleId: role.id } })
+        ).map((rp) => rp.permissionId),
+        usersRead.id,
+      ];
+      return { group, role, permissionIds };
+    };
+
+    it("a permission change waiting on the restore's share lock sees the group restored", async () => {
+      const { group, role, permissionIds } = await archivedOrgGroup();
+      const token = await getTestPrincipalToken({
+        permissions: ["roles.admin", "users.read", GROUP_PERMISSION],
+      });
+
+      const release = await holdLocks((tx) =>
+        restoreGroup(PROVISIONING, group.id, tx)
+      );
+      const pending = fetch(
+        `${BASE_URL}/v1/admin/roles/${role.id}/permissions`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ permissionIds }),
+        }
+      );
+      await waitForLockWait(ROLE_UPDATE_LOCK);
+      await release();
+
+      const res = await pending;
+      expect(res.status).toBe(HTTP_STATUS.CONFLICT);
+      expect(((await res.json()) as { error: string }).error).toBe(
+        "role_assigned_in_org"
+      );
+    });
+
+    it("a restore waiting on the permission change's row lock sees the new permission", async () => {
+      const { group, role, permissionIds } = await archivedOrgGroup();
+
+      const release = await holdLocks(async (tx) => {
+        await db.roles.lockRoles([role.id], "update", tx);
+        await db.roles.setPermissions(role.id, permissionIds, tx);
+      });
+      const pending = outcome(
+        db.$transaction((tx) => restoreGroup(PROVISIONING, group.id, tx))
+      );
+      await waitForLockWait(ROLE_SHARE_LOCK);
+      await release();
+
+      const err = await pending;
+      expect(err).toBeInstanceOf(AppError);
+      expect((err as AppError).code).toBe("role_not_org_assignable");
+      expect((await db.groups.getAny(group.id)).archivedAt).not.toBeNull();
+    });
+  });
 
   it("setGroupRoles refuses a group archived while it waited on the group lock", async () => {
     const group = await newGroup(null);

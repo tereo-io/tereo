@@ -26,8 +26,8 @@ const permissionRequired = (permission: string) =>
  * The caller's role as an admin or owner of `organizationId`, for acting on
  * its groups without `groups.<need>`: null for a holder of
  * `organizations.write`, whose platform authority covers every organization.
- * As `requireOrgRole("admin")`, except that an inactive organization's
- * admins may still read its groups. Any refusal is the 403 a missing group
+ * As `requireOrgRole("admin")`, except that an inactive (not archived)
+ * organization's admins may still read its groups. Any refusal is the 403 a missing group
  * gets, so it tells nothing of the organization or the caller's place in it.
  */
 export const requireGroupOrgAdmin = async (
@@ -53,6 +53,10 @@ export const requireGroupOrgAdmin = async (
     auth.userId
   );
   if (!membership || membership.memberRole === "member") throw refused;
+  // Deactivated, not archived: an archived organization's groups are closed
+  // to its former admins, as the organization itself is.
+  const org = await db.organizations.getAny(organizationId);
+  if (org.archivedAt) throw refused;
   return membership.memberRole;
 };
 

@@ -135,6 +135,19 @@ export const getMemberIds = async (
   return rows.map((r) => r.userId);
 };
 
+/** Of `userIds`, those who are members of the group. */
+export const getMemberIdsAmong = async (
+  groupId: string,
+  userIds: string[],
+  tx?: Prisma.TransactionClient
+): Promise<string[]> => {
+  const rows = await (tx ?? prisma).groupMember.findMany({
+    where: { groupId, userId: { in: userIds } },
+    select: { userId: true },
+  });
+  return rows.map((r) => r.userId);
+};
+
 export const listMembers = async (
   groupId: string,
   opts: { cursor?: string; limit: number },

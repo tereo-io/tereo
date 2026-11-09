@@ -4,12 +4,13 @@
 
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { holdLocks, waitForLockWait } from "../support/dbLocks.js";
+import { prisma, type Prisma } from "../../utils/db/prisma.js";
 import { assertAdminRemains } from "../../utils/adminGuard.js";
 import { generateUniqueId } from "../support/auth/crypto.js";
 import { createTestUser } from "../support/auth/users.js";
 import { removeMembers } from "../../utils/groups.js";
-import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import {
@@ -17,34 +18,22 @@ import {
   getTestPrincipalToken,
 } from "../support/principals.js";
 
+type Tx = Prisma.TransactionClient;
+
 /**
- * The last-admin guard. Other suites leave admins behind, so this file sets
- * their global `admin` assignments (expired) and admin groups (archived)
- * aside for its duration and restores them afterwards; the users made here
- * are then the only admins.
+ * The last-admin guard. Other suites, and other runs sharing the test
+ * database, leave admins behind, and this file changes none of their rows.
+ * A check that needs the admins made here to be the only ones runs in
+ * `asSoleAdmins`: a transaction that sets every other admin aside, runs the
+ * check in it, and always rolls back, so no other session ever sees the
+ * change. Requests to the server, which cannot see that transaction, only
+ * show that each route queues on the guard's lock.
  */
 describe("assertAdminRemains", () => {
-  const setAside = new Map<string, Date | null>();
-  const archivedGroupIds: string[] = [];
+  const madeUserIds: string[] = [];
+  const madeGroupIds: string[] = [];
   let callerToken: string;
   let adminPermissionId: string;
-
-  const adminAssignments = () =>
-    prisma.userRole.findMany({
-      where: {
-        organizationId: null,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-        user: { isActive: true, userType: "human" },
-        role: {
-          isActive: true,
-          archivedAt: null,
-          retiredAt: null,
-          rolePermissions: {
-            some: { permission: { name: "admin", retiredAt: null } },
-          },
-        },
-      },
-    });
 
   const grantsAdmin = {
     isActive: true,
@@ -53,6 +42,41 @@ describe("assertAdminRemains", () => {
     rolePermissions: {
       some: { permission: { name: "admin", retiredAt: null } },
     },
+  };
+
+  class Rollback extends Error {}
+
+  const asSoleAdmins = async (check: (tx: Tx) => Promise<void>) => {
+    await prisma
+      .$transaction(
+        async (tx) => {
+          await tx.userRole.updateMany({
+            where: {
+              organizationId: null,
+              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+              user: { isActive: true, userType: "human" },
+              role: grantsAdmin,
+              userId: { notIn: madeUserIds },
+            },
+            data: { expiresAt: new Date(Date.now() - 60_000) },
+          });
+          await tx.group.updateMany({
+            where: {
+              id: { notIn: madeGroupIds },
+              organizationId: null,
+              archivedAt: null,
+              roles: { some: { role: grantsAdmin } },
+            },
+            data: { archivedAt: new Date() },
+          });
+          await check(tx);
+          throw new Rollback();
+        },
+        { timeout: 30_000 }
+      )
+      .catch((err: unknown) => {
+        if (!(err instanceof Rollback)) throw err;
+      });
   };
 
   const adminRole = async () =>
@@ -64,14 +88,50 @@ describe("assertAdminRemains", () => {
       },
     });
 
+  const user = async () => {
+    const created = await createTestUser();
+    madeUserIds.push(created.id);
+    return created;
+  };
+
   const makeAdmin = async () => {
-    const user = await createTestUser();
+    const admin = await user();
     const role = await adminRole();
     await prisma.userRole.create({
-      data: { userId: user.id, roleId: role.id },
+      data: { userId: admin.id, roleId: role.id },
     });
-    return { user, role };
+    return { user: admin, role };
   };
+
+  /** A global group holding a fresh admin role, with `size` new members. */
+  const adminGroup = async (size: number) => {
+    const role = await adminRole();
+    const members = [];
+    for (let i = 0; i < size; i++) members.push(await user());
+    const group = await prisma.group.create({
+      data: {
+        slug: `guard-${generateUniqueId()}`,
+        name: "Guard test group",
+        definitionSource: "local",
+        createdBy: members[0].id,
+      },
+    });
+    madeGroupIds.push(group.id);
+    await prisma.groupMember.createMany({
+      data: members.map((m) => ({
+        groupId: group.id,
+        userId: m.id,
+        addedBy: m.id,
+      })),
+    });
+    await prisma.groupRole.create({
+      data: { groupId: group.id, roleId: role.id, addedBy: members[0].id },
+    });
+    return { group, role, memberIds: members.map((m) => m.id) };
+  };
+
+  const refusal = (p: Promise<unknown>) =>
+    expect(p).rejects.toThrow(/no active administrator/);
 
   beforeAll(async () => {
     // removeMembers emits events, which name the default organization.
@@ -91,120 +151,59 @@ describe("assertAdminRemains", () => {
       where: { id: callerId },
       data: { userType: "service_account" },
     });
-    for (const a of await adminAssignments()) {
-      setAside.set(a.id, a.expiresAt);
-      await prisma.userRole.update({
-        where: { id: a.id },
-        data: { expiresAt: new Date(Date.now() - 60_000) },
-      });
-    }
-    const adminGroups = await prisma.group.findMany({
-      where: {
-        organizationId: null,
-        archivedAt: null,
-        roles: { some: { role: grantsAdmin } },
-      },
-      select: { id: true },
-    });
-    archivedGroupIds.push(...adminGroups.map((g) => g.id));
-    await prisma.group.updateMany({
-      where: { id: { in: archivedGroupIds } },
-      data: { archivedAt: new Date() },
-    });
   });
 
-  afterAll(async () => {
-    for (const [id, expiresAt] of setAside) {
-      await prisma.userRole.updateMany({ where: { id }, data: { expiresAt } });
-    }
-    await prisma.group.updateMany({
-      where: { id: { in: archivedGroupIds } },
-      data: { archivedAt: null },
+  // No admin made here outlives its test: the next one's set-aside spares
+  // only its own.
+  afterEach(async () => {
+    await prisma.groupMember.deleteMany({
+      where: { groupId: { in: madeGroupIds } },
     });
+    await prisma.groupRole.deleteMany({
+      where: { groupId: { in: madeGroupIds } },
+    });
+    await prisma.group.deleteMany({ where: { id: { in: madeGroupIds } } });
+    await prisma.userRole.deleteMany({
+      where: { userId: { in: madeUserIds } },
+    });
+    madeGroupIds.length = 0;
+    madeUserIds.length = 0;
   });
-
-  /** A global group holding a fresh admin role, with `size` new members. */
-  const adminGroup = async (size: number) => {
-    const role = await adminRole();
-    const members = [];
-    for (let i = 0; i < size; i++) members.push(await createTestUser());
-    const group = await prisma.group.create({
-      data: {
-        slug: `guard-${generateUniqueId()}`,
-        name: "Guard test group",
-        definitionSource: "local",
-        createdBy: members[0].id,
-      },
-    });
-    await prisma.groupMember.createMany({
-      data: members.map((m) => ({
-        groupId: group.id,
-        userId: m.id,
-        addedBy: m.id,
-      })),
-    });
-    await prisma.groupRole.create({
-      data: { groupId: group.id, roleId: role.id, addedBy: members[0].id },
-    });
-    return { group, role, memberIds: members.map((m) => m.id) };
-  };
-
-  const dropGroup = async (groupId: string) => {
-    await prisma.groupMember.deleteMany({ where: { groupId } });
-    await prisma.groupRole.deleteMany({ where: { groupId } });
-    await prisma.group.delete({ where: { id: groupId } });
-  };
-
-  const removeMember = (groupId: string, userId: string) =>
-    fetch(`${BASE_URL}/v1/admin/groups/${groupId}/members/${userId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${callerToken}` },
-    });
 
   it("removing admin-group members passes while another member remains, and refuses the last", async () => {
     const { group, memberIds } = await adminGroup(4);
     const [a, b, c, d] = memberIds;
-    try {
+    await asSoleAdmins(async (tx) => {
       // Several at once, leaving two.
-      await prisma.$transaction((tx) =>
-        removeMembers({ mode: "provisioning" }, group.id, [a, b], tx)
+      await removeMembers({ mode: "provisioning" }, group.id, [a, b], tx);
+      await removeMembers({ mode: "provisioning" }, group.id, [c], tx);
+      await refusal(removeMembers({ mode: "provisioning" }, group.id, [d], tx));
+      expect(await tx.groupMember.count({ where: { groupId: group.id } })).toBe(
+        1
       );
-      expect((await removeMember(group.id, c)).status).toBe(
-        HTTP_STATUS.NO_CONTENT
-      );
-      const last = await removeMember(group.id, d);
-      expect(last.status).toBe(HTTP_STATUS.CONFLICT);
-      expect(
-        await prisma.groupMember.count({ where: { groupId: group.id } })
-      ).toBe(1);
-    } finally {
-      await dropGroup(group.id);
-    }
+    });
   });
 
   it("removing every admin-group member in one call is refused", async () => {
     const { group, memberIds } = await adminGroup(3);
-    try {
-      await expect(
-        prisma.$transaction((tx) =>
-          removeMembers({ mode: "provisioning" }, group.id, memberIds, tx)
-        )
-      ).rejects.toThrow(/no active administrator/);
-      expect(
-        await prisma.groupMember.count({ where: { groupId: group.id } })
-      ).toBe(3);
-    } finally {
-      await dropGroup(group.id);
-    }
+    await asSoleAdmins(async (tx) => {
+      await refusal(
+        removeMembers({ mode: "provisioning" }, group.id, memberIds, tx)
+      );
+      expect(await tx.groupMember.count({ where: { groupId: group.id } })).toBe(
+        3
+      );
+    });
   });
 
   it("weighs each kind of removal against the remaining admins", async () => {
     const { group, role, memberIds } = await adminGroup(2);
     const [a, b] = memberIds;
     const direct = await makeAdmin();
-    const guard = (removal: Parameters<typeof assertAdminRemains>[0]) =>
-      prisma.$transaction((tx) => assertAdminRemains(removal, tx));
-    try {
+    const orgId = await ensureTestOrganization(`guard-${generateUniqueId()}`);
+    await asSoleAdmins(async (tx) => {
+      const guard = (removal: Parameters<typeof assertAdminRemains>[0]) =>
+        assertAdminRemains(removal, tx);
       // The direct admin remains whatever the group loses.
       await guard({ kind: "group", groupId: group.id });
       await guard({
@@ -229,191 +228,123 @@ describe("assertAdminRemains", () => {
       // A group member's direct assignments do not cover its group role.
       await guard({ kind: "directExcept", userId: a, keepRoleIds: [] });
 
-      await prisma.userRole.deleteMany({ where: { userId: direct.user.id } });
-      expect(await db.roles.adminExists()).toBe(true);
-      await expect(guard({ kind: "group", groupId: group.id })).rejects.toThrow(
-        /no active administrator/
-      );
-      await expect(
+      await tx.userRole.deleteMany({ where: { userId: direct.user.id } });
+      expect(await db.roles.adminExists(undefined, tx)).toBe(true);
+      await refusal(guard({ kind: "group", groupId: group.id }));
+      await refusal(
         guard({ kind: "groupRoles", groupId: group.id, roleIds: [role.id] })
-      ).rejects.toThrow(/no active administrator/);
-      await expect(guard({ kind: "role", roleId: role.id })).rejects.toThrow(
-        /no active administrator/
       );
+      await refusal(guard({ kind: "role", roleId: role.id }));
       await guard({ kind: "groupMembers", groupId: group.id, userIds: [a] });
       await guard({ kind: "user", userId: b });
       await guard(null);
 
       // An org group grants no admin outside its organization, nor does an
       // archived group.
-      await prisma.group.update({
+      await tx.group.update({
         where: { id: group.id },
-        data: {
-          organizationId: await ensureTestOrganization(
-            `guard-${generateUniqueId()}`
-          ),
-        },
+        data: { organizationId: orgId },
       });
-      expect(await db.roles.adminExists()).toBe(false);
-      await prisma.group.update({
+      expect(await db.roles.adminExists(undefined, tx)).toBe(false);
+      await tx.group.update({
         where: { id: group.id },
         data: { organizationId: null, archivedAt: new Date() },
       });
-      expect(await db.roles.adminExists()).toBe(false);
+      expect(await db.roles.adminExists(undefined, tx)).toBe(false);
       // With no admin at all there is nothing to protect.
       await guard({ kind: "user", userId: a });
-    } finally {
-      await dropGroup(group.id);
-      await prisma.userRole.deleteMany({ where: { userId: direct.user.id } });
-    }
-  });
-
-  const removeAllRoles = (userId: string) =>
-    fetch(`${BASE_URL}/v1/admin/users/${userId}/roles`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${callerToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ roleIds: [] }),
-    });
-
-  it("two concurrent removals of the last two admins: one is refused", async () => {
-    const x = await makeAdmin();
-    const y = await makeAdmin();
-
-    const responses = await Promise.all([
-      removeAllRoles(x.user.id),
-      removeAllRoles(y.user.id),
-    ]);
-    const statuses = responses.map((r) => r.status).sort();
-    expect(statuses).toEqual([HTTP_STATUS.OK, HTTP_STATUS.CONFLICT]);
-    expect((await adminAssignments()).length).toBe(1);
-
-    // Leave the remaining one for the next test to find on its own.
-    await prisma.userRole.deleteMany({
-      where: { userId: { in: [x.user.id, y.user.id] } },
     });
   });
 
   it("keeping only an expired admin assignment counts as removing admin", async () => {
-    const { user } = await makeAdmin();
+    const { user: admin } = await makeAdmin();
     const expired = await adminRole();
     await prisma.userRole.create({
       data: {
-        userId: user.id,
+        userId: admin.id,
         roleId: expired.id,
         expiresAt: new Date(Date.now() - 60_000),
       },
     });
-
-    const res = await fetch(`${BASE_URL}/v1/admin/users/${user.id}/roles`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${callerToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ roleIds: [expired.id] }),
-    });
-    expect(res.status).toBe(HTTP_STATUS.CONFLICT);
-    expect((await adminAssignments()).length).toBe(1);
-
-    await prisma.userRole.deleteMany({ where: { userId: user.id } });
+    await asSoleAdmins((tx) =>
+      refusal(
+        assertAdminRemains(
+          { kind: "directExcept", userId: admin.id, keepRoleIds: [expired.id] },
+          tx
+        )
+      )
+    );
   });
 
   it("removing the last admin's direct assignment passes while a global group grants the same role", async () => {
-    const { user, role } = await makeAdmin();
+    const { user: admin, role } = await makeAdmin();
     const group = await prisma.group.create({
       data: {
         slug: `guard-${generateUniqueId()}`,
         name: "Guard test group",
         definitionSource: "local",
-        createdBy: user.id,
+        createdBy: admin.id,
       },
     });
+    madeGroupIds.push(group.id);
     await prisma.groupMember.create({
-      data: { groupId: group.id, userId: user.id, addedBy: user.id },
+      data: { groupId: group.id, userId: admin.id, addedBy: admin.id },
     });
     await prisma.groupRole.create({
-      data: { groupId: group.id, roleId: role.id, addedBy: user.id },
+      data: { groupId: group.id, roleId: role.id, addedBy: admin.id },
     });
-
-    try {
-      expect((await removeAllRoles(user.id)).status).toBe(HTTP_STATUS.OK);
-
-      await prisma.userRole.create({
-        data: { userId: user.id, roleId: role.id },
-      });
-      const res = await fetch(
-        `${BASE_URL}/v1/admin/roles/${role.id}/users/${user.id}`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${callerToken}` },
-        }
+    await asSoleAdmins(async (tx) => {
+      await assertAdminRemains(
+        { kind: "directExcept", userId: admin.id, keepRoleIds: [] },
+        tx
       );
-      expect(res.status).toBe(HTTP_STATUS.NO_CONTENT);
-    } finally {
-      // A group's admin is not set aside like the others; none may outlive
-      // the test.
-      await prisma.groupMember.deleteMany({ where: { groupId: group.id } });
-      await prisma.groupRole.deleteMany({ where: { groupId: group.id } });
-      await prisma.group.delete({ where: { id: group.id } });
-      await prisma.userRole.deleteMany({ where: { userId: user.id } });
-    }
+      await assertAdminRemains(
+        { kind: "direct", userId: admin.id, roleIds: [role.id] },
+        tx
+      );
+      await refusal(assertAdminRemains({ kind: "role", roleId: role.id }, tx));
+    });
   });
 
-  it("deleting the last admin role is refused before any token is revoked", async () => {
-    const { role } = await makeAdmin();
+  it("each route removing admin queues on the guard's lock, so a second removal sees the first", async () => {
+    const { group, memberIds } = await adminGroup(2);
+    const roles = await makeAdmin();
+    const assignment = await makeAdmin();
+    const deleted = await adminRole();
+    const call = (method: string, path: string, body?: unknown) =>
+      fetch(`${BASE_URL}/v1/admin${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${callerToken}`,
+          ...(body !== undefined && { "Content-Type": "application/json" }),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
 
-    // A service account holds the role too; its tokens would be revoked
-    // with the delete.
-    const owner = await createTestUser();
-    const client = await prisma.oAuthClient.create({
-      data: {
-        clientId: `guard-${generateUniqueId()}`,
-        name: "Guard test client",
-        redirectUris: [],
-        scopes: [],
-        grantTypes: ["client_credentials"],
-        ownerId: owner.id,
-      },
-    });
-    const account = await prisma.user.create({
-      data: {
-        email: `guard-${generateUniqueId()}@services.example.com`,
-        passwordHash: "!",
-        userType: "service_account",
-        oauthClientId: client.id,
-      },
-    });
-    await prisma.userRole.create({
-      data: { userId: account.id, roleId: role.id },
-    });
-    const jti = randomUUID();
-    await prisma.accessToken.create({
-      data: {
-        jti,
-        clientId: client.id,
-        userId: account.id,
-        scopes: [],
-        expiresAt: new Date(Date.now() + 3_600_000),
-      },
-    });
-
-    const response = await fetch(`${BASE_URL}/v1/admin/roles/${role.id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${callerToken}` },
-    });
-    expect(response.status).toBe(HTTP_STATUS.CONFLICT);
-
-    const token = await prisma.accessToken.findUniqueOrThrow({
-      where: { jti },
-    });
-    expect(token.revokedAt).toBeNull();
-    expect(await prisma.role.findUnique({ where: { id: role.id } })).not.toBe(
-      null
+    const release = await holdLocks(
+      (tx) =>
+        tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('core:admin-remains', 0))`
     );
-
-    await prisma.userRole.deleteMany({ where: { roleId: role.id } });
+    const responses = Promise.all([
+      call("DELETE", `/groups/${group.id}/members/${memberIds[0]}`),
+      call("PUT", `/users/${roles.user.id}/roles`, { roleIds: [] }),
+      call(
+        "DELETE",
+        `/roles/${assignment.role.id}/users/${assignment.user.id}`
+      ),
+      call("DELETE", `/roles/${deleted.id}`),
+    ]);
+    try {
+      await waitForLockWait("%core:admin-remains%", 10_000, 4);
+    } finally {
+      await release();
+    }
+    // The group's other member remains an admin.
+    expect((await responses).map((r) => r.status)).toEqual([
+      HTTP_STATUS.NO_CONTENT,
+      HTTP_STATUS.OK,
+      HTTP_STATUS.NO_CONTENT,
+      HTTP_STATUS.NO_CONTENT,
+    ]);
   });
 });

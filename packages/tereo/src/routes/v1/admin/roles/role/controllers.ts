@@ -452,12 +452,6 @@ export const setRolePermissions = async (req: Request, res: Response) => {
   }
 
   const { role, revokedJtis } = await db.$transaction(async (tx) => {
-    await assertOrgAssignableWhileAssignedInOrg(
-      tx,
-      params.id,
-      existing.rolePermissions.map((rp) => rp.permissionId),
-      body.permissionIds
-    );
     const keepsAdmin = await tx.permission.count({
       where: { id: { in: body.permissionIds }, name: "admin", retiredAt: null },
     });
@@ -470,6 +464,14 @@ export const setRolePermissions = async (req: Request, res: Response) => {
     // PATCH guestAssignable checks under this same lock, so one of the two
     // sees the other's result; the flag is read after taking it.
     await db.roles.lockRoles([params.id], "update", tx);
+    // Under the row lock, which restoring a group holding the role shares:
+    // one of the two sees the other's result.
+    await assertOrgAssignableWhileAssignedInOrg(
+      tx,
+      params.id,
+      existing.rolePermissions.map((rp) => rp.permissionId),
+      body.permissionIds
+    );
     if ((await db.roles.get(params.id, tx)).guestAssignable) {
       const next = await tx.permission.findMany({
         where: { id: { in: body.permissionIds } },

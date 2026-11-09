@@ -133,42 +133,45 @@ export const endUserSessions = async (
     ? ((await db.refreshTokens.getById(keepRefreshTokenId))?.authCodeId ?? null)
     : null;
 
-  const { ids, jtis } = await db.$transaction(async (tx) => {
-    await prepare?.(tx);
-    await db.users.lockForSessionEnd(tx, { userIds: [userId] });
-    const active = await db.refreshTokens.getActiveByUserId(userId, tx);
-    const ending = active.filter((rt) => rt.id !== keepRefreshTokenId);
-    const ids = ending.map((rt) => rt.id);
-    const jtis = await db.accessTokens.revokeByRefreshTokenIds(ids, tx);
-    // The access tokens of a refresh token since rotated away fail their
-    // checks already, but sit in session rooms nothing here closes: revoke
-    // them with their families, the caller's spared, to close their sockets.
-    const families = [
-      ...new Set(
-        ending.flatMap((rt) =>
-          rt.authCodeId && rt.authCodeId !== keepFamily ? [rt.authCodeId] : []
-        )
-      ),
-    ];
-    jtis.push(...(await db.accessTokens.revokeByAuthCodeIds(families, tx)));
-    await db.refreshTokens.revokeByIds(ids, tx);
-    jtis.push(
-      ...(await db.accessTokens.revokeSessionlessByUserId(
+  const { ids, jtis } = await db.$transaction(
+    async (tx) => {
+      await prepare?.(tx);
+      await db.users.lockForSessionEnd(tx, { userIds: [userId] });
+      const active = await db.refreshTokens.getActiveByUserId(userId, tx);
+      const ending = active.filter((rt) => rt.id !== keepRefreshTokenId);
+      const ids = ending.map((rt) => rt.id);
+      const jtis = await db.accessTokens.revokeByRefreshTokenIds(ids, tx);
+      // The access tokens of a refresh token since rotated away fail their
+      // checks already, but sit in session rooms nothing here closes: revoke
+      // them with their families, the caller's spared, to close their sockets.
+      const families = [
+        ...new Set(
+          ending.flatMap((rt) =>
+            rt.authCodeId && rt.authCodeId !== keepFamily ? [rt.authCodeId] : []
+          )
+        ),
+      ];
+      jtis.push(...(await db.accessTokens.revokeByAuthCodeIds(families, tx)));
+      await db.refreshTokens.revokeByIds(ids, tx);
+      jtis.push(
+        ...(await db.accessTokens.revokeSessionlessByUserId(
+          userId,
+          keep?.jti ?? null,
+          tx
+        ))
+      );
+      const ssoSessionIds = await db.userSessions.deleteUserSessionsByUserId(
         userId,
-        keep?.jti ?? null,
+        keepSsoSessionId,
         tx
-      ))
-    );
-    const ssoSessionIds = await db.userSessions.deleteUserSessionsByUserId(
-      userId,
-      keepSsoSessionId,
-      tx
-    );
-    await record?.(tx, ids, ssoSessionIds);
-    // After `record`, which may consume one of them itself.
-    await db.loginFlows.deletePendingForUser(userId, keepSsoSessionId, tx);
-    return { ids, jtis };
-  });
+      );
+      await record?.(tx, ids, ssoSessionIds);
+      // After `record`, which may consume one of them itself.
+      await db.loginFlows.deletePendingForUser(userId, keepSsoSessionId, tx);
+      return { ids, jtis };
+    },
+    { timeout: 30_000 }
+  );
 
   notifySessionsRevoked(userId, ids);
   // Sessionless tokens' sockets joined no session room, and those of rotated
@@ -285,28 +288,31 @@ export const endSession = async (
     await db.userSessions.getIdByRefreshTokenId(refreshTokenId),
   ].filter((id): id is string => id !== null);
 
-  const revoked = await db.$transaction(async (tx) => {
-    await prepare?.(tx);
-    await db.users.lockForSessionEnd(tx, {
-      userIds: [token.userId],
-      userSessionIds,
-    });
-    const revoked = await revokeBrowserSessions(tx, {
-      userSessionIds,
-      authCodeIds: token.authCodeId ? [token.authCodeId] : [],
-    });
-    // A token without an authorization code has no family to revoke by.
-    revoked.jtis.push(
-      ...(await db.accessTokens.revokeByRefreshTokenIds([token.id], tx))
-    );
-    await db.refreshTokens.revokeByIds([token.id], tx);
-    // The requested session first, then the siblings ended with its browser.
-    const revokedIds = [
-      ...new Set([token.id, ...revoked.tokens.map((t) => t.id)]),
-    ];
-    await record?.(tx, revokedIds, revoked.ssoSessionIds);
-    return revoked;
-  });
+  const revoked = await db.$transaction(
+    async (tx) => {
+      await prepare?.(tx);
+      await db.users.lockForSessionEnd(tx, {
+        userIds: [token.userId],
+        userSessionIds,
+      });
+      const revoked = await revokeBrowserSessions(tx, {
+        userSessionIds,
+        authCodeIds: token.authCodeId ? [token.authCodeId] : [],
+      });
+      // A token without an authorization code has no family to revoke by.
+      revoked.jtis.push(
+        ...(await db.accessTokens.revokeByRefreshTokenIds([token.id], tx))
+      );
+      await db.refreshTokens.revokeByIds([token.id], tx);
+      // The requested session first, then the siblings ended with its browser.
+      const revokedIds = [
+        ...new Set([token.id, ...revoked.tokens.map((t) => t.id)]),
+      ];
+      await record?.(tx, revokedIds, revoked.ssoSessionIds);
+      return revoked;
+    },
+    { timeout: 30_000 }
+  );
 
   notifyRevoked(revoked, [{ id: token.id, userId: token.userId }]);
   return { ssoSessionIds: revoked.ssoSessionIds };

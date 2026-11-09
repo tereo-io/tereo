@@ -3,6 +3,7 @@ import { PERMISSIONS } from "../definitions/permissions.js";
 import type { WebhookScope } from "./webhookOwnership.js";
 import { canReadBucket } from "./bucketAccess.js";
 import { hasPermission } from "./permissions.js";
+import { capToCeiling } from "./coreAccess.js";
 import { prisma } from "./db/prisma.js";
 import db from "./db/index.js";
 import {
@@ -53,11 +54,11 @@ const actsAsOrgAdmin = async (
   reader: Reader,
   organizationId: string
 ): Promise<boolean> => {
-  if (hasPermission(reader.permissions, "organizations.write")) {
-    return true;
-  }
   if (reader.ceiling && !hasPermission(reader.ceiling, "organizations.write")) {
     return false;
+  }
+  if (hasPermission(reader.permissions, "organizations.write")) {
+    return true;
   }
   const member = await prisma.organizationMember.findFirst({
     where: {
@@ -145,12 +146,21 @@ export interface FanoutEvent {
   data: Record<string, unknown>;
 }
 
-/** Whether `actor`, acting in the event's organization, could read it. */
+/**
+ * Whether `actor`, acting in the event's organization, could read it.
+ * `orgAdmin` answers `actsAsOrgAdmin` for the actor, memoized by the caller.
+ */
 const mayReadEvent = async (
   actor: Reader,
   event: FanoutEvent,
   readPermission: string | null,
-  { requireWebhooksRead = true }: { requireWebhooksRead?: boolean } = {}
+  {
+    requireWebhooksRead = true,
+    orgAdmin = (organizationId) => actsAsOrgAdmin(actor, organizationId),
+  }: {
+    requireWebhooksRead?: boolean;
+    orgAdmin?: (organizationId: string) => Promise<boolean>;
+  } = {}
 ): Promise<boolean> => {
   const { permissions } = actor;
   if (
@@ -161,10 +171,7 @@ const mayReadEvent = async (
   if (
     readPermission &&
     !hasPermission(permissions, readPermission) &&
-    !(
-      isOwnOrgGroupEvent(event) &&
-      (await actsAsOrgAdmin(actor, event.organizationId))
-    )
+    !(isOwnOrgGroupEvent(event) && (await orgAdmin(event.organizationId)))
   ) {
     return false;
   }
@@ -218,6 +225,42 @@ export const createRecipientCheck = (
     }
     return answer;
   };
+};
+
+/**
+ * Whether `endpoint` may still be sent a stored delivery, decided as when
+ * its event was fanned out: its creator may have lost the access that let
+ * the event through since. A test send's payload is core's own.
+ */
+export const mayResendDelivery = async (
+  endpoint: RecipientEndpoint & { organizationId: string | null },
+  delivery: { eventType: string; payload: unknown }
+): Promise<boolean> => {
+  if (delivery.eventType === TEST_EVENT_TYPE) return true;
+  const payload = delivery.payload as {
+    organizationId?: unknown;
+    data?: unknown;
+  } | null;
+  const readPermission =
+    (await db.eventTypes.readPermissions([delivery.eventType])).get(
+      delivery.eventType
+    ) ?? null;
+  return createRecipientCheck(
+    {
+      // As the delivery view reads one that names none: the endpoint's.
+      organizationId:
+        typeof payload?.organizationId === "string" ||
+        payload?.organizationId === null
+          ? payload.organizationId
+          : endpoint.organizationId,
+      eventType: delivery.eventType,
+      data:
+        payload?.data && typeof payload.data === "object"
+          ? (payload.data as Record<string, unknown>)
+          : {},
+    },
+    readPermission
+  )(endpoint);
 };
 
 /**
@@ -347,13 +390,30 @@ export const redactUnreadable = async <T extends StoredDelivery>(
   if (organizationId) {
     permissionsIn.set(organizationId, Promise.resolve(viewer.permissions));
   }
+  // Another organization's are read live, so capped here as the request's are.
   const permissionsOf = (org: string | null) => {
     let permissions = permissionsIn.get(org);
     if (!permissions) {
-      permissions = actingPermissions(viewer.userId, org).then((p) => p ?? []);
+      permissions = actingPermissions(viewer.userId, org).then((p) =>
+        capToCeiling(p ?? [], viewer.ceiling)
+      );
       permissionsIn.set(org, permissions);
     }
     return permissions;
+  };
+  const adminIn = new Map<string, Promise<boolean>>();
+  const orgAdmin = (org: string) => {
+    let answer = adminIn.get(org);
+    if (!answer) {
+      answer = permissionsOf(org).then((permissions) =>
+        actsAsOrgAdmin(
+          { userId: viewer.userId, permissions, ceiling: viewer.ceiling },
+          org
+        )
+      );
+      adminIn.set(org, answer);
+    }
+    return answer;
   };
   return Promise.all(
     deliveries.map(async (delivery) => {
@@ -398,7 +458,7 @@ export const redactUnreadable = async <T extends StoredDelivery>(
               },
               { organizationId: eventOrg, eventType: delivery.eventType, data },
               readPermission,
-              { requireWebhooksRead: !owner }
+              { requireWebhooksRead: !owner, orgAdmin }
             );
       return readable
         ? { ...delivery, payloadRedacted: false }

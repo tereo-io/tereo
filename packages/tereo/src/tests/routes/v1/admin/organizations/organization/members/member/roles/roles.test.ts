@@ -372,6 +372,52 @@ describe("member roles of an organization, with group roles", () => {
     expect(res.body.groupRoles).toEqual([row]);
   });
 
+  it("shows groupRoles only to who may read the org's groups, or to the member themselves", async () => {
+    const orgId = await ensureTestOrganization(`mr-groups-${randomUUID()}`);
+    const user = await createTestUser();
+    await joinOrg(orgId, user.id);
+    const { row } = await orgGroupWithRole(orgId, user.id);
+
+    const callerIn = async (
+      memberRole: "member" | "admin" | null,
+      permissions: string[] = []
+    ) => {
+      const userId = randomUUID();
+      const token = await getTestPrincipalToken({ userId, permissions });
+      if (memberRole) await joinOrg(orgId, userId, memberRole);
+      return token;
+    };
+    const read = async (token: string, target = user.id) => {
+      const res = await adminApi(
+        "GET",
+        `/organizations/${orgId}/members/${target}/roles`,
+        token
+      );
+      expect(res.status).toBe(200);
+      return res.body.groupRoles;
+    };
+
+    // A plain member sees the other members' direct roles, not their groups.
+    expect(await read(await callerIn("member"))).toEqual([]);
+    // Nor does organizations.read, which reads no groups.
+    expect(await read(await callerIn(null, ["organizations.read"]))).toEqual(
+      []
+    );
+    expect(await read(await callerIn("admin"))).toEqual([row]);
+    expect(
+      await read(await callerIn(null, ["organizations.read", "groups.read"]))
+    ).toEqual([row]);
+    expect(await read(await callerIn(null, ["organizations.write"]))).toEqual([
+      row,
+    ]);
+    // The member themselves.
+    const self = await getTestPrincipalToken({
+      userId: user.id,
+      permissions: [],
+    });
+    expect(await read(self)).toEqual([row]);
+  });
+
   it("omits global groups, other organizations' groups and archived groups", async () => {
     const orgId = await ensureTestOrganization(`mr-groups-${randomUUID()}`);
     const otherId = await ensureTestOrganization(`mr-groups-${randomUUID()}`);

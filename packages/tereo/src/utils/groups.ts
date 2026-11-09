@@ -52,12 +52,12 @@ import {
  * 4. `lockOrgOwners` when an org admin acts on an org group, then
  *    `assertAdminRemains` last.
  *
- * A transaction changing several groups (provisioning's apply, and its
- * archival of dropped groups) first takes step 1 for the members of all of
- * them, ascending, before any group's step 2; each group's own step 1 then
- * re-enters locks already held. Otherwise a member locked for a later group
- * after an earlier group's row could close a cycle with a change to that
- * member.
+ * A transaction changing several groups (provisioning's apply) first takes
+ * step 1 for the members of all of them, ascending, before any group's step
+ * 2; each group's own step 1 then re-enters locks already held. Otherwise a
+ * member locked for a later group after an earlier group's row could close a
+ * cycle with a change to that member. Provisioning archives dropped groups
+ * one per transaction instead.
  */
 
 type Tx = Prisma.TransactionClient;
@@ -554,10 +554,21 @@ export const removeMembers = async (
   userIds: string[],
   tx: Tx
 ): Promise<GroupChange & { removed: string[] }> => {
-  const ids = unique(userIds);
   // A group's organization never changes, so it can be read before the locks.
   const { organizationId } = await db.groups.getAny(groupId, tx);
-  await lockUsers(ids, tx);
+  await lockUsers(unique(userIds), tx);
+  // Every writer to these users' memberships holds their authority lock, so
+  // who of them is a member holds until commit. Non-members are left out
+  // before any check, so naming one is a plain no-op (a 404 for the route).
+  const ids = unique(await db.groups.getMemberIdsAmong(groupId, userIds, tx));
+  if (ids.length === 0) {
+    return {
+      group: await db.groups.getAny(groupId, tx),
+      affectedUserIds: [],
+      revokedJtis: [],
+      removed: [],
+    };
+  }
   // As for direct role removal: a global group's members must hold nothing
   // the caller does not; an org group's roles are checked against what the
   // caller holds in the org, as an org admin holds nothing globally.
@@ -642,14 +653,13 @@ export const setGroupRoles = async (
     );
   }
   const live = !group.archivedAt;
+  // Whatever the removed roles grant now: which of them grant admin is read
+  // under the guard's lock, as a role may gain admin until it is taken.
   if (live && !group.organizationId && toRemove.length > 0) {
-    const removedAdmin = await db.roles.getAdminRoleIds(toRemove, tx);
-    if (removedAdmin.length > 0) {
-      await assertAdminRemains(
-        { kind: "groupRoles", groupId, roleIds: removedAdmin },
-        tx
-      );
-    }
+    await assertAdminRemains(
+      { kind: "groupRoles", groupId, roleIds: toRemove },
+      tx
+    );
   }
 
   const { added, removed } = await db.groups.replaceRoles(
@@ -746,6 +756,13 @@ export const restoreGroup = async (
   if (!group.archivedAt) throw new NotArchivedError("Group is not archived");
   const memberIds = await lockLateMembers(groupId, locked, tx);
 
+  // Shared, against a change to the roles' permissions, which checks under
+  // its row lock whether the role is held in an organization.
+  await db.roles.lockRoles(
+    await db.groups.getRoleIds(groupId, tx),
+    "share",
+    tx
+  );
   const roles = await groupRoles(groupId, tx);
   // A held role may have gained a permission while the group was archived,
   // when nothing counted it as assigned in the organization.
