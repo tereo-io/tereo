@@ -6,6 +6,8 @@ export const ListMembersQuerySchema = z.object({
   limit: ListLimitSchema,
 });
 
-export const AddMembersSchema = z.object({
-  userIds: z.array(z.guid()).min(1).max(500),
-});
+export const AddMembersSchema = z
+  .object({
+    userIds: z.array(z.guid()).min(1).max(500),
+  })
+  .strict();

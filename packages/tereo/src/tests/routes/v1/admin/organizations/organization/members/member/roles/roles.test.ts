@@ -1,12 +1,12 @@
 // @module-tag int
 // @module-tag auth
 
+import { ensureDefaultOrganization } from "../../../../../../../../../utils/defaultOrganization.js";
 import { getAccessTokenForUser } from "../../../../../../../../support/auth/login.js";
-import { getTestPrincipalToken } from "../../../../../../../../support/principals.js";
 import { createTestClient } from "../../../../../../../../support/auth/clients.js";
 import { createTestGuest } from "../../../../../../../../support/auth/guests.js";
 import { prisma } from "../../../../../../../../../utils/db/prisma.js";
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
   createTestOrganization,
@@ -18,15 +18,30 @@ import {
   HTTP_STATUS,
 } from "../../../../../../../../support/auth/constants.js";
 import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../../../../../../../../support/principals.js";
+import {
   createTestUser,
   createAdminUser,
   createTestRole,
 } from "../../../../../../../../support/auth/users.js";
+import {
+  adminApi,
+  deleteGroups,
+  ensureGroupPermission,
+  GROUP_PERMISSION,
+  joinOrg,
+  postGroup,
+  roleGranting,
+} from "../../../../../../../../support/groups.js";
 
 let adminUser: Awaited<ReturnType<typeof createAdminUser>>;
 let adminToken: string;
 
 beforeAll(async () => {
+  await ensureDefaultOrganization();
+  await ensureGroupPermission();
   const testClient = await createTestClient();
   adminUser = await createAdminUser();
   adminToken = await getAccessTokenForUser(adminUser, testClient);
@@ -278,5 +293,108 @@ describe("PUT /v1/admin/organizations/:id/members/:userId/roles", () => {
     expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
     const data = (await response.json()) as { error: string };
     expect(data.error).toBe("not_found");
+  });
+});
+
+const orgGroupIds: string[] = [];
+
+let groupToken: string;
+
+beforeAll(async () => {
+  groupToken = await getTestPrincipalToken({
+    permissions: ["groups.admin", "organizations.admin", GROUP_PERMISSION],
+  });
+});
+
+afterAll(() => deleteGroups(orgGroupIds));
+
+const memberRoles = (orgId: string, userId: string, roleIds?: string[]) =>
+  adminApi(
+    roleIds ? "PUT" : "GET",
+    `/organizations/${orgId}/members/${userId}/roles`,
+    groupToken,
+    roleIds && { roleIds }
+  );
+
+const orgGroupWithRole = async (orgId: string, userId: string) => {
+  const role = await roleGranting();
+  const group = await postGroup(groupToken, {
+    organizationId: orgId,
+    roleIds: [role.id],
+  });
+  orgGroupIds.push(group.id);
+  const res = await adminApi(
+    "POST",
+    `/groups/${group.id}/members`,
+    groupToken,
+    {
+      userIds: [userId],
+    }
+  );
+  expect(res.status).toBeLessThan(300);
+  return {
+    role,
+    group,
+    row: {
+      id: role.id,
+      name: role.name,
+      displayName: role.displayName,
+      organizationId: orgId,
+      via: { kind: "group", groupId: group.id },
+      group: { id: group.id, slug: group.slug, name: group.name },
+    },
+  };
+};
+
+describe("member roles of an organization, with group roles", () => {
+  it("GET lists a role held through the org's group apart from direct roles", async () => {
+    const orgId = await ensureTestOrganization(`mr-groups-${randomUUID()}`);
+    const user = await createTestUser();
+    await joinOrg(orgId, user.id);
+    const { row } = await orgGroupWithRole(orgId, user.id);
+
+    const res = await memberRoles(orgId, user.id);
+    expect(res.status).toBe(200);
+    expect(res.body.roles).toEqual([]);
+    expect(res.body.groupRoles).toEqual([row]);
+  });
+
+  it("PUT keeps direct roles in roles (via direct) and returns groupRoles", async () => {
+    const orgId = await ensureTestOrganization(`mr-groups-${randomUUID()}`);
+    const user = await createTestUser();
+    await joinOrg(orgId, user.id);
+    const { role, row } = await orgGroupWithRole(orgId, user.id);
+
+    const res = await memberRoles(orgId, user.id, [role.id]);
+    expect(res.status).toBe(200);
+    expect(res.body.roles.map((r: { id: string }) => r.id)).toEqual([role.id]);
+    expect(res.body.roles[0].via).toEqual({ kind: "direct" });
+    expect(res.body.groupRoles).toEqual([row]);
+  });
+
+  it("omits global groups, other organizations' groups and archived groups", async () => {
+    const orgId = await ensureTestOrganization(`mr-groups-${randomUUID()}`);
+    const otherId = await ensureTestOrganization(`mr-groups-${randomUUID()}`);
+    const user = await createTestUser();
+    await joinOrg(orgId, user.id);
+    await joinOrg(otherId, user.id);
+    await orgGroupWithRole(otherId, user.id);
+    const archived = await orgGroupWithRole(orgId, user.id);
+    await adminApi("POST", `/groups/${archived.group.id}/archive`, groupToken);
+    const globalRole = await roleGranting();
+    const globalGroup = await postGroup(groupToken, {
+      roleIds: [globalRole.id],
+    });
+    orgGroupIds.push(globalGroup.id);
+    await adminApi("POST", `/groups/${globalGroup.id}/members`, groupToken, {
+      userIds: [user.id],
+    });
+
+    const res = await memberRoles(orgId, user.id);
+    expect(res.status).toBe(200);
+    expect(res.body.groupRoles).toEqual([]);
+    expect(await prisma.groupMember.count({ where: { userId: user.id } })).toBe(
+      3
+    );
   });
 });

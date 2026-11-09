@@ -15,6 +15,7 @@ export const UpdateGroupSchema = z
     name: GroupNameSchema.optional(),
     description: GroupDescriptionSchema.optional(),
   })
+  .strict()
   .refine(
     (body) =>
       body.slug !== undefined ||

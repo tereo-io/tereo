@@ -129,7 +129,7 @@ All under `/v1/admin`. Lists are cursor-paginated (`limit` 1-100, default 50; `n
 
 | Route | Purpose |
 |---|---|
-| `GET /groups` | List. Filters: `organizationId` (a UUID or `global`), `definitionSource`, `archived`, `q` |
+| `GET /groups` | List. Filters: `organizationId` (a UUID or `global`), `definitionSource`, `includeArchived` (archived groups are left out unless `true`), `q` |
 | `POST /groups` | Create. Body: `slug`, `name`, `description?`, `organizationId?`, `roleIds?` (max 100). 201 |
 | `GET /groups/:id` | Read, with `memberCount` |
 | `PATCH /groups/:id` | Edit `slug`, `name`, `description`. Not on an archived group |
@@ -141,7 +141,12 @@ All under `/v1/admin`. Lists are cursor-paginated (`limit` 1-100, default 50; `n
 | `PUT /groups/:id/roles` | `{ roleIds }` replaces the set (max 100). Returns `{ roles, added, removed }` |
 | `GET /roles/:id/users` | `{ roleId, users, groups }`: `users` are the role's **direct** holders (each `via: { kind: "direct" }`); `groups` are the unarchived groups holding it, each with `organization` and `memberCount` (list their members through `GET /groups/:id/members`) |
 | `GET /users/:id/groups` | A user's groups, global and organization (`users.read`; `?includeArchived`) |
+| `GET`/`PUT /organizations/:id/members/:userId/roles` | The same shape for one organization: `roles` are the member's **direct** roles there (each `via: { kind: "direct" }`); `groupRoles` the roles held through that **organization's** groups (not global ones'), each with `group`. The role editor lists them apart; `PUT` replaces the direct ones only |
 | `GET`/`PUT /users/:id/roles` | Return `{ roles, groupRoles }`: `roles` are the **direct** assignments (each `via: { kind: "direct" }`); `groupRoles` are the roles held through **global** groups, each with `group: { id, slug, name }` |
+
+Bodies are strict: a key a route does not know is a 400, not ignored. An `admin` or `owner` of an
+**inactive** organization may still read its groups (`GET /groups?organizationId=`, `GET /groups/:id`,
+members, roles); every write is a 403 for them, and only a holder of `groups.<need>` passes.
 
 A **provisioned** group answers `409 managed_by_provisioning` to `PATCH`, role changes, archive and
 restore. Its members stay editable (`membershipSource` is `local`).
@@ -184,9 +189,10 @@ effective roles does push a permission change to each affected member's open ses
 ## Userinfo and the SDK
 
 `/oauth/userinfo` returns `groups: [{ id, slug, name, organizationId }]`: the user's active global
-groups plus those of the token's organization while it is active and not archived (otherwise the
-global ones only, as `roles` leaves out its group roles too). It goes to the same callers as `roles`; for a
-delegated token only with the `account` or `admin` area, otherwise the list is empty. It is never in
+groups plus those of the token's organization while it is active and not archived and the user is
+still a member of it (otherwise the global ones only, as `roles` leaves out its group roles too). It
+goes to the UI, a service's client and a token with a core scope, as `roles` does; a delegated token
+gets `groups` only with the `account` or `admin` area (an empty list otherwise) and never `roles`. It is never in
 a token. Discovery lists `groups` in `claims_supported`. `groups` is an admin domain, so the
 `core:admin` and `core:admin.read` ceilings cover `groups.*`.
 

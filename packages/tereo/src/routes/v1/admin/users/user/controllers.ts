@@ -3,6 +3,7 @@ import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
 import { retirePasswordLinks } from "../../../../../utils/passwordSetup.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
+import { listGroupRoles } from "../../../../../utils/groupRoles.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
@@ -206,35 +207,6 @@ const userRolesResponse = async (
   userId: string,
   direct: Awaited<ReturnType<typeof db.roles.getGlobalUserRoles>>
 ) => {
-  const groups = new Map(
-    (await db.groups.getUserGroups(userId, { organizationId: null })).map(
-      (g) => [g.id, { id: g.id, slug: g.slug, name: g.name }]
-    )
-  );
-  const groupRoles = new Map<
-    string,
-    {
-      id: string;
-      name: string;
-      displayName: string;
-      organizationId: string | null;
-      via: { kind: "group"; groupId: string };
-      group: { id: string; slug: string; name: string };
-    }
-  >();
-  for (const a of await db.roles.effectiveAssignments(userId, null)) {
-    if (a.via.kind !== "group") continue;
-    const group = groups.get(a.via.groupId);
-    if (!group) continue;
-    groupRoles.set(`${a.roleId}:${group.id}`, {
-      id: a.role.id,
-      name: a.role.name,
-      displayName: a.role.displayName,
-      organizationId: a.organizationId,
-      via: { kind: "group", groupId: group.id },
-      group,
-    });
-  }
   return {
     userId,
     roles: direct.map((ur) => ({
@@ -244,7 +216,7 @@ const userRolesResponse = async (
       expiresAt: ur.expiresAt,
       via: { kind: "direct" as const },
     })),
-    groupRoles: [...groupRoles.values()],
+    groupRoles: await listGroupRoles(userId, null),
   };
 };
 

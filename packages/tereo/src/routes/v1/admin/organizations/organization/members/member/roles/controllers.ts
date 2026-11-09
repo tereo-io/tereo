@@ -2,6 +2,7 @@ import { getDefaultOrganizationId } from "../../../../../../../../utils/defaultO
 import { assertNotIntegrationAccount } from "../../../../../../../../utils/integrations.js";
 import { UserType } from "../../../../../../../../../prisma/generated/client/index.js";
 import { emitTx, logAuditTx } from "../../../../../../../../utils/outbox.js";
+import { listGroupRoles } from "../../../../../../../../utils/groupRoles.js";
 import { assertCanTakeAway } from "../../../../../../../../utils/grants.js";
 import { validateUser } from "../../../../../../../../utils/auth.js";
 import db from "../../../../../../../../utils/db/index.js";
@@ -52,7 +53,9 @@ export const getMemberOrgRoles = async (req: Request, res: Response) => {
       name: ur.role.name,
       displayName: ur.role.displayName,
       expiresAt: ur.expiresAt,
+      via: { kind: "direct" as const },
     })),
+    groupRoles: await listGroupRoles(userId, orgId),
   });
 };
 
@@ -162,6 +165,8 @@ export const setMemberOrgRoles = async (req: Request, res: Response) => {
       name: ur.role.name,
       displayName: ur.role.displayName,
       expiresAt: ur.expiresAt,
+      via: { kind: "direct" as const },
     })),
+    groupRoles: await listGroupRoles(userId, orgId),
   });
 };

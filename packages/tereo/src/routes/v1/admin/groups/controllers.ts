@@ -36,7 +36,7 @@ export const listGroups = async (req: Request, res: Response) => {
   const page = await db.groups.list({
     organizationId: query.organizationId,
     definitionSource: query.definitionSource,
-    archived: query.archived,
+    includeArchived: query.includeArchived,
     q: query.q,
     cursor: cursorId(query.cursor),
     limit: query.limit,
