@@ -1084,6 +1084,12 @@ response, the ID token **and `/oauth/introspect`** (they share one claims builde
 `emailVerifiedAt`. Accounts that existed before the feature were marked verified by the migration.
 A changed address is unverified until proven again.
 
+**Without an email connection.** Every way to verify an address except first-admin setup and a
+provider that vouches for it goes through email. On a deployment with no default email
+connection, users created after the upgrade (admin-created users, guests, and provider sign-ins
+whose provider does not vouch for the address) stay `email_verified: false`, with no way to verify,
+until email is configured; an app that requires `email_verified` rejects them.
+
 An address becomes verified when:
 
 - the user opens a verify link (`POST /v1/email-verification { token }`, public; `inspect` returns
