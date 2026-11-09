@@ -518,44 +518,101 @@ const groupInScope = (
   return { organizationId: null };
 };
 
-const assignmentsFor = async (
+/**
+ * The group roles that count for `userId` in `scope`: of a live role (as
+ * `liveAssignmentsWhere`), held by an unarchived group they belong to.
+ */
+const groupAssignmentsWhere = (
   userId: string,
   scope: AssignmentScope,
   guest: boolean,
+  { includeInactiveRoles = false }: AssignmentOptions = {}
+): Prisma.GroupRoleWhereInput => ({
+  role: {
+    ...(includeInactiveRoles ? {} : { isActive: true }),
+    archivedAt: null,
+    retiredAt: null,
+    // The guest floor, as `guestAssignmentsWhere` sets it for direct rows.
+    // Guests are never members; this is a backstop.
+    ...(guest ? { guestAssignable: true } : {}),
+  },
+  group: {
+    archivedAt: null,
+    members: { some: { userId } },
+    ...(guest ? { organizationId: { not: null } } : {}),
+    AND: [groupInScope(userId, scope)],
+  },
+});
+
+/** Whether the floor applies to the user, and whether they are in any group. */
+interface Principal {
+  guest: boolean;
+  inGroup: boolean;
+}
+
+/**
+ * One small read for both: most users are in no group, and they skip the
+ * group query altogether.
+ */
+const principal = async (
+  userId: string,
   db: Prisma.TransactionClient,
+  { ignoreGuestFloor = false }: AssignmentOptions = {}
+): Promise<Principal> => {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      userType: true,
+      groupMemberships: { select: { id: true }, take: 1 },
+    },
+  });
+  return {
+    guest: !ignoreGuestFloor && user?.userType === "guest",
+    inGroup: (user?.groupMemberships.length ?? 0) > 0,
+  };
+};
+
+/**
+ * Runs both reads at once on the root client; one after the other in a
+ * transaction, whose one connection takes a query at a time.
+ */
+const both = async <A, B>(
+  tx: Prisma.TransactionClient | undefined,
+  a: () => Promise<A>,
+  b: () => Promise<B>
+): Promise<[A, B]> =>
+  tx ? [await a(), await b()] : await Promise.all([a(), b()]);
+
+const assignmentsFor = async (
+  userId: string,
+  scope: AssignmentScope,
+  { guest, inGroup }: Principal,
+  tx: Prisma.TransactionClient | undefined,
   options: AssignmentOptions = {}
 ): Promise<EffectiveAssignment[]> => {
+  const db = tx ?? prisma;
   const live = liveAssignmentsWhere(userId, scope, options);
-  // One after the other: `db` may be an interactive transaction.
-  const direct = await db.userRole.findMany({
-    where: guest ? { AND: [live, guestAssignmentsWhere] } : live,
-    include: {
-      role: { include: assignmentRoleInclude },
-      serviceAccess: { select: { approvedPermissionIds: true } },
-    },
-  });
-  const viaGroups = await db.groupRole.findMany({
-    where: {
-      role: {
-        ...(options.includeInactiveRoles ? {} : { isActive: true }),
-        archivedAt: null,
-        retiredAt: null,
-        // The guest floor, as `guestAssignmentsWhere` sets it for direct
-        // rows. Guests are never members; this is a backstop.
-        ...(guest ? { guestAssignable: true } : {}),
-      },
-      group: {
-        archivedAt: null,
-        members: { some: { userId } },
-        ...(guest ? { organizationId: { not: null } } : {}),
-        AND: [groupInScope(userId, scope)],
-      },
-    },
-    include: {
-      role: { include: assignmentRoleInclude },
-      group: { select: { organizationId: true } },
-    },
-  });
+  const [direct, viaGroups] = await both(
+    tx,
+    () =>
+      db.userRole.findMany({
+        where: guest ? { AND: [live, guestAssignmentsWhere] } : live,
+        include: {
+          role: { include: assignmentRoleInclude },
+          serviceAccess: { select: { approvedPermissionIds: true } },
+        },
+      }),
+    async () =>
+      inGroup
+        ? await db.groupRole.findMany({
+            where: groupAssignmentsWhere(userId, scope, guest, options),
+            include: {
+              role: { include: assignmentRoleInclude },
+              group: { select: { organizationId: true } },
+            },
+          })
+        : []
+  );
   return [
     ...direct.map((ur): EffectiveAssignment => ({
       roleId: ur.roleId,
@@ -588,8 +645,8 @@ export const effectiveAssignments = async (
   tx?: Prisma.TransactionClient,
   options?: AssignmentOptions
 ): Promise<EffectiveAssignment[]> => {
-  const guest = !options?.ignoreGuestFloor && (await isGuest(userId, tx));
-  return await assignmentsFor(userId, scope, guest, tx ?? prisma, options);
+  const who = await principal(userId, tx ?? prisma, options);
+  return await assignmentsFor(userId, scope, who, tx, options);
 };
 
 /**
@@ -621,7 +678,9 @@ export const dedupeAssignments = (
  * Users holding a role matching `role`, directly or through an unarchived
  * group. Broader than `effectiveAssignments` (no expiry, scope or membership
  * check), so it suits a filter that may take in more users than it must,
- * such as token revocation.
+ * such as token revocation. Postgres cannot drive an OR of two EXISTS from an
+ * index, so it scans every user: for a list of a role's holders, use
+ * `getUserIdsByRoleId`.
  */
 export const holdsRoleWhere = (
   role: Prisma.RoleWhereInput
@@ -648,10 +707,39 @@ export const holdsRequires2faRole = async (
   userId: string,
   tx?: Prisma.TransactionClient,
   options?: Pick<AssignmentOptions, "ignoreGuestFloor">
-): Promise<boolean> =>
-  (await effectiveAssignments(userId, "memberships", tx, options)).some(
-    (a) => a.role.requires2fa
+): Promise<boolean> => {
+  const db = tx ?? prisma;
+  const { guest, inGroup } = await principal(userId, db, options);
+  const requires2fa: Prisma.RoleWhereInput = { requires2fa: true };
+  const live = liveAssignmentsWhere(userId, "memberships");
+  const [direct, viaGroup] = await both(
+    tx,
+    () =>
+      db.userRole.findFirst({
+        where: {
+          AND: [
+            live,
+            ...(guest ? [guestAssignmentsWhere] : []),
+            { role: requires2fa },
+          ],
+        },
+        select: { id: true },
+      }),
+    async () =>
+      inGroup
+        ? await db.groupRole.findFirst({
+            where: {
+              AND: [
+                groupAssignmentsWhere(userId, "memberships", guest),
+                { role: requires2fa },
+              ],
+            },
+            select: { id: true },
+          })
+        : null
   );
+  return direct !== null || viaGroup !== null;
+};
 
 /**
  * A user's roles that count in `scope` (see `liveAssignmentsWhere`), direct
@@ -698,14 +786,9 @@ const permissionsInScope = async (
   tx?: Prisma.TransactionClient,
   options?: AssignmentOptions
 ): Promise<string[]> => {
-  const guest = !options?.ignoreGuestFloor && (await isGuest(userId, tx));
-  const assignments = await assignmentsFor(
-    userId,
-    scope,
-    guest,
-    tx ?? prisma,
-    options
-  );
+  const who = await principal(userId, tx ?? prisma, options);
+  const { guest } = who;
+  const assignments = await assignmentsFor(userId, scope, who, tx, options);
 
   const permissionSet = new Set<string>();
 
@@ -848,14 +931,31 @@ export const getUserIdsByRoleId = async (
   roleId: string,
   tx?: Prisma.TransactionClient
 ): Promise<{ userId: string; user: { oauthClientId: string | null } }[]> => {
-  const users = await (tx ?? prisma).user.findMany({
-    where: holdsRoleWhere({ id: roleId }),
-    select: { id: true, oauthClientId: true },
-  });
-  return users.map((u) => ({
-    userId: u.id,
-    user: { oauthClientId: u.oauthClientId },
-  }));
+  const db = tx ?? prisma;
+  const holder = {
+    userId: true,
+    user: { select: { oauthClientId: true } },
+  } as const;
+  // Two index-driven reads (user_roles by role, then group_members by group)
+  // rather than `holdsRoleWhere`, which scans every user.
+  const [direct, viaGroups] = await both(
+    tx,
+    () => db.userRole.findMany({ where: { roleId }, select: holder }),
+    async () => {
+      const groups = await db.group.findMany({
+        where: { archivedAt: null, roles: { some: { roleId } } },
+        select: { id: true },
+      });
+      if (groups.length === 0) return [];
+      return await db.groupMember.findMany({
+        where: { groupId: { in: groups.map((g) => g.id) } },
+        select: holder,
+      });
+    }
+  );
+  const byUser = new Map<string, { oauthClientId: string | null }>();
+  for (const h of [...direct, ...viaGroups]) byUser.set(h.userId, h.user);
+  return [...byUser].map(([userId, user]) => ({ userId, user }));
 };
 
 const grantsAdmin = {
@@ -873,48 +973,67 @@ const activeHuman = {
 } satisfies Prisma.UserWhereInput;
 
 /**
+ * How many of a group's members `getAdminAssignments` reads. A guard drops a
+ * group's members one by one only for the members a change removes from it
+ * (at most one per call today; 500 at most, the member endpoints' batch), or
+ * all of them at once (by group or role), so a sample one larger answers the
+ * guard as the full list would.
+ */
+const ADMIN_GROUP_MEMBER_SAMPLE = 501;
+
+/**
  * Global, unexpired assignments of an active role granting the `admin`
  * permission to an active human — the accounts that can still administer
  * core — and the same role held by an active human through an unarchived
- * global group (`groupId` set). Org-scoped assignments and org groups grant
- * nothing outside their organization.
+ * global group (`groupId` set; up to `ADMIN_GROUP_MEMBER_SAMPLE` members of
+ * each group). Org-scoped assignments and org groups grant nothing outside
+ * their organization.
  */
 export const getAdminAssignments = async (
   tx?: Prisma.TransactionClient
 ): Promise<{ userId: string; roleId: string; groupId: string | null }[]> => {
   const db = tx ?? prisma;
-  const direct = await db.userRole.findMany({
-    where: {
-      organizationId: null,
-      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-      user: activeHuman,
-      role: grantsAdmin,
-    },
-    select: { userId: true, roleId: true },
-  });
-  const viaGroups = await db.groupRole.findMany({
-    where: {
-      role: grantsAdmin,
-      group: { organizationId: null, archivedAt: null },
-    },
-    select: {
-      roleId: true,
-      groupId: true,
-      group: {
-        select: {
-          members: { where: { user: activeHuman }, select: { userId: true } },
+  const [direct, groups] = await both(
+    tx,
+    () =>
+      db.userRole.findMany({
+        where: {
+          organizationId: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+          user: activeHuman,
+          role: grantsAdmin,
         },
-      },
-    },
-  });
+        select: { userId: true, roleId: true },
+      }),
+    () =>
+      db.group.findMany({
+        where: {
+          organizationId: null,
+          archivedAt: null,
+          roles: { some: { role: grantsAdmin } },
+        },
+        select: {
+          id: true,
+          roles: { where: { role: grantsAdmin }, select: { roleId: true } },
+          members: {
+            where: { user: activeHuman },
+            select: { userId: true },
+            orderBy: { id: "asc" },
+            take: ADMIN_GROUP_MEMBER_SAMPLE,
+          },
+        },
+      })
+  );
   return [
     ...direct.map((a) => ({ ...a, groupId: null })),
-    ...viaGroups.flatMap((gr) =>
-      gr.group.members.map((m) => ({
-        userId: m.userId,
-        roleId: gr.roleId,
-        groupId: gr.groupId,
-      }))
+    ...groups.flatMap((g) =>
+      g.roles.flatMap((r) =>
+        g.members.map((m) => ({
+          userId: m.userId,
+          roleId: r.roleId,
+          groupId: g.id,
+        }))
+      )
     ),
   ];
 };

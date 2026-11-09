@@ -364,6 +364,23 @@ describe("db.roles group-derived roles", () => {
     ]);
   });
 
+  it("getUserIdsByRoleId skips archived groups and lists each user once", async () => {
+    const both = await createTestUser();
+    const archivedOnly = await createTestUser();
+    const role = await grantingRole();
+    await prisma.userRole.create({
+      data: { userId: both.id, roleId: role.id },
+    });
+    await groupWith(null, [both.id], [role.id]);
+    await groupWith(null, [both.id], [role.id]);
+    const archived = await groupWith(null, [archivedOnly.id], [role.id]);
+    await db.groups.setArchived(archived.id, new Date());
+
+    expect(await db.roles.getUserIdsByRoleId(role.id)).toEqual([
+      { userId: both.id, user: { oauthClientId: null } },
+    ]);
+  });
+
   it("holdsRoleWhere matches a member of a group holding the role", async () => {
     const member = await createTestUser();
     const outsider = await createTestUser();
@@ -395,6 +412,86 @@ describe("db.roles group-derived roles", () => {
     await groupWith(null, [user.id], [role.id]);
 
     expect(await db.totp.userRolesRequire2fa(user.id)).toBe(true);
+  });
+
+  it("holdsRequires2faRole counts group roles in active member orgs only", async () => {
+    const orgA = await newOrg();
+    const user = await createTestUser();
+    const role = await grantingRole({ requires2fa: true });
+    await groupWith(orgA, [user.id], [role.id]);
+    // Not yet a member of the group's organization.
+    expect(await db.roles.holdsRequires2faRole(user.id)).toBe(false);
+
+    await joinOrg(orgA, user.id);
+    expect(await db.roles.holdsRequires2faRole(user.id)).toBe(true);
+    expect(
+      await prisma.$transaction((tx) =>
+        db.roles.holdsRequires2faRole(user.id, tx)
+      )
+    ).toBe(true);
+
+    await prisma.organization.update({
+      where: { id: orgA },
+      data: { isActive: false },
+    });
+    expect(await db.roles.holdsRequires2faRole(user.id)).toBe(false);
+  });
+
+  it("holdsRequires2faRole applies the guest floor unless ignoreGuestFloor", async () => {
+    const orgA = await newOrg();
+    const { user } = await createTestGuest({ organizationId: orgA });
+    const role = await grantingRole({ requires2fa: true });
+    await prisma.userRole.create({
+      data: { userId: user.id, roleId: role.id, organizationId: orgA },
+    });
+
+    expect(await db.roles.holdsRequires2faRole(user.id)).toBe(false);
+    expect(
+      await db.roles.holdsRequires2faRole(user.id, undefined, {
+        ignoreGuestFloor: true,
+      })
+    ).toBe(true);
+
+    await prisma.role.update({
+      where: { id: role.id },
+      data: { guestAssignable: true },
+    });
+    expect(await db.roles.holdsRequires2faRole(user.id)).toBe(true);
+  });
+
+  it("a direct role still counts for a user in no group, and in a transaction", async () => {
+    const user = await createTestUser();
+    const role = await grantingRole();
+    await prisma.userRole.create({
+      data: { userId: user.id, roleId: role.id },
+    });
+
+    expect(await db.roles.getUserPermissions(user.id)).toEqual([PERMISSION]);
+    expect(
+      await prisma.$transaction((tx) =>
+        db.roles.getUserPermissions(user.id, null, tx)
+      )
+    ).toEqual([PERMISSION]);
+  });
+
+  it("getAdminAssignments lists each admin-granting role of a global group for each member", async () => {
+    const one = await createTestUser();
+    const two = await createTestUser();
+    const admin = await prisma.role.findFirstOrThrow({
+      where: { name: "admin", serviceId: CORE_SERVICE_ID },
+    });
+    const notAdmin = await grantingRole();
+    const group = await groupWith(
+      null,
+      [one.id, two.id],
+      [admin.id, notAdmin.id]
+    );
+
+    const rows = (await db.roles.getAdminAssignments()).filter(
+      (a) => a.groupId === group.id
+    );
+    expect(rows.map((r) => r.userId).sort()).toEqual([one.id, two.id].sort());
+    expect(rows.every((r) => r.roleId === admin.id)).toBe(true);
   });
 
   it("countInertOrgAssignments counts an org group holding a role with a global-only permission", async () => {
