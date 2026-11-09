@@ -102,6 +102,10 @@ allowed to manage webhooks would receive every user, client and service change. 
 check the caller the same way, against every event type the endpoint will be subscribed to:
 `403` if they could not read one. The bucket is checked per event, when it is sent. An endpoint
 whose creator is deactivated or loses access is simply sent nothing; it is not paused.
+The check runs again before every send attempt, retries included: a delivery whose creator may no
+longer receive its event is settled `FAILED` ("The endpoint's creator may no longer receive this
+event") without counting toward auto-disable, and retry one of it is `403`. For another
+organization's events, the creator's permissions there are capped by the caller's token scopes.
 Delivery views (`GET …/deliveries`, `GET …/deliveries/:deliveryId` and the retry responses) apply
 the same check to the caller: a delivery whose event they could not read comes back with
 `payload` and `responseBody` set to `null` and `payloadRedacted: true`. For the same reason the

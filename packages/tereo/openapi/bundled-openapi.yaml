@@ -15457,7 +15457,8 @@ paths:
         `ACTIVE` (`400 invalid_endpoint_status`; re-enable it first). A
         `file-service.*` delivery of an endpoint that is not provisioned is
         retried only by the endpoint's creator or a `webhooks.admin` holder
-        (`403` otherwise).
+        (`403` otherwise). A delivery whose event the endpoint's creator may no
+        longer receive is not sent again (`403`).
 
         Returns `202 Accepted` with the updated delivery record. An audit log
         entry is created for this action.
