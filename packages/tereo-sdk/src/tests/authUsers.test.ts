@@ -111,7 +111,7 @@ describe("AuthServiceUser", () => {
 });
 
 describe("sendVerificationEmail", () => {
-  it("sendVerificationEmail posts to the user's email-verification route", async () => {
+  it("posts to the user's email-verification route", async () => {
     mockTryHandleRequest.mockResolvedValue({ status: 202, data: "" });
     await sendUserVerificationEmail(uuid(7));
     expect(mockTryHandleRequest).toHaveBeenCalledWith(
@@ -123,6 +123,13 @@ describe("sendVerificationEmail", () => {
       "AS_0005",
       expect.any(String)
     );
+  });
+
+  it("in test mode resolves without a request", async () => {
+    mockRequests.auth.sendUserVerificationEmail.mockClear();
+    const { users } = new AuthServiceClient({}, true);
+    await expect(users.sendVerificationEmail(uuid(7))).resolves.toBeUndefined();
+    expect(mockRequests.auth.sendUserVerificationEmail).not.toHaveBeenCalled();
   });
 
   it("the users client hands the id to the request", async () => {

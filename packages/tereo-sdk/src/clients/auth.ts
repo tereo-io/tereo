@@ -79,7 +79,7 @@ export class AuthServiceClient {
   private readonly allowedClients: ReadonlySet<string> | null;
 
   /** Admin actions on users, such as sending a verification email. */
-  readonly users = new UsersClient();
+  readonly users: UsersClient;
 
   /**
    * `testMode` accepts forged test tokens and answers user and organization
@@ -91,6 +91,7 @@ export class AuthServiceClient {
     private readonly testServiceUserId?: string
   ) {
     if (testMode) assertTestModeAllowed();
+    this.users = new UsersClient(testMode);
     const ttl =
       config.introspectionCacheTtlSeconds ?? INTROSPECT_CACHE_TTL_SECONDS;
     if (!(ttl >= 0 && ttl <= MAX_INTROSPECT_CACHE_TTL_SECONDS)) {

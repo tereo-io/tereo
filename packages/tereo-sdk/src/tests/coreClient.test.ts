@@ -253,6 +253,9 @@ describe("testMode", () => {
     expect((await testing.files.downloadObject("b", "k")).toString()).toBe(
       "test-file-contents:b/k"
     );
+    await expect(
+      testing.auth.users.sendVerificationEmail("u1")
+    ).resolves.toBeUndefined();
     await testing.stop();
   });
 
