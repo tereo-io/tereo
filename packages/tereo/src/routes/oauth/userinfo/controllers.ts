@@ -54,14 +54,20 @@ export const getUserInfo = async (req: Request, res: Response) => {
   // Resolve org from id in token
   let orgId: string | undefined;
   let orgName: string | undefined;
-  // The organization whose groups are listed: the token's, while active.
+  // The organization whose groups are listed: the token's, while it is active
+  // and the user still a member (the roles of its groups count on no less).
   let groupsOrgId: string | null = null;
   if (payload.org_id) {
     try {
       const org = await db.organizations.get(payload.org_id);
       orgId = org.id;
       orgName = org.name;
-      if (org.isActive) groupsOrgId = org.id;
+      if (
+        org.isActive &&
+        (await db.organizations.getMembership(org.id, userId))
+      ) {
+        groupsOrgId = org.id;
+      }
     } catch (err) {
       // Org deleted or archived since the token was issued — omit its claims.
       if (!(err instanceof NotFoundError)) throw err;

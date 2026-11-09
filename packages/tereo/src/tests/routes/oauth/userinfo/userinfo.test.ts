@@ -628,6 +628,55 @@ describe("/oauth/userinfo", () => {
       const token = await delegatedToken(user.id, ["core:files"]);
       expect((await userinfo(token)).groups).toEqual([]);
     });
+
+    it.each([["core:account"], ["core:admin.read"], ["core:admin"]])(
+      "a delegated %s token gets the global groups, and no roles",
+      async (scope) => {
+        const token = await delegatedToken(user.id, [scope]);
+        const data = (await userinfo(token)) as {
+          groups?: { id: string }[];
+          roles?: string[];
+        };
+        expect(data.groups?.map((g) => g.id)).toEqual([globalGroup.id]);
+        expect(data.roles).toEqual([]);
+      }
+    );
+
+    it("a delegated token with only another area's scope gets groups: []", async () => {
+      const token = await delegatedToken(user.id, ["core:organizations"]);
+      expect((await userinfo(token)).groups).toEqual([]);
+    });
+
+    it("lists no org groups of a token's organization the user is not a member of", async () => {
+      const strangerOrgId = (await createTestOrganization(adminToken)).id;
+      const outsider = await createTestUser();
+      const strangerGroup = await postGroup(adminToken, {
+        organizationId: strangerOrgId,
+      });
+      groupIds.push(strangerGroup.id);
+      const token = await getTestPrincipalToken({
+        userId: outsider.id,
+        organizationId: strangerOrgId,
+        permissions: [],
+      });
+      expect((await userinfo(token)).groups).toEqual([]);
+
+      await addTestOrgMember(adminToken, strangerOrgId, outsider.id);
+      await adminApi(
+        "POST",
+        `/groups/${strangerGroup.id}/members`,
+        adminToken,
+        { userIds: [outsider.id] }
+      );
+      expect((await userinfo(token)).groups?.map((g) => g.id)).toEqual([
+        strangerGroup.id,
+      ]);
+
+      await prisma.organizationMember.deleteMany({
+        where: { organizationId: strangerOrgId, userId: outsider.id },
+      });
+      expect((await userinfo(token)).groups).toEqual([]);
+    });
   });
 
   describe("UserInfo", () => {
