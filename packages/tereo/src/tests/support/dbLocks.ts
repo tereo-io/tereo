@@ -25,14 +25,23 @@ export async function untilQueued(
   }
 }
 
-export const waitForLockWait = async (like: string, timeoutMs = 10_000) => {
+/**
+ * Resolves once `count` sessions of this database whose query matches `like`
+ * wait on a lock.
+ */
+export const waitForLockWait = async (
+  like: string,
+  timeoutMs = 10_000,
+  count = 1
+) => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const rows = await prisma.$queryRaw<{ n: bigint }[]>`
       SELECT count(*)::bigint AS n FROM pg_stat_activity
-      WHERE wait_event_type = 'Lock' AND query ILIKE ${like}`;
-    if (Number(rows[0].n) > 0) return;
+      WHERE wait_event_type = 'Lock' AND datname = current_database()
+        AND query ILIKE ${like}`;
+    if (Number(rows[0].n) >= count) return;
     await new Promise((r) => setTimeout(r, 25));
   }
-  throw new Error(`No backend waited on a lock for ${like}`);
+  throw new Error(`Fewer than ${count} backends waited on a lock for ${like}`);
 };
