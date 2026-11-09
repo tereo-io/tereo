@@ -2,7 +2,9 @@ import { orgAssignableRoles } from "@/features/auth-admin/api/roles/orgAssignabl
 import useSetGroupRoles from "@/features/auth-admin/api/groups/useSetGroupRoles";
 import type { GroupRole } from "@/features/auth-admin/api/groups/types";
 import useAllRoles from "@/features/auth-admin/api/roles/useAllRoles";
+import { RolesReadRequired } from "../../roles/RolesReadRequired";
 import { errorDescriptionOf } from "@/utils/apiErrors";
+import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 import {
   Alert,
@@ -32,7 +34,9 @@ const GroupRolesModal = ({
   const [selected, setSelected] = useState<string[]>(
     currentRoles.map((r) => r.id)
   );
-  const { data, isLoading, isError, error } = useAllRoles();
+  const { hasPermission } = useAuth();
+  const mayListRoles = hasPermission("roles.read");
+  const { data, isLoading, isError, error } = useAllRoles(mayListRoles);
   const mutation = useSetGroupRoles(groupId);
 
   // Core lists only unarchived, unretired roles. A held role outside that
@@ -68,13 +72,15 @@ const GroupRolesModal = ({
           key="save"
           onClick={save}
           isLoading={mutation.isPending}
-          disabled={isLoading || isError}
+          disabled={!mayListRoles || isLoading || isError}
         >
           Save Roles
         </Button>,
       ]}
     >
-      {isLoading ? (
+      {!mayListRoles ? (
+        <RolesReadRequired />
+      ) : isLoading ? (
         <Spinner size="md" />
       ) : isError ? (
         <Alert variant="danger">

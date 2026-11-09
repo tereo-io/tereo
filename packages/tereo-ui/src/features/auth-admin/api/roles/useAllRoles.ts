@@ -4,7 +4,7 @@ import { useAxios } from "@/lib/auth";
 import type { Role } from "./types";
 
 /** Every unarchived, unretired role — the assignable set. */
-const useAllRoles = () => {
+const useAllRoles = (enabled = true) => {
   const axios = useAxios("auth");
 
   return useQuery({
@@ -14,6 +14,7 @@ const useAllRoles = () => {
         sort: "displayName",
         sortDir: "asc",
       }),
+    enabled,
   });
 };
 

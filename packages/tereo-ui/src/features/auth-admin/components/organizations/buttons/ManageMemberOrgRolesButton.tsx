@@ -3,14 +3,19 @@ import useMemberOrgRoles from "@/features/auth-admin/api/organizations/useMember
 import type { OrganizationMember } from "@/features/auth-admin/api/organizations/types";
 import { orgAssignableRoles } from "@/features/auth-admin/api/roles/orgAssignable";
 import useAllRoles from "@/features/auth-admin/api/roles/useAllRoles";
+import { RolesReadRequired } from "../../roles/RolesReadRequired";
 import { faUserShield } from "@fortawesome/free-solid-svg-icons";
 import { useGroupAccess } from "../../groups/useGroupAuthority";
+import { errorDescriptionOf } from "@/utils/apiErrors";
 import { Link } from "react-router-dom";
+import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 import "../../groups/styles.css";
 import {
+  Alert,
   Badge,
   Button,
+  Checkbox,
   CheckboxGroup,
   Col,
   EmptyState,
@@ -38,14 +43,30 @@ const ManageMemberOrgRolesButton = ({
     member.user.id,
     showModal
   );
-  const { data: roles, isLoading: rolesLoading } = useAllRoles();
+  const { hasPermission } = useAuth();
+  const mayListRoles = hasPermission("roles.read");
+  const {
+    data: roles,
+    isLoading: rolesLoading,
+    isError: rolesFailed,
+    error: rolesError,
+  } = useAllRoles(showModal && mayListRoles);
   const { mutate, isPending } = useSetMemberOrgRoles(orgId);
   const { canRead: canReadGroup } = useGroupAccess();
+  // Empty when core withholds them (the viewer may not read the org's groups).
   const groupRoles = current?.groupRoles ?? [];
 
-  const held = new Set(current?.roles.map((r) => r.id) ?? []);
+  const heldRoles = current?.roles ?? [];
+  const held = new Set(heldRoles.map((r) => r.id));
   const customRoles = orgAssignableRoles(roles ?? [], held);
-  const values = selected ?? current?.roles.map((r) => r.id) ?? [];
+  const assignable = new Set(customRoles.map((r) => r.id));
+  // A held role that can't be offered (archived, inactive) is sent back as
+  // it is: the PUT replaces the whole set of direct roles.
+  const locked = heldRoles.filter((r) => !assignable.has(r.id));
+  const values = (selected ?? heldRoles.map((r) => r.id)).filter((id) =>
+    assignable.has(id)
+  );
+  const canSave = mayListRoles && !!roles && !!current;
 
   const handleClose = () => {
     setShowModal(false);
@@ -53,11 +74,10 @@ const ManageMemberOrgRolesButton = ({
   };
 
   const handleSave = () => {
-    const assignable = new Set(customRoles.map((r) => r.id));
     mutate(
       {
         userId: member.user.id,
-        roleIds: values.filter((id) => assignable.has(id)),
+        roleIds: [...values, ...locked.map((r) => r.id)],
       },
       { onSuccess: handleClose }
     );
@@ -89,7 +109,7 @@ const ManageMemberOrgRolesButton = ({
             key="save"
             onClick={handleSave}
             isLoading={isPending}
-            disabled={isPending || currentLoading}
+            disabled={isPending || !canSave}
           >
             Save Roles
           </Button>,
@@ -102,22 +122,42 @@ const ManageMemberOrgRolesButton = ({
             org-assignable can be granted here; other roles are assigned under
             Users.
           </p>
-          {currentLoading || rolesLoading ? (
+          {!mayListRoles ? (
+            <RolesReadRequired />
+          ) : currentLoading || rolesLoading ? (
             <Spinner size="md" />
-          ) : customRoles.length === 0 ? (
-            <EmptyState>
-              No custom role can be granted within an organization
-            </EmptyState>
+          ) : rolesFailed ? (
+            <Alert variant="danger">
+              {errorDescriptionOf(rolesError, "Could not load the roles")}
+            </Alert>
           ) : (
-            <CheckboxGroup
-              name={`member-org-roles-${member.user.id}`}
-              options={customRoles.map((role) => ({
-                value: role.id,
-                label: role.displayName,
-              }))}
-              values={values}
-              onChange={setSelected}
-            />
+            <>
+              {customRoles.length === 0 ? (
+                <EmptyState>
+                  No custom role can be granted within an organization
+                </EmptyState>
+              ) : (
+                <CheckboxGroup
+                  name={`member-org-roles-${member.user.id}`}
+                  options={customRoles.map((role) => ({
+                    value: role.id,
+                    label: role.displayName,
+                  }))}
+                  values={values}
+                  onChange={setSelected}
+                />
+              )}
+              {locked.map((role) => (
+                <Checkbox
+                  key={role.id}
+                  labelLocation="right"
+                  label={`${role.displayName} (archived or inactive)`}
+                  checked
+                  disabled
+                  onChange={() => undefined}
+                />
+              ))}
+            </>
           )}
           {groupRoles.length > 0 && (
             <Col size="sm">

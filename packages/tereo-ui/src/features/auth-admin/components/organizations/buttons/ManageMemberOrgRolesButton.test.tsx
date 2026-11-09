@@ -72,7 +72,7 @@ const renderButton = () =>
   );
 
 beforeEach(() => {
-  authMock.permissions = [];
+  authMock.permissions = ["roles.read"];
   authMock.organizations = [
     { id: "o1", name: "Acme", slug: "acme", memberRole: "admin" },
   ];
@@ -113,6 +113,104 @@ describe("ManageMemberOrgRolesButton", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save Roles" }));
 
+    await waitFor(() =>
+      expect(authMock.axios.put).toHaveBeenCalledWith(
+        "/v1/admin/organizations/o1/members/u1/roles",
+        { roleIds: ["direct"] }
+      )
+    );
+  });
+
+  it("keeps held archived and inactive roles, locked, in the PUT", async () => {
+    authMock.axios.put.mockResolvedValue({ data: memberRoles });
+    const held = (id: string) => ({
+      id,
+      name: id,
+      displayName: id,
+      expiresAt: null,
+      via: { kind: "direct" },
+    });
+    authMock.axios.get.mockImplementation(async (url: string) =>
+      url === "/v1/admin/roles"
+        ? {
+            data: {
+              data: [
+                role("direct"),
+                role("agent"),
+                { ...role("dormant"), isActive: false },
+              ],
+              hasMore: false,
+              nextCursor: null,
+            },
+          }
+        : {
+            data: {
+              ...memberRoles,
+              roles: [held("direct"), held("gone"), held("dormant")],
+            },
+          }
+    );
+    renderButton();
+    fireEvent.click(screen.getByTitle("Organization roles"));
+
+    fireEvent.click(await screen.findByLabelText("agent"));
+    expect(screen.getByLabelText(/gone \(archived/)).toBeDisabled();
+    expect(screen.getByLabelText(/gone \(archived/)).toBeChecked();
+    expect(screen.getByLabelText(/dormant \(archived/)).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save Roles" }));
+
+    await waitFor(() =>
+      expect(authMock.axios.put).toHaveBeenCalledWith(
+        "/v1/admin/organizations/o1/members/u1/roles",
+        { roleIds: ["direct", "agent", "gone", "dormant"] }
+      )
+    );
+  });
+
+  it("says roles.read is needed instead of offering an empty picker", async () => {
+    authMock.permissions = [];
+    renderButton();
+    fireEvent.click(screen.getByTitle("Organization roles"));
+
+    expect(await screen.findByText(/roles\.read/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save Roles" })).toBeDisabled();
+    expect(authMock.axios.get).not.toHaveBeenCalledWith(
+      "/v1/admin/roles",
+      expect.anything()
+    );
+  });
+
+  it("shows a failed role load and refuses to save", async () => {
+    authMock.axios.get.mockImplementation(async (url: string) => {
+      if (url === "/v1/admin/roles") throw new Error("Roles exploded");
+      return { data: memberRoles };
+    });
+    renderButton();
+    fireEvent.click(screen.getByTitle("Organization roles"));
+
+    expect(await screen.findByText(/Could not load the roles/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save Roles" })).toBeDisabled();
+  });
+
+  it("shows no group section when core withholds groupRoles", async () => {
+    authMock.axios.put.mockResolvedValue({ data: memberRoles });
+    authMock.axios.get.mockImplementation(async (url: string) =>
+      url === "/v1/admin/roles"
+        ? {
+            data: {
+              data: [role("direct"), role("agent")],
+              hasMore: false,
+              nextCursor: null,
+            },
+          }
+        : { data: { ...memberRoles, groupRoles: [] } }
+    );
+    renderButton();
+    fireEvent.click(screen.getByTitle("Organization roles"));
+
+    expect(await screen.findByLabelText("direct")).toBeChecked();
+    expect(screen.queryByText(/Through this organization/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save Roles" }));
     await waitFor(() =>
       expect(authMock.axios.put).toHaveBeenCalledWith(
         "/v1/admin/organizations/o1/members/u1/roles",
