@@ -4,7 +4,6 @@ import { ensurePermission, TEST_SERVICE } from "../../support/testService.js";
 import { createTestRole, createTestUser } from "../../support/auth/users.js";
 import { ensureTestOrganization } from "../../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { CORE_SERVICE_ID } from "../../../definitions/index.js";
 import { createTestGuest } from "../../support/auth/guests.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import db from "../../../utils/db/index.js";
@@ -310,30 +309,6 @@ describe("db.roles group-derived roles", () => {
     ).toEqual([role.id]);
   });
 
-  it("getAdminAssignments includes admin held through a global group with groupId set", async () => {
-    const user = await createTestUser();
-    const admin = await prisma.role.findFirstOrThrow({
-      where: { name: "admin", serviceId: CORE_SERVICE_ID },
-    });
-    const orgA = await newOrg();
-    await joinOrg(orgA, user.id);
-    const orgGroup = await groupWith(orgA, [user.id], [admin.id]);
-    const group = await groupWith(null, [user.id], [admin.id]);
-
-    const mine = (await db.roles.getAdminAssignments()).filter(
-      (a) => a.userId === user.id
-    );
-    expect(mine).toEqual([
-      { userId: user.id, roleId: admin.id, groupId: group.id },
-    ]);
-    expect(mine.some((a) => a.groupId === orgGroup.id)).toBe(false);
-
-    await db.groups.setArchived(group.id, new Date());
-    expect(
-      (await db.roles.getAdminAssignments()).some((a) => a.userId === user.id)
-    ).toBe(false);
-  });
-
   it("getUserIdsByRoleId includes group members", async () => {
     const direct = await createTestUser();
     const member = await createTestUser();
@@ -509,26 +484,6 @@ describe("db.roles group-derived roles", () => {
         db.roles.getUserPermissions(user.id, null, tx)
       )
     ).toEqual([PERMISSION]);
-  });
-
-  it("getAdminAssignments lists each admin-granting role of a global group for each member", async () => {
-    const one = await createTestUser();
-    const two = await createTestUser();
-    const admin = await prisma.role.findFirstOrThrow({
-      where: { name: "admin", serviceId: CORE_SERVICE_ID },
-    });
-    const notAdmin = await grantingRole();
-    const group = await groupWith(
-      null,
-      [one.id, two.id],
-      [admin.id, notAdmin.id]
-    );
-
-    const rows = (await db.roles.getAdminAssignments()).filter(
-      (a) => a.groupId === group.id
-    );
-    expect(rows.map((r) => r.userId).sort()).toEqual([one.id, two.id].sort());
-    expect(rows.every((r) => r.roleId === admin.id)).toBe(true);
   });
 
   it("countInertOrgAssignments counts an org group holding a role with a global-only permission", async () => {

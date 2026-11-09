@@ -122,7 +122,7 @@ export const updateRole = async (req: Request, res: Response) => {
 
   const { role, revokedJtis } = await db.$transaction(async (tx) => {
     if (body.isActive === false && existing.isActive) {
-      await assertAdminRemains((a) => a.roleId !== params.id, tx);
+      await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
     }
     // A role gains `admin` only under its lock, and only while no
     // integration holds it, so the role read above settles whether to check.
@@ -372,7 +372,7 @@ export const deleteRole = async (req: Request, res: Response) => {
   );
 
   const { affectedUserIds, revokedJtis } = await db.$transaction(async (tx) => {
-    await assertAdminRemains((a) => a.roleId !== params.id, tx);
+    await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
     // Read before the delete: assignments cascade away with the row.
     const affectedUserIds = await db.roles.getUserIdsByRoleId(params.id, tx);
     const revokedJtis = await revokeClientTokensTx(affectedUserIds, tx);
@@ -465,7 +465,7 @@ export const setRolePermissions = async (req: Request, res: Response) => {
     // updateRole, deleteRole and setUserRoles; the opposite order deadlocks
     // against a user-role insert, whose foreign key share-locks the role.
     if (!keepsAdmin) {
-      await assertAdminRemains((a) => a.roleId !== params.id, tx);
+      await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
     }
     // PATCH guestAssignable checks under this same lock, so one of the two
     // sees the other's result; the flag is read after taking it.

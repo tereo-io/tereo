@@ -571,7 +571,7 @@ export const removeMembers = async (
   // Only an unarchived global group's roles count as administrators.
   if (!group.organizationId && !group.archivedAt) {
     await assertAdminRemains(
-      (a) => !(a.groupId === groupId && ids.includes(a.userId)),
+      { kind: "groupMembers", groupId, userIds: ids },
       tx
     );
   }
@@ -636,10 +636,10 @@ export const setGroupRoles = async (
   }
   const live = !group.archivedAt;
   if (live && !group.organizationId && toRemove.length > 0) {
-    const removedAdmin = new Set(await db.roles.getAdminRoleIds(toRemove, tx));
-    if (removedAdmin.size > 0) {
+    const removedAdmin = await db.roles.getAdminRoleIds(toRemove, tx);
+    if (removedAdmin.length > 0) {
       await assertAdminRemains(
-        (a) => !(a.groupId === groupId && removedAdmin.has(a.roleId)),
+        { kind: "groupRoles", groupId, roleIds: removedAdmin },
         tx
       );
     }
@@ -709,7 +709,7 @@ export const archiveGroup = async (
     );
   }
   if (!group.organizationId) {
-    await assertAdminRemains((a) => a.groupId !== groupId, tx);
+    await assertAdminRemains({ kind: "group", groupId }, tx);
   }
   const archived = await db.groups.setArchived(groupId, new Date(), tx);
   await logAuditTx(tx, {

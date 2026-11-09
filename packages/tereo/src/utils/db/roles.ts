@@ -979,69 +979,99 @@ const activeHuman = {
 } satisfies Prisma.UserWhereInput;
 
 /**
- * How many of a group's members `getAdminAssignments` reads. A guard drops a
- * group's members one by one only for the members a change removes from it
- * (at most one per call today; 500 at most, the member endpoints' batch), or
- * all of them at once (by group or role), so a sample one larger answers the
- * guard as the full list would.
+ * What a change takes from the administrators: every assignment of a user or
+ * of a role, a user's direct global assignments of some roles (`direct`) or
+ * of all but some (`directExcept`), a global group, some of its members or
+ * some of its roles.
  */
-const ADMIN_GROUP_MEMBER_SAMPLE = 501;
+export type AdminRemoval =
+  | { kind: "user"; userId: string }
+  | { kind: "role"; roleId: string }
+  | { kind: "direct"; userId: string; roleIds: string[] }
+  | { kind: "directExcept"; userId: string; keepRoleIds: string[] }
+  | { kind: "group"; groupId: string }
+  | { kind: "groupMembers"; groupId: string; userIds: string[] }
+  | { kind: "groupRoles"; groupId: string; roleIds: string[] };
+
+const directAdminWhere = (
+  removal: AdminRemoval | undefined
+): Prisma.UserRoleWhereInput => {
+  const where: Prisma.UserRoleWhereInput = {
+    organizationId: null,
+    OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    user: activeHuman,
+    role: grantsAdmin,
+  };
+  switch (removal?.kind) {
+    case "user":
+      return { ...where, userId: { not: removal.userId } };
+    case "role":
+      return { ...where, roleId: { not: removal.roleId } };
+    case "direct":
+      return {
+        ...where,
+        NOT: { userId: removal.userId, roleId: { in: removal.roleIds } },
+      };
+    case "directExcept":
+      return {
+        ...where,
+        NOT: { userId: removal.userId, roleId: { notIn: removal.keepRoleIds } },
+      };
+    default:
+      return where;
+  }
+};
+
+const groupAdminWhere = (
+  removal: AdminRemoval | undefined
+): Prisma.GroupMemberWhereInput => {
+  const role: Prisma.GroupRoleWhereInput = { role: grantsAdmin };
+  const where: Prisma.GroupMemberWhereInput = { user: activeHuman };
+  switch (removal?.kind) {
+    case "user":
+      where.userId = { not: removal.userId };
+      break;
+    case "role":
+      role.roleId = { not: removal.roleId };
+      break;
+    case "group":
+      where.groupId = { not: removal.groupId };
+      break;
+    case "groupMembers":
+      where.NOT = { groupId: removal.groupId, userId: { in: removal.userIds } };
+      break;
+    case "groupRoles":
+      role.NOT = { groupId: removal.groupId, roleId: { in: removal.roleIds } };
+      break;
+  }
+  return {
+    ...where,
+    group: { organizationId: null, archivedAt: null, roles: { some: role } },
+  };
+};
 
 /**
- * Global, unexpired assignments of an active role granting the `admin`
- * permission to an active human — the accounts that can still administer
- * core — and the same role held by an active human through an unarchived
- * global group (`groupId` set; up to `ADMIN_GROUP_MEMBER_SAMPLE` members of
- * each group). Org-scoped assignments and org groups grant nothing outside
- * their organization.
+ * Whether an active human holds the `admin` permission globally — through a
+ * live, unexpired direct assignment of an active role, or the same role held
+ * by an unarchived global group they belong to — once `removal` is taken
+ * away. Org-scoped assignments and org groups grant nothing outside their
+ * organization. Two existence probes, whatever the number of members.
  */
-export const getAdminAssignments = async (
+export const adminExists = async (
+  removal?: AdminRemoval,
   tx?: Prisma.TransactionClient
-): Promise<{ userId: string; roleId: string; groupId: string | null }[]> => {
+): Promise<boolean> => {
   const db = tx ?? prisma;
-  const [direct, groups] = await both(
-    tx,
-    () =>
-      db.userRole.findMany({
-        where: {
-          organizationId: null,
-          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-          user: activeHuman,
-          role: grantsAdmin,
-        },
-        select: { userId: true, roleId: true },
-      }),
-    () =>
-      db.group.findMany({
-        where: {
-          organizationId: null,
-          archivedAt: null,
-          roles: { some: { role: grantsAdmin } },
-        },
-        select: {
-          id: true,
-          roles: { where: { role: grantsAdmin }, select: { roleId: true } },
-          members: {
-            where: { user: activeHuman },
-            select: { userId: true },
-            orderBy: { id: "asc" },
-            take: ADMIN_GROUP_MEMBER_SAMPLE,
-          },
-        },
-      })
-  );
-  return [
-    ...direct.map((a) => ({ ...a, groupId: null })),
-    ...groups.flatMap((g) =>
-      g.roles.flatMap((r) =>
-        g.members.map((m) => ({
-          userId: m.userId,
-          roleId: r.roleId,
-          groupId: g.id,
-        }))
-      )
-    ),
-  ];
+  const direct = await db.userRole.findFirst({
+    where: directAdminWhere(removal),
+    select: { id: true },
+  });
+  if (direct) return true;
+  const viaGroup = await db.groupMember.findFirst({
+    where: groupAdminWhere(removal),
+    select: { id: true },
+  });
+  return viaGroup !== null;
 };
 
 /** Of these roles, the ids of the ones granting `admin`. */
