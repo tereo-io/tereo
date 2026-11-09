@@ -7,6 +7,7 @@ import { isUsableAccount } from "./users.js";
 import { ConflictError } from "./errors.js";
 import { hashFlowToken } from "./crypto.js";
 import { randomBytes } from "node:crypto";
+import { emailDomain } from "./email.js";
 import db from "./db/index.js";
 import env from "../env.js";
 
@@ -52,6 +53,25 @@ export const assertEmailConfigured = async (tx?: Prisma.TransactionClient) => {
     throw new ConflictError(
       "No default email connection is configured",
       "email_not_configured"
+    );
+  }
+};
+
+/**
+ * Refuses a setup link for an address on an SSO-only domain (409
+ * `sso_only_domain`): redeeming one is refused there, since the provider
+ * holds the credential. Writes nothing, so it can come first in a caller's
+ * transaction.
+ */
+export const assertSetupLinkAllowed = async (
+  email: string,
+  tx?: Prisma.TransactionClient
+) => {
+  const domain = await db.identityProviders.findDomain(emailDomain(email), tx);
+  if (domain?.ssoOnly) {
+    throw new ConflictError(
+      "This email's domain signs in only through its identity provider, so a setup link would not work; give the guest a password with initialAccess.password instead",
+      "sso_only_domain"
     );
   }
 };

@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag auth
+import { createSsoOnlyDomain } from "../../../../support/identityProviders.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../definitions/index.js";
 import { GUEST_DEFAULT_ROLES_KEY } from "../../../../../utils/guestRoles.js";
 import { cleanNotifications } from "../../../../support/notifications.js";
@@ -147,6 +148,8 @@ describe("POST /v1/admin/guests", () => {
       status: "active",
       hasPassword: false,
       organizationId: orgId,
+      emailVerified: false,
+      emailVerifiedAt: null,
     });
     const id = res.body.user.id as string;
     const membership = await prisma.organizationMember.findMany({
@@ -611,6 +614,7 @@ describe("POST /v1/admin/guests", () => {
     expect(res.body.user).toMatchObject({
       hasPassword: true,
       passwordChangeRequired: true,
+      emailVerified: false,
     });
   });
 
@@ -637,6 +641,35 @@ describe("POST /v1/admin/guests", () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toBe("email_not_configured");
     expect(await prisma.user.count({ where: { email } })).toBe(0);
+  });
+
+  it("refuses a setup link on an SSO-only domain, writing nothing", async () => {
+    const sso = await createSsoOnlyDomain();
+    try {
+      const email = `guest-${generateUniqueId()}@${sso.domain}`;
+      const res = await invite({ email });
+      expect([res.status, res.body.error]).toEqual([409, "sso_only_domain"]);
+      expect(await prisma.user.count({ where: { email } })).toBe(0);
+
+      const created = await invite({
+        email,
+        initialAccess: { type: "password", password: PASSWORD },
+      });
+      expect(created.status).toBe(201);
+      const id = created.body.user.id as string;
+      await prisma.user.update({ where: { id }, data: { passwordHash: null } });
+      const before = await prisma.user.findUniqueOrThrow({ where: { id } });
+      const again = await invite({ email, expiresIn: 2 * 86_400 });
+      expect([again.status, again.body.error]).toEqual([
+        409,
+        "sso_only_domain",
+      ]);
+      expect(
+        (await prisma.user.findUniqueOrThrow({ where: { id } })).expiresAt
+      ).toEqual(before.expiresAt);
+    } finally {
+      await sso.remove();
+    }
   });
 
   it("returns core's 400 for an invalid body", async () => {

@@ -814,6 +814,12 @@ joined another meanwhile, with their roles and bucket grants there, audited and 
 auto-accept (`account_exists`, as for any user) and cannot link a provider from the account page. All of
 this lifts on promotion.
 
+**SSO-only domains.** A setup link is never redeemable for an address on an SSO-only domain, so one is
+not issued: an invite with `initialAccess.type: "password_setup_link"` (for a new guest, or an existing
+one who has no password) and `POST /v1/admin/guests/:id/password-setup-link` answer `409
+sso_only_domain`, before anything is written. Give such a guest a password with
+`initialAccess.password` instead.
+
 ### The permission floor
 
 Applied in `permissionsInScope` (`utils/db/roles.ts`), the one place permissions are resolved, so it
@@ -880,7 +886,7 @@ endpoints follow the normal rule.
 | `GET /v1/admin/guests/options`                              | `users.guests.write`                                                | The invite form's data without `roles.read`: `{ roles, defaultRoleIds, maxTtlSeconds }`, the roles a guest may be given now                            |
 | `GET /v1/admin/guests/:id`                                  | `users.guests.read`                                                 | One guest (the user plus `organizationId`, unwrapped); `404 not_a_guest` for a non-guest or one out of scope                                           |
 | `PATCH /v1/admin/guests/:id { expiresAt, name? }`           | `users.guests.write`                                                | Extend or shorten (`expiresAt` is a required RFC 3339 date-time, `null` is a 400; a time in the past ends access now); returns the guest. As `GET` for 404 |
-| `POST /v1/admin/guests/:id/password-setup-link { notify? }` | `users.guests.write`; for a guest who has a password, also `users.write` and the "holds every permission" rule | Issue a fresh link; earlier ones die. `200 { url, expiresAt }`; `403 guest_has_password` when the guest has a password and the caller lacks `users.write`; `409 guest_not_usable` for a deactivated or expired guest, `409 email_not_configured` |
+| `POST /v1/admin/guests/:id/password-setup-link { notify? }` | `users.guests.write`; for a guest who has a password, also `users.write` and the "holds every permission" rule | Issue a fresh link; earlier ones die. `200 { url, expiresAt }`; `403 guest_has_password` when the guest has a password and the caller lacks `users.write`; `409 guest_not_usable` for a deactivated or expired guest, `409 sso_only_domain` for an email on an SSO-only domain, `409 email_not_configured` |
 | `POST /v1/admin/users/:id/promote`                          | `users.write` plus the "holds every permission the user holds" rule | `userType = human`, `expiresAt = null`; id, membership, roles, password, grants and history kept; live setup links and forced-change grants retired. Returns the user. `409 password_not_user_set` while the password is one someone else chose. An expired guest can sign in again |
 
 The admin UI's Auth Admin → Guests page lists guests through `GET /v1/admin/guests`, so

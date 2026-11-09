@@ -1,7 +1,6 @@
 import { getGuest, getManagedGuest } from "../../../../../../utils/guests.js";
 import { AppError, ConflictError } from "../../../../../../utils/errors.js";
 import { assertMayResetCredentials } from "../../../users/user/guards.js";
-import { issuePasswordLink } from "../../../../../../utils/userLinks.js";
 import { hasPermission } from "../../../../../../utils/permissions.js";
 import { isUsableAccount } from "../../../../../../utils/users.js";
 import { validateUser } from "../../../../../../utils/auth.js";
@@ -13,6 +12,10 @@ import {
   validateBody,
   validateParams,
 } from "../../../../../../utils/validateReq.js";
+import {
+  assertSetupLinkAllowed,
+  issuePasswordLink,
+} from "../../../../../../utils/userLinks.js";
 
 const guestHasPassword = () =>
   new AppError(
@@ -55,6 +58,7 @@ export const issueGuestPasswordSetupLink = async (
         "guest_not_usable"
       );
     }
+    await assertSetupLinkAllowed(guest.email, tx);
     return issuePasswordLink(tx, {
       userId: id,
       purpose: "setup",

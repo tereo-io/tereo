@@ -37,7 +37,9 @@
       `initialAccess` is a password-setup link (`notify: true` emails it and needs
       a default email connection: `409 email_not_configured`; the link is returned
       as `passwordSetupUrl` either way) or a password, which the guest must change
-      at first sign-in unless `mustChange` is false.
+      at first sign-in unless `mustChange` is false. A setup link is refused for
+      an email on an SSO-only domain, where it could never be redeemed
+      (`409 sso_only_domain`, nothing created): give such a guest a password.
 
       The caller must act in the organization (a member, or a service account
       whose client belongs to it) unless they hold `organizations.write`:
@@ -97,7 +99,7 @@
         description: 'Invalid body, `organization_inactive`, `unknown_role`, `role_not_guest_assignable`, or an expiry out of range'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: '`guest_in_other_organization`, `guest_unassigned`, `user_exists` (with `userId`), `user_not_invitable` (these four only with `users.read`; otherwise `email_unavailable`), or `email_not_configured`'
+        description: '`guest_in_other_organization`, `guest_unassigned`, `user_exists` (with `userId`), `user_not_invitable` (these four only with `users.read`; otherwise `email_unavailable`), `email_not_configured`, or `sso_only_domain`'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: The organization does not exist
@@ -308,7 +310,8 @@
       notification log. Needs `users.guests.write`, in an organization the
       caller acts in (`403 organization_not_permitted`, as for `PATCH`).
       `409 guest_not_usable` for a guest who is deactivated or expired (extend or
-      reactivate them first); the link would be refused on use.
+      reactivate them first), and `409 sso_only_domain` for a guest whose email
+      is on an SSO-only domain; either link would be refused on use.
 
       For a guest who already has a password, the link replaces it and its URL
       comes back to the caller, so it is a credential reset: it also needs
@@ -356,7 +359,7 @@
         description: No such user, or `not_a_guest`
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: '`email_not_configured`, or `guest_not_usable`'
+        description: '`email_not_configured`, `guest_not_usable` or `sso_only_domain`'
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':

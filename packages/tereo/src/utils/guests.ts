@@ -1,6 +1,5 @@
 import type { InviteGuestInput } from "../routes/v1/admin/guests/schemas.js";
 import { actingOrganizationIds, canActInOrganization } from "./users.js";
-import { issuePasswordLink, retirePasswordLinks } from "./userLinks.js";
 import { AppError, BadRequestError, ConflictError } from "./errors.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { PASSWORD_LINK_PURPOSES } from "./db/userLinkTokens.js";
@@ -23,6 +22,11 @@ import {
   getGuestDefaultRoleIds,
   guestAssignableProblemsOf,
 } from "./guestRoles.js";
+import {
+  assertSetupLinkAllowed,
+  issuePasswordLink,
+  retirePasswordLinks,
+} from "./userLinks.js";
 
 type Tx = Prisma.TransactionClient;
 type UserRow = Awaited<ReturnType<typeof db.users.get>>;
@@ -561,6 +565,9 @@ export const inviteGuest = async (
   if (existing) {
     return await extendInvitedGuest(tx, auth, existing, organizationId, input);
   }
+  if (input.initialAccess.type === "password_setup_link") {
+    await assertSetupLinkAllowed(email, tx);
+  }
 
   const roles = input.roles
     ? await resolveGuestRoles(input.roles, tx)
@@ -682,6 +689,12 @@ const extendInvitedGuest = async (
         { details: { userId: existing.id } }
       )
     );
+  }
+  if (
+    existing.passwordHash === null &&
+    input.initialAccess.type === "password_setup_link"
+  ) {
+    await assertSetupLinkAllowed(existing.email, tx);
   }
   const memberOf = await guestOrganizationId(existing.id, tx);
   if (memberOf !== null && memberOf !== organizationId) {
