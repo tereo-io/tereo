@@ -85,6 +85,25 @@ describe("POST /v1/admin/users/:id/email-verification", () => {
     expect(smtp.messages[0].parsed.text).toContain("/verify-email#token=");
   });
 
+  it("the sixth send for one user in an hour → 429; a refusal costs nothing", async () => {
+    const user = await createTestUser();
+    expect((await send(user.id, writer)).status).toBe(409);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerifiedAt: null },
+    });
+
+    for (let i = 0; i < 5; i++) {
+      expect((await send(user.id, writer)).status).toBe(202);
+    }
+    const over = await send(user.id, writer);
+    expect(over.status).toBe(429);
+    expect(over.body.error).toBe("too_many_requests");
+
+    const other = await createTestUser({ emailVerified: false });
+    expect((await send(other.id, writer)).status).toBe(202);
+  });
+
   it("already verified → 409 already_verified", async () => {
     const user = await createTestUser();
     const res = await send(user.id, writer);

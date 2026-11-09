@@ -1,7 +1,6 @@
 import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js";
 import { PASSWORD_LINK_PURPOSES } from "../../../utils/db/userLinkTokens.js";
 import { recordSessionsRevoked } from "../../../utils/sessionEvents.js";
-import { passwordSetupFailure } from "../../../middleware/rateLimit.js";
 import { hashPassword, hashFlowToken } from "../../../utils/crypto.js";
 import { canResetPassword } from "../../../utils/passwordReset.js";
 import { markEmailVerified } from "../../../utils/userLinks.js";
@@ -11,6 +10,7 @@ import { validateBody } from "../../../utils/validateReq.js";
 import { isUsableAccount } from "../../../utils/users.js";
 import { NotFoundError } from "../../../utils/errors.js";
 import { emailDomain } from "../../../utils/email.js";
+import { logger } from "../../../utils/logger.js";
 import { SetPasswordSchema } from "./schemas.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
@@ -18,6 +18,10 @@ import {
   UserType,
   type Prisma,
 } from "../../../../prisma/generated/client/index.js";
+import {
+  loginAccountBackoff,
+  passwordSetupFailure,
+} from "../../../middleware/rateLimit.js";
 
 type PasswordLinkPurpose = (typeof PASSWORD_LINK_PURPOSES)[number];
 
@@ -144,6 +148,16 @@ export const setPassword = async (req: Request, res: Response) => {
       await recordRevoked(tx, sessionIds, ssoSessionIds);
     }
   );
+
+  // A reset proved the inbox: failed sign-ins before it, the usual way into
+  // "Forgot password", must not delay the first one with the new password.
+  if (purpose === "reset") {
+    await loginAccountBackoff
+      .reset(req, user.email)
+      .catch((err) =>
+        logger.warn({ err }, "Could not clear the login backoff after a reset")
+      );
+  }
 
   res.status(204).end();
 };

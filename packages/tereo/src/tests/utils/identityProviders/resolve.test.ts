@@ -154,6 +154,19 @@ describe("resolveLoginIdentity", () => {
     expect(events).toEqual(["auth.user.identity-linked"]);
   });
 
+  it("claiming an invite verifies the address only for a usable account", async () => {
+    const provider = await makeProvider();
+    const claim = async (isActive: boolean) => {
+      const user = await createTestUser({ emailVerified: false, isActive });
+      await invite(user.id, provider.id);
+      await resolveLoginIdentity(provider, identity({ email: user.email }));
+      return prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    };
+
+    expect((await claim(true)).emailVerifiedAt).not.toBeNull();
+    expect((await claim(false)).emailVerifiedAt).toBeNull();
+  });
+
   it("matches an invite whatever the case of the provider's email", async () => {
     const provider = await makeProvider();
     const local = `alice-${unique()}`;

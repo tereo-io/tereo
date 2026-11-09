@@ -1053,7 +1053,8 @@ lifetime), so the link opened in another tab of the same browser still offers Si
 while the admin UI's own sign-in completes only in the tab that started it, which holds its PKCE
 verifier. The email ("Reset your password") is a sensitive notification. Redeeming
 it is `POST /v1/password-setup` ([Setup link](#setup-link)): it sets the password, marks the address
-verified, ends the other sessions and clears pending forced-password-change grants. A link whose
+verified, ends the other sessions, clears pending forced-password-change grants and clears the
+account's login backoff (the failed sign-ins that usually come before a reset). A link whose
 user has since moved to an SSO-only domain answers the uniform `404`.
 
 **Limits.** Reset requests are limited per hour, each limit counted on every request whether or not
@@ -1091,8 +1092,8 @@ An address becomes verified when:
 - the first admin completes setup (`POST /v1/setup`, `via: setup`);
 - a **non-forced** provider sign-in links to the account, an invite is claimed, autoAccept applies or
   the user links an account from the account page, when the provider vouches for the same address
-  (`email_verified` from the provider). A sign-in of a deactivated or expired account verifies
-  nothing.
+  (`email_verified` from the provider). A sign-in or invite claim of a deactivated or expired
+  account verifies nothing.
 
 A **forced** provider link (an SSO-only domain's first sign-in) does **not** mark the address
 verified.
@@ -1104,7 +1105,8 @@ is sensitive. They are sent by:
 
 - `POST /v1/account/email-verification` (own address; 1 per minute and 5 per hour per user, `429`);
 - `POST /v1/admin/users/:id/email-verification` (`users.write`; the link is never returned, so an
-  admin cannot confirm for the user);
+  admin cannot confirm for the user; 5 per hour per target user, whoever sends them, `429`, since
+  each send retires the link sent before);
 - an admin changing a user's email (`PATCH /v1/admin/users/:id`), which also marks the new address
   unverified. No link is sent when the user is inactive, expired or deactivated in the same
   request, or no email connection exists; the update succeeds either way.

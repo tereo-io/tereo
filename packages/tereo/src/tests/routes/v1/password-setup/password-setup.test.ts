@@ -7,10 +7,12 @@ import { ensureTestOrganization } from "../../../support/principals.js";
 import { createGuest, issue } from "../../../support/passwordSetup.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { SYSTEM_USER_ID } from "../../../../definitions/index.js";
+import { getRedisClient } from "../../../../utils/redis.js";
+import { normalizeEmail } from "../../../../utils/email.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
+import { createHash, randomBytes } from "node:crypto";
 import { fetchJson } from "../../../support/http.js";
-import { randomBytes } from "node:crypto";
 import axios from "axios";
 import {
   getAccessTokenForUser,
@@ -291,6 +293,29 @@ describe("password setup", () => {
 
       const reset = await issue(user.id, false, "reset");
       expect((await setPassword(reset)).status).toBe(HTTP_STATUS.NO_CONTENT);
+      const tokens = await loginAndExchange(
+        client,
+        { email: user.email, plainPassword: NEW_PASSWORD },
+        REDIRECT_URI,
+        SCOPE
+      );
+      expect(tokens.access_token).toBeTruthy();
+    });
+
+    it("clears the account's login backoff", async () => {
+      const user = await createTestUser();
+      const backoffKey = `rl:login:account:${createHash("sha256")
+        .update(normalizeEmail(user.email))
+        .digest("hex")}`;
+      await getRedisClient().hset(backoffKey, {
+        failures: 20,
+        next: Date.now() + 15 * 60 * 1000,
+      });
+
+      const reset = await issue(user.id, false, "reset");
+      expect((await setPassword(reset)).status).toBe(HTTP_STATUS.NO_CONTENT);
+
+      expect(await getRedisClient().exists(backoffKey)).toBe(0);
       const tokens = await loginAndExchange(
         client,
         { email: user.email, plainPassword: NEW_PASSWORD },

@@ -114,6 +114,8 @@
         description: '`already_verified`, `user_not_verifiable` or `email_not_configured`'
       '429':
         $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
       '500':
         $ref: '../../components/responses.yaml#/ServerErrorResponse'
 
@@ -127,6 +129,9 @@
       the response, so an admin cannot confirm an address for the user. Needs
       `users.write`. `409 already_verified`, `409 user_not_verifiable` (service
       accounts, the system user, deactivated users, expired guests) or `409 email_not_configured`.
+      Limited to 5 per hour per target user, whoever sends them (`429`): each
+      send retires the link sent before; a refusal that sends nothing does not
+      use a slot.
       A change of a user's email through `PATCH /v1/admin/users/{id}` marks
       the new address unverified and sends this link itself, unless the user is
       inactive or expired (or deactivated in the same request) or no email
@@ -157,6 +162,8 @@
         description: '`already_verified`, `user_not_verifiable` or `email_not_configured`'
       '429':
         $ref: '../../components/responses.yaml#/RateLimitResponse'
+      '503':
+        $ref: '../../components/responses.yaml#/ServiceUnavailableResponse'
       '500':
         $ref: '../../components/responses.yaml#/ServerErrorResponse'
 

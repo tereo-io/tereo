@@ -252,3 +252,14 @@ export const accountVerifyResendHour = createFailureLimiter({
   errorDescription: "Too many verification emails. Try again later.",
   getKey: (_req, userId) => `user:${userId}`,
 });
+
+// Verification emails an admin sends a user, per target user: each one also
+// retires the link the user was sent before.
+export const adminVerifySendTarget = createFailureLimiter({
+  keyPrefix: "rl:verify-send:admin",
+  points: 5,
+  duration: 3600,
+  errorDescription:
+    "Too many verification emails for this user. Try again later.",
+  getKey: (_req, userId) => `user:${userId}`,
+});
