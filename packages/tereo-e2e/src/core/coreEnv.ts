@@ -34,4 +34,8 @@ export const coreEnv = (): NodeJS.ProcessEnv => ({
   FILE_SERVICE_TEMP_PATH: path.join(e2e.storagePath, "temp"),
 
   SETUP_TOKEN: e2e.setupToken,
+
+  // The mail catcher is plaintext SMTP on localhost.
+  NOTIFICATIONS_ALLOW_PRIVATE_HOSTS: "true",
+  ALLOW_PLAINTEXT_SMTP: "true",
 });

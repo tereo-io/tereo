@@ -395,7 +395,8 @@ info:
       has it): 5 attempts, then a delay before each further attempt that starts at 1 second and
       doubles with each failure, up to 15 minutes. An attempt during the delay — even with the
       right password — gets `429` with `Retry-After`; it does not lengthen the delay. A correct
-      password clears the count, and an account left alone for a day starts over. A browser
+      password, or a redeemed password reset link, clears the count, and an account left alone
+      for a day starts over. A browser
       that has completed a login as the account (2FA included) holds a known-device cookie
       (`tereo_known_device`, 90 days) that lets its attempts through the account's
       delay, so someone keeping the account in backoff does not lock its owner out. Its wrong
@@ -891,6 +892,10 @@ tags:
     description: Admin endpoints for guest users — temporary single-organization logins that invite, extend, expire and promote
   - name: Password Setup
     description: Public pages behind a password setup link — inspect the link and set the first password (the one-time token is the credential)
+  - name: Password Reset
+    description: Public password reset — ask for a reset link by email; the link is redeemed on the password setup routes
+  - name: Email Verification
+    description: Confirm an email address from a link, and send the link to a user or to oneself
   - name: Admin - Settings
     description: Admin endpoints for system settings
   - name: Admin - Services
@@ -4763,6 +4768,11 @@ paths:
         like `DELETE /v1/admin/users/{id}/sessions/all`: a caller resetting their
         own password keeps the session they act from.
 
+        Changing the `email` marks the new address unverified, retires the
+        user's live reset and verify links, and emails a verify link to the new
+        address when the user is active and unexpired and a default email
+        connection exists (without one the update still succeeds).
+
         Setting a `password`, changing the `email` or deactivating also retires
         the user's live password setup link and pending forced-change grants. A
         password set here is the admin's choice: a guest so set cannot be
@@ -5554,7 +5564,9 @@ paths:
           requested value, which lifts the guest's refresh sessions capped at the
           old expiry. `roles` are added (none removed; omitted adds none, the
           defaults apply only to a new guest). The name and password are left
-          alone; `initialAccess` applies only if they have never set a password.
+          alone; `initialAccess` applies only if they have no password and,
+          on an SSO-only domain, no linked identity (the domain's forced link
+          removes the password).
           `200`, `created: false`, with `passwordSetupUrl` when a link was
           issued.
         - **A guest in another organization**: `409 guest_in_other_organization`.
@@ -5569,7 +5581,9 @@ paths:
         `initialAccess` is a password-setup link (`notify: true` emails it and needs
         a default email connection: `409 email_not_configured`; the link is returned
         as `passwordSetupUrl` either way) or a password, which the guest must change
-        at first sign-in unless `mustChange` is false.
+        at first sign-in unless `mustChange` is false. A setup link is refused for
+        an email on an SSO-only domain, where it could never be redeemed
+        (`409 sso_only_domain`, nothing created): give such a guest a password.
 
         The caller must act in the organization (a member, or a service account
         whose client belongs to it) unless they hold `organizations.write`:
@@ -5633,7 +5647,7 @@ paths:
           description: The organization does not exist
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: '`guest_in_other_organization`, `guest_unassigned`, `user_exists` (with `userId`), `user_not_invitable` (these four only with `users.read`; otherwise `email_unavailable`), or `email_not_configured`'
+          description: '`guest_in_other_organization`, `guest_unassigned`, `user_exists` (with `userId`), `user_not_invitable` (these four only with `users.read`; otherwise `email_unavailable`), `email_not_configured`, or `sso_only_domain`'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5842,7 +5856,8 @@ paths:
         notification log. Needs `users.guests.write`, in an organization the
         caller acts in (`403 organization_not_permitted`, as for `PATCH`).
         `409 guest_not_usable` for a guest who is deactivated or expired (extend or
-        reactivate them first); the link would be refused on use.
+        reactivate them first), and `409 sso_only_domain` for a guest whose email
+        is on an SSO-only domain; either link would be refused on use.
 
         For a guest who already has a password, the link replaces it and its URL
         comes back to the caller, so it is a credential reset: it also needs
@@ -5891,22 +5906,274 @@ paths:
           description: No such user, or `not_a_guest`
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: '`email_not_configured`, or `guest_not_usable`'
+          description: '`email_not_configured`, `guest_not_usable` or `sso_only_domain`'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/password-reset:
+    post:
+      tags:
+        - Password Reset
+      summary: Request a password reset email
+      description: |
+        Asks for a reset link to be emailed to an address. Public. The answer is
+        always `202` with an empty body, sent before any work is done (the reset
+        is processed after the response), so neither the status, the timing nor
+        an error reveals whether the address has an account. A link is sent only
+        when an account exists for the address, is active and unexpired, is a
+        human or guest (not a service account or the system user), is not on an
+        SSO-only domain, and a default email connection exists. The link goes to
+        `/set-password#token=...`, works once, replaces any earlier setup or
+        reset link and expires after `PASSWORD_RESET_TTL_SECONDS` (1 hour by
+        default); the email is a sensitive notification. A `client_id` that
+        names a login client is carried in the link so the page shows that
+        client's branding; any other value is ignored.
+
+        Requests are limited per hour: 10 per IP (for any addresses), 3 per
+        address from one IP, and 10 per address from all IPs together. Each is
+        counted for every request whether or not the address has an account, and
+        a request over any of them is still `202` but sends nothing. One source
+        can therefore spend at most 3 of an address's 10; using up a victim's
+        allowance and delaying their genuine reset for the hour takes requests
+        from at least four IPs.
+
+        Redeeming the link (`POST /v1/password-setup`) sets the password, marks
+        the address verified, clears pending forced-password-change grants and
+        ends the user's other sessions. An audit entry is written and
+        `auth.user.password-reset-requested` is emitted when a link is issued.
+      operationId: requestPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '202':
+          description: Accepted, whether or not a link was sent
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/password-reset/status:
+    get:
+      tags:
+        - Password Reset
+      summary: Whether password reset is available
+      description: |
+        Public. `enabled` is true when a default email connection exists, so the
+        sign-in page knows whether to offer "Forgot password".
+      operationId: getPasswordResetStatus
+      security: []
+      responses:
+        '200':
+          description: Availability
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordResetStatusResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/email-verification/inspect:
+    post:
+      tags:
+        - Email Verification
+      summary: Inspect an email verification link
+      description: |
+        The address a verify link confirms and when it expires. Public: the token
+        from the link's URL fragment is the credential. Consumes nothing. Every
+        miss (unknown, used or expired token, a user who cannot sign in, or a
+        link for an address the user has since left) is the same `404`, counted
+        against the caller's IP (`429` past 10 misses per 900 seconds).
+      operationId: inspectEmailVerification
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailVerificationTokenRequest'
+      responses:
+        '200':
+          description: The link's address and expiry
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailVerificationInspectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/email-verification:
+    post:
+      tags:
+        - Email Verification
+      summary: Confirm an email address from a link
+      description: |
+        Marks the address verified and consumes the token (of two concurrent
+        requests with one token, one succeeds). Ends no session. Public, with
+        the same uniform `404` and per-IP limit as inspect. An audit entry is
+        written and `auth.user.email-verified` is emitted (`via: link`).
+      operationId: verifyEmail
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailVerificationTokenRequest'
+      responses:
+        '204':
+          description: Address verified
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/account/email-verification:
+    post:
+      tags:
+        - Email Verification
+      summary: Send myself a verification email
+      description: |
+        Emails the signed-in user a link confirming their address, replacing any
+        earlier verify link (valid `EMAIL_VERIFICATION_TTL_SECONDS`, 3 days by
+        default; sensitive notification). Limited to 1 per minute and 5 per hour
+        per user (`429`); a refusal that sends nothing does not use a slot.
+        `409 already_verified`, `409 user_not_verifiable` (service accounts, the
+        system user, deactivated users and expired guests), `409 email_not_configured` without a
+        default email connection.
+      operationId: sendMyEmailVerification
+      security:
+        - BearerAuth: []
+      responses:
+        '202':
+          description: Accepted; the email is queued
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: '`already_verified`, `user_not_verifiable` or `email_not_configured`'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/admin/users/{id}/email-verification:
+    post:
+      tags:
+        - Admin - Users
+      summary: Send a user a verification email
+      description: |
+        Emails the user a link confirming their address. The link is never in
+        the response, so an admin cannot confirm an address for the user. Needs
+        `users.write`. `409 already_verified`, `409 user_not_verifiable` (service
+        accounts, the system user, deactivated users, expired guests) or `409 email_not_configured`.
+        Limited to 5 per hour per target user, whoever sends them (`429`): each
+        send retires the link sent before; a refusal that sends nothing does not
+        use a slot.
+        A change of a user's email through `PATCH /v1/admin/users/{id}` marks
+        the new address unverified and sends this link itself, unless the user is
+        inactive or expired (or deactivated in the same request) or no email
+        connection exists.
+      operationId: sendAdminUserEmailVerification
+      security:
+        - BearerAuth:
+            - users.write
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      responses:
+        '202':
+          description: Accepted; the email is queued
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+          description: '`already_verified`, `user_not_verifiable` or `email_not_configured`'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
   /v1/password-setup/inspect:
     post:
       tags:
         - Password Setup
-      summary: Inspect a password setup link
+      summary: Inspect a password setup or reset link
       description: |
-        Who a setup link is for and when it expires, so the page can greet
+        Who a setup or reset link is for and when it expires, so the page can greet
         them. Public: the token from the link's URL fragment is the credential.
         Consumes nothing. Every
         miss, whether the token is unknown, used or expired, or its user is no
-        longer usable or no longer a guest, is the same `404`, and counts against the caller's IP
+        longer reachable by the link (deactivated or expired; for a setup link, no longer a guest;
+        for either, an email address now on an SSO-only domain), is the same `404`, and counts against the caller's IP
         (`429` past the limit, `503` when the limiter cannot reach Redis).
       operationId: inspectPasswordSetup
       security: []
@@ -5934,7 +6201,7 @@ paths:
           $ref: '#/components/responses/BadRequestResponse'
         '404':
           $ref: '#/components/responses/NotFoundResponse'
-          description: Unknown, used or expired token, or a user no longer usable or no longer a guest
+          description: Unknown, used or expired token, or a user the link no longer reaches
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -5945,17 +6212,22 @@ paths:
     post:
       tags:
         - Password Setup
-      summary: Set a password from a setup link
+      summary: Set a password from a setup or reset link
       description: |
         Sets the user's password, consumes the token, clears
-        `passwordChangeRequired` and ends the user's other sessions, in one
-        transaction. The token works once: of two concurrent requests with it,
+        `passwordChangeRequired` and any pending forced-password-change grants,
+        and ends the user's other sessions, in one transaction. A reset link
+        also marks the address verified, since only the inbox received it; a
+        setup link does not, as its URL is returned to the inviter. The token works once: of two concurrent requests with it,
         one succeeds. Public, with the same uniform `404` and per-IP limit as
         `POST /v1/password-setup/inspect`. The password follows the password
         rules (`400 invalid_request`).
 
-        An audit log entry is created and `auth.user.password-set` is emitted
-        (never carrying the password). The UI then offers a sign-in at `/`.
+        The same route redeems a reset link (`POST /v1/password-reset`), which
+        also reaches human users, not only guests. Both link kinds are refused
+        (the uniform `404`) once the user's email domain is SSO-only. An audit
+        log entry is created and `auth.user.password-set` is emitted, with
+        `via` set to `setup` or `reset` (never carrying the password). The UI then offers a sign-in at `/`.
       operationId: setPasswordFromLink
       security: []
       requestBody:
@@ -5978,7 +6250,7 @@ paths:
           $ref: '#/components/responses/BadRequestResponse'
         '404':
           $ref: '#/components/responses/NotFoundResponse'
-          description: Unknown, used or expired token, or a user no longer usable or no longer a guest
+          description: Unknown, used or expired token, or a user the link no longer reaches
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -18901,7 +19173,7 @@ webhooks:
       tags:
         - Password Setup
       summary: Password set from a link
-      description: Fired when a user sets their password from a setup link. Never carries the password.
+      description: Fired when a user sets their password from a setup or reset link. Never carries the password.
       operationId: webhookUserPasswordSet
       security: []
       parameters:
@@ -18933,6 +19205,145 @@ webhooks:
                           format: uuid
                         email:
                           type: string
+                        via:
+                          type: string
+                          enum:
+                            - setup
+                            - reset
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.user.password-reset-requested:
+    post:
+      tags:
+        - Password Reset
+      summary: Password reset requested
+      description: Fired when a password reset link is issued for a user. The link itself is never in the event.
+      operationId: webhookUserPasswordResetRequested
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.user.password-reset-requested
+                    entityType:
+                      const: User
+                    data:
+                      type: object
+                      required:
+                        - userId
+                        - email
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        email:
+                          type: string
+                        expiresAt:
+                          type: string
+                          format: date-time
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.user.email-verification-sent:
+    post:
+      tags:
+        - Email Verification
+      summary: Email verification sent
+      description: Fired when a verification link is emailed to a user. The link itself is never in the event.
+      operationId: webhookUserEmailVerificationSent
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.user.email-verification-sent
+                    entityType:
+                      const: User
+                    data:
+                      type: object
+                      required:
+                        - userId
+                        - email
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        email:
+                          type: string
+                        expiresAt:
+                          type: string
+                          format: date-time
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.user.email-verified:
+    post:
+      tags:
+        - Email Verification
+      summary: Email verified
+      description: Fired when a user's address is marked verified.
+      operationId: webhookUserEmailVerified
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.user.email-verified
+                    entityType:
+                      const: User
+                    data:
+                      type: object
+                      required:
+                        - userId
+                        - email
+                        - via
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        email:
+                          type: string
+                        via:
+                          type: string
+                          enum:
+                            - link
+                            - password_link
+                            - provider
+                            - setup
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -25024,7 +25435,7 @@ components:
           description: With the `email` scope
         email_verified:
           type: boolean
-          description: With the `email` scope
+          description: With the `email` scope. True once the address has been proven (a link sent to it, or a provider that vouches for it), not merely set.
     RevokeRequest:
       type: object
       properties:
@@ -25058,6 +25469,7 @@ components:
           format: email
         email_verified:
           type: boolean
+          description: True once the address has been proven (a link sent to it, or a provider that vouches for it), not merely set.
         picture:
           type: string
           format: uri
@@ -25430,6 +25842,8 @@ components:
         - name
         - isActive
         - hasPassword
+        - emailVerified
+        - emailVerifiedAt
         - createdAt
         - updatedAt
         - photoUrl
@@ -25452,6 +25866,15 @@ components:
         hasPassword:
           type: boolean
           description: Whether the account has a password. False for an account created without one, which signs in through a linked identity provider only.
+        emailVerified:
+          type: boolean
+          description: Whether the address has been proven, by a link sent to it or by an identity provider that vouches for it. It is the `email_verified` claim.
+        emailVerifiedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the address was proven; null while it has not been.
         createdAt:
           type: string
           format: date-time
@@ -25611,6 +26034,8 @@ components:
         - status
         - passwordChangeRequired
         - hasPassword
+        - emailVerified
+        - emailVerifiedAt
         - createdAt
         - updatedAt
       properties:
@@ -25651,6 +26076,15 @@ components:
         hasPassword:
           type: boolean
           description: Whether the user has a password. False for a user created without one, who can sign in only through a linked identity provider (or an invite's first sign-in).
+        emailVerified:
+          type: boolean
+          description: Whether the address has been proven, by a link sent to it or by an identity provider that vouches for it. It is the `email_verified` claim.
+        emailVerifiedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the address was proven; null while it has not been.
         createdAt:
           type: string
           format: date-time
@@ -32708,6 +33142,47 @@ components:
         expiresAt:
           type: string
           format: date-time
+    PasswordResetRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+        client_id:
+          type: string
+          maxLength: 255
+          description: A login client the link's page returns the user to. Ignored unless a client with this ID exists.
+    PasswordResetStatusResponse:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+          description: Whether a default email connection exists, so a reset email can be sent.
+    EmailVerificationTokenRequest:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          maxLength: 128
+    EmailVerificationInspectResponse:
+      type: object
+      required:
+        - email
+        - expiresAt
+      properties:
+        email:
+          type: string
+          format: email
+          description: The address the link confirms.
+        expiresAt:
+          type: string
+          format: date-time
     PasswordSetupInspectRequest:
       type: object
       required:
@@ -32722,6 +33197,7 @@ components:
         - email
         - name
         - expiresAt
+        - purpose
       properties:
         email:
           type: string
@@ -32734,6 +33210,12 @@ components:
           type: string
           format: date-time
           description: When the link expires.
+        purpose:
+          type: string
+          enum:
+            - setup
+            - reset
+          description: A guest's setup link or a password reset link.
     PasswordSetupRequest:
       type: object
       required:
@@ -34191,6 +34673,8 @@ x-tagGroups:
       - Admin - Users
       - Admin - Guests
       - Password Setup
+      - Password Reset
+      - Email Verification
       - Admin - User Identities
       - Admin - User Permissions
       - Admin - User Sessions

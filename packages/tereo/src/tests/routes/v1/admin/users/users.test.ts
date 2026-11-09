@@ -224,6 +224,19 @@ describe("POST /v1/admin/users", () => {
     expect(data.name).toBe(newUserData.name);
     expect(data.password).toBeUndefined(); // Should not return password
     expect(data.passwordHash).toBeUndefined(); // Should not return hash
+    // An admin chose the address: nothing has proven it yet.
+    expect(data.emailVerified).toBe(false);
+    expect(data.emailVerifiedAt).toBeNull();
+    const token = await getAccessTokenForUser(
+      {
+        id: data.id!,
+        email: newUserData.email,
+        plainPassword: newUserData.password,
+      },
+      await createTestClient()
+    );
+    const info = await fetchJson("GET", `${BASE_URL}/oauth/userinfo`, token);
+    expect(info.body.email_verified).toBe(false);
   });
 
   it("should return 409 conflict for duplicate email", async () => {

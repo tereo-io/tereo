@@ -19,6 +19,22 @@ export const getUser = async (userId: string): Promise<AuthServiceUser> => {
   return res.data;
 };
 
+/** Sends the user a link to confirm their email address. */
+export const sendUserVerificationEmail = async (
+  userId: string
+): Promise<void> => {
+  await tryHandleRequest(
+    {
+      clientName: CORE_CLIENT,
+      requestName: "core.auth.sendVerificationEmail",
+      method: "POST",
+      url: urlPath`/v1/admin/users/${userId}/email-verification`,
+    },
+    "AS_0005",
+    `Failed to send a verification email to user ${userId}`
+  );
+};
+
 /**
  * The users among `userIds` (at most 100, all UUIDs) in one request. Ids
  * with no user are left out.

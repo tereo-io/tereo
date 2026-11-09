@@ -222,7 +222,7 @@ const adminUsers = (method: string, path: string, body?: unknown) =>
 const linkFlow = async (
   token: string,
   target: Provider,
-  claims: { sub: string; email?: string }
+  claims: { sub: string; email?: string; email_verified?: boolean }
 ) => {
   const start = await account(token, "POST", "/identities", {
     provider: target.slug,
@@ -301,6 +301,47 @@ describe("linking from the account page", () => {
         lastLoginAt: null,
       },
     ]);
+  });
+
+  it("verifies an unverified user when the provider vouches for their own email", async () => {
+    const user = await createTestUser({ emailVerified: false });
+    const token = await freshToken(user);
+
+    const callback = await linkFlow(token, provider, {
+      sub: subject(),
+      email: user.email,
+      email_verified: true,
+    });
+    expectAccountRedirect(callback, { linked: provider.slug });
+
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+    });
+    expect(after.emailVerifiedAt).not.toBeNull();
+    const entry = await prisma.auditLogEntry.findFirstOrThrow({
+      where: {
+        entityId: user.id,
+        metadata: { path: ["action"], equals: "email_verified" },
+      },
+    });
+    expect(entry.metadata).toMatchObject({ via: "provider" });
+  });
+
+  it("leaves the user unverified when the provider does not vouch for the email", async () => {
+    const user = await createTestUser({ emailVerified: false });
+    const token = await freshToken(user);
+
+    const callback = await linkFlow(token, provider, {
+      sub: subject(),
+      email: user.email,
+      email_verified: false,
+    });
+    expectAccountRedirect(callback, { linked: provider.slug });
+
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+    });
+    expect(after.emailVerifiedAt).toBeNull();
   });
 
   it("refuses a login older than 10 minutes with 403 reauth_required", async () => {

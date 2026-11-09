@@ -196,6 +196,11 @@
       like `DELETE /v1/admin/users/{id}/sessions/all`: a caller resetting their
       own password keeps the session they act from.
 
+      Changing the `email` marks the new address unverified, retires the
+      user's live reset and verify links, and emails a verify link to the new
+      address when the user is active and unexpired and a default email
+      connection exists (without one the update still succeeds).
+
       Setting a `password`, changing the `email` or deactivating also retires
       the user's live password setup link and pending forced-change grants. A
       password set here is the admin's choice: a guest so set cannot be

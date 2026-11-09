@@ -1,6 +1,12 @@
-import { expect, test as setup } from "@playwright/test";
+import { adminAccessToken } from "../fixtures/index.js";
+import { CoreApi } from "../fixtures/coreApi.js";
 import { signIn } from "../utils/signIn.js";
 import { e2e } from "../config.js";
+import {
+  expect,
+  request as playwrightRequest,
+  test as setup,
+} from "@playwright/test";
 
 // Runs once per run, before every other spec, on the database the webServer
 // just recreated: setup is pending, so every path leads to /setup.
@@ -52,5 +58,14 @@ setup(
     // The first section the admin can see.
     await expect(page).toHaveURL(/\/auth-admin\/dashboard$/);
     await page.context().storageState({ path: e2e.adminStatePath });
+
+    // The default email connection turns on password reset and email
+    // verification; its mail lands in the mail catcher (src/core/mailCatcher.ts).
+    const context = await playwrightRequest.newContext({
+      baseURL: `${e2e.baseURL}/v1/`,
+      extraHTTPHeaders: { Authorization: `Bearer ${adminAccessToken()}` },
+    });
+    await new CoreApi(context).ensureEmailConnection(e2e.smtpPort);
+    await context.dispose();
   }
 );

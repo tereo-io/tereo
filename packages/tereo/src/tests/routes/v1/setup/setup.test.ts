@@ -221,6 +221,24 @@ describe("GET /v1/setup/status and POST /v1/setup", () => {
       });
     });
 
+    it("the first admin from setup is verified", async () => {
+      const body = setupBody(await issueSetupToken());
+
+      expect((await request(body)).status).toBe(HTTP_STATUS.CREATED);
+
+      const user = await prisma.user.findUniqueOrThrow({
+        where: { email: body.admin.email },
+      });
+      expect(user.emailVerifiedAt).not.toBeNull();
+      const entry = await prisma.auditLogEntry.findFirstOrThrow({
+        where: { entityId: user.id, action: "UPDATE", entityType: "User" },
+      });
+      expect(entry.metadata).toMatchObject({
+        action: "email_verified",
+        via: "setup",
+      });
+    });
+
     it("lets the new admin sign in and use the admin API", async () => {
       const body = setupBody(await issueSetupToken());
       expect((await request(body)).status).toBe(HTTP_STATUS.CREATED);

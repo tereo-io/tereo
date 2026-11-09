@@ -5,6 +5,8 @@ export interface PasswordSetupDetails {
   email: string;
   name: string | null;
   expiresAt: string;
+  /** `reset` for a link the user asked for; `setup` for an invitation. */
+  purpose: "setup" | "reset";
 }
 
 /** Inspecting consumes nothing, so it is safe to repeat; any failure reads as an unusable link. */

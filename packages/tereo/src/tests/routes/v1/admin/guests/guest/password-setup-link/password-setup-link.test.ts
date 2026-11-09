@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag auth
+import { createSsoOnlyDomain } from "../../../../../../support/identityProviders.js";
 import { getAccessTokenForUser } from "../../../../../../support/auth/login.js";
 import { createTestClient } from "../../../../../../support/auth/clients.js";
 import { createTestGuest } from "../../../../../../support/auth/guests.js";
@@ -53,7 +54,7 @@ describe("POST /v1/admin/guests/:id/password-setup-link", () => {
       Date.now()
     );
     expect(
-      await prisma.passwordSetupToken.count({
+      await prisma.userLinkToken.count({
         where: { userId: user.id, usedAt: null },
       })
     ).toBe(1);
@@ -71,8 +72,29 @@ describe("POST /v1/admin/guests/:id/password-setup-link", () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toBe("guest_not_usable");
     expect(
-      await prisma.passwordSetupToken.count({ where: { userId: user.id } })
+      await prisma.userLinkToken.count({ where: { userId: user.id } })
     ).toBe(0);
+  });
+
+  it("refuses a guest on an SSO-only domain with 409 sso_only_domain", async () => {
+    const sso = await createSsoOnlyDomain();
+    try {
+      const { user } = await createTestGuest({ organizationId: orgId });
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { email: `guest-${randomUUID()}@${sso.domain}` },
+      });
+
+      const res = await issue(user.id);
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("sso_only_domain");
+      expect(
+        await prisma.userLinkToken.count({ where: { userId: user.id } })
+      ).toBe(0);
+    } finally {
+      await sso.remove();
+    }
   });
 
   it("returns 404 not_a_guest for a regular user", async () => {
@@ -98,7 +120,7 @@ describe("password-setup-link outside the caller's organizations", () => {
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("not_a_guest");
     expect(
-      await prisma.passwordSetupToken.count({ where: { userId: user.id } })
+      await prisma.userLinkToken.count({ where: { userId: user.id } })
     ).toBe(0);
   });
 });
@@ -132,7 +154,7 @@ describe("password-setup-link for a guest who has a password", () => {
     expect(res.body.error).toBe("guest_has_password");
     expect(res.body.url).toBeUndefined();
     expect(
-      await prisma.passwordSetupToken.count({ where: { userId: user.id } })
+      await prisma.userLinkToken.count({ where: { userId: user.id } })
     ).toBe(0);
   });
 
@@ -174,7 +196,7 @@ describe("password-setup-link for a guest who has a password", () => {
 
     expect(res.status).toBe(403);
     expect(
-      await prisma.passwordSetupToken.count({ where: { userId: user.id } })
+      await prisma.userLinkToken.count({ where: { userId: user.id } })
     ).toBe(0);
   });
 

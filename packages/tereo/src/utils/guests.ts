@@ -2,6 +2,7 @@ import type { InviteGuestInput } from "../routes/v1/admin/guests/schemas.js";
 import { actingOrganizationIds, canActInOrganization } from "./users.js";
 import { AppError, BadRequestError, ConflictError } from "./errors.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
+import { PASSWORD_LINK_PURPOSES } from "./db/userLinkTokens.js";
 import { revokeOrganizationGrantsTx } from "./bucketGrants.js";
 import type { AuthContext } from "../middleware/auth.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
@@ -18,13 +19,16 @@ import {
   UserType,
 } from "../../prisma/generated/client/index.js";
 import {
-  issuePasswordSetupLink,
-  retirePasswordLinks,
-} from "./passwordSetup.js";
-import {
   getGuestDefaultRoleIds,
   guestAssignableProblemsOf,
 } from "./guestRoles.js";
+import {
+  assertSetupLinkAllowed,
+  isSsoOnlyEmail,
+  issuePasswordLink,
+  retirePasswordLinks,
+  ssoOnlySetupLinkRefused,
+} from "./userLinks.js";
 
 type Tx = Prisma.TransactionClient;
 type UserRow = Awaited<ReturnType<typeof db.users.get>>;
@@ -510,11 +514,16 @@ const applyInitialAccess = async (
       },
     });
     // A link from an earlier invite would replace the password just set.
-    await db.passwordSetupTokens.invalidateForUser(user.id, tx);
+    await db.userLinkTokens.invalidateForUser(
+      user.id,
+      PASSWORD_LINK_PURPOSES,
+      tx
+    );
     return { user: updated };
   }
-  const { url } = await issuePasswordSetupLink(tx, {
+  const { url } = await issuePasswordLink(tx, {
     userId: user.id,
+    purpose: "setup",
     createdBy: auth.userId,
     notify: access.notify,
   });
@@ -557,6 +566,9 @@ export const inviteGuest = async (
   const existing = await db.users.getByEmail(email, tx);
   if (existing) {
     return await extendInvitedGuest(tx, auth, existing, organizationId, input);
+  }
+  if (input.initialAccess.type === "password_setup_link") {
+    await assertSetupLinkAllowed(email, tx);
   }
 
   const roles = input.roles
@@ -693,16 +705,29 @@ const extendInvitedGuest = async (
   // A guest left with no organization (removed, or theirs archived) joins
   // the one inviting them. That hands the inviter the guest's account, so it
   // is for whoever acts in every organization.
-  if (memberOf === null) {
-    if (!managesAllGuests(auth)) {
-      throw refuseEmail(
-        auth,
-        new ConflictError(
-          "This guest belongs to no organization; only an administrator of every organization can invite them into one",
-          "guest_unassigned"
-        )
-      );
+  if (memberOf === null && !managesAllGuests(auth)) {
+    throw refuseEmail(
+      auth,
+      new ConflictError(
+        "This guest belongs to no organization; only an administrator of every organization can invite them into one",
+        "guest_unassigned"
+      )
+    );
+  }
+  // After the refusals that hide another organization's guest, before any
+  // write. On an SSO-only domain a guest with no password but a linked
+  // identity signs in through the provider (the domain's forced link dropped
+  // the password), so initial access does not apply: a re-invite only
+  // extends them. Any other guest with no password, linked or not, gets it.
+  let needsInitialAccess = existing.passwordHash === null;
+  if (needsInitialAccess && (await isSsoOnlyEmail(existing.email, tx))) {
+    if ((await tx.userIdentity.count({ where: { userId: existing.id } })) > 0) {
+      needsInitialAccess = false;
+    } else if (input.initialAccess.type === "password_setup_link") {
+      throw ssoOnlySetupLinkRefused();
     }
+  }
+  if (memberOf === null) {
     const member = await db.organizations.addMember(
       organizationId,
       existing.id,
@@ -738,7 +763,7 @@ const extendInvitedGuest = async (
       : await setAccountExpiry(tx, existing, expiresAt);
 
   let passwordSetupUrl: string | undefined;
-  if (user.passwordHash === null) {
+  if (needsInitialAccess) {
     ({ user, passwordSetupUrl } = await applyInitialAccess(
       tx,
       auth,

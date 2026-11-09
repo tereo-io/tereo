@@ -259,6 +259,8 @@ organization picker with the `core:organizations` scope.
 [Guest users](packages/tereo/docs/auth.md#guest-users) are temporary, single-organization logins that expire on their own
 and reach only roles flagged guest-assignable; an app invites, extends and promotes them with
 `core.guests`, and a guest sets a first password from a one-time link.
+Signed-out users can [reset a forgotten password](packages/tereo/docs/auth.md#password-reset) by email, and core tracks whether an
+address is [verified](packages/tereo/docs/auth.md#email-verification) (`email_verified`), with verify links, account and admin resends.
 [Sign-in page branding](packages/tereo/docs/branding.md) sets a client's app name, logos, colours,
 wording and background on core's login pages, from the admin UI or a provisioning document, with
 per-client edit grants.

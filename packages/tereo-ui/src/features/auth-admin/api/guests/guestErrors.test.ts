@@ -23,6 +23,15 @@ describe("guest error messages", () => {
     );
   });
 
+  it("words a setup link refused on an SSO-only domain", () => {
+    expect(inviteGuestErrorMessage(coreError("sso_only_domain"))).toMatch(
+      /Give the guest a password instead/
+    );
+    expect(passwordLinkErrorMessage(coreError("sso_only_domain"))).toMatch(
+      /only through its identity provider/
+    );
+  });
+
   it("words a link refused for a guest who set a password", () => {
     expect(passwordLinkErrorMessage(coreError("guest_has_password"))).toMatch(
       /already set a password/

@@ -115,6 +115,25 @@ describe("resolveLoginIdentity", () => {
     expect(row.email).toBe("seen@elsewhere.test");
   });
 
+  it("verifies a linked user's matching email, unless the account is unusable", async () => {
+    const provider = await makeProvider();
+    const signIn = async (isActive: boolean) => {
+      const user = await createTestUser({ emailVerified: false, isActive });
+      const id = identity({ email: user.email, emailVerified: true });
+      await db.userIdentities.create({
+        userId: user.id,
+        providerId: provider.id,
+        subject: id.subject,
+        email: null,
+      });
+      await resolveLoginIdentity(provider, id);
+      return prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    };
+
+    expect((await signIn(true)).emailVerifiedAt).not.toBeNull();
+    expect((await signIn(false)).emailVerifiedAt).toBeNull();
+  });
+
   it("claims an invite for a verified matching email", async () => {
     const provider = await makeProvider();
     const user = await createTestUser();
@@ -133,6 +152,19 @@ describe("resolveLoginIdentity", () => {
     ).toBe(0);
     const events = vi.mocked(emitTx).mock.calls.map(([, e]) => e.eventType);
     expect(events).toEqual(["auth.user.identity-linked"]);
+  });
+
+  it("claiming an invite verifies the address only for a usable account", async () => {
+    const provider = await makeProvider();
+    const claim = async (isActive: boolean) => {
+      const user = await createTestUser({ emailVerified: false, isActive });
+      await invite(user.id, provider.id);
+      await resolveLoginIdentity(provider, identity({ email: user.email }));
+      return prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    };
+
+    expect((await claim(true)).emailVerifiedAt).not.toBeNull();
+    expect((await claim(false)).emailVerifiedAt).toBeNull();
   });
 
   it("matches an invite whatever the case of the provider's email", async () => {
@@ -222,6 +254,7 @@ describe("resolveLoginIdentity", () => {
       "auth.organization.member-added",
       "auth.organization.member-roles-changed",
       "auth.user.identity-linked",
+      "auth.user.email-verified",
     ]);
     expect(events[1].data).toMatchObject({
       organizationId: domain.organizationId,
@@ -247,6 +280,7 @@ describe("resolveLoginIdentity", () => {
       "OrganizationMember",
       "OrganizationMember",
       "User",
+      "User",
       "UserIdentity",
     ]);
   });
@@ -264,6 +298,7 @@ describe("resolveLoginIdentity", () => {
       "auth.user.created",
       "auth.organization.member-added",
       "auth.user.identity-linked",
+      "auth.user.email-verified",
     ]);
   });
 

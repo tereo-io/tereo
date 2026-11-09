@@ -1,3 +1,4 @@
+import emailVerificationRouter from "./email-verification/index.js";
 import { createRequireAuth } from "../../../middleware/auth.js";
 import { getProfile, changePassword } from "./controllers.js";
 import organizationsRouter from "./organizations/index.js";
@@ -24,6 +25,7 @@ accountRouter.use("/totp", totpRouter);
 accountRouter.use("/photo", photoRouter);
 accountRouter.use("/sessions", sessionsRouter);
 accountRouter.use("/identities", identitiesRouter);
+accountRouter.use("/email-verification", emailVerificationRouter);
 accountRouter.use("/service", serviceRouter);
 
 accountRouter.get("/me", getProfile);

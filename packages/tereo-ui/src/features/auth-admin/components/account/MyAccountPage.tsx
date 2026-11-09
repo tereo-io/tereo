@@ -1,5 +1,6 @@
 import RegenerateRecoveryCodesButton from "./buttons/RegenerateRecoveryCodesButton";
 import RevokeAllOtherSessionsButton from "./buttons/RevokeAllOtherSessionsButton";
+import useResendVerification from "../../api/account/useResendVerification";
 import useAccountSessions from "../../api/account/useAccountSessions";
 import useAccountProfile from "../../api/account/useAccountProfile";
 import ChangePasswordButton from "./buttons/ChangePasswordButton";
@@ -16,6 +17,7 @@ import "./styles.css";
 import {
   Alert,
   Badge,
+  Button,
   BorderedSection,
   Card,
   Centered,
@@ -33,6 +35,7 @@ export const MyAccountPage = () => {
   const { data: profile, isLoading: profileLoading } = useAccountProfile();
   const { data: sessionsData } = useAccountSessions();
   const [enrollingTotp, setEnrollingTotp] = useState(false);
+  const resend = useResendVerification();
 
   if (profileLoading) {
     return (
@@ -55,6 +58,21 @@ export const MyAccountPage = () => {
   return (
     <Page padded fillHeight>
       <PageHeader title="My Account" subtitle={profile.email} />
+      {!profile.emailVerified && (
+        <Alert variant="warning">
+          <Row>
+            <span>Your email address isn&apos;t confirmed.</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              isLoading={resend.isPending}
+              onClick={() => resend.mutate()}
+            >
+              Resend
+            </Button>
+          </Row>
+        </Alert>
+      )}
       <Row>
         <Col>
           <Row>

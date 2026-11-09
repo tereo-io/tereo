@@ -287,7 +287,7 @@ describe("POST /v1/admin/users/:id/promote", () => {
         (await passwordSetup("", { token, password: "TakenOver123!x" })).status
       ).toBe(404);
       expect(
-        await prisma.passwordSetupToken.count({
+        await prisma.userLinkToken.count({
           where: { userId: id, usedAt: null },
         })
       ).toBe(0);

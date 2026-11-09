@@ -1,7 +1,10 @@
 # Sign-in page branding
 
-Core's sign-in pages (`/login`, `/consent`, `/logout`, `/set-password` and the steps under `/login/*`)
-say "Tereo" in kosmeo's stock colours until an admin brands them. Branding is made of fixed slots,
+Core's sign-in pages (`/login`, `/consent`, `/logout`, `/set-password`, `/forgot-password`,
+`/verify-email` and the steps under `/login/*`)
+say "Tereo" in kosmeo's stock colours until an admin brands them. Verify links carry no `client_id`,
+so `/verify-email` always shows the default profile; reset links carry the client the reset was
+asked from. Branding is made of fixed slots,
 set per client, with a default beneath; no free-form HTML or CSS reaches the page. It is set in the
 admin UI (**Branding**), through `/v1/admin/branding`, or by a
 [provisioning document](provisioning.md#branding). The route reference is in the API docs

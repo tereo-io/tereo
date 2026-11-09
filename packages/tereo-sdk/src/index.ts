@@ -45,6 +45,7 @@ export {
   NotFoundError,
 } from "./utils/errors.js";
 export { AuthServiceClient } from "./clients/auth.js";
+export { UsersClient } from "./clients/users.js";
 export type {
   AuthServiceClientConfig,
   IntrospectionResponse,

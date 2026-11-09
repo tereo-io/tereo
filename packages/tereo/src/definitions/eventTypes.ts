@@ -195,7 +195,19 @@ const authEvents: EventTypeDefinition[] = [
   },
   {
     eventType: "auth.user.password-set",
-    description: "User set their password from a setup link",
+    description: "User set their password from a setup or reset link",
+  },
+  {
+    eventType: "auth.user.password-reset-requested",
+    description: "A password reset link was issued for a user",
+  },
+  {
+    eventType: "auth.user.email-verification-sent",
+    description: "An email verification link was sent to a user",
+  },
+  {
+    eventType: "auth.user.email-verified",
+    description: "A user's email address was verified",
   },
   {
     eventType: "auth.role.guest-assignable-changed",

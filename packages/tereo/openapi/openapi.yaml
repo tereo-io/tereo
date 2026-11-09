@@ -395,7 +395,8 @@ info:
       has it): 5 attempts, then a delay before each further attempt that starts at 1 second and
       doubles with each failure, up to 15 minutes. An attempt during the delay — even with the
       right password — gets `429` with `Retry-After`; it does not lengthen the delay. A correct
-      password clears the count, and an account left alone for a day starts over. A browser
+      password, or a redeemed password reset link, clears the count, and an account left alone
+      for a day starts over. A browser
       that has completed a login as the account (2FA included) holds a known-device cookie
       (`tereo_known_device`, 90 days) that lets its attempts through the account's
       delay, so someone keeping the account in backoff does not lock its owner out. Its wrong
@@ -895,6 +896,10 @@ tags:
     description: Admin endpoints for guest users — temporary single-organization logins that invite, extend, expire and promote
   - name: Password Setup
     description: Public pages behind a password setup link — inspect the link and set the first password (the one-time token is the credential)
+  - name: Password Reset
+    description: Public password reset — ask for a reset link by email; the link is redeemed on the password setup routes
+  - name: Email Verification
+    description: Confirm an email address from a link, and send the link to a user or to oneself
   - name: Admin - Settings
     description: Admin endpoints for system settings
   - name: Admin - Services
@@ -994,6 +999,8 @@ x-tagGroups:
       - Admin - Users
       - Admin - Guests
       - Password Setup
+      - Password Reset
+      - Email Verification
       - Admin - User Identities
       - Admin - User Permissions
       - Admin - User Sessions
@@ -1162,6 +1169,18 @@ paths:
     $ref: './paths/auth/admin/guests.yaml#/~1admin~1guests~1{id}'
   /v1/admin/guests/{id}/password-setup-link:
     $ref: './paths/auth/admin/guests.yaml#/~1admin~1guests~1{id}~1password-setup-link'
+  /v1/password-reset:
+    $ref: './paths/auth/password-reset.yaml#/~1password-reset'
+  /v1/password-reset/status:
+    $ref: './paths/auth/password-reset.yaml#/~1password-reset~1status'
+  /v1/email-verification/inspect:
+    $ref: './paths/auth/email-verification.yaml#/~1email-verification~1inspect'
+  /v1/email-verification:
+    $ref: './paths/auth/email-verification.yaml#/~1email-verification'
+  /v1/account/email-verification:
+    $ref: './paths/auth/email-verification.yaml#/~1account~1email-verification'
+  /v1/admin/users/{id}/email-verification:
+    $ref: './paths/auth/email-verification.yaml#/~1admin~1users~1{id}~1email-verification'
   /v1/password-setup/inspect:
     $ref: './paths/auth/password-setup.yaml#/~1password-setup~1inspect'
   /v1/password-setup:
@@ -2176,6 +2195,12 @@ webhooks:
     $ref: './paths/auth/password-setup.yaml#/auth.user.password-setup-link-issued'
   auth.user.password-set:
     $ref: './paths/auth/password-setup.yaml#/auth.user.password-set'
+  auth.user.password-reset-requested:
+    $ref: './paths/auth/password-reset.yaml#/auth.user.password-reset-requested'
+  auth.user.email-verification-sent:
+    $ref: './paths/auth/email-verification.yaml#/auth.user.email-verification-sent'
+  auth.user.email-verified:
+    $ref: './paths/auth/email-verification.yaml#/auth.user.email-verified'
   auth.user.password-changed:
     $ref: './paths/auth/account.yaml#/auth.user.password-changed'
   auth.user.sessions-revoked:

@@ -48,6 +48,11 @@ E2E_SKIP_UI_BUILD=1 npm run e2e:core -w tereo-e2e  # reset and restart without r
    a fixed `SETUP_TOKEN` and `UI_BASE_URL=http://localhost:4501`. It also points `DOTENV_CONFIG_PATH`
    at a file that never exists, so `packages/tereo/.env` is never read.
 
+Core's email goes to a fake SMTP server (`src/core/mailCatcher.ts`, port `E2E_PORT + 2000`) that runs in
+the same process and writes each message to `.e2e-state/mail/`. The setup project creates the default
+email connection that points at it, which turns on password reset and email verification; specs read
+mail through the `mail` fixture (`waitForMessage(to)`, `linkIn(message)`).
+
 Nothing here runs `docker compose down` or removes volumes. Overrides: `E2E_PORT`, `E2E_DATABASE_URL`
 (must end in `_e2e`), `E2E_REDIS_URL`, `E2E_REDIS_DB`, `E2E_REDIS_KEY_PREFIX`, `E2E_CORE_LOG_LEVEL`, and `E2E_STATE_DIR`
 (default `.e2e-state`). Two runs can overlap when each has its own port, database, Redis prefix and

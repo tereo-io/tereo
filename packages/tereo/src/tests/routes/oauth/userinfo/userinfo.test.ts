@@ -7,6 +7,7 @@ import { LOGIN_CLIENT } from "../../../../definitions/index.js";
 import { browserLogin } from "../../../support/browserLogin.js";
 import { createTestUser } from "../../../support/auth/users.js";
 import { prisma } from "../../../../utils/db/prisma.js";
+import jwt from "jsonwebtoken";
 import {
   addTestOrgMember,
   createTestOrganization,
@@ -36,6 +37,7 @@ import {
   json,
   postForm,
   loginAndExchange,
+  codeFlowSignIn,
 } from "../../../support/auth/login.js";
 import {
   adminApi,
@@ -767,5 +769,29 @@ describe("/oauth/userinfo", () => {
       expect(revoked.status).toBe(200);
       expect((await userinfo(tokens.access_token)).status).toBe(401);
     });
+  });
+  it("userinfo and the ID token say email_verified false for an unverified user", async () => {
+    const redirectUri = "http://localhost:3000/callback";
+    const client = await createTestClient({ redirectUris: [redirectUri] });
+    const { signIn } = codeFlowSignIn(
+      () => client,
+      redirectUri,
+      "openid email"
+    );
+    const unverified = await createTestUser({ emailVerified: false });
+    const { tokens } = await signIn(unverified);
+    const headers = { Authorization: `Bearer ${tokens.access_token}` };
+    const info = async () =>
+      json(await fetch(`${BASE_URL}/oauth/userinfo`, { headers }));
+
+    expect(jwt.decode(tokens.id_token)).toMatchObject({
+      email_verified: false,
+    });
+    expect(await info()).toMatchObject({ email_verified: false });
+    await prisma.user.update({
+      where: { id: unverified.id },
+      data: { emailVerifiedAt: new Date() },
+    });
+    expect(await info()).toMatchObject({ email_verified: true });
   });
 });

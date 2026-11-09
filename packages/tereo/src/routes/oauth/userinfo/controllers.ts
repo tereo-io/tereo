@@ -47,6 +47,7 @@ export const getUserInfo = async (req: Request, res: Response) => {
       lastName: user.lastName,
       photoUrl,
       updatedAt: user.updatedAt,
+      emailVerifiedAt: user.emailVerifiedAt,
     },
     scopes
   );

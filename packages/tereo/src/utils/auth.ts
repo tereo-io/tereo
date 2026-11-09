@@ -43,6 +43,7 @@ interface UserClaims {
   givenName?: string;
   familyName?: string;
   email?: string;
+  emailVerified?: boolean;
   picture?: string;
   updatedAt?: Date;
 }
@@ -330,6 +331,7 @@ const loginIdTokenContext = async (
     firstName: string | null;
     lastName: string | null;
     email: string;
+    emailVerifiedAt: Date | null;
     photoObjectId: string | null;
     updatedAt: Date;
   },
@@ -368,7 +370,10 @@ const loginIdTokenContext = async (
         picture,
         updatedAt: user.updatedAt,
       }),
-      ...(scopes.includes("email") && { email: user.email }),
+      ...(scopes.includes("email") && {
+        email: user.email,
+        emailVerified: user.emailVerifiedAt !== null,
+      }),
     },
   };
 };

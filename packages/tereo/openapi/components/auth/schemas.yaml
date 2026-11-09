@@ -663,7 +663,7 @@ IntrospectResponse:
       description: With the `email` scope
     email_verified:
       type: boolean
-      description: With the `email` scope
+      description: With the `email` scope. True once the address has been proven (a link sent to it, or a provider that vouches for it), not merely set.
 
 RevokeRequest:
   type: object
@@ -699,6 +699,7 @@ UserInfoResponse:
       format: email
     email_verified:
       type: boolean
+      description: True once the address has been proven (a link sent to it, or a provider that vouches for it), not merely set.
     picture:
       type: string
       format: uri
@@ -1124,6 +1125,8 @@ UserProfile:
     - name
     - isActive
     - hasPassword
+    - emailVerified
+    - emailVerifiedAt
     - createdAt
     - updatedAt
     - photoUrl
@@ -1144,6 +1147,13 @@ UserProfile:
     hasPassword:
       type: boolean
       description: Whether the account has a password. False for an account created without one, which signs in through a linked identity provider only.
+    emailVerified:
+      type: boolean
+      description: Whether the address has been proven, by a link sent to it or by an identity provider that vouches for it. It is the `email_verified` claim.
+    emailVerifiedAt:
+      type: [string, 'null']
+      format: date-time
+      description: When the address was proven; null while it has not been.
     createdAt:
       type: string
       format: date-time
@@ -1287,7 +1297,7 @@ ChangePasswordRequest:
 # Admin - User Schemas
 User:
   type: object
-  required: [id, email, name, isActive, userType, expiresAt, status, passwordChangeRequired, hasPassword, createdAt, updatedAt]
+  required: [id, email, name, isActive, userType, expiresAt, status, passwordChangeRequired, hasPassword, emailVerified, emailVerifiedAt, createdAt, updatedAt]
   properties:
     id:
       type: string
@@ -1316,6 +1326,13 @@ User:
     hasPassword:
       type: boolean
       description: Whether the user has a password. False for a user created without one, who can sign in only through a linked identity provider (or an invite's first sign-in).
+    emailVerified:
+      type: boolean
+      description: Whether the address has been proven, by a link sent to it or by an identity provider that vouches for it. It is the `email_verified` claim.
+    emailVerifiedAt:
+      type: [string, 'null']
+      format: date-time
+      description: When the address was proven; null while it has not been.
     createdAt:
       type: string
       format: date-time
@@ -4092,7 +4109,7 @@ PasswordSetupInspectRequest:
 
 PasswordSetupInspectResponse:
   type: object
-  required: [email, name, expiresAt]
+  required: [email, name, expiresAt, purpose]
   properties:
     email:
       type: string
@@ -4103,6 +4120,50 @@ PasswordSetupInspectResponse:
       type: string
       format: date-time
       description: When the link expires.
+    purpose:
+      type: string
+      enum: [setup, reset]
+      description: A guest's setup link or a password reset link.
+
+PasswordResetRequest:
+  type: object
+  required: [email]
+  properties:
+    email:
+      type: string
+      format: email
+    client_id:
+      type: string
+      maxLength: 255
+      description: A login client the link's page returns the user to. Ignored unless a client with this ID exists.
+
+PasswordResetStatusResponse:
+  type: object
+  required: [enabled]
+  properties:
+    enabled:
+      type: boolean
+      description: Whether a default email connection exists, so a reset email can be sent.
+
+EmailVerificationTokenRequest:
+  type: object
+  required: [token]
+  properties:
+    token:
+      type: string
+      maxLength: 128
+
+EmailVerificationInspectResponse:
+  type: object
+  required: [email, expiresAt]
+  properties:
+    email:
+      type: string
+      format: email
+      description: The address the link confirms.
+    expiresAt:
+      type: string
+      format: date-time
 
 PasswordSetupRequest:
   type: object

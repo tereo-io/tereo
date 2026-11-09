@@ -2,6 +2,7 @@ import { clientIpHeaders } from "../utils/clientIp.js";
 import { CoreApi } from "./coreApi.js";
 import { e2e } from "../config.js";
 import { readFileSync } from "fs";
+import { Mail } from "./mail.js";
 import {
   test as base,
   request,
@@ -16,7 +17,7 @@ interface StorageState {
 }
 
 /** The admin's access token, from the storage state the setup project saved. */
-const adminAccessToken = (): string => {
+export const adminAccessToken = (): string => {
   const state = JSON.parse(
     readFileSync(e2e.adminStatePath, "utf-8")
   ) as StorageState;
@@ -32,6 +33,8 @@ let counter = 0;
 interface Fixtures {
   /** Core's API as the signed-in admin, for data a spec is not about. */
   api: CoreApi;
+  /** Mail core sent through the default connection (the mail catcher). */
+  mail: Mail;
   /** A name no other spec, worker or earlier run has used. */
   uid: (prefix: string) => string;
 }
@@ -51,6 +54,10 @@ export const test = base.extend<Fixtures>({
     });
     await use(new CoreApi(context));
     await context.dispose();
+  },
+  // eslint-disable-next-line no-empty-pattern
+  mail: async ({}, use) => {
+    await use(new Mail());
   },
   // eslint-disable-next-line no-empty-pattern
   uid: async ({}, use, testInfo) => {

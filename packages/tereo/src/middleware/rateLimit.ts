@@ -1,3 +1,4 @@
+import { hashFlowToken } from "../utils/crypto.js";
 import { normalizeEmail } from "../utils/email.js";
 import {
   createPreAuthRateLimitMiddleware,
@@ -190,4 +191,75 @@ export const passwordSetupFailure = createFailureLimiter({
   errorDescription:
     "Too many failed password setup attempts. Please try again later.",
   getKey: (req) => `ip:${getIpIdentifier(req)}`,
+});
+
+// Reset requests per IP, for any addresses: one source cannot mail every
+// user. The route swallows the refusal, as for the two below.
+export const passwordResetIp = createFailureLimiter({
+  keyPrefix: "rl:password-reset:ip",
+  points: 10,
+  duration: 3600,
+  errorDescription: "Too many password reset requests. Try again later.",
+  getKey: (req) => `ip:${getIpIdentifier(req)}`,
+});
+
+// Reset emails per address and IP, so one source cannot spend an address's
+// whole allowance below.
+export const passwordResetAddressIp = createFailureLimiter({
+  keyPrefix: "rl:password-reset:address-ip",
+  points: 3,
+  duration: 3600,
+  errorDescription: "Too many password reset requests. Try again later.",
+  getKey: (req, email) =>
+    `${hashFlowToken(normalizeEmail(email ?? ""))}:ip:${getIpIdentifier(req)}`,
+});
+
+// Reset emails per address, whoever asks: an address cannot be used to flood
+// someone's inbox. Spent by every request for the address, known or not, so
+// the limit tells nothing about the account.
+export const passwordResetAddress = createFailureLimiter({
+  keyPrefix: "rl:password-reset:address",
+  points: 10,
+  duration: 3600,
+  errorDescription: "Too many password reset requests. Try again later.",
+  getKey: (_req, email) => hashFlowToken(normalizeEmail(email ?? "")),
+});
+
+// Wrong or spent verify-link tokens, per IP: as for passwordSetupFailure.
+export const emailVerificationFailure = createFailureLimiter({
+  keyPrefix: "rl:email-verification",
+  points: 10,
+  duration: 900,
+  errorDescription:
+    "Too many failed email verification attempts. Please try again later.",
+  getKey: (req) => `ip:${getIpIdentifier(req)}`,
+});
+
+// Verification emails a user asks for themselves, per user. Unlike a reset
+// request, a refusal is visible: the caller is signed in and knows the address.
+export const accountVerifyResendMinute = createFailureLimiter({
+  keyPrefix: "rl:verify-resend:minute",
+  points: 1,
+  duration: 60,
+  errorDescription: "Too many verification emails. Try again in a minute.",
+  getKey: (_req, userId) => `user:${userId}`,
+});
+
+export const accountVerifyResendHour = createFailureLimiter({
+  keyPrefix: "rl:verify-resend:hour",
+  points: 5,
+  duration: 3600,
+  errorDescription: "Too many verification emails. Try again later.",
+  getKey: (_req, userId) => `user:${userId}`,
+});
+
+// Verification emails an admin sends a user, per target user: each one also
+// retires the link the user was sent before.
+export const adminVerifySendTarget = createFailureLimiter({
+  keyPrefix: "rl:verify-send:admin",
+  points: 5,
+  duration: 3600,
+  errorDescription:
+    "Too many verification emails for this user. Try again later.",
+  getKey: (_req, userId) => `user:${userId}`,
 });

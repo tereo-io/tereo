@@ -1,11 +1,13 @@
 import useInspectPasswordSetup from "../../api/password/useInspectPasswordSetup";
 import { Alert, Button, Col, Input, Spinner } from "@kosmeo-ui/react";
 import { errorDescriptionOf, issuesOf } from "@/utils/apiErrors";
+import { useLocation, useSearchParams } from "react-router-dom";
 import useSetPassword from "../../api/password/useSetPassword";
-import { useLocation, useNavigate } from "react-router-dom";
 import { BrandedAuthPage } from "@/features/auth/branding";
+import { startLogin } from "@/lib/auth/pkce";
 import { useMemo, useState } from "react";
 import { isAxiosError } from "axios";
+import env from "@/lib/env";
 
 const INVALID_LINK = "This link is no longer valid";
 const TRY_AGAIN =
@@ -36,7 +38,7 @@ const tokenFromHash = (hash: string): string =>
 
 export const SetPasswordPage = () => {
   const { hash } = useLocation();
-  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const token = useMemo(() => tokenFromHash(hash), [hash]);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -52,6 +54,25 @@ export const SetPasswordPage = () => {
   } = useInspectPasswordSetup(token);
   const { mutate, isPending } = useSetPassword();
 
+  const isReset = details?.purpose === "reset";
+  const title = isReset ? "Reset your password" : "Set your password";
+
+  // A reset asked from another app's sign-in ends here: this page cannot
+  // resume that app's sign-in, which may have begun on another device.
+  const clientId = searchParams.get("client_id");
+  const fromOtherApp = isReset && !!clientId && clientId !== env.CLIENT_ID;
+
+  if (done && fromOtherApp) {
+    return (
+      <BrandedAuthPage title="Password set">
+        <Alert variant="success">
+          Your password is set. Go back to the app you were signing in to and
+          sign in with your new password.
+        </Alert>
+      </BrandedAuthPage>
+    );
+  }
+
   if (done) {
     return (
       <BrandedAuthPage title="Password set">
@@ -59,7 +80,8 @@ export const SetPasswordPage = () => {
           <Alert variant="success">
             Your password is set. You can now sign in.
           </Alert>
-          <Button fullWidth onClick={() => navigate("/")}>
+          {/* A fresh sign-in, so no authorize state from another tab is needed. */}
+          <Button fullWidth onClick={() => void startLogin()}>
             Sign in
           </Button>
         </Col>
@@ -116,7 +138,7 @@ export const SetPasswordPage = () => {
 
   return (
     <BrandedAuthPage
-      title="Set your password"
+      title={title}
       subtitle={`Choose a password for ${details.email}`}
     >
       <form onSubmit={handleSubmit}>

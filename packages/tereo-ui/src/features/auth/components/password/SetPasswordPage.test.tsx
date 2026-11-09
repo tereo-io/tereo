@@ -8,6 +8,8 @@ import { authMock } from "@/test/authMock";
 import { AxiosError } from "axios";
 
 vi.mock("@/lib/auth", () => ({ usePublicAxios: () => authMock.axios }));
+const startLogin = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("@/lib/auth/pkce", () => ({ startLogin }));
 
 const notFound = new AxiosError("nf", undefined, undefined, undefined, {
   status: 404,
@@ -26,12 +28,14 @@ const renderAt = (url: string) =>
         <Routes>
           <Route path="/set-password" element={<SetPasswordPage />} />
           <Route path="/" element={<Where />} />
+          <Route path="/login" element={<Where />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
   );
 
 beforeEach(() => {
+  startLogin.mockClear();
   authMock.axios.post.mockReset();
 });
 
@@ -73,7 +77,7 @@ describe("SetPasswordPage", () => {
     );
     expect(await screen.findByText(/Your password is set/)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(await screen.findByTestId("where")).toHaveTextContent(/^\/$/);
+    expect(startLogin).toHaveBeenCalledWith();
   });
 
   const DETAILS = {
@@ -167,6 +171,55 @@ describe("SetPasswordPage", () => {
       expect(screen.queryByText("This link is no longer valid")).toBeNull();
       await user.click(screen.getByRole("button", { name: "Try again" }));
       expect(await screen.findByLabelText(/^New password/)).toBeVisible();
+    }
+  );
+
+  const resetDetails = { data: { ...DETAILS.data, purpose: "reset" } };
+
+  const completeReset = async (query = "") => {
+    const user = userEvent.setup();
+    authMock.axios.post.mockImplementation(async (path: string) =>
+      path === "/v1/password-setup/inspect" ? resetDetails : { data: undefined }
+    );
+    renderAt(`/set-password${query}#token=abc123`);
+    await user.type(
+      await screen.findByLabelText(/^New password/),
+      "Str0ng-pass-phrase"
+    );
+    await user.type(
+      screen.getByLabelText(/^Confirm password/),
+      "Str0ng-pass-phrase"
+    );
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+    return user;
+  };
+
+  it("titles a reset link 'Reset your password'", async () => {
+    authMock.axios.post.mockResolvedValue(resetDetails);
+    renderAt("/set-password#token=abc123");
+
+    expect(await screen.findByText("Reset your password")).toBeVisible();
+  });
+
+  it("after a reset asked from another app, says to go back to it, with no way into the console", async () => {
+    await completeReset("?client_id=acme");
+
+    expect(
+      await screen.findByText(/Go back to the app you were signing in to/)
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+  });
+
+  it.each([
+    ["no client", ""],
+    ["the console's own client", "?client_id=tereo-ui"],
+  ])(
+    "after a reset with %s, Sign in starts a fresh sign-in",
+    async (_label, query) => {
+      const user = await completeReset(query);
+      await user.click(await screen.findByRole("button", { name: "Sign in" }));
+
+      expect(startLogin).toHaveBeenCalledWith();
     }
   );
 

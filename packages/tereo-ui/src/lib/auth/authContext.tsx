@@ -137,6 +137,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       path === routePath(env.unauthorizedRedirectPath) ||
       path.startsWith("/login") ||
       path.startsWith("/logout") ||
+      // Opened from an email by someone who is signed out.
+      path === "/set-password" ||
+      path === "/forgot-password" ||
+      path === "/verify-email" ||
       // Public share-unlock page — recipients of a password-protected
       // share link are typically external users with no account.
       path.startsWith("/shared/") ||

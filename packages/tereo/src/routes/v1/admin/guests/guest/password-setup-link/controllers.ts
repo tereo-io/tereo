@@ -1,4 +1,3 @@
-import { issuePasswordSetupLink } from "../../../../../../utils/passwordSetup.js";
 import { getGuest, getManagedGuest } from "../../../../../../utils/guests.js";
 import { AppError, ConflictError } from "../../../../../../utils/errors.js";
 import { assertMayResetCredentials } from "../../../users/user/guards.js";
@@ -13,6 +12,10 @@ import {
   validateBody,
   validateParams,
 } from "../../../../../../utils/validateReq.js";
+import {
+  assertSetupLinkAllowed,
+  issuePasswordLink,
+} from "../../../../../../utils/userLinks.js";
 
 const guestHasPassword = () =>
   new AppError(
@@ -56,8 +59,10 @@ export const issueGuestPasswordSetupLink = async (
           "guest_not_usable"
         );
       }
-      return issuePasswordSetupLink(tx, {
+      await assertSetupLinkAllowed(guest.email, tx);
+      return issuePasswordLink(tx, {
         userId: id,
+        purpose: "setup",
         createdBy: auth.userId,
         notify,
       });

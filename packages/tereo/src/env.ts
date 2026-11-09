@@ -352,6 +352,10 @@ const EnvFields = z
     GUEST_MAX_TTL_SECONDS: int(1, 10 * 365 * DAY, 90 * DAY),
     // Lifetime of a password setup link, in seconds.
     PASSWORD_SETUP_TTL_SECONDS: int(60, 30 * DAY, 72 * HOUR),
+    // Lifetime of a password reset link, in seconds.
+    PASSWORD_RESET_TTL_SECONDS: int(300, DAY, HOUR),
+    // Lifetime of an email verification link, in seconds.
+    EMAIL_VERIFICATION_TTL_SECONDS: int(HOUR, 14 * DAY, 72 * HOUR),
     // How often each node checks its sockets' tokens again and closes those no
     // longer active; 0 turns the check off.
     WEBSOCKET_REVALIDATE_INTERVAL_SECONDS: int(0, HOUR, 60),

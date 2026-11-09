@@ -2,7 +2,6 @@ import * as notificationConnections from "./notificationConnections.js";
 import { Prisma } from "../../../prisma/generated/client/index.js";
 import * as orgSelectionSessions from "./orgSelectionSessions.js";
 import * as passwordChangeGrants from "./passwordChangeGrants.js";
-import * as passwordSetupTokens from "./passwordSetupTokens.js";
 import * as idempotencyRecords from "./idempotencyRecords.js";
 import * as authorizationCode from "./authorizationCode.js";
 import * as bucketPermissions from "./bucketPermissions.js";
@@ -13,6 +12,7 @@ import * as brandingProfiles from "./brandingProfiles.js";
 import * as multipartUploads from "./multipartUploads.js";
 import * as webhookEndpoints from "./webhookEndpoints.js";
 import * as auditLogEntries from "./auditLogEntries.js";
+import * as userLinkTokens from "./userLinkTokens.js";
 import * as brandingGrants from "./brandingGrants.js";
 import * as objectVersions from "./objectVersions.js";
 import * as userIdentities from "./userIdentities.js";
@@ -66,7 +66,7 @@ export default {
   organizations,
   orgSelectionSessions,
   passwordChangeGrants,
-  passwordSetupTokens,
+  userLinkTokens,
   permissions,
   refreshTokens,
   roles,

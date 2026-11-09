@@ -174,6 +174,26 @@ export const PUBLIC: Allowlist = [
     "Shows who a password setup link is for; the link's token is the credential (404 when unusable)",
   ],
   [
+    "get",
+    "/v1/password-reset/status",
+    "Tells the sign-in page whether reset emails can be sent; before any sign-in",
+  ],
+  [
+    "post",
+    "/v1/password-reset",
+    "Asks for a reset link by email; always 202, the address is the only input and the link goes to its owner",
+  ],
+  [
+    "post",
+    "/v1/email-verification/inspect",
+    "Shows which address a verify link confirms; the link's token is the credential (404 when unusable)",
+  ],
+  [
+    "post",
+    "/v1/email-verification",
+    "Confirms an address from a verify link; the link's token is the credential (404 when unusable)",
+  ],
+  [
     "post",
     "/v1/password-setup",
     "Sets a password from a setup link; the link's token is the credential (404 when unusable)",
@@ -249,6 +269,11 @@ export const SIGNED_IN_ONLY: Allowlist = [
   ],
   ["get", "/v1/account/me", "The caller's own profile"],
   ["post", "/v1/account/password", "Changes the caller's own password"],
+  [
+    "post",
+    "/v1/account/email-verification",
+    "Emails the caller a link confirming their own address",
+  ],
   ["get", "/v1/account/organizations", "Organizations the caller belongs to"],
   ["get", "/v1/account/totp", "The caller's own TOTP status"],
   [

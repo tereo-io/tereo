@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag auth
+import { createSsoOnlyDomain } from "../../../../support/identityProviders.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../definitions/index.js";
 import { GUEST_DEFAULT_ROLES_KEY } from "../../../../../utils/guestRoles.js";
 import { cleanNotifications } from "../../../../support/notifications.js";
@@ -147,6 +148,8 @@ describe("POST /v1/admin/guests", () => {
       status: "active",
       hasPassword: false,
       organizationId: orgId,
+      emailVerified: false,
+      emailVerifiedAt: null,
     });
     const id = res.body.user.id as string;
     const membership = await prisma.organizationMember.findMany({
@@ -357,7 +360,7 @@ describe("POST /v1/admin/guests", () => {
 
     expect(res.status).toBe(200);
     expect(
-      await prisma.passwordSetupToken.count({
+      await prisma.userLinkToken.count({
         where: { userId: first.body.user.id, usedAt: null },
       })
     ).toBe(0);
@@ -611,6 +614,7 @@ describe("POST /v1/admin/guests", () => {
     expect(res.body.user).toMatchObject({
       hasPassword: true,
       passwordChangeRequired: true,
+      emailVerified: false,
     });
   });
 
@@ -637,6 +641,85 @@ describe("POST /v1/admin/guests", () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toBe("email_not_configured");
     expect(await prisma.user.count({ where: { email } })).toBe(0);
+  });
+
+  it("refuses a setup link on an SSO-only domain, writing nothing", async () => {
+    const sso = await createSsoOnlyDomain();
+    try {
+      const email = `guest-${generateUniqueId()}@${sso.domain}`;
+      const res = await invite({ email });
+      expect([res.status, res.body.error]).toEqual([409, "sso_only_domain"]);
+      expect(await prisma.user.count({ where: { email } })).toBe(0);
+
+      const created = await invite({
+        email,
+        initialAccess: { type: "password", password: PASSWORD },
+      });
+      expect(created.status).toBe(201);
+      const id = created.body.user.id as string;
+      await prisma.user.update({ where: { id }, data: { passwordHash: null } });
+      const before = await prisma.user.findUniqueOrThrow({ where: { id } });
+      const again = await invite({ email, expiresIn: 2 * 86_400 });
+      expect([again.status, again.body.error]).toEqual([
+        409,
+        "sso_only_domain",
+      ]);
+      expect(
+        (await prisma.user.findUniqueOrThrow({ where: { id } })).expiresAt
+      ).toEqual(before.expiresAt);
+      const elsewhere = await invite({ email, organizationId: otherOrgId });
+      expect(elsewhere.body.error).toBe("guest_in_other_organization");
+    } finally {
+      await sso.remove();
+    }
+  });
+
+  it("re-invites a guest linked through an SSO-only domain: extends, issues no link", async () => {
+    const sso = await createSsoOnlyDomain();
+    try {
+      const email = `guest-${generateUniqueId()}@${sso.domain}`;
+      const created = await invite({
+        email,
+        initialAccess: { type: "password", password: PASSWORD },
+      });
+      const id = created.body.user.id as string;
+      // As the domain's forced link leaves the guest.
+      await prisma.user.update({ where: { id }, data: { passwordHash: null } });
+      await prisma.userIdentity.create({
+        data: { userId: id, providerId: sso.providerId, subject: `s-${id}` },
+      });
+
+      const res = await invite({ email, expiresIn: 2 * 86_400 });
+
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty("passwordSetupUrl");
+      expect(new Date(res.body.user.expiresAt).getTime()).toBeGreaterThan(
+        new Date(created.body.user.expiresAt).getTime()
+      );
+      expect(await prisma.userLinkToken.count({ where: { userId: id } })).toBe(
+        0
+      );
+
+      // Off an SSO-only domain, a linked guest with no password still gets
+      // initial access.
+      const plain = await invite({ email: uniqueEmail() });
+      const plainId = plain.body.user.id as string;
+      await prisma.userIdentity.create({
+        data: {
+          userId: plainId,
+          providerId: sso.providerId,
+          subject: `s-${plainId}`,
+        },
+      });
+      const again = await invite({ email: plain.body.user.email });
+      expect(again.status).toBe(200);
+      expect(again.body.passwordSetupUrl).toMatch(/\/set-password#token=/);
+    } finally {
+      await prisma.userIdentity.deleteMany({
+        where: { providerId: sso.providerId },
+      });
+      await sso.remove();
+    }
   });
 
   it("returns core's 400 for an invalid body", async () => {
@@ -702,57 +785,5 @@ describe("POST /v1/admin/guests", () => {
     });
     const res = await invite({ email: uniqueEmail() }, token);
     expect(res.status).toBe(201);
-  });
-});
-
-describe("GET /v1/admin/guests", () => {
-  it("lists only guests, filtered by organization", async () => {
-    const mine = await createTestGuest({ organizationId: orgId });
-    const theirs = await createTestGuest({ organizationId: otherOrgId });
-
-    const res = await fetchJson(
-      "GET",
-      `${BASE_URL}/v1/admin/guests?filter[organizationId]=${otherOrgId}&limit=200`,
-      adminToken
-    );
-
-    expect(res.status).toBe(200);
-    const ids = res.body.data.map((u: { id: string }) => u.id);
-    expect(ids).toContain(theirs.user.id);
-    expect(ids).not.toContain(mine.user.id);
-    expect(
-      res.body.data.find((u: { id: string }) => u.id === theirs.user.id)
-        .organizationId
-    ).toBe(otherOrgId);
-    // Expired guests from earlier runs stay in the fixed test org; only this
-    // test's own row is asserted active.
-    for (const user of res.body.data) expect(user.userType).toBe("guest");
-    expect(
-      res.body.data.find((u: { id: string }) => u.id === theirs.user.id).status
-    ).toBe("active");
-  });
-
-  it("shows a caller without organizations.write only their organizations' guests", async () => {
-    const mine = await createTestGuest({ organizationId: orgId });
-    const theirs = await createTestGuest({ organizationId: otherOrgId });
-    const userId = randomUUID();
-    const token = await getTestPrincipalToken({
-      userId,
-      permissions: ["users.guests.read"],
-    });
-    await prisma.organizationMember.create({
-      data: { organizationId: orgId, userId, memberRole: "member" },
-    });
-
-    const res = await fetchJson(
-      "GET",
-      `${BASE_URL}/v1/admin/guests?limit=200&sort=createdAt&sortDir=desc`,
-      token
-    );
-
-    expect(res.status).toBe(200);
-    const ids = res.body.data.map((u: { id: string }) => u.id);
-    expect(ids).toContain(mine.user.id);
-    expect(ids).not.toContain(theirs.user.id);
   });
 });

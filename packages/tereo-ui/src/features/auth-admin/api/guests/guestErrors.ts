@@ -17,6 +17,8 @@ export const inviteGuestErrorMessage = (error: unknown): string => {
       return "You can invite guests only into an organization you belong to.";
     case "user_not_invitable":
       return "This account cannot be invited as a guest.";
+    case "sso_only_domain":
+      return "This email's domain signs in only through its identity provider, so a setup link would not work. Give the guest a password instead.";
     case "email_not_configured":
       return "Core has no email connection, so it cannot email the link. Turn off emailing to get the link here instead.";
     default:
@@ -41,6 +43,8 @@ export const passwordLinkErrorMessage = (error: unknown): string => {
       return "This guest has already set a password. Only an administrator who can manage users can send them a new link.";
     case "guest_not_usable":
       return "This guest is deactivated or expired. Extend their access first.";
+    case "sso_only_domain":
+      return "This guest's email domain signs in only through its identity provider, so a setup link would not work.";
     case "email_not_configured":
       return "Core has no email connection, so it cannot email the link. Turn off emailing to get the link here instead.";
     case "organization_not_permitted":

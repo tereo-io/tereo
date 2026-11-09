@@ -1,9 +1,9 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
-import { retirePasswordLinks } from "../../../../../utils/passwordSetup.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
+import { isUsableAccount } from "../../../../../utils/users.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
@@ -23,6 +23,11 @@ import {
   listGroupRoles,
   listOrgGroupRoles,
 } from "../../../../../utils/groupRoles.js";
+import {
+  issueVerifyLink,
+  retireAllLinks,
+  retirePasswordLinks,
+} from "../../../../../utils/userLinks.js";
 import {
   endDeactivatedUserSessions,
   endSession,
@@ -110,8 +115,9 @@ export const updateUser = async (req: Request, res: Response) => {
     // A body of only a rate limit is not a profile update.
     const profileChanged =
       rateLimitPerSecond === undefined || Object.keys(profile).length > 0;
+    // The new address has proved nothing yet.
     let updated = profileChanged
-      ? await db.users.update(id, profile, tx)
+      ? await db.users.update(id, profile, tx, { unverify: newEmail !== null })
       : await db.users.get(id, tx);
     // An invite is matched by email: it must not follow the account to an
     // address the admin who issued it never saw.
@@ -120,8 +126,24 @@ export const updateUser = async (req: Request, res: Response) => {
       : 0;
     // Whoever holds a setup link or a forced-change grant must not keep a way
     // in past a new password, a new sign-in email or a deactivation.
-    if (body.password || newEmail || deactivating) {
+    if (newEmail || deactivating) {
+      await retireAllLinks(tx, id);
+    } else if (body.password) {
       await retirePasswordLinks(tx, id);
+    }
+    if (newEmail && isUsableAccount(updated)) {
+      try {
+        await issueVerifyLink(tx, { userId: id, createdBy: auth.userId });
+      } catch (err) {
+        // Without a connection the mail could never leave; the admin can
+        // resend once one exists. The refusal comes before any write, so the
+        // transaction carries on.
+        if (!(
+          err instanceof ConflictError && err.code === "email_not_configured"
+        )) {
+          throw err;
+        }
+      }
     }
     if (profileChanged) {
       const metadata = {

@@ -71,6 +71,8 @@ describe("isBrandedAuthPath", () => {
     "/logout",
     "/set-password",
     "/set-password/",
+    "/forgot-password",
+    "/verify-email",
     "/LOGIN",
     "/Consent",
   ])("brands %s", (path) => expect(isBrandedAuthPath(path)).toBe(true));
