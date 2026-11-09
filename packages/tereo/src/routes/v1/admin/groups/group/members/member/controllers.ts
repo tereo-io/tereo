@@ -18,18 +18,21 @@ export const removeMember = async (req: Request, res: Response) => {
   );
   const { userId } = validateParams(MemberUserIdParamSchema, req);
 
-  const change = await db.$transaction(async (tx) => {
-    const result = await removeMembers(
-      { mode: "admin", auth, grantable, callerOrgRole },
-      group.id,
-      [userId],
-      tx
-    );
-    if (result.removed.length === 0) {
-      throw new NotFoundError("User is not a member of this group");
-    }
-    return result;
-  });
+  const change = await db.$transaction(
+    async (tx) => {
+      const result = await removeMembers(
+        { mode: "admin", auth, grantable, callerOrgRole },
+        group.id,
+        [userId],
+        tx
+      );
+      if (result.removed.length === 0) {
+        throw new NotFoundError("User is not a member of this group");
+      }
+      return result;
+    },
+    { timeout: 30_000 }
+  );
   afterGroupChange(change);
 
   res.status(204).send();

@@ -273,77 +273,87 @@ export const setUserRoles = async (req: Request, res: Response) => {
     );
   }
 
-  const { userRoles, revokedJtis } = await db.$transaction(async (tx) => {
-    // A grant races a credential reset's check of what the user holds.
-    await db.users.lockAuthority(id, tx);
-    // Read in the transaction, and only the roles new as of this read are
-    // created: a held role removed concurrently is not put back unchecked.
-    const held = new Set(
-      (await db.roles.getGlobalUserRoles(id, tx)).map((ur) => ur.roleId)
-    );
-    // A held role stays whatever its state: archived and retired ones keep
-    // their assignment to come back on restore.
-    const added = roleIds.filter((roleId) => !held.has(roleId));
-    const roles = await db.roles.getByIds(added, tx);
-    const found = new Set(roles.map((r) => r.id));
-    const missing = added.filter((roleId) => !found.has(roleId));
-    if (missing.length > 0) {
-      throw new BadRequestError(
-        "unknown_role",
-        `Roles not found, archived or retired: ${missing.join(", ")}`
+  // 30 s: the user's authority lock may be held by a group change, which
+  // takes every member's (utils/groups.ts).
+  const { userRoles, revokedJtis } = await db.$transaction(
+    async (tx) => {
+      // A grant races a credential reset's check of what the user holds.
+      await db.users.lockAuthority(id, tx);
+      // Read in the transaction, and only the roles new as of this read are
+      // created: a held role removed concurrently is not put back unchecked.
+      const held = new Set(
+        (await db.roles.getGlobalUserRoles(id, tx)).map((ur) => ur.roleId)
       );
-    }
-    assertCanGrant(
-      await globalGrantablePermissions(auth, tx),
-      db.roles.grantedPermissionNames(roles)
-    );
-    if ([...held].some((roleId) => !roleIds.includes(roleId))) {
-      await assertMayDisempower(auth, id, "remove roles from", tx);
-    }
+      // A held role stays whatever its state: archived and retired ones keep
+      // their assignment to come back on restore.
+      const added = roleIds.filter((roleId) => !held.has(roleId));
+      const roles = await db.roles.getByIds(added, tx);
+      const found = new Set(roles.map((r) => r.id));
+      const missing = added.filter((roleId) => !found.has(roleId));
+      if (missing.length > 0) {
+        throw new BadRequestError(
+          "unknown_role",
+          `Roles not found, archived or retired: ${missing.join(", ")}`
+        );
+      }
+      assertCanGrant(
+        await globalGrantablePermissions(auth, tx),
+        db.roles.grantedPermissionNames(roles)
+      );
+      if ([...held].some((roleId) => !roleIds.includes(roleId))) {
+        await assertMayDisempower(auth, id, "remove roles from", tx);
+      }
 
-    // A role the user already holds keeps its row and its expiresAt, so only
-    // a newly created admin assignment is sure to be live; a kept one counts
-    // only if assertAdminRemains finds it unexpired.
-    const gainsAdmin =
-      targetUser.isActive &&
-      targetUser.userType === "human" &&
-      (await db.roles.getAdminRoleIds(added, tx)).length > 0;
-    if (!gainsAdmin) {
-      await assertAdminRemains(
-        (a) =>
-          a.userId !== id || a.groupId !== null || roleIds.includes(a.roleId),
-        tx
+      // A role the user already holds keeps its row and its expiresAt, so only
+      // a newly created admin assignment is sure to be live; a kept one counts
+      // only if assertAdminRemains finds it unexpired.
+      const gainsAdmin =
+        targetUser.isActive &&
+        targetUser.userType === "human" &&
+        (await db.roles.getAdminRoleIds(added, tx)).length > 0;
+      if (!gainsAdmin) {
+        await assertAdminRemains(
+          (a) =>
+            a.userId !== id || a.groupId !== null || roleIds.includes(a.roleId),
+          tx
+        );
+      }
+      const result = await db.roles.setUserRoles(
+        id,
+        roleIds,
+        tx,
+        new Set(added)
       );
-    }
-    const result = await db.roles.setUserRoles(id, roleIds, tx, new Set(added));
-    // Permissions are read live, so a token from a password-only login would
-    // carry the new role; revoked, its refresh meets the step-up.
-    const revokedJtis = roles.some((r) => r.requires2fa)
-      ? await db.accessTokens.revokeWithoutMfa({ id }, tx)
-      : [];
-    await logAuditTx(tx, {
-      auth,
-      action: "UPDATE",
-      entityType: "User",
-      entityId: id,
-      entityName: targetUser.email,
-      metadata: {
-        action: "roles_changed",
-        roleIds: roleIds,
-        ...(revokedJtis.length > 0 && {
-          accessTokensRevoked: revokedJtis.length,
-        }),
-      },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.user.roles-changed",
-      entityType: "User",
-      entityId: id,
-      data: { userId: id, email: targetUser.email, roleIds: roleIds },
-    });
-    return { userRoles: result, revokedJtis };
-  });
+      // Permissions are read live, so a token from a password-only login would
+      // carry the new role; revoked, its refresh meets the step-up.
+      const revokedJtis = roles.some((r) => r.requires2fa)
+        ? await db.accessTokens.revokeWithoutMfa({ id }, tx)
+        : [];
+      await logAuditTx(tx, {
+        auth,
+        action: "UPDATE",
+        entityType: "User",
+        entityId: id,
+        entityName: targetUser.email,
+        metadata: {
+          action: "roles_changed",
+          roleIds: roleIds,
+          ...(revokedJtis.length > 0 && {
+            accessTokensRevoked: revokedJtis.length,
+          }),
+        },
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.user.roles-changed",
+        entityType: "User",
+        entityId: id,
+        data: { userId: id, email: targetUser.email, roleIds: roleIds },
+      });
+      return { userRoles: result, revokedJtis };
+    },
+    { timeout: 30_000 }
+  );
 
   disconnectTokenSockets(revokedJtis);
   notifyUserRolesChanged(id);
