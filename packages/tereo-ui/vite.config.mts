@@ -21,6 +21,11 @@ export default defineConfig(() => ({
   build: {
     outDir: "./dist",
     emptyOutDir: true,
+    // One stylesheet, loaded by index.html. With per-chunk CSS, Vite 8 put
+    // the CSS of a kosmeo component shared by several lazy pages with one of
+    // them only (AuthPage's went with SetupPage), so the others rendered it
+    // unstyled.
+    cssCodeSplit: false,
   },
   plugins: [react()],
   server: {
