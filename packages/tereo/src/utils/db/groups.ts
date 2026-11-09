@@ -220,6 +220,18 @@ export const getRoleIds = async (
   return rows.map((r) => r.roleId);
 };
 
+/** The groups holding the role, archived ones included. */
+export const getIdsHoldingRole = async (
+  roleId: string,
+  tx?: Prisma.TransactionClient
+): Promise<string[]> => {
+  const rows = await (tx ?? prisma).groupRole.findMany({
+    where: { roleId },
+    select: { groupId: true },
+  });
+  return rows.map((r) => r.groupId);
+};
+
 /** Makes the group's roles exactly `roleIds`; returns what changed. */
 export const replaceRoles = async (
   groupId: string,

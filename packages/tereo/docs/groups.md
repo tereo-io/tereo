@@ -193,6 +193,10 @@ organization's ([webhooks](webhooks.md)).
 | `auth.group.members-added`, `members-removed` | `groupId`, `organizationId`, `userIds`; one event per operation, in chunks of 1,000 ids |
 | `auth.group.roles-changed` | `groupId`, `organizationId`, `roleIds`, `added`, `removed` |
 
+Deleting a role (`DELETE /v1/admin/roles/:id`) takes it from every group holding it, archived ones
+included: each gets the `roles_changed` audit entry (with `reason: "role_deleted"`) and the
+`auth.group.roles-changed` event a role change would, with `removed` naming the role.
+
 A change to a group's roles emits no per-member `auth.user.roles-changed`. Every change that alters
 effective roles does push a permission change to each affected member's open sessions
 ([WebSocket](auth.md)).

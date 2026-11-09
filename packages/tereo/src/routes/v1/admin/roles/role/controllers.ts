@@ -19,6 +19,10 @@ import {
   validateParams,
 } from "../../../../../utils/validateReq.js";
 import {
+  lockGroupsHoldingRole,
+  recordRoleDeletedFromGroupsTx,
+} from "../../../../../utils/groups.js";
+import {
   assertCanGrant,
   assertCanTakeAway,
   globalGrantablePermissions,
@@ -372,10 +376,14 @@ export const deleteRole = async (req: Request, res: Response) => {
   );
 
   const { affectedUserIds, revokedJtis } = await db.$transaction(async (tx) => {
+    await lockGroupsHoldingRole(params.id, tx);
     await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
-    // Read before the delete: assignments cascade away with the row.
+    await db.roles.lockRoles([params.id], "update", tx);
+    // Read before the delete: assignments and group holds cascade away with
+    // the row.
     const affectedUserIds = await db.roles.getUserIdsByRoleId(params.id, tx);
     const revokedJtis = await revokeClientTokensTx(affectedUserIds, tx);
+    await recordRoleDeletedFromGroupsTx(tx, auth, params.id);
     await db.roles.remove(params.id, tx);
     await logAuditTx(tx, {
       auth,

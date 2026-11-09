@@ -332,6 +332,23 @@ const emitRolesChanged = (
     },
   });
 
+const rolesChangedAudit = (
+  tx: Tx,
+  auth: AuditActor,
+  group: Group,
+  change: { roleIds: string[]; added: string[]; removed: string[] },
+  extra: Record<string, unknown> = {}
+) =>
+  logAuditTx(tx, {
+    auth,
+    organizationId: group.organizationId,
+    action: "UPDATE",
+    entityType: "Group",
+    entityId: group.id,
+    entityName: group.slug,
+    metadata: { action: "roles_changed", ...change, ...extra },
+  });
+
 const membersAudit = (
   tx: Tx,
   auth: AuditActor,
@@ -674,23 +691,13 @@ export const setGroupRoles = async (
       ? await db.accessTokens.revokeWithoutMfa({ id: { in: memberIds } }, tx)
       : [];
   if (changed) {
-    await logAuditTx(tx, {
-      auth: auditActor(actor),
-      organizationId: group.organizationId,
-      action: "UPDATE",
-      entityType: "Group",
-      entityId: group.id,
-      entityName: group.slug,
-      metadata: {
-        action: "roles_changed",
-        roleIds: wanted,
-        added,
-        removed,
-        ...(revokedJtis.length > 0 && {
-          accessTokensRevoked: revokedJtis.length,
-        }),
-      },
-    });
+    await rolesChangedAudit(
+      tx,
+      auditActor(actor),
+      group,
+      { roleIds: wanted, added, removed },
+      revokedJtis.length > 0 ? { accessTokensRevoked: revokedJtis.length } : {}
+    );
     await emitRolesChanged(tx, group, wanted, added, removed);
   }
   return {
@@ -823,6 +830,51 @@ export const removeFromOrgGroupsTx = async (
     await emitMembersEvents(tx, group, "auth.group.members-removed", removed);
   }
   return groupIds;
+};
+
+/**
+ * Lock step 2 for deleting a role: locks the groups holding it, ascending,
+ * before the admin guard's lock and the role's row lock, as setGroupRoles
+ * takes them. Returns their ids.
+ */
+export const lockGroupsHoldingRole = async (
+  roleId: string,
+  tx: Tx
+): Promise<string[]> => {
+  const ids = (await db.groups.getIdsHoldingRole(roleId, tx)).sort();
+  for (const id of ids) await db.groups.lockGroup(id, tx);
+  return ids;
+};
+
+/**
+ * Records, for each group holding a role about to be deleted, the role's
+ * removal as setGroupRoles would: the deletion cascades the group's hold
+ * away. Call it under the role's row lock, which a group taking the role
+ * shares, so no group gains it after this read; a group found here but not
+ * by `lockGroupsHoldingRole` took it in a transaction since committed.
+ * Archived groups count: their roles come back on restore. The members'
+ * notifications are the role deletion's.
+ */
+export const recordRoleDeletedFromGroupsTx = async (
+  tx: Tx,
+  auth: AuditActor,
+  roleId: string
+): Promise<void> => {
+  const ids = (await db.groups.getIdsHoldingRole(roleId, tx)).sort();
+  for (const id of ids) {
+    const group = await db.groups.getAny(id, tx);
+    const roleIds = (await db.groups.getRoleIds(id, tx))
+      .filter((r) => r !== roleId)
+      .sort();
+    await rolesChangedAudit(
+      tx,
+      auth,
+      group,
+      { roleIds, added: [], removed: [roleId] },
+      { reason: "role_deleted" }
+    );
+    await emitRolesChanged(tx, group, roleIds, [], [roleId]);
+  }
 };
 
 /** After commit: ends sockets of revoked tokens and tells members to refresh. */

@@ -652,7 +652,8 @@ toggle (PATCH-able; deactivating an org or role is what revokes tokens/sessions)
   id (read-only), all other mutations 409 via per-id router guards.
 - `DELETE /v1/admin/roles/:id` is a **hard delete** of a custom role: it cascades the role's
   assignment join rows (and its place among identity-provider domains' default roles) and revokes
-  affected users' tokens first. Organizations have no delete —
+  affected users' tokens first. Each group holding it records the loss as a role change
+  ([groups](groups.md#events-and-audit)). Organizations have no delete —
   archiving is as far as they go. The default organization can never be archived.
 
 ## Permissions and system roles are declared in code

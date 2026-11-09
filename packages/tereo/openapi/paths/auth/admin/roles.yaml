@@ -252,8 +252,9 @@
       Permanently deletes a role, archived or not. This is not reversible —
       archive the role instead for routine retirement.
 
-      Role-permission and user-role assignments, and the role's place among
-      identity-provider domains' default roles, are removed with the role,
+      Role-permission and user-role assignments, the role's place in every
+      group holding it, and its place among identity-provider domains'
+      default roles, are removed with the role,
       and the access tokens of the service clients that held it are revoked
       (people's permissions are read on every request, so their tokens lose
       the role at once). System roles cannot be deleted
@@ -261,7 +262,10 @@
       it would leave no active administrator (`409 conflict`).
 
       An audit log entry is created for this action.
-      An `auth.role.deleted` webhook event is emitted.
+      An `auth.role.deleted` webhook event is emitted. Each group that held
+      the role, archived or not, gets a `roles_changed` audit entry
+      (`reason: role_deleted`) and an `auth.group.roles-changed` event, as
+      if the role had been taken from it.
     operationId: deleteAdminRole
     security:
       - BearerAuth: [roles.delete]
