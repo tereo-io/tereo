@@ -57,6 +57,9 @@ CREATE INDEX "group_members_user_id_idx" ON "auth"."group_members"("user_id");
 CREATE UNIQUE INDEX "group_members_group_id_user_id_key" ON "auth"."group_members"("group_id", "user_id");
 
 -- CreateIndex
+CREATE INDEX "group_members_group_id_id_idx" ON "auth"."group_members"("group_id", "id");
+
+-- CreateIndex
 CREATE INDEX "group_roles_role_id_idx" ON "auth"."group_roles"("role_id");
 
 -- CreateIndex
@@ -89,3 +92,10 @@ ALTER TABLE "auth"."group_roles" ADD CONSTRAINT "group_roles_added_by_fkey" FORE
 -- Slug uniqueness per scope. An archived group keeps its slug.
 CREATE UNIQUE INDEX "groups_org_slug_key" ON "auth"."groups" ("organization_id", "slug") WHERE "organization_id" IS NOT NULL;
 CREATE UNIQUE INDEX "groups_global_slug_key" ON "auth"."groups" ("slug") WHERE "organization_id" IS NULL;
+
+-- The slug format and provisioning state the admin API and provisioning
+-- enforce, held by the database too.
+ALTER TABLE "auth"."groups" ADD CONSTRAINT "groups_slug_format"
+  CHECK ("slug" ~ '^[a-z0-9-]{1,100}$');
+ALTER TABLE "auth"."groups" ADD CONSTRAINT "groups_unprovisioned_provisioned"
+  CHECK ("unprovisioned_at" IS NULL OR "definition_source" = 'provisioned');
