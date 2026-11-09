@@ -15,6 +15,7 @@ import {
   archiveGroup,
   chunkUserIds,
   createGroup,
+  removeFromOrgGroupsTx,
   removeMembers,
   restoreGroup,
   setGroupRoles,
@@ -257,6 +258,56 @@ describe("group audit entries and events", () => {
         data: expect.objectContaining({ id: group.id }),
       }),
     ]);
+  });
+
+  it("removeFromOrgGroupsTx takes a leaving member out of every org group, archived ones included", async () => {
+    const org = await ensureTestOrganization(`group-audit-${randomUUID()}`);
+    const user = await createTestUser();
+    await joinOrg(org, user.id);
+    const live = (await newGroup(org)).group;
+    const archived = (await newGroup(org)).group;
+    const untouched = (await newGroup(org)).group;
+    const global = (await newGroup(null)).group;
+    for (const group of [live, archived, global]) {
+      await db.$transaction((tx) => addMembers(actor, group.id, [user.id], tx));
+    }
+    await db.$transaction((tx) => archiveGroup(actor, archived.id, tx));
+
+    const { result, events } = await withEvents((tx) =>
+      removeFromOrgGroupsTx(tx, actor.auth, org, user.id)
+    );
+
+    expect([...result].sort()).toEqual([live.id, archived.id].sort());
+    for (const group of [live, archived]) {
+      expect(await db.groups.getMemberIds(group.id)).toEqual([]);
+      const entry = await lastAudit(group.id);
+      expect(entry.userId).toBe(actor.auth.userId);
+      expect(entry.organizationId).toBe(org);
+      expect(entry.metadata).toEqual({
+        action: "members_removed",
+        userIds: [user.id],
+        reason: "organization_member_removed",
+      });
+    }
+    expect(events).toHaveLength(2);
+    expect(events).toEqual(
+      expect.arrayContaining(
+        [live, archived].map((group) =>
+          expect.objectContaining({
+            eventType: "auth.group.members-removed",
+            organizationId: org,
+            entityId: group.id,
+            data: {
+              groupId: group.id,
+              organizationId: org,
+              userIds: [user.id],
+            },
+          })
+        )
+      )
+    );
+    expect(await db.groups.getMemberIds(global.id)).toEqual([user.id]);
+    expect(await db.groups.getMemberIds(untouched.id)).toEqual([]);
   });
 
   it("members-added splits 2,500 user ids into 3 events", () => {
