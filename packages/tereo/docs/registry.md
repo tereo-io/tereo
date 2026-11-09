@@ -184,7 +184,9 @@ environment variable its document names. `access/approve`, `access/revoke` and
 `revoke-previous-secret` still work. A service dropped from the documents is deactivated after
 `REGISTRY_RETIREMENT_GRACE_HOURS`, and reactivated if it returns ([provisioning](provisioning.md#removing-an-entry)).
 Its buckets are marked missing at the deactivation and can be deleted from then on
-([declared buckets](#declared-buckets)); a return declares them again.
+([declared buckets](#declared-buckets)); a return declares them again. Integrations, login clients,
+custom roles and groups dropped from the documents wait the same grace before they are deactivated,
+deleted or archived.
 
 ## Core
 
