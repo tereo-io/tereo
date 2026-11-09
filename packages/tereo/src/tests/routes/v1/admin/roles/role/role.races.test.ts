@@ -1,9 +1,9 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag race
+import { holdLocks, waitForLockWait } from "../../../../../support/dbLocks.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { createTestRole } from "../../../../../support/auth/users.js";
-import { waitForLockWait } from "../../../../../support/dbLocks.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
@@ -109,6 +109,36 @@ describe("PATCH /v1/admin/roles/:id and POST /v1/admin/roles/:id/archive", () =>
     expect(row.archivedAt).toBeNull();
     expect(row.isActive).toBe(true);
     expect(res.status).toBe(409);
+  });
+});
+
+describe("PATCH /v1/admin/roles/:id deactivating", () => {
+  it("runs the admin guard though the role read inactive before a reactivation committed", async () => {
+    // The guard decides whether the role still counts under its lock; the
+    // read before the transaction may predate the reactivation.
+    const role = await createTestRole();
+    await prisma.role.update({
+      where: { id: role.id },
+      data: { isActive: false },
+    });
+    const release = await holdLocks(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('core:admin-remains', 0))`;
+      await tx.role.update({
+        where: { id: role.id },
+        data: { isActive: true },
+      });
+    });
+    const pending = call("PATCH", `/v1/admin/roles/${role.id}`, adminToken, {
+      isActive: false,
+    });
+    try {
+      await waitForLockWait("%core:admin-remains%", 5_000);
+    } finally {
+      await release();
+    }
+    expect((await pending).status).toBe(200);
+    const row = await prisma.role.findUniqueOrThrow({ where: { id: role.id } });
+    expect(row.isActive).toBe(false);
   });
 });
 

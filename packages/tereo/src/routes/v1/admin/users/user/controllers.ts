@@ -284,10 +284,14 @@ export const setUserRoles = async (req: Request, res: Response) => {
 
       // A role the user already holds keeps its row and its expiresAt, so only
       // a newly created admin assignment is sure to be live; a kept one counts
-      // only if assertAdminRemains finds it unexpired.
+      // only if assertAdminRemains finds it unexpired. Whether the user and
+      // an added role count is read under the guard's lock, which a role
+      // losing admin and the user's deactivation both take.
+      await assertAdminRemains(null, tx);
+      const current = await db.users.get(id, tx);
       const gainsAdmin =
-        targetUser.isActive &&
-        targetUser.userType === "human" &&
+        current.isActive &&
+        current.userType === "human" &&
         (await db.roles.getAdminRoleIds(added, tx)).length > 0;
       if (!gainsAdmin) {
         await assertAdminRemains(

@@ -125,7 +125,9 @@ export const updateRole = async (req: Request, res: Response) => {
   }
 
   const { role, revokedJtis } = await db.$transaction(async (tx) => {
-    if (body.isActive === false && existing.isActive) {
+    // Whatever `existing` says: the role may have been reactivated since,
+    // and the guard counts it only if it is active under its lock.
+    if (body.isActive === false) {
       await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
     }
     // A role gains `admin` only under its lock, and only while no
