@@ -70,7 +70,7 @@ export const assertSetupLinkAllowed = async (
   const domain = await db.identityProviders.findDomain(emailDomain(email), tx);
   if (domain?.ssoOnly) {
     throw new ConflictError(
-      "This email's domain signs in only through its identity provider, so a setup link would not work; give the guest a password with initialAccess.password instead",
+      "This email's domain signs in only through its identity provider, so a setup link would not work; set a password for the guest instead",
       "sso_only_domain"
     );
   }

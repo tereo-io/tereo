@@ -7,7 +7,7 @@ import {
 
 /**
  * Makes a fresh domain SSO-only under a provider of its own, and returns the
- * domain and a cleanup that removes both.
+ * domain, the provider's id and a cleanup that removes both.
  */
 export const createSsoOnlyDomain = async () => {
   const id = randomBytes(5).toString("hex");
@@ -38,5 +38,5 @@ export const createSsoOnlyDomain = async () => {
     });
     await prisma.identityProvider.delete({ where: { id: provider.id } });
   };
-  return { domain, remove };
+  return { domain, providerId: provider.id, remove };
 };

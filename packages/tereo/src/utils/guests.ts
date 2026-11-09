@@ -712,10 +712,16 @@ const extendInvitedGuest = async (
       )
     );
   }
+  // A guest with no password but a linked identity signs in through the
+  // provider (an SSO-only domain's forced link dropped the password), so
+  // initial access does not apply: a re-invite only extends them.
+  const needsInitialAccess =
+    existing.passwordHash === null &&
+    (await tx.userIdentity.count({ where: { userId: existing.id } })) === 0;
   // After the refusals that hide another organization's guest, before any
   // write.
   if (
-    existing.passwordHash === null &&
+    needsInitialAccess &&
     input.initialAccess.type === "password_setup_link"
   ) {
     await assertSetupLinkAllowed(existing.email, tx);
@@ -756,7 +762,7 @@ const extendInvitedGuest = async (
       : await setAccountExpiry(tx, existing, expiresAt);
 
   let passwordSetupUrl: string | undefined;
-  if (user.passwordHash === null) {
+  if (needsInitialAccess) {
     ({ user, passwordSetupUrl } = await applyInitialAccess(
       tx,
       auth,

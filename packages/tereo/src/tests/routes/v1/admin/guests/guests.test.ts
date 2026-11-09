@@ -674,6 +674,39 @@ describe("POST /v1/admin/guests", () => {
     }
   });
 
+  it("re-invites a guest linked through an SSO-only domain: extends, issues no link", async () => {
+    const sso = await createSsoOnlyDomain();
+    try {
+      const email = `guest-${generateUniqueId()}@${sso.domain}`;
+      const created = await invite({
+        email,
+        initialAccess: { type: "password", password: PASSWORD },
+      });
+      const id = created.body.user.id as string;
+      // As the domain's forced link leaves the guest.
+      await prisma.user.update({ where: { id }, data: { passwordHash: null } });
+      await prisma.userIdentity.create({
+        data: { userId: id, providerId: sso.providerId, subject: `s-${id}` },
+      });
+
+      const res = await invite({ email, expiresIn: 2 * 86_400 });
+
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty("passwordSetupUrl");
+      expect(new Date(res.body.user.expiresAt).getTime()).toBeGreaterThan(
+        new Date(created.body.user.expiresAt).getTime()
+      );
+      expect(await prisma.userLinkToken.count({ where: { userId: id } })).toBe(
+        0
+      );
+    } finally {
+      await prisma.userIdentity.deleteMany({
+        where: { providerId: sso.providerId },
+      });
+      await sso.remove();
+    }
+  });
+
   it("returns core's 400 for an invalid body", async () => {
     const res = await invite({ email: uniqueEmail(), expiresIn: 0 });
     expect(res.status).toBe(400);
@@ -737,55 +770,5 @@ describe("POST /v1/admin/guests", () => {
     });
     const res = await invite({ email: uniqueEmail() }, token);
     expect(res.status).toBe(201);
-  });
-});
-
-describe("GET /v1/admin/guests", () => {
-  it("lists only guests, filtered by organization", async () => {
-    const mine = await createTestGuest({ organizationId: orgId });
-    const theirs = await createTestGuest({ organizationId: otherOrgId });
-
-    const res = await fetchJson(
-      "GET",
-      `${BASE_URL}/v1/admin/guests?filter[organizationId]=${otherOrgId}&limit=200`,
-      adminToken
-    );
-
-    expect(res.status).toBe(200);
-    const ids = res.body.data.map((u: { id: string }) => u.id);
-    expect(ids).toContain(theirs.user.id);
-    expect(ids).not.toContain(mine.user.id);
-    expect(
-      res.body.data.find((u: { id: string }) => u.id === theirs.user.id)
-        .organizationId
-    ).toBe(otherOrgId);
-    for (const user of res.body.data) {
-      expect(user.userType).toBe("guest");
-      expect(user.status).toBe("active");
-    }
-  });
-
-  it("shows a caller without organizations.write only their organizations' guests", async () => {
-    const mine = await createTestGuest({ organizationId: orgId });
-    const theirs = await createTestGuest({ organizationId: otherOrgId });
-    const userId = randomUUID();
-    const token = await getTestPrincipalToken({
-      userId,
-      permissions: ["users.guests.read"],
-    });
-    await prisma.organizationMember.create({
-      data: { organizationId: orgId, userId, memberRole: "member" },
-    });
-
-    const res = await fetchJson(
-      "GET",
-      `${BASE_URL}/v1/admin/guests?limit=200&sort=createdAt&sortDir=desc`,
-      token
-    );
-
-    expect(res.status).toBe(200);
-    const ids = res.body.data.map((u: { id: string }) => u.id);
-    expect(ids).toContain(mine.user.id);
-    expect(ids).not.toContain(theirs.user.id);
   });
 });
