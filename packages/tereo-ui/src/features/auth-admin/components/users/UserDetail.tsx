@@ -8,6 +8,7 @@ import { UserConnectedAccounts } from "./UserConnectedAccounts";
 import useUserSessions from "../../api/users/useUserSessions";
 import PromoteGuestButton from "./buttons/PromoteGuestButton";
 import { RateLimitField } from "@/components/RateLimitField";
+import { useGroupAccess } from "../groups/useGroupAuthority";
 import ManageRolesButton from "./buttons/ManageRolesButton";
 import ExtendGuestButton from "./buttons/ExtendGuestButton";
 import useUserGroups from "../../api/groups/useUserGroups";
@@ -72,7 +73,7 @@ export const UserDetail = () => {
   const canWrite = hasPermission("users.write");
   const canDelete = hasPermission("users.delete");
   const canWriteGuests = hasPermission("users.guests.write");
-  const canReadGroups = hasPermission("groups.read");
+  const { canRead: canReadGroup } = useGroupAccess();
 
   const canReadSettings = hasPermission("settings.read");
 
@@ -358,7 +359,7 @@ export const UserDetail = () => {
               <div className="t-role-chips">
                 {groups.map((g) => (
                   <Badge key={g.id} variant="secondary">
-                    {canReadGroups ? (
+                    {canReadGroup(g) ? (
                       <Link
                         to={`/auth-admin/groups/${g.id}`}
                         className="v-link"

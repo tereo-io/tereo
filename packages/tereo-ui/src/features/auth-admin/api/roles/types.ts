@@ -70,6 +70,22 @@ export interface RoleUser {
   organizationId: string | null;
   organization: OrgRef | null;
   expiresAt: string | null;
-  /** How the user holds the role; a group row is removed in the group. */
-  via?: { kind: "direct" } | { kind: "group"; groupId: string };
+}
+
+/** A live group holding the role; its members hold it in the group's scope. */
+export interface RoleGroup {
+  id: string;
+  slug: string;
+  name: string;
+  /** The group's organization; null for a global group. */
+  organizationId: string | null;
+  organization: OrgRef | null;
+  memberCount: number;
+}
+
+export interface RoleUsersResponse {
+  roleId: string;
+  /** Direct assignments only, one per scope. */
+  users: RoleUser[];
+  groups: RoleGroup[];
 }

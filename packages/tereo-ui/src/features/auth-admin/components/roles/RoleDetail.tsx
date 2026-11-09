@@ -3,17 +3,17 @@ import ArchiveRestoreRoleButton from "./buttons/ArchiveRestoreRoleButton";
 import ManagePermissionsButton from "./buttons/ManagePermissionsButton";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
+import type { RoleGroup, RoleUser } from "../../api/roles/types";
 import { formatDate, formatDateTime } from "@/utils/formatDate";
 import DuplicateRoleButton from "./buttons/DuplicateRoleButton";
+import { useGroupAccess } from "../groups/useGroupAuthority";
 import { faLock } from "@fortawesome/free-solid-svg-icons";
 import DeleteRoleButton from "./buttons/DeleteRoleButton";
 import useRoleUsers from "../../api/roles/useRoleUsers";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
-import type { RoleUser } from "../../api/roles/types";
 import EditRoleButton from "./buttons/EditRoleButton";
 import { PageHeader } from "@/components/PageHeader";
 import { useParams, Link } from "react-router-dom";
-import useGroup from "../../api/groups/useGroup";
 import useRole from "../../api/roles/useRole";
 import { useAuth } from "@/lib/auth";
 import { useMemo } from "react";
@@ -33,23 +33,6 @@ import {
   type TableColumn,
 } from "@kosmeo-ui/react";
 
-/** The group a user holds the role through; reading it needs `groups.read`. */
-const ViaGroup = ({ groupId }: { groupId: string }) => {
-  const { hasPermission } = useAuth();
-  const canRead = hasPermission("groups.read");
-  const { data: group } = useGroup(groupId, canRead);
-
-  if (!canRead) return <span>via group</span>;
-  return (
-    <span>
-      via{" "}
-      <Link to={`/auth-admin/groups/${groupId}`} className="v-link">
-        {group?.name ?? groupId}
-      </Link>
-    </span>
-  );
-};
-
 export const RoleDetail = () => {
   const { roleId } = useParams<{ roleId: string }>();
 
@@ -62,6 +45,7 @@ export const RoleDetail = () => {
 
   const { data: role, isLoading } = useRole(id);
   const { data: usersData } = useRoleUsers(id);
+  const { canRead: canReadGroup } = useGroupAccess();
 
   useDocumentTitle(role?.displayName || role?.name);
 
@@ -95,15 +79,6 @@ export const RoleDetail = () => {
         ),
       },
       {
-        title: "Via",
-        cellElement: (user) =>
-          user.via?.kind === "group" ? (
-            <ViaGroup groupId={user.via.groupId} />
-          ) : (
-            "direct"
-          ),
-      },
-      {
         title: "Scope",
         dataKey: "organizationId",
         cellElement: (user) =>
@@ -128,20 +103,57 @@ export const RoleDetail = () => {
         ? [
             {
               title: "Actions",
-              // A group row goes by taking the user out of the group.
-              cellElement: (user: RoleUser) =>
-                user.via?.kind === "group" ? null : (
-                  <RemoveUserFromRoleButton
-                    roleId={id}
-                    roleDisplayName={role?.displayName || ""}
-                    user={user}
-                  />
-                ),
+              cellElement: (user: RoleUser) => (
+                <RemoveUserFromRoleButton
+                  roleId={id}
+                  roleDisplayName={role?.displayName || ""}
+                  user={user}
+                />
+              ),
             },
           ]
         : []),
     ],
     [id, role?.displayName, canRemoveUsers]
+  );
+
+  const groupColumns: TableColumn<RoleGroup>[] = useMemo(
+    () => [
+      {
+        title: "Group",
+        dataKey: "name",
+        cellElement: (group) =>
+          canReadGroup(group) ? (
+            <Link to={`/auth-admin/groups/${group.id}`} className="v-link">
+              {group.name}
+            </Link>
+          ) : (
+            group.name
+          ),
+      },
+      {
+        title: "Scope",
+        dataKey: "organizationId",
+        cellElement: (group) =>
+          group.organizationId ? (
+            <Link
+              to={`/auth-admin/organizations/${group.organizationId}`}
+              className="v-link"
+            >
+              {group.organization?.name ?? group.organizationId}
+            </Link>
+          ) : (
+            "Global"
+          ),
+      },
+      {
+        title: "Members",
+        dataKey: "memberCount",
+        width: "7rem",
+        align: "center",
+      },
+    ],
+    [canReadGroup]
   );
 
   if (isLoading) {
@@ -201,7 +213,13 @@ export const RoleDetail = () => {
                 <DeleteRoleButton
                   key="delete"
                   role={role}
-                  userCount={usersData?.users.length ?? 0}
+                  userCount={
+                    (usersData?.users.length ?? 0) +
+                    (usersData?.groups ?? []).reduce(
+                      (n, g) => n + g.memberCount,
+                      0
+                    )
+                  }
                 />,
               ]
         }
@@ -300,12 +318,20 @@ export const RoleDetail = () => {
               <Table<RoleUser>
                 rows={usersData?.users || []}
                 columns={userColumns}
-                rowKey={(u) =>
-                  `${u.id}:${u.organizationId ?? ""}:${
-                    u.via?.kind === "group" ? u.via.groupId : "direct"
-                  }`
-                }
+                rowKey={(u) => `${u.id}:${u.organizationId ?? ""}`}
                 emptyMessage="No users assigned to this role"
+                maxHeight="25rem"
+              />
+            </Col>
+          </Card>
+          <Card>
+            <Col>
+              <h3>Groups with this Role ({usersData?.groups.length || 0})</h3>
+              <Table<RoleGroup>
+                rows={usersData?.groups || []}
+                columns={groupColumns}
+                rowKey={(g) => g.id}
+                emptyMessage="No group holds this role"
                 maxHeight="25rem"
               />
             </Col>

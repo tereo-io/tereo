@@ -171,6 +171,22 @@ describe("UserDetail", () => {
       ).toHaveAttribute("href", "/auth-admin/groups/g1");
     });
 
+    it("asks for archived groups too and marks them", async () => {
+      renderDetail(person, new QueryClient(), undefined, roles, [
+        {
+          ...supportGroup,
+          organizationId: null,
+          archivedAt: "2026-10-05T00:00:00Z",
+        },
+      ]);
+
+      expect(await screen.findByText("archived")).toBeVisible();
+      expect(authMock.axios.get).toHaveBeenCalledWith(
+        "/v1/admin/users/u1/groups",
+        { params: { includeArchived: true } }
+      );
+    });
+
     it("never sends a group-only role back from the roles editor", async () => {
       authMock.axios.put.mockResolvedValue({ data: roles });
       renderDetail(person, new QueryClient(), undefined, roles);

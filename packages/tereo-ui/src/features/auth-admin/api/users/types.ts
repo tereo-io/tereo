@@ -34,7 +34,7 @@ export interface UserRole {
   expiresAt: string | null;
 }
 
-/** A role held through a global group; `PUT .../roles` never touches these. */
+/** A role held through a group; `PUT .../roles` never touches these. */
 export interface UserGroupRole {
   id: string;
   name: string;

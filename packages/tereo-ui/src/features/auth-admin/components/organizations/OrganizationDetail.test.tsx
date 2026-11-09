@@ -131,6 +131,12 @@ describe("OrganizationDetail groups", () => {
         String(url).includes("organizationId=o1")
       )
     ).toBe(true);
+    // Core hides archived groups unless includeArchived is set.
+    expect(
+      authMock.axios.get.mock.calls.some(([url]) =>
+        /[?&](includeArchived|archived)=/.test(String(url))
+      )
+    ).toBe(false);
   });
 
   it("hides the tab from someone who cannot read the groups", async () => {

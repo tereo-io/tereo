@@ -113,11 +113,8 @@ export const GroupList = ({ organizationId, canCreate }: GroupListProps) => {
         {
           type: "SELECT",
           title: "Archived",
-          dataKey: "archived",
-          options: [
-            { id: "false", name: "Active only", selected: true },
-            { id: "true", name: "Archived only", selected: false },
-          ],
+          dataKey: "includeArchived",
+          options: [{ id: "true", name: "Include archived", selected: false }],
         },
       ],
     }),

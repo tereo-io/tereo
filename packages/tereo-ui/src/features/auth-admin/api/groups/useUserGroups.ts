@@ -6,7 +6,10 @@ const useUserGroups = (userId: string) => {
   const axios = useAxios("auth");
 
   const queryFn = async (): Promise<Group[]> => {
-    const res = await axios.get(`/v1/admin/users/${userId}/groups`);
+    // Archived groups too: their roles come back on restore.
+    const res = await axios.get(`/v1/admin/users/${userId}/groups`, {
+      params: { includeArchived: true },
+    });
     return res.data.data;
   };
 

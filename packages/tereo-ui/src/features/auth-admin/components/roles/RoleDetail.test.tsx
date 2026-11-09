@@ -6,9 +6,14 @@ import type { Role } from "../../api/roles/types";
 import { authMock } from "@/test/authMock";
 import { RoleDetail } from "./RoleDetail";
 
+const granted = vi.hoisted(() => ({ all: true }));
+
 vi.mock("@/lib/auth", async () => ({
   ...(await import("@/test/authMock")).mockAuthModule(),
-  useAuth: () => ({ hasPermission: () => true }),
+  useAuth: () => ({
+    hasPermission: (p: string) => granted.all || !p.startsWith("groups."),
+    organizations: [],
+  }),
 }));
 
 const role: Role = {
@@ -43,23 +48,35 @@ const users = [
   },
 ];
 
-const groupRow = {
-  id: "u2",
-  email: "bob@example.com",
-  name: "Bob",
-  isActive: true,
-  organizationId: null,
-  organization: null,
-  expiresAt: null,
-  via: { kind: "group", groupId: "g1" },
-};
+const groups = [
+  {
+    id: "g1",
+    slug: "helpdesk",
+    name: "Helpdesk",
+    organizationId: null,
+    organization: null,
+    memberCount: 4,
+  },
+  {
+    id: "g2",
+    slug: "acme-support",
+    name: "Acme support",
+    organizationId: "o1",
+    organization: { id: "o1", name: "Acme", slug: "acme" },
+    memberCount: 2,
+  },
+];
 
-const renderDetail = (data: Role, rows: object[] = users) => {
+const renderDetail = (
+  data: Role,
+  rows: object[] = users,
+  heldBy: object[] = []
+) => {
   authMock.axios.get.mockImplementation(async (url: string) => {
     const path = String(url);
-    if (path.endsWith("/users")) return { data: { roleId: "r1", users: rows } };
-    if (path === "/v1/admin/groups/g1")
-      return { data: { id: "g1", name: "Support" } };
+    if (path.endsWith("/users")) {
+      return { data: { roleId: "r1", users: rows, groups: heldBy } };
+    }
     return { data };
   });
   render(
@@ -73,7 +90,10 @@ const renderDetail = (data: Role, rows: object[] = users) => {
   );
 };
 
-beforeEach(() => authMock.axios.get.mockReset());
+beforeEach(() => {
+  authMock.axios.get.mockReset();
+  granted.all = true;
+});
 
 describe("RoleDetail", () => {
   it("offers edit, archive and delete on a hand-made role", async () => {
@@ -108,14 +128,29 @@ describe("RoleDetail", () => {
     expect(screen.getByTitle(/remove/i)).toBeInTheDocument();
   });
 
-  it("shows a group-held row as via its group, with no remove control", async () => {
-    renderDetail(role, [{ ...users[0], via: { kind: "direct" } }, groupRow]);
+  it("lists the groups holding the role, with member counts and links", async () => {
+    renderDetail(role, users, groups);
 
-    expect(await screen.findByText("bob@example.com")).toBeVisible();
-    expect(
-      await screen.findByRole("link", { name: "Support" })
-    ).toHaveAttribute("href", "/auth-admin/groups/g1");
-    // Ada's direct row keeps its control; Bob's group row has none.
+    expect(await screen.findByText("Groups with this Role (2)")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Helpdesk" })).toHaveAttribute(
+      "href",
+      "/auth-admin/groups/g1"
+    );
+    expect(screen.getByText("4")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Acme" })).toHaveAttribute(
+      "href",
+      "/auth-admin/organizations/o1"
+    );
+    // The users table holds direct assignments only, each removable.
+    expect(screen.getByText("Users with this Role (1)")).toBeVisible();
     expect(screen.getAllByTitle(/remove/i)).toHaveLength(1);
+  });
+
+  it("names a group without a link when the viewer cannot open it", async () => {
+    granted.all = false;
+    renderDetail(role, users, groups);
+
+    expect(await screen.findByText("Helpdesk")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Helpdesk" })).toBeNull();
   });
 });

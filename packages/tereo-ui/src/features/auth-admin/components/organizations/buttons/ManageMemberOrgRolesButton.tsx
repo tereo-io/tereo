@@ -1,10 +1,15 @@
 import useSetMemberOrgRoles from "@/features/auth-admin/api/organizations/useSetMemberOrgRoles";
 import useMemberOrgRoles from "@/features/auth-admin/api/organizations/useMemberOrgRoles";
 import type { OrganizationMember } from "@/features/auth-admin/api/organizations/types";
+import { orgAssignableRoles } from "@/features/auth-admin/api/roles/orgAssignable";
 import useAllRoles from "@/features/auth-admin/api/roles/useAllRoles";
 import { faUserShield } from "@fortawesome/free-solid-svg-icons";
+import { useGroupAccess } from "../../groups/useGroupAuthority";
+import { Link } from "react-router-dom";
 import { useState } from "react";
+import "../../groups/styles.css";
 import {
+  Badge,
   Button,
   CheckboxGroup,
   Col,
@@ -19,10 +24,8 @@ interface ManageMemberOrgRolesButtonProps {
   member: OrganizationMember;
 }
 
-// Org-scoped role assignment. Only custom roles whose permissions are all
-// org-assignable can be newly granted within an organization: core refuses
-// system roles (403) and roles carrying anything else (400). Roles the member
-// already holds stay listed so saving keeps them.
+// Org-scoped role assignment. Roles held through the organization's groups
+// are listed apart and read-only: the PUT sets direct assignments only.
 const ManageMemberOrgRolesButton = ({
   orgId,
   member,
@@ -37,15 +40,11 @@ const ManageMemberOrgRolesButton = ({
   );
   const { data: roles, isLoading: rolesLoading } = useAllRoles();
   const { mutate, isPending } = useSetMemberOrgRoles(orgId);
+  const { canRead: canReadGroup } = useGroupAccess();
+  const groupRoles = current?.groupRoles ?? [];
 
   const held = new Set(current?.roles.map((r) => r.id) ?? []);
-  const customRoles = (roles ?? []).filter(
-    (r) =>
-      !r.isSystem &&
-      r.isActive &&
-      (held.has(r.id) ||
-        (r.permissions ?? []).every((p) => p.retired || p.orgAssignable))
-  );
+  const customRoles = orgAssignableRoles(roles ?? [], held);
   const values = selected ?? current?.roles.map((r) => r.id) ?? [];
 
   const handleClose = () => {
@@ -119,6 +118,31 @@ const ManageMemberOrgRolesButton = ({
               values={values}
               onChange={setSelected}
             />
+          )}
+          {groupRoles.length > 0 && (
+            <Col size="sm">
+              <strong>Through this organization&apos;s groups</strong>
+              <div className="t-role-chips">
+                {groupRoles.map((r) => (
+                  <Badge key={`${r.group.id}-${r.id}`} variant="secondary">
+                    {r.displayName}{" "}
+                    <span className="t-role-via">
+                      via{" "}
+                      {canReadGroup({ organizationId: orgId }) ? (
+                        <Link
+                          to={`/auth-admin/groups/${r.group.id}`}
+                          className="v-link"
+                        >
+                          {r.group.name}
+                        </Link>
+                      ) : (
+                        r.group.name
+                      )}
+                    </span>
+                  </Badge>
+                ))}
+              </div>
+            </Col>
           )}
         </Col>
       </Modal>

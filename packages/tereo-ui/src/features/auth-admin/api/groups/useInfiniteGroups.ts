@@ -5,11 +5,14 @@ import type { Group } from "./types";
 import { useMemo } from "react";
 
 /**
- * Core's group list takes plain query params (`q`, `archived`,
+ * Core's group list takes plain query params (`q`, `includeArchived`,
  * `definitionSource`, `organizationId`), while InfiniteScroll emits every
  * menu option as `filter[<key>]`. Rewrites those, and pins the organization.
  */
-const rewrite = (url: string, organizationId: string | undefined): string => {
+export const rewrite = (
+  url: string,
+  organizationId: string | undefined
+): string => {
   const [path, query = ""] = url.split("?");
   const params = new URLSearchParams();
   for (const [key, value] of new URLSearchParams(query)) {
