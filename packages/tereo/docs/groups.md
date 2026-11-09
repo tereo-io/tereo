@@ -64,6 +64,15 @@ A group role counts only when all of these hold:
 
 The guest permission floor still applies to anything that reaches a guest.
 
+An inactive organization is the one place the two differ: for a read scoped to it by id, the user's
+direct roles in it still count (as before groups), while its groups' roles do not. Tokens naming the
+organization are revoked when it is deactivated, so request-time checks rarely see it; the reads
+that do are an admin with `organizations.write` acting on the inactive organization (what they hold
+there bounds what they may grant or take away) and the delivery of a notification accepted before
+the deactivation (its attachments are checked in the sender's organization). The `memberships` scope
+(two-factor at sign-in) drops both kinds for an inactive organization, and the `anywhere` scope (who
+may act on an account) keeps both.
+
 An archived group grants nothing and is left out of claims, but keeps its members and roles so a
 restore brings them back.
 
