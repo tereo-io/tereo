@@ -3,7 +3,6 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import useUpstreamProviders from "../../api/upstream/useUpstreamProviders";
 import { upstreamErrorMessage } from "../../api/upstream/upstreamErrors";
 import { BrandedAuthPage, useBranding } from "@/features/auth/branding";
-import { rememberResetReturn } from "../../api/password/resetReturn";
 import { upstreamStartUrl } from "../../api/upstream/upstreamUrls";
 import { oauthErrorMessage } from "../../api/oauthErrorMessage";
 import { pickOAuthParams } from "../../api/oauthParams";
@@ -96,10 +95,11 @@ export const LoginPage = () => {
       onPassword={setPassword}
       onSubmit={handleSubmit}
       forgotPasswordHref={resetStatus?.enabled ? forgotPasswordHref : undefined}
-      onForgotPassword={() => {
-        rememberResetReturn(location.search);
-        navigate(forgotPasswordHref);
-      }}
+      onForgotPassword={() =>
+        navigate(forgotPasswordHref, {
+          state: { loginSearch: location.search },
+        })
+      }
       onProvider={(slug) => redirectTo(upstreamStartUrl(slug, oauthParams))}
     />
   );

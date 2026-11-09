@@ -33,7 +33,6 @@ const renderAt = (url: string) =>
   );
 
 beforeEach(() => {
-  window.localStorage.clear();
   authMock.axios.post.mockReset();
 });
 
@@ -174,12 +173,12 @@ describe("SetPasswordPage", () => {
 
   const resetDetails = { data: { ...DETAILS.data, purpose: "reset" } };
 
-  const completeReset = async () => {
+  const completeReset = async (query = "") => {
     const user = userEvent.setup();
     authMock.axios.post.mockImplementation(async (path: string) =>
       path === "/v1/password-setup/inspect" ? resetDetails : { data: undefined }
     );
-    renderAt("/set-password#token=abc123");
+    renderAt(`/set-password${query}#token=abc123`);
     await user.type(
       await screen.findByLabelText(/^New password/),
       "Str0ng-pass-phrase"
@@ -199,19 +198,27 @@ describe("SetPasswordPage", () => {
     expect(await screen.findByText("Reset your password")).toBeVisible();
   });
 
-  it("Sign in returns to the stored login query after a reset", async () => {
-    window.localStorage.setItem(
-      "tereo.resetReturnTo",
-      JSON.stringify({ search: "?client_id=c1&state=s", savedAt: Date.now() })
-    );
-    const user = await completeReset();
-    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+  it("after a reset asked from another app, says to go back to it, with no way into the console", async () => {
+    await completeReset("?client_id=acme");
 
-    expect(await screen.findByTestId("where")).toHaveTextContent(
-      "/login?client_id=c1&state=s"
-    );
-    expect(window.localStorage.getItem("tereo.resetReturnTo")).toBeNull();
+    expect(
+      await screen.findByText(/Go back to the app you were signing in to/)
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
   });
+
+  it.each([
+    ["no client", ""],
+    ["the console's own client", "?client_id=tereo-ui"],
+  ])(
+    "after a reset with %s, Sign in starts a fresh sign-in at /",
+    async (_label, query) => {
+      const user = await completeReset(query);
+      await user.click(await screen.findByRole("button", { name: "Sign in" }));
+
+      expect(await screen.findByTestId("where")).toHaveTextContent(/^\/$/);
+    }
+  );
 
   it("ignores a token in the query string", async () => {
     renderAt("/set-password?token=abc123");

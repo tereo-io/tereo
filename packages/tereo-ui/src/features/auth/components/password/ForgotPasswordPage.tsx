@@ -1,15 +1,27 @@
 import useRequestPasswordReset from "../../api/password/useRequestPasswordReset";
-import { readResetReturn } from "../../api/password/resetReturn";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Alert, Button, Col, Input } from "@kosmeo-ui/react";
 import { BrandedAuthPage } from "@/features/auth/branding";
-import { Link, useSearchParams } from "react-router-dom";
 import { useState } from "react";
 
 const TRY_AGAIN =
   "Too many attempts or the service is busy. Try again shortly.";
 
+/**
+ * The sign-in page this one was opened from, with its authorize request, as
+ * the login page passed it in this tab's history; else `/`, which starts a
+ * fresh sign-in.
+ */
+const backToSignIn = (state: unknown): string => {
+  const search = (state as { loginSearch?: unknown } | null)?.loginSearch;
+  return typeof search === "string" && search.startsWith("?")
+    ? `/login${search}`
+    : "/";
+};
+
 export const ForgotPasswordPage = () => {
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const clientId = searchParams.get("client_id") ?? undefined;
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -29,7 +41,7 @@ export const ForgotPasswordPage = () => {
   };
 
   const back = (
-    <Link className="v-link" to={`/login${readResetReturn() ?? ""}`}>
+    <Link className="v-link" to={backToSignIn(location.state)}>
       Back to sign in
     </Link>
   );

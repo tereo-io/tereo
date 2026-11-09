@@ -13,7 +13,12 @@ vi.mock("@/lib/auth", () => ({ usePublicAxios: () => authMock.axios }));
 
 const Where = () => {
   const l = useLocation();
-  return <div data-testid="where">{l.pathname + l.search}</div>;
+  return (
+    <>
+      <div data-testid="where">{l.pathname + l.search}</div>
+      <div data-testid="state">{JSON.stringify(l.state)}</div>
+    </>
+  );
 };
 
 const renderPage = (
@@ -81,17 +86,17 @@ describe("LoginPage forgot password", () => {
     expect(screen.queryByRole("link", { name: "Forgot password?" })).toBeNull();
   });
 
-  it("follows the link to /forgot-password and stores the login query", async () => {
+  it("follows the link to /forgot-password, handing it the login query", async () => {
     renderPage(null, true, "/login?client_id=acme&state=s1");
     await userEvent.click(
       await screen.findByRole("link", { name: "Forgot password?" })
     );
 
-    expect(
-      JSON.parse(window.localStorage.getItem("tereo.resetReturnTo") ?? "null")
-    ).toMatchObject({ search: "?client_id=acme&state=s1" });
     expect(await screen.findByTestId("where")).toHaveTextContent(
       "/forgot-password?client_id=acme"
+    );
+    expect(screen.getByTestId("state")).toHaveTextContent(
+      JSON.stringify({ loginSearch: "?client_id=acme&state=s1" })
     );
   });
 

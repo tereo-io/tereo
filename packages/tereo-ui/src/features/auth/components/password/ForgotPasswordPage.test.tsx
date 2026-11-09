@@ -1,5 +1,5 @@
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ForgotPasswordPage } from "./ForgotPasswordPage";
 import { render, screen } from "@testing-library/react";
@@ -38,5 +38,48 @@ describe("ForgotPasswordPage", () => {
         "If an account exists for that address, we've sent a link."
       )
     ).toBeVisible();
+  });
+
+  const Where = () => {
+    const l = useLocation();
+    return <div data-testid="where">{l.pathname + l.search}</div>;
+  };
+
+  const renderWithState = (state: unknown) =>
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter
+          initialEntries={[{ pathname: "/forgot-password", state }]}
+        >
+          <Routes>
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/login" element={<Where />} />
+            <Route path="/" element={<Where />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+  it("goes back to the sign-in it was opened from", async () => {
+    renderWithState({ loginSearch: "?client_id=acme&state=s1" });
+    await userEvent.click(
+      await screen.findByRole("link", { name: "Back to sign in" })
+    );
+
+    expect(await screen.findByTestId("where")).toHaveTextContent(
+      "/login?client_id=acme&state=s1"
+    );
+  });
+
+  it.each([
+    ["no login query", null],
+    ["a query that is not one", { loginSearch: "//evil.example/" }],
+  ])("with %s, goes back to /", async (_label, state) => {
+    renderWithState(state);
+    await userEvent.click(
+      await screen.findByRole("link", { name: "Back to sign in" })
+    );
+
+    expect(await screen.findByTestId("where")).toHaveTextContent(/^\/$/);
   });
 });

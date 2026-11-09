@@ -1001,8 +1001,8 @@ domain is now SSO-only, where the provider holds the credential.
   user's pending forced-password-change grants. A **reset** link marks the address verified: only
   the inbox received it. A **setup** link does not, because its URL is returned to the inviter
   (`passwordSetupUrl`, with `notify` too), so redeeming it proves nothing about the address.
-  The UI then shows a "Password set" screen. Its Sign in button goes to `/` after a setup link; after
-  a reset it returns to the sign-in page the reset was started from (see
+  The UI then shows a "Password set" screen with a Sign in button to `/`, a fresh sign-in to the
+  admin console; after a reset asked from another app's sign-in it has no button (see
   [Password reset](#password-reset)).
 
 Issuing emits `auth.user.password-setup-link-issued`. The hourly auth cleanup deletes a token
@@ -1047,11 +1047,12 @@ exists (the sign-in page asks `GET /v1/password-reset/status`, `{ enabled }`, be
 The link is `${UI_BASE_URL}/set-password[?client_id=…]#token=<token>`, valid for
 `PASSWORD_RESET_TTL_SECONDS` (1 hour by default, 5 minutes to 24 hours), single use, and replaces
 any earlier setup or reset link. `client_id` is carried only if a client with that ID exists, so the
-page shows that client's branding. The return to the app comes from the browser instead: the sign-in
-page remembers its authorize request in `localStorage` for an hour (the reset link's default
-lifetime), so the link opened in another tab of the same browser still offers Sign in back to it,
-while the admin UI's own sign-in completes only in the tab that started it, which holds its PKCE
-verifier. The email ("Reset your password") is a sensitive notification. Redeeming
+page shows that client's branding. The link is often opened on another device or in another tab,
+where the app's sign-in cannot be resumed (its PKCE verifier and state stay where it began), so a
+finished reset does not try: when the link's `client_id` names a client other than the admin
+console's own, the page says "Your password is set. Go back to the app you were signing in to and
+sign in with your new password." with no button; without a `client_id`, or with the console's, its
+Sign in button goes to `/`, a fresh sign-in. The email ("Reset your password") is a sensitive notification. Redeeming
 it is `POST /v1/password-setup` ([Setup link](#setup-link)): it sets the password, marks the address
 verified, ends the other sessions, clears pending forced-password-change grants and clears the
 account's login backoff (the failed sign-ins that usually come before a reset). A link whose

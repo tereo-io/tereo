@@ -4,7 +4,7 @@ import { linkIn } from "../../fixtures/mail.js";
 
 const NEW_PASSWORD = "E2e-Reset-Passw0rd!";
 
-test("forgot password → email → new password → back to sign-in", async ({
+test("forgot password → email → new password → sign in", async ({
   browser,
   api,
   mail,
@@ -32,7 +32,7 @@ test("forgot password → email → new password → back to sign-in", async ({
   const message = await mail.waitForMessage(user.email, {
     subject: "Reset your password",
   });
-  // As from a mail client: a new tab, which has its own sessionStorage.
+  // As from a mail client: a new tab, with none of the sign-in's state.
   const linkPage = await page.context().newPage();
   await linkPage.goto(linkIn(message));
 
@@ -44,22 +44,22 @@ test("forgot password → email → new password → back to sign-in", async ({
   await linkPage.getByRole("button", { name: "Set password" }).click();
   await expect(linkPage.getByText("Your password is set.")).toBeVisible();
 
-  // The new tab returns to the sign-in page with the same authorize request,
-  // not a fresh one.
+  // The reset was asked from the admin UI's own sign-in, so Sign in starts a
+  // fresh one in this tab, which then holds its own PKCE verifier.
   await linkPage.getByRole("button", { name: "Sign in" }).click();
-  await expect(linkPage).toHaveURL(loginUrl);
-  await linkPage.close();
-
-  // The admin UI's own sign-in completes only in the tab that started it,
-  // which holds its PKCE verifier.
-  await page.getByRole("link", { name: "Back to sign in" }).click();
-  await expect(page).toHaveURL(/\/login\?.*client_id=/);
-  await page.getByLabel("Email").fill(user.email);
-  await page
+  await expect(linkPage).toHaveURL(/\/login\?.*client_id=/);
+  await linkPage.getByLabel("Email").fill(user.email);
+  await linkPage
     .getByRole("textbox", { name: "Password", exact: true })
     .fill(NEW_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page.getByRole("heading", { name: "My Account" })).toBeVisible();
+  await linkPage.getByRole("button", { name: "Sign In" }).click();
+  await expect(
+    linkPage.getByRole("heading", { name: "My Account" })
+  ).toBeVisible();
+
+  // The first tab's way back returns to the sign-in it left.
+  await page.getByRole("link", { name: "Back to sign in" }).click();
+  await expect(page).toHaveURL(loginUrl);
 
   await page.context().close();
 });
