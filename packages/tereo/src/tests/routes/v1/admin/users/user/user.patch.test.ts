@@ -5,7 +5,6 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { createGuest, issue } from "../../../../../support/passwordSetup.js";
 import { issueVerifyLinkFor } from "../../../../../support/verifyLink.js";
-import { createTestUser } from "../../../../../support/auth/users.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { waitFor } from "../../../../../support/webhooks.js";
@@ -28,6 +27,10 @@ import {
   cleanNotifications,
   createNotificationConnection,
 } from "../../../../../support/notifications.js";
+import {
+  createTestRole,
+  createTestUser,
+} from "../../../../../support/auth/users.js";
 
 const patch = (id: string, token: string, body: unknown) =>
   fetchJson("PATCH", `${BASE_URL}/v1/admin/users/${id}`, token, body);
@@ -225,4 +228,56 @@ describe("PATCH /v1/admin/users/:id and email verification", () => {
     expect(smtp.messages[0].rcpt).toEqual([newEmail]);
     expect(await liveLinks(user.id, "verify")).toBe(1);
   });
+
+  it.each([
+    ["email", { email: `moved-${randomUUID()}@acme.com` }],
+    ["password", { password: "N3w-Str0ng-Passw0rd!" }],
+  ])(
+    "a %s change of a user who is admin only through a group is refused and changes nothing",
+    async (_, body) => {
+      const target = await createTestUser();
+      const role = await createTestRole();
+      const { id: permissionId } = await prisma.permission.findUniqueOrThrow({
+        where: { name: "admin" },
+      });
+      await prisma.rolePermission.create({
+        data: { roleId: role.id, permissionId },
+      });
+      const group = await prisma.group.create({
+        data: {
+          slug: `patch-${randomUUID()}`,
+          name: "Admins",
+          definitionSource: "local",
+          createdBy: target.id,
+        },
+      });
+      try {
+        await prisma.groupMember.create({
+          data: { groupId: group.id, userId: target.id, addedBy: target.id },
+        });
+        await prisma.groupRole.create({
+          data: { groupId: group.id, roleId: role.id, addedBy: target.id },
+        });
+        await issue(target.id, false, "reset");
+
+        const res = await patch(target.id, writer, body);
+
+        expect(res.status).toBe(403);
+        expect(JSON.stringify(res.body)).toContain(
+          "holding permissions you do not: admin"
+        );
+        const after = await prisma.user.findUniqueOrThrow({
+          where: { id: target.id },
+        });
+        expect(after.email).toBe(target.email);
+        expect(after.emailVerifiedAt).not.toBeNull();
+        expect(await liveLinks(target.id, "reset")).toBe(1);
+        expect(await liveLinks(target.id, "verify")).toBe(0);
+      } finally {
+        await prisma.groupRole.deleteMany({ where: { groupId: group.id } });
+        await prisma.groupMember.deleteMany({ where: { groupId: group.id } });
+        await prisma.group.delete({ where: { id: group.id } });
+      }
+    }
+  );
 });
