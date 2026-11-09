@@ -667,6 +667,8 @@ describe("POST /v1/admin/guests", () => {
       expect(
         (await prisma.user.findUniqueOrThrow({ where: { id } })).expiresAt
       ).toEqual(before.expiresAt);
+      const elsewhere = await invite({ email, organizationId: otherOrgId });
+      expect(elsewhere.body.error).toBe("guest_in_other_organization");
     } finally {
       await sso.remove();
     }

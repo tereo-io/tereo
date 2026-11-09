@@ -690,12 +690,6 @@ const extendInvitedGuest = async (
       )
     );
   }
-  if (
-    existing.passwordHash === null &&
-    input.initialAccess.type === "password_setup_link"
-  ) {
-    await assertSetupLinkAllowed(existing.email, tx);
-  }
   const memberOf = await guestOrganizationId(existing.id, tx);
   if (memberOf !== null && memberOf !== organizationId) {
     throw refuseEmail(
@@ -709,16 +703,24 @@ const extendInvitedGuest = async (
   // A guest left with no organization (removed, or theirs archived) joins
   // the one inviting them. That hands the inviter the guest's account, so it
   // is for whoever acts in every organization.
+  if (memberOf === null && !managesAllGuests(auth)) {
+    throw refuseEmail(
+      auth,
+      new ConflictError(
+        "This guest belongs to no organization; only an administrator of every organization can invite them into one",
+        "guest_unassigned"
+      )
+    );
+  }
+  // After the refusals that hide another organization's guest, before any
+  // write.
+  if (
+    existing.passwordHash === null &&
+    input.initialAccess.type === "password_setup_link"
+  ) {
+    await assertSetupLinkAllowed(existing.email, tx);
+  }
   if (memberOf === null) {
-    if (!managesAllGuests(auth)) {
-      throw refuseEmail(
-        auth,
-        new ConflictError(
-          "This guest belongs to no organization; only an administrator of every organization can invite them into one",
-          "guest_unassigned"
-        )
-      );
-    }
     const member = await db.organizations.addMember(
       organizationId,
       existing.id,

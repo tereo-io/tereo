@@ -1001,7 +1001,7 @@ domain is now SSO-only, where the provider holds the credential.
   user's pending forced-password-change grants. A **reset** link marks the address verified: only
   the inbox received it. A **setup** link does not, because its URL is returned to the inviter
   (`passwordSetupUrl`, with `notify` too), so redeeming it proves nothing about the address.
-  The UI then shows a "Password set" screen with a Sign in button to `/`, a fresh sign-in to the
+  The UI then shows a "Password set" screen with a Sign in button that starts a fresh sign-in to the
   admin console; after a reset asked from another app's sign-in it has no button (see
   [Password reset](#password-reset)).
 
@@ -1052,7 +1052,7 @@ where the app's sign-in cannot be resumed (its PKCE verifier and state stay wher
 finished reset does not try: when the link's `client_id` names a client other than the admin
 console's own, the page says "Your password is set. Go back to the app you were signing in to and
 sign in with your new password." with no button; without a `client_id`, or with the console's, its
-Sign in button goes to `/`, a fresh sign-in. The email ("Reset your password") is a sensitive notification. Redeeming
+Sign in button starts a fresh sign-in to the console in this tab. The email ("Reset your password") is a sensitive notification. Redeeming
 it is `POST /v1/password-setup` ([Setup link](#setup-link)): it sets the password, marks the address
 verified, ends the other sessions, clears pending forced-password-change grants and clears the
 account's login backoff (the failed sign-ins that usually come before a reset). A link whose
@@ -1087,7 +1087,8 @@ A changed address is unverified until proven again.
 **Without an email connection.** Every way to verify an address except first-admin setup and a
 provider that vouches for it goes through email. On a deployment with no default email
 connection, users created after the upgrade (admin-created users, guests, and provider sign-ins
-whose provider does not vouch for the address) stay `email_verified: false`, with no way to verify,
+whose provider does not vouch for the address), and existing users whose email an admin changes, stay
+`email_verified: false`, with no way to verify,
 until email is configured; an app that requires `email_verified` rejects them.
 
 An address becomes verified when:
