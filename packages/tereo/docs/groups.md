@@ -48,9 +48,10 @@ Members are users; `group_members` records who added them. Roles are held throug
 Group roles are resolved at read time and merged with the user's direct assignments, deduplicated by
 role and organization. Nothing is copied into `user_roles`. Every place that reads a user's roles
 counts both: permission checks, `roles` in userinfo and `GET /v1/account/me`, the two-factor
-requirement of a role, the "last admin" checks, a role's list of holders and the notifications sent
+requirement of a role, the "last admin" checks, and the token revocations and notifications sent
 when a role changes. Service access, integrations and the organization role editor stay direct-only
-(service accounts cannot be members; the editor lists group roles separately).
+(service accounts cannot be members; the editor lists group roles separately), and a role's list of
+holders (`GET /roles/:id/users`) lists the groups holding it apart from its direct holders.
 
 A group role counts only when all of these hold:
 
@@ -62,6 +63,15 @@ A group role counts only when all of these hold:
   permissions take effect, as for a direct org-scoped assignment.
 
 The guest permission floor still applies to anything that reaches a guest.
+
+An inactive organization is the one place the two differ: for a read scoped to it by id, the user's
+direct roles in it still count (as before groups), while its groups' roles do not. Tokens naming the
+organization are revoked when it is deactivated, so request-time checks rarely see it; the reads
+that do are an admin with `organizations.write` acting on the inactive organization (what they hold
+there bounds what they may grant or take away) and the delivery of a notification accepted before
+the deactivation (its attachments are checked in the sender's organization). The `memberships` scope
+(two-factor at sign-in) drops both kinds for an inactive organization, and the `anywhere` scope (who
+may act on an account) keeps both.
 
 An archived group grants nothing and is left out of claims, but keeps its members and roles so a
 restore brings them back.
@@ -113,6 +123,7 @@ All under `/v1/admin`. Lists are cursor-paginated (`limit` 1-100, default 50; `n
 | `DELETE /groups/:id/members/:userId` | Remove. 204; 404 if not a member |
 | `GET /groups/:id/roles` | The group's roles |
 | `PUT /groups/:id/roles` | `{ roleIds }` replaces the set (max 100). Returns `{ roles, added, removed }` |
+| `GET /roles/:id/users` | `{ roleId, users, groups }`: `users` are the role's **direct** holders (each `via: { kind: "direct" }`); `groups` are the unarchived groups holding it, each with `organization` and `memberCount` (list their members through `GET /groups/:id/members`) |
 | `GET /users/:id/groups` | A user's groups, global and organization (`users.read`; `?includeArchived`) |
 | `GET`/`PUT /users/:id/roles` | Return `{ roles, groupRoles }`: `roles` are the **direct** assignments (each `via: { kind: "direct" }`); `groupRoles` are the roles held through **global** groups, each with `group: { id, slug, name }` |
 

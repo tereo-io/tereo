@@ -477,6 +477,9 @@ model Group {
   // Slug uniqueness per scope is enforced via partial unique indexes in migration SQL:
   // - groups_org_slug_key: (organization_id, slug) WHERE organization_id IS NOT NULL
   // - groups_global_slug_key: (slug) WHERE organization_id IS NULL
+  // CHECK constraints in migration SQL:
+  // - groups_slug_format: slug matches ^[a-z0-9-]{1,100}$
+  // - groups_unprovisioned_provisioned: unprovisioned_at only on a provisioned group
   @@index([organizationId])
   @@index([archivedAt])
   @@map("groups")
@@ -495,6 +498,7 @@ model GroupMember {
   addedByUser User  @relation("GroupMemberAdder", fields: [addedBy], references: [id], onDelete: Restrict)
 
   @@unique([groupId, userId])
+  @@index([groupId, id])
   @@index([userId])
   @@map("group_members")
   @@schema("auth")

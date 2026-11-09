@@ -23,10 +23,23 @@ const ALLOWED: Record<string, string> = {
     "revokes guests' tokens; guests are never group members",
   "routes/v1/admin/roles/role/controllers.ts":
     "revokes guests' tokens; guests are never group members",
+  "utils/db/services.ts":
+    "lists an integration's service account's roles; service accounts are never group members",
+  "utils/transformers.ts":
+    "formats the integration service account roles that utils/db/services.ts reads",
 };
 
-const READ =
-  /\.userRole\.(findMany|findFirst|findUnique|count|groupBy|aggregate)\b|userRoles:\s*\{\s*(some|none|every)\b/;
+// Model reads, relation filters, nested selects and includes (`userRoles:
+// true`, `_count: { select: { userRoles: true } }`), reading a loaded
+// relation (`user.userRoles`), and raw SQL naming the table.
+const READ = new RegExp(
+  [
+    String.raw`\.userRole\.(findMany|findFirst|findFirstOrThrow|findUnique|findUniqueOrThrow|count|groupBy|aggregate)\b`,
+    String.raw`\buserRoles\s*:\s*(true\b|\{\s*(some|none|every|select|include|where|orderBy|take|skip|cursor|distinct)\b)`,
+    String.raw`\.userRoles\b`,
+    String.raw`"user_roles"`,
+  ].join("|")
+);
 
 const files = readdirSync(SRC, { recursive: true, encoding: "utf8" })
   .map((f) => f.split(path.sep).join("/"))
@@ -35,6 +48,28 @@ const files = readdirSync(SRC, { recursive: true, encoding: "utf8" })
 describe("user role reads", () => {
   it("finds the source files", () => {
     expect(files.length).toBeGreaterThan(100);
+  });
+
+  it.each([
+    "tx.userRole.findMany({ where: { userId } })",
+    "db.userRole.count()",
+    "where: { userRoles: { some: { roleId } } }",
+    "include: { userRoles: true }",
+    "select: {\n  userRoles: {\n    select: { roleId: true },\n  },\n}",
+    "_count: { select: { userRoles: true } }",
+    "account?.userRoles ?? []",
+    'tx.$queryRaw`SELECT 1 FROM "auth"."user_roles"`',
+  ])("catches %j", (code) => {
+    expect(READ.test(code)).toBe(true);
+  });
+
+  it.each([
+    "await db.userRole.create({ data })",
+    "userRoles: { create: [{ roleId }] }",
+    "const userRoles = await db.roles.getLiveUserRoles(id, null);",
+    'reason: "user_roles_changed"',
+  ])("ignores %j", (code) => {
+    expect(READ.test(code)).toBe(false);
   });
 
   it("reads user_roles directly only in the allowlisted files", () => {

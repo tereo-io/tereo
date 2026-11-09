@@ -580,10 +580,12 @@
       - Admin - Role Users
     summary: Get users with role
     description: |
-      Returns every assignment of the role (global and in any
-      organization), ordered by email: a user holding it in several scopes
-      appears once per scope, told apart by `organizationId`. Works for
-      archived roles too.
+      Returns every direct assignment of the role (global and in any
+      organization) as `users`, ordered by email: a user holding it in
+      several scopes appears once per scope, told apart by `organizationId`.
+      The unarchived groups holding the role are listed as `groups`, with
+      their member counts; their members are not in `users` — list them with
+      `GET /v1/admin/groups/{id}/members`. Works for archived roles too.
     operationId: getAdminRoleUsers
     security:
       - BearerAuth: [roles.read]
