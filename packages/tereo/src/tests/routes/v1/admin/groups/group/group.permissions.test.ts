@@ -235,6 +235,92 @@ describe("/v1/admin/groups/:id authorization", () => {
     expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
   });
 
+  it("gives one 403 for a missing group and any org group the caller may not act on", async () => {
+    const userId = randomUUID();
+    const token = await getTestPrincipalToken({ userId, permissions: [] });
+    const [inactiveOrg, memberOf] = [await newOrg(), await newOrg()];
+    await joinOrg(inactiveOrg, userId, "admin");
+    await joinOrg(memberOf, userId, "member");
+    const groups = await Promise.all(
+      [await newOrg(), memberOf, inactiveOrg].map(async (organizationId) =>
+        track(await postGroup(admin, { organizationId }))
+      )
+    );
+    const global = track(await postGroup(admin));
+    await prisma.organization.update({
+      where: { id: inactiveOrg },
+      data: { isActive: false },
+    });
+
+    const missing = await adminApi(
+      "PATCH",
+      `/groups/${randomUUID()}`,
+      token,
+      { name: "Probe" }
+    );
+    expect(missing.status).toBe(HTTP_STATUS.FORBIDDEN);
+    for (const group of [...groups, global]) {
+      const res = await adminApi("PATCH", `/groups/${group.id}`, token, {
+        name: "Probe",
+      });
+      expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(res.body).toEqual(missing.body);
+    }
+
+    const missingRead = await adminApi(
+      "GET",
+      `/groups/${randomUUID()}`,
+      token
+    );
+    for (const group of groups.slice(0, 2)) {
+      const res = await adminApi("GET", `/groups/${group.id}`, token);
+      expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(res.body).toEqual(missingRead.body);
+    }
+    const otherList = await adminApi(
+      "GET",
+      `/groups?organizationId=${groups[0].organizationId}`,
+      token
+    );
+    expect(otherList.status).toBe(HTTP_STATUS.FORBIDDEN);
+    expect(otherList.body).toEqual(missingRead.body);
+  });
+
+  it("an inactive organization's admin reads its groups but cannot change them", async () => {
+    const orgId = await newOrg();
+    const token = await orgMemberToken(orgId, "admin");
+    const member = await orgUser(orgId);
+    const group = track(await postGroup(admin, { organizationId: orgId }));
+    await prisma.organization.update({
+      where: { id: orgId },
+      data: { isActive: false },
+    });
+
+    for (const path of [
+      `/groups/${group.id}`,
+      `/groups/${group.id}/members`,
+      `/groups/${group.id}/roles`,
+      `/groups?organizationId=${orgId}`,
+    ]) {
+      const res = await adminApi("GET", path, token);
+      expect(res.status, path).toBe(HTTP_STATUS.OK);
+    }
+    const patched = await adminApi("PATCH", `/groups/${group.id}`, token, {
+      name: "Renamed",
+    });
+    expect(patched.status).toBe(HTTP_STATUS.FORBIDDEN);
+    const added = await adminApi("POST", `/groups/${group.id}/members`, token, {
+      userIds: [member],
+    });
+    expect(added.status).toBe(HTTP_STATUS.FORBIDDEN);
+    const archived = await adminApi(
+      "POST",
+      `/groups/${group.id}/archive`,
+      token
+    );
+    expect(archived.status).toBe(HTTP_STATUS.FORBIDDEN);
+  });
+
   it("a delegated core:admin.read token can GET but not POST", async () => {
     const userId = randomUUID();
     await getTestPrincipalToken({ userId, permissions: ["groups.admin"] });
