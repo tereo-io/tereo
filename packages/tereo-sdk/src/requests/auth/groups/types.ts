@@ -1,10 +1,15 @@
 /**
  * A group as `/v1/admin/groups` returns it.
  *
- * Errors the group requests can raise (as `error` codes of the response):
- * `not_org_member`, `guest_not_allowed`, `service_account_not_allowed`,
- * `system_user_not_allowed`, `group_slug_taken`, `managed_by_provisioning`,
- * `unknown_role`, `role_not_org_assignable` and `unknown_organization`.
+ * Errors the group requests can raise (as `error` codes of the response),
+ * besides the generic `forbidden`, `not_found` and validation errors:
+ * - 400: `unknown_role`, `role_not_org_assignable`, `unknown_organization`,
+ *   `unknown_user`;
+ * - 409: `not_org_member`, `guest_not_allowed`, `service_account_not_allowed`,
+ *   `system_user_not_allowed`, `group_slug_taken`, `managed_by_provisioning`,
+ *   `resource_archived` (the group is archived), `already_archived`,
+ *   `not_archived`, and `conflict` (the change would leave no active
+ *   administrator).
  */
 export interface Group {
   id: string;
@@ -30,7 +35,8 @@ export interface ListGroupsQuery {
   /** `global` for global groups only, or an organization id. */
   organizationId?: string;
   definitionSource?: "local" | "provisioned";
-  archived?: boolean;
+  /** Include archived groups; by default they are left out. */
+  includeArchived?: boolean;
   q?: string;
   cursor?: string;
   /** 1 to 100, default 50. */
@@ -74,6 +80,11 @@ export interface ListGroupMembersQuery {
   limit?: number;
 }
 
+export interface ListUserGroupsQuery {
+  /** Include archived groups; by default they are left out. */
+  includeArchived?: boolean;
+}
+
 export interface PaginatedGroupMembers {
   data: GroupMember[];
   nextCursor: string | null;
@@ -106,7 +117,7 @@ export interface SetGroupRolesResult {
   removed: string[];
 }
 
-/** Every group the user belongs to; not paginated. */
+/** The groups the user belongs to; not paginated. */
 export interface UserGroupsResult {
   data: Group[];
   nextCursor: null;

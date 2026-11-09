@@ -6,6 +6,7 @@ import {
   createGroup,
   getGroup,
   listGroupMembers,
+  listGroupRoles,
   listGroups,
   listUserGroups,
   removeGroupMember,
@@ -31,7 +32,7 @@ describe("group requests", () => {
   it.each([
     [
       "listGroups",
-      () => listGroups({ archived: true, q: undefined }),
+      () => listGroups({ includeArchived: true, q: undefined }),
       "core.groups.list",
       "GET",
       "/v1/admin/groups",
@@ -102,6 +103,14 @@ describe("group requests", () => {
       "AS_0115",
     ],
     [
+      "listGroupRoles",
+      () => listGroupRoles(ID),
+      "core.groups.listRoles",
+      "GET",
+      `/v1/admin/groups/${ID}/roles`,
+      "AS_0118",
+    ],
+    [
       "setGroupRoles",
       () => setGroupRoles(ID, ["r"]),
       "core.groups.setRoles",
@@ -129,8 +138,16 @@ describe("group requests", () => {
   });
 
   it("sends only the query fields that are set", async () => {
-    await listGroups({ archived: true, q: undefined });
-    expect(sent()[0].params).toEqual({ archived: true });
+    await listGroups({ includeArchived: true, q: undefined });
+    expect(sent()[0].params).toEqual({ includeArchived: true });
+  });
+
+  it("passes includeArchived to the user's groups", async () => {
+    await listUserGroups(USER, { includeArchived: true });
+    expect(sent()[0].params).toEqual({ includeArchived: true });
+    tryHandleRequest.mockClear();
+    await listUserGroups(USER);
+    expect(sent()[0].params).toEqual({});
   });
 
   it("sends bodies as given", async () => {

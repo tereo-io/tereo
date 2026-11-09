@@ -175,6 +175,7 @@ export type {
   GroupRolesResult,
   ListGroupMembersQuery,
   ListGroupsQuery,
+  ListUserGroupsQuery,
   PaginatedGroupMembers,
   PaginatedGroups,
   SetGroupRolesResult,

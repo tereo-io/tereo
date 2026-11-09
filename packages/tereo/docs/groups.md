@@ -198,7 +198,9 @@ a token. Discovery lists `groups` in `claims_supported`. `groups` is an admin do
 
 `@tereo-io/sdk` offers the request functions `listGroups`, `getGroup`, `createGroup`, `updateGroup`,
 `archiveGroup`, `restoreGroup`, `listGroupMembers`, `addGroupMembers`, `removeGroupMember`,
-`setGroupRoles` and `listUserGroups`, sent with the service account's permissions. They are reached
+`listGroupRoles`, `setGroupRoles` (which replaces the whole set: read it with `listGroupRoles` first
+to add or remove one role) and `listUserGroups` (`includeArchived` to include archived groups), sent
+with the service account's permissions. They are reached
 through the handler's `requests` once `createCoreClient()` has run
 (`import { requests } from "@tereo-io/sdk/handler"`, then `requests.auth.listGroups(...)`); their
 types (`Group`, `ListGroupsQuery`, …) come from `@tereo-io/sdk`. Their error codes start at

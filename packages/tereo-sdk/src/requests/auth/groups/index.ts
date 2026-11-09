@@ -5,8 +5,10 @@ import type {
   AddGroupMembersResult,
   CreateGroupBody,
   Group,
+  GroupRolesResult,
   ListGroupMembersQuery,
   ListGroupsQuery,
+  ListUserGroupsQuery,
   PaginatedGroupMembers,
   PaginatedGroups,
   SetGroupRolesResult,
@@ -168,6 +170,21 @@ export const removeGroupMember = async (
   );
 };
 
+/** Every role the group holds, archived, inactive or retired ones included. */
+export const listGroupRoles = async (id: string): Promise<GroupRolesResult> => {
+  const res = await tryHandleRequest<GroupRolesResult>(
+    {
+      clientName: CORE_CLIENT,
+      requestName: "core.groups.listRoles",
+      method: "GET",
+      url: urlPath`/v1/admin/groups/${id}/roles`,
+    },
+    "AS_0118",
+    `Failed to list the roles of group ${id}`
+  );
+  return res.data;
+};
+
 /** Replaces the group's roles with `roleIds` (at most 100). */
 export const setGroupRoles = async (
   id: string,
@@ -188,7 +205,8 @@ export const setGroupRoles = async (
 };
 
 export const listUserGroups = async (
-  userId: string
+  userId: string,
+  query: ListUserGroupsQuery = {}
 ): Promise<UserGroupsResult> => {
   const res = await tryHandleRequest<UserGroupsResult>(
     {
@@ -196,6 +214,7 @@ export const listUserGroups = async (
       requestName: "core.groups.listForUser",
       method: "GET",
       url: urlPath`/v1/admin/users/${userId}/groups`,
+      params: definedParams(query),
     },
     "AS_0117",
     `Failed to list the groups of user ${userId}`
