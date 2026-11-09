@@ -1,9 +1,10 @@
 import useInspectPasswordSetup from "../../api/password/useInspectPasswordSetup";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, Col, Input, Spinner } from "@kosmeo-ui/react";
 import { errorDescriptionOf, issuesOf } from "@/utils/apiErrors";
+import { useLocation, useSearchParams } from "react-router-dom";
 import useSetPassword from "../../api/password/useSetPassword";
 import { BrandedAuthPage } from "@/features/auth/branding";
+import { startLogin } from "@/lib/auth/pkce";
 import { useMemo, useState } from "react";
 import { isAxiosError } from "axios";
 import env from "@/lib/env";
@@ -38,7 +39,6 @@ const tokenFromHash = (hash: string): string =>
 export const SetPasswordPage = () => {
   const { hash } = useLocation();
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
   const token = useMemo(() => tokenFromHash(hash), [hash]);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -81,7 +81,7 @@ export const SetPasswordPage = () => {
             Your password is set. You can now sign in.
           </Alert>
           {/* A fresh sign-in, so no authorize state from another tab is needed. */}
-          <Button fullWidth onClick={() => navigate("/")}>
+          <Button fullWidth onClick={() => void startLogin()}>
             Sign in
           </Button>
         </Col>

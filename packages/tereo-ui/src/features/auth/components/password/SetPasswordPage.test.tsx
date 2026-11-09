@@ -8,6 +8,8 @@ import { authMock } from "@/test/authMock";
 import { AxiosError } from "axios";
 
 vi.mock("@/lib/auth", () => ({ usePublicAxios: () => authMock.axios }));
+const startLogin = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("@/lib/auth/pkce", () => ({ startLogin }));
 
 const notFound = new AxiosError("nf", undefined, undefined, undefined, {
   status: 404,
@@ -33,6 +35,7 @@ const renderAt = (url: string) =>
   );
 
 beforeEach(() => {
+  startLogin.mockClear();
   authMock.axios.post.mockReset();
 });
 
@@ -74,7 +77,7 @@ describe("SetPasswordPage", () => {
     );
     expect(await screen.findByText(/Your password is set/)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(await screen.findByTestId("where")).toHaveTextContent(/^\/$/);
+    expect(startLogin).toHaveBeenCalledWith();
   });
 
   const DETAILS = {
@@ -211,12 +214,12 @@ describe("SetPasswordPage", () => {
     ["no client", ""],
     ["the console's own client", "?client_id=tereo-ui"],
   ])(
-    "after a reset with %s, Sign in starts a fresh sign-in at /",
+    "after a reset with %s, Sign in starts a fresh sign-in",
     async (_label, query) => {
       const user = await completeReset(query);
       await user.click(await screen.findByRole("button", { name: "Sign in" }));
 
-      expect(await screen.findByTestId("where")).toHaveTextContent(/^\/$/);
+      expect(startLogin).toHaveBeenCalledWith();
     }
   );
 
