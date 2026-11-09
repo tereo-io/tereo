@@ -1,5 +1,6 @@
 import ArchiveRestoreGroupButton from "./buttons/ArchiveRestoreGroupButton";
 import RemoveGroupMemberButton from "./buttons/RemoveGroupMemberButton";
+import { errorDescriptionOf, type CoreError } from "@/utils/apiErrors";
 import type { GroupMember, GroupRole } from "../../api/groups/types";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
@@ -39,9 +40,13 @@ export const GroupDetail = () => {
   const { groupId } = useParams<{ groupId: string }>();
   const id = groupId ?? "";
 
-  const { data: group, isLoading } = useGroup(id);
+  const { data: group, isLoading, error } = useGroup(id);
   const membersQuery = useGroupMembers(id);
-  const { data: roles, isSuccess: rolesLoaded } = useGroupRoles(id);
+  const {
+    data: roles,
+    isSuccess: rolesLoaded,
+    error: rolesError,
+  } = useGroupRoles(id);
   const { canWrite } = useGroupAuthority(group);
   const [tab, setTab] = useState("members");
   const [showAdd, setShowAdd] = useState(false);
@@ -148,7 +153,13 @@ export const GroupDetail = () => {
   if (!group) {
     return (
       <Page padded fillHeight>
-        <EmptyState layout="block">Group not found</EmptyState>
+        {!error || (error as CoreError).response?.status === 404 ? (
+          <EmptyState layout="block">Group not found</EmptyState>
+        ) : (
+          <Alert variant="danger">
+            {errorDescriptionOf(error, "Could not load the group")}
+          </Alert>
+        )}
       </Page>
     );
   }
@@ -263,13 +274,22 @@ export const GroupDetail = () => {
                           ) : undefined
                         }
                       />
-                      <Table<GroupMember>
-                        rows={members}
-                        columns={memberColumns}
-                        rowKey={(m) => m.userId}
-                        emptyMessage="No members in this group"
-                        maxHeight="30rem"
-                      />
+                      {membersQuery.isError && members.length === 0 ? (
+                        <Alert variant="danger">
+                          {errorDescriptionOf(
+                            membersQuery.error,
+                            "Could not load the members"
+                          )}
+                        </Alert>
+                      ) : (
+                        <Table<GroupMember>
+                          rows={members}
+                          columns={memberColumns}
+                          rowKey={(m) => m.userId}
+                          emptyMessage="No members in this group"
+                          maxHeight="30rem"
+                        />
+                      )}
                       {membersQuery.hasNextPage && (
                         <Button
                           size="sm"
@@ -303,13 +323,22 @@ export const GroupDetail = () => {
                           ) : undefined
                         }
                       />
-                      <Table<GroupRole>
-                        rows={roles ?? []}
-                        columns={roleColumns}
-                        rowKey={(r) => r.id}
-                        emptyMessage="This group holds no roles"
-                        maxHeight="30rem"
-                      />
+                      {rolesError ? (
+                        <Alert variant="danger">
+                          {errorDescriptionOf(
+                            rolesError,
+                            "Could not load the roles"
+                          )}
+                        </Alert>
+                      ) : (
+                        <Table<GroupRole>
+                          rows={roles ?? []}
+                          columns={roleColumns}
+                          rowKey={(r) => r.id}
+                          emptyMessage="This group holds no roles"
+                          maxHeight="30rem"
+                        />
+                      )}
                     </Col>
                   ),
                 },

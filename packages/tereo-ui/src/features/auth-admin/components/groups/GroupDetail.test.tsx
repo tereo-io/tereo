@@ -39,14 +39,30 @@ const roles = [
   { id: "r1", name: "agent", displayName: "Agent", serviceId: null },
 ];
 
+type Read = "group" | "members" | "roles" | "allRoles";
+
+const refusal = (status: number, error_description: string) =>
+  Object.assign(new Error(error_description), {
+    response: { status, data: { error: "x", error_description } },
+  });
+
 const renderDetail = (
   data: Group,
   held: object[] = roles,
   allRoles: object[] = [],
-  pendingRoles = false
+  pendingRoles = false,
+  failures: Partial<Record<Read, Error>> = {}
 ) => {
   authMock.axios.get.mockImplementation(async (url: string) => {
     const path = String(url);
+    const read: Read = path.endsWith("/members")
+      ? "members"
+      : path === "/v1/admin/roles"
+        ? "allRoles"
+        : path.endsWith("/roles")
+          ? "roles"
+          : "group";
+    if (failures[read]) throw failures[read];
     if (path.endsWith("/members")) {
       return {
         data: { data: members, hasMore: false, limit: 50, nextCursor: null },
@@ -168,5 +184,100 @@ describe("GroupDetail", () => {
     expect(
       await screen.findByRole("button", { name: "Edit roles" })
     ).toBeDisabled();
+  });
+
+  it("says not found only for a 404", async () => {
+    renderDetail(group, roles, [], false, {
+      group: refusal(404, "Group not found"),
+    });
+    expect(await screen.findByText("Group not found")).toBeVisible();
+  });
+
+  it("shows the error of a failed group load", async () => {
+    renderDetail(group, roles, [], false, {
+      group: refusal(403, "The following permission is required: groups.read"),
+    });
+    expect(
+      await screen.findByText(
+        "The following permission is required: groups.read"
+      )
+    ).toBeVisible();
+    expect(screen.queryByText("Group not found")).toBeNull();
+  });
+
+  it("shows failed member and role loads as errors, not empty tables", async () => {
+    renderDetail(group, roles, [], false, {
+      members: refusal(500, "Members exploded"),
+      roles: refusal(500, "Roles exploded"),
+    });
+    expect(await screen.findByText("Members exploded")).toBeVisible();
+    expect(screen.queryByText("No members in this group")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /^Roles/ }));
+    expect(await screen.findByText("Roles exploded")).toBeVisible();
+    expect(screen.queryByText("This group holds no roles")).toBeNull();
+  });
+
+  describe("an organization group's roles", () => {
+    const orgGroup = { ...group, organizationId: "o1" };
+    const custom = (id: string, orgAssignable: boolean) => ({
+      id,
+      name: id,
+      displayName: id,
+      isActive: true,
+      isSystem: false,
+      permissions: [
+        {
+          id: `p-${id}`,
+          name: `p.${id}`,
+          displayName: `p.${id}`,
+          retired: false,
+          orgAssignable,
+        },
+      ],
+    });
+
+    const openRoles = async () => {
+      fireEvent.click(await screen.findByRole("tab", { name: /^Roles/ }));
+      const edit = await screen.findByRole("button", { name: "Edit roles" });
+      await waitFor(() => expect(edit).toBeEnabled());
+      fireEvent.click(edit);
+    };
+
+    it("offers only custom, org-assignable roles, keeping held ones", async () => {
+      renderDetail(
+        orgGroup,
+        [{ id: "held", name: "held", displayName: "held", serviceId: null }],
+        [
+          custom("scoped", true),
+          custom("platform", false),
+          custom("held", false),
+          { ...custom("system", true), isSystem: true },
+        ]
+      );
+      await openRoles();
+
+      expect(await screen.findByLabelText("scoped")).toBeEnabled();
+      expect(screen.getByLabelText("held")).toBeChecked();
+      expect(screen.queryByLabelText("platform")).toBeNull();
+      expect(screen.queryByLabelText(/system/)).toBeNull();
+    });
+
+    it("shows a failed role load and refuses to save", async () => {
+      renderDetail(orgGroup, roles, [], false, {
+        allRoles: refusal(
+          403,
+          "The following permission is required: roles.read"
+        ),
+      });
+      await openRoles();
+
+      expect(
+        await screen.findByText(
+          "The following permission is required: roles.read"
+        )
+      ).toBeVisible();
+      expect(screen.getByRole("button", { name: "Save Roles" })).toBeDisabled();
+      expect(screen.queryByLabelText(/archived or inactive/)).toBeNull();
+    });
   });
 });

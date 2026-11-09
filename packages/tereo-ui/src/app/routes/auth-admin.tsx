@@ -1,3 +1,4 @@
+import { RequireGroupAccess } from "@/features/auth-admin/components/groups/RequireGroupAccess";
 import { AuthAdminSidebar } from "../layouts/AuthAdminSidebar";
 import { Navigate, type RouteObject } from "react-router-dom";
 import { SectionLayout } from "../layouts/SectionLayout";
@@ -72,12 +73,14 @@ export const authAdminRoute: RouteObject = {
     },
     {
       path: "groups/:groupId",
-      element: gated(
-        "groups",
-        namedLazy(
-          () => import("@/features/auth-admin/components/groups/GroupDetail"),
-          "GroupDetail"
-        )
+      // Organization admins reach their groups from the organization's page.
+      element: (
+        <RequireGroupAccess>
+          {namedLazy(
+            () => import("@/features/auth-admin/components/groups/GroupDetail"),
+            "GroupDetail"
+          )}
+        </RequireGroupAccess>
       ),
     },
     {

@@ -1,8 +1,11 @@
+import { orgAssignableRoles } from "@/features/auth-admin/api/roles/orgAssignable";
 import useSetGroupRoles from "@/features/auth-admin/api/groups/useSetGroupRoles";
 import type { GroupRole } from "@/features/auth-admin/api/groups/types";
 import useAllRoles from "@/features/auth-admin/api/roles/useAllRoles";
+import { errorDescriptionOf } from "@/utils/apiErrors";
 import { useState } from "react";
 import {
+  Alert,
   Button,
   Checkbox,
   CheckboxGroup,
@@ -12,7 +15,7 @@ import {
 
 interface GroupRolesModalProps {
   groupId: string;
-  /** An organization's group holds custom roles only. */
+  /** An organization's group holds custom, org-assignable roles only. */
   organizational: boolean;
   currentRoles: GroupRole[];
   show: boolean;
@@ -29,15 +32,15 @@ const GroupRolesModal = ({
   const [selected, setSelected] = useState<string[]>(
     currentRoles.map((r) => r.id)
   );
-  const { data, isLoading } = useAllRoles();
+  const { data, isLoading, isError, error } = useAllRoles();
   const mutation = useSetGroupRoles(groupId);
 
   // Core lists only unarchived, unretired roles. A held role outside that
   // set can't be picked again, but the PUT replaces the whole set, so it is
   // sent back as it is (shown checked and locked) rather than removed.
-  const assignable = (data ?? []).filter(
-    (role) => role.isActive && (!organizational || !role.isSystem)
-  );
+  const assignable = organizational
+    ? orgAssignableRoles(data ?? [], new Set(currentRoles.map((r) => r.id)))
+    : (data ?? []).filter((role) => role.isActive);
   const assignableIds = new Set(assignable.map((r) => r.id));
   const locked = currentRoles.filter((r) => !assignableIds.has(r.id));
 
@@ -61,13 +64,22 @@ const GroupRolesModal = ({
         <Button key="cancel" variant="secondary" onClick={onClose}>
           Cancel
         </Button>,
-        <Button key="save" onClick={save} isLoading={mutation.isPending}>
+        <Button
+          key="save"
+          onClick={save}
+          isLoading={mutation.isPending}
+          disabled={isLoading || isError}
+        >
           Save Roles
         </Button>,
       ]}
     >
       {isLoading ? (
         <Spinner size="md" />
+      ) : isError ? (
+        <Alert variant="danger">
+          {errorDescriptionOf(error, "Could not load the roles")}
+        </Alert>
       ) : (
         <>
           <CheckboxGroup
