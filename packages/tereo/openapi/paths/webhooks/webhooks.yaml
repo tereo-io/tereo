@@ -103,7 +103,12 @@
       An endpoint acts as the user who created it: it is sent an event only
       while they are active and could read it — the event type's read
       permission, and for a file event, read access to its bucket. Create
-      refuses (`403`) an event type the caller could not read.
+      refuses (`403`) an event type the caller could not read. An
+      `auth.group.*` type is also allowed, without `groups.read`, to an
+      `admin` or `owner` of the endpoint's organization (a delegated token
+      only if its scopes allow `organizations.write`) and to an
+      `organizations.write` holder; such an endpoint is sent only the events
+      of that organization's own groups, never a global group's.
 
       **Required permissions:**
       - `webhooks.write`
@@ -138,6 +143,7 @@
         $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: 'An event type the caller could not read (`auth.group.*` is also allowed to an `admin` or `owner` of the endpoint''s organization, or an `organizations.write` holder, who receive only that organization''s own group events)'
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
       '429':
@@ -202,7 +208,9 @@
       stored value; the mask for a header with no stored value is refused
       with `400 masked_header_value`. The URL and event types
       are validated as on create, and the caller must be able to read every
-      event type the endpoint ends up subscribed to (`403` otherwise).
+      event type the endpoint ends up subscribed to (`403` otherwise), with
+      create's exception for `auth.group.*` types and the endpoint's
+      organization's admins and owners.
       Archived endpoints are rejected (`409 resource_archived`). A provisioned
       endpoint refuses every change except a body carrying only `status` (to
       re-enable it): `409 managed_by_provisioning`.
@@ -256,6 +264,7 @@
         $ref: '../../components/webhooks/responses.yaml#/WebhooksUnauthorizedResponse'
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
+        description: 'An event type the caller could not read (with create''s `auth.group.*` exception), or a file-event change by someone other than the creator or a `webhooks.admin` holder'
       '404':
         $ref: '../../components/responses.yaml#/NotFoundResponse'
       '409':

@@ -101,7 +101,7 @@ export const updateUser = async (req: Request, res: Response) => {
 
   const update = async (tx: Prisma.TransactionClient) => {
     if (deactivating) {
-      await assertAdminRemains((a) => a.userId !== id, tx);
+      await assertAdminRemains({ kind: "user", userId: id }, tx);
     }
     const { rateLimitPerSecond, ...profile } = body;
     // A body of only a rate limit is not a profile update.
@@ -285,8 +285,7 @@ export const setUserRoles = async (req: Request, res: Response) => {
         (await db.roles.getAdminRoleIds(added, tx)).length > 0;
       if (!gainsAdmin) {
         await assertAdminRemains(
-          (a) =>
-            a.userId !== id || a.groupId !== null || roleIds.includes(a.roleId),
+          { kind: "directExcept", userId: id, keepRoleIds: roleIds },
           tx
         );
       }

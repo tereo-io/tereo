@@ -93,7 +93,8 @@ organization's groups, including reading them (and listing them with `?organizat
 So may a holder of the platform `organizations.write`, which covers every organization as it does on
 the organization routes (`requireOrgRole`). A **deactivated** organization's admins and owners may
 still read its groups, members and roles, but not change them. A delegated token acts as an org admin
-only if its scopes allow `organizations.write`. A global group always needs the platform permission.
+only if its scopes allow `organizations.write`. A global group always needs `groups.<need>`;
+`organizations.write` does not reach it.
 
 A caller without the permission gets one and the same 403 (`The following permission is required:
 groups.<need>`) for a missing group and for any group they may not act on (a global group, another
@@ -144,21 +145,28 @@ All under `/v1/admin`. Lists are cursor-paginated (`limit` 1-100, default 50; `n
 | `GET`/`PUT /organizations/:id/members/:userId/roles` | The same shape for one organization: `roles` are the member's **direct** roles there (each `via: { kind: "direct" }`); `groupRoles` the roles held through that **organization's** groups (not global ones'), each with `group`. The role editor lists them apart; `PUT` replaces the direct ones only |
 | `GET`/`PUT /users/:id/roles` | Return `{ roles, groupRoles }`: `roles` are the **direct** assignments (each `via: { kind: "direct" }`); `groupRoles` are the roles held through **global** groups, each with `group: { id, slug, name }` |
 
-Bodies are strict: a key a route does not know is a 400, not ignored. An `admin` or `owner` of an
-**inactive** organization may still read its groups (`GET /groups?organizationId=`, `GET /groups/:id`,
-members, roles); every write is a 403 for them, and only a holder of `groups.<need>` passes.
+Bodies are strict: a key a route does not know is a 400, not ignored. Who may read or change an
+inactive organization's groups is under [Authorization](#authorization).
 
 A **provisioned** group answers `409 managed_by_provisioning` to `PATCH`, role changes, archive and
 restore. Its members stay editable (`membershipSource` is `local`).
 
 Errors (`code`): `unknown_organization`, `unknown_role`, `unknown_user`, `role_not_org_assignable`,
 `group_slug_taken` (409), `not_org_member`, `guest_not_allowed`, `service_account_not_allowed`,
-`system_user_not_allowed` (409), `managed_by_provisioning` (409). Archived groups answer 409 to edits
-and to adding members.
+`system_user_not_allowed` (409), `managed_by_provisioning` (409). Archived groups answer 409
+`resource_archived` to edits, role changes (also when archived while the request waited for the
+group) and adding members.
 
 Every change runs in one transaction that takes the affected users' authority locks first, then
 locks the group, so concurrent changes, and a member being added while their organization membership
 is removed, cannot interleave into an inconsistent state.
+
+Lock order (the header of `utils/groups.ts` has the detail): the authority locks of the users whose
+authority changes, ascending id (for role changes, archive and restore, every member); the group row;
+for those group-wide changes, any member who joined in between; then organization owners and the
+last-admin guard. A transaction changing several groups (provisioning's apply and its archival of
+dropped groups) takes the authority locks of all their members first, ascending, before any group
+row.
 
 ### Limits
 

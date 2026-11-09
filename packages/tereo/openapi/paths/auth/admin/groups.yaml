@@ -13,8 +13,10 @@
       - `q`: case-insensitive match on slug or name
 
       **Authorization:** `groups.read`. Without it, the caller must name one organization in
-      `organizationId` and be an `admin` or `owner` of it, and sees only its groups; an inactive
-      organization's groups stay readable this way.
+      `organizationId` and be an `admin` or `owner` of it (`organizations.write` also passes, as
+      on the organization routes), and sees only its groups; an inactive organization's groups
+      stay readable this way. Every refusal is the same `403`, naming `groups.read`, whatever
+      the organization or the caller's place in it.
     operationId: getAdminGroups
     security:
       - BearerAuth: [groups.read]
@@ -69,7 +71,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: 'Neither `groups.read` nor `admin`/`owner` of the organization named'
+        description: 'Neither `groups.read`, nor `admin`/`owner` of the organization named, nor `organizations.write`'
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -88,8 +90,10 @@
       A body key not listed is refused (`400`).
 
       **Authorization:** `groups.write`. Without it, an `admin` or `owner` of the organization
-      named in `organizationId` may create a group in it, unless the organization is inactive
-      (`403`: only `groups.write` passes).
+      named in `organizationId` may create a group in it (`organizations.write` also passes, as
+      on the organization routes), unless the organization is inactive: there only
+      `groups.write` or `organizations.write` passes. A global group needs `groups.write`. Every
+      refusal of a caller without `groups.write` is the same `403`, naming `groups.write`.
 
       An audit log entry is created for this action.
       An `auth.group.created` webhook event is emitted, and with `roleIds` an `auth.group.roles-changed`.
@@ -169,7 +173,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: 'No authority over the group'
+        description: 'No authority over the group (to a caller without the route''s `groups.*` permission, the same `403` as for a missing group)'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
@@ -191,7 +195,7 @@
       the organization routes). A global group needs `groups.write`. A caller without
       `groups.write` gets `403` for a missing group as for one they cannot reach.
       On an inactive organization the org role is not enough: an `admin` or `owner`
-      gets `403`, and only `groups.write` passes.
+      gets `403`, and only `groups.write` or `organizations.write` passes.
 
       An audit log entry is created for this action (none when nothing changes).
       An `auth.group.updated` webhook event is emitted.
@@ -226,7 +230,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: 'No authority over the group'
+        description: 'No authority over the group (to a caller without the route''s `groups.*` permission, the same `403` as for a missing group)'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
@@ -254,7 +258,7 @@
       the organization routes). A global group needs `groups.archive`. A caller without
       `groups.archive` gets `403` for a missing group as for one they cannot reach.
       On an inactive organization the org role is not enough: an `admin` or `owner`
-      gets `403`, and only `groups.archive` passes.
+      gets `403`, and only `groups.archive` or `organizations.write` passes.
 
       An audit log entry is created for this action.
       An `auth.group.archived` webhook event is emitted.
@@ -283,7 +287,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: 'No authority over the group, or the grant check refuses'
+        description: 'No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), or the grant check refuses'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
@@ -302,15 +306,17 @@
     description: |
       Restores an archived group, giving its members its roles again. The caller must be able to
       grant every permission of every role the group holds — inactive and archived roles
-      included, since one may come back. Access tokens of members from a password-only sign-in
-      are revoked when a restored role requires two-factor authentication.
+      included, since one may come back. An organization's group whose roles now carry a
+      permission that cannot be granted within an organization is refused
+      (`400 role_not_org_assignable`); change its roles first. Access tokens of members from a
+      password-only sign-in are revoked when a restored role requires two-factor authentication.
 
       **Authorization:** `groups.archive`, or, for an organization's group, being an
       `admin` or `owner` of that organization (`organizations.write` also passes, as on
       the organization routes). A global group needs `groups.archive`. A caller without
       `groups.archive` gets `403` for a missing group as for one they cannot reach.
       On an inactive organization the org role is not enough: an `admin` or `owner`
-      gets `403`, and only `groups.archive` passes.
+      gets `403`, and only `groups.archive` or `organizations.write` passes.
 
       An audit log entry is created for this action.
       An `auth.group.restored` webhook event is emitted.
@@ -335,11 +341,12 @@
               $ref: '../../../components/auth/schemas.yaml#/Group'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: 'Invalid id, or `role_not_org_assignable` (an organization''s group holding a role that cannot be granted within an organization)'
       '401':
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: 'No authority over the group, or the grant check refuses'
+        description: 'No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), or the grant check refuses'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
@@ -390,7 +397,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: 'No authority over the group'
+        description: 'No authority over the group (to a caller without the route''s `groups.*` permission, the same `403` as for a missing group)'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
@@ -406,9 +413,10 @@
       Adds up to 500 users; those already members are skipped, and `added` lists the rest.
       Members of a provisioned group are managed here too.
 
-      Each user must be a regular user (`409 guest_not_allowed`, `service_account_not_allowed`,
-      `system_user_not_allowed`) and, for an organization's group, a member of that organization
-      (`409 not_org_member`). The caller must be able to grant every permission of every role
+      For an organization's group, each user must first be a member of that organization: any
+      other id, unknown ids included, gets `409 not_org_member`, so ids outside the organization
+      cannot be probed. Each user must be a regular user (`400 unknown_user`, `409
+      guest_not_allowed`, `service_account_not_allowed`, `system_user_not_allowed`). The caller must be able to grant every permission of every role
       the group holds — inactive and archived roles included, since one may come back. An
       organization `admin` (not `owner`) may not add one of the organization's owners. Access
       tokens of new members from a password-only sign-in are revoked when a group role requires
@@ -419,7 +427,7 @@
       the organization routes). A global group needs `groups.write`. A caller without
       `groups.write` gets `403` for a missing group as for one they cannot reach.
       On an inactive organization the org role is not enough: an `admin` or `owner`
-      gets `403`, and only `groups.write` passes.
+      gets `403`, and only `groups.write` or `organizations.write` passes.
 
       An audit log entry is created for this action when anyone is added.
       `auth.group.members-added` webhook events are emitted, up to 1,000 user ids each.
@@ -450,18 +458,18 @@
               $ref: '../../../components/auth/schemas.yaml#/AddGroupMembersResponse'
       '400':
         $ref: '../../../components/responses.yaml#/BadRequestResponse'
-        description: 'Invalid body, or `unknown_user`'
+        description: 'Invalid body, or `unknown_user` (a global group; an organization''s group answers `409 not_org_member`)'
       '401':
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: 'No authority over the group; the grant check refuses; or an organization admin adding an owner'
+        description: 'No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group); the grant check refuses; or an organization admin adding an owner'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
       '409':
         $ref: '../../../components/auth/responses.yaml#/GroupConflictResponse'
-        description: '`not_org_member`, `guest_not_allowed`, `service_account_not_allowed`, `system_user_not_allowed`, or `resource_archived` (restore the group first)'
+        description: '`not_org_member` (an organization''s group, for any id outside the organization), `guest_not_allowed`, `service_account_not_allowed`, `system_user_not_allowed`, or `resource_archived` (restore the group first)'
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -482,7 +490,7 @@
       the organization routes). A global group needs `groups.write`. A caller without
       `groups.write` gets `403` for a missing group as for one they cannot reach.
       On an inactive organization the org role is not enough: an `admin` or `owner`
-      gets `403`, and only `groups.write` passes.
+      gets `403`, and only `groups.write` or `organizations.write` passes.
 
       An audit log entry is created for this action.
       An `auth.group.members-removed` webhook event is emitted.
@@ -501,10 +509,10 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: 'No authority over the group or the user, or an organization admin removing an owner'
+        description: 'No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group) or the user, or an organization admin removing an owner'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
-        description: 'Group not found, or the user is not a member'
+        description: 'Group not found (to a caller holding `groups.write`; anyone else gets `403`), or the user is not a member'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
         description: 'The last administrator would lose admin'
@@ -550,7 +558,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: 'No authority over the group'
+        description: 'No authority over the group (to a caller without the route''s `groups.*` permission, the same `403` as for a missing group)'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
@@ -568,7 +576,8 @@
       organization's group holds only custom roles whose permissions can all be granted within
       an organization. Removing the last live administrator's admin role from a global group is
       refused. A provisioned group's roles come from its provisioning documents
-      (`409 managed_by_provisioning`); an archived group must be restored first. Access tokens
+      (`409 managed_by_provisioning`); an archived group, including one archived while this
+      request waited for it, must be restored first (`409 resource_archived`). Access tokens
       of members from a password-only sign-in are revoked when an added role requires
       two-factor authentication.
 
@@ -577,7 +586,7 @@
       the organization routes). A global group needs `groups.write`. A caller without
       `groups.write` gets `403` for a missing group as for one they cannot reach.
       On an inactive organization the org role is not enough: an `admin` or `owner`
-      gets `403`, and only `groups.write` passes.
+      gets `403`, and only `groups.write` or `organizations.write` passes.
 
       An audit log entry is created for this action when the roles change.
       An `auth.group.roles-changed` webhook event is emitted.
@@ -613,7 +622,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: 'No authority over the group; the grant check refuses; or a system role on an organization''s group'
+        description: 'No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group); the grant check refuses; or a system role on an organization''s group'
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
