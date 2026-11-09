@@ -1,7 +1,10 @@
 import { getDefaultOrganizationId } from "../../../../../../../../utils/defaultOrganization.js";
 import { assertNotIntegrationAccount } from "../../../../../../../../utils/integrations.js";
 import { UserType } from "../../../../../../../../../prisma/generated/client/index.js";
+import { requireGroupOrgAdmin } from "../../../../../groups/group/middleware.js";
 import { emitTx, logAuditTx } from "../../../../../../../../utils/outbox.js";
+import { listGroupRoles } from "../../../../../../../../utils/groupRoles.js";
+import { hasPermission } from "../../../../../../../../utils/permissions.js";
 import { assertCanTakeAway } from "../../../../../../../../utils/grants.js";
 import { validateUser } from "../../../../../../../../utils/auth.js";
 import db from "../../../../../../../../utils/db/index.js";
@@ -30,6 +33,30 @@ import {
   NotFoundError,
 } from "../../../../../../../../utils/errors.js";
 
+/**
+ * The member's roles through the organization's groups, for a caller who may
+ * read those groups or asks about themselves; for anyone else an empty list,
+ * as the groups' reads refuse them.
+ */
+const visibleGroupRoles = async (
+  req: Request,
+  orgId: string,
+  userId: string
+) => {
+  const auth = validateUser(req);
+  const mayRead =
+    userId === auth.userId ||
+    hasPermission(auth.permissions, "groups.read") ||
+    (await requireGroupOrgAdmin(req, orgId, "read").then(
+      () => true,
+      (err: unknown) => {
+        if (err instanceof ForbiddenError) return false;
+        throw err;
+      }
+    ));
+  return mayRead ? listGroupRoles(userId, orgId) : [];
+};
+
 export const getMemberOrgRoles = async (req: Request, res: Response) => {
   const { id: orgId } = validateParams(OrgIdParamSchema, req);
   const { userId } = validateParams(MemberUserIdParamSchema, req);
@@ -52,7 +79,9 @@ export const getMemberOrgRoles = async (req: Request, res: Response) => {
       name: ur.role.name,
       displayName: ur.role.displayName,
       expiresAt: ur.expiresAt,
+      via: { kind: "direct" as const },
     })),
+    groupRoles: await visibleGroupRoles(req, orgId, userId),
   });
 };
 
@@ -67,90 +96,101 @@ export const setMemberOrgRoles = async (req: Request, res: Response) => {
   await db.organizations.get(orgId);
   await assertNotIntegrationAccount(userId);
 
-  const { userRoles, revokedJtis } = await db.$transaction(async (tx) => {
-    await db.users.lockAuthority(userId, tx);
-    // Under the lock removeMember and tier changes take, so the membership
-    // and its tier hold until the write.
-    await lockOrgOwners(tx, orgId);
-    const membership = await db.organizations.getMembership(orgId, userId, tx);
-    if (!membership) {
-      throw new NotFoundError("User is not a member of this organization");
-    }
-    // As with member tiers: an org admin does not manage an owner.
-    if (callerRole === "admin" && membership.memberRole === "owner") {
-      throw new ForbiddenError(
-        "Only organization owners can change an owner's roles"
+  const { userRoles, revokedJtis } = await db.$transaction(
+    async (tx) => {
+      await db.users.lockAuthority(userId, tx);
+      // Under the lock removeMember and tier changes take, so the membership
+      // and its tier hold until the write.
+      await lockOrgOwners(tx, orgId);
+      const membership = await db.organizations.getMembership(
+        orgId,
+        userId,
+        tx
       );
-    }
+      if (!membership) {
+        throw new NotFoundError("User is not a member of this organization");
+      }
+      // As with member tiers: an org admin does not manage an owner.
+      if (callerRole === "admin" && membership.memberRole === "owner") {
+        throw new ForbiddenError(
+          "Only organization owners can change an owner's roles"
+        );
+      }
 
-    // Read in the transaction, and only the roles new as of this read are
-    // created: a held role removed concurrently is not put back unchecked.
-    // A held role stays whatever its state (archived, retired).
-    const heldRoles = await db.organizations.getMemberRoles(orgId, userId, tx);
-    const held = new Set(heldRoles.map((ur) => ur.roleId));
-    const added = roleIds.filter((roleId) => !held.has(roleId));
-    await assertOrgAssignableRoles(
-      auth,
-      orgId,
-      added,
-      new Set(),
-      tx,
-      (await db.users.get(userId, tx)).userType === UserType.guest
-    );
-    const removed = heldRoles.filter((ur) => !roleIds.includes(ur.roleId));
-    if (removed.length > 0) {
-      assertCanTakeAway(
-        await callerPermissionsIn(auth, orgId, tx),
-        db.roles.grantedPermissionNames(removed.map((ur) => ur.role))
+      // Read in the transaction, and only the roles new as of this read are
+      // created: a held role removed concurrently is not put back unchecked.
+      // A held role stays whatever its state (archived, retired).
+      const heldRoles = await db.organizations.getMemberRoles(
+        orgId,
+        userId,
+        tx
       );
-    }
+      const held = new Set(heldRoles.map((ur) => ur.roleId));
+      const added = roleIds.filter((roleId) => !held.has(roleId));
+      await assertOrgAssignableRoles(
+        auth,
+        orgId,
+        added,
+        new Set(),
+        tx,
+        (await db.users.get(userId, tx)).userType === UserType.guest
+      );
+      const removed = heldRoles.filter((ur) => !roleIds.includes(ur.roleId));
+      if (removed.length > 0) {
+        assertCanTakeAway(
+          await callerPermissionsIn(auth, orgId, tx),
+          db.roles.grantedPermissionNames(removed.map((ur) => ur.role))
+        );
+      }
 
-    const result = await db.organizations.setMemberRoles(
-      orgId,
-      userId,
-      roleIds,
-      tx,
-      new Set(added)
-    );
-    // A role requiring 2FA counts wherever the user is a member, and
-    // permissions are read live: a token from a password-only login is
-    // revoked, so its refresh meets the step-up.
-    const requires2fa = (await db.roles.getByIds(added, tx)).some(
-      (r) => r.requires2fa
-    );
-    const revokedJtis = requires2fa
-      ? await db.accessTokens.revokeWithoutMfa({ id: userId }, tx)
-      : [];
-    await logAuditTx(tx, {
-      auth,
-      organizationId: orgId,
-      action: "UPDATE",
-      entityType: "OrganizationMember",
-      entityId: membership.id,
-      entityName: membership.user.email,
-      metadata: {
-        action: "roles_changed",
+      const result = await db.organizations.setMemberRoles(
+        orgId,
         userId,
         roleIds,
-        ...(revokedJtis.length > 0 && {
-          accessTokensRevoked: revokedJtis.length,
-        }),
-      },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.organization.member-roles-changed",
-      entityType: "OrganizationMember",
-      entityId: membership.id,
-      data: {
+        tx,
+        new Set(added)
+      );
+      // A role requiring 2FA counts wherever the user is a member, and
+      // permissions are read live: a token from a password-only login is
+      // revoked, so its refresh meets the step-up.
+      const requires2fa = (await db.roles.getByIds(added, tx)).some(
+        (r) => r.requires2fa
+      );
+      const revokedJtis = requires2fa
+        ? await db.accessTokens.revokeWithoutMfa({ id: userId }, tx)
+        : [];
+      await logAuditTx(tx, {
+        auth,
         organizationId: orgId,
-        userId,
-        email: membership.user.email,
-        roleIds,
-      },
-    });
-    return { userRoles: result, revokedJtis };
-  });
+        action: "UPDATE",
+        entityType: "OrganizationMember",
+        entityId: membership.id,
+        entityName: membership.user.email,
+        metadata: {
+          action: "roles_changed",
+          userId,
+          roleIds,
+          ...(revokedJtis.length > 0 && {
+            accessTokensRevoked: revokedJtis.length,
+          }),
+        },
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.organization.member-roles-changed",
+        entityType: "OrganizationMember",
+        entityId: membership.id,
+        data: {
+          organizationId: orgId,
+          userId,
+          email: membership.user.email,
+          roleIds,
+        },
+      });
+      return { userRoles: result, revokedJtis };
+    },
+    { timeout: 30_000 }
+  );
 
   disconnectTokenSockets(revokedJtis);
   notifyOrgRolesChanged(userId, orgId);
@@ -162,6 +202,8 @@ export const setMemberOrgRoles = async (req: Request, res: Response) => {
       name: ur.role.name,
       displayName: ur.role.displayName,
       expiresAt: ur.expiresAt,
+      via: { kind: "direct" as const },
     })),
+    groupRoles: await visibleGroupRoles(req, orgId, userId),
   });
 };

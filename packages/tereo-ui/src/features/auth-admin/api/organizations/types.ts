@@ -1,3 +1,5 @@
+import type { UserGroupRole } from "../users/types";
+
 export type MemberRole = "owner" | "admin" | "member";
 
 export interface Organization {
@@ -57,10 +59,14 @@ export interface MemberOrgRole {
   name: string;
   displayName: string;
   expiresAt: string | null;
+  via: { kind: "direct" };
 }
 
 export interface MemberOrgRolesResponse {
   organizationId: string;
   userId: string;
+  /** Direct assignments only: the set the roles editor sends back. */
   roles: MemberOrgRole[];
+  /** Held through the organization's groups; `PUT` never touches these. */
+  groupRoles: UserGroupRole[];
 }

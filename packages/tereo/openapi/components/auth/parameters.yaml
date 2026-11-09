@@ -90,3 +90,30 @@ BrandingGrantUserIdParam:
   schema:
     type: string
     format: uuid
+
+GroupIdParam:
+  name: id
+  in: path
+  required: true
+  schema:
+    type: string
+    format: uuid
+
+GroupMemberUserIdParam:
+  name: userId
+  in: path
+  required: true
+  description: The member to remove
+  schema:
+    type: string
+    format: uuid
+
+GroupsLimitParam:
+  name: limit
+  in: query
+  description: Maximum number of items to return per page (cursor pagination)
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 100
+    default: 50

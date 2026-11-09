@@ -1,12 +1,16 @@
 // @module-tag int
 // @module-tag auth
 import { createTestClient } from "../../../support/auth/clients.js";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateAccessToken } from "../../../../utils/tokens.js";
 import { LOGIN_CLIENT } from "../../../../definitions/index.js";
 import { browserLogin } from "../../../support/browserLogin.js";
 import { createTestUser } from "../../../support/auth/users.js";
-import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
+import {
+  addTestOrgMember,
+  createTestOrganization,
+} from "../../../support/auth/organizations.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -33,6 +37,12 @@ import {
   postForm,
   loginAndExchange,
 } from "../../../support/auth/login.js";
+import {
+  adminApi,
+  delegatedToken,
+  deleteGroups,
+  postGroup,
+} from "../../../support/groups.js";
 
 describe("/oauth/userinfo", () => {
   describe("OAuth UserInfo Endpoint", () => {
@@ -488,6 +498,184 @@ describe("/oauth/userinfo", () => {
           );
         });
       });
+    });
+  });
+
+  describe("groups claim", () => {
+    const groupIds: string[] = [];
+    let adminToken: string;
+    let user: Awaited<ReturnType<typeof createTestUser>>;
+    let orgId: string;
+    let otherOrgId: string;
+    let globalGroup: { id: string };
+    let orgGroup: { id: string };
+    let otherOrgGroup: { id: string };
+
+    const userinfo = async (token: string) =>
+      (await (
+        await fetch(`${BASE_URL}/oauth/userinfo`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      ).json()) as {
+        groups?: {
+          id: string;
+          slug: string;
+          name: string;
+          organizationId: string | null;
+        }[];
+      };
+    const loginToken = (organizationId: string) =>
+      getTestPrincipalToken({
+        userId: user.id,
+        organizationId,
+        permissions: [],
+      });
+
+    beforeAll(async () => {
+      adminToken = await getTestPrincipalToken({ permissions: ["admin"] });
+      user = await createTestUser();
+      orgId = (await createTestOrganization(adminToken)).id;
+      otherOrgId = (await createTestOrganization(adminToken)).id;
+      await addTestOrgMember(adminToken, orgId, user.id);
+      await addTestOrgMember(adminToken, otherOrgId, user.id);
+      globalGroup = await postGroup(adminToken);
+      orgGroup = await postGroup(adminToken, { organizationId: orgId });
+      otherOrgGroup = await postGroup(adminToken, {
+        organizationId: otherOrgId,
+      });
+      const archived = await postGroup(adminToken);
+      groupIds.push(globalGroup.id, orgGroup.id, otherOrgGroup.id, archived.id);
+      for (const g of [globalGroup, orgGroup, otherOrgGroup, archived]) {
+        await adminApi("POST", `/groups/${g.id}/members`, adminToken, {
+          userIds: [user.id],
+        });
+      }
+      await adminApi("POST", `/groups/${archived.id}/archive`, adminToken);
+      archivedId = archived.id;
+    });
+    let archivedId: string;
+    afterAll(() => deleteGroups(groupIds));
+
+    it("includes global and the token org's groups for the login client", async () => {
+      const data = await userinfo(await loginToken(orgId));
+      expect(data.groups?.map((g) => g.id).sort()).toEqual(
+        [globalGroup.id, orgGroup.id].sort()
+      );
+      const org = data.groups?.find((g) => g.id === orgGroup.id);
+      expect(org?.organizationId).toBe(orgId);
+      expect(Object.keys(org ?? {}).sort()).toEqual([
+        "id",
+        "name",
+        "organizationId",
+        "slug",
+      ]);
+    });
+
+    it("omits other orgs' and archived groups", async () => {
+      const ids = (await userinfo(await loginToken(orgId))).groups?.map(
+        (g) => g.id
+      );
+      expect(ids).not.toContain(otherOrgGroup.id);
+      expect(ids).not.toContain(archivedId);
+    });
+
+    it("lists only global groups when the token's organization is inactive or archived", async () => {
+      for (const data of [{ isActive: false }, { archivedAt: new Date() }]) {
+        const lapsedOrgId = (await createTestOrganization(adminToken)).id;
+        await addTestOrgMember(adminToken, lapsedOrgId, user.id);
+        const lapsedGroup = await postGroup(adminToken, {
+          organizationId: lapsedOrgId,
+        });
+        groupIds.push(lapsedGroup.id);
+        await adminApi(
+          "POST",
+          `/groups/${lapsedGroup.id}/members`,
+          adminToken,
+          {
+            userIds: [user.id],
+          }
+        );
+        const token = await loginToken(lapsedOrgId);
+        expect((await userinfo(token)).groups?.map((g) => g.id)).toContain(
+          lapsedGroup.id
+        );
+
+        await prisma.organization.update({
+          where: { id: lapsedOrgId },
+          data,
+        });
+        expect((await userinfo(token)).groups?.map((g) => g.id)).toEqual([
+          globalGroup.id,
+        ]);
+      }
+    });
+
+    it("a plain relying party gets no groups claim", async () => {
+      const client = await createTestClient({ scopes: ["openid", "email"] });
+      const outsider = await createTestUser();
+      await adminApi("POST", `/groups/${globalGroup.id}/members`, adminToken, {
+        userIds: [outsider.id],
+      });
+      const token = await getAccessTokenForUser(
+        outsider,
+        client,
+        "openid email"
+      );
+      expect((await userinfo(token)).groups).toBeUndefined();
+    });
+
+    it("a delegated token without account/admin area gets groups: []", async () => {
+      const token = await delegatedToken(user.id, ["core:files"]);
+      expect((await userinfo(token)).groups).toEqual([]);
+    });
+
+    it.each([["core:account"], ["core:admin.read"], ["core:admin"]])(
+      "a delegated %s token gets the global groups, and no roles",
+      async (scope) => {
+        const token = await delegatedToken(user.id, [scope]);
+        const data = (await userinfo(token)) as {
+          groups?: { id: string }[];
+          roles?: string[];
+        };
+        expect(data.groups?.map((g) => g.id)).toEqual([globalGroup.id]);
+        expect(data.roles).toEqual([]);
+      }
+    );
+
+    it("a delegated token with only another area's scope gets groups: []", async () => {
+      const token = await delegatedToken(user.id, ["core:organizations"]);
+      expect((await userinfo(token)).groups).toEqual([]);
+    });
+
+    it("lists no org groups of a token's organization the user is not a member of", async () => {
+      const strangerOrgId = (await createTestOrganization(adminToken)).id;
+      const outsider = await createTestUser();
+      const strangerGroup = await postGroup(adminToken, {
+        organizationId: strangerOrgId,
+      });
+      groupIds.push(strangerGroup.id);
+      const token = await getTestPrincipalToken({
+        userId: outsider.id,
+        organizationId: strangerOrgId,
+        permissions: [],
+      });
+      expect((await userinfo(token)).groups).toEqual([]);
+
+      await addTestOrgMember(adminToken, strangerOrgId, outsider.id);
+      await adminApi(
+        "POST",
+        `/groups/${strangerGroup.id}/members`,
+        adminToken,
+        { userIds: [outsider.id] }
+      );
+      expect((await userinfo(token)).groups?.map((g) => g.id)).toEqual([
+        strangerGroup.id,
+      ]);
+
+      await prisma.organizationMember.deleteMany({
+        where: { organizationId: strangerOrgId, userId: outsider.id },
+      });
+      expect((await userinfo(token)).groups).toEqual([]);
     });
   });
 

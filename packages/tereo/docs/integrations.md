@@ -55,7 +55,7 @@ them. Two things decide whether step 5 succeeds:
 set, so the order of documents and entries does not matter ([provisioning](provisioning.md#applying)).
 The organization is the exception: documents do not create organizations, and an org-bound entry
 whose `organizationId` names none (or an archived one) fails the whole apply, which at start stops
-core from starting. So for an org-bound integration:
+core from starting. The check is made when the integration is created: an organization archived later leaves it in place. So for an org-bound integration:
 
 1. Deploy core with the services, and create the organization in the admin UI or API.
 2. Add the custom roles and the integration, with that organization's id, to the documents, and

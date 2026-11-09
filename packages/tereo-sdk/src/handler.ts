@@ -235,7 +235,9 @@ export type {
 
 export type {
   AuthServiceUser,
+  AuthServiceUserGroupRole,
   AuthServiceUserRole,
+  AuthServiceUserRolesResponse,
   AuthServiceUserPermissionsResponse,
 } from "./requests/auth/users/types.js";
 

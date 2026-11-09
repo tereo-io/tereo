@@ -704,6 +704,18 @@
       Returns the roles assigned to a member within this specific
       organization. An archived organization's member roles stay readable.
 
+      `roles` holds the direct assignments, whatever their state (exactly
+      what `PUT` replaces). `groupRoles` lists each live role the member
+      holds through a live group of this organization, once per role and
+      group, with the group; a global group's roles are not listed here (see
+      `GET /v1/admin/users/{id}/roles`). A role held both ways appears in
+      each list. `groupRoles` is returned only when the caller may read the
+      organization's groups (platform `groups.read`, an organization admin or
+      owner, or `organizations.write`) or asks about themselves; otherwise it
+      is an empty list. It is also empty while the organization is inactive
+      or archived, since its groups' roles count for nothing then (`roles`
+      still lists the direct ones).
+
       **Authorization:** Either the platform-level permission `organizations.read` OR the org role `member` on the target organization grants access. Org role is checked via `requireOrgRole()` inside the handler.
     operationId: getAdminOrganizationMemberRoles
     security:
@@ -751,7 +763,10 @@
     summary: Set member's org-scoped roles
     description: |
       Replaces all org-scoped role assignments for a member within this
-      organization (duplicate `roleIds` are ignored). A role the member
+      organization (duplicate `roleIds` are ignored). Roles held through a
+      group are not touched: the response lists them in `groupRoles`, apart
+      from the direct `roles`. `groupRoles` is empty unless the caller
+      may read the organization's groups or asks about themselves (see `GET`). A role the member
       already holds here keeps its assignment, `expiresAt` included; only
       roles left out are removed. Only custom roles can
       be assigned here: a system role (declared by a service) returns `403`.

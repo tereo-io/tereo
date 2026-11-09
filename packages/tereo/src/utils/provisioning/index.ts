@@ -29,6 +29,7 @@ export const provision = async (
         clients: d.clients.length,
         roles: d.roles.length,
         integrations: d.integrations?.length ?? 0,
+        groups: d.groups?.length ?? 0,
         branding: Boolean(d.branding),
       })),
       ...(changed && { ...result }),

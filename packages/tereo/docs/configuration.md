@@ -248,7 +248,7 @@ env (no overlap).
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `REGISTRY_RETIREMENT_GRACE_HOURS` | `24` | 0–8760. How long an item may be missing from a declaration before it retires, and how long a service, login client or custom role dropped from the [provisioning documents](provisioning.md) lasts before it is deactivated, deleted or archived |
+| `REGISTRY_RETIREMENT_GRACE_HOURS` | `24` | 0–8760. How long an item may be missing from a declaration before it retires, and how long a service, integration, login client, custom role or group dropped from the [provisioning documents](provisioning.md) lasts before it is deactivated, deleted or archived |
 | `SERVICE_SECRET_OVERLAP_HOURS` | `24` | 0–8760. How long a replaced service secret keeps working |
 
 ### Files

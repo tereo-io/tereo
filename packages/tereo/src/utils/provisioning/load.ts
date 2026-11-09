@@ -1,5 +1,4 @@
 import { CLIENT_SECRET_PREFIX, secretStrengthProblem } from "../secretRules.js";
-import { ProvisioningDocumentSchema, type CustomRoleEntry } from "./schema.js";
 import { readFile, readdir, realpath, stat } from "fs/promises";
 import { CORE_SCOPES } from "../../definitions/index.js";
 import { isSafeRedirectUri } from "../redirectUris.js";
@@ -16,6 +15,11 @@ import {
   profileFields,
   type LoadedBranding,
 } from "./branding.js";
+import {
+  ProvisioningDocumentSchema,
+  type CustomRoleEntry,
+  type GroupEntryOutput,
+} from "./schema.js";
 
 export class ProvisioningError extends Error {
   constructor(public problems: string[]) {
@@ -179,6 +183,8 @@ export interface LoadedDocument {
   roles: CustomRoleEntry[];
   /** Absent is none. */
   integrations?: ResolvedIntegration[];
+  /** Absent is none. */
+  groups?: GroupEntryOutput[];
   /** Absent is not declared. */
   guests?: { defaultRoles: string[] };
   /** Absent is not declared. */
@@ -460,6 +466,7 @@ const buildSet = ({
       })),
       roles: data.roles ?? [],
       ...(data.guests && { guests: data.guests }),
+      ...(data.groups && { groups: data.groups }),
       integrations: (data.integrations ?? []).map((i) => ({
         slug: i.slug,
         name: i.name,

@@ -877,6 +877,8 @@ tags:
     description: Admin endpoints for managing role users
   - name: Admin - Role Permissions
     description: Admin endpoints for managing role permissions
+  - name: Admin - Groups
+    description: Admin endpoints for groups — sets of users who hold the group's roles, global or within one organization — their members and roles
   - name: Admin - Permissions
     description: Admin endpoints for managing permissions
   - name: Admin - Organizations
@@ -1000,6 +1002,7 @@ x-tagGroups:
       - Admin - Roles
       - Admin - Role Users
       - Admin - Role Permissions
+      - Admin - Groups
       - Admin - Permissions
       - Admin - Organizations
       - Admin - Organization Members
@@ -1129,6 +1132,8 @@ paths:
     $ref: './paths/auth/admin/users.yaml#/~1admin~1users'
   /v1/admin/users/{id}:
     $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}'
+  /v1/admin/users/{id}/groups:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1groups'
   /v1/admin/users/{id}/roles:
     $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1roles'
   /v1/admin/users/{id}/permissions:
@@ -1169,6 +1174,20 @@ paths:
     $ref: './paths/auth/admin/clients.yaml#/~1admin~1clients~1{id}'
   /v1/admin/clients/{id}/regenerate-secret:
     $ref: './paths/auth/admin/clients.yaml#/~1admin~1clients~1{id}~1regenerate-secret'
+  /v1/admin/groups:
+    $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups'
+  /v1/admin/groups/{id}:
+    $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups~1{id}'
+  /v1/admin/groups/{id}/archive:
+    $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups~1{id}~1archive'
+  /v1/admin/groups/{id}/restore:
+    $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups~1{id}~1restore'
+  /v1/admin/groups/{id}/members:
+    $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups~1{id}~1members'
+  /v1/admin/groups/{id}/members/{userId}:
+    $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups~1{id}~1members~1{userId}'
+  /v1/admin/groups/{id}/roles:
+    $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups~1{id}~1roles'
   /v1/admin/roles:
     $ref: './paths/auth/admin/roles.yaml#/~1admin~1roles'
   /v1/admin/roles/{id}:
@@ -1413,6 +1432,12 @@ components:
       $ref: './components/auth/parameters.yaml#/ClientIdParam'
     RoleIdParam:
       $ref: './components/auth/parameters.yaml#/RoleIdParam'
+    GroupIdParam:
+      $ref: './components/auth/parameters.yaml#/GroupIdParam'
+    GroupMemberUserIdParam:
+      $ref: './components/auth/parameters.yaml#/GroupMemberUserIdParam'
+    GroupsLimitParam:
+      $ref: './components/auth/parameters.yaml#/GroupsLimitParam'
     PermissionIdParam:
       $ref: './components/auth/parameters.yaml#/PermissionIdParam'
     OrganizationIdParam:
@@ -1546,6 +1571,8 @@ components:
       $ref: './components/responses.yaml#/NotArchivedResponse'
     ArchivedResponse:
       $ref: './components/auth/responses.yaml#/ArchivedResponse'
+    GroupConflictResponse:
+      $ref: './components/auth/responses.yaml#/GroupConflictResponse'
     UnprocessableEntityResponse:
       $ref: './components/auth/responses.yaml#/UnprocessableEntityResponse'
     FilesUnauthorizedResponse:
@@ -1721,6 +1748,42 @@ components:
       $ref: './components/auth/schemas.yaml#/RoleWithPermissions'
     RoleUsersResponse:
       $ref: './components/auth/schemas.yaml#/RoleUsersResponse'
+    UserRoleAssignment:
+      $ref: './components/auth/schemas.yaml#/UserRoleAssignment'
+    UserGroupRoleAssignment:
+      $ref: './components/auth/schemas.yaml#/UserGroupRoleAssignment'
+    Group:
+      $ref: './components/auth/schemas.yaml#/Group'
+    ListGroupsResponse:
+      $ref: './components/auth/schemas.yaml#/ListGroupsResponse'
+    UserGroupsResponse:
+      $ref: './components/auth/schemas.yaml#/UserGroupsResponse'
+    CreateGroupRequest:
+      $ref: './components/auth/schemas.yaml#/CreateGroupRequest'
+    UpdateGroupRequest:
+      $ref: './components/auth/schemas.yaml#/UpdateGroupRequest'
+    GroupMember:
+      $ref: './components/auth/schemas.yaml#/GroupMember'
+    ListGroupMembersResponse:
+      $ref: './components/auth/schemas.yaml#/ListGroupMembersResponse'
+    AddGroupMembersRequest:
+      $ref: './components/auth/schemas.yaml#/AddGroupMembersRequest'
+    AddGroupMembersResponse:
+      $ref: './components/auth/schemas.yaml#/AddGroupMembersResponse'
+    GroupRole:
+      $ref: './components/auth/schemas.yaml#/GroupRole'
+    ListGroupRolesResponse:
+      $ref: './components/auth/schemas.yaml#/ListGroupRolesResponse'
+    SetGroupRolesRequest:
+      $ref: './components/auth/schemas.yaml#/SetGroupRolesRequest'
+    SetGroupRolesResponse:
+      $ref: './components/auth/schemas.yaml#/SetGroupRolesResponse'
+    GroupEventData:
+      $ref: './components/auth/schemas.yaml#/GroupEventData'
+    GroupMembersEventData:
+      $ref: './components/auth/schemas.yaml#/GroupMembersEventData'
+    GroupRolesEventData:
+      $ref: './components/auth/schemas.yaml#/GroupRolesEventData'
     CreateRoleRequest:
       $ref: './components/auth/schemas.yaml#/CreateRoleRequest'
     UpdateRoleRequest:
@@ -2069,6 +2132,20 @@ webhooks:
     $ref: './paths/auth/admin/roles.yaml#/auth.role.permissions-changed'
   auth.role.user-removed:
     $ref: './paths/auth/admin/roles.yaml#/auth.role.user-removed'
+  auth.group.created:
+    $ref: './paths/auth/admin/groups.yaml#/auth.group.created'
+  auth.group.updated:
+    $ref: './paths/auth/admin/groups.yaml#/auth.group.updated'
+  auth.group.archived:
+    $ref: './paths/auth/admin/groups.yaml#/auth.group.archived'
+  auth.group.restored:
+    $ref: './paths/auth/admin/groups.yaml#/auth.group.restored'
+  auth.group.members-added:
+    $ref: './paths/auth/admin/groups.yaml#/auth.group.members-added'
+  auth.group.members-removed:
+    $ref: './paths/auth/admin/groups.yaml#/auth.group.members-removed'
+  auth.group.roles-changed:
+    $ref: './paths/auth/admin/groups.yaml#/auth.group.roles-changed'
   auth.client.updated:
     $ref: './paths/auth/admin/clients.yaml#/auth.client.updated'
   auth.client.deleted:

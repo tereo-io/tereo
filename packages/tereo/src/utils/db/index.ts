@@ -35,6 +35,7 @@ import * as clients from "./clients.js";
 import * as consent from "./consent.js";
 import * as buckets from "./buckets.js";
 import * as objects from "./objects.js";
+import * as groups from "./groups.js";
 import * as outbox from "./outbox.js";
 import * as scopes from "./scopes.js";
 import * as shares from "./shares.js";
@@ -44,8 +45,9 @@ import * as users from "./users.js";
 import * as totp from "./totp.js";
 
 const $transaction = <T>(
-  fn: (tx: Prisma.TransactionClient) => Promise<T>
-): Promise<T> => prisma.$transaction(fn);
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  options?: { maxWait?: number; timeout?: number }
+): Promise<T> => prisma.$transaction(fn, options);
 
 // One namespace per table group. `permissions` are auth's role permissions;
 // `bucketPermissions` are per-bucket grants.
@@ -58,6 +60,7 @@ export default {
   brandingProfiles,
   clients,
   consent,
+  groups,
   identityProviders,
   loginFlows,
   organizations,

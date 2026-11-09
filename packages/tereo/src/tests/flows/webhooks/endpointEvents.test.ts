@@ -1,7 +1,8 @@
 // @module-tag int
 // @module-tag webhooks
-import { getTestPrincipalToken } from "../../support/principals.js";
+import { getTestPrincipalToken, testOrgId } from "../../support/principals.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { createTestBucket } from "../../support/files.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import axios from "axios";
@@ -219,6 +220,8 @@ describe("who may redirect an endpoint's file events", () => {
   let creator: string;
   let editor: string;
   let endpointId: string;
+  /** A public bucket of the org, so the creator may read its events. */
+  let bucketName: string;
 
   const patch = (token: string, body: Record<string, unknown>) =>
     api.patch(`${BASE_URL}/webhooks/${endpointId}`, body, auth(token));
@@ -229,7 +232,11 @@ describe("who may redirect an endpoint's file events", () => {
         data: {
           webhookEndpointId: endpointId,
           eventType,
-          payload: { eventType, data: {} },
+          payload: {
+            organizationId: testOrgId(org),
+            eventType,
+            data: { bucketName },
+          },
           status: "FAILED",
           attempts: 10,
           completedAt: new Date(),
@@ -238,6 +245,15 @@ describe("who may redirect an endpoint's file events", () => {
     ).id;
 
   beforeAll(async () => {
+    bucketName = (
+      await createTestBucket(
+        await getTestPrincipalToken({
+          organizationId: org,
+          permissions: ["file-service.admin"],
+        }),
+        { policy: "public" }
+      )
+    ).name;
     creator = await getTestPrincipalToken({
       organizationId: org,
       permissions: filePermissions,

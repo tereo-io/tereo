@@ -118,6 +118,29 @@ const CustomRoleEntry = z
   })
   .strict();
 
+// As the admin API's group fields. Members are never declared.
+const GroupEntry = z
+  .object({
+    slug: z
+      .string()
+      .regex(
+        /^[a-z0-9-]{1,100}$/,
+        "1-100 lowercase letters, digits or hyphens"
+      ),
+    name: z.string().min(1).max(255),
+    description: Description.optional(),
+    // Absent: a global group. Fixed once created. Lower-cased, as Postgres
+    // returns ids and as the group's scope is compared.
+    organizationId: z
+      .guid()
+      .transform((id) => id.toLowerCase())
+      .optional(),
+    // Resolved as an integration's: custom roles of the set, core's roles,
+    // `<slug>/<name>` services' system roles.
+    roles: z.array(Text).default([]),
+  })
+  .strict();
+
 const GuestsEntry = z
   .object({
     defaultRoles: z.array(z.string().min(1).max(100)),
@@ -150,6 +173,7 @@ export const ProvisioningDocumentSchema = z
     clients: z.array(ClientEntry).optional(),
     roles: z.array(CustomRoleEntry).optional(),
     integrations: z.array(IntegrationEntry).optional(),
+    groups: z.array(GroupEntry).optional(),
     guests: GuestsEntry.optional(),
     branding: BrandingEntry.optional(),
   })
@@ -160,13 +184,15 @@ export const ProvisioningDocumentSchema = z
       d.clients?.length ||
       d.roles?.length ||
       d.integrations?.length ||
+      d.groups?.length ||
       d.guests ||
       d.branding,
     {
       message:
-        "needs one of service, clients, roles, integrations, guests, branding, not empty",
+        "needs one of service, clients, roles, integrations, groups, guests, branding, not empty",
     }
   );
 
 export type ProvisioningDocument = z.input<typeof ProvisioningDocumentSchema>;
 export type CustomRoleEntry = z.output<typeof CustomRoleEntry>;
+export type GroupEntryOutput = z.output<typeof GroupEntry>;

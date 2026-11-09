@@ -92,11 +92,20 @@ named in its `data.bucketName` (`src/utils/webhookAccess.ts`). Core's event type
 prefix (`READ_PERMISSIONS` in `definitions/eventTypes.ts`): `auth.user.*` needs `users.read`,
 `core.service.*` `services.read`, `file-service.object.*` `file-service.objects.read`, and so on; a
 service's event types take the one their declaration gives, if any ([registry.md](registry.md)).
+One exception: an `auth.group.*` event of an organization's own group (its `data.organizationId` is
+the organization it is emitted in) is also readable by that organization's admins and owners, as
+they manage its groups ([groups.md](groups.md#authorization)), and by `organizations.write` holders;
+a delegated token acts as an org admin only if its scopes allow `organizations.write`. A global
+group's events (`data.organizationId` null) still need `groups.read`.
 Platform-wide events are emitted under the default organization, so without this any member of it
 allowed to manage webhooks would receive every user, client and service change. Create and PATCH
 check the caller the same way, against every event type the endpoint will be subscribed to:
 `403` if they could not read one. The bucket is checked per event, when it is sent. An endpoint
 whose creator is deactivated or loses access is simply sent nothing; it is not paused.
+The check runs again before every send attempt, retries included: a delivery whose creator may no
+longer receive its event is settled `FAILED` ("The endpoint's creator may no longer receive this
+event") without counting toward auto-disable, and retry one of it is `403`. For another
+organization's events, the creator's permissions there are capped by the caller's token scopes.
 Delivery views (`GET …/deliveries`, `GET …/deliveries/:deliveryId` and the retry responses) apply
 the same check to the caller: a delivery whose event they could not read comes back with
 `payload` and `responseBody` set to `null` and `payloadRedacted: true`. For the same reason the

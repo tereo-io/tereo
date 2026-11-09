@@ -44,6 +44,7 @@ const ADMIN_DOMAINS = [
   "settings",
   "organizations",
   "services",
+  "groups",
 ];
 
 /**

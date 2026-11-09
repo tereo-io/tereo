@@ -745,14 +745,15 @@
     description: |
       Get the authenticated user's profile information (OpenID Connect). The
       token must carry `openid`. The standard claims follow the token's
-      scopes (`profile`, `email`). `roles`, `permissions` and
-      `organizations` — core's authorization — are returned only when the
-      token was issued to core's UI or to a service's client, or carries a
-      core API scope (`core:*`); for any other client all three are omitted.
-      A token delegated to a third-party client by core API scopes gets its
-      `permissions` cut down to those scopes' ceilings, `roles` empty, and
-      `organizations` only with `core:account` or `core:organizations`
-      (otherwise empty).
+      scopes (`profile`, `email`). `roles`, `permissions`,
+      `organizations` and `groups` — core's authorization — are returned only
+      when the token was issued to core's UI or to a service's client, or
+      carries a core API scope (`core:*`); for any other client all four are
+      omitted. A token delegated to a third-party client by core API scopes
+      gets its `permissions` cut down to those scopes' ceilings, `roles`
+      empty, `organizations` only with `core:account` or `core:organizations`
+      and `groups` only with `core:account` or `core:admin` (otherwise
+      empty).
       `org_id` and `org_name` are the token's organization; they are omitted
       when that organization has since been archived or deleted.
 

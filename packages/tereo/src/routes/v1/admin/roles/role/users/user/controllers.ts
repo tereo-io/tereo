@@ -59,56 +59,61 @@ export const removeRoleUser = async (req: Request, res: Response) => {
   ].join(":");
   const details = { roleId, userId, organizationId, roleName: role.name };
 
-  await db.$transaction(async (tx) => {
-    await db.users.lockAuthority(userId, tx);
-    if (!organizationId) {
-      await assertMayDisempower(auth, userId, "remove roles from", tx);
-    }
-    if (organizationId && callerOrgRole === "admin") {
-      // Under the lock tier changes take, so the target's tier holds until
-      // the write.
-      await lockOrgOwners(tx, organizationId);
-      const membership = await db.organizations.getMembership(
-        organizationId,
-        userId,
+  await db.$transaction(
+    async (tx) => {
+      await db.users.lockAuthority(userId, tx);
+      if (!organizationId) {
+        await assertMayDisempower(auth, userId, "remove roles from", tx);
+      }
+      if (organizationId && callerOrgRole === "admin") {
+        // Under the lock tier changes take, so the target's tier holds until
+        // the write.
+        await lockOrgOwners(tx, organizationId);
+        const membership = await db.organizations.getMembership(
+          organizationId,
+          userId,
+          tx
+        );
+        if (membership?.memberRole === "owner") {
+          throw new ForbiddenError(
+            "Only organization owners can change an owner's roles"
+          );
+        }
+      }
+      // Org-scoped assignments never count as administrators, so removing one
+      // always passes; the guard still runs, under its lock, for both. The
+      // same role held through a group stays.
+      await assertAdminRemains(
+        organizationId === null
+          ? { kind: "direct", userId, roleIds: [roleId] }
+          : null,
         tx
       );
-      if (membership?.memberRole === "owner") {
-        throw new ForbiddenError(
-          "Only organization owners can change an owner's roles"
-        );
-      }
-    }
-    // Org-scoped assignments never count as administrators, so removing one
-    // always passes; the guard still runs, under its lock, for both.
-    await assertAdminRemains(
-      (a) =>
-        organizationId !== null || a.userId !== userId || a.roleId !== roleId,
-      tx
-    );
-    await db.roles.removeUserRole(
-      userId,
-      roleId,
-      organizationId ?? undefined,
-      tx
-    );
-    await logAuditTx(tx, {
-      auth,
-      ...(organizationId && { organizationId }),
-      action: "DELETE",
-      entityType: "RoleAssignment",
-      entityId,
-      entityName: role.name,
-      metadata: details,
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.role.user-removed",
-      entityType: "RoleAssignment",
-      entityId,
-      data: details,
-    });
-  });
+      await db.roles.removeUserRole(
+        userId,
+        roleId,
+        organizationId ?? undefined,
+        tx
+      );
+      await logAuditTx(tx, {
+        auth,
+        ...(organizationId && { organizationId }),
+        action: "DELETE",
+        entityType: "RoleAssignment",
+        entityId,
+        entityName: role.name,
+        metadata: details,
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.role.user-removed",
+        entityType: "RoleAssignment",
+        entityId,
+        data: details,
+      });
+    },
+    { timeout: 30_000 }
+  );
 
   notifyUserRolesChanged(userId);
 

@@ -1,13 +1,9 @@
 import { Prisma } from "../../../prisma/generated/client/index.js";
+import { holdsRequires2faRole, isGuest } from "./roles.js";
 import { getTotpPolicy } from "./settings.js";
 import { hashFlowToken } from "../crypto.js";
 import { NotFoundError } from "../errors.js";
 import { prisma } from "./prisma.js";
-import {
-  guestAssignmentsWhere,
-  isGuest,
-  liveAssignmentsWhere,
-} from "./roles.js";
 
 export interface TotpStatus {
   totpEnabled: boolean;
@@ -73,27 +69,13 @@ export interface TotpSetupSessionData {
 }
 
 /**
- * Whether a role the user holds requires 2FA. The assignments counted are the
- * ones that grant permissions (`liveAssignmentsWhere`), in the scope of every
- * active organization the user belongs to: 2FA is decided at sign-in, before
- * an organization is chosen, so it must hold for whichever one is chosen. The
- * same scope applies wherever the requirement is reported or enforced, so a
- * user cannot turn off what the next sign-in would demand.
+ * Whether a role the user holds, directly or through a group, requires 2FA
+ * (`holdsRequires2faRole`). The same scope applies wherever the requirement
+ * is reported or enforced, so a user cannot turn off what the next sign-in
+ * would demand.
  */
-export const userRolesRequire2fa = async (userId: string): Promise<boolean> => {
-  const guest = await isGuest(userId);
-  const required = await prisma.userRole.count({
-    where: {
-      AND: [
-        liveAssignmentsWhere(userId, "memberships"),
-        { role: { requires2fa: true } },
-        // A guest's other assignments grant nothing, so they demand nothing.
-        ...(guest ? [guestAssignmentsWhere] : []),
-      ],
-    },
-  });
-  return required > 0;
-};
+export const userRolesRequire2fa = async (userId: string): Promise<boolean> =>
+  await holdsRequires2faRole(userId);
 
 export const getUserTotpStatus = async (
   userId: string

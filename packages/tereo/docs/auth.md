@@ -652,7 +652,8 @@ toggle (PATCH-able; deactivating an org or role is what revokes tokens/sessions)
   id (read-only), all other mutations 409 via per-id router guards.
 - `DELETE /v1/admin/roles/:id` is a **hard delete** of a custom role: it cascades the role's
   assignment join rows (and its place among identity-provider domains' default roles) and revokes
-  affected users' tokens first. Organizations have no delete —
+  affected users' tokens first. Each group holding it records the loss as a role change
+  ([groups](groups.md#events-and-audit)). Organizations have no delete —
   archiving is as far as they go. The default organization can never be archived.
 
 ## Permissions and system roles are declared in code
@@ -776,7 +777,13 @@ does not manage an owner: changing an owner's tier (`PATCH …/members/:userId`)
 
 **Scope of roles.** `GET /v1/account/me` and `/oauth/userinfo` list the same roles that give their
 permissions: global ones plus the token's organization's, unexpired, of an active, unarchived,
-unretired role. For a guest, inert roles are left out ([Guest users](#guest-users)).
+unretired role. A user's permissions are their direct roles **and** the roles of the [groups](groups.md)
+they belong to, merged and deduplicated when read: a group's roles count while the group is not
+archived and, for an organization's group, while the user is still a member of an active, unarchived
+organization. Userinfo also carries a `groups` claim (`id`, `slug`, `name`, `organizationId`): the
+user's active global groups plus the token's organization's while it is active and the user still a
+member, for the callers that get `roles`, except that a `delegated` token gets `groups` (only with
+the `account` or `admin` area, an empty list otherwise) and an empty `roles`. For a guest, inert roles are left out ([Guest users](#guest-users)).
 
 ## Guest users
 

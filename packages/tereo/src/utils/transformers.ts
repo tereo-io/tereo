@@ -6,6 +6,7 @@ import db from "./db/index.js";
 import {
   ClientType,
   UserType,
+  type Group,
   type Service,
   type ServiceAccess,
 } from "../../prisma/generated/client/index.js";
@@ -346,4 +347,26 @@ export const formatWebhookEndpoint = <T extends WebhookEndpointRow>(
     previousSecretExpiresAt: previousSecretExpiry(endpoint),
     hasDeliveries: options.hasDeliveries,
   };
+};
+
+/** A group as the admin API returns it. */
+export const formatGroup = (group: Group, memberCount: number) => ({
+  id: group.id,
+  organizationId: group.organizationId,
+  slug: group.slug,
+  name: group.name,
+  description: group.description,
+  definitionSource: group.definitionSource,
+  membershipSource: group.membershipSource,
+  unprovisionedAt: group.unprovisionedAt,
+  archivedAt: group.archivedAt,
+  createdAt: group.createdAt,
+  updatedAt: group.updatedAt,
+  memberCount,
+});
+
+/** Groups with their member counts, read in one query. */
+export const formatGroups = async (groups: Group[]) => {
+  const counts = await db.groups.countMembers(groups.map((g) => g.id));
+  return groups.map((g) => formatGroup(g, counts.get(g.id) ?? 0));
 };

@@ -620,3 +620,132 @@ describe("branding", () => {
     ]);
   });
 });
+
+describe("groups", () => {
+  const ORG_A = "0195f3a0-0000-7000-8000-00000000000a";
+  const ORG_B = "0195f3a0-0000-7000-8000-00000000000b";
+  type GroupInput = NonNullable<LoadedDocument["groups"]>[number];
+  const group = (extra: Partial<GroupInput> = {}): GroupInput => ({
+    slug: "support",
+    name: "Support",
+    roles: [],
+    ...extra,
+  });
+  const grouped = (
+    file: string,
+    groups: GroupInput[],
+    body: Parameters<typeof doc>[1] = {}
+  ): LoadedDocument => ({ ...doc(file, body), groups });
+
+  it("accepts set custom roles, core roles and services' system roles", () => {
+    expect(
+      validate(
+        grouped(
+          "a.json",
+          [
+            group({
+              roles: [
+                "support",
+                "webhook_publisher",
+                "beta-service/beta_reader",
+              ],
+            }),
+            group({
+              slug: "org-support",
+              organizationId: ORG_A,
+              roles: ["org-support"],
+            }),
+          ],
+          {
+            service: beta(),
+            roles: [
+              customRole({ permissions: ["beta.items.read"] }),
+              customRole({
+                name: "org-support",
+                orgAssignable: true,
+                permissions: ["beta.items.read"],
+              }),
+            ],
+          }
+        )
+      )
+    ).toEqual([]);
+  });
+
+  it("refuses a role carrying admin", () => {
+    const problems = validate(
+      grouped("a.json", [group({ roles: ["admin", "super"] })], {
+        roles: [customRole({ name: "super", permissions: ["admin"] })],
+      })
+    );
+    expect(problems).toEqual([
+      'a.json: groups[support]: roles "admin" carries the admin permission; groups can\'t hold it',
+      'a.json: groups[support]: roles "super" carries the admin permission; groups can\'t hold it',
+    ]);
+  });
+
+  it("refuses a role found nowhere", () => {
+    const problems = validate(
+      grouped(
+        "a.json",
+        [group({ roles: ["missing", "beta-service/nope", "gone-service/x"] })],
+        { service: beta() }
+      )
+    );
+    expect(problems).toEqual(
+      ["missing", "beta-service/nope", "gone-service/x"].map(
+        (r) =>
+          `a.json: groups[support]: roles "${r}" is not a custom role in the provisioning set, a core role, nor a service's system role`
+      )
+    );
+  });
+
+  it("refuses an organization's group a role that is not an org-assignable custom role", () => {
+    const problems = validate(
+      grouped(
+        "a.json",
+        [
+          group({
+            organizationId: ORG_A,
+            roles: [
+              "support",
+              "webhook_publisher",
+              "beta-service/beta_reader",
+              "missing",
+            ],
+          }),
+        ],
+        {
+          service: beta(),
+          roles: [customRole({ permissions: ["beta.items.read"] })],
+        }
+      )
+    );
+    expect(problems).toEqual([
+      'a.json: groups[support]: roles "support" is not org-assignable; an organization\'s group holds only org-assignable custom roles',
+      'a.json: groups[support]: roles "webhook_publisher" is a system role; an organization\'s group holds only org-assignable custom roles',
+      'a.json: groups[support]: roles "beta-service/beta_reader" is a system role; an organization\'s group holds only org-assignable custom roles',
+      'a.json: groups[support]: roles "missing" is not a custom role in the provisioning set',
+    ]);
+  });
+
+  it("refuses a slug used twice in one scope, across documents", () => {
+    const problems = validate(
+      grouped("a.json", [group(), group({ organizationId: ORG_A })]),
+      grouped("b.json", [group(), group({ organizationId: ORG_A })])
+    );
+    expect(problems).toEqual([
+      'a.json and b.json: group "support" is used by more than one entry',
+      `a.json and b.json: group "${ORG_A}/support" is used by more than one entry`,
+    ]);
+  });
+
+  it("accepts one slug in two organizations and globally", () => {
+    expect(
+      validate(
+        grouped("a.json", [group(), group({ organizationId: ORG_A })]),
+        grouped("b.json", [group({ organizationId: ORG_B })])
+      )
+    ).toEqual([]);
+  });
+});

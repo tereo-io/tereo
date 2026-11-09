@@ -51,6 +51,16 @@ export const get = async (id: string, tx?: Prisma.TransactionClient) => {
   return res;
 };
 
+/** Names of the given organizations, archived included, by id. */
+export const getNames = async (ids: string[]): Promise<Map<string, string>> => {
+  if (ids.length === 0) return new Map();
+  const rows = await prisma.organization.findMany({
+    where: { id: { in: [...new Set(ids)] } },
+    select: { id: true, name: true },
+  });
+  return new Map(rows.map((o) => [o.id, o.name]));
+};
+
 /** Admin lookup that also returns archived organizations. */
 export const getAny = async (id: string, tx?: Prisma.TransactionClient) => {
   const db = tx ?? prisma;

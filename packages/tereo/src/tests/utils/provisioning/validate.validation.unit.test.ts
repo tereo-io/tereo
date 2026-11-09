@@ -1,5 +1,6 @@
 // @module-tag unit
 // @module-tag provisioning
+import { ProvisioningDocumentSchema } from "../../../utils/provisioning/schema.js";
 import { validateSet } from "../../../utils/provisioning/validate.js";
 import { describe, expect, it } from "vitest";
 import type {
@@ -137,5 +138,52 @@ describe("guest-assignable provisioned roles", () => {
     const text = problems.join("\n");
     expect(text).toContain('"plain"');
     expect(text).toContain('"missing"');
+  });
+});
+
+describe("ProvisioningDocumentSchema groups", () => {
+  const parse = (body: Record<string, unknown>) =>
+    ProvisioningDocumentSchema.safeParse({ version: "1.0.0", ...body });
+
+  it("accepts a document holding only groups, defaulting roles", () => {
+    const result = parse({ groups: [{ slug: "support", name: "Support" }] });
+    expect(result.success).toBe(true);
+    expect(result.data?.groups).toEqual([
+      { slug: "support", name: "Support", roles: [] },
+    ]);
+  });
+
+  it("lower-cases an organizationId, as Postgres returns ids", () => {
+    const id = "7B1C4D9E-0A2B-4C3D-8E4F-5A6B7C8D9E0F";
+    const result = parse({
+      groups: [{ slug: "support", name: "Support", organizationId: id }],
+    });
+    expect(result.data?.groups?.[0].organizationId).toBe(id.toLowerCase());
+  });
+
+  it("still refuses a document with nothing in it, naming groups", () => {
+    const result = parse({ groups: [] });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0].message).toBe(
+      "needs one of service, clients, roles, integrations, groups, guests, branding, not empty"
+    );
+  });
+
+  it.each([
+    ["an uppercase slug", { slug: "Support", name: "S" }],
+    ["a slug over 100", { slug: "a".repeat(101), name: "S" }],
+    ["an empty name", { slug: "s", name: "" }],
+    ["a name over 255", { slug: "s", name: "n".repeat(256) }],
+    [
+      "a description over 500",
+      { slug: "s", name: "S", description: "d".repeat(501) },
+    ],
+    [
+      "an organizationId that is no uuid",
+      { slug: "s", name: "S", organizationId: "acme" },
+    ],
+    ["members", { slug: "s", name: "S", members: [] }],
+  ])("refuses %s", (_label, entry) => {
+    expect(parse({ groups: [entry] }).success).toBe(false);
   });
 });

@@ -34,6 +34,32 @@ export interface UserRole {
   expiresAt: string | null;
 }
 
+/** A role held through a group; `PUT .../roles` never touches these. */
+export interface UserGroupRole {
+  id: string;
+  name: string;
+  displayName: string;
+  organizationId: string | null;
+  via: { kind: "group"; groupId: string };
+  group: { id: string; slug: string; name: string };
+}
+
+/** A role held through an organization's group: it counts only there. */
+export interface UserOrgGroupRole extends UserGroupRole {
+  organizationId: string;
+  organization: { id: string; name: string };
+}
+
+export interface UserRolesResponse {
+  userId: string;
+  /** Direct assignments only: the set the roles editor sends back. */
+  roles: UserRole[];
+  /** Held through global groups. */
+  groupRoles?: UserGroupRole[];
+  /** Held through organizations' groups. */
+  orgGroupRoles?: UserOrgGroupRole[];
+}
+
 export interface UserSession {
   id: string;
   clientId: string;
