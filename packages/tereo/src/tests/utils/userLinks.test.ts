@@ -150,6 +150,46 @@ describe("userLinks", () => {
     expect(smtp.messages[0].parsed.text).toMatch(/\/verify-email#token=/);
   });
 
+  it("a reset and a verify link emit their events, with no token or URL", async () => {
+    await withConnection();
+    const user = await createUser();
+    const reset = await issueReset(user.id);
+    const verify = await issueVerify(user.id);
+
+    const payloads = (
+      await prisma.outbox.findMany({ where: { destination: "webhook" } })
+    )
+      .map(
+        (r) =>
+          r.payload as {
+            eventType: string;
+            entityId: string;
+            data: Record<string, unknown>;
+          }
+      )
+      .filter((p) => p.entityId === user.id);
+    const dataOf = (eventType: string) =>
+      payloads.filter((p) => p.eventType === eventType).map((p) => p.data);
+
+    expect(dataOf("auth.user.password-reset-requested")).toEqual([
+      {
+        userId: user.id,
+        email: user.email,
+        expiresAt: reset.expiresAt.toISOString(),
+      },
+    ]);
+    expect(dataOf("auth.user.email-verification-sent")).toEqual([
+      {
+        userId: user.id,
+        email: user.email,
+        expiresAt: verify.expiresAt.toISOString(),
+      },
+    ]);
+    const token = new URL(reset.url).hash.replace("#token=", "");
+    expect(JSON.stringify(payloads)).not.toContain(token);
+    expect(JSON.stringify(payloads)).not.toMatch(/set-password|verify-email/);
+  });
+
   it("issueVerifyLink without a default connection is email_not_configured", async () => {
     const user = await createUser();
 

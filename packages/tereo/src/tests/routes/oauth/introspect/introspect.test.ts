@@ -57,7 +57,7 @@ describe("POST /oauth/introspect", () => {
     });
 
     // Helper to get tokens
-    async function getTokens(): Promise<TokenResponse> {
+    async function getTokens(user = testUser): Promise<TokenResponse> {
       const codeVerifier = generateCodeVerifier();
       const codeChallenge = generateCodeChallenge(codeVerifier);
       const state = generateUniqueId();
@@ -102,8 +102,8 @@ describe("POST /oauth/introspect", () => {
           scope: "openid profile email offline_access",
           code_challenge: codeChallenge,
           code_challenge_method: "S256",
-          email: testUser.email,
-          password: testUser.plainPassword,
+          email: user.email,
+          password: user.plainPassword,
         }),
         redirect: "manual",
       });
@@ -205,6 +205,26 @@ describe("POST /oauth/introspect", () => {
 
         expect(data.iss).toBeDefined();
         expect(typeof data.iss).toBe("string");
+      });
+
+      it("reports the user's real email_verified", async () => {
+        const unverified = await createTestUser({ emailVerified: false });
+        const tokens = await getTokens(unverified);
+        const introspect = async () =>
+          (await (
+            await fetch(`${BASE_URL}/oauth/introspect`, {
+              method: "POST",
+              headers: testClientHeaders(),
+              body: JSON.stringify({ token: tokens.access_token }),
+            })
+          ).json()) as IntrospectResponse;
+
+        expect((await introspect()).email_verified).toBe(false);
+        await prisma.user.update({
+          where: { id: unverified.id },
+          data: { emailVerifiedAt: new Date() },
+        });
+        expect((await introspect()).email_verified).toBe(true);
       });
 
       it("should return 200 with active=false for invalid token per RFC 7662", async () => {

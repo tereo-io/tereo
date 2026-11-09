@@ -219,6 +219,8 @@ export interface IntrospectResponse {
   aud?: string | string[];
   iss?: string;
   jti?: string;
+  email?: string;
+  email_verified?: boolean;
 }
 
 export interface UserInfoResponse {
