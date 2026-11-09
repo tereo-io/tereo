@@ -340,6 +340,40 @@ describe("applyGroups", () => {
     expect((await groupRow(group.slug, org)).name).toBe("Renamed");
   });
 
+  it("changes roles and restores a group whose organization was archived", async () => {
+    const org = await ensureTestOrganization(testOrgId(`gone-${rand()}`));
+    const first = customRole(["file-service.objects.read"], {
+      orgAssignable: true,
+    });
+    const second = customRole(["file-service.objects.read"], {
+      orgAssignable: true,
+    });
+    const group = groupSpec({ organizationId: org, roles: [first.name] });
+    await applyProvisioning(setOf([first, second], [group]));
+    await prisma.organization.update({
+      where: { id: org },
+      data: { archivedAt: new Date() },
+    });
+
+    const changed = { ...group, roles: [second.name] };
+    expect(
+      (await applyProvisioning(setOf([first, second], [changed]))).groups
+    ).toEqual([`group:${org}/${group.slug}`]);
+    expect(roleNamesOf(await groupRow(group.slug, org))).toEqual([second.name]);
+
+    // Dropped, then archived, then declared again.
+    await applyProvisioning(setOf([first, second], []));
+    await prisma.group.updateMany({
+      where: { slug: group.slug, organizationId: org },
+      data: { archivedAt: new Date() },
+    });
+    const back = await applyProvisioning(setOf([first, second], [changed]));
+    expect(back.groups).toEqual([`group:${org}/${group.slug}`]);
+    const row = await groupRow(group.slug, org);
+    expect(row.unprovisionedAt).toBeNull();
+    expect(row.archivedAt).toBeNull();
+  });
+
   it("emits one update for a group that returns renamed", async () => {
     const group = groupSpec();
     await applyProvisioning(setOf([], [group]));
@@ -377,7 +411,7 @@ describe("applyGroups", () => {
 });
 
 describe("deprovisionMissing", () => {
-  it("archives dropped groups in a transaction of their own", async () => {
+  it("archives each dropped group in a transaction of its own", async () => {
     const role = customRole(["roles.read"]);
     const group = groupSpec();
     await applyProvisioning(setOf([role], [group]));
@@ -387,6 +421,7 @@ describe("deprovisionMissing", () => {
       now.getTime() + (env.REGISTRY_RETIREMENT_GRACE_HOURS + 1) * 3_600_000
     );
 
+    let failedGroupId: string;
     const setArchived = vi
       .spyOn(db.groups, "setArchived")
       .mockRejectedValueOnce(new Error("archive failed"));
@@ -394,11 +429,18 @@ describe("deprovisionMissing", () => {
     try {
       const failed = await deprovisionMissing(later);
       expect(failed.roles).toBeGreaterThanOrEqual(1);
-      expect(failed.groups).toBe(0);
       expect(logged).toHaveBeenCalledWith(
-        expect.anything(),
-        "Provisioning: archiving dropped groups failed"
+        expect.objectContaining({ groupId: expect.any(String) }),
+        "Provisioning: archiving a dropped group failed"
       );
+      const failedCall = logged.mock.calls.find(
+        ([, msg]) => msg === "Provisioning: archiving a dropped group failed"
+      );
+      failedGroupId = (failedCall?.[0] as { groupId: string }).groupId;
+      expect(
+        (await prisma.group.findUniqueOrThrow({ where: { id: failedGroupId } }))
+          .archivedAt
+      ).toBeNull();
     } finally {
       setArchived.mockRestore();
       logged.mockRestore();
@@ -407,10 +449,13 @@ describe("deprovisionMissing", () => {
       where: { name: role.name, serviceId: null },
     });
     expect(kept.archivedAt).not.toBeNull();
-    expect((await groupRow(group.slug)).archivedAt).toBeNull();
 
     expect((await deprovisionMissing(later)).groups).toBeGreaterThanOrEqual(1);
     expect((await groupRow(group.slug)).archivedAt).not.toBeNull();
+    expect(
+      (await prisma.group.findUniqueOrThrow({ where: { id: failedGroupId } }))
+        .archivedAt
+    ).not.toBeNull();
   });
 });
 

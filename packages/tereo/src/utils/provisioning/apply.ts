@@ -1874,21 +1874,47 @@ export const deprovisionMissing = async (
       (await db.roles.getUserIdsByRoleId(id)).map((h) => h.userId)
     );
   }
-  // Their own transaction: a group with many members, or one waiting on a
-  // member's lock, fails alone, and the next run retries it.
+  // One transaction per group: one that fails (a member's lock, or a refusal
+  // such as the last administrator) is logged and retried next run, and holds
+  // back no other.
   let groups = 0;
   try {
-    const archivedGroups = await prisma.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
-        return archiveDueGroups(tx, cutoff);
+    const dueGroups = await prisma.group.findMany({
+      where: {
+        definitionSource: "provisioned",
+        unprovisionedAt: { lte: cutoff },
+        archivedAt: null,
       },
-      { timeout: 30_000 }
-    );
-    afterGroupChange(archivedGroups);
-    groups = archivedGroups.count;
+      select: { id: true, slug: true, organizationId: true },
+      orderBy: { id: "asc" },
+    });
+    for (const { id, slug, organizationId } of dueGroups) {
+      try {
+        const archived = await prisma.$transaction(
+          async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
+            return archiveDueGroups(tx, cutoff, id);
+          },
+          { timeout: 30_000 }
+        );
+        groups += archived.count;
+        try {
+          afterGroupChange(archived);
+        } catch (err) {
+          logger.error(
+            { err, groupId: id },
+            "Provisioning: group follow-up failed"
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { err, groupId: id, slug, organizationId },
+          "Provisioning: archiving a dropped group failed"
+        );
+      }
+    }
   } catch (err) {
-    logger.error({ err }, "Provisioning: archiving dropped groups failed");
+    logger.error({ err }, "Provisioning: listing dropped groups failed");
   }
   const roles = archivedRoles.length;
   if (

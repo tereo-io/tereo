@@ -92,7 +92,8 @@ Without the permission, an **admin or owner of the group's organization** may do
 organization's groups, including reading them (and listing them with `?organizationId=<their org>`).
 So may a holder of the platform `organizations.write`, which covers every organization as it does on
 the organization routes (`requireOrgRole`). A **deactivated** organization's admins and owners may
-still read its groups, members and roles, but not change them. A delegated token acts as an org admin
+still read its groups, members and roles, but not change them; an **archived** organization's admins
+no longer reach its groups. A delegated token acts as an org admin
 only if its scopes allow `organizations.write`. A global group always needs `groups.<need>`;
 `organizations.write` does not reach it.
 
@@ -142,7 +143,7 @@ All under `/v1/admin`. Lists are cursor-paginated (`limit` 1-100, default 50; `n
 | `PUT /groups/:id/roles` | `{ roleIds }` replaces the set (max 100). Returns `{ roles, added, removed }` |
 | `GET /roles/:id/users` | `{ roleId, users, groups }`: `users` are the role's **direct** holders (each `via: { kind: "direct" }`); `groups` are the unarchived groups holding it, each with `organization` and `memberCount` (list their members through `GET /groups/:id/members`) |
 | `GET /users/:id/groups` | A user's groups, global and organization (`users.read`; `?includeArchived`) |
-| `GET`/`PUT /organizations/:id/members/:userId/roles` | The same shape for one organization: `roles` are the member's **direct** roles there (each `via: { kind: "direct" }`); `groupRoles` the roles held through that **organization's** groups (not global ones'), each with `group`. The role editor lists them apart; `PUT` replaces the direct ones only |
+| `GET`/`PUT /organizations/:id/members/:userId/roles` | The same shape for one organization: `roles` are the member's **direct** roles there (each `via: { kind: "direct" }`); `groupRoles` the roles held through that **organization's** groups (not global ones'), each with `group`. They are listed only to a caller who may read the organization's groups (platform `groups.read`, an organization admin or owner, `organizations.write`) or who asks about themselves; anyone else gets an empty list. They are also empty while the organization is inactive or archived, as its groups' roles count for nothing then (`roles` still lists the direct ones). The role editor lists them apart; `PUT` replaces the direct ones only |
 | `GET`/`PUT /users/:id/roles` | Return `{ roles, groupRoles }`: `roles` are the **direct** assignments (each `via: { kind: "direct" }`); `groupRoles` are the roles held through **global** groups, each with `group: { id, slug, name }` |
 
 Bodies are strict: a key a route does not know is a 400, not ignored. Who may read or change an
@@ -153,7 +154,9 @@ restore. Its members stay editable (`membershipSource` is `local`).
 
 Errors (`code`): `unknown_organization`, `unknown_role`, `unknown_user`, `role_not_org_assignable`,
 `group_slug_taken` (409), `not_org_member`, `guest_not_allowed`, `service_account_not_allowed`,
-`system_user_not_allowed` (409), `managed_by_provisioning` (409). Archived groups answer 409
+`system_user_not_allowed` (409), `managed_by_provisioning` (409), `already_archived` and
+`not_archived` (409, archiving an archived group or restoring one that is not), and a conflict when
+archiving or changing roles would leave no administrator. Archived groups answer 409
 `resource_archived` to edits, role changes (also when archived while the request waited for the
 group) and adding members.
 
@@ -200,7 +203,7 @@ effective roles does push a permission change to each affected member's open ses
 groups plus those of the token's organization while it is active and not archived and the user is
 still a member of it (otherwise the global ones only, as `roles` leaves out its group roles too). It
 goes to the UI, a service's client and a token with a core scope, as `roles` does; a delegated token
-gets `groups` only with the `account` or `admin` area (an empty list otherwise) and never `roles`. It is never in
+gets `groups` only with the `account` or `admin` area (an empty list otherwise) and an empty `roles`. It is never in
 a token. Discovery lists `groups` in `claims_supported`. `groups` is an admin domain, so the
 `core:admin` and `core:admin.read` ceilings cover `groups.*`.
 

@@ -101,8 +101,8 @@ export const groupProblems = async (
       );
       continue;
     }
-    // As for integrations, the organization is checked on creation only: one
-    // archived since leaves its provisioned groups as they are.
+    // The organization is checked on creation only: one archived since leaves
+    // its provisioned groups as they are (integrations do the same).
     if (own) continue;
     if (organizationId && !liveOrgs.has(organizationId)) {
       problems.push(
@@ -315,13 +315,15 @@ export const markGroupsMissing = async (
  */
 export const archiveDueGroups = async (
   tx: Tx,
-  cutoff: Date
+  cutoff: Date,
+  onlyId?: string
 ): Promise<{ count: number } & Changes> => {
   const due = await tx.group.findMany({
     where: {
       definitionSource: "provisioned",
       unprovisionedAt: { lte: cutoff },
       archivedAt: null,
+      ...(onlyId ? { id: onlyId } : {}),
     },
     select: { id: true },
   });

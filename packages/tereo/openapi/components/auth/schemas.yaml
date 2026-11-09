@@ -718,7 +718,7 @@ UserInfoResponse:
       description: Effective permissions — from global roles and roles in the token's organization when it carries `org_id` (only the org-assignable permissions of those), from global roles alone otherwise. Only for a token of core's UI or a service's client, or one carrying a core API scope
     groups:
       type: array
-      description: The unarchived groups the user belongs to that count for this token, global ones and those of the token's organization while it is active and the user still a member. For a token of core's UI or a service's client, or one carrying a core API scope; a delegated token gets them (and no `roles`) only with the `account` or `admin` area, an empty list otherwise.
+      description: The unarchived groups the user belongs to that count for this token, global ones and those of the token's organization while it is active and the user still a member. For a token of core's UI or a service's client, or one carrying a core API scope; a delegated token gets them (and an empty `roles`) only with the `account` or `admin` area, an empty list otherwise.
       items:
         type: object
         required: [id, slug, name, organizationId]

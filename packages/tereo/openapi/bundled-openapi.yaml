@@ -2510,14 +2510,15 @@ paths:
       description: |
         Get the authenticated user's profile information (OpenID Connect). The
         token must carry `openid`. The standard claims follow the token's
-        scopes (`profile`, `email`). `roles`, `permissions` and
-        `organizations` — core's authorization — are returned only when the
-        token was issued to core's UI or to a service's client, or carries a
-        core API scope (`core:*`); for any other client all three are omitted.
-        A token delegated to a third-party client by core API scopes gets its
-        `permissions` cut down to those scopes' ceilings, `roles` empty, and
-        `organizations` only with `core:account` or `core:organizations`
-        (otherwise empty).
+        scopes (`profile`, `email`). `roles`, `permissions`,
+        `organizations` and `groups` — core's authorization — are returned only
+        when the token was issued to core's UI or to a service's client, or
+        carries a core API scope (`core:*`); for any other client all four are
+        omitted. A token delegated to a third-party client by core API scopes
+        gets its `permissions` cut down to those scopes' ceilings, `roles`
+        empty, `organizations` only with `core:account` or `core:organizations`
+        and `groups` only with `core:account` or `core:admin` (otherwise
+        empty).
         `org_id` and `org_name` are the token's organization; they are omitted
         when that organization has since been archived or deleted.
 
@@ -6540,7 +6541,7 @@ paths:
         `admin` or `owner` of that organization (`organizations.write` also passes, as on
         the organization routes). A global group needs `groups.read`. A caller without
         `groups.read` gets `403` for a missing group as for one they cannot reach.
-        An `admin` or `owner` of an inactive organization may still read its groups.
+        An `admin` or `owner` of an inactive organization may still read its groups, but not of an archived one.
       operationId: getAdminGroup
       security:
         - BearerAuth:
@@ -6689,7 +6690,7 @@ paths:
           description: Group not found (to a caller holding the route's `groups.*` permission; anyone else gets `403`)
         '409':
           $ref: '#/components/responses/GroupConflictResponse'
-          description: '`already_archived` or `managed_by_provisioning`'
+          description: '`already_archived`, `managed_by_provisioning`, or the last administrator would lose admin'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -6766,7 +6767,7 @@ paths:
         `admin` or `owner` of that organization (`organizations.write` also passes, as on
         the organization routes). A global group needs `groups.read`. A caller without
         `groups.read` gets `403` for a missing group as for one they cannot reach.
-        An `admin` or `owner` of an inactive organization may still read its groups.
+        An `admin` or `owner` of an inactive organization may still read its groups, but not of an archived one.
       operationId: getAdminGroupMembers
       security:
         - BearerAuth:
@@ -6932,7 +6933,7 @@ paths:
         `admin` or `owner` of that organization (`organizations.write` also passes, as on
         the organization routes). A global group needs `groups.read`. A caller without
         `groups.read` gets `403` for a missing group as for one they cannot reach.
-        An `admin` or `owner` of an inactive organization may still read its groups.
+        An `admin` or `owner` of an inactive organization may still read its groups, but not of an archived one.
       operationId: getAdminGroupRoles
       security:
         - BearerAuth:
@@ -8492,7 +8493,12 @@ paths:
         holds through a live group of this organization, once per role and
         group, with the group; a global group's roles are not listed here (see
         `GET /v1/admin/users/{id}/roles`). A role held both ways appears in
-        each list.
+        each list. `groupRoles` is returned only when the caller may read the
+        organization's groups (platform `groups.read`, an organization admin or
+        owner, or `organizations.write`) or asks about themselves; otherwise it
+        is an empty list. It is also empty while the organization is inactive
+        or archived, since its groups' roles count for nothing then (`roles`
+        still lists the direct ones).
 
         **Authorization:** Either the platform-level permission `organizations.read` OR the org role `member` on the target organization grants access. Org role is checked via `requireOrgRole()` inside the handler.
       operationId: getAdminOrganizationMemberRoles
@@ -8544,7 +8550,8 @@ paths:
         Replaces all org-scoped role assignments for a member within this
         organization (duplicate `roleIds` are ignored). Roles held through a
         group are not touched: the response lists them in `groupRoles`, apart
-        from the direct `roles`. A role the member
+        from the direct `roles`. `groupRoles` is empty unless the caller
+        may read the organization's groups or asks about themselves (see `GET`). A role the member
         already holds here keeps its assignment, `expiresAt` included; only
         roles left out are removed. Only custom roles can
         be assigned here: a system role (declared by a service) returns `403`.
@@ -25062,7 +25069,7 @@ components:
           description: Effective permissions — from global roles and roles in the token's organization when it carries `org_id` (only the org-assignable permissions of those), from global roles alone otherwise. Only for a token of core's UI or a service's client, or one carrying a core API scope
         groups:
           type: array
-          description: The unarchived groups the user belongs to that count for this token, global ones and those of the token's organization while it is active and the user still a member. For a token of core's UI or a service's client, or one carrying a core API scope; a delegated token gets them (and no `roles`) only with the `account` or `admin` area, an empty list otherwise.
+          description: The unarchived groups the user belongs to that count for this token, global ones and those of the token's organization while it is active and the user still a member. For a token of core's UI or a service's client, or one carrying a core API scope; a delegated token gets them (and an empty `roles`) only with the `account` or `admin` area, an empty list otherwise.
           items:
             type: object
             required:
