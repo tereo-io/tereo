@@ -92,7 +92,7 @@ describe("group schemas", () => {
       ["organizationId global", { organizationId: "global" }],
       ["an organization id", { organizationId: ID }],
       ["definitionSource provisioned", { definitionSource: "provisioned" }],
-      ["archived true", { archived: "true" }],
+      ["includeArchived true", { includeArchived: "true" }],
       ["limit 1", { limit: "1" }],
       ["limit 100", { limit: "100" }],
     ])("accepts %s", (_label, query) => {
@@ -102,7 +102,7 @@ describe("group schemas", () => {
     it.each([
       ["limit 0", { limit: "0" }, ["limit"]],
       ["limit 101", { limit: "101" }, ["limit"]],
-      ["archived yes", { archived: "yes" }, ["archived"]],
+      ["includeArchived yes", { includeArchived: "yes" }, ["includeArchived"]],
       [
         "an unknown definitionSource",
         { definitionSource: "x" },
@@ -119,10 +119,11 @@ describe("group schemas", () => {
       expect(result.error?.issues[0].path).toEqual(path);
     });
 
-    it("parses archived=false as false", () => {
-      expect(ListGroupsQuerySchema.parse({ archived: "false" }).archived).toBe(
-        false
-      );
+    it("defaults includeArchived to false and parses includeArchived=true", () => {
+      expect(ListGroupsQuerySchema.parse({}).includeArchived).toBe(false);
+      expect(
+        ListGroupsQuerySchema.parse({ includeArchived: "true" }).includeArchived
+      ).toBe(true);
     });
   });
 
@@ -169,6 +170,20 @@ describe("group schemas", () => {
       const result = SetGroupRolesSchema.safeParse(body);
       expect(result.success).toBe(false);
       expect(result.error?.issues[0].path).toEqual(path);
+    });
+  });
+
+  describe("unknown body keys", () => {
+    it.each([
+      ["CreateGroupSchema", CreateGroupSchema, valid],
+      ["UpdateGroupSchema", UpdateGroupSchema, { name: "x" }],
+      ["AddMembersSchema", AddMembersSchema, { userIds: ids(1) }],
+      ["SetGroupRolesSchema", SetGroupRolesSchema, { roleIds: ids(1) }],
+    ])("%s rejects a key it does not know", (_label, schema, body) => {
+      expect(schema.safeParse(body).success).toBe(true);
+      const result = schema.safeParse({ ...body, userId: "x" });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0].code).toBe("unrecognized_keys");
     });
   });
 });

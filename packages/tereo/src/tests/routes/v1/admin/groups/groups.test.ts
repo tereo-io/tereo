@@ -192,21 +192,23 @@ describe("GET /v1/admin/groups", () => {
     expect(second.body.nextCursor).toBeNull();
   });
 
-  it("filters by archived state", async () => {
+  it("hides archived groups unless includeArchived", async () => {
     const orgId = await newOrg();
     const live = track(await postGroup(admin, { organizationId: orgId }));
     const gone = track(await postGroup(admin, { organizationId: orgId }));
     await adminApi("POST", `/groups/${gone.id}/archive`, admin);
 
-    const archived = await adminApi(
+    const both = await adminApi(
       "GET",
-      `/groups?organizationId=${orgId}&archived=true`,
+      `/groups?organizationId=${orgId}&includeArchived=true`,
       admin
     );
-    expect(archived.body.data.map((g: ApiGroup) => g.id)).toEqual([gone.id]);
+    expect(both.body.data.map((g: ApiGroup) => g.id).sort()).toEqual(
+      [live.id, gone.id].sort()
+    );
     const unarchived = await adminApi(
       "GET",
-      `/groups?organizationId=${orgId}&archived=false`,
+      `/groups?organizationId=${orgId}`,
       admin
     );
     expect(unarchived.body.data.map((g: ApiGroup) => g.id)).toEqual([live.id]);

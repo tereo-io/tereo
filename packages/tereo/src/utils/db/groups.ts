@@ -26,8 +26,8 @@ export interface ListGroupsOptions {
   /** A group's organization, or `"global"` for groups with none. */
   organizationId?: string | "global";
   definitionSource?: GroupDefinitionSource;
-  /** true: only archived; false: only unarchived; omitted: both. */
-  archived?: boolean;
+  /** Archived groups too; without it they are left out. */
+  includeArchived?: boolean;
   /** Case-insensitive match on slug or name. */
   q?: string;
   /** The last group id of the previous page. */
@@ -85,9 +85,7 @@ export const list = async (
       ...(opts.definitionSource
         ? { definitionSource: opts.definitionSource }
         : {}),
-      ...(opts.archived === undefined
-        ? {}
-        : { archivedAt: opts.archived ? { not: null } : null }),
+      ...(opts.includeArchived ? {} : { archivedAt: null }),
       ...(opts.q
         ? {
             OR: [
