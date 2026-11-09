@@ -13,7 +13,14 @@ const RESERVED = ["v1", "oauth", ".well-known", "health", "ws", "assets"];
 
 // Keep in step with BRANDED_AUTH_PATHS in packages/tereo/src/utils/ui.ts:
 // core injects branding on these paths only, so each must be a route.
-const BRANDED_AUTH_PATHS = ["/login", "/consent", "/logout", "/set-password"];
+const BRANDED_AUTH_PATHS = [
+  "/login",
+  "/consent",
+  "/logout",
+  "/set-password",
+  "/forgot-password",
+  "/verify-email",
+];
 const AUTH_ROUTES = "src/app/routes/auth.tsx";
 
 const uiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

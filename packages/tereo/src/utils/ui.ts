@@ -30,6 +30,8 @@ export const BRANDED_AUTH_PATHS: readonly string[] = [
   "/consent",
   "/logout",
   "/set-password",
+  "/forgot-password",
+  "/verify-email",
 ];
 
 // Lowercased and without a trailing slash, as the UI's router matches them.
