@@ -349,19 +349,56 @@ describe("db.roles group-derived roles", () => {
     expect(ids.sort()).toEqual([direct.id, member.id].sort());
   });
 
-  it("getUsersByRoleId lists group holders with via", async () => {
+  it("getUsersByRoleId lists direct holders, and the live groups holding the role", async () => {
+    const direct = await createTestUser();
     const member = await createTestUser();
+    const orgA = await newOrg();
     const role = await grantingRole();
-    const group = await groupWith(null, [member.id], [role.id]);
+    await prisma.userRole.create({
+      data: { userId: direct.id, roleId: role.id },
+    });
+    const group = await groupWith(null, [member.id, direct.id], [role.id]);
+    const orgGroup = await groupWith(orgA, [], [role.id]);
+    const archived = await groupWith(null, [member.id], [role.id]);
+    await db.groups.setArchived(archived.id, new Date());
+    const org = await prisma.organization.findUniqueOrThrow({
+      where: { id: orgA },
+      select: { id: true, name: true, slug: true },
+    });
 
-    expect(await db.roles.getUsersByRoleId(role.id)).toEqual([
-      expect.objectContaining({
-        id: member.id,
+    const { users, groups } = await db.roles.getUsersByRoleId(role.id);
+    expect(users).toEqual([
+      {
+        id: direct.id,
+        email: direct.email,
+        name: direct.name,
+        isActive: true,
         organizationId: null,
+        organization: null,
         expiresAt: null,
-        via: { kind: "group", groupId: group.id },
-      }),
+        via: { kind: "direct" },
+      },
     ]);
+    expect(groups.sort((x, y) => (x.id < y.id ? -1 : 1))).toEqual(
+      [
+        {
+          id: group.id,
+          slug: group.slug,
+          name: group.name,
+          organizationId: null,
+          organization: null,
+          memberCount: 2,
+        },
+        {
+          id: orgGroup.id,
+          slug: orgGroup.slug,
+          name: orgGroup.name,
+          organizationId: orgA,
+          organization: org,
+          memberCount: 0,
+        },
+      ].sort((x, y) => (x.id < y.id ? -1 : 1))
+    );
   });
 
   it("getUserIdsByRoleId skips archived groups and lists each user once", async () => {

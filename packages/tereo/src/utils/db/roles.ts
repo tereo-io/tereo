@@ -883,47 +883,53 @@ export const getOrgIdsHoldingRole = async (
 };
 
 /**
- * One row per way a user holds the role: each assignment, and each
- * unarchived group holding it that they belong to.
+ * Who holds the role: each direct assignment, ordered by email, and the
+ * unarchived groups holding it with their member counts. A group's members
+ * are listed, a page at a time, by the group's own members endpoint.
  */
 export const getUsersByRoleId = async (roleId: string) => {
-  const userRoles = await prisma.userRole.findMany({
-    where: { roleId },
-    include: { user: true, organization: orgRefSelect },
-  });
-  const members = await prisma.groupMember.findMany({
-    where: { group: { archivedAt: null, roles: { some: { roleId } } } },
-    include: {
-      user: true,
-      group: { select: { organizationId: true, organization: orgRefSelect } },
-    },
-  });
+  const [userRoles, groups] = await Promise.all([
+    prisma.userRole.findMany({
+      where: { roleId },
+      select: {
+        organizationId: true,
+        expiresAt: true,
+        organization: orgRefSelect,
+        user: {
+          select: { id: true, email: true, name: true, isActive: true },
+        },
+      },
+    }),
+    prisma.group.findMany({
+      where: { archivedAt: null, roles: { some: { roleId } } },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        organizationId: true,
+        organization: orgRefSelect,
+        _count: { select: { members: true } },
+      },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    }),
+  ]);
 
-  const rows = [
-    ...userRoles.map((ur) => ({
-      id: ur.user.id,
-      email: ur.user.email,
-      name: ur.user.name,
-      isActive: ur.user.isActive,
+  const users = userRoles
+    .map((ur) => ({
+      ...ur.user,
       organizationId: ur.organizationId,
       organization: ur.organization,
       expiresAt: ur.expiresAt,
-      via: { kind: "direct" } as AssignmentVia,
+      via: { kind: "direct" } as const,
+    }))
+    .sort((a, b) => (a.email < b.email ? -1 : a.email > b.email ? 1 : 0));
+  return {
+    users,
+    groups: groups.map(({ _count, ...g }) => ({
+      ...g,
+      memberCount: _count.members,
     })),
-    ...members.map((m) => ({
-      id: m.user.id,
-      email: m.user.email,
-      name: m.user.name,
-      isActive: m.user.isActive,
-      organizationId: m.group.organizationId,
-      organization: m.group.organization,
-      expiresAt: null,
-      via: { kind: "group", groupId: m.groupId } as AssignmentVia,
-    })),
-  ];
-  return rows.sort((a, b) =>
-    a.email < b.email ? -1 : a.email > b.email ? 1 : 0
-  );
+  };
 };
 
 /** Users holding the role directly or through an unarchived group, once each. */

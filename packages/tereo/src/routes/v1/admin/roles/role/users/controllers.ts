@@ -9,7 +9,7 @@ export const getRoleUsers = async (req: Request, res: Response) => {
   // getAny: assignments survive archive, so the read-only user list must
   // stay visible for archived roles.
   await db.roles.getAny(params.id);
-  const users = await db.roles.getUsersByRoleId(params.id);
+  const { users, groups } = await db.roles.getUsersByRoleId(params.id);
 
-  res.json({ roleId: params.id, users });
+  res.json({ roleId: params.id, users, groups });
 };

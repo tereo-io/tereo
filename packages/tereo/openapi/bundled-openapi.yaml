@@ -7604,10 +7604,12 @@ paths:
         - Admin - Role Users
       summary: Get users with role
       description: |
-        Returns every assignment of the role (global and in any
-        organization), ordered by email: a user holding it in several scopes
-        appears once per scope, told apart by `organizationId`. Works for
-        archived roles too.
+        Returns every direct assignment of the role (global and in any
+        organization) as `users`, ordered by email: a user holding it in
+        several scopes appears once per scope, told apart by `organizationId`.
+        The unarchived groups holding the role are listed as `groups`, with
+        their member counts; their members are not in `users` — list them with
+        `GET /v1/admin/groups/{id}/members`. Works for archived roles too.
       operationId: getAdminRoleUsers
       security:
         - BearerAuth:
@@ -26215,6 +26217,7 @@ components:
       required:
         - roleId
         - users
+        - groups
       properties:
         roleId:
           type: string
@@ -26223,7 +26226,7 @@ components:
           type: array
           items:
             type: object
-            description: One per way a user holds the role — each assignment, and each unarchived group holding the role that the user belongs to. A user holding it globally and in an organization, or directly and through a group, appears once for each.
+            description: One per direct assignment of the role. A user holding it globally and in an organization appears once for each. Users holding the role only through a group are not listed here; see `groups`.
             required:
               - id
               - email
@@ -26263,30 +26266,53 @@ components:
                   - string
                   - 'null'
                 format: date-time
-                description: When the role assignment expires; always null for a row held through a group
+                description: When the role assignment expires
               via:
-                description: How the user holds the role. A `group` row's `organizationId` is the group's; it is removed by taking the user out of the group, or the role from the group, not through `DELETE /v1/admin/roles/{id}/users/{userId}`.
+                description: How the user holds the role; always a direct assignment in this list.
+                type: object
+                required:
+                  - kind
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                      - direct
+        groups:
+          type: array
+          description: The unarchived groups holding the role, by name. Their members hold it through the group, in the group's scope; it is removed by taking a user out of the group, or the role from the group.
+          items:
+            type: object
+            required:
+              - id
+              - slug
+              - name
+              - organizationId
+              - organization
+              - memberCount
+            properties:
+              id:
+                type: string
+                format: uuid
+                description: Group ID
+              slug:
+                type: string
+              name:
+                type: string
+              organizationId:
+                type:
+                  - string
+                  - 'null'
+                format: uuid
+                description: The group's organization; null for a global group.
+              organization:
+                description: The organization `organizationId` names; null for a global group.
                 oneOf:
-                  - type: object
-                    required:
-                      - kind
-                    properties:
-                      kind:
-                        type: string
-                        enum:
-                          - direct
-                  - type: object
-                    required:
-                      - kind
-                      - groupId
-                    properties:
-                      kind:
-                        type: string
-                        enum:
-                          - group
-                      groupId:
-                        type: string
-                        format: uuid
+                  - $ref: '#/components/schemas/OrgRef'
+                  - type: 'null'
+              memberCount:
+                type: integer
+                minimum: 0
+                description: How many users the group has
     UserRoleAssignment:
       description: A direct global role assignment, whatever the role's state — what `PUT /v1/admin/users/{id}/roles` replaces
       allOf:
