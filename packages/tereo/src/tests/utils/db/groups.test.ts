@@ -155,4 +155,20 @@ describe("db.groups", () => {
     );
     expect(await ids({ includeArchived: true })).toHaveLength(4);
   });
+
+  it("the database refuses a slug outside [a-z0-9-]{1,100}", async () => {
+    await expect(make("bad", orgA, { slug: `Bad_${run}` })).rejects.toThrow(
+      /groups_slug_format/
+    );
+  });
+
+  it("the database refuses unprovisionedAt on a local group", async () => {
+    const group = await make("local-unprov", orgA);
+    await expect(
+      prisma.group.update({
+        where: { id: group.id },
+        data: { unprovisionedAt: new Date() },
+      })
+    ).rejects.toThrow(/groups_unprovisioned_provisioned/);
+  });
 });
