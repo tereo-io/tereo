@@ -20,6 +20,10 @@ import {
   validateParams,
 } from "../../../../../utils/validateReq.js";
 import {
+  listGroupRoles,
+  listOrgGroupRoles,
+} from "../../../../../utils/groupRoles.js";
+import {
   issueVerifyLink,
   retireAllLinks,
   retirePasswordLinks,
@@ -105,7 +109,7 @@ export const updateUser = async (req: Request, res: Response) => {
 
   const update = async (tx: Prisma.TransactionClient) => {
     if (deactivating) {
-      await assertAdminRemains((a) => a.userId !== id, tx);
+      await assertAdminRemains({ kind: "user", userId: id }, tx);
     }
     const { rateLimitPerSecond, ...profile } = body;
     // A body of only a rate limit is not a profile update.
@@ -178,10 +182,13 @@ export const updateUser = async (req: Request, res: Response) => {
     // endUserSessions, which locks the row before its callback. The user's
     // tokens fail requireAuth as soon as it commits; the sessions end right
     // after.
-    newUser = await db.$transaction(async (tx) => {
-      await authorize(tx);
-      return await update(tx);
-    });
+    newUser = await db.$transaction(
+      async (tx) => {
+        await authorize(tx);
+        return await update(tx);
+      },
+      { timeout: 30_000 }
+    );
     await endDeactivatedUserSessions(id, recordSessionsRevoked(auth, existing));
   } else if (body.password) {
     // A password reset signs the user out everywhere, in the transaction
@@ -201,10 +208,13 @@ export const updateUser = async (req: Request, res: Response) => {
     );
     newUser = reset as typeof newUser;
   } else {
-    newUser = await db.$transaction(async (tx) => {
-      await authorize(tx);
-      return await update(tx);
-    });
+    newUser = await db.$transaction(
+      async (tx) => {
+        await authorize(tx);
+        return await update(tx);
+      },
+      { timeout: 30_000 }
+    );
   }
 
   res.json(formatAdminUser(newUser));
@@ -218,20 +228,36 @@ export const getUserPermissions = async (req: Request, res: Response) => {
   res.json({ userId: id, permissions });
 };
 
-export const getUserRoles = async (req: Request, res: Response) => {
-  const { id } = validateParams(UserIdParamSchema, req);
-  await db.users.get(id);
-
-  const userRoles = await db.roles.getGlobalUserRoles(id);
-  res.json({
-    userId: id,
-    roles: userRoles.map((ur) => ({
+/**
+ * A user's global roles: `roles` holds the direct assignments, whatever their
+ * state (exactly what `PUT` replaces), and `groupRoles` each live role held
+ * through a live global group, once per role and group. A role held both
+ * ways appears in each. `orgGroupRoles` are the roles held through
+ * organizations' groups, which count only within that organization.
+ */
+const userRolesResponse = async (
+  userId: string,
+  direct: Awaited<ReturnType<typeof db.roles.getGlobalUserRoles>>
+) => {
+  return {
+    userId,
+    roles: direct.map((ur) => ({
       id: ur.role.id,
       name: ur.role.name,
       displayName: ur.role.displayName,
       expiresAt: ur.expiresAt,
+      via: { kind: "direct" as const },
     })),
-  });
+    groupRoles: await listGroupRoles(userId, null),
+    orgGroupRoles: await listOrgGroupRoles(userId),
+  };
+};
+
+export const getUserRoles = async (req: Request, res: Response) => {
+  const { id } = validateParams(UserIdParamSchema, req);
+  await db.users.get(id);
+
+  res.json(await userRolesResponse(id, await db.roles.getGlobalUserRoles(id)));
 };
 
 export const setUserRoles = async (req: Request, res: Response) => {
@@ -252,89 +278,95 @@ export const setUserRoles = async (req: Request, res: Response) => {
     );
   }
 
-  const { userRoles, revokedJtis } = await db.$transaction(async (tx) => {
-    // A grant races a credential reset's check of what the user holds.
-    await db.users.lockAuthority(id, tx);
-    // Read in the transaction, and only the roles new as of this read are
-    // created: a held role removed concurrently is not put back unchecked.
-    const held = new Set(
-      (await db.roles.getGlobalUserRoles(id, tx)).map((ur) => ur.roleId)
-    );
-    // A held role stays whatever its state: archived and retired ones keep
-    // their assignment to come back on restore.
-    const added = roleIds.filter((roleId) => !held.has(roleId));
-    const roles = await db.roles.getByIds(added, tx);
-    const found = new Set(roles.map((r) => r.id));
-    const missing = added.filter((roleId) => !found.has(roleId));
-    if (missing.length > 0) {
-      throw new BadRequestError(
-        "unknown_role",
-        `Roles not found, archived or retired: ${missing.join(", ")}`
+  // 30 s: the user's authority lock may be held by a group change, which
+  // takes every member's (utils/groups.ts).
+  const { userRoles, revokedJtis } = await db.$transaction(
+    async (tx) => {
+      // A grant races a credential reset's check of what the user holds.
+      await db.users.lockAuthority(id, tx);
+      // Read in the transaction, and only the roles new as of this read are
+      // created: a held role removed concurrently is not put back unchecked.
+      const held = new Set(
+        (await db.roles.getGlobalUserRoles(id, tx)).map((ur) => ur.roleId)
       );
-    }
-    assertCanGrant(
-      await globalGrantablePermissions(auth, tx),
-      db.roles.grantedPermissionNames(roles)
-    );
-    if ([...held].some((roleId) => !roleIds.includes(roleId))) {
-      await assertMayDisempower(auth, id, "remove roles from", tx);
-    }
+      // A held role stays whatever its state: archived and retired ones keep
+      // their assignment to come back on restore.
+      const added = roleIds.filter((roleId) => !held.has(roleId));
+      const roles = await db.roles.getByIds(added, tx);
+      const found = new Set(roles.map((r) => r.id));
+      const missing = added.filter((roleId) => !found.has(roleId));
+      if (missing.length > 0) {
+        throw new BadRequestError(
+          "unknown_role",
+          `Roles not found, archived or retired: ${missing.join(", ")}`
+        );
+      }
+      assertCanGrant(
+        await globalGrantablePermissions(auth, tx),
+        db.roles.grantedPermissionNames(roles)
+      );
+      if ([...held].some((roleId) => !roleIds.includes(roleId))) {
+        await assertMayDisempower(auth, id, "remove roles from", tx);
+      }
 
-    // A role the user already holds keeps its row and its expiresAt, so only
-    // a newly created admin assignment is sure to be live; a kept one counts
-    // only if assertAdminRemains finds it unexpired.
-    const gainsAdmin =
-      targetUser.isActive &&
-      targetUser.userType === "human" &&
-      (await db.roles.getAdminRoleIds(added, tx)).length > 0;
-    if (!gainsAdmin) {
-      await assertAdminRemains(
-        (a) => a.userId !== id || roleIds.includes(a.roleId),
-        tx
+      // A role the user already holds keeps its row and its expiresAt, so only
+      // a newly created admin assignment is sure to be live; a kept one counts
+      // only if assertAdminRemains finds it unexpired. Whether the user and
+      // an added role count is read under the guard's lock, which a role
+      // losing admin and the user's deactivation both take.
+      await assertAdminRemains(null, tx);
+      const current = await db.users.get(id, tx);
+      const gainsAdmin =
+        current.isActive &&
+        current.userType === "human" &&
+        (await db.roles.getAdminRoleIds(added, tx)).length > 0;
+      if (!gainsAdmin) {
+        await assertAdminRemains(
+          { kind: "directExcept", userId: id, keepRoleIds: roleIds },
+          tx
+        );
+      }
+      const result = await db.roles.setUserRoles(
+        id,
+        roleIds,
+        tx,
+        new Set(added)
       );
-    }
-    const result = await db.roles.setUserRoles(id, roleIds, tx, new Set(added));
-    // Permissions are read live, so a token from a password-only login would
-    // carry the new role; revoked, its refresh meets the step-up.
-    const revokedJtis = roles.some((r) => r.requires2fa)
-      ? await db.accessTokens.revokeWithoutMfa({ id }, tx)
-      : [];
-    await logAuditTx(tx, {
-      auth,
-      action: "UPDATE",
-      entityType: "User",
-      entityId: id,
-      entityName: targetUser.email,
-      metadata: {
-        action: "roles_changed",
-        roleIds: roleIds,
-        ...(revokedJtis.length > 0 && {
-          accessTokensRevoked: revokedJtis.length,
-        }),
-      },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.user.roles-changed",
-      entityType: "User",
-      entityId: id,
-      data: { userId: id, email: targetUser.email, roleIds: roleIds },
-    });
-    return { userRoles: result, revokedJtis };
-  });
+      // Permissions are read live, so a token from a password-only login would
+      // carry the new role; revoked, its refresh meets the step-up.
+      const revokedJtis = roles.some((r) => r.requires2fa)
+        ? await db.accessTokens.revokeWithoutMfa({ id }, tx)
+        : [];
+      await logAuditTx(tx, {
+        auth,
+        action: "UPDATE",
+        entityType: "User",
+        entityId: id,
+        entityName: targetUser.email,
+        metadata: {
+          action: "roles_changed",
+          roleIds: roleIds,
+          ...(revokedJtis.length > 0 && {
+            accessTokensRevoked: revokedJtis.length,
+          }),
+        },
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.user.roles-changed",
+        entityType: "User",
+        entityId: id,
+        data: { userId: id, email: targetUser.email, roleIds: roleIds },
+      });
+      return { userRoles: result, revokedJtis };
+    },
+    { timeout: 30_000 }
+  );
 
   disconnectTokenSockets(revokedJtis);
   notifyUserRolesChanged(id);
 
-  res.json({
-    userId: id,
-    roles: userRoles.map((ur) => ({
-      id: ur.role.id,
-      name: ur.role.name,
-      displayName: ur.role.displayName,
-      expiresAt: ur.expiresAt,
-    })),
-  });
+  res.json(await userRolesResponse(id, userRoles));
 };
 
 export const getUserSessions = async (req: Request, res: Response) => {

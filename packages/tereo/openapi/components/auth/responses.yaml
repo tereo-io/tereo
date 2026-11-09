@@ -361,3 +361,34 @@ BrandingPayloadTooLargeResponse:
             enum: [payload_too_large]
           error_description:
             type: string
+
+GroupConflictResponse:
+  description: Conflict - the change clashes with the group's state or its members
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - group_slug_taken
+              - managed_by_provisioning
+              - resource_archived
+              - already_archived
+              - not_archived
+              - not_org_member
+              - guest_not_allowed
+              - service_account_not_allowed
+              - system_user_not_allowed
+              - conflict
+          error_description:
+            description: A human-readable explanation of the error
+            type: string

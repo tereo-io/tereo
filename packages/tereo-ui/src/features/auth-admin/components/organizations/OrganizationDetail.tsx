@@ -12,6 +12,7 @@ import AddMemberModal from "./modals/AddMemberModal";
 import { PageHeader } from "@/components/PageHeader";
 import { formatDateTime } from "@/utils/formatDate";
 import { useParams, Link } from "react-router-dom";
+import { GroupList } from "../groups/GroupList";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import {
@@ -27,6 +28,7 @@ import {
   SectionHeader,
   Spinner,
   Table,
+  Tabs,
   type TableColumn,
 } from "@kosmeo-ui/react";
 
@@ -38,6 +40,7 @@ export const OrganizationDetail = () => {
   const { data: membersData } = useOrganizationMembers(id);
   const [showAddMember, setShowAddMember] = useState(false);
   const [showInviteGuest, setShowInviteGuest] = useState(false);
+  const [tab, setTab] = useState("members");
   const { hasPermission, organizations } = useAuth();
 
   useDocumentTitle(organization?.name);
@@ -54,6 +57,8 @@ export const OrganizationDetail = () => {
     hasPermission("users.guests.write") && (canWrite || myRole !== undefined);
   const canEdit = canWrite || myRole === "owner";
   const canManageMembers = canWrite || myRole === "owner" || myRole === "admin";
+  // Core lists an organization's groups to groups.read, or to its admins.
+  const canSeeGroups = hasPermission("groups.read") || canManageMembers;
 
   const memberColumns: TableColumn<OrganizationMember>[] = useMemo(
     () => [
@@ -208,42 +213,75 @@ export const OrganizationDetail = () => {
           />
         </Col>
         <Col>
-          <Card>
-            <Col>
-              <SectionHeader
-                title={`Members (${membersData?.members.length || 0})`}
-                actions={
-                  isArchived || !(canWrite || canInviteGuests) ? undefined : (
-                    <>
-                      {canInviteGuests && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setShowInviteGuest(true)}
-                        >
-                          Invite Guest
-                        </Button>
-                      )}
-                      {canWrite && (
-                        <Button
-                          size="sm"
-                          onClick={() => setShowAddMember(true)}
-                        >
-                          Add Member
-                        </Button>
-                      )}
-                    </>
-                  )
-                }
-              />
-              <Table<OrganizationMember>
-                rows={membersData?.members || []}
-                columns={memberColumns}
-                emptyMessage="No members in this organization"
-                maxHeight="30rem"
-              />
-            </Col>
-          </Card>
+          <Tabs
+            active={tab}
+            onChange={setTab}
+            tabs={[
+              {
+                key: "members",
+                label: "Members",
+                content: (
+                  <Card>
+                    <Col>
+                      <SectionHeader
+                        title={`Members (${membersData?.members.length || 0})`}
+                        actions={
+                          isArchived ||
+                          !(canWrite || canInviteGuests) ? undefined : (
+                            <>
+                              {canInviteGuests && (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => setShowInviteGuest(true)}
+                                >
+                                  Invite Guest
+                                </Button>
+                              )}
+                              {canWrite && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => setShowAddMember(true)}
+                                >
+                                  Add Member
+                                </Button>
+                              )}
+                            </>
+                          )
+                        }
+                      />
+                      <Table<OrganizationMember>
+                        rows={membersData?.members || []}
+                        columns={memberColumns}
+                        emptyMessage="No members in this organization"
+                        maxHeight="30rem"
+                      />
+                    </Col>
+                  </Card>
+                ),
+              },
+              ...(canSeeGroups
+                ? [
+                    {
+                      key: "groups",
+                      label: "Groups",
+                      content: (
+                        <Card>
+                          <GroupList
+                            organizationId={id}
+                            canCreate={
+                              !isArchived &&
+                              (hasPermission("groups.write") ||
+                                canManageMembers)
+                            }
+                          />
+                        </Card>
+                      ),
+                    },
+                  ]
+                : []),
+            ]}
+          />
           <InviteGuestModal
             orgId={id}
             show={showInviteGuest}

@@ -95,7 +95,7 @@ export const createWebhookEndpoint = async (req: Request, res: Response) => {
       `The following event types are not registered or are retired: ${invalid.join(", ")}`
     );
   }
-  assertMaySubscribe(auth.permissions, registered);
+  await assertMaySubscribe(auth, organizationId, registered);
 
   const { endpoint, signingSecret } = await db.$transaction(async (tx) => {
     const created = await db.webhookEndpoints.create(

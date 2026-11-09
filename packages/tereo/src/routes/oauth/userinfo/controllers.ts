@@ -55,11 +55,20 @@ export const getUserInfo = async (req: Request, res: Response) => {
   // Resolve org from id in token
   let orgId: string | undefined;
   let orgName: string | undefined;
+  // The organization whose groups are listed: the token's, while it is active
+  // and the user still a member (the roles of its groups count on no less).
+  let groupsOrgId: string | null = null;
   if (payload.org_id) {
     try {
       const org = await db.organizations.get(payload.org_id);
       orgId = org.id;
       orgName = org.name;
+      if (
+        org.isActive &&
+        (await db.organizations.getMembership(org.id, userId))
+      ) {
+        groupsOrgId = org.id;
+      }
     } catch (err) {
       // Org deleted or archived since the token was issued — omit its claims.
       if (!(err instanceof NotFoundError)) throw err;
@@ -73,7 +82,9 @@ export const getUserInfo = async (req: Request, res: Response) => {
   // A delegated token is told what requireAuth would let it use: its
   // permissions cut down to its scopes' ceilings, no roles (a role is not
   // capped, its permissions are), and the memberships only with the scope
-  // that lists them.
+  // that lists them. Groups are the global ones and the token's
+  // organization's while it is active (an inactive one's group roles are
+  // left out of `roles` too), and need the account or admin area.
   const delegated = access.kind === "delegated";
   const authorization =
     access.kind !== "none"
@@ -98,6 +109,20 @@ export const getUserInfo = async (req: Request, res: Response) => {
                     slug: org.slug,
                     memberRole: org.memberRole,
                   })),
+          // Groups are an account fact (the user's own) and an admin one.
+          groups:
+            delegated && !allowsArea(access, ["account", "admin"])
+              ? []
+              : (
+                  await db.groups.getUserGroups(userId, {
+                    organizationId: groupsOrgId,
+                  })
+                ).map((g) => ({
+                  id: g.id,
+                  slug: g.slug,
+                  name: g.name,
+                  organizationId: g.organizationId,
+                })),
         }
       : {};
 

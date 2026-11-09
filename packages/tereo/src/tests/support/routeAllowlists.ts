@@ -385,6 +385,61 @@ export const RESOURCE_SCOPED: Allowlist = [
   ],
   [
     "get",
+    "/v1/admin/groups",
+    "groups.read, or without it an admin or owner of the organization named by organizationId; a caller with neither is refused",
+  ],
+  [
+    "post",
+    "/v1/admin/groups",
+    "groups.write, or for a group in organizationId an admin or owner of that organization; a caller with neither is refused",
+  ],
+  [
+    "get",
+    "/v1/admin/groups/:id",
+    "groups.read, or for an organization's group an admin or owner of its organization; a missing group is refused like an inaccessible one",
+  ],
+  [
+    "patch",
+    "/v1/admin/groups/:id",
+    "groups.write, or for an organization's group an admin or owner of its organization; a missing group is refused like an inaccessible one",
+  ],
+  [
+    "post",
+    "/v1/admin/groups/:id/archive",
+    "groups.archive, or for an organization's group an admin or owner of its organization; a missing group is refused like an inaccessible one",
+  ],
+  [
+    "post",
+    "/v1/admin/groups/:id/restore",
+    "groups.archive, or for an organization's group an admin or owner of its organization; a missing group is refused like an inaccessible one",
+  ],
+  [
+    "get",
+    "/v1/admin/groups/:id/members",
+    "groups.read, or for an organization's group an admin or owner of its organization; a missing group is refused like an inaccessible one",
+  ],
+  [
+    "post",
+    "/v1/admin/groups/:id/members",
+    "groups.write, or for an organization's group an admin or owner of its organization; a missing group is refused like an inaccessible one",
+  ],
+  [
+    "delete",
+    "/v1/admin/groups/:id/members/:userId",
+    "groups.write, or for an organization's group an admin or owner of its organization; a missing group is refused like an inaccessible one",
+  ],
+  [
+    "get",
+    "/v1/admin/groups/:id/roles",
+    "groups.read, or for an organization's group an admin or owner of its organization; a missing group is refused like an inaccessible one",
+  ],
+  [
+    "put",
+    "/v1/admin/groups/:id/roles",
+    "groups.write, or for an organization's group an admin or owner of its organization; a missing group is refused like an inaccessible one",
+  ],
+  [
+    "get",
     "/v1/admin/organizations/:id",
     "requireOrgMember: organizations.read bypasses it, otherwise the caller must be a member of :id",
   ],

@@ -902,7 +902,8 @@ export const updateGuest = async (
 
 /**
  * Whether, once a regular user, `userId` must use 2FA: the instance policy
- * is `required`, or a live assignment of theirs is of a role requiring it.
+ * is `required`, or a role they hold, directly or through a group, requires
+ * it.
  */
 const regularUserRequires2fa = async (
   tx: Tx,
@@ -911,15 +912,9 @@ const regularUserRequires2fa = async (
   const policy = await db.settings.getTotpPolicy();
   if (policy === "disabled") return false;
   if (policy === "required") return true;
-  const required = await tx.userRole.count({
-    where: {
-      AND: [
-        db.roles.liveAssignmentsWhere(userId, "memberships"),
-        { role: { requires2fa: true } },
-      ],
-    },
+  return await db.roles.holdsRequires2faRole(userId, tx, {
+    ignoreGuestFloor: true,
   });
-  return required > 0;
 };
 
 /**

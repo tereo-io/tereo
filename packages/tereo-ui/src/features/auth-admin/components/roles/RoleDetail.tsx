@@ -3,13 +3,14 @@ import ArchiveRestoreRoleButton from "./buttons/ArchiveRestoreRoleButton";
 import ManagePermissionsButton from "./buttons/ManagePermissionsButton";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
+import type { RoleGroup, RoleUser } from "../../api/roles/types";
 import { formatDate, formatDateTime } from "@/utils/formatDate";
 import DuplicateRoleButton from "./buttons/DuplicateRoleButton";
+import { useGroupAccess } from "../groups/useGroupAuthority";
 import { faLock } from "@fortawesome/free-solid-svg-icons";
 import DeleteRoleButton from "./buttons/DeleteRoleButton";
 import useRoleUsers from "../../api/roles/useRoleUsers";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
-import type { RoleUser } from "../../api/roles/types";
 import EditRoleButton from "./buttons/EditRoleButton";
 import { PageHeader } from "@/components/PageHeader";
 import { useParams, Link } from "react-router-dom";
@@ -44,6 +45,7 @@ export const RoleDetail = () => {
 
   const { data: role, isLoading } = useRole(id);
   const { data: usersData } = useRoleUsers(id);
+  const { canRead: canReadGroup } = useGroupAccess();
 
   useDocumentTitle(role?.displayName || role?.name);
 
@@ -115,6 +117,45 @@ export const RoleDetail = () => {
     [id, role?.displayName, canRemoveUsers]
   );
 
+  const groupColumns: TableColumn<RoleGroup>[] = useMemo(
+    () => [
+      {
+        title: "Group",
+        dataKey: "name",
+        cellElement: (group) =>
+          canReadGroup(group) ? (
+            <Link to={`/auth-admin/groups/${group.id}`} className="v-link">
+              {group.name}
+            </Link>
+          ) : (
+            group.name
+          ),
+      },
+      {
+        title: "Scope",
+        dataKey: "organizationId",
+        cellElement: (group) =>
+          group.organizationId ? (
+            <Link
+              to={`/auth-admin/organizations/${group.organizationId}`}
+              className="v-link"
+            >
+              {group.organization?.name ?? group.organizationId}
+            </Link>
+          ) : (
+            "Global"
+          ),
+      },
+      {
+        title: "Members",
+        dataKey: "memberCount",
+        width: "7rem",
+        align: "center",
+      },
+    ],
+    [canReadGroup]
+  );
+
   if (isLoading) {
     return (
       <Page padded fillHeight>
@@ -172,7 +213,13 @@ export const RoleDetail = () => {
                 <DeleteRoleButton
                   key="delete"
                   role={role}
-                  userCount={usersData?.users.length ?? 0}
+                  userCount={
+                    (usersData?.users.length ?? 0) +
+                    (usersData?.groups ?? []).reduce(
+                      (n, g) => n + g.memberCount,
+                      0
+                    )
+                  }
                 />,
               ]
         }
@@ -271,7 +318,20 @@ export const RoleDetail = () => {
               <Table<RoleUser>
                 rows={usersData?.users || []}
                 columns={userColumns}
+                rowKey={(u) => `${u.id}:${u.organizationId ?? ""}`}
                 emptyMessage="No users assigned to this role"
+                maxHeight="25rem"
+              />
+            </Col>
+          </Card>
+          <Card>
+            <Col>
+              <h3>Groups with this Role ({usersData?.groups.length || 0})</h3>
+              <Table<RoleGroup>
+                rows={usersData?.groups || []}
+                columns={groupColumns}
+                rowKey={(g) => g.id}
+                emptyMessage="No group holds this role"
                 maxHeight="25rem"
               />
             </Col>

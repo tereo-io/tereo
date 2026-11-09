@@ -6,6 +6,7 @@ import { formatOrganizationMember } from "../../../../../../../utils/transformer
 import { revokeCreatorSharesTx } from "../../../../../../../utils/shareRevocation.js";
 import { recordSessionsRevoked } from "../../../../../../../utils/sessionEvents.js";
 import { endOrganizationSessions } from "../../../../../../../utils/sessions.js";
+import { removeFromOrgGroupsTx } from "../../../../../../../utils/groups.js";
 import type { Prisma } from "../../../../../../../utils/db/prisma.js";
 import { assertNotGuest } from "../../../../users/user/guards.js";
 import { validateUser } from "../../../../../../../utils/auth.js";
@@ -66,55 +67,64 @@ export const removeMember = async (req: Request, res: Response) => {
 
   await db.organizations.get(orgId);
   await assertNotIntegrationAccount(userId);
-  const revokedBuckets = await db.$transaction(async (tx) => {
-    await db.users.lockAuthority(userId, tx);
-    await lockOrgOwners(tx, orgId);
-    const removed = await db.organizations.removeMember(orgId, userId, tx);
-    if (callerRole === "admin" && removed.memberRole === "owner") {
-      throw new ForbiddenError(
-        "Only organization owners can remove other owners"
-      );
-    }
-    if (removed.memberRole === "owner") {
-      await assertOwnerRemains(tx, orgId, userId);
-    }
-    // Org-scoped roles grant nothing without the membership; leaving them
-    // would hand them back if the user were ever re-added.
-    await tx.userRole.deleteMany({ where: { userId, organizationId: orgId } });
-    await logAuditTx(tx, {
-      auth,
-      organizationId: orgId,
-      action: "DELETE",
-      entityType: "OrganizationMember",
-      entityId: removed.id,
-      entityName: removed.user.email,
-      metadata: { userId, memberRole: removed.memberRole },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.organization.member-removed",
-      entityType: "OrganizationMember",
-      entityId: removed.id,
-      data: {
-        organizationId: orgId,
-        userId,
-        email: removed.user.email,
-        memberRole: removed.memberRole,
-      },
-    });
-    // Shares outlive their creator's membership unless asked otherwise.
-    if (revokeShares) {
-      await revokeCreatorSharesTx(
-        tx,
+  // 30 s: the user's authority lock may be held by a group change, which
+  // takes every member's (utils/groups.ts).
+  const revokedBuckets = await db.$transaction(
+    async (tx) => {
+      await db.users.lockAuthority(userId, tx);
+      await lockOrgOwners(tx, orgId);
+      const removed = await db.organizations.removeMember(orgId, userId, tx);
+      if (callerRole === "admin" && removed.memberRole === "owner") {
+        throw new ForbiddenError(
+          "Only organization owners can remove other owners"
+        );
+      }
+      if (removed.memberRole === "owner") {
+        await assertOwnerRemains(tx, orgId, userId);
+      }
+      // Org-scoped roles grant nothing without the membership; leaving them
+      // would hand them back if the user were ever re-added.
+      await tx.userRole.deleteMany({
+        where: { userId, organizationId: orgId },
+      });
+      // The same holds for the organization's groups.
+      await removeFromOrgGroupsTx(tx, auth, orgId, userId);
+      await logAuditTx(tx, {
         auth,
-        { userId, organizationId: orgId },
-        "organization_member_removed"
-      );
-    }
-    // Like the roles, a grant on the organization's buckets would come back
-    // with a re-added membership.
-    return await revokeOrganizationGrantsTx(tx, auth, orgId, userId);
-  });
+        organizationId: orgId,
+        action: "DELETE",
+        entityType: "OrganizationMember",
+        entityId: removed.id,
+        entityName: removed.user.email,
+        metadata: { userId, memberRole: removed.memberRole },
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.organization.member-removed",
+        entityType: "OrganizationMember",
+        entityId: removed.id,
+        data: {
+          organizationId: orgId,
+          userId,
+          email: removed.user.email,
+          memberRole: removed.memberRole,
+        },
+      });
+      // Shares outlive their creator's membership unless asked otherwise.
+      if (revokeShares) {
+        await revokeCreatorSharesTx(
+          tx,
+          auth,
+          { userId, organizationId: orgId },
+          "organization_member_removed"
+        );
+      }
+      // Like the roles, a grant on the organization's buckets would come back
+      // with a re-added membership.
+      return await revokeOrganizationGrantsTx(tx, auth, orgId, userId);
+    },
+    { timeout: 30_000 }
+  );
 
   // Tokens and SSO sessions bound to this organization end with the
   // membership.
@@ -149,56 +159,61 @@ export const updateMemberRole = async (req: Request, res: Response) => {
   }
   await db.organizations.get(orgId);
 
-  const member = await db.$transaction(async (tx) => {
-    // An owner or admin tier is authority a credential reset checks for.
-    await db.users.lockAuthority(userId, tx);
-    if (body.memberRole !== "member") {
-      assertNotGuest(await db.users.get(userId, tx), "guest_tier");
-    }
-    await lockOrgOwners(tx, orgId);
-    const { previousRole, member: updated } =
-      await db.organizations.updateMemberRole(
-        orgId,
-        userId,
-        body.memberRole as OrgMemberRole,
-        tx
-      );
-    if (callerRole === "admin" && previousRole === "owner") {
-      throw new ForbiddenError(
-        "Only organization owners can change an owner's role"
-      );
-    }
-    if (previousRole === "owner" && updated.memberRole !== "owner") {
-      await assertOwnerRemains(tx, orgId, userId);
-    }
-    await logAuditTx(tx, {
-      auth,
-      organizationId: orgId,
-      action: "UPDATE",
-      entityType: "OrganizationMember",
-      entityId: updated.id,
-      entityName: updated.user.email,
-      changes: computeChanges(
-        { memberRole: previousRole },
-        { memberRole: updated.memberRole }
-      ),
-      metadata: { userId },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.organization.member-updated",
-      entityType: "OrganizationMember",
-      entityId: updated.id,
-      data: {
+  // 30 s: the user's authority lock may be held by a group change, which
+  // takes every member's (utils/groups.ts).
+  const member = await db.$transaction(
+    async (tx) => {
+      // An owner or admin tier is authority a credential reset checks for.
+      await db.users.lockAuthority(userId, tx);
+      if (body.memberRole !== "member") {
+        assertNotGuest(await db.users.get(userId, tx), "guest_tier");
+      }
+      await lockOrgOwners(tx, orgId);
+      const { previousRole, member: updated } =
+        await db.organizations.updateMemberRole(
+          orgId,
+          userId,
+          body.memberRole as OrgMemberRole,
+          tx
+        );
+      if (callerRole === "admin" && previousRole === "owner") {
+        throw new ForbiddenError(
+          "Only organization owners can change an owner's role"
+        );
+      }
+      if (previousRole === "owner" && updated.memberRole !== "owner") {
+        await assertOwnerRemains(tx, orgId, userId);
+      }
+      await logAuditTx(tx, {
+        auth,
         organizationId: orgId,
-        userId,
-        email: updated.user.email,
-        memberRole: updated.memberRole,
-        previousMemberRole: previousRole,
-      },
-    });
-    return updated;
-  });
+        action: "UPDATE",
+        entityType: "OrganizationMember",
+        entityId: updated.id,
+        entityName: updated.user.email,
+        changes: computeChanges(
+          { memberRole: previousRole },
+          { memberRole: updated.memberRole }
+        ),
+        metadata: { userId },
+      });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.organization.member-updated",
+        entityType: "OrganizationMember",
+        entityId: updated.id,
+        data: {
+          organizationId: orgId,
+          userId,
+          email: updated.user.email,
+          memberRole: updated.memberRole,
+          previousMemberRole: previousRole,
+        },
+      });
+      return updated;
+    },
+    { timeout: 30_000 }
+  );
   notifyOrgMembershipChanged(userId, orgId);
   res.json(formatOrganizationMember(member));
 };

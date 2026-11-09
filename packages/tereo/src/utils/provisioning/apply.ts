@@ -1,15 +1,17 @@
-import { CORE_SERVICE_ID, SYSTEM_USER_ID } from "../../definitions/index.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
 import { computeChanges, emitTx, logAuditTx } from "../outbox.js";
 import { broadcastBucketInvalidate } from "../cacheBroadcast.js";
 import { formatClient, formatRole } from "../transformers.js";
 import { syncProvisionedAccessTx } from "../serviceAccess.js";
+import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { invalidateBranding } from "../branding/resolve.js";
 import { invalidateAfterWrite } from "../branding/write.js";
 import { setRateLimitTx } from "../rateLimitOverride.js";
 import { openSigningSecret } from "../webhookSecrets.js";
 import { prisma, type Prisma } from "../db/prisma.js";
+import { resolveProvisionedRole } from "./roles.js";
 import type { CustomRoleEntry } from "./schema.js";
+import { afterGroupChange } from "../groups.js";
 import { validateSet } from "./validate.js";
 import { AppError } from "../errors.js";
 import { logger } from "../logger.js";
@@ -38,6 +40,12 @@ import {
   setIntegrationRolesTx,
   updateIntegrationTx,
 } from "../integrations.js";
+import {
+  applyGroups,
+  archiveDueGroups,
+  groupProblems,
+  markGroupsMissing,
+} from "./groupsApply.js";
 import {
   GUEST_DEFAULT_ROLES_KEY,
   getGuestDefaultRoleIds,
@@ -93,6 +101,11 @@ export interface ProvisioningResult {
   roles: string[];
   /** Branding profiles (`default` or a client id) written or handed back. */
   branding: string[];
+  /**
+   * Groups (`group:<slug>`, `group:<organizationId>/<slug>`) created,
+   * changed or brought back.
+   */
+  groups: string[];
 }
 
 /** An entry with the document it came from. */
@@ -673,37 +686,6 @@ const applyIntegration = async (
   }
 };
 
-/**
- * The role a provisioned integration names: `<slug>/<name>` a service's
- * system role; a bare name the set's custom role when the set declares one,
- * else core's (never a custom role an admin made). Validation checked the
- * names against the set; the database is checked here.
- */
-const resolveIntegrationRole = async (
-  tx: Tx,
-  target: string,
-  setRoleNames: Set<string>
-) => {
-  const slash = target.indexOf("/");
-  const live = { archivedAt: null, retiredAt: null };
-  if (slash !== -1) {
-    return tx.role.findFirst({
-      where: {
-        name: target.slice(slash + 1),
-        service: { slug: target.slice(0, slash), kind: "service" },
-        ...live,
-      },
-      select: { id: true },
-    });
-  }
-  return tx.role.findFirst({
-    where: setRoleNames.has(target)
-      ? { name: target, serviceId: null, provisioned: true, ...live }
-      : { name: target, serviceId: CORE_SERVICE_ID, ...live },
-    select: { id: true },
-  });
-};
-
 /** Roles and audiences, once the roles and services they name exist. */
 const applyIntegrationsAccess = async (
   tx: Tx,
@@ -725,7 +707,7 @@ const applyIntegrationsAccess = async (
     const roleIds: string[] = [];
     const missing: string[] = [];
     for (const name of sortedUnique(spec.roles)) {
-      const role = await resolveIntegrationRole(tx, name, setRoleNames);
+      const role = await resolveProvisionedRole(tx, name, setRoleNames);
       if (role) roleIds.push(role.id);
       else missing.push(name);
     }
@@ -1626,6 +1608,7 @@ export const applyProvisioning = async (
   if (brandingProblems.length > 0)
     throw new ProvisioningError([
       ...(await findProblems(prisma, p, await loadState(prisma, p))),
+      ...(await groupProblems(prisma, set)),
       ...brandingProblems,
     ]);
   // A dry run stores them too; ones nothing references expire after the
@@ -1646,7 +1629,10 @@ export const applyProvisioning = async (
             .filter((s) => s.kind === "service")
             .map((s) => s.id)
         );
-        const problems = await findProblems(tx, p, state);
+        const problems = [
+          ...(await findProblems(tx, p, state)),
+          ...(await groupProblems(tx, set)),
+        ];
         if (problems.length > 0) throw new ProvisioningError(problems);
 
         const result: ProvisioningResult = {
@@ -1658,6 +1644,7 @@ export const applyProvisioning = async (
           access: [],
           roles: [],
           branding: [],
+          groups: [],
         };
         for (const entry of p.services)
           await applyService(tx, entry, state, now, result);
@@ -1675,11 +1662,13 @@ export const applyProvisioning = async (
         );
         if (integrationProblems.length > 0)
           throw new ProvisioningError(integrationProblems);
+        const groupChanges = await applyGroups(tx, set, now, result);
         await applyWebhooks(tx, p, now, result);
         for (const entry of p.clients)
           await applyClient(tx, entry, state, now, result);
         await applyBranding(tx, set, brandingImages, result);
         await markMissing(tx, p, now, result);
+        await markGroupsMissing(tx, set, now, result);
         // A dry run computed the result against the real rows; roll it back.
         if (options.dryRun) throw new DryRunRollback(result);
         return {
@@ -1687,6 +1676,7 @@ export const applyProvisioning = async (
           revokedClients: content.revokedClients,
           bucketNames: content.bucketNames,
           roleChanges,
+          groupChanges,
         };
       },
       { timeout: 120_000 }
@@ -1695,7 +1685,8 @@ export const applyProvisioning = async (
     if (err instanceof DryRunRollback) return err.result;
     throw err;
   }
-  const { result, revokedClients, bucketNames, roleChanges } = applied;
+  const { result, revokedClients, bucketNames, roleChanges, groupChanges } =
+    applied;
   // Tokens first: a failed push must not leave a revoked role's holders with
   // working tokens. The apply is committed, so a failure here is logged.
   const after = async (what: string, step: () => Promise<unknown>) => {
@@ -1720,6 +1711,9 @@ export const applyProvisioning = async (
     await after("notifying a role's status change", () =>
       notifyRoleStatusChanged(id)
     );
+  await after("notifying group members", async () =>
+    afterGroupChange(groupChanges)
+  );
   for (const name of new Set(bucketNames))
     await broadcastBucketInvalidate(name);
   if (result.branding.length > 0)
@@ -1745,6 +1739,7 @@ export const deprovisionMissing = async (
   integrations: number;
   clients: number;
   roles: number;
+  groups: number;
 }> => {
   const cutoff = new Date(
     now.getTime() - env.REGISTRY_RETIREMENT_GRACE_HOURS * 60 * 60 * 1000
@@ -1879,11 +1874,37 @@ export const deprovisionMissing = async (
       (await db.roles.getUserIdsByRoleId(id)).map((h) => h.userId)
     );
   }
+  // Their own transactions: a group with many members, or one waiting on a
+  // member's lock, fails alone, and the next run retries it.
+  let groups = 0;
+  try {
+    const archivedGroups = await archiveDueGroups(
+      (fn) =>
+        prisma.$transaction(
+          async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
+            return fn(tx);
+          },
+          { timeout: 30_000 }
+        ),
+      cutoff
+    );
+    afterGroupChange(archivedGroups);
+    groups = archivedGroups.count;
+  } catch (err) {
+    logger.error({ err }, "Provisioning: archiving dropped groups failed");
+  }
   const roles = archivedRoles.length;
-  if (services > 0 || integrations > 0 || clients > 0 || roles > 0)
+  if (
+    services > 0 ||
+    integrations > 0 ||
+    clients > 0 ||
+    roles > 0 ||
+    groups > 0
+  )
     logger.info(
-      { services, integrations, clients, roles },
+      { services, integrations, clients, roles, groups },
       "Retired entries removed from the provisioning file"
     );
-  return { services, integrations, clients, roles };
+  return { services, integrations, clients, roles, groups };
 };

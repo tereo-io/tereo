@@ -11,6 +11,7 @@ import {
   assertNotManagedByIntegration,
   getVisibleEndpoint,
   isFileEvent,
+  mayResendDelivery,
   mayResendFileEvents,
   redactUnreadable,
 } from "../../../../../../../utils/webhookAccess.js";
@@ -51,13 +52,16 @@ export const retryDelivery = async (req: Request, res: Response) => {
   }
   assertRetryableEndpoint(endpoint.status);
 
-  const { createdAt, eventType } = await db.webhookDeliveries.getForEndpoint(
-    deliveryId,
-    id
-  );
+  const delivery = await db.webhookDeliveries.getForEndpoint(deliveryId, id);
+  const { createdAt, eventType } = delivery;
   if (isFileEvent(eventType) && !mayResendFileEvents(auth, endpoint)) {
     throw new ForbiddenError(
       "Only the endpoint's creator or webhooks.admin may retry its file-service deliveries"
+    );
+  }
+  if (!(await mayResendDelivery(endpoint, delivery))) {
+    throw new ForbiddenError(
+      "The endpoint's creator may no longer receive this event, so it is not sent again"
     );
   }
   const ref = { id: deliveryId, createdAt };

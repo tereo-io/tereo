@@ -2,9 +2,9 @@
 // @module-tag auth
 // @module-tag race
 import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrganization.js";
+import { holdLocks, waitForLockWait } from "../../../../../support/dbLocks.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { type AuthContext } from "../../../../../../middleware/auth.js";
-import { waitForLockWait } from "../../../../../support/dbLocks.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { ForbiddenError } from "../../../../../../utils/errors.js";
 import { issue } from "../../../../../support/passwordSetup.js";
@@ -99,6 +99,38 @@ describe("PUT /v1/admin/users/:id/roles", () => {
     }
     expect(regranted).toBe(0);
   }, 120_000);
+
+  it("decides whether an added role grants admin under the admin guard's lock", async () => {
+    // A role loses admin only under that lock, so a grant read before it
+    // could skip the guard on a role no longer granting admin.
+    const kept = await roleGranting("admin");
+    const added = await roleGranting("admin");
+    const user = await createTestUser();
+    await prisma.userRole.create({
+      data: { userId: user.id, roleId: kept.id },
+    });
+
+    const release = await holdLocks(
+      (tx) =>
+        tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('core:admin-remains', 0))`
+    );
+    let settled = false;
+    const pending = call(
+      "PUT",
+      `/v1/admin/users/${user.id}/roles`,
+      adminToken,
+      {
+        roleIds: [added.id],
+      }
+    ).finally(() => (settled = true));
+    try {
+      await waitForLockWait("%core:admin-remains%", 5_000);
+      expect(settled).toBe(false);
+    } finally {
+      await release();
+    }
+    expect((await pending).status).toBe(200);
+  });
 
   it("answers 409, not 500, when the assignment's foreign key fails", async () => {
     const role = await createTestRole();

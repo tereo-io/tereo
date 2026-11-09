@@ -8,7 +8,10 @@ import { useState } from "react";
 
 interface DeleteRoleButtonProps {
   role: Role;
-  /** Users holding the role, who lose it (and their sessions) on delete. */
+  /**
+   * Holders who lose the role (and their sessions) on delete: its direct
+   * assignments plus its groups' members, so a user may count more than once.
+   */
   userCount: number;
 }
 

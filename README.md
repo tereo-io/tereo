@@ -264,6 +264,10 @@ address is [verified](packages/tereo/docs/auth.md#email-verification) (`email_ve
 [Sign-in page branding](packages/tereo/docs/branding.md) sets a client's app name, logos, colours,
 wording and background on core's login pages, from the admin UI or a provisioning document, with
 per-client edit grants.
+[Groups](packages/tereo/docs/groups.md) are named sets of users that carry roles, global or per
+organization: an admin manages them (and an organization's admins its own), provisioning documents
+declare them with their roles, and apps read them through the SDK, events and the userinfo `groups`
+claim. Their roles count wherever permissions are checked.
 CI checks formatting, import order, lint and types, runs the suite in Docker with real users and
 tokens, and starts the release image against a fresh database.
 

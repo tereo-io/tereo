@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { UserRole } from "./types";
+import type { UserRolesResponse } from "./types";
 import { toast } from "react-toastify";
 import { useAxios } from "@/lib/auth";
 import { AxiosError } from "axios";
@@ -11,7 +11,7 @@ const useSetUserRoles = () => {
   const mutationFn = async (data: {
     userId: string;
     roleIds: string[];
-  }): Promise<{ userId: string; roles: UserRole[] }> => {
+  }): Promise<UserRolesResponse> => {
     const res = await axios.put(`/v1/admin/users/${data.userId}/roles`, {
       roleIds: data.roleIds,
     });
@@ -27,6 +27,7 @@ const useSetUserRoles = () => {
       await queryClient.invalidateQueries({
         queryKey: ["users", variables.userId, "permissions"],
       });
+      await queryClient.invalidateQueries({ queryKey: ["roles"] });
       toast.success("User roles updated successfully");
     },
     onError: (error: AxiosError<{ error_description?: string }>) => {

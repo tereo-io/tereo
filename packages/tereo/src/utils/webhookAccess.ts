@@ -3,6 +3,7 @@ import { PERMISSIONS } from "../definitions/permissions.js";
 import type { WebhookScope } from "./webhookOwnership.js";
 import { canReadBucket } from "./bucketAccess.js";
 import { hasPermission } from "./permissions.js";
+import { capToCeiling } from "./coreAccess.js";
 import { prisma } from "./db/prisma.js";
 import db from "./db/index.js";
 import {
@@ -19,27 +20,89 @@ import {
  * organization, and for a file event, read access to the bucket it names. An
  * endpoint a service owns acts as the service's account, which needs no
  * `webhooks.read`: its subscriptions come from provisioning, not the API.
+ * An organization's admins and owners read its groups' events without the
+ * event type's `readPermission`, as they manage those groups.
  */
 
 /** File events carry their bucket in `data.bucketName`. */
 const BUCKET_EVENT_PREFIX = "file-service.";
+
+/**
+ * Group events, which an organization's admins and owners read for its own
+ * groups. A global group's event names no organization in its data.
+ */
+const GROUP_EVENT_PREFIX = "auth.group.";
 
 export interface EventReadRule {
   eventType: string;
   readPermission: string | null;
 }
 
+interface Reader {
+  userId: string;
+  permissions: string[];
+  /** A delegated token's ceiling, which caps the org-admin tier too. */
+  ceiling?: string[];
+}
+
 /**
- * 403 unless `permissions` (the caller's, in the endpoint's organization)
- * read every event type in `rules`. A file event's bucket is checked per
- * event, when it is sent.
+ * Whether `reader` acts as an admin or owner of `organizationId`, as
+ * `requireOrgRole("admin")` would let them: through `organizations.write`, or
+ * an admin or owner membership while the organization is active.
  */
-export const assertMaySubscribe = (
-  permissions: string[],
+const actsAsOrgAdmin = async (
+  reader: Reader,
+  organizationId: string
+): Promise<boolean> => {
+  if (reader.ceiling && !hasPermission(reader.ceiling, "organizations.write")) {
+    return false;
+  }
+  if (hasPermission(reader.permissions, "organizations.write")) {
+    return true;
+  }
+  const member = await prisma.organizationMember.findFirst({
+    where: {
+      userId: reader.userId,
+      organizationId,
+      memberRole: { in: ["admin", "owner"] },
+      organization: { isActive: true, archivedAt: null },
+    },
+    select: { id: true },
+  });
+  return member !== null;
+};
+
+/** Whether `event` is a group event of the organization it is emitted in. */
+const isOwnOrgGroupEvent = (
+  event: FanoutEvent
+): event is FanoutEvent & {
+  organizationId: string;
+} =>
+  event.eventType.startsWith(GROUP_EVENT_PREFIX) &&
+  event.organizationId !== null &&
+  event.data.organizationId === event.organizationId;
+
+/**
+ * 403 unless the caller (`permissions` are theirs in the endpoint's
+ * organization, `organizationId`) reads every event type in `rules`. A file
+ * event's bucket is checked per event, when it is sent; so is a group event's
+ * organization, for a caller who reads them as an org admin.
+ */
+export const assertMaySubscribe = async (
+  caller: Reader,
+  organizationId: string | null,
   rules: EventReadRule[]
-): void => {
-  const unreadable = rules.filter(
-    (r) => r.readPermission && !hasPermission(permissions, r.readPermission)
+): Promise<void> => {
+  const lacking = rules.filter(
+    (r) =>
+      r.readPermission && !hasPermission(caller.permissions, r.readPermission)
+  );
+  const orgAdmin =
+    organizationId !== null &&
+    lacking.some((r) => r.eventType.startsWith(GROUP_EVENT_PREFIX)) &&
+    (await actsAsOrgAdmin(caller, organizationId));
+  const unreadable = lacking.filter(
+    (r) => !(orgAdmin && r.eventType.startsWith(GROUP_EVENT_PREFIX))
   );
   if (unreadable.length > 0) {
     throw new ForbiddenError(
@@ -83,12 +146,21 @@ export interface FanoutEvent {
   data: Record<string, unknown>;
 }
 
-/** Whether `actor`, acting in the event's organization, could read it. */
+/**
+ * Whether `actor`, acting in the event's organization, could read it.
+ * `orgAdmin` answers `actsAsOrgAdmin` for the actor, memoized by the caller.
+ */
 const mayReadEvent = async (
-  actor: { userId: string; permissions: string[] },
+  actor: Reader,
   event: FanoutEvent,
   readPermission: string | null,
-  { requireWebhooksRead = true }: { requireWebhooksRead?: boolean } = {}
+  {
+    requireWebhooksRead = true,
+    orgAdmin = (organizationId) => actsAsOrgAdmin(actor, organizationId),
+  }: {
+    requireWebhooksRead?: boolean;
+    orgAdmin?: (organizationId: string) => Promise<boolean>;
+  } = {}
 ): Promise<boolean> => {
   const { permissions } = actor;
   if (
@@ -96,7 +168,11 @@ const mayReadEvent = async (
     !hasPermission(permissions, PERMISSIONS.WEBHOOKS.READ)
   )
     return false;
-  if (readPermission && !hasPermission(permissions, readPermission)) {
+  if (
+    readPermission &&
+    !hasPermission(permissions, readPermission) &&
+    !(isOwnOrgGroupEvent(event) && (await orgAdmin(event.organizationId)))
+  ) {
     return false;
   }
   if (!event.eventType.startsWith(BUCKET_EVENT_PREFIX)) return true;
@@ -149,6 +225,42 @@ export const createRecipientCheck = (
     }
     return answer;
   };
+};
+
+/**
+ * Whether `endpoint` may still be sent a stored delivery, decided as when
+ * its event was fanned out: its creator may have lost the access that let
+ * the event through since. A test send's payload is core's own.
+ */
+export const mayResendDelivery = async (
+  endpoint: RecipientEndpoint & { organizationId: string | null },
+  delivery: { eventType: string; payload: unknown }
+): Promise<boolean> => {
+  if (delivery.eventType === TEST_EVENT_TYPE) return true;
+  const payload = delivery.payload as {
+    organizationId?: unknown;
+    data?: unknown;
+  } | null;
+  const readPermission =
+    (await db.eventTypes.readPermissions([delivery.eventType])).get(
+      delivery.eventType
+    ) ?? null;
+  return createRecipientCheck(
+    {
+      // As the delivery view reads one that names none: the endpoint's.
+      organizationId:
+        typeof payload?.organizationId === "string" ||
+        payload?.organizationId === null
+          ? payload.organizationId
+          : endpoint.organizationId,
+      eventType: delivery.eventType,
+      data:
+        payload?.data && typeof payload.data === "object"
+          ? (payload.data as Record<string, unknown>)
+          : {},
+    },
+    readPermission
+  )(endpoint);
 };
 
 /**
@@ -267,7 +379,7 @@ interface StoredDelivery {
  * when they are sent.
  */
 export const redactUnreadable = async <T extends StoredDelivery>(
-  viewer: { userId: string; permissions: string[] },
+  viewer: Reader,
   { organizationId, owner }: WebhookScope,
   deliveries: T[]
 ): Promise<(T & { payloadRedacted: boolean })[]> => {
@@ -278,13 +390,30 @@ export const redactUnreadable = async <T extends StoredDelivery>(
   if (organizationId) {
     permissionsIn.set(organizationId, Promise.resolve(viewer.permissions));
   }
+  // Another organization's are read live, so capped here as the request's are.
   const permissionsOf = (org: string | null) => {
     let permissions = permissionsIn.get(org);
     if (!permissions) {
-      permissions = actingPermissions(viewer.userId, org).then((p) => p ?? []);
+      permissions = actingPermissions(viewer.userId, org).then((p) =>
+        capToCeiling(p ?? [], viewer.ceiling)
+      );
       permissionsIn.set(org, permissions);
     }
     return permissions;
+  };
+  const adminIn = new Map<string, Promise<boolean>>();
+  const orgAdmin = (org: string) => {
+    let answer = adminIn.get(org);
+    if (!answer) {
+      answer = permissionsOf(org).then((permissions) =>
+        actsAsOrgAdmin(
+          { userId: viewer.userId, permissions, ceiling: viewer.ceiling },
+          org
+        )
+      );
+      adminIn.set(org, answer);
+    }
+    return answer;
   };
   return Promise.all(
     deliveries.map(async (delivery) => {
@@ -310,7 +439,11 @@ export const redactUnreadable = async <T extends StoredDelivery>(
       const readPermission = readPermissions.get(delivery.eventType) ?? null;
       const readable = outsideOrganizations
         ? await mayReadEvent(
-            { userId: viewer.userId, permissions: await permissionsOf(null) },
+            {
+              userId: viewer.userId,
+              permissions: await permissionsOf(null),
+              ceiling: viewer.ceiling,
+            },
             { organizationId: null, eventType: delivery.eventType, data },
             readPermission,
             { requireWebhooksRead: !owner }
@@ -321,10 +454,11 @@ export const redactUnreadable = async <T extends StoredDelivery>(
               {
                 userId: viewer.userId,
                 permissions: await permissionsOf(eventOrg),
+                ceiling: viewer.ceiling,
               },
               { organizationId: eventOrg, eventType: delivery.eventType, data },
               readPermission,
-              { requireWebhooksRead: !owner }
+              { requireWebhooksRead: !owner, orgAdmin }
             );
       return readable
         ? { ...delivery, payloadRedacted: false }

@@ -1,10 +1,12 @@
 // @module-tag int
 // @module-tag auth
 
-import { getTestPrincipalToken } from "../../../../../support/principals.js";
+import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrganization.js";
 import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { createTestClient } from "../../../../../support/auth/clients.js";
 import { generateUniqueId } from "../../../../../support/auth/crypto.js";
+import { ensureGroupPermission } from "../../../../../support/groups.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
@@ -52,7 +54,9 @@ interface UserRolesResponse {
     name: string;
     displayName: string;
     expiresAt: string | null;
+    via: { kind: "direct" };
   }>;
+  groupRoles: Array<{ id: string; via: { kind: "group"; groupId: string } }>;
 }
 
 interface UserSessionsResponse {
@@ -83,6 +87,8 @@ let regularUser: Awaited<ReturnType<typeof createTestUser>>;
 let adminToken: string;
 
 beforeAll(async () => {
+  await ensureDefaultOrganization();
+  await ensureGroupPermission();
   testClient = await createTestClient();
   adminUser = await createAdminUser();
   regularUser = await createTestUser();

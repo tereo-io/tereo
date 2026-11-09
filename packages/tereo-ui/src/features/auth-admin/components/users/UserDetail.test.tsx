@@ -45,14 +45,31 @@ const account: UserDetailData = {
   userType: "service_account",
 };
 
+const supportGroup = { id: "g1", slug: "support", name: "Support" };
+
 const renderDetail = (
   user: UserDetailData,
   client: QueryClient = new QueryClient(),
-  settings: object = { rateLimits: { preAuthPerSecond: 300 } }
+  settings: object = { rateLimits: { preAuthPerSecond: 300 } },
+  userRoles: object = { roles: [], groupRoles: [] },
+  groups: object[] = []
 ) => {
   authMock.axios.get.mockImplementation(async (path: string) => {
     const url = String(path);
-    if (url.endsWith("/roles")) return { data: { roles: [] } };
+    if (url === "/v1/admin/roles") {
+      return {
+        data: {
+          data: [
+            { id: "r-direct", displayName: "Direct", isActive: true },
+            { id: "r-group", displayName: "Agent", isActive: true },
+          ],
+          hasMore: false,
+          nextCursor: null,
+        },
+      };
+    }
+    if (url.endsWith("/groups")) return { data: { data: groups } };
+    if (url.endsWith("/roles")) return { data: userRoles };
     if (url.endsWith("/permissions")) return { data: { permissions: [] } };
     if (url.endsWith("/sessions")) return { data: { sessions: [] } };
     if (url.endsWith("/totp")) return { data: { totpEnabled: false } };
@@ -76,6 +93,7 @@ const renderDetail = (
 beforeEach(() => {
   authMock.axios.get.mockReset();
   authMock.axios.patch.mockReset();
+  authMock.axios.put.mockReset();
   denied.clear();
 });
 
@@ -139,6 +157,122 @@ describe("UserDetail", () => {
       ).not.toBeInTheDocument();
     }
   );
+
+  describe("roles and groups", () => {
+    const roles = {
+      roles: [
+        {
+          id: "r-direct",
+          name: "direct",
+          displayName: "Direct",
+          expiresAt: null,
+          via: { kind: "direct" },
+        },
+      ],
+      groupRoles: [
+        {
+          id: "r-group",
+          name: "agent",
+          displayName: "Agent",
+          organizationId: null,
+          via: { kind: "group", groupId: "g1" },
+          group: supportGroup,
+        },
+      ],
+    };
+
+    it("shows a group-held role as via the group", async () => {
+      renderDetail(person, new QueryClient(), undefined, roles);
+
+      expect(await screen.findByText("via Support")).toBeVisible();
+      expect(screen.getByText("direct")).toBeVisible();
+    });
+
+    it("shows a role held through an organization's group with the group and organization", async () => {
+      renderDetail(person, new QueryClient(), undefined, {
+        roles: [],
+        groupRoles: [],
+        orgGroupRoles: [
+          {
+            id: "r-org",
+            name: "common",
+            displayName: "Common",
+            organizationId: "o1",
+            via: { kind: "group", groupId: "g2" },
+            group: { id: "g2", slug: "marketing", name: "Marketing" },
+            organization: { id: "o1", name: "VIVO" },
+          },
+        ],
+      });
+
+      expect(
+        await screen.findByText("via Marketing, in VIVO only")
+      ).toBeVisible();
+      expect(screen.getByText("Common", { exact: false })).toBeVisible();
+      expect(screen.queryByText("No roles assigned")).not.toBeInTheDocument();
+    });
+
+    it("names an organization's group's organization", async () => {
+      renderDetail(person, new QueryClient(), undefined, roles, [
+        {
+          ...supportGroup,
+          organizationId: "o1",
+          organization: { id: "o1", name: "VIVO" },
+          archivedAt: null,
+        },
+      ]);
+
+      expect(await screen.findByText("(VIVO)")).toBeVisible();
+    });
+
+    it("lists the user's groups with a link", async () => {
+      renderDetail(person, new QueryClient(), undefined, roles, [
+        {
+          ...supportGroup,
+          organizationId: null,
+          organization: null,
+          archivedAt: null,
+        },
+      ]);
+
+      expect(
+        await screen.findByRole("link", { name: "Support" })
+      ).toHaveAttribute("href", "/auth-admin/groups/g1");
+    });
+
+    it("asks for archived groups too and marks them", async () => {
+      renderDetail(person, new QueryClient(), undefined, roles, [
+        {
+          ...supportGroup,
+          organizationId: null,
+          archivedAt: "2026-10-05T00:00:00Z",
+        },
+      ]);
+
+      expect(await screen.findByText("archived")).toBeVisible();
+      expect(authMock.axios.get).toHaveBeenCalledWith(
+        "/v1/admin/users/u1/groups",
+        { params: { includeArchived: true } }
+      );
+    });
+
+    it("never sends a group-only role back from the roles editor", async () => {
+      authMock.axios.put.mockResolvedValue({ data: roles });
+      renderDetail(person, new QueryClient(), undefined, roles);
+
+      await screen.findByText("via Support");
+      fireEvent.click(screen.getByRole("button", { name: "Manage Roles" }));
+      await screen.findByLabelText("Direct");
+      fireEvent.click(screen.getByRole("button", { name: "Save Roles" }));
+
+      await waitFor(() =>
+        expect(authMock.axios.put).toHaveBeenCalledWith(
+          "/v1/admin/users/u1/roles",
+          { roleIds: ["r-direct"] }
+        )
+      );
+    });
+  });
 
   describe("a guest", () => {
     const guest: UserDetailData = {

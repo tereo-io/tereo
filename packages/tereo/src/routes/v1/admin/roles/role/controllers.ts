@@ -19,12 +19,17 @@ import {
   validateParams,
 } from "../../../../../utils/validateReq.js";
 import {
+  lockGroupsHoldingRole,
+  recordRoleDeletedFromGroupsTx,
+} from "../../../../../utils/groups.js";
+import {
   assertCanGrant,
   assertCanTakeAway,
   globalGrantablePermissions,
 } from "../../../../../utils/grants.js";
 import {
   ValidationError,
+  ArchivedError,
   ConflictError,
   ForbiddenError,
   ManagedByProvisioningError,
@@ -81,33 +86,6 @@ export const updateRole = async (req: Request, res: Response) => {
     );
   }
 
-  // The 2FA policy guards everything the role grants: only a caller holding
-  // all of it may change it (`admin` for core's admin role).
-  if (
-    body.requires2fa !== undefined &&
-    body.requires2fa !== existing.requires2fa
-  ) {
-    assertCanGrant(
-      await globalGrantablePermissions(auth),
-      db.roles.grantedPermissionNames([existing])
-    );
-  }
-
-  // Reactivating hands the role's permissions back to everyone holding it,
-  // the caller included: the same as granting them.
-  if (body.isActive === true && !existing.isActive) {
-    assertCanGrant(
-      await globalGrantablePermissions(auth),
-      db.roles.grantedPermissionNames([existing])
-    );
-  }
-  if (body.isActive === false && existing.isActive) {
-    assertCanTakeAway(
-      await globalGrantablePermissions(auth),
-      db.roles.grantedPermissionNames([existing])
-    );
-  }
-
   if (body.name && body.name !== existing.name) {
     const conflict = await db.roles.getCustomByNameAny(body.name);
     if (conflict) {
@@ -120,104 +98,126 @@ export const updateRole = async (req: Request, res: Response) => {
     }
   }
 
-  const { role, revokedJtis } = await db.$transaction(async (tx) => {
-    if (body.isActive === false && existing.isActive) {
-      await assertAdminRemains((a) => a.roleId !== params.id, tx);
-    }
-    // A role gains `admin` only under its lock, and only while no
-    // integration holds it, so the role read above settles whether to check.
-    if (
-      body.isActive === true &&
-      !existing.isActive &&
-      db.roles.grantedPermissionNames([existing]).includes("admin")
-    ) {
-      await refuseAdminForIntegrations(params.id, tx);
-    }
-    if (body.guestAssignable === true) {
+  const { role, revokedJtis, statusChanged } = await db.$transaction(
+    async (tx) => {
+      // Every decision below reads the role under its row lock, which every
+      // writer to the role takes: the read before the transaction may be
+      // stale. The admin guard's lock, when taken, comes first.
+      if (body.isActive === false) {
+        await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
+      }
       await db.roles.lockRoles([params.id], "update", tx);
-      assertGuestAssignable(
-        (await db.roles.get(params.id, tx)).rolePermissions.map(
-          (rp) => rp.permission
-        )
-      );
-    }
-    await db.roles.update(params.id, body, tx);
-    const updated = await db.roles.get(params.id, tx);
-    // Permissions are read live, so a holder's token from a password-only
-    // login would keep working; revoked, its refresh meets the step-up.
-    const gains2fa =
-      updated.isActive &&
-      updated.requires2fa &&
-      !(existing.isActive && existing.requires2fa);
-    // A guest is held only to guest-assignable roles assigned in an
-    // organization, so flagging one that requires 2FA is a gain for them too.
-    const guestsGain2fa =
-      updated.isActive &&
-      updated.requires2fa &&
-      updated.guestAssignable &&
-      !(existing.isActive && existing.requires2fa && existing.guestAssignable);
-    const revokedJtis = [
-      ...(gains2fa
-        ? await db.accessTokens.revokeWithoutMfa(
-            { userRoles: { some: { roleId: params.id } } },
-            tx
-          )
-        : []),
-      ...(guestsGain2fa
-        ? await db.accessTokens.revokeWithoutMfa(
-            {
-              userType: "guest",
-              userRoles: {
-                some: { roleId: params.id, organizationId: { not: null } },
+      const current = await db.roles.getAny(params.id, tx);
+      // Archived while this waited, answered as guardArchived would have.
+      if (current.archivedAt) throw new ArchivedError();
+      refuseProvisioned(current);
+      const granted = db.roles.grantedPermissionNames([current]);
+      const deactivated = body.isActive === false && current.isActive;
+      const reactivated = body.isActive === true && !current.isActive;
+      if (deactivated) {
+        assertCanTakeAway(await globalGrantablePermissions(auth, tx), granted);
+      }
+      // The 2FA policy guards everything the role grants: only a caller
+      // holding all of it may change it (`admin` for core's admin role).
+      // Reactivating hands the role's permissions back to everyone holding
+      // it, the caller included: the same as granting them.
+      if (
+        reactivated ||
+        (body.requires2fa !== undefined &&
+          body.requires2fa !== current.requires2fa)
+      ) {
+        assertCanGrant(await globalGrantablePermissions(auth, tx), granted);
+      }
+      if (reactivated && granted.includes("admin")) {
+        await refuseAdminForIntegrations(params.id, tx);
+      }
+      if (body.guestAssignable === true) {
+        assertGuestAssignable(
+          current.rolePermissions.map((rp) => rp.permission)
+        );
+      }
+      await db.roles.update(params.id, body, tx);
+      const updated = await db.roles.get(params.id, tx);
+      // Permissions are read live, so a holder's token from a password-only
+      // login would keep working; revoked, its refresh meets the step-up.
+      const gains2fa =
+        updated.isActive &&
+        updated.requires2fa &&
+        !(current.isActive && current.requires2fa);
+      // A guest is held only to guest-assignable roles assigned in an
+      // organization, so flagging one that requires 2FA is a gain for them too.
+      const guestsGain2fa =
+        updated.isActive &&
+        updated.requires2fa &&
+        updated.guestAssignable &&
+        !(current.isActive && current.requires2fa && current.guestAssignable);
+      const revokedJtis = [
+        ...(gains2fa
+          ? await db.accessTokens.revokeWithoutMfa(
+              db.roles.holdsRoleWhere({ id: params.id }),
+              tx
+            )
+          : []),
+        ...(guestsGain2fa
+          ? await db.accessTokens.revokeWithoutMfa(
+              {
+                userType: "guest",
+                userRoles: {
+                  some: { roleId: params.id, organizationId: { not: null } },
+                },
               },
-            },
-            tx
-          )
-        : []),
-      ...(body.isActive === false && existing.isActive
-        ? await revokeClientTokensTx(
-            await db.roles.getUserIdsByRoleId(params.id, tx),
-            tx
-          )
-        : []),
-    ];
-    await logAuditTx(tx, {
-      auth,
-      action: "UPDATE",
-      entityType: "Role",
-      entityId: updated.id,
-      entityName: updated.name,
-      changes: computeChanges(existing, updated),
-      ...(revokedJtis.length > 0 && {
-        metadata: { accessTokensRevoked: revokedJtis.length },
-      }),
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.role.updated",
-      entityType: "Role",
-      entityId: updated.id,
-      data: formatRole(updated) as Record<string, unknown>,
-    });
-    if (updated.guestAssignable !== existing.guestAssignable) {
-      await emitTx(tx, {
-        organizationId: getDefaultOrganizationId(),
-        eventType: "auth.role.guest-assignable-changed",
+              tx
+            )
+          : []),
+        ...(deactivated
+          ? await revokeClientTokensTx(
+              await db.roles.getUserIdsByRoleId(params.id, tx),
+              tx
+            )
+          : []),
+      ];
+      await logAuditTx(tx, {
+        auth,
+        action: "UPDATE",
         entityType: "Role",
         entityId: updated.id,
-        data: {
-          id: updated.id,
-          name: updated.name,
-          guestAssignable: updated.guestAssignable,
-        },
+        entityName: updated.name,
+        changes: computeChanges(current, updated),
+        ...(revokedJtis.length > 0 && {
+          metadata: { accessTokensRevoked: revokedJtis.length },
+        }),
       });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.role.updated",
+        entityType: "Role",
+        entityId: updated.id,
+        data: formatRole(updated) as Record<string, unknown>,
+      });
+      if (updated.guestAssignable !== current.guestAssignable) {
+        await emitTx(tx, {
+          organizationId: getDefaultOrganizationId(),
+          eventType: "auth.role.guest-assignable-changed",
+          entityType: "Role",
+          entityId: updated.id,
+          data: {
+            id: updated.id,
+            name: updated.name,
+            guestAssignable: updated.guestAssignable,
+          },
+        });
+      }
+      return {
+        role: updated,
+        revokedJtis,
+        statusChanged: deactivated || reactivated,
+      };
     }
-    return { role: updated, revokedJtis };
-  });
+  );
 
   disconnectTokenSockets(revokedJtis);
 
-  if (body.isActive !== undefined && body.isActive !== existing.isActive) {
+  if (statusChanged) {
     await notifyRoleStatusChanged(params.id);
   }
 
@@ -372,10 +372,14 @@ export const deleteRole = async (req: Request, res: Response) => {
   );
 
   const { affectedUserIds, revokedJtis } = await db.$transaction(async (tx) => {
-    await assertAdminRemains((a) => a.roleId !== params.id, tx);
-    // Read before the delete: assignments cascade away with the row.
+    await lockGroupsHoldingRole(params.id, tx);
+    await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
+    await db.roles.lockRoles([params.id], "update", tx);
+    // Read before the delete: assignments and group holds cascade away with
+    // the row.
     const affectedUserIds = await db.roles.getUserIdsByRoleId(params.id, tx);
     const revokedJtis = await revokeClientTokensTx(affectedUserIds, tx);
+    await recordRoleDeletedFromGroupsTx(tx, auth, params.id);
     await db.roles.remove(params.id, tx);
     await logAuditTx(tx, {
       auth,
@@ -452,12 +456,6 @@ export const setRolePermissions = async (req: Request, res: Response) => {
   }
 
   const { role, revokedJtis } = await db.$transaction(async (tx) => {
-    await assertOrgAssignableWhileAssignedInOrg(
-      tx,
-      params.id,
-      existing.rolePermissions.map((rp) => rp.permissionId),
-      body.permissionIds
-    );
     const keepsAdmin = await tx.permission.count({
       where: { id: { in: body.permissionIds }, name: "admin", retiredAt: null },
     });
@@ -465,11 +463,19 @@ export const setRolePermissions = async (req: Request, res: Response) => {
     // updateRole, deleteRole and setUserRoles; the opposite order deadlocks
     // against a user-role insert, whose foreign key share-locks the role.
     if (!keepsAdmin) {
-      await assertAdminRemains((a) => a.roleId !== params.id, tx);
+      await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
     }
     // PATCH guestAssignable checks under this same lock, so one of the two
     // sees the other's result; the flag is read after taking it.
     await db.roles.lockRoles([params.id], "update", tx);
+    // Under the row lock, which restoring a group holding the role shares:
+    // one of the two sees the other's result.
+    await assertOrgAssignableWhileAssignedInOrg(
+      tx,
+      params.id,
+      existing.rolePermissions.map((rp) => rp.permissionId),
+      body.permissionIds
+    );
     if ((await db.roles.get(params.id, tx)).guestAssignable) {
       const next = await tx.permission.findMany({
         where: { id: { in: body.permissionIds } },
@@ -526,10 +532,11 @@ export const setRolePermissions = async (req: Request, res: Response) => {
 const ORG_LIST_LIMIT = 10;
 
 /**
- * A role held within an organization may grant only org-assignable
- * permissions, so one that is may not gain any other: the assignment would
- * silently hold a permission that grants nothing there. Remove the org-scoped
- * assignments, or use another role, first.
+ * A role held within an organization (assigned there, or held by one of its
+ * groups) may grant only org-assignable permissions, so one that is may not
+ * gain any other: the assignment would silently hold a permission that grants
+ * nothing there. Remove the org-scoped assignments and take the role from the
+ * org groups, or use another role, first.
  */
 const assertOrgAssignableWhileAssignedInOrg = async (
   tx: Prisma.TransactionClient,
@@ -546,15 +553,13 @@ const assertOrgAssignableWhileAssignedInOrg = async (
     orderBy: { name: "asc" },
   });
   if (notAssignable.length === 0) return;
-  const orgs = await tx.userRole.findMany({
-    where: { roleId, organizationId: { not: null } },
-    distinct: ["organizationId"],
-    select: { organizationId: true },
-    orderBy: { organizationId: "asc" },
-    take: ORG_LIST_LIMIT + 1,
-  });
+  const orgs = await db.roles.getOrgIdsHoldingRole(
+    roleId,
+    ORG_LIST_LIMIT + 1,
+    tx
+  );
   if (orgs.length === 0) return;
-  const named = orgs.slice(0, ORG_LIST_LIMIT).map((o) => o.organizationId);
+  const named = orgs.slice(0, ORG_LIST_LIMIT);
   const more = orgs.length > ORG_LIST_LIMIT ? ", and more" : "";
   throw new ConflictError(
     `This role is assigned within organizations (${named.join(", ")}${more}), where it may grant only org-assignable permissions; not org-assignable: ${notAssignable.map((p) => p.name).join(", ")}`,

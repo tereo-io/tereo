@@ -100,6 +100,14 @@ describe("/.well-known", () => {
         ).toBe(true);
       });
 
+      it("lists the groups claim", async () => {
+        const response = await fetch(
+          `${BASE_URL}/.well-known/openid-configuration`
+        );
+        const config = (await response.json()) as OIDCConfig;
+        expect(config.claims_supported).toContain("groups");
+      });
+
       it("should include supported response types including 'code'", async () => {
         const response = await fetch(
           `${BASE_URL}/.well-known/openid-configuration`

@@ -1,12 +1,17 @@
 // @module-tag int
 // @module-tag auth
 // @module-tag race
+import { holdLocks, waitForLockWait } from "../../../../../support/dbLocks.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
-import { createTestRole } from "../../../../../support/auth/users.js";
-import { waitForLockWait } from "../../../../../support/dbLocks.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
+import { passwordOnlyToken } from "../../../../../support/groups.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import {
+  createTestRole,
+  createTestUser,
+} from "../../../../../support/auth/users.js";
 
 const call = (method: string, path: string, token: string, body?: unknown) =>
   fetch(`${BASE_URL}${path}`, {
@@ -52,7 +57,7 @@ const whileLocked = async (
   );
   await isLocked;
   const pending = request();
-  await waitForLockWait(`%UPDATE%"auth"."${table}"%`);
+  await waitForLockWait(`%"auth"."${table}"%`);
   release();
   await holder;
   return await pending;
@@ -109,6 +114,132 @@ describe("PATCH /v1/admin/roles/:id and POST /v1/admin/roles/:id/archive", () =>
     expect(row.archivedAt).toBeNull();
     expect(row.isActive).toBe(true);
     expect(res.status).toBe(409);
+  });
+});
+
+describe("PATCH /v1/admin/roles/:id deactivating", () => {
+  it("runs the admin guard though the role read inactive before a reactivation committed", async () => {
+    // The guard decides whether the role still counts under its lock; the
+    // read before the transaction may predate the reactivation.
+    const role = await createTestRole();
+    await prisma.role.update({
+      where: { id: role.id },
+      data: { isActive: false },
+    });
+    const release = await holdLocks(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('core:admin-remains', 0))`;
+      await tx.role.update({
+        where: { id: role.id },
+        data: { isActive: true },
+      });
+    });
+    const pending = call("PATCH", `/v1/admin/roles/${role.id}`, adminToken, {
+      isActive: false,
+    });
+    try {
+      await waitForLockWait("%core:admin-remains%", 5_000);
+    } finally {
+      await release();
+    }
+    expect((await pending).status).toBe(200);
+    const row = await prisma.role.findUniqueOrThrow({ where: { id: role.id } });
+    expect(row.isActive).toBe(false);
+  });
+});
+
+describe("PATCH /v1/admin/roles/:id deactivating a role reactivated meanwhile", () => {
+  it("revokes its service clients' tokens, read as active under the row lock", async () => {
+    const client = await createTestClient({
+      clientType: "confidential",
+      grantTypes: ["client_credentials"],
+    });
+    const account = await prisma.user.findFirstOrThrow({
+      where: { oauthClientId: client.id },
+    });
+    const role = await createTestRole();
+    await prisma.role.update({
+      where: { id: role.id },
+      data: { isActive: false },
+    });
+    await prisma.userRole.create({
+      data: { userId: account.id, roleId: role.id },
+    });
+    const token = await prisma.accessToken.create({
+      data: {
+        jti: crypto.randomUUID(),
+        clientId: client.id,
+        userId: account.id,
+        scopes: [],
+        expiresAt: new Date(Date.now() + 3600_000),
+      },
+    });
+
+    const release = await holdLocks(async (tx) => {
+      await tx.$queryRaw`SELECT 1 FROM "auth"."roles" WHERE id = ${role.id}::uuid FOR UPDATE`;
+      await tx.role.update({
+        where: { id: role.id },
+        data: { isActive: true },
+      });
+    });
+    const pending = call("PATCH", `/v1/admin/roles/${role.id}`, adminToken, {
+      isActive: false,
+    });
+    try {
+      await waitForLockWait(`%"auth"."roles"%`);
+    } finally {
+      await release();
+    }
+    expect((await pending).status).toBe(200);
+    const row = await prisma.accessToken.findUniqueOrThrow({
+      where: { id: token.id },
+    });
+    expect(row.revokedAt).not.toBeNull();
+  });
+});
+
+describe("PATCH /v1/admin/roles/:id requiring 2FA after it was dropped meanwhile", () => {
+  it("revokes holders' password-only tokens and audits the change, read under the row lock", async () => {
+    const role = await createTestRole();
+    await prisma.role.update({
+      where: { id: role.id },
+      data: { requires2fa: true },
+    });
+    const holder = await createTestUser();
+    await prisma.userRole.create({
+      data: { userId: holder.id, roleId: role.id },
+    });
+
+    // Read before the PATCH's transaction, the role still requires 2FA; a
+    // token from a password-only login made while it did not.
+    let jti!: string;
+    const release = await holdLocks(async (tx) => {
+      await tx.$queryRaw`SELECT 1 FROM "auth"."roles" WHERE id = ${role.id}::uuid FOR UPDATE`;
+      await tx.role.update({
+        where: { id: role.id },
+        data: { requires2fa: false },
+      });
+      jti = await passwordOnlyToken(holder.id);
+    });
+    const pending = call("PATCH", `/v1/admin/roles/${role.id}`, adminToken, {
+      requires2fa: true,
+    });
+    try {
+      await waitForLockWait(`%"auth"."roles"%`);
+    } finally {
+      await release();
+    }
+    expect((await pending).status).toBe(200);
+    const token = await prisma.accessToken.findUniqueOrThrow({
+      where: { jti },
+    });
+    expect(token.revokedAt).not.toBeNull();
+    const entry = await prisma.auditLogEntry.findFirstOrThrow({
+      where: { entityType: "Role", entityId: role.id, action: "UPDATE" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    expect(entry.changes).toMatchObject({
+      requires2fa: { old: false, new: true },
+    });
   });
 });
 

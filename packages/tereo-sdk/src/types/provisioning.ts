@@ -155,6 +155,29 @@ export interface IntegrationProvisioning {
   audiences?: string[];
 }
 
+/**
+ * A group the deploy declares: its roles reach every member, whom admins add
+ * and remove. Members are never declared. Dropped, it is archived after the
+ * grace period, members kept; declared again, it is restored.
+ */
+export interface GroupProvisioning {
+  /** 1–100 lowercase letters, digits or hyphens; unique per organization, or globally. */
+  slug: string;
+  /** 1–255 characters. */
+  name: string;
+  /** Up to 500 characters. */
+  description?: string;
+  /** An existing, unarchived organization; absent, the group is global. Fixed once created. */
+  organizationId?: string;
+  /**
+   * Role names: a custom role of the set, else core's role; `<slug>/<name>`
+   * a service's system role. An organization's group holds only
+   * org-assignable custom roles of the set; no group a role carrying
+   * `admin`. Default [].
+   */
+  roles?: string[];
+}
+
 /** A colour or shadow custom property of `@kosmeo-ui/react` a branding profile may set. */
 export type BrandingColorVariable =
   | "--k-background-color"
@@ -258,7 +281,7 @@ export interface BrandingProvisioning {
 
 /**
  * One file; it needs at least one of `service`, `clients`, `roles`,
- * `integrations`, `guests`, `branding`, not empty.
+ * `integrations`, `groups`, `guests`, `branding`, not empty.
  */
 export interface ProvisioningDocument {
   $schema?: string;
@@ -268,6 +291,7 @@ export interface ProvisioningDocument {
   clients?: LoginClientProvisioning[];
   roles?: CustomRole[];
   integrations?: IntegrationProvisioning[];
+  groups?: GroupProvisioning[];
   /** Guest defaults: custom, guest-assignable roles a guest gets when the invite names none. */
   guests?: { defaultRoles: string[] };
   branding?: BrandingProvisioning;

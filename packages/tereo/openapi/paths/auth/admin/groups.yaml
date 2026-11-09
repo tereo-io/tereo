@@ -1,0 +1,845 @@
+/admin/groups:
+  get:
+    tags:
+      - Admin - Groups
+    summary: List groups
+    description: |
+      Returns a page of groups, ordered by id, with each group's member count.
+
+      **Filters:**
+      - `organizationId`: an organization's id for its groups, or `global` for groups with none
+      - `definitionSource`: `local` (made through this API) or `provisioned` (declared in provisioning documents)
+      - `includeArchived`: `true` to list archived groups too; archived groups are left out by default
+      - `q`: case-insensitive match on slug or name
+
+      **Authorization:** `groups.read`. Without it, the caller must name one organization in
+      `organizationId` and be an `admin` or `owner` of it (`organizations.write` also passes, as
+      on the organization routes), and sees only its groups; an inactive organization's groups
+      stay readable this way. Every refusal is the same `403`, naming `groups.read`, whatever
+      the organization or the caller's place in it.
+    operationId: getAdminGroups
+    security:
+      - BearerAuth: [groups.read]
+    parameters:
+      - name: organizationId
+        in: query
+        required: false
+        description: An organization's id (UUID), or `global`
+        schema:
+          type: string
+      - name: definitionSource
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [local, provisioned]
+      - name: includeArchived
+        in: query
+        required: false
+        description: '`true` lists archived groups along with the others; default `false`'
+        schema:
+          type: string
+          enum: ['true', 'false']
+          default: 'false'
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 255
+      - $ref: '../../../components/auth/parameters.yaml#/GroupsLimitParam'
+      - $ref: '../../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: 'A page of groups'
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ListGroupsResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: 'Invalid query, or a cursor from another list (`invalid_cursor`)'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'Neither `groups.read`, nor `admin`/`owner` of the organization named, nor `organizations.write`'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Admin - Groups
+    summary: Create group
+    description: |
+      Creates a group: global without `organizationId`, or an organization's group with it.
+      Groups made here are `local`; provisioned groups come only from provisioning documents.
+      `roleIds` sets its first roles, checked as `PUT /v1/admin/groups/{id}/roles` checks them.
+
+      The slug is unique among the scope's groups, archived ones included (`409 group_slug_taken`).
+
+      A body key not listed is refused (`400`).
+
+      **Authorization:** `groups.write`. Without it, an `admin` or `owner` of the organization
+      named in `organizationId` may create a group in it (`organizations.write` also passes, as
+      on the organization routes), unless the organization is inactive: there only
+      `groups.write` or `organizations.write` passes. A global group needs `groups.write`. Every
+      refusal of a caller without `groups.write` is the same `403`, naming `groups.write`.
+
+      An audit log entry is created for this action.
+      An `auth.group.created` webhook event is emitted, and with `roleIds` an `auth.group.roles-changed`.
+    operationId: postAdminGroups
+    security:
+      - BearerAuth: [groups.write]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/CreateGroupRequest'
+    responses:
+      '201':
+        description: 'Group created'
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Group'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: 'Invalid body; `unknown_role` (a role missing, archived or retired), `role_not_org_assignable` (an organization''s group with a role carrying permissions that cannot be granted within an organization), or `unknown_organization` (missing or archived)'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the scope; a role whose permissions the caller cannot grant; or a system role on an organization''s group (organizations'' groups hold only custom roles)'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/GroupConflictResponse'
+        description: '`group_slug_taken`'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/groups/{id}:
+  get:
+    tags:
+      - Admin - Groups
+    summary: Get group
+    description: |
+      Returns the group, archived or not, with its member count.
+
+      **Authorization:** `groups.read`, or, for an organization's group, being an
+      `admin` or `owner` of that organization (`organizations.write` also passes, as on
+      the organization routes). A global group needs `groups.read`. A caller without
+      `groups.read` gets `403` for a missing group as for one they cannot reach.
+      An `admin` or `owner` of an inactive organization may still read its groups, but not of an archived one.
+    operationId: getAdminGroup
+    security:
+      - BearerAuth: [groups.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/GroupIdParam'
+    responses:
+      '200':
+        description: 'The group'
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Group'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the group (to a caller without the route''s `groups.*` permission, the same `403` as for a missing group)'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  patch:
+    tags:
+      - Admin - Groups
+    summary: Update group
+    description: |
+      Changes the group's slug, name or description (at least one). A provisioned group is
+      changed only through its provisioning documents (`409 managed_by_provisioning`), and an
+      archived group must be restored first (`409 resource_archived`).
+
+      **Authorization:** `groups.write`, or, for an organization's group, being an
+      `admin` or `owner` of that organization (`organizations.write` also passes, as on
+      the organization routes). A global group needs `groups.write`. A caller without
+      `groups.write` gets `403` for a missing group as for one they cannot reach.
+      On an inactive organization the org role is not enough: an `admin` or `owner`
+      gets `403`, and only `groups.write` or `organizations.write` passes.
+
+      An audit log entry is created for this action (none when nothing changes).
+      An `auth.group.updated` webhook event is emitted.
+    operationId: patchAdminGroup
+    security:
+      - BearerAuth: [groups.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/GroupIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/UpdateGroupRequest'
+    responses:
+      '200':
+        description: 'The updated group'
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Group'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the group (to a caller without the route''s `groups.*` permission, the same `403` as for a missing group)'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/GroupConflictResponse'
+        description: '`group_slug_taken`, `managed_by_provisioning` or `resource_archived`'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/groups/{id}/archive:
+  post:
+    tags:
+      - Admin - Groups
+    summary: Archive group
+    description: |
+      Archives the group. Its members keep their membership but lose every role it gives; its
+      slug stays taken. The caller must hold every permission the group's roles grant, since
+      archiving takes them from every member at once. Archiving a global group that holds the
+      last live administrator's role is refused. A provisioned group is archived only by
+      provisioning (`409 managed_by_provisioning`).
+
+      **Authorization:** `groups.archive`, or, for an organization's group, being an
+      `admin` or `owner` of that organization (`organizations.write` also passes, as on
+      the organization routes). A global group needs `groups.archive`. A caller without
+      `groups.archive` gets `403` for a missing group as for one they cannot reach.
+      On an inactive organization the org role is not enough: an `admin` or `owner`
+      gets `403`, and only `groups.archive` or `organizations.write` passes.
+
+      An audit log entry is created for this action.
+      An `auth.group.archived` webhook event is emitted.
+    operationId: postAdminGroupArchive
+    security:
+      - BearerAuth: [groups.archive]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/GroupIdParam'
+    responses:
+      '200':
+        description: 'The archived group'
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Group'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), or the grant check refuses'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/GroupConflictResponse'
+        description: '`already_archived`, `managed_by_provisioning`, or the last administrator would lose admin'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/groups/{id}/restore:
+  post:
+    tags:
+      - Admin - Groups
+    summary: Restore group
+    description: |
+      Restores an archived group, giving its members its roles again. The caller must be able to
+      grant every permission of every role the group holds — inactive and archived roles
+      included, since one may come back. An organization's group whose roles now carry a
+      permission that cannot be granted within an organization is refused
+      (`400 role_not_org_assignable`); change its roles first. Access tokens of members from a
+      password-only sign-in are revoked when a restored role requires two-factor authentication.
+
+      **Authorization:** `groups.archive`, or, for an organization's group, being an
+      `admin` or `owner` of that organization (`organizations.write` also passes, as on
+      the organization routes). A global group needs `groups.archive`. A caller without
+      `groups.archive` gets `403` for a missing group as for one they cannot reach.
+      On an inactive organization the org role is not enough: an `admin` or `owner`
+      gets `403`, and only `groups.archive` or `organizations.write` passes.
+
+      An audit log entry is created for this action.
+      An `auth.group.restored` webhook event is emitted.
+    operationId: postAdminGroupRestore
+    security:
+      - BearerAuth: [groups.archive]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/GroupIdParam'
+    responses:
+      '200':
+        description: 'The restored group'
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/Group'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: 'Invalid id, or `role_not_org_assignable` (an organization''s group holding a role that cannot be granted within an organization)'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), or the grant check refuses'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/GroupConflictResponse'
+        description: '`not_archived` or `managed_by_provisioning`'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/groups/{id}/members:
+  get:
+    tags:
+      - Admin - Groups
+    summary: List group members
+    description: |
+      Returns a page of the group's members, in the order they were added.
+
+      **Authorization:** `groups.read`, or, for an organization's group, being an
+      `admin` or `owner` of that organization (`organizations.write` also passes, as on
+      the organization routes). A global group needs `groups.read`. A caller without
+      `groups.read` gets `403` for a missing group as for one they cannot reach.
+      An `admin` or `owner` of an inactive organization may still read its groups, but not of an archived one.
+    operationId: getAdminGroupMembers
+    security:
+      - BearerAuth: [groups.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/GroupIdParam'
+      - $ref: '../../../components/auth/parameters.yaml#/GroupsLimitParam'
+      - $ref: '../../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: 'A page of members'
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ListGroupMembersResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the group (to a caller without the route''s `groups.*` permission, the same `403` as for a missing group)'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  post:
+    tags:
+      - Admin - Groups
+    summary: Add group members
+    description: |
+      Adds up to 500 users; those already members are skipped, and `added` lists the rest.
+      Members of a provisioned group are managed here too.
+
+      For an organization's group, each user must first be a member of that organization: any
+      other id, unknown ids included, gets `409 not_org_member`, so ids outside the organization
+      cannot be probed. Each user must be a regular user (`400 unknown_user`, `409
+      guest_not_allowed`, `service_account_not_allowed`, `system_user_not_allowed`). The caller must be able to grant every permission of every role
+      the group holds — inactive and archived roles included, since one may come back. An
+      organization `admin` (not `owner`) may not add one of the organization's owners. Access
+      tokens of new members from a password-only sign-in are revoked when a group role requires
+      two-factor authentication.
+
+      **Authorization:** `groups.write`, or, for an organization's group, being an
+      `admin` or `owner` of that organization (`organizations.write` also passes, as on
+      the organization routes). A global group needs `groups.write`. A caller without
+      `groups.write` gets `403` for a missing group as for one they cannot reach.
+      On an inactive organization the org role is not enough: an `admin` or `owner`
+      gets `403`, and only `groups.write` or `organizations.write` passes.
+
+      An audit log entry is created for this action when anyone is added.
+      `auth.group.members-added` webhook events are emitted, up to 1,000 user ids each.
+    operationId: postAdminGroupMembers
+    security:
+      - BearerAuth: [groups.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/GroupIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/AddGroupMembersRequest'
+    responses:
+      '200':
+        description: 'The users added'
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/AddGroupMembersResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: 'Invalid body, or `unknown_user` (a global group; an organization''s group answers `409 not_org_member`)'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group); the grant check refuses; or an organization admin adding an owner'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/GroupConflictResponse'
+        description: '`not_org_member` (an organization''s group, for any id outside the organization), `guest_not_allowed`, `service_account_not_allowed`, `system_user_not_allowed`, or `resource_archived` (restore the group first)'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/groups/{id}/members/{userId}:
+  delete:
+    tags:
+      - Admin - Groups
+    summary: Remove group member
+    description: |
+      Removes one member, from an archived group too. The same checks as taking roles from the
+      user directly apply, and removing the last live administrator's only way to admin is
+      refused (`409`). An organization `admin` (not `owner`) may not remove one of the
+      organization's owners.
+
+      **Authorization:** `groups.write`, or, for an organization's group, being an
+      `admin` or `owner` of that organization (`organizations.write` also passes, as on
+      the organization routes). A global group needs `groups.write`. A caller without
+      `groups.write` gets `403` for a missing group as for one they cannot reach.
+      On an inactive organization the org role is not enough: an `admin` or `owner`
+      gets `403`, and only `groups.write` or `organizations.write` passes.
+
+      An audit log entry is created for this action.
+      An `auth.group.members-removed` webhook event is emitted.
+    operationId: deleteAdminGroupMember
+    security:
+      - BearerAuth: [groups.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/GroupIdParam'
+      - $ref: '../../../components/auth/parameters.yaml#/GroupMemberUserIdParam'
+    responses:
+      '204':
+        $ref: '../../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group) or the user, or an organization admin removing an owner'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: 'Group not found (to a caller holding `groups.write`; anyone else gets `403`), or the user is not a member'
+      '409':
+        $ref: '../../../components/responses.yaml#/ConflictResponse'
+        description: 'The last administrator would lose admin'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/groups/{id}/roles:
+  get:
+    tags:
+      - Admin - Groups
+    summary: List group roles
+    description: |
+      Returns every role the group holds, whatever its state, by name.
+
+      **Authorization:** `groups.read`, or, for an organization's group, being an
+      `admin` or `owner` of that organization (`organizations.write` also passes, as on
+      the organization routes). A global group needs `groups.read`. A caller without
+      `groups.read` gets `403` for a missing group as for one they cannot reach.
+      An `admin` or `owner` of an inactive organization may still read its groups, but not of an archived one.
+    operationId: getAdminGroupRoles
+    security:
+      - BearerAuth: [groups.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/GroupIdParam'
+    responses:
+      '200':
+        description: 'The group''s roles'
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ListGroupRolesResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the group (to a caller without the route''s `groups.*` permission, the same `403` as for a missing group)'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+  put:
+    tags:
+      - Admin - Groups
+    summary: Set group roles
+    description: |
+      Makes the group's roles exactly `roleIds` (up to 100). The caller must be able to grant
+      every permission of each role added and hold every permission of each role removed. An
+      organization's group holds only custom roles whose permissions can all be granted within
+      an organization. Removing the last live administrator's admin role from a global group is
+      refused. A provisioned group's roles come from its provisioning documents
+      (`409 managed_by_provisioning`); an archived group, including one archived while this
+      request waited for it, must be restored first (`409 resource_archived`). Access tokens
+      of members from a password-only sign-in are revoked when an added role requires
+      two-factor authentication.
+
+      **Authorization:** `groups.write`, or, for an organization's group, being an
+      `admin` or `owner` of that organization (`organizations.write` also passes, as on
+      the organization routes). A global group needs `groups.write`. A caller without
+      `groups.write` gets `403` for a missing group as for one they cannot reach.
+      On an inactive organization the org role is not enough: an `admin` or `owner`
+      gets `403`, and only `groups.write` or `organizations.write` passes.
+
+      An audit log entry is created for this action when the roles change.
+      An `auth.group.roles-changed` webhook event is emitted.
+    operationId: putAdminGroupRoles
+    security:
+      - BearerAuth: [groups.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/GroupIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/SetGroupRolesRequest'
+    responses:
+      '200':
+        description: 'The group''s roles and what changed'
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/SetGroupRolesResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+        description: 'Invalid body, `unknown_role` or `role_not_org_assignable`'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group); the grant check refuses; or a system role on an organization''s group'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/GroupConflictResponse'
+        description: '`managed_by_provisioning`, `resource_archived`, or the last administrator would lose admin'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+auth.group.created:
+  post:
+    tags: [Admin - Groups]
+    summary: Group created
+    description: 'Fired when a group is created, through the admin API or provisioning. Emitted under the group''s organization, or the default organization for a global group.'
+    operationId: webhookGroupCreated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.group.created
+                  entityType:
+                    const: Group
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/GroupEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+auth.group.updated:
+  post:
+    tags: [Admin - Groups]
+    summary: Group updated
+    description: 'Fired when a group''s slug, name or description changes, or provisioning marks it missing from (or back in) its documents. Emitted under the group''s organization, or the default organization for a global group.'
+    operationId: webhookGroupUpdated
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.group.updated
+                  entityType:
+                    const: Group
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/GroupEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+auth.group.archived:
+  post:
+    tags: [Admin - Groups]
+    summary: Group archived
+    description: 'Fired when a group is archived. Emitted under the group''s organization, or the default organization for a global group.'
+    operationId: webhookGroupArchived
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.group.archived
+                  entityType:
+                    const: Group
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/GroupEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+auth.group.restored:
+  post:
+    tags: [Admin - Groups]
+    summary: Group restored
+    description: 'Fired when a group is restored. Emitted under the group''s organization, or the default organization for a global group.'
+    operationId: webhookGroupRestored
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.group.restored
+                  entityType:
+                    const: Group
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/GroupEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+auth.group.members-added:
+  post:
+    tags: [Admin - Groups]
+    summary: Users added to a group
+    description: 'Fired when users join a group, up to 1,000 user ids per event. Emitted under the group''s organization, or the default organization for a global group.'
+    operationId: webhookGroupMembersAdded
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.group.members-added
+                  entityType:
+                    const: Group
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/GroupMembersEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+auth.group.members-removed:
+  post:
+    tags: [Admin - Groups]
+    summary: Users removed from a group
+    description: 'Fired when users leave a group — removed through the admin API, or removed from the group''s organization — up to 1,000 user ids per event. Emitted under the group''s organization, or the default organization for a global group.'
+    operationId: webhookGroupMembersRemoved
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.group.members-removed
+                  entityType:
+                    const: Group
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/GroupMembersEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.
+auth.group.roles-changed:
+  post:
+    tags: [Admin - Groups]
+    summary: Group roles changed
+    description: 'Fired when a group''s roles change. Emitted under the group''s organization, or the default organization for a global group.'
+    operationId: webhookGroupRolesChanged
+    security: []
+    parameters:
+      - $ref: '../../../components/parameters.yaml#/WebhookIdHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookEventHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookTimestampHeader'
+      - $ref: '../../../components/parameters.yaml#/WebhookSignatureHeader'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../../components/webhook-schemas.yaml#/OrganizationWebhookEvent'
+              - type: object
+                properties:
+                  eventType:
+                    const: auth.group.roles-changed
+                  entityType:
+                    const: Group
+                  data:
+                    $ref: '../../../components/auth/schemas.yaml#/GroupRolesEventData'
+    responses:
+      '2XX':
+        description: Any 2xx response acknowledges the delivery; anything else is retried.

@@ -36,7 +36,7 @@ export interface AuthServiceUser {
   emailVerifiedAt: string | null;
 }
 
-/** Role assignment shape returned by `GET /v1/admin/users/:id/roles`. */
+/** A role the user holds directly, as `GET /v1/admin/users/:id/roles` lists it. */
 export interface AuthServiceUserRole {
   /** Role ID. */
   id: string;
@@ -46,6 +46,41 @@ export interface AuthServiceUserRole {
   displayName: string;
   /** ISO-8601 timestamp, or null if the role assignment is permanent. */
   expiresAt: string | null;
+  /** How the user holds it: assigned to them. */
+  via: { kind: "direct" };
+}
+
+/** A role the user holds through a group. */
+export interface AuthServiceUserGroupRole {
+  id: string;
+  name: string;
+  displayName: string;
+  /** The group's organization; null for a global group. */
+  organizationId: string | null;
+  via: { kind: "group"; groupId: string };
+  group: { id: string; slug: string; name: string };
+}
+
+/**
+ * A role the user holds through an organization's group: it counts only
+ * within that organization, while the user is a member there.
+ */
+export interface AuthServiceUserOrgGroupRole extends AuthServiceUserGroupRole {
+  organizationId: string;
+  organization: { id: string; name: string };
+}
+
+/**
+ * Response of `GET` and `PUT /v1/admin/users/:id/roles`. `roles` are the
+ * direct assignments (the only ones `PUT` changes); `groupRoles` come from
+ * global groups and `orgGroupRoles` from organizations' groups. A role held
+ * both ways appears in both lists.
+ */
+export interface AuthServiceUserRolesResponse {
+  userId: string;
+  roles: AuthServiceUserRole[];
+  groupRoles: AuthServiceUserGroupRole[];
+  orgGroupRoles: AuthServiceUserOrgGroupRole[];
 }
 
 /** Response shape of `GET /v1/admin/users/:id/permissions`. */

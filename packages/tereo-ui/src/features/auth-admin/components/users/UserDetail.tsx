@@ -9,8 +9,10 @@ import { UserConnectedAccounts } from "./UserConnectedAccounts";
 import useUserSessions from "../../api/users/useUserSessions";
 import PromoteGuestButton from "./buttons/PromoteGuestButton";
 import { RateLimitField } from "@/components/RateLimitField";
+import { useGroupAccess } from "../groups/useGroupAuthority";
 import ManageRolesButton from "./buttons/ManageRolesButton";
 import ExtendGuestButton from "./buttons/ExtendGuestButton";
+import useUserGroups from "../../api/groups/useUserGroups";
 import useUpdateUser from "../../api/users/useUpdateUser";
 import useSettings from "../../api/settings/useSettings";
 import type { UserManager } from "../../api/users/types";
@@ -23,6 +25,7 @@ import { formatDateTime } from "@/utils/formatDate";
 import { Link, useParams } from "react-router-dom";
 import useUser from "../../api/users/useUser";
 import { useAuth } from "@/lib/auth";
+import "../groups/styles.css";
 import "./sessions.css";
 import {
   Alert,
@@ -71,6 +74,7 @@ export const UserDetail = () => {
   const canWrite = hasPermission("users.write");
   const canDelete = hasPermission("users.delete");
   const canWriteGuests = hasPermission("users.guests.write");
+  const { canRead: canReadGroup } = useGroupAccess();
 
   const canReadSettings = hasPermission("settings.read");
 
@@ -78,6 +82,7 @@ export const UserDetail = () => {
   const { data: settings } = useSettings({ enabled: canReadSettings });
   const updateUser = useUpdateUser();
   const { data: rolesData } = useUserRoles(id);
+  const { data: groups } = useUserGroups(id);
   const { data: permissionsData } = useUserPermissions(id);
   const { data: sessionsData } = useUserSessions(id);
   const { data: totpStatus } = useUserTotpStatus(id);
@@ -350,11 +355,68 @@ export const UserDetail = () => {
           {user.userType === "human" && !user.managedBy && (
             <UserConnectedAccounts userId={id} email={user.email} />
           )}
-          <TagCard
-            title="Roles"
-            emptyText="No roles assigned"
-            tags={rolesData?.roles.map((r) => r.displayName) || []}
-          />
+          <Card>
+            <SectionHeader title="Roles" />
+            {rolesData?.roles.length ||
+            rolesData?.groupRoles?.length ||
+            rolesData?.orgGroupRoles?.length ? (
+              <div className="t-role-chips">
+                {rolesData?.roles.map((r) => (
+                  <Badge key={`direct-${r.id}`} variant="primary">
+                    {r.displayName} <span className="t-role-via">direct</span>
+                  </Badge>
+                ))}
+                {rolesData?.groupRoles?.map((r) => (
+                  <Badge key={`${r.group.id}-${r.id}`} variant="secondary">
+                    {r.displayName}{" "}
+                    <span className="t-role-via">via {r.group.name}</span>
+                  </Badge>
+                ))}
+                {rolesData?.orgGroupRoles?.map((r) => (
+                  <Badge key={`${r.group.id}-${r.id}`} variant="secondary">
+                    {r.displayName}{" "}
+                    <span className="t-role-via">
+                      via {r.group.name}, in {r.organization.name} only
+                    </span>
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <EmptyState>No roles assigned</EmptyState>
+            )}
+          </Card>
+          <Card>
+            <SectionHeader title="Groups" />
+            {groups?.length ? (
+              <div className="t-role-chips">
+                {groups.map((g) => (
+                  <Badge key={g.id} variant="secondary">
+                    {canReadGroup(g) ? (
+                      <Link
+                        to={`/auth-admin/groups/${g.id}`}
+                        className="v-link"
+                      >
+                        {g.name}
+                      </Link>
+                    ) : (
+                      g.name
+                    )}
+                    {g.organization && (
+                      <span className="t-role-via">
+                        {" "}
+                        ({g.organization.name})
+                      </span>
+                    )}
+                    {g.archivedAt && (
+                      <span className="t-role-via"> archived</span>
+                    )}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <EmptyState>Not in any group</EmptyState>
+            )}
+          </Card>
           <TagCard
             title="Permissions"
             emptyText="No permissions"

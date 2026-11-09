@@ -259,15 +259,63 @@
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
         $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/users/{id}/groups:
+  get:
+    tags:
+      - Admin - Groups
+    summary: Get user groups
+    description: |
+      Returns every group the user belongs to, global and in any organization,
+      ordered by id, each with its organization's id and name (`organization`,
+      null for a global group). Archived groups are left out unless `includeArchived=true`.
+    operationId: getAdminUserGroups
+    security:
+      - BearerAuth: [users.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+      - $ref: '../../../components/parameters.yaml#/IncludeArchivedParam'
+    responses:
+      '200':
+        description: The user's groups
+        headers:
+          X-RateLimit-Limit:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'
+          X-RateLimit-Remaining:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Remaining'
+          X-RateLimit-Reset:
+            $ref: '../../../components/headers.yaml#/X-RateLimit-Reset'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/UserGroupsResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: Forbidden - missing users.read permission
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
 /admin/users/{id}/roles:
   get:
     tags:
       - Admin - User Permissions
     summary: Get user roles
     description: |
-      Returns the user's global role assignments. Organization-scoped
-      assignments are listed per organization, under
-      `GET /v1/admin/organizations/{id}/members/{userId}/roles`.
+      Returns the user's global roles: `roles` lists the direct assignments,
+      whatever the role's state (what `PUT` replaces), and `groupRoles` each
+      live role held through a live global group, once per role and group. A
+      role held both ways appears in each list. `orgGroupRoles` lists the roles
+      held through organizations' groups, each with its organization; they
+      count only within that organization, while the user is a member there.
+      Direct organization-scoped assignments are listed per organization, under
+      `GET /v1/admin/organizations/{id}/members/{userId}/roles`; the user's
+      groups under `GET /v1/admin/users/{id}/groups`.
     operationId: getAdminUserRoles
     security:
       - BearerAuth: [users.read]
@@ -310,7 +358,9 @@
       are ignored) and returns them. Organization-scoped assignments (made
       under `/v1/admin/organizations/{id}/members/{userId}/roles`) are kept. A
       role the user already holds keeps its assignment, `expiresAt`
-      included; only roles left out are removed.
+      included; only roles left out are removed. Roles held through a group
+      are not assignments here: they are listed under `groupRoles` and stay
+      whatever `roleIds` says.
 
       Refused for the system user (`400 system_user`) and for a service's
       service-account user (`403` — a service's roles are approved under

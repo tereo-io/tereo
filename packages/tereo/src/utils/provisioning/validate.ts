@@ -1,8 +1,10 @@
 import { ROLES, isRequestableCoreRole } from "../../definitions/roles.js";
 import { isCorePermission } from "../../definitions/guests.js";
 import { guestAssignableProblems } from "../guestRoles.js";
+import { checkGroups, groupScopeKey } from "./groups.js";
 import { hasPermission } from "../permissions.js";
 import { checkBrandingSet } from "./branding.js";
+import { roleTargetProblems } from "./roles.js";
 import {
   CORE_DECLARATION,
   CORE_RESERVED_NAMESPACES,
@@ -134,6 +136,13 @@ const checkSetUniqueness = (
     "custom role",
     set.documents.flatMap((d) =>
       d.roles.map((r) => ({ value: r.name, file: d.file }))
+    ),
+    problems
+  );
+  checkUnique(
+    "group",
+    set.documents.flatMap((d) =>
+      (d.groups ?? []).map((g) => ({ value: groupScopeKey(g), file: d.file }))
     ),
     problems
   );
@@ -422,55 +431,19 @@ const checkIntegration = (
   if (CORE_RESERVED_SLUGS.includes(integration.slug))
     problems.push(`${label}: slug "${integration.slug}" is reserved for core`);
 
-  const customRoles = new Map(
-    set.documents.flatMap((d) => d.roles.map((r) => [r.name, r] as const))
+  problems.push(
+    ...roleTargetProblems({
+      label,
+      roles: integration.roles,
+      organizationId: integration.organizationId,
+      customRoles: new Map(
+        set.documents.flatMap((d) => d.roles.map((r) => [r.name, r] as const))
+      ),
+      services,
+      holders: "integrations",
+      orgHolder: "an org-bound integration",
+    })
   );
-  const isSystemRole = (target: string) => {
-    const { slug, name } = splitRoleTarget(target);
-    return slug === null
-      ? CORE_ROLE_NAMES.has(name)
-      : !!services
-          .find((s) => s.service.slug === slug)
-          ?.service.systemRoles.some((r) => r.name === name);
-  };
-  const permissionsOf = (target: string): string[] => {
-    const { slug, name } = splitRoleTarget(target);
-    if (slug === null)
-      return (
-        customRoles.get(name)?.permissions ??
-        ROLES.find((r) => r.name === name)?.permissions ??
-        []
-      );
-    return (
-      services
-        .find((s) => s.service.slug === slug)
-        ?.service.systemRoles.find((r) => r.name === name)?.permissions ?? []
-    );
-  };
-  for (const role of integration.roles) {
-    const where = `${label}: roles "${role}"`;
-    if (permissionsOf(role).includes("admin")) {
-      problems.push(
-        `${where} carries the admin permission; integrations can't hold it`
-      );
-      continue;
-    }
-    const custom = customRoles.get(role);
-    if (integration.organizationId) {
-      if (custom?.orgAssignable) continue;
-      problems.push(
-        custom
-          ? `${where} is not org-assignable; an org-bound integration holds only org-assignable custom roles`
-          : isSystemRole(role)
-            ? `${where} is a system role; an org-bound integration holds only org-assignable custom roles`
-            : `${where} is not a custom role in the provisioning set`
-      );
-    } else if (!custom && !isSystemRole(role)) {
-      problems.push(
-        `${where} is not a custom role in the provisioning set, a core role, nor a service's system role`
-      );
-    }
-  }
   for (const audience of integration.audiences)
     if (!services.some((s) => s.service.slug === audience))
       problems.push(
@@ -505,6 +478,7 @@ export const validateSet = (set: ProvisioningSet): string[] => {
     for (const integration of doc.integrations ?? [])
       checkIntegration(set, doc.file, integration, services, problems);
   }
+  checkGroups(set, services, problems);
   checkGuests(set, problems);
   checkBrandingSet(set, problems);
   return problems;

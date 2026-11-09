@@ -24,6 +24,7 @@ export type {
   BucketProvisioning,
   CustomRole,
   EventTypeProvisioning,
+  GroupProvisioning,
   IntegrationProvisioning,
   LoginClientProvisioning,
   PermissionProvisioning,
@@ -163,6 +164,26 @@ export type {
   PaginatedGuests,
   PasswordSetupLink,
 } from "./requests/auth/guests/types.js";
+
+// --- Groups ------------------------------------------------------------------
+
+export type {
+  AddGroupMembersResult,
+  CreateGroupBody,
+  Group,
+  GroupMember,
+  GroupRole,
+  GroupRolesResult,
+  ListGroupMembersQuery,
+  ListGroupsQuery,
+  ListUserGroupsQuery,
+  PaginatedGroupMembers,
+  PaginatedGroups,
+  SetGroupRolesResult,
+  UpdateGroupBody,
+  UserGroup,
+  UserGroupsResult,
+} from "./requests/auth/groups/types.js";
 
 // --- Audit -------------------------------------------------------------------
 

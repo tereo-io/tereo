@@ -3,6 +3,7 @@ import emailVerificationRouter from "./email-verification/index.js";
 import identityInvitesRouter from "./identity-invites/index.js";
 import identitiesRouter from "./identities/index.js";
 import promoteRouter from "./promote/index.js";
+import groupsRouter from "./groups/index.js";
 import totpRouter from "./totp/index.js";
 import { Router } from "express";
 import {
@@ -19,6 +20,7 @@ import {
 const userRouter = Router({ mergeParams: true });
 
 userRouter.use("/totp", totpRouter);
+userRouter.use("/groups", groupsRouter);
 userRouter.use("/identities", identitiesRouter);
 userRouter.use("/identity-invites", identityInvitesRouter);
 userRouter.use("/email-verification", emailVerificationRouter);
