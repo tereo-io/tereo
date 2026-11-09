@@ -610,6 +610,12 @@ export const setGroupRoles = async (
   const locked = await lockCurrentMembers(groupId, tx);
   await db.groups.lockGroup(groupId, tx);
   const group = await db.groups.getAny(groupId, tx);
+  // Archived while this waited on the locks.
+  if (actor.mode === "admin" && group.archivedAt) {
+    throw new ArchivedError(
+      "Group is archived; restore it before changing its roles"
+    );
+  }
   const memberIds = await lockLateMembers(groupId, locked, tx);
 
   const wanted = unique(roleIds);
@@ -734,6 +740,17 @@ export const restoreGroup = async (
   const memberIds = await lockLateMembers(groupId, locked, tx);
 
   const roles = await groupRoles(groupId, tx);
+  // A held role may have gained a permission while the group was archived,
+  // when nothing counted it as assigned in the organization.
+  if (group.organizationId) {
+    const notAssignable = db.roles.notOrgAssignablePermissionNames(roles);
+    if (notAssignable.length > 0) {
+      throw new BadRequestError(
+        "role_not_org_assignable",
+        `An organization's group cannot hold roles with these permissions: ${notAssignable.join(", ")}; change its roles before restoring it`
+      );
+    }
+  }
   if (actor.mode === "admin") {
     assertCanGrant(actor.grantable, db.roles.grantedPermissionNames(roles));
   }

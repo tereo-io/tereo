@@ -19,6 +19,7 @@ import {
   archiveGroup,
   createGroup,
   removeMembers,
+  restoreGroup,
   setGroupRoles,
   updateGroup,
 } from "../../utils/groups.js";
@@ -369,6 +370,25 @@ describe("roles", () => {
     expect(await db.roles.getUserPermissions(user.id)).not.toContain(
       GROUP_PERMISSION
     );
+  });
+
+  it("restoreGroup refuses an org group whose role gained a non-org-assignable permission while archived", async () => {
+    const role = await roleGranting();
+    const group = await newGroup(await newOrg(), [role.id]);
+    await db.$transaction((tx) => archiveGroup(PROVISIONING, group.id, tx));
+    const globalOnly = await prisma.permission.findUniqueOrThrow({
+      where: { name: "groups.read" },
+    });
+    await prisma.rolePermission.create({
+      data: { roleId: role.id, permissionId: globalOnly.id },
+    });
+
+    const err = await refusal(() =>
+      db.$transaction((tx) => restoreGroup(PROVISIONING, group.id, tx))
+    );
+    expect(err.statusCode).toBe(400);
+    expect(err.code).toBe("role_not_org_assignable");
+    expect((await db.groups.getAny(group.id)).archivedAt).not.toBeNull();
   });
 });
 
