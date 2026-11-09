@@ -3,6 +3,7 @@
 // @module-tag race
 import { holdLocks, waitForLockWait } from "../../../../../support/dbLocks.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
 import { createTestRole } from "../../../../../support/auth/users.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
@@ -139,6 +140,56 @@ describe("PATCH /v1/admin/roles/:id deactivating", () => {
     expect((await pending).status).toBe(200);
     const row = await prisma.role.findUniqueOrThrow({ where: { id: role.id } });
     expect(row.isActive).toBe(false);
+  });
+});
+
+describe("PATCH /v1/admin/roles/:id deactivating a role reactivated meanwhile", () => {
+  it("revokes its service clients' tokens, read as active under the row lock", async () => {
+    const client = await createTestClient({
+      clientType: "confidential",
+      grantTypes: ["client_credentials"],
+    });
+    const account = await prisma.user.findFirstOrThrow({
+      where: { oauthClientId: client.id },
+    });
+    const role = await createTestRole();
+    await prisma.role.update({
+      where: { id: role.id },
+      data: { isActive: false },
+    });
+    await prisma.userRole.create({
+      data: { userId: account.id, roleId: role.id },
+    });
+    const token = await prisma.accessToken.create({
+      data: {
+        jti: crypto.randomUUID(),
+        clientId: client.id,
+        userId: account.id,
+        scopes: [],
+        expiresAt: new Date(Date.now() + 3600_000),
+      },
+    });
+
+    const release = await holdLocks(async (tx) => {
+      await tx.$queryRaw`SELECT 1 FROM "auth"."roles" WHERE id = ${role.id}::uuid FOR UPDATE`;
+      await tx.role.update({
+        where: { id: role.id },
+        data: { isActive: true },
+      });
+    });
+    const pending = call("PATCH", `/v1/admin/roles/${role.id}`, adminToken, {
+      isActive: false,
+    });
+    try {
+      await waitForLockWait(`%"auth"."roles"%`);
+    } finally {
+      await release();
+    }
+    expect((await pending).status).toBe(200);
+    const row = await prisma.accessToken.findUniqueOrThrow({
+      where: { id: token.id },
+    });
+    expect(row.revokedAt).not.toBeNull();
   });
 });
 

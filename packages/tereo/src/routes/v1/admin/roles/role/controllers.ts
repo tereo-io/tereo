@@ -105,13 +105,6 @@ export const updateRole = async (req: Request, res: Response) => {
       db.roles.grantedPermissionNames([existing])
     );
   }
-  if (body.isActive === false && existing.isActive) {
-    assertCanTakeAway(
-      await globalGrantablePermissions(auth),
-      db.roles.grantedPermissionNames([existing])
-    );
-  }
-
   if (body.name && body.name !== existing.name) {
     const conflict = await db.roles.getCustomByNameAny(body.name);
     if (conflict) {
@@ -124,106 +117,124 @@ export const updateRole = async (req: Request, res: Response) => {
     }
   }
 
-  const { role, revokedJtis } = await db.$transaction(async (tx) => {
-    // Whatever `existing` says: the role may have been reactivated since,
-    // and the guard counts it only if it is active under its lock.
-    if (body.isActive === false) {
-      await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
-    }
-    // A role gains `admin` only under its lock, and only while no
-    // integration holds it, so the role read above settles whether to check.
-    if (
-      body.isActive === true &&
-      !existing.isActive &&
-      db.roles.grantedPermissionNames([existing]).includes("admin")
-    ) {
-      await refuseAdminForIntegrations(params.id, tx);
-    }
-    if (body.guestAssignable === true) {
-      await db.roles.lockRoles([params.id], "update", tx);
-      assertGuestAssignable(
-        (await db.roles.get(params.id, tx)).rolePermissions.map(
-          (rp) => rp.permission
-        )
-      );
-    }
-    await db.roles.update(params.id, body, tx);
-    const updated = await db.roles.get(params.id, tx);
-    // Permissions are read live, so a holder's token from a password-only
-    // login would keep working; revoked, its refresh meets the step-up.
-    const gains2fa =
-      updated.isActive &&
-      updated.requires2fa &&
-      !(existing.isActive && existing.requires2fa);
-    // A guest is held only to guest-assignable roles assigned in an
-    // organization, so flagging one that requires 2FA is a gain for them too.
-    const guestsGain2fa =
-      updated.isActive &&
-      updated.requires2fa &&
-      updated.guestAssignable &&
-      !(existing.isActive && existing.requires2fa && existing.guestAssignable);
-    const revokedJtis = [
-      ...(gains2fa
-        ? await db.accessTokens.revokeWithoutMfa(
-            db.roles.holdsRoleWhere({ id: params.id }),
-            tx
+  const { role, revokedJtis, deactivated } = await db.$transaction(
+    async (tx) => {
+      // Whatever `existing` says: the role may have been reactivated since.
+      // The guard counts it only if it is active under its lock, and whether
+      // this deactivates it is read under the row lock a reactivation's write
+      // takes.
+      let deactivated = false;
+      if (body.isActive === false) {
+        await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
+        await db.roles.lockRoles([params.id], "update", tx);
+        const current = await db.roles.get(params.id, tx);
+        deactivated = current.isActive;
+        if (deactivated) {
+          assertCanTakeAway(
+            await globalGrantablePermissions(auth, tx),
+            db.roles.grantedPermissionNames([current])
+          );
+        }
+      }
+      // A role gains `admin` only under its lock, and only while no
+      // integration holds it, so the role read above settles whether to check.
+      if (
+        body.isActive === true &&
+        !existing.isActive &&
+        db.roles.grantedPermissionNames([existing]).includes("admin")
+      ) {
+        await refuseAdminForIntegrations(params.id, tx);
+      }
+      if (body.guestAssignable === true) {
+        await db.roles.lockRoles([params.id], "update", tx);
+        assertGuestAssignable(
+          (await db.roles.get(params.id, tx)).rolePermissions.map(
+            (rp) => rp.permission
           )
-        : []),
-      ...(guestsGain2fa
-        ? await db.accessTokens.revokeWithoutMfa(
-            {
-              userType: "guest",
-              userRoles: {
-                some: { roleId: params.id, organizationId: { not: null } },
+        );
+      }
+      await db.roles.update(params.id, body, tx);
+      const updated = await db.roles.get(params.id, tx);
+      // Permissions are read live, so a holder's token from a password-only
+      // login would keep working; revoked, its refresh meets the step-up.
+      const gains2fa =
+        updated.isActive &&
+        updated.requires2fa &&
+        !(existing.isActive && existing.requires2fa);
+      // A guest is held only to guest-assignable roles assigned in an
+      // organization, so flagging one that requires 2FA is a gain for them too.
+      const guestsGain2fa =
+        updated.isActive &&
+        updated.requires2fa &&
+        updated.guestAssignable &&
+        !(
+          existing.isActive &&
+          existing.requires2fa &&
+          existing.guestAssignable
+        );
+      const revokedJtis = [
+        ...(gains2fa
+          ? await db.accessTokens.revokeWithoutMfa(
+              db.roles.holdsRoleWhere({ id: params.id }),
+              tx
+            )
+          : []),
+        ...(guestsGain2fa
+          ? await db.accessTokens.revokeWithoutMfa(
+              {
+                userType: "guest",
+                userRoles: {
+                  some: { roleId: params.id, organizationId: { not: null } },
+                },
               },
-            },
-            tx
-          )
-        : []),
-      ...(body.isActive === false && existing.isActive
-        ? await revokeClientTokensTx(
-            await db.roles.getUserIdsByRoleId(params.id, tx),
-            tx
-          )
-        : []),
-    ];
-    await logAuditTx(tx, {
-      auth,
-      action: "UPDATE",
-      entityType: "Role",
-      entityId: updated.id,
-      entityName: updated.name,
-      changes: computeChanges(existing, updated),
-      ...(revokedJtis.length > 0 && {
-        metadata: { accessTokensRevoked: revokedJtis.length },
-      }),
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.role.updated",
-      entityType: "Role",
-      entityId: updated.id,
-      data: formatRole(updated) as Record<string, unknown>,
-    });
-    if (updated.guestAssignable !== existing.guestAssignable) {
-      await emitTx(tx, {
-        organizationId: getDefaultOrganizationId(),
-        eventType: "auth.role.guest-assignable-changed",
+              tx
+            )
+          : []),
+        ...(deactivated
+          ? await revokeClientTokensTx(
+              await db.roles.getUserIdsByRoleId(params.id, tx),
+              tx
+            )
+          : []),
+      ];
+      await logAuditTx(tx, {
+        auth,
+        action: "UPDATE",
         entityType: "Role",
         entityId: updated.id,
-        data: {
-          id: updated.id,
-          name: updated.name,
-          guestAssignable: updated.guestAssignable,
-        },
+        entityName: updated.name,
+        changes: computeChanges(existing, updated),
+        ...(revokedJtis.length > 0 && {
+          metadata: { accessTokensRevoked: revokedJtis.length },
+        }),
       });
+      await emitTx(tx, {
+        organizationId: getDefaultOrganizationId(),
+        eventType: "auth.role.updated",
+        entityType: "Role",
+        entityId: updated.id,
+        data: formatRole(updated) as Record<string, unknown>,
+      });
+      if (updated.guestAssignable !== existing.guestAssignable) {
+        await emitTx(tx, {
+          organizationId: getDefaultOrganizationId(),
+          eventType: "auth.role.guest-assignable-changed",
+          entityType: "Role",
+          entityId: updated.id,
+          data: {
+            id: updated.id,
+            name: updated.name,
+            guestAssignable: updated.guestAssignable,
+          },
+        });
+      }
+      return { role: updated, revokedJtis, deactivated };
     }
-    return { role: updated, revokedJtis };
-  });
+  );
 
   disconnectTokenSockets(revokedJtis);
 
-  if (body.isActive !== undefined && body.isActive !== existing.isActive) {
+  if (deactivated || (body.isActive === true && !existing.isActive)) {
     await notifyRoleStatusChanged(params.id);
   }
 
