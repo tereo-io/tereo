@@ -782,7 +782,7 @@ archived and, for an organization's group, while the user is still a member of a
 organization. Userinfo also carries a `groups` claim (`id`, `slug`, `name`, `organizationId`): the
 user's active global groups plus the token's organization's while it is active and the user still a
 member, for the callers that get `roles`, except that a `delegated` token gets `groups` (only with
-the `account` or `admin` area, an empty list otherwise) and never `roles`. For a guest, inert roles are left out ([Guest users](#guest-users)).
+the `account` or `admin` area, an empty list otherwise) and an empty `roles`. For a guest, inert roles are left out ([Guest users](#guest-users)).
 
 ## Guest users
 

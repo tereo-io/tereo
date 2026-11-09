@@ -147,7 +147,7 @@
       `admin` or `owner` of that organization (`organizations.write` also passes, as on
       the organization routes). A global group needs `groups.read`. A caller without
       `groups.read` gets `403` for a missing group as for one they cannot reach.
-      An `admin` or `owner` of an inactive organization may still read its groups.
+      An `admin` or `owner` of an inactive organization may still read its groups, but not of an archived one.
     operationId: getAdminGroup
     security:
       - BearerAuth: [groups.read]
@@ -293,7 +293,7 @@
         description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
       '409':
         $ref: '../../../components/auth/responses.yaml#/GroupConflictResponse'
-        description: '`already_archived` or `managed_by_provisioning`'
+        description: '`already_archived`, `managed_by_provisioning`, or the last administrator would lose admin'
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -369,7 +369,7 @@
       `admin` or `owner` of that organization (`organizations.write` also passes, as on
       the organization routes). A global group needs `groups.read`. A caller without
       `groups.read` gets `403` for a missing group as for one they cannot reach.
-      An `admin` or `owner` of an inactive organization may still read its groups.
+      An `admin` or `owner` of an inactive organization may still read its groups, but not of an archived one.
     operationId: getAdminGroupMembers
     security:
       - BearerAuth: [groups.read]
@@ -532,7 +532,7 @@
       `admin` or `owner` of that organization (`organizations.write` also passes, as on
       the organization routes). A global group needs `groups.read`. A caller without
       `groups.read` gets `403` for a missing group as for one they cannot reach.
-      An `admin` or `owner` of an inactive organization may still read its groups.
+      An `admin` or `owner` of an inactive organization may still read its groups, but not of an archived one.
     operationId: getAdminGroupRoles
     security:
       - BearerAuth: [groups.read]
