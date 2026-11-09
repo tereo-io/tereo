@@ -193,12 +193,33 @@ export const passwordSetupFailure = createFailureLimiter({
   getKey: (req) => `ip:${getIpIdentifier(req)}`,
 });
 
+// Reset requests per IP, for any addresses: one source cannot mail every
+// user. The route swallows the refusal, as for the two below.
+export const passwordResetIp = createFailureLimiter({
+  keyPrefix: "rl:password-reset:ip",
+  points: 10,
+  duration: 3600,
+  errorDescription: "Too many password reset requests. Try again later.",
+  getKey: (req) => `ip:${getIpIdentifier(req)}`,
+});
+
+// Reset emails per address and IP, so one source cannot spend an address's
+// whole allowance below.
+export const passwordResetAddressIp = createFailureLimiter({
+  keyPrefix: "rl:password-reset:address-ip",
+  points: 3,
+  duration: 3600,
+  errorDescription: "Too many password reset requests. Try again later.",
+  getKey: (req, email) =>
+    `${hashFlowToken(normalizeEmail(email ?? ""))}:ip:${getIpIdentifier(req)}`,
+});
+
 // Reset emails per address, whoever asks: an address cannot be used to flood
 // someone's inbox. Spent by every request for the address, known or not, so
-// the limit tells nothing about the account; the route swallows the refusal.
+// the limit tells nothing about the account.
 export const passwordResetAddress = createFailureLimiter({
   keyPrefix: "rl:password-reset:address",
-  points: 3,
+  points: 10,
   duration: 3600,
   errorDescription: "Too many password reset requests. Try again later.",
   getKey: (_req, email) => hashFlowToken(normalizeEmail(email ?? "")),

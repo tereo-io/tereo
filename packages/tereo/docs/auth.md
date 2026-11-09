@@ -1050,11 +1050,22 @@ it is `POST /v1/password-setup` ([Setup link](#setup-link)): it sets the passwor
 verified, ends the other sessions and clears pending forced-password-change grants. A link whose
 user has since moved to an SSO-only domain answers the uniform `404`.
 
-**Per-address limit.** Each address may be asked for 3 times per hour, counted on every request
-whether or not it has an account, and a request over the limit is still `202` but sends nothing.
-Because anyone can make these requests, **anyone can use up the allowance for a victim's address**
-and delay that person's genuine reset for up to an hour; the cost of leaking nothing about which
-addresses exist. (The route also has the usual per-IP limits.) A reset issued is audited
+**Limits.** Reset requests are limited per hour, each limit counted on every request whether or not
+the address has an account, and a request over any of them is still `202` but sends nothing (logged
+at info):
+
+| Limit                    | Per hour | Key                                   |
+| ------------------------ | -------- | ------------------------------------- |
+| Per IP                   | 10       | the client IP, for any addresses      |
+| Per address and IP       | 3        | the normalised address and client IP  |
+| Per address, all sources | 10       | the normalised address                |
+
+They are spent in that order, and a request refused by one spends none after it, so one source
+spends at most 3 of an address's 10. Using up a victim's allowance, and so delaying their genuine
+reset for up to an hour, takes requests from at least four IPs; it is the cost of leaking nothing
+about which addresses exist. Each request that gets through still issues a new link and retires the
+one before it. Without Redis the route answers `503`, whatever the address. (The route also has the
+usual per-IP request limits.) A reset issued is audited
 (`password_reset_requested`, with the requesting IP) and emits `auth.user.password-reset-requested`.
 
 ### Email verification

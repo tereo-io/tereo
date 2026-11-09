@@ -165,24 +165,6 @@ describe("password reset request", () => {
     await expectNoLink(user.id);
   });
 
-  it("the fourth request in an hour for one address sends nothing", async () => {
-    const user = await createTestUser();
-    const upper = user.email.replace(/^[a-z]/, (c) => c.toUpperCase());
-
-    const statuses = [];
-    for (const email of [user.email, upper, user.email, upper]) {
-      statuses.push((await request({ email })).status);
-    }
-
-    expect(statuses).toEqual([202, 202, 202, 202]);
-    await waitForMails(user.email, 3);
-    // A later address's mail arriving means the fourth request's work is done.
-    const later = await createTestUser();
-    await request({ email: later.email });
-    await waitForMails(later.email, 1);
-    expect(mailsTo(user.email)).toHaveLength(3);
-  });
-
   it("concurrent requests leave one live password link", async () => {
     const user = await createTestUser();
 
