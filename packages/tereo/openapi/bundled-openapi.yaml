@@ -5510,8 +5510,9 @@ paths:
           requested value, which lifts the guest's refresh sessions capped at the
           old expiry. `roles` are added (none removed; omitted adds none, the
           defaults apply only to a new guest). The name and password are left
-          alone; `initialAccess` applies only if they have neither a password nor a
-          linked identity (an SSO-only domain's forced link removes the password).
+          alone; `initialAccess` applies only if they have no password and,
+          on an SSO-only domain, no linked identity (the domain's forced link
+          removes the password).
           `200`, `created: false`, with `passwordSetupUrl` when a link was
           issued.
         - **A guest in another organization**: `409 guest_in_other_organization`.

@@ -699,6 +699,21 @@ describe("POST /v1/admin/guests", () => {
       expect(await prisma.userLinkToken.count({ where: { userId: id } })).toBe(
         0
       );
+
+      // Off an SSO-only domain, a linked guest with no password still gets
+      // initial access.
+      const plain = await invite({ email: uniqueEmail() });
+      const plainId = plain.body.user.id as string;
+      await prisma.userIdentity.create({
+        data: {
+          userId: plainId,
+          providerId: sso.providerId,
+          subject: `s-${plainId}`,
+        },
+      });
+      const again = await invite({ email: plain.body.user.email });
+      expect(again.status).toBe(200);
+      expect(again.body.passwordSetupUrl).toMatch(/\/set-password#token=/);
     } finally {
       await prisma.userIdentity.deleteMany({
         where: { providerId: sso.providerId },

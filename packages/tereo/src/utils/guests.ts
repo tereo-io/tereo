@@ -24,8 +24,10 @@ import {
 } from "./guestRoles.js";
 import {
   assertSetupLinkAllowed,
+  isSsoOnlyEmail,
   issuePasswordLink,
   retirePasswordLinks,
+  ssoOnlySetupLinkRefused,
 } from "./userLinks.js";
 
 type Tx = Prisma.TransactionClient;
@@ -712,19 +714,18 @@ const extendInvitedGuest = async (
       )
     );
   }
-  // A guest with no password but a linked identity signs in through the
-  // provider (an SSO-only domain's forced link dropped the password), so
-  // initial access does not apply: a re-invite only extends them.
-  const needsInitialAccess =
-    existing.passwordHash === null &&
-    (await tx.userIdentity.count({ where: { userId: existing.id } })) === 0;
   // After the refusals that hide another organization's guest, before any
-  // write.
-  if (
-    needsInitialAccess &&
-    input.initialAccess.type === "password_setup_link"
-  ) {
-    await assertSetupLinkAllowed(existing.email, tx);
+  // write. On an SSO-only domain a guest with no password but a linked
+  // identity signs in through the provider (the domain's forced link dropped
+  // the password), so initial access does not apply: a re-invite only
+  // extends them. Any other guest with no password, linked or not, gets it.
+  let needsInitialAccess = existing.passwordHash === null;
+  if (needsInitialAccess && (await isSsoOnlyEmail(existing.email, tx))) {
+    if ((await tx.userIdentity.count({ where: { userId: existing.id } })) > 0) {
+      needsInitialAccess = false;
+    } else if (input.initialAccess.type === "password_setup_link") {
+      throw ssoOnlySetupLinkRefused();
+    }
   }
   if (memberOf === null) {
     const member = await db.organizations.addMember(

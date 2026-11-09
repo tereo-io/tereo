@@ -57,6 +57,21 @@ export const assertEmailConfigured = async (tx?: Prisma.TransactionClient) => {
   }
 };
 
+/** Whether the address's domain is SSO-only: the provider holds the credential. */
+export const isSsoOnlyEmail = async (
+  email: string,
+  tx?: Prisma.TransactionClient
+): Promise<boolean> =>
+  (await db.identityProviders.findDomain(emailDomain(email), tx))?.ssoOnly ??
+  false;
+
+/** A setup link refused for an address on an SSO-only domain. */
+export const ssoOnlySetupLinkRefused = () =>
+  new ConflictError(
+    "This email's domain signs in only through its identity provider, so a setup link would not work; set a password for the guest instead",
+    "sso_only_domain"
+  );
+
 /**
  * Refuses a setup link for an address on an SSO-only domain (409
  * `sso_only_domain`): redeeming one is refused there, since the provider
@@ -67,13 +82,7 @@ export const assertSetupLinkAllowed = async (
   email: string,
   tx?: Prisma.TransactionClient
 ) => {
-  const domain = await db.identityProviders.findDomain(emailDomain(email), tx);
-  if (domain?.ssoOnly) {
-    throw new ConflictError(
-      "This email's domain signs in only through its identity provider, so a setup link would not work; set a password for the guest instead",
-      "sso_only_domain"
-    );
-  }
+  if (await isSsoOnlyEmail(email, tx)) throw ssoOnlySetupLinkRefused();
 };
 
 /**
