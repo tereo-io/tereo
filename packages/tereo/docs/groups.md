@@ -167,9 +167,10 @@ is removed, cannot interleave into an inconsistent state.
 Lock order (the header of `utils/groups.ts` has the detail): the authority locks of the users whose
 authority changes, ascending id (for role changes, archive and restore, every member); the group row;
 for those group-wide changes, any member who joined in between; then organization owners and the
-last-admin guard. A transaction changing several groups (provisioning's apply and its archival of
-dropped groups) takes the authority locks of all their members first, ascending, before any group
-row.
+last-admin guard. A transaction changing several groups (provisioning's apply, and deleting a role
+the groups hold) takes the authority locks of all their members first, ascending, then all the group
+rows it may write, ascending id, before any group's last-admin guard. Provisioning archives dropped
+groups one per transaction.
 
 ### Limits
 

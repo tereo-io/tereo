@@ -52,12 +52,15 @@ import {
  * 4. `lockOrgOwners` when an org admin acts on an org group, then
  *    `assertAdminRemains` last.
  *
- * A transaction changing several groups (provisioning's apply) first takes
- * step 1 for the members of all of them, ascending, before any group's step
- * 2; each group's own step 1 then re-enters locks already held. Otherwise a
- * member locked for a later group after an earlier group's row could close a
- * cycle with a change to that member. Provisioning archives dropped groups
- * one per transaction instead.
+ * A transaction changing several groups (provisioning's apply, deleting a
+ * role) takes each step for all of them before the next: step 1 for the
+ * members of all of them, ascending, then step 2 for every group row it may
+ * write, ascending id (`db.groups.lockGroups`), before any step 4; each
+ * group's own steps then re-enter locks already held. Otherwise a member or
+ * group locked for a later group after an earlier group's locks could close
+ * a cycle with a change to that member or group, or with the admin guard's
+ * lock one group's step 4 holds. Provisioning archives dropped groups one per
+ * transaction instead.
  */
 
 type Tx = Prisma.TransactionClient;
@@ -842,7 +845,7 @@ export const lockGroupsHoldingRole = async (
   tx: Tx
 ): Promise<string[]> => {
   const ids = (await db.groups.getIdsHoldingRole(roleId, tx)).sort();
-  for (const id of ids) await db.groups.lockGroup(id, tx);
+  await db.groups.lockGroups(ids, tx);
   return ids;
 };
 

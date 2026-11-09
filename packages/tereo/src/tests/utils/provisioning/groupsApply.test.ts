@@ -6,6 +6,7 @@ import { deleteGroups, groupSlug, PROVISIONING } from "../../support/groups.js";
 import type { CustomRoleEntry } from "../../../utils/provisioning/schema.js";
 import { ProvisioningError } from "../../../utils/provisioning/load.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { holdLocks, waitForLockWait } from "../../support/dbLocks.js";
 import { createTestUser } from "../../support/auth/users.js";
 import { addMembers } from "../../../utils/groups.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -539,6 +540,46 @@ describe("lock order across groups", () => {
     } finally {
       locks.restore();
     }
+  });
+
+  it("locks every group row it may write, ascending, before any group's admin guard", async () => {
+    // Per group, the higher id's guard lock would be held while waiting on
+    // the lower id's row, against a role deletion holding that row and
+    // queued on the guard.
+    const first = customRole(["roles.read"]);
+    const second = customRole(["users.read"]);
+    const g1 = groupSpec({ roles: [first.name] });
+    const g2 = groupSpec({ roles: [first.name] });
+    await applyProvisioning(setOf([first, second], [g1, g2]));
+    const id1 = (await groupRow(g1.slug)).id;
+    const id2 = (await groupRow(g2.slug)).id;
+    const lo = id1 < id2 ? id1 : id2;
+    const [loSpec, hiSpec] = lo === id1 ? [g1, g2] : [g2, g1];
+
+    const release = await holdLocks((tx) => db.groups.lockGroup(lo, tx));
+    const pending = applyProvisioning(
+      setOf(
+        [first, second],
+        [
+          { ...hiSpec, roles: [second.name] },
+          { ...loSpec, roles: [second.name] },
+        ]
+      )
+    ).catch((err: unknown) => err);
+    let guardFree: boolean;
+    try {
+      await waitForLockWait(`%FROM "auth"."groups"%FOR UPDATE%`);
+      guardFree = await prisma.$transaction(async (tx) => {
+        const [row] = await tx.$queryRaw<{ ok: boolean }[]>`
+          SELECT pg_try_advisory_xact_lock(hashtextextended('core:admin-remains', 0)) AS ok`;
+        return row.ok;
+      });
+    } finally {
+      await release();
+    }
+    expect(await pending).not.toBeInstanceOf(Error);
+    expect(guardFree).toBe(true);
+    expect(roleNamesOf(await groupRow(hiSpec.slug))).toEqual([second.name]);
   });
 
   it("archives each due group in its own transaction, its members locked before its row", async () => {

@@ -196,6 +196,17 @@ export const applyGroups = async (
       existing && (!sameRoles || existing.archivedAt) ? [existing.id] : []
     )
   );
+  // Lock step 2 for the whole apply: every existing group row it or
+  // markGroupsMissing may write, ascending, before any group's admin guard.
+  // Under the provisioning lock no other writer changes which groups those
+  // are.
+  await db.groups.lockGroups(
+    [
+      ...planned.flatMap(({ existing }) => (existing ? [existing.id] : [])),
+      ...(await undeclaredLiveGroups(tx, set)).map((g) => g.id),
+    ],
+    tx
+  );
 
   for (const { group, roleIds, existing, sameRoles } of planned) {
     const organizationId = group.organizationId ?? null;
@@ -270,13 +281,8 @@ export const applyGroups = async (
   return { affectedUserIds: [...affected].sort(), revokedJtis };
 };
 
-/** Stamps `unprovisioned_at` on each provisioned group the set no longer declares. */
-export const markGroupsMissing = async (
-  tx: Tx,
-  set: ProvisioningSet,
-  now: Date,
-  result: { unprovisioned: string[] }
-): Promise<void> => {
+/** The live provisioned groups the set no longer declares and not yet stamped. */
+const undeclaredLiveGroups = async (tx: Tx, set: ProvisioningSet) => {
   const declaredKeys = new Set(
     declaredGroups(set).map(({ group }) => groupScopeKey(group))
   );
@@ -287,8 +293,17 @@ export const markGroupsMissing = async (
       archivedAt: null,
     },
   });
-  for (const row of rows) {
-    if (declaredKeys.has(groupScopeKey(row))) continue;
+  return rows.filter((row) => !declaredKeys.has(groupScopeKey(row)));
+};
+
+/** Stamps `unprovisioned_at` on each provisioned group the set no longer declares. */
+export const markGroupsMissing = async (
+  tx: Tx,
+  set: ProvisioningSet,
+  now: Date,
+  result: { unprovisioned: string[] }
+): Promise<void> => {
+  for (const row of await undeclaredLiveGroups(tx, set)) {
     const updated = await db.groups.update(
       row.id,
       { unprovisionedAt: now },

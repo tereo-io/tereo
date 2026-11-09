@@ -124,6 +124,15 @@ export const lockGroup = async (id: string, tx: Prisma.TransactionClient) => {
   await tx.$queryRaw`SELECT 1 FROM "auth"."groups" WHERE id = ${id}::uuid FOR UPDATE`;
 };
 
+/** Locks several groups' rows, ascending id: the order every such caller takes. */
+export const lockGroups = async (
+  ids: string[],
+  tx: Prisma.TransactionClient
+) => {
+  if (ids.length === 0) return;
+  await tx.$queryRaw`SELECT 1 FROM "auth"."groups" WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE`;
+};
+
 export const getMemberIds = async (
   groupId: string,
   tx?: Prisma.TransactionClient
