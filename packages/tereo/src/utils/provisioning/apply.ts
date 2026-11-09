@@ -1874,16 +1874,20 @@ export const deprovisionMissing = async (
       (await db.roles.getUserIdsByRoleId(id)).map((h) => h.userId)
     );
   }
-  // Their own transaction: a group with many members, or one waiting on a
+  // Their own transactions: a group with many members, or one waiting on a
   // member's lock, fails alone, and the next run retries it.
   let groups = 0;
   try {
-    const archivedGroups = await prisma.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
-        return archiveDueGroups(tx, cutoff);
-      },
-      { timeout: 30_000 }
+    const archivedGroups = await archiveDueGroups(
+      (fn) =>
+        prisma.$transaction(
+          async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${PROVISIONING_LOCK}, 0))`;
+            return fn(tx);
+          },
+          { timeout: 30_000 }
+        ),
+      cutoff
     );
     afterGroupChange(archivedGroups);
     groups = archivedGroups.count;

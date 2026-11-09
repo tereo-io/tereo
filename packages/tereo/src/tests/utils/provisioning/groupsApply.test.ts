@@ -377,7 +377,7 @@ describe("applyGroups", () => {
 });
 
 describe("deprovisionMissing", () => {
-  it("archives dropped groups in a transaction of their own", async () => {
+  it("archives each dropped group in a transaction of its own", async () => {
     const role = customRole(["roles.read"]);
     const group = groupSpec();
     await applyProvisioning(setOf([role], [group]));
@@ -387,17 +387,24 @@ describe("deprovisionMissing", () => {
       now.getTime() + (env.REGISTRY_RETIREMENT_GRACE_HOURS + 1) * 3_600_000
     );
 
+    const { id: groupId } = await groupRow(group.slug);
+    const original = db.groups.setArchived.bind(db.groups);
     const setArchived = vi
       .spyOn(db.groups, "setArchived")
-      .mockRejectedValueOnce(new Error("archive failed"));
+      .mockImplementation((id, archivedAt, tx) =>
+        id === groupId
+          ? (Promise.reject(new Error("archive failed")) as ReturnType<
+              typeof original
+            >)
+          : original(id, archivedAt, tx)
+      );
     const logged = vi.spyOn(logger, "error");
     try {
       const failed = await deprovisionMissing(later);
       expect(failed.roles).toBeGreaterThanOrEqual(1);
-      expect(failed.groups).toBe(0);
       expect(logged).toHaveBeenCalledWith(
-        expect.anything(),
-        "Provisioning: archiving dropped groups failed"
+        expect.objectContaining({ groupId }),
+        "Provisioning: archiving a dropped group failed"
       );
     } finally {
       setArchived.mockRestore();
@@ -493,23 +500,35 @@ describe("lock order across groups", () => {
     }
   });
 
-  it("archives due groups with every member locked first, ascending", async () => {
+  it("archives each due group in its own transaction, its members locked before its row", async () => {
     const first = customRole(["roles.read"]);
     const { lo, hi, groupIds } = await crossedGroups(first);
-    // Due in this transaction only, so no other retirement run archives them.
+    const [withHi, withLo] = groupIds;
+    await prisma.group.updateMany({
+      where: { id: { in: groupIds } },
+      data: { unprovisionedAt: new Date("2000-01-01T00:00:00Z") },
+    });
+    // Only these are due by this cutoff, unless another run left one as old.
     const cutoff = new Date("2000-01-02T00:00:00Z");
     const locks = spyLocks();
+    const transactions: number[] = [];
     try {
-      const archived = await prisma.$transaction(async (tx) => {
-        await tx.group.updateMany({
-          where: { id: { in: groupIds } },
-          data: { unprovisionedAt: new Date("2000-01-01T00:00:00Z") },
-        });
-        return archiveDueGroups(tx, cutoff);
-      });
-      expect(archived.affectedUserIds).toEqual([lo, hi]);
-      expect(locks.lockedAt(lo)).toBeLessThan(locks.lockedAt(hi));
-      expect(locks.lockedAt(hi)).toBeLessThan(locks.firstGroupTouch(groupIds));
+      const archived = await archiveDueGroups(
+        (fn) =>
+          prisma.$transaction((tx) => {
+            transactions.push(transactions.length);
+            return fn(tx);
+          }),
+        cutoff
+      );
+      expect(archived.count).toBeGreaterThanOrEqual(2);
+      expect(archived.affectedUserIds).toEqual(
+        expect.arrayContaining([lo, hi])
+      );
+      // One to list the due groups, then one per group.
+      expect(transactions).toHaveLength(1 + archived.count);
+      expect(locks.lockedAt(hi)).toBeLessThan(locks.firstGroupTouch([withHi]));
+      expect(locks.lockedAt(lo)).toBeLessThan(locks.firstGroupTouch([withLo]));
     } finally {
       locks.restore();
     }
