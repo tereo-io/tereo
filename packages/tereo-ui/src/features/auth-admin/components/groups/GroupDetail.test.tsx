@@ -94,7 +94,14 @@ const renderDetail = (
 
 beforeEach(() => {
   authMock.axios.get.mockReset();
-  authMock.permissions = ["groups.read", "groups.write", "groups.archive"];
+  authMock.permissions = [
+    "groups.read",
+    "groups.write",
+    "groups.archive",
+    "roles.read",
+    "users.read",
+    "organizations.read",
+  ];
   authMock.organizations = [];
 });
 
@@ -143,6 +150,39 @@ describe("GroupDetail", () => {
     expect(
       await screen.findByRole("button", { name: "Add members" })
     ).toBeEnabled();
+  });
+
+  it("links members, roles and the organization only where the viewer may go", async () => {
+    renderDetail({ ...group, organizationId: "o1" });
+
+    expect(await screen.findByText("ada@example.com")).toHaveAttribute(
+      "href",
+      "/auth-admin/users/u1"
+    );
+    expect(screen.getByText("Organization")).toHaveAttribute(
+      "href",
+      "/auth-admin/organizations/o1"
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /^Roles/ }));
+    expect(await screen.findByText("Agent")).toHaveAttribute(
+      "href",
+      "/auth-admin/roles/r1"
+    );
+  });
+
+  it("gives an organization admin without users/roles/organizations.read plain text", async () => {
+    authMock.permissions = [];
+    authMock.organizations = [
+      { id: "o1", name: "Acme", slug: "acme", memberRole: "admin" },
+    ];
+    renderDetail({ ...group, organizationId: "o1" });
+
+    expect(await screen.findByText("ada@example.com")).not.toHaveAttribute(
+      "href"
+    );
+    expect(screen.getByText("Organization")).not.toHaveAttribute("href");
+    fireEvent.click(screen.getByRole("tab", { name: /^Roles/ }));
+    expect(await screen.findByText("Agent")).not.toHaveAttribute("href");
   });
 
   it("freezes an archived group", async () => {
@@ -278,6 +318,22 @@ describe("GroupDetail", () => {
       ).toBeVisible();
       expect(screen.getByRole("button", { name: "Save Roles" })).toBeDisabled();
       expect(screen.queryByLabelText(/archived or inactive/)).toBeNull();
+    });
+
+    it("says roles.read is needed rather than offering a broken picker", async () => {
+      authMock.permissions = [];
+      authMock.organizations = [
+        { id: "o1", name: "Acme", slug: "acme", memberRole: "admin" },
+      ];
+      renderDetail(orgGroup);
+      await openRoles();
+
+      expect(await screen.findByText("roles.read")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Save Roles" })).toBeDisabled();
+      expect(authMock.axios.get).not.toHaveBeenCalledWith(
+        "/v1/admin/roles",
+        expect.anything()
+      );
     });
   });
 });

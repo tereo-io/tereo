@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useParams, Link } from "react-router-dom";
 import useGroup from "../../api/groups/useGroup";
 import { useMemo, useState } from "react";
+import { useAuth } from "@/lib/auth";
 import "./styles.css";
 import {
   Alert,
@@ -48,6 +49,12 @@ export const GroupDetail = () => {
     error: rolesError,
   } = useGroupRoles(id);
   const { canWrite } = useGroupAuthority(group);
+  // An organization's admins reach this page without these: link only to
+  // pages the viewer can open.
+  const { hasPermission } = useAuth();
+  const canReadUsers = hasPermission("users.read");
+  const canReadRoles = hasPermission("roles.read");
+  const canReadOrgs = hasPermission("organizations.read");
   const [tab, setTab] = useState("members");
   const [showAdd, setShowAdd] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -69,11 +76,14 @@ export const GroupDetail = () => {
       {
         title: "Email",
         dataKey: "email",
-        cellElement: (member) => (
-          <Link to={`/auth-admin/users/${member.userId}`} className="v-link">
-            {member.email}
-          </Link>
-        ),
+        cellElement: (member) =>
+          canReadUsers ? (
+            <Link to={`/auth-admin/users/${member.userId}`} className="v-link">
+              {member.email}
+            </Link>
+          ) : (
+            member.email
+          ),
       },
       {
         title: "Name",
@@ -116,7 +126,7 @@ export const GroupDetail = () => {
           ]
         : []),
     ],
-    [id, groupName, canWrite]
+    [id, groupName, canWrite, canReadUsers]
   );
 
   const roleColumns: TableColumn<GroupRole>[] = useMemo(
@@ -124,11 +134,14 @@ export const GroupDetail = () => {
       {
         title: "Role",
         dataKey: "displayName",
-        cellElement: (role) => (
-          <Link to={`/auth-admin/roles/${role.id}`} className="v-link">
-            {role.displayName}
-          </Link>
-        ),
+        cellElement: (role) =>
+          canReadRoles ? (
+            <Link to={`/auth-admin/roles/${role.id}`} className="v-link">
+              {role.displayName}
+            </Link>
+          ) : (
+            role.displayName
+          ),
       },
       { title: "Name", dataKey: "name" },
       {
@@ -137,7 +150,7 @@ export const GroupDetail = () => {
         cellElement: (role) => (role.serviceId ? "System" : "Custom"),
       },
     ],
-    []
+    [canReadRoles]
   );
 
   if (isLoading) {
@@ -219,7 +232,9 @@ export const GroupDetail = () => {
               { label: "Description", value: group.description || "-" },
               {
                 label: "Scope",
-                value: group.organizationId ? (
+                value: !group.organizationId ? (
+                  "Global"
+                ) : canReadOrgs ? (
                   <Link
                     to={`/auth-admin/organizations/${group.organizationId}`}
                     className="v-link"
@@ -227,7 +242,7 @@ export const GroupDetail = () => {
                     Organization
                   </Link>
                 ) : (
-                  "Global"
+                  "Organization"
                 ),
               },
               { label: "Source", value: provisioned ? "Provisioned" : "Local" },
