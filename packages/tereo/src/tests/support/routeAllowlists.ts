@@ -10,6 +10,21 @@ export type Allowlist = ReadonlyArray<readonly [RouteMethod, string, string]>;
 export const PUBLIC: Allowlist = [
   [
     "get",
+    "/scim/v2/ServiceProviderConfig",
+    "SCIM connection token, not a bearer access token",
+  ],
+  [
+    "get",
+    "/scim/v2/ResourceTypes",
+    "SCIM connection token, not a bearer access token",
+  ],
+  [
+    "get",
+    "/scim/v2/Schemas",
+    "SCIM connection token, not a bearer access token",
+  ],
+  [
+    "get",
     "/health",
     "Liveness probe; load balancers and orchestrators send no token",
   ],

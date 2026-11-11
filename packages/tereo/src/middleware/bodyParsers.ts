@@ -21,3 +21,11 @@ export const apiBodyParsers = (limit: "1mb" | "10mb" = "1mb") => [
   express.json({ limit }),
   express.urlencoded({ extended: true, limit }),
 ];
+
+/** SCIM bodies arrive as application/scim+json (RFC 7644) or plain JSON. */
+export const scimBodyParsers = [
+  express.json({
+    limit: "1mb",
+    type: ["application/scim+json", "application/json"],
+  }),
+];

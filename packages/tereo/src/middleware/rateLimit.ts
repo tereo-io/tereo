@@ -1,6 +1,7 @@
 import { hashFlowToken } from "../utils/crypto.js";
 import { normalizeEmail } from "../utils/email.js";
 import {
+  createScimRateLimitMiddleware,
   createPreAuthRateLimitMiddleware,
   createRateLimitMiddleware,
   createWindowedBackoffLimiter,
@@ -15,6 +16,9 @@ import {
 // sends X-Forwarded-For, which the default TRUST_PROXY (loopback) honours.
 
 export const rateLimitGeneral = createRateLimitMiddleware("tereo");
+
+// Per SCIM connection, after its token is authenticated.
+export const rateLimitScim = createScimRateLimitMiddleware();
 
 // Mounted before requireAuth, so floods of missing or bad tokens are bounded.
 export const rateLimitPreAuth = createPreAuthRateLimitMiddleware("tereo");

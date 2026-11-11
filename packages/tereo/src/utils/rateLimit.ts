@@ -5,6 +5,7 @@ import { getRedisClient, redisCommand, redisKey } from "./redis.js";
 import { BlockList, isIPv4, isIPv6 } from "node:net";
 import { createHash, randomUUID } from "node:crypto";
 import { redactUrl } from "../telemetry/redact.js";
+import { scimContext } from "./scim/context.js";
 import { logger } from "./logger.js";
 import env from "../env.js";
 
@@ -300,6 +301,24 @@ export function createRateLimitMiddleware(
       // Only an authenticated request carries an override.
       return { internal, key, points: auth?.rateLimitPerSecond ?? undefined };
     },
+  });
+}
+
+/**
+ * SCIM calls per connection, at the internal tier's rate: a directory's
+ * initial sync sends thousands of requests in a burst, from addresses core
+ * can't tell apart.
+ */
+export function createScimRateLimitMiddleware(): RequestHandler {
+  return createTieredLimiter({
+    keyPrefix: "tereo:ratelimit:scim",
+    externalPoints: env.RATE_LIMIT_INTERNAL_PER_SECOND,
+    internalPoints: env.RATE_LIMIT_INTERNAL_PER_SECOND,
+    headersOnPass: true,
+    classify: (req) => ({
+      internal: true,
+      key: `scim:${scimContext(req).connection.id}`,
+    }),
   });
 }
 

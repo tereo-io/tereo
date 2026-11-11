@@ -1,13 +1,13 @@
 import { getDefaultOrganizationId } from "../../../../../../utils/defaultOrganization.js";
 import { mapUniqueViolation } from "../../../../../../utils/prismaErrors.js";
 import { assertMayGrantScim } from "../../../../../../utils/scim/tokens.js";
+import { scimBaseUrl } from "../../../../../../utils/scim/url.js";
 import { logAuditTx } from "../../../../../../utils/outbox.js";
 import { validateUser } from "../../../../../../utils/auth.js";
 import { IdentityProviderIdParamSchema } from "../schemas.js";
 import { PutScimConnectionSchema } from "./schemas.js";
 import db from "../../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
-import env from "../../../../../../env.js";
 import {
   validateBody,
   validateParams,
@@ -26,7 +26,7 @@ const formatConnection = async (connectionId: string) => {
   return {
     id: connection.id,
     providerId: connection.providerId,
-    baseUrl: `${env.PUBLIC_URL}/scim/v2`,
+    baseUrl: scimBaseUrl(),
     isActive: connection.isActive,
     lastUsedAt: connection.lastUsedAt,
     managedUserCount,
