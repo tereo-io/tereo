@@ -85,6 +85,8 @@ export const AREA_BY_PATH: ReadonlyArray<
   ["utils/notifications", "notifications"],
   ["routes/v1/audit", "audit"],
   ["utils/identityProviders", "auth"],
+  ["utils/scim", "auth"],
+  ["routes/scim", "auth"],
   ["routes/health", "platform"],
   ["routes/v1/setup", "platform"],
   ...AREA_TAGS.map((a) => [`flows/${a}`, a] as const),
