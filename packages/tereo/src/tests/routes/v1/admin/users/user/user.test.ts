@@ -696,6 +696,22 @@ describe("PATCH /v1/admin/users/:id with a password", () => {
     expect(await liveSessions(user.id)).toBe(0);
   });
 
+  it("ends the sessions a deactivation left live when reactivating", async () => {
+    const { user, token } = await signedInUser();
+    // A deactivation whose sign-out step failed after it committed.
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { isActive: false },
+    });
+    expect(await liveSessions(user.id)).toBeGreaterThan(0);
+
+    const response = await patchUser(writerToken, user.id, { isActive: true });
+    expect(response.status).toBe(HTTP_STATUS.OK);
+
+    expect(await liveSessions(user.id)).toBe(0);
+    expect((await userinfo(token)).status).toBe(HTTP_STATUS.UNAUTHORIZED);
+  });
+
   it("keeps the caller's own session when they reset their own password", async () => {
     const admin = await createAdminUser();
     const current = await getAccessTokenForUser(admin, testClient);
