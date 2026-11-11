@@ -3,6 +3,7 @@ import { Prisma } from "../../../prisma/generated/client/index.js";
 import { SYSTEM_USER_ID } from "../../definitions/systemUser.js";
 import type { ScimFilter } from "../scim/filter.js";
 import { NotFoundError } from "../errors.js";
+import { escapeLike } from "./like.js";
 import { prisma } from "./prisma.js";
 
 type Tx = Prisma.TransactionClient;
@@ -164,7 +165,7 @@ export const findClaimable = async (
         ? { connectionId, externalId: by.externalId }
         : {
             connectionId,
-            userName: { equals: by.email, mode: "insensitive" },
+            userName: iequals(by.email),
           },
   });
 };
@@ -183,6 +184,12 @@ export const listProviderDomains = async (providerId: string, tx?: Tx) => {
   return rows.map((r) => r.domain.toLowerCase());
 };
 
+// Prisma compiles an insensitive `equals` to ILIKE, so the value is escaped.
+const iequals = (value: string) => ({
+  equals: escapeLike(value),
+  mode: "insensitive" as const,
+});
+
 const managed = (connectionId: string) =>
   ({ scimLink: { is: { connectionId, deletedAt: null } } }) as const;
 
@@ -191,7 +198,7 @@ const managed = (connectionId: string) =>
 const unmanagedInDomains = (domains: string[]): Prisma.UserWhereInput => ({
   scimLink: { is: null },
   OR: domains.map((d) => ({
-    email: { endsWith: `@${d}`, mode: "insensitive" as const },
+    email: { endsWith: escapeLike(`@${d}`), mode: "insensitive" as const },
   })),
 });
 
@@ -208,7 +215,7 @@ const clauseWhere = (
   connectionId: string,
   clause: ScimFilter[number]
 ): Prisma.UserWhereInput => {
-  const insensitive = { equals: clause.value, mode: "insensitive" as const };
+  const insensitive = iequals(clause.value);
   switch (clause.attr) {
     case "email":
       return { email: insensitive };

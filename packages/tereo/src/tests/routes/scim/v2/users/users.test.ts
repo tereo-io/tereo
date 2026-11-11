@@ -176,4 +176,39 @@ describe("GET /scim/v2/Users", () => {
     expect(status).toBe(400);
     expect(body.scimType).toBe("invalidFilter");
   });
+
+  describe("filter values are literal text", () => {
+    it("treats % and _ as ordinary characters", async () => {
+      const c = await createScimConnection();
+      const stamp = tag();
+      const first = await makeUser(`j_smith-${stamp}@${c.domain}`);
+      await makeUser(`jxsmith-${stamp}@${c.domain}`);
+      const m = await makeUser(`m-${stamp}@${c.domain}`);
+      await manage(c.connectionId, m.id, m.email);
+      const f = (q: string) =>
+        list(c.token, `?filter=${encodeURIComponent(q)}`);
+
+      expect((await f('userName eq "%"')).body.Resources).toEqual([]);
+      expect((await f('emails.value eq "%"')).body.Resources).toEqual([]);
+      expect((await f('emails.value eq "_"')).body.Resources).toEqual([]);
+      const { body } = await byUserName(c.token, first.email);
+      expect(body.Resources.map((r: { id: string }) => r.id)).toEqual([
+        first.id,
+      ]);
+    });
+
+    it("does not match a domain that merely ends with or extends the provider's", async () => {
+      const c = await createScimConnection();
+      const stamp = tag();
+      const evil = await makeUser(`x-${stamp}@evil-${c.domain}`);
+      const sub = await makeUser(`x-${stamp}@sub.${c.domain}`);
+      for (const user of [evil, sub]) {
+        const { body } = await list(
+          c.token,
+          `?filter=${encodeURIComponent(`emails.value eq "${user.email}"`)}`
+        );
+        expect(body.totalResults, user.email).toBe(0);
+      }
+    });
+  });
 });

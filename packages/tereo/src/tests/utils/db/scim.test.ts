@@ -132,4 +132,36 @@ describe("db.scim", () => {
     expect(first.lastUsedAt).not.toBeNull();
     expect(second.lastUsedAt).toEqual(first.lastUsedAt);
   });
+
+  it("claims by email as a true case-insensitive equality", async () => {
+    const connection = await makeConnection("claim");
+    const wanted = await prisma.user.create({
+      data: { email: `j_smith-${run}@claim.test` },
+    });
+    const lookalike = await prisma.user.create({
+      data: { email: `jxsmith-${run}@claim.test` },
+    });
+    for (const user of [wanted, lookalike]) {
+      await db.$transaction((tx) =>
+        db.scim.createLink(
+          {
+            connectionId: connection.id,
+            userId: user.id,
+            externalId: null,
+            userName: user.email,
+            idpActive: true,
+            adminHold: false,
+          },
+          tx
+        )
+      );
+    }
+    const found = await db.scim.findClaimable(connection.id, {
+      email: wanted.email.toUpperCase(),
+    });
+    expect(found.map((l) => l.userId)).toEqual([wanted.id]);
+    expect(await db.scim.findClaimable(connection.id, { email: "%" })).toEqual(
+      []
+    );
+  });
 });
