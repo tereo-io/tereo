@@ -183,8 +183,11 @@ function entryNameFor(
   objectKey: string,
   stripPrefix: string | null | undefined
 ): string {
-  if (stripPrefix && objectKey.startsWith(stripPrefix)) {
-    const stripped = objectKey.slice(stripPrefix.length);
+  // Only the prefix's folders are dropped: stripping a partial segment would
+  // name `rep/x.txt` and `repx.txt` alike under the prefix `rep`.
+  const folders = stripPrefix?.slice(0, stripPrefix.lastIndexOf("/") + 1);
+  if (folders && objectKey.startsWith(folders)) {
+    const stripped = objectKey.slice(folders.length);
     // Never emit an empty or absolute-looking entry name.
     return stripped.length > 0 ? stripped.replace(/^\/+/, "") : objectKey;
   }

@@ -1,5 +1,6 @@
 import { Prisma } from "../../../prisma/generated/client/index.js";
 import { NotFoundError } from "../errors.js";
+import { escapeLike } from "./like.js";
 import { prisma } from "./prisma.js";
 
 export interface CreateInput {
@@ -70,7 +71,8 @@ export const enumerateObjectIdsForPrefix = async (
   const rows = await prisma.object.findMany({
     where: {
       bucketId,
-      objectKey: { startsWith: prefix },
+      // Prisma hands LIKE's wildcards through.
+      objectKey: { startsWith: escapeLike(prefix) },
       deletedAt: null,
       thumbnailFor: null,
     },
