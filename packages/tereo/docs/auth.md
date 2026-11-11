@@ -410,6 +410,22 @@ password or an identity at another active provider). Other users whose only way 
 are not counted: they are locked out until it is activated again or they are given a password.
 `POST …/activate` re-checks the issuer. Providers cannot be deleted, only deactivated.
 
+**Deactivating a provider** also ends the sessions obtained through it. Once the deactivation
+commits core enqueues a sweep (`jobs/providerDeactivationSessionSweep.ts`, named by the provider and
+its `updatedAt`) over every person holding an identity at the provider. For each, in one
+transaction, it ends their federated sessions — the SSO sessions and token families whose login
+used a provider (`amr` contains `fed`), with their access tokens and sockets — and deletes the
+login steps the provider vouched for that are still under way (consent, organization pick, TOTP
+verification). It is audited and emitted as an admin session revoke (`sessions_revoked`,
+`auth.user.sessions-revoked`) by the admin who deactivated. Sessions from a password sign-in are
+kept. A session records that it came from a provider but not which one, so a person with identities
+at two providers loses the federated sessions from both and signs in again through the one still
+active. The sweep reads the provider as it is when it runs and does nothing once it is active
+again; deactivating a provider that is already inactive enqueues nothing. Failures and retries are
+handled as in the SSO-only sweep below (10 attempts, the users that failed only; run in the request,
+once, when the job cannot be enqueued), so the sessions end shortly after the response rather than
+with it.
+
 Once any user has linked an identity, `PATCH` refuses a new `slug` with 409 `slug_in_use` and a new
 `issuer` with 409 `issuer_in_use`: a `sub` is unique only within its issuer, so under another issuer
 the same `sub` may be another person, and every existing link would point at them. To move to a new
@@ -553,8 +569,8 @@ Either unlink ends the user's sessions in the same transaction, as a password ch
 caller's own session is kept when they unlink their own; `sessions_revoked` is audited and
 `auth.user.sessions-revoked` emitted): a session obtained through the identity must not outlive
 it, and a session does not record which identity it came from, so all of them go. Deactivating a
-provider ends no session: it only refuses new sign-ins, and the sessions its users already hold
-last until they expire or are revoked (`DELETE /v1/admin/users/{id}/sessions/all`).
+provider ends its users' federated sessions and leaves their password sessions (see _Deactivating a
+provider_ above).
 
 For an `ssoOnly` domain, the password check runs first and unchanged, so nothing reveals whether an
 account exists: an unknown email and a wrong password both answer 401 `Invalid credentials`. A correct

@@ -187,8 +187,13 @@
     summary: Deactivate an identity provider
     description: |
       Takes the provider off the login page and refuses sign-ins that are under
-      way. Identities already linked stay, and so do the sessions their users
-      already hold: this ends none. Refused with 409 `sso_only_domain` while
+      way. Identities already linked stay. Shortly after, in the background,
+      it ends the federated sessions (those signed in to through an identity
+      provider) of every user holding an identity at this provider, audited
+      and emitted as `auth.user.sessions-revoked`; their password sessions are
+      kept. A session does not record which provider it came from, so a user
+      with identities at two providers loses the federated sessions from both.
+      Refused with 409 `sso_only_domain` while
       any of its domains is SSO-only, since those users would have no way in: turn
       `ssoOnly` off first.
       Refused with 409 `conflict` when it would leave no administrator able to
