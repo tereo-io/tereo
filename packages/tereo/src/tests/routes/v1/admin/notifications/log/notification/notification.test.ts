@@ -172,6 +172,19 @@ describe("/v1/admin/notifications/:id", () => {
       expect(byStatus.failed.attempts).toBe(3);
     });
 
+    it("does not return the sender's stored access", async () => {
+      const n = await seed();
+      await prisma.notification.update({
+        where: { id_createdAt: { id: n.id, createdAt: n.createdAt } },
+        data: {
+          senderAccess: { organizationId: randomUUID(), ceiling: null },
+        },
+      });
+      const res = await api("GET", `/${n.id}`, readToken);
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty("senderAccess");
+    });
+
     it("shows content null once sent, and never connection secrets", async () => {
       const connection = await prisma.notificationConnection.create({
         data: {

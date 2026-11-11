@@ -36,6 +36,7 @@ export const get = (id: string, createdAt?: Date) =>
 export const getWithDeliveries = (id: string) =>
   prisma.notification.findFirst({
     where: { id },
+    omit: { senderAccess: true },
     include: {
       deliveries: { orderBy: { createdAt: "asc" } },
       sender: userRefSelect,
