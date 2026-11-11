@@ -9392,8 +9392,8 @@ paths:
         `roleIds`; `ssoOnly` refuses password sign-in for the domain's users. The two
         are independent. `domain` is lowercased and a leading `@` dropped.
         `autoAccept: true` puts users in the organization, so it needs
-        `organizations.write` or an organization the caller acts in (a member, or
-        a service account whose client belongs to it): otherwise 403
+        `organizations.write` or a caller who is an admin or owner of the
+        organization, while it is active: otherwise 403
         `organization_not_permitted`, whether or not the organization exists.
         `ssoOnly: true` is refused with 409 `provider_inactive` while the provider
         is deactivated, since the domain's users would have no way to sign in, and
@@ -9490,8 +9490,8 @@ paths:
         to another `organizationId` grants its roles (those sent, or else its current
         ones) in that organization, so all of them are checked there. Turning
         `autoAccept` on, or moving a domain that auto-accepts, needs
-        `organizations.write` or to act in the organization it will add users to
-        (403 `organization_not_permitted`), as on create. Errors are those
+        `organizations.write` or an admin or owner of the organization it will add
+        users to (403 `organization_not_permitted`), as on create. Errors are those
         of adding a domain, including 409 `provider_inactive` for `ssoOnly: true` on a
         deactivated provider. Turning `ssoOnly` on or off, or changing the `domain` of
         an SSO-only domain, needs `admin` through a global role (403 otherwise).
@@ -9635,9 +9635,9 @@ paths:
         its account is a member of the organization, and it holds org roles
         there. Without one it is a **platform** integration: no `org_id`, global
         roles. The organization is fixed at creation. Binding to an organization
-        puts an account in it, so it needs `organizations.write` or an
-        organization the caller acts in (a member, or a service account whose
-        client belongs to it): otherwise `403 organization_not_permitted`,
+        puts an account in it, so it needs `organizations.write` or a caller who
+        is an admin or owner of the organization, while it is active: otherwise
+        `403 organization_not_permitted`,
         whether or not the organization exists.
 
         `slug` defaults to the name, lowercased and hyphenated. Returns

@@ -151,7 +151,7 @@ describe("POST /v1/admin/integrations and GET /v1/admin/integrations", () => {
       expect(res.body.error).toBe("unknown_organization");
     });
 
-    it("binds to an organization only for organizations.write or a caller acting in it", async () => {
+    it("binds to an organization only for organizations.write or an admin of it", async () => {
       const memberId = randomUUID();
       const writerToken = await getTestPrincipalToken({
         userId: memberId,
@@ -176,7 +176,16 @@ describe("POST /v1/admin/integrations and GET /v1/admin/integrations", () => {
         (await bind("00000000-0000-7000-8000-00000000dead")).body.error
       ).toBe("organization_not_permitted");
 
+      // Plain membership is not authority over the organization.
       await ensureTestMembership(memberId, "integrations-org");
+      expect((await bind(orgId)).body.error).toBe("organization_not_permitted");
+
+      await prisma.organizationMember.update({
+        where: {
+          organizationId_userId: { organizationId: orgId, userId: memberId },
+        },
+        data: { memberRole: "admin" },
+      });
       const allowed = await bind(orgId);
       expect(allowed.status).toBe(201);
       expect(allowed.body.organizationId).toBe(orgId);

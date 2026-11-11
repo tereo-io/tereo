@@ -88,7 +88,7 @@ describe("PATCH and DELETE /v1/admin/identity-providers/:id/domains/:domainId", 
       ...body,
     });
 
-  it("turns auto-accept on, or moves an auto-accept domain, only for organizations.write or a caller acting in the organization", async () => {
+  it("turns auto-accept on, or moves an auto-accept domain, only for organizations.write or an admin of the organization", async () => {
     const provider = await newProvider();
     const userId = randomUUID();
     const token = await getTestPrincipalToken({
@@ -108,7 +108,16 @@ describe("PATCH and DELETE /v1/admin/identity-providers/:id/domains/:domainId", 
     expect(refused.status).toBe(403);
     expect((await refused.json()).error).toBe("organization_not_permitted");
 
+    // Plain membership is not authority over the organization.
     await ensureTestMembership(userId, orgId);
+    expect(
+      (await call(token, "PATCH", path, { autoAccept: true })).status
+    ).toBe(403);
+
+    await prisma.organizationMember.update({
+      where: { organizationId_userId: { organizationId: orgId, userId } },
+      data: { memberRole: "admin" },
+    });
     expect(
       (await call(token, "PATCH", path, { autoAccept: true })).status
     ).toBe(200);

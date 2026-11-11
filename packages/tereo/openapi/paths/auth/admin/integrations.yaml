@@ -64,9 +64,9 @@
       its account is a member of the organization, and it holds org roles
       there. Without one it is a **platform** integration: no `org_id`, global
       roles. The organization is fixed at creation. Binding to an organization
-      puts an account in it, so it needs `organizations.write` or an
-      organization the caller acts in (a member, or a service account whose
-      client belongs to it): otherwise `403 organization_not_permitted`,
+      puts an account in it, so it needs `organizations.write` or a caller who
+      is an admin or owner of the organization, while it is active: otherwise
+      `403 organization_not_permitted`,
       whether or not the organization exists.
 
       `slug` defaults to the name, lowercased and hyphenated. Returns

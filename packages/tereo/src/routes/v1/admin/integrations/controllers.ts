@@ -1,5 +1,5 @@
+import { assertAdministersOrganization } from "../../../../utils/orgRoleAuth.js";
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
-import { assertActsInOrganization } from "../../../../utils/orgRoleAuth.js";
 import { createIntegrationTx } from "../../../../utils/integrations.js";
 import { formatIntegration } from "../../../../utils/transformers.js";
 import { BadRequestError } from "../../../../utils/errors.js";
@@ -38,10 +38,10 @@ export const createIntegration = async (req: Request, res: Response) => {
 
   // The integration's service account becomes a member of the organization.
   if (body.organizationId) {
-    await assertActsInOrganization(
+    await assertAdministersOrganization(
       auth,
       body.organizationId,
-      "You can bind an integration only to an organization you belong to"
+      "You can bind an integration only to an organization you administer"
     );
   }
 

@@ -111,7 +111,7 @@ describe("GET and POST /v1/admin/identity-providers/:id/domains", () => {
       ...body,
     });
 
-  it("binds an auto-accept domain only for organizations.write or a caller acting in the organization", async () => {
+  it("binds an auto-accept domain only for organizations.write or an admin of the organization", async () => {
     const provider = await newProvider();
     const userId = randomUUID();
     const token = await getTestPrincipalToken({
@@ -131,7 +131,18 @@ describe("GET and POST /v1/admin/identity-providers/:id/domains", () => {
     const manual = await postDomain(token, provider.id, { domain: domain() });
     expect(manual.status).toBe(201);
 
+    // Plain membership is not authority over the organization.
     await ensureTestMembership(userId, orgId);
+    const asMember = await postDomain(token, provider.id, {
+      domain: domain(),
+      autoAccept: true,
+    });
+    expect((await asMember.json()).error).toBe("organization_not_permitted");
+
+    await prisma.organizationMember.update({
+      where: { organizationId_userId: { organizationId: orgId, userId } },
+      data: { memberRole: "admin" },
+    });
     const allowed = await postDomain(token, provider.id, {
       domain: domain(),
       autoAccept: true,

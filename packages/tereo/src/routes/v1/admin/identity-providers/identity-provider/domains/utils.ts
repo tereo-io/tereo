@@ -1,7 +1,7 @@
 import { getDefaultOrganizationId } from "../../../../../../utils/defaultOrganization.js";
+import { assertAdministersOrganization } from "../../../../../../utils/orgRoleAuth.js";
 import type { Prisma } from "../../../../../../../prisma/generated/client/index.js";
 import { formatDomain } from "../../../../../../utils/identityProviders/format.js";
-import { assertActsInOrganization } from "../../../../../../utils/orgRoleAuth.js";
 import type { AuthContext } from "../../../../../../middleware/auth.js";
 import { assertGlobalAdmin } from "../../../../../../utils/grants.js";
 import { ConflictError } from "../../../../../../utils/errors.js";
@@ -57,13 +57,13 @@ export const assertMayChangeSsoOnly = (
  * organization, so binding one needs authority over that organization.
  */
 export const assertMayAutoAcceptInto = (
-  auth: Pick<AuthContext, "userId" | "permissions">,
+  auth: Pick<AuthContext, "userId" | "permissions" | "ceiling">,
   organizationId: string
 ) =>
-  assertActsInOrganization(
+  assertAdministersOrganization(
     auth,
     organizationId,
-    "You can auto-accept a domain only into an organization you belong to"
+    "You can auto-accept a domain only into an organization you administer"
   );
 
 type DomainEvent =

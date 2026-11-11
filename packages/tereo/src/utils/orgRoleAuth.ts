@@ -111,6 +111,34 @@ export const assertActsInOrganization = async (
 };
 
 /**
+ * Passes for organizations.write and for an admin or owner of an active
+ * organization, the tier that manages its members. Otherwise 403
+ * `organization_not_permitted` with `message` — also for an organization that
+ * does not exist.
+ */
+export const assertAdministersOrganization = async (
+  auth: { userId: string; permissions: string[]; ceiling?: string[] },
+  organizationId: string,
+  message: string
+): Promise<void> => {
+  if (hasPermission(auth.permissions, "organizations.write")) return;
+  // A delegated token's scopes cap the member role's authority.
+  const capped =
+    auth.ceiling && !hasPermission(auth.ceiling, "organizations.write");
+  const membership = capped
+    ? null
+    : await db.organizations.getMembership(organizationId, auth.userId);
+  if (
+    membership &&
+    ROLE_LEVEL[membership.memberRole] >= ROLE_LEVEL.admin &&
+    (await db.organizations.getAny(organizationId)).isActive
+  ) {
+    return;
+  }
+  throw new AppError(403, "organization_not_permitted", message);
+};
+
+/**
  * Serializes changes to one organization's owners. Taken before the change, so
  * two concurrent removals of its last two owners cannot each count the other
  * as the one that remains, and a target an org admin found not to be an owner
