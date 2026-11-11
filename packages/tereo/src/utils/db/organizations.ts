@@ -51,6 +51,18 @@ export const get = async (id: string, tx?: Prisma.TransactionClient) => {
   return res;
 };
 
+/**
+ * Held shared while a token naming the organization is issued without a
+ * user's row to lock: deactivating it updates the row, so it waits for the
+ * issue and then revokes what that created.
+ */
+export const lockForTokenIssue = async (
+  id: string,
+  tx: Prisma.TransactionClient
+): Promise<void> => {
+  await tx.$queryRaw`SELECT 1 FROM "auth"."organizations" WHERE id = ${id}::uuid FOR SHARE`;
+};
+
 /** Names of the given organizations, archived included, by id. */
 export const getNames = async (ids: string[]): Promise<Map<string, string>> => {
   if (ids.length === 0) return new Map();
