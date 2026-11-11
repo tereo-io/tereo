@@ -392,6 +392,12 @@ describe("UserDetail", () => {
       );
     });
 
+    it("still shows the connected accounts", async () => {
+      renderDetail(scimUser);
+
+      expect(await screen.findByText("Connected Accounts")).toBeVisible();
+    });
+
     it("hides Unlink without users.write", async () => {
       denied.add("users.write");
       renderDetail(scimUser);

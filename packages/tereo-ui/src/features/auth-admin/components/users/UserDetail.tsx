@@ -392,9 +392,10 @@ export const UserDetail = () => {
               ) : null
             }
           />
-          {user.userType === "human" && !user.managedBy && (
-            <UserConnectedAccounts userId={id} email={user.email} />
-          )}
+          {user.userType === "human" &&
+            (!user.managedBy || user.managedBy.kind === "scim") && (
+              <UserConnectedAccounts userId={id} email={user.email} />
+            )}
           <Card>
             <SectionHeader title="Roles" />
             {rolesData?.roles.length ||
