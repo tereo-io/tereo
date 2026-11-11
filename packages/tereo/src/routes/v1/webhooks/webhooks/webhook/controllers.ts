@@ -84,15 +84,14 @@ export const updateWebhookEndpoint = async (req: Request, res: Response) => {
 
   const existing = await getVisibleEndpoint(id, auth, scope);
   // Archived-endpoint rejection is enforced by guardArchived on the PATCH route.
-  // A provisioned endpoint takes only a status change: re-enabling one that
-  // was disabled, which the file cannot do.
+  // A provisioned endpoint takes only a status change to ACTIVE: re-enabling
+  // one that was disabled, which the file cannot do. Pausing it would stop a
+  // service's events, and no apply would start them again.
   const statusOnly = Object.entries(body).every(
     ([key, value]) => key === "status" || value === undefined
   );
-  if (!statusOnly) {
-    assertNotProvisioned(existing);
-    assertNotManagedByIntegration(existing, scope);
-  }
+  if (!statusOnly || body.status === "PAUSED") assertNotProvisioned(existing);
+  if (!statusOnly) assertNotManagedByIntegration(existing, scope);
   // An admin pausing an integration's endpoint changes nothing it is sent.
   const adminPause =
     statusOnly && !scope.owner && existing.ownerService?.kind === "integration";

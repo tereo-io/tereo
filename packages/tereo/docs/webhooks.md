@@ -164,7 +164,8 @@ events to the service. They are ordinary endpoints with an owner:
   only the service's own provisioned endpoints get the exception: endpoints made through the API, or
   owned by another service or an integration, never do.
 - Provisioned endpoints answer `409 managed_by_provisioning` to `PATCH` (except one carrying only
-  `status`, to re-enable), `DELETE`, archive, restore, rotate-secret and revoke-previous-secret.
+  `status: "ACTIVE"`, to re-enable; `PAUSED` is refused, since no apply would start the service's
+  events again), `DELETE`, archive, restore, rotate-secret and revoke-previous-secret.
   Delivery views, retries and test sends work. An endpoint a document drops is archived at once.
 
 ## List Filters

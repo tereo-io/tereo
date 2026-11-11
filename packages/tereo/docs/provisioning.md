@@ -630,7 +630,7 @@ Provisioned rows change only in the documents. The admin API answers `409` with 
 | Login client | `PATCH`, `DELETE`, `regenerate-secret` on `/v1/admin/clients/:id` | Reading it |
 | Custom role | Edit, delete, archive, restore, and changing its permissions | Assigning it to users and organization members, and duplicating it |
 | Group | `PATCH`, role changes, archive and restore on `/v1/admin/groups/:id` | Reading it, and adding and removing members |
-| Webhook endpoint | `PATCH` (except a status-only re-enable), `DELETE`, archive, restore, `rotate-secret`, `revoke-previous-secret` | Delivery views, retries, test sends, a status-only `PATCH` to re-enable |
+| Webhook endpoint | `PATCH` (except a status-only re-enable; pausing is refused), `DELETE`, archive, restore, `rotate-secret`, `revoke-previous-secret` | Delivery views, retries, test sends, a status-only `PATCH` to re-enable |
 
 Responses carry `provisioned: true` (an endpoint also `ownerService`), and the admin UI shows a
 "Managed by provisioning" badge and hides the change controls.
