@@ -70,4 +70,31 @@ describe("/scim/v2 authentication", () => {
     const access = await getTestPrincipalToken({ permissions: [] });
     expectUnauthorized(await get(`Bearer ${access}`));
   });
+
+  const malformed = (authorization?: string) =>
+    fetch(`${CORE_URL}/scim/v2/Nope`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/scim+json",
+        ...(authorization && { Authorization: authorization }),
+      },
+      body: "{not json",
+    });
+
+  it("answers 401, not 400, to a malformed body without a token", async () => {
+    const response = await malformed();
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe("Bearer");
+  });
+
+  it("answers a SCIM 400 invalidSyntax to a malformed body with a valid token", async () => {
+    const { token } = await createScimConnection();
+    const response = await malformed(`Bearer ${token}`);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      schemas: [URN],
+      status: "400",
+      scimType: "invalidSyntax",
+    });
+  });
 });

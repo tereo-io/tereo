@@ -1,7 +1,10 @@
 import { scimBodyParsers } from "../../../middleware/bodyParsers.js";
 import { requireScimToken, scimErrorHandler } from "./middleware.js";
-import { rateLimitScim } from "../../../middleware/rateLimit.js";
 import { Router } from "express";
+import {
+  rateLimitPreAuth,
+  rateLimitScim,
+} from "../../../middleware/rateLimit.js";
 import {
   getServiceProviderConfig,
   getResourceTypes,
@@ -11,7 +14,13 @@ import {
 
 const router = Router();
 
-router.use(...scimBodyParsers, requireScimToken, rateLimitScim);
+// Nothing is parsed before the token is known.
+router.use(
+  rateLimitPreAuth,
+  requireScimToken,
+  rateLimitScim,
+  ...scimBodyParsers
+);
 
 router.get("/ServiceProviderConfig", getServiceProviderConfig);
 router.get("/ResourceTypes", getResourceTypes);
