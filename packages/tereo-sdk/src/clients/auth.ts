@@ -14,6 +14,7 @@ import {
 } from "../utils/errors.js";
 import {
   buildCachePrefix,
+  safeCacheDel,
   safeCacheGet,
   safeCacheSet,
 } from "../utils/cache.js";
@@ -72,6 +73,13 @@ const MAX_USER_IDS_PER_REQUEST = 100;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const tokenCacheKey = (token: string): string =>
+  `${AUTH_CACHE_PREFIX}token:${crypto.createHash("sha256").update(token).digest("hex")}`;
+const userCacheKey = (userId: string): string =>
+  `${AUTH_CACHE_PREFIX}user:${userId}`;
+const organizationCacheKey = (id: string): string =>
+  `${AUTH_CACHE_PREFIX}org:${id}`;
+
 export class AuthServiceClient {
   private readonly defaultTestPermissions: string[];
   private readonly publicRoutes: PublicRouteConfig[];
@@ -121,8 +129,7 @@ export class AuthServiceClient {
     }
 
     const caching = this.introspectionCacheTtlSeconds > 0;
-    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-    const cacheKey = `${AUTH_CACHE_PREFIX}token:${tokenHash}`;
+    const cacheKey = tokenCacheKey(token);
 
     if (caching) {
       const cached = await safeCacheGet<IntrospectionResponse>(cacheKey);
@@ -154,6 +161,26 @@ export class AuthServiceClient {
   }
 
   /**
+   * Drops the cached introspection of `token`, for every replica of this
+   * service, so its next use asks core. For a service that learns a token
+   * is revoked (a sign-out it handles, a webhook from core) and cannot wait
+   * out the cache. A Redis failure is logged and the entry left to expire.
+   */
+  async invalidateToken(token: string): Promise<void> {
+    await safeCacheDel(tokenCacheKey(token));
+  }
+
+  /** Drops the cached `getUser`/`getUsers` result for each id, found or not. */
+  async invalidateUser(...userIds: string[]): Promise<void> {
+    await safeCacheDel(...userIds.map(userCacheKey));
+  }
+
+  /** Drops the cached `getOrganization` result for each id, found or not. */
+  async invalidateOrganization(...ids: string[]): Promise<void> {
+    await safeCacheDel(...ids.map(organizationCacheKey));
+  }
+
+  /**
    * Get a user from core's admin API.
    * Results are cached in Redis. Returns null if the user is not found.
    * In test mode (`createCoreClient({ testMode: true })`), returns mock data for any UUID-shaped userId.
@@ -175,7 +202,7 @@ export class AuthServiceClient {
       };
     }
 
-    const cacheKey = `${AUTH_CACHE_PREFIX}user:${userId}`;
+    const cacheKey = userCacheKey(userId);
     const cached = await safeCacheGet<{
       exists: boolean;
       user?: AuthServiceUser;
@@ -230,7 +257,7 @@ export class AuthServiceClient {
         const cached = await safeCacheGet<{
           exists: boolean;
           user?: AuthServiceUser;
-        }>(`${AUTH_CACHE_PREFIX}user:${userId}`);
+        }>(userCacheKey(userId));
         if (cached) {
           result.set(userId, cached.exists && cached.user ? cached.user : null);
         } else if (UUID_RE.test(userId)) {
@@ -251,7 +278,7 @@ export class AuthServiceClient {
           const user = found.get(userId) ?? null;
           result.set(userId, user);
           await safeCacheSet(
-            `${AUTH_CACHE_PREFIX}user:${userId}`,
+            userCacheKey(userId),
             user ? { exists: true, user } : { exists: false },
             user ? USER_CACHE_TTL_SECONDS : USER_NOT_FOUND_CACHE_TTL_SECONDS
           );
@@ -306,7 +333,7 @@ export class AuthServiceClient {
       };
     }
 
-    const cacheKey = `${AUTH_CACHE_PREFIX}org:${id}`;
+    const cacheKey = organizationCacheKey(id);
     const cached = await safeCacheGet<{
       exists: boolean;
       org?: AuthServiceOrganization;

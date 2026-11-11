@@ -14,6 +14,10 @@ const { tryHandleRequest, mockRedis } = vi.hoisted(() => {
         store.set(key, value);
         return "OK";
       }),
+      del: vi.fn(async (...keys: string[]) => {
+        for (const key of keys) store.delete(key);
+        return keys.length;
+      }),
     },
   };
 });
@@ -82,6 +86,43 @@ describe("AuthServiceClient introspection cache", () => {
     expect(tryHandleRequest).toHaveBeenCalledTimes(2);
     expect(mockRedis.set).not.toHaveBeenCalled();
     expect(mockRedis.get).not.toHaveBeenCalled();
+  });
+
+  it("asks core again for a token once it is invalidated", async () => {
+    const client = new AuthServiceClient();
+    await client.introspectToken("d");
+    await client.introspectToken("other");
+    await client.invalidateToken("d");
+    tryHandleRequest.mockImplementation(async () => ({
+      data: { active: false },
+    }));
+    expect(await client.introspectToken("d")).toEqual({ active: false });
+    expect(tryHandleRequest).toHaveBeenCalledTimes(3);
+    // Another token's entry is untouched.
+    expect((await client.introspectToken("other")).active).toBe(true);
+    expect(tryHandleRequest).toHaveBeenCalledTimes(3);
+  });
+
+  it("asks core again for a user once it is invalidated", async () => {
+    const client = new AuthServiceClient();
+    const id = "00000000-0000-7000-8000-000000000001";
+    await client.getUser(id);
+    await client.getUser(id);
+    expect(tryHandleRequest).toHaveBeenCalledTimes(1);
+    await client.invalidateUser(id);
+    await client.getUser(id);
+    expect(tryHandleRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks core again for an organization once it is invalidated", async () => {
+    const client = new AuthServiceClient();
+    const id = "00000000-0000-7000-8000-000000000002";
+    await client.getOrganization(id);
+    await client.getOrganization(id);
+    expect(tryHandleRequest).toHaveBeenCalledTimes(1);
+    await client.invalidateOrganization(id);
+    await client.getOrganization(id);
+    expect(tryHandleRequest).toHaveBeenCalledTimes(2);
   });
 
   it("refuses a maximum above 300 s, or below 0", () => {

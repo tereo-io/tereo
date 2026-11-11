@@ -65,6 +65,9 @@ scopes this service defines with `requireScope`.
 | `getUsers(userIds)` | `Map<userId, AuthServiceUser \| null>` — cache misses fetched together, one `GET /v1/admin/users?filter[id]=…&filter[id_op]=in` per 100 ids; a non-UUID id is null | as `getUser` |
 | `validateUserExists(userId)` | `boolean` | as `getUser` |
 | `getOrganization(id)` | `AuthServiceOrganization \| null` (null on 404) — `id` is the JWT `org_id` | 5 min; not-found 60 s |
+| `invalidateToken(token)` | Nothing. Drops the token's cached introspection, so its next use asks core | — |
+| `invalidateUser(...userIds)` | Nothing. Drops the cached lookup of each user, found or not | — |
+| `invalidateOrganization(...ids)` | Nothing. Drops the cached lookup of each organization, found or not | — |
 | `getService()` | `AuthServiceOwnService` — this service as core knows it: `slug`, `namespace`, `declarationVersion`, `declarationHash` and `declaredAt` of the provisioning document core last applied, and `access` (`{ kind, target, status, decidedAt }[]`). `GET /v1/account/service` over `CORE_CLIENT`; needs no permission. Throws when the client belongs to no service (404). Use it at start to check the deploy's document has been applied | None |
 
 Introspection uses `POST /oauth/introspect` over `CORE_PUBLIC_CLIENT` (the service's credentials as
@@ -78,3 +81,30 @@ The cache is the Redis passed to `createCoreClient`, under `@tereo-io/sdk:<clien
 shared by the service's replicas and by no other service — another service's introspection says nothing
 about whether core would report the token active to this one.
 A Redis failure falls through to core.
+
+### How stale a cached answer can be
+
+Core does not tell app services when a token, user or organization changes, so each cached answer
+is served until it expires:
+
+| Cached | Stale for at most | What that means |
+|--------|-------------------|-----------------|
+| Active introspection | `introspectionCacheTtlSeconds`: 60 s by default, 300 s at most, never past the token's `exp`; `0` caches nothing | A token that was revoked, signed out, or whose user was deactivated or lost a role or permission keeps passing `requireAuth` / `requirePermission`, with the permissions it had when cached |
+| Inactive introspection | not cached | — |
+| `getUser` / `getUsers` | 5 min | `isActive`, `status`, name and email lag a change in core |
+| `getOrganization` | 5 min | `isActive`, `archivedAt` and name lag a change in core |
+| A user or organization core did not find | 60 s | One created just after the lookup is reported missing |
+
+A service that learns of a change sooner — it handles the sign-out itself, or receives core's
+webhook for it — drops the entry instead of waiting:
+
+```ts
+await core.auth.invalidateToken(token);        // the raw Bearer token
+await core.auth.invalidateUser(userId);
+await core.auth.invalidateOrganization(orgId);
+```
+
+Each removes the entry for every replica of the service, since they share the cache, and for no
+other service. The next call asks core. A Redis failure is logged and the entry left to expire.
+Invalidating needs the token itself: the cache is keyed by its hash, so tokens cannot be dropped
+by user. To bound every token's window, lower `introspectionCacheTtlSeconds`.
