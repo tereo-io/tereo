@@ -982,7 +982,9 @@ const activeHuman = {
  * What a change takes from the administrators: every assignment of a user or
  * of a role, a user's direct global assignments of some roles (`direct`) or
  * of all but some (`directExcept`), a global group, some of its members or
- * some of its roles.
+ * some of its roles. `signIn` takes no assignment: it leaves out the
+ * administrators with no way to sign in, not counting an identity at
+ * `exceptProviderId`.
  */
 export type AdminRemoval =
   | { kind: "user"; userId: string }
@@ -991,7 +993,23 @@ export type AdminRemoval =
   | { kind: "directExcept"; userId: string; keepRoleIds: string[] }
   | { kind: "group"; groupId: string }
   | { kind: "groupMembers"; groupId: string; userIds: string[] }
-  | { kind: "groupRoles"; groupId: string; roleIds: string[] };
+  | { kind: "groupRoles"; groupId: string; roleIds: string[] }
+  | { kind: "signIn"; exceptProviderId: string | null };
+
+const signsIn = (exceptProviderId: string | null) =>
+  ({
+    OR: [
+      { passwordHash: { not: null } },
+      {
+        identities: {
+          some: {
+            provider: { isActive: true },
+            ...(exceptProviderId && { providerId: { not: exceptProviderId } }),
+          },
+        },
+      },
+    ],
+  }) satisfies Prisma.UserWhereInput;
 
 const directAdminWhere = (
   removal: AdminRemoval | undefined
@@ -1016,6 +1034,11 @@ const directAdminWhere = (
       return {
         ...where,
         NOT: { userId: removal.userId, roleId: { notIn: removal.keepRoleIds } },
+      };
+    case "signIn":
+      return {
+        ...where,
+        user: { ...activeHuman, ...signsIn(removal.exceptProviderId) },
       };
     default:
       return where;
@@ -1042,6 +1065,9 @@ const groupAdminWhere = (
       break;
     case "groupRoles":
       role.NOT = { groupId: removal.groupId, roleId: { in: removal.roleIds } };
+      break;
+    case "signIn":
+      where.user = { ...activeHuman, ...signsIn(removal.exceptProviderId) };
       break;
   }
   return {

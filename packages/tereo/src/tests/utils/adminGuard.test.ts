@@ -7,12 +7,16 @@ import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { holdLocks, waitForLockWait } from "../support/dbLocks.js";
 import { prisma, type Prisma } from "../../utils/db/prisma.js";
-import { assertAdminRemains } from "../../utils/adminGuard.js";
 import { generateUniqueId } from "../support/auth/crypto.js";
+import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { createTestUser } from "../support/auth/users.js";
 import { removeMembers } from "../../utils/groups.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
+import {
+  assertAdminCanSignInWithout,
+  assertAdminRemains,
+} from "../../utils/adminGuard.js";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
@@ -303,6 +307,100 @@ describe("assertAdminRemains", () => {
         tx
       );
       await refusal(assertAdminRemains({ kind: "role", roleId: role.id }, tx));
+    });
+  });
+
+  describe("deactivating an identity provider", () => {
+    const providerIds: string[] = [];
+    const provider = async () => {
+      const row = await prisma.identityProvider.create({
+        data: {
+          slug: `guard-${generateUniqueId().toLowerCase()}`.slice(0, 50),
+          displayName: "Guard test provider",
+          kind: "oidc",
+          issuer: "https://idp.test",
+          clientId: "c",
+          clientSecret: "s",
+          createdBy: SYSTEM_USER_ID,
+        },
+      });
+      providerIds.push(row.id);
+      return row;
+    };
+
+    afterEach(async () => {
+      await prisma.identityProvider.deleteMany({
+        where: { id: { in: providerIds } },
+      });
+      providerIds.length = 0;
+    });
+
+    it("is refused when the only administrators sign in through it alone", async () => {
+      const { user: admin } = await makeAdmin();
+      const [only, other] = [await provider(), await provider()];
+      const link = (tx: Tx, providerId: string) =>
+        tx.userIdentity.create({
+          data: { userId: admin.id, providerId, subject: admin.id },
+        });
+      const guard = (tx: Tx) => assertAdminCanSignInWithout(only.id, tx);
+
+      await asSoleAdmins(async (tx) => {
+        await link(tx, only.id);
+        // A password is another way in.
+        await guard(tx);
+        await tx.user.update({
+          where: { id: admin.id },
+          data: { passwordHash: null },
+        });
+        await expect(guard(tx)).rejects.toThrow(
+          /no administrator able to sign in/
+        );
+        // An identity at an inactive provider is no way in; at an active
+        // one it is.
+        await link(tx, other.id);
+        await tx.identityProvider.update({
+          where: { id: other.id },
+          data: { isActive: false },
+        });
+        await expect(guard(tx)).rejects.toThrow(
+          /no administrator able to sign in/
+        );
+        await tx.identityProvider.update({
+          where: { id: other.id },
+          data: { isActive: true },
+        });
+        await guard(tx);
+      });
+    });
+
+    it("passes when no administrator could sign in to begin with", async () => {
+      const { user: admin } = await makeAdmin();
+      const unused = await provider();
+      await asSoleAdmins(async (tx) => {
+        await tx.user.update({
+          where: { id: admin.id },
+          data: { passwordHash: null },
+        });
+        await assertAdminCanSignInWithout(unused.id, tx);
+      });
+    });
+
+    it("queues on the guard's lock", async () => {
+      const row = await provider();
+      const release = await holdLocks(
+        (tx) =>
+          tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('core:admin-remains', 0))`
+      );
+      const response = fetch(
+        `${BASE_URL}/v1/admin/identity-providers/${row.id}/deactivate`,
+        { method: "POST", headers: { Authorization: `Bearer ${callerToken}` } }
+      );
+      try {
+        await waitForLockWait("%core:admin-remains%");
+      } finally {
+        await release();
+      }
+      expect((await response).status).toBe(HTTP_STATUS.OK);
     });
   });
 

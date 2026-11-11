@@ -2,6 +2,7 @@ import { broadcastIdentityProviderInvalidate } from "../../../../../utils/cacheB
 import { assertMayCountAsMfa } from "../../../../../utils/identityProviders/mfaGuard.js";
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { formatProvider } from "../../../../../utils/identityProviders/format.js";
+import { assertAdminCanSignInWithout } from "../../../../../utils/adminGuard.js";
 import { BadRequestError, ConflictError } from "../../../../../utils/errors.js";
 import { adapterFor } from "../../../../../utils/identityProviders/index.js";
 import { mapUniqueViolation } from "../../../../../utils/prismaErrors.js";
@@ -242,6 +243,8 @@ const setActive = async (req: Request, res: Response, isActive: boolean) => {
   const { id } = validateParams(IdentityProviderIdParamSchema, req);
 
   const provider = await db.$transaction(async (tx) => {
+    // The admin guard's lock comes before any row lock.
+    if (!isActive) await assertAdminCanSignInWithout(id, tx);
     // Under the row lock a domain turning SSO-only takes too, so the two
     // can't both pass their checks.
     await db.identityProviders.lockForUpdate(id, tx);

@@ -9248,6 +9248,9 @@ paths:
         way. Identities already linked stay. Refused with 409 `sso_only_domain` while
         any of its domains is SSO-only, since those users would have no way in: turn
         `ssoOnly` off first.
+        Refused with 409 `conflict` when it would leave no administrator able to
+        sign in: one counts with a password or an identity at another active
+        provider. Other users whose only way in is this provider are not counted.
 
         An audit log entry is created for this action.
         An `auth.identity-provider.deactivated` webhook event is emitted.

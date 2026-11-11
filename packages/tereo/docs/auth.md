@@ -390,7 +390,10 @@ for. Create
 and edit contact the issuer, so an unreachable or inconsistent issuer is a 400
 `provider_unreachable` or `invalid_provider_config`. A new provider is active and appears on the
 login page (`GET /oauth/upstream/providers`). `POST …/deactivate` hides it and refuses new
-sign-ins; it is refused with 409 `sso_only_domain` while any of its domains is SSO-only.
+sign-ins; it is refused with 409 `sso_only_domain` while any of its domains is SSO-only, and with
+409 `conflict` when it would leave no administrator able to sign in (none of those who can now has a
+password or an identity at another active provider). Other users whose only way in is the provider
+are not counted: they are locked out until it is activated again or they are given a password.
 `POST …/activate` re-checks the issuer. Providers cannot be deleted, only deactivated.
 
 Once any user has linked an identity, `PATCH` refuses a new `slug` with 409 `slug_in_use` and a new
