@@ -558,6 +558,42 @@ export const assertScimAllows = (
   }
 };
 
+/**
+ * Sets the admin's hold on a managed user who is already inactive; the
+ * caller holds the user's row lock. A link-only write: `is_active` stays
+ * false either way.
+ */
+export const holdScimUserTx = async (
+  tx: Tx,
+  auth: Actor,
+  userId: string
+): Promise<void> => {
+  const link = await db.scim.getLinkByUser(userId, tx);
+  if (!link || link.adminHold) return;
+  const user = await db.users.get(userId, tx);
+  // Reactivated since the caller read them: the hold alone would leave them
+  // active against the invariant.
+  if (user.isActive) {
+    throw new ConflictError(
+      "The user was reactivated while this request ran; send it again"
+    );
+  }
+  await db.scim.updateLink(link.id, { adminHold: true }, tx);
+  const connection = await db.scim.getConnection(link.connectionId, tx);
+  await logAuditTx(tx, {
+    auth,
+    action: "UPDATE",
+    entityType: "User",
+    entityId: user.id,
+    entityName: user.email,
+    metadata: {
+      action: "scim_admin_hold",
+      scimConnectionId: link.connectionId,
+      providerId: connection.providerId,
+    },
+  });
+};
+
 /** The user then is managed locally; their state, active or not, is kept. */
 export const unlinkScimUser = async (
   auth: AuthContext,

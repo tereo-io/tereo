@@ -6,8 +6,6 @@ export const UpdateUserSchema = z.object({
   email: emailSchema.optional(),
   password: passwordSchema.optional(),
   name: z.string().max(100).optional(),
-  firstName: z.string().max(100).nullable().optional(),
-  lastName: z.string().max(100).nullable().optional(),
   isActive: z.boolean().optional(),
   rateLimitPerSecond: z
     .number()

@@ -4,7 +4,6 @@ import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
 import { formatAdminUser } from "../../../../../utils/transformers.js";
-import { assertScimAllows } from "../../../../../utils/scim/users.js";
 import { logAuditTx, emitTx } from "../../../../../utils/outbox.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../utils/auth.js";
@@ -24,6 +23,10 @@ import {
   validateBody,
   validateParams,
 } from "../../../../../utils/validateReq.js";
+import {
+  assertScimAllows,
+  holdScimUserTx,
+} from "../../../../../utils/scim/users.js";
 import {
   listGroupRoles,
   listOrgGroupRoles,
@@ -54,8 +57,8 @@ import {
   managerOf,
 } from "./guards.js";
 
-// What a user's SCIM connection owns.
-const PROFILE_FIELDS = ["email", "name", "firstName", "lastName"] as const;
+// What a user's SCIM connection owns, of what this route changes.
+const PROFILE_FIELDS = ["email", "name"] as const;
 
 export const getUser = async (req: Request, res: Response) => {
   const { id } = validateParams(UserIdParamSchema, req);
@@ -88,7 +91,12 @@ export const updateUser = async (req: Request, res: Response) => {
     ),
     reactivating,
   };
-  assertScimAllows(await db.scim.getLinkByUser(id), scimChange);
+  const scimLink = await db.scim.getLinkByUser(id);
+  assertScimAllows(scimLink, scimChange);
+  // Switching off a managed user the IdP already deactivated still sets the
+  // admin's hold, so the IdP's next active:true does not bring them back.
+  const holding =
+    body.isActive === false && !existing.isActive && scimLink !== null;
   // Again under the user's row lock, which SCIM's writes take, so the link
   // checked is the one the change commits against. `hold` is the admin's
   // hold a deactivation sets and a reactivation clears.
@@ -99,6 +107,7 @@ export const updateUser = async (req: Request, res: Response) => {
     if (link && hold !== undefined && link.adminHold !== hold) {
       await db.scim.updateLink(link.id, { adminHold: hold }, tx);
     }
+    if (holding) await holdScimUserTx(tx, auth, id);
   };
 
   const newEmail =
@@ -113,7 +122,9 @@ export const updateUser = async (req: Request, res: Response) => {
     if (body.password || newEmail) {
       await assertMayResetCredentials(auth, id, tx);
     }
-    if (deactivating) await assertMayDisempower(auth, id, "deactivate", tx);
+    if (deactivating || holding) {
+      await assertMayDisempower(auth, id, "deactivate", tx);
+    }
     if (reactivating) await assertMayReactivate(auth, id, tx);
     if (body.rateLimitPerSecond !== undefined) {
       await assertMayDisempower(auth, id, "change the rate limit of", tx);

@@ -34,7 +34,6 @@ import {
 } from "../../../../../support/auth/users.js";
 import {
   activeState,
-  makeUser,
   managedWith,
   tag,
 } from "../../../../../support/scimUsers.js";
@@ -316,8 +315,6 @@ describe("PATCH /v1/admin/users/:id on a SCIM-managed user", () => {
 
   it.each([
     ["name", { name: "Someone Else" }],
-    ["firstName", { firstName: "Janet" }],
-    ["lastName", { lastName: "Roe" }],
     ["email", { email: `moved-${tag()}@elsewhere.test` }],
   ])("refuses a change to %s with 409 managed_by_scim", async (_, body) => {
     const user = await scimUser();
@@ -336,8 +333,6 @@ describe("PATCH /v1/admin/users/:id on a SCIM-managed user", () => {
     const user = await scimUser();
     const r = await patch(user.id, writer, {
       name: user.name,
-      firstName: "Jane",
-      lastName: "Doe",
       email: user.email,
     });
     expect(r.status).toBe(200);
@@ -391,17 +386,5 @@ describe("PATCH /v1/admin/users/:id on a SCIM-managed user", () => {
     expect(reset.status).toBe(200);
     const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
     expect(row.passwordHash).not.toBeNull();
-  });
-
-  it("sets firstName and lastName of an unmanaged user", async () => {
-    const user = await makeUser(`u-${tag()}@unmanaged.test`);
-    const r = await patch(user.id, writer, {
-      firstName: "Ann",
-      lastName: "Lee",
-    });
-    expect(r.status).toBe(200);
-    expect(
-      await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
-    ).toMatchObject({ firstName: "Ann", lastName: "Lee" });
   });
 });

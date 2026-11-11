@@ -120,6 +120,60 @@ describe("SCIM user lifecycle", () => {
     });
   });
 
+  it("an admin hold on a user the IdP already deactivated survives the IdP's active:true", async () => {
+    const c = await createScimConnection();
+    const created = await scimFetch(
+      c.token,
+      "POST",
+      "/scim/v2/Users",
+      createBody(`idpoff-${tag()}@${c.domain}`)
+    );
+    const id = created.body.id as string;
+    expect((await setActive(c.token, id, false)).status).toBe(200);
+
+    const held = await adminPatch(id, { isActive: false });
+    expect(held.status).toBe(200);
+    expect(await state(id)).toMatchObject({
+      isActive: false,
+      idpActive: false,
+      adminHold: true,
+    });
+    const holdEntries = () =>
+      prisma.auditLogEntry.findMany({
+        where: {
+          entityType: "User",
+          entityId: id,
+          metadata: { path: ["action"], equals: "scim_admin_hold" },
+        },
+      });
+    const entries = await holdEntries();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      action: "UPDATE",
+      metadata: { scimConnectionId: c.connectionId, providerId: c.providerId },
+    });
+    // Already held: nothing more is written.
+    expect((await adminPatch(id, { isActive: false })).status).toBe(200);
+    expect(await holdEntries()).toHaveLength(1);
+
+    const back = await setActive(c.token, id, true);
+    expect(back.status).toBe(200);
+    expect(back.body.active).toBe(false);
+    expect(await state(id)).toMatchObject({
+      isActive: false,
+      idpActive: true,
+      adminHold: true,
+    });
+
+    const lifted = await adminPatch(id, { isActive: true });
+    expect(lifted.status).toBe(200);
+    expect(await state(id)).toMatchObject({
+      isActive: true,
+      idpActive: true,
+      adminHold: false,
+    });
+  });
+
   it("creates a user inactive when the IdP says active:false", async () => {
     const c = await createScimConnection();
     const email = `off-${tag()}@${c.domain}`;
