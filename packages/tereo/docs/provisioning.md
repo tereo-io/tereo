@@ -344,6 +344,9 @@ A role an integration holds, hand-made ones included, cannot gain `admin` or com
 the apply is refused, naming the integrations, as the admin API refuses it
 ([integrations](integrations.md)). Take the role from them first.
 
+Nor can an apply take `admin` from a role when that would leave no active administrator: it is
+refused, as the admin API refuses it ([auth](auth.md)). Grant `admin` to another user first.
+
 ### `guests`
 
 ```json
@@ -592,7 +595,8 @@ runs older documents does nothing. After that the hourly retirement job
 - **deletes** a login client, as the admin delete does;
 - **archives** a custom role or a group (its members are kept). Groups are archived in a
   transaction of their own, after the rest: one that fails is logged and retried the next hour,
-  and holds back nothing else.
+  and holds back nothing else. A role whose archiving would leave no active administrator is kept,
+  with a warning in the log, and tried again the next hour.
 
 An entry that returns, before or after, is reactivated: a deactivated service becomes active again and an archived role is restored. A deleted login client is created anew. Items a service's declaration
 stops listing retire as in [registry](registry.md#retirement); its dropped webhooks are archived at

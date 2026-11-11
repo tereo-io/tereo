@@ -2,6 +2,7 @@
 // @module-tag auth
 // @module-tag race
 
+import { applyRoles, archiveDueRoles } from "../../utils/provisioning/apply.js";
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
@@ -10,6 +11,7 @@ import { prisma, type Prisma } from "../../utils/db/prisma.js";
 import { generateUniqueId } from "../support/auth/crypto.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { createTestUser } from "../support/auth/users.js";
+import { removeRoles } from "../support/provisioning.js";
 import { removeMembers } from "../../utils/groups.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
@@ -36,6 +38,7 @@ type Tx = Prisma.TransactionClient;
 describe("assertAdminRemains", () => {
   const madeUserIds: string[] = [];
   const madeGroupIds: string[] = [];
+  const madeRoleNames: string[] = [];
   let callerToken: string;
   let adminPermissionId: string;
 
@@ -170,8 +173,10 @@ describe("assertAdminRemains", () => {
     await prisma.userRole.deleteMany({
       where: { userId: { in: madeUserIds } },
     });
+    await removeRoles(madeRoleNames);
     madeGroupIds.length = 0;
     madeUserIds.length = 0;
+    madeRoleNames.length = 0;
   });
 
   it("removing admin-group members passes while another member remains, and refuses the last", async () => {
@@ -401,6 +406,95 @@ describe("assertAdminRemains", () => {
         await release();
       }
       expect((await response).status).toBe(HTTP_STATUS.OK);
+    });
+  });
+
+  const provisionedRole = async (permissionIds: string[], dropped = false) => {
+    const role = await prisma.role.create({
+      data: {
+        name: `prov-role-${generateUniqueId()}`,
+        displayName: "Guard test provisioned role",
+        provisioned: true,
+        unprovisionedAt: dropped ? new Date(Date.now() - 60_000) : null,
+        rolePermissions: {
+          create: permissionIds.map((permissionId) => ({ permissionId })),
+        },
+      },
+    });
+    madeRoleNames.push(role.name);
+    return role;
+  };
+
+  const roleEntry = (name: string, permissions: string[]) => ({
+    file: "roles.json",
+    version: "1.0.0",
+    role: {
+      name,
+      displayName: "Guard test provisioned role",
+      orgAssignable: false,
+      requires2fa: false,
+      guestAssignable: false,
+      permissions,
+    },
+  });
+
+  const holds = async (userId: string, ...roleIds: string[]) => {
+    await prisma.userRole.createMany({
+      data: roleIds.map((roleId) => ({ userId, roleId })),
+    });
+  };
+
+  it("provisioning refuses to take admin from the role the last administrator holds, and takes it while another remains", async () => {
+    const role = await provisionedRole([adminPermissionId]);
+    await holds((await user()).id, role.id);
+    const stripped = [roleEntry(role.name, ["roles.read"])];
+    await asSoleAdmins((tx) =>
+      refusal(applyRoles(tx, stripped, { roles: [] }))
+    );
+
+    await makeAdmin();
+    await asSoleAdmins(async (tx) => {
+      await applyRoles(tx, stripped, { roles: [] });
+      expect(
+        await tx.rolePermission.count({
+          where: { roleId: role.id, permissionId: adminPermissionId },
+        })
+      ).toBe(0);
+    });
+  });
+
+  it("provisioning moves admin from one role the last administrator holds to another in one apply", async () => {
+    const from = await provisionedRole([adminPermissionId]);
+    const to = await provisionedRole([]);
+    await holds((await user()).id, from.id, to.id);
+    await asSoleAdmins(async (tx) => {
+      await applyRoles(
+        tx,
+        [roleEntry(from.name, ["roles.read"]), roleEntry(to.name, ["admin"])],
+        { roles: [] }
+      );
+      expect(await db.roles.getAdminRoleIds([from.id, to.id], tx)).toEqual([
+        to.id,
+      ]);
+    });
+  });
+
+  it("provisioning keeps a dropped role whose archiving would leave no administrator, and archives it once another remains", async () => {
+    const role = await provisionedRole([adminPermissionId], true);
+    await holds((await user()).id, role.id);
+    const now = new Date();
+    await asSoleAdmins(async (tx) => {
+      const archived = await archiveDueRoles(tx, now, now);
+      expect(archived.map((r) => r.id)).not.toContain(role.id);
+      expect(
+        (await tx.role.findUniqueOrThrow({ where: { id: role.id } })).archivedAt
+      ).toBe(null);
+    });
+
+    await makeAdmin();
+    await asSoleAdmins(async (tx) => {
+      const archived = await archiveDueRoles(tx, now, now);
+      expect(archived.map((r) => r.id)).toContain(role.id);
     });
   });
 

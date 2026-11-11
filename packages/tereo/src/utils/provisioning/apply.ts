@@ -8,12 +8,13 @@ import { invalidateBranding } from "../branding/resolve.js";
 import { invalidateAfterWrite } from "../branding/write.js";
 import { setRateLimitTx } from "../rateLimitOverride.js";
 import { openSigningSecret } from "../webhookSecrets.js";
+import { AppError, ConflictError } from "../errors.js";
 import { prisma, type Prisma } from "../db/prisma.js";
+import { assertAdminRemains } from "../adminGuard.js";
 import { resolveProvisionedRole } from "./roles.js";
 import type { CustomRoleEntry } from "./schema.js";
 import { afterGroupChange } from "../groups.js";
 import { validateSet } from "./validate.js";
-import { AppError } from "../errors.js";
 import { logger } from "../logger.js";
 import db from "../db/index.js";
 import env from "../../env.js";
@@ -918,10 +919,10 @@ const roleFields = (spec: CustomRoleEntry) => ({
  * the ids of roles whose permissions or activity changed, for the holders'
  * tokens and sessions once the transaction commits.
  */
-const applyRoles = async (
+export const applyRoles = async (
   tx: Tx,
-  p: Entries,
-  result: ProvisioningResult
+  roles: Entries["roles"],
+  result: Pick<ProvisioningResult, "roles">
 ): Promise<{
   permissionsChanged: string[];
   statusChanged: string[];
@@ -932,7 +933,7 @@ const applyRoles = async (
   const revokedJtis: string[] = [];
   const permissions = await tx.permission.findMany({
     where: {
-      name: { in: p.roles.flatMap((e) => e.role.permissions) },
+      name: { in: roles.flatMap((e) => e.role.permissions) },
       retiredAt: null,
     },
     select: { id: true, name: true },
@@ -941,7 +942,28 @@ const applyRoles = async (
   const adminId = idOf.get("admin");
   const problems: string[] = [];
 
-  for (const from of p.roles) {
+  // Before a role is written: the admin guard's lock comes before row locks.
+  const losingAdmin = await tx.role.findMany({
+    where: {
+      serviceId: null,
+      name: {
+        in: roles
+          .filter((e) => !e.role.permissions.includes("admin"))
+          .map((e) => e.role.name),
+      },
+      isActive: true,
+      archivedAt: null,
+      rolePermissions: { some: { permission: { name: "admin" } } },
+    },
+    select: { name: true },
+  });
+  let hadAdmin = false;
+  if (losingAdmin.length > 0) {
+    await assertAdminRemains(null, tx);
+    hadAdmin = await db.roles.adminExists(undefined, tx);
+  }
+
+  for (const from of roles) {
     const spec = from.role;
     const meta = documentMeta(from);
     const entry = `role:${spec.name}`;
@@ -1118,6 +1140,15 @@ const applyRoles = async (
     }
     if (reactivated) statusChanged.push(role.id);
     result.roles.push(entry);
+  }
+  // After the writes: another role of the set may have gained it.
+  if (hadAdmin && !(await db.roles.adminExists(undefined, tx))) {
+    const losing = new Set(losingAdmin.map((r) => r.name));
+    for (const from of roles)
+      if (losing.has(from.role.name))
+        problems.push(
+          `${roleLabel(from)}: taking the admin permission from this role would leave no active administrator; grant admin to another user first`
+        );
   }
   if (problems.length > 0) throw new ProvisioningError(problems);
   return { permissionsChanged, statusChanged, revokedJtis };
@@ -1668,7 +1699,7 @@ export const applyProvisioning = async (
         const content = await applyServicesContent(tx, p, now, result);
         if (content.problems.length > 0)
           throw new ProvisioningError(content.problems);
-        const roleChanges = await applyRoles(tx, p, result);
+        const roleChanges = await applyRoles(tx, p.roles, result);
         await applyGuests(tx, set);
         for (const entry of p.integrations)
           await applyIntegration(tx, entry, state, now, result);
@@ -1746,6 +1777,60 @@ const revokeHolderClientTokens = async (roleId: string) => {
   );
   for (const clientId of clientIds)
     await db.accessTokens.revokeByClientId(clientId);
+};
+
+/**
+ * Archives the custom roles dropped from the documents before `cutoff`. One
+ * whose archiving would leave no administrator is kept, and tried again on
+ * the next run.
+ */
+export const archiveDueRoles = async (
+  tx: Tx,
+  cutoff: Date,
+  now: Date
+): Promise<{ id: string; name: string }[]> => {
+  const dueRoles = await tx.role.findMany({
+    where: {
+      provisioned: true,
+      unprovisionedAt: { lte: cutoff },
+      serviceId: null,
+      archivedAt: null,
+    },
+  });
+  const archivedRoles: { id: string; name: string }[] = [];
+  for (const role of dueRoles) {
+    try {
+      await assertAdminRemains({ kind: "role", roleId: role.id }, tx);
+    } catch (err) {
+      if (!(err instanceof ConflictError)) throw err;
+      logger.warn(
+        { role: role.name },
+        "Provisioning: a role removed from the documents was not archived, as it would leave no active administrator"
+      );
+      continue;
+    }
+    await tx.role.update({
+      where: { id: role.id },
+      data: { isActive: false, archivedAt: now },
+    });
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      action: "ARCHIVE",
+      entityType: "Role",
+      entityId: role.id,
+      entityName: role.name,
+      metadata: { action: "unprovisioned" },
+    });
+    await emitTx(tx, {
+      organizationId: getDefaultOrganizationId(),
+      eventType: "auth.role.archived",
+      entityType: "Role",
+      entityId: role.id,
+      data: { id: role.id, name: role.name },
+    });
+    archivedRoles.push({ id: role.id, name: role.name });
+  }
+  return archivedRoles;
 };
 
 // `now` is a parameter for tests.
@@ -1842,32 +1927,7 @@ export const deprovisionMissing = async (
       for (const client of dueClients)
         jtis.push(...(await deleteLoginClientTx(tx, client, SYSTEM_ACTOR)));
 
-      const dueRoles = await tx.role.findMany({
-        where: { ...stale, serviceId: null, archivedAt: null },
-      });
-      const archivedRoles: { id: string; name: string }[] = [];
-      for (const role of dueRoles) {
-        await tx.role.update({
-          where: { id: role.id },
-          data: { isActive: false, archivedAt: now },
-        });
-        await logAuditTx(tx, {
-          auth: SYSTEM_ACTOR,
-          action: "ARCHIVE",
-          entityType: "Role",
-          entityId: role.id,
-          entityName: role.name,
-          metadata: { action: "unprovisioned" },
-        });
-        await emitTx(tx, {
-          organizationId: getDefaultOrganizationId(),
-          eventType: "auth.role.archived",
-          entityType: "Role",
-          entityId: role.id,
-          data: { id: role.id, name: role.name },
-        });
-        archivedRoles.push({ id: role.id, name: role.name });
-      }
+      const archivedRoles = await archiveDueRoles(tx, cutoff, now);
       return {
         serviceClientIds,
         missingBuckets,
