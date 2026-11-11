@@ -2,6 +2,7 @@ import { SYSTEM_USER, SYSTEM_USER_ID } from "../../definitions/index.js";
 import type { IdentityProvider, NormalizedIdentity } from "./types.js";
 import { emitTx, logAuditTx, type AuditLogInput } from "../outbox.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
+import { domainPlacement, organizationClosed } from "./placement.js";
 import { createUserInOrganizationTx } from "../userLifecycle.js";
 import { uniqueViolationFields } from "../prismaErrors.js";
 import { emailDomain, normalizeEmail } from "../email.js";
@@ -157,7 +158,7 @@ const resolveOnce = async (
   if (!domain || domain.providerId !== provider.id || !domain.autoAccept) {
     return { error: "no_account" };
   }
-  if (domain.organization.archivedAt || !domain.organization.isActive) {
+  if (organizationClosed(domain.organization)) {
     logger.warn(
       { domain: domain.domain, organizationId: domain.organizationId },
       "Auto-accept domain's organization is archived or inactive; not provisioning"
@@ -179,11 +180,7 @@ const provision = async (
   email: string,
   domainId: string
 ): Promise<string> => {
-  const domain = await db.identityProviders.getDomain(provider.id, domainId);
-  const orgId = domain.organizationId;
-  // A default role archived or retired since it was chosen is not granted.
-  const roles = await db.roles.getByIds(domain.roles.map((r) => r.role.id));
-  const roleIds = roles.map((r) => r.id);
+  const placement = await domainPlacement(provider.id, domainId);
 
   return await db.$transaction(async (tx) => {
     const firstName = clip(identity.firstName);
@@ -199,7 +196,7 @@ const provision = async (
         firstName,
         lastName,
       },
-      { organizationId: orgId, roleIds },
+      placement,
       { providerId: provider.id }
     );
     await linkIdentity(tx, SYSTEM_ACTOR, user.id, provider, identity);

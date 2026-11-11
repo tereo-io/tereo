@@ -1,11 +1,16 @@
-import { listResponse, toScimUser } from "../../../../utils/scim/mapping.js";
-import { validateQuery } from "../../../../utils/validateReq.js";
+import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
+import { createScimUser, listVisible } from "../../../../utils/scim/users.js";
 import { parseFilter } from "../../../../utils/scim/filter.js";
-import { listVisible } from "../../../../utils/scim/users.js";
 import { scimBaseUrl } from "../../../../utils/scim/url.js";
 import { listUsersQuerySchema } from "./schemas.js";
 import type { Request, Response } from "express";
 import { scimContext } from "../middleware.js";
+import {
+  listResponse,
+  ScimUserBodySchema,
+  toScimUser,
+  toUserInput,
+} from "../../../../utils/scim/mapping.js";
 
 export const listUsers = async (req: Request, res: Response) => {
   const query = validateQuery(listUsersQuerySchema, req);
@@ -21,4 +26,19 @@ export const listUsers = async (req: Request, res: Response) => {
       )
     )
   );
+};
+
+export const createUser = async (req: Request, res: Response) => {
+  const body = validateBody(ScimUserBodySchema, req);
+  const { user, link } = await createScimUser(
+    scimContext(req),
+    toUserInput(body)
+  );
+  const resource = toScimUser(user, link, scimBaseUrl());
+  const { location } = resource.meta as { location: string };
+  res
+    .status(201)
+    .location(location)
+    .type("application/scim+json")
+    .send(JSON.stringify(resource));
 };

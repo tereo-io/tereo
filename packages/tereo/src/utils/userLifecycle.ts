@@ -77,7 +77,11 @@ const changeUserTx = async (
   actor: Actor,
   existing: UserRow,
   profile: UserProfile,
-  opts: { isActive?: boolean; issueVerifyLinkAs?: string } = {}
+  opts: {
+    isActive?: boolean;
+    issueVerifyLinkAs?: string;
+    auditMetadata?: Record<string, unknown>;
+  } = {}
 ): Promise<UserRow> => {
   const id = existing.id;
   const newEmail =
@@ -122,6 +126,7 @@ const changeUserTx = async (
     }
   }
   await auditUserUpdatedTx(tx, actor, existing, updated, {
+    ...opts.auditMetadata,
     ...(profile.password && { passwordReset: true }),
     ...(invitesWithdrawn > 0 && { invitesWithdrawn }),
   });
@@ -133,7 +138,10 @@ export const updateUserProfileTx = async (
   actor: Actor,
   existing: UserRow,
   profile: UserProfile,
-  opts: { issueVerifyLinkAs?: string } = {}
+  opts: {
+    issueVerifyLinkAs?: string;
+    auditMetadata?: Record<string, unknown>;
+  } = {}
 ): Promise<UserRow> => changeUserTx(tx, actor, existing, profile, opts);
 
 /**

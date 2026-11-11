@@ -25,6 +25,11 @@ export const PUBLIC: Allowlist = [
   ],
   ["get", "/scim/v2/Users", "SCIM connection token, not a bearer access token"],
   [
+    "post",
+    "/scim/v2/Users",
+    "SCIM connection token, not a bearer access token",
+  ],
+  [
     "get",
     "/scim/v2/Users/:id",
     "SCIM connection token, not a bearer access token",

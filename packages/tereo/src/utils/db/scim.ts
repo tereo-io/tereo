@@ -170,6 +170,29 @@ export const findClaimable = async (
   });
 };
 
+/**
+ * A live link of the connection whose user has `email`, or holding `userName`
+ * (case-insensitively) or `externalId`; null when there is none.
+ */
+export const findLiveConflict = async (
+  connectionId: string,
+  by: { email: string; userName: string; externalId: string | null },
+  tx?: Tx
+) => {
+  return await (tx ?? prisma).scimUser.findFirst({
+    where: {
+      connectionId,
+      deletedAt: null,
+      OR: [
+        { user: { email: by.email } },
+        { userName: iequals(by.userName) },
+        ...(by.externalId === null ? [] : [{ externalId: by.externalId }]),
+      ],
+    },
+    select: { id: true },
+  });
+};
+
 interface VisibilityScope {
   connectionId: string;
   providerId: string;
