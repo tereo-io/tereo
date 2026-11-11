@@ -280,4 +280,4 @@ release (0.1 → 0.2) may change the API, the SDK or the configuration; each pac
 
 | # | Gap | Notes |
 |---|-----|-------|
-| 1 | **Object storage** | Files are on local disk (`FILE_SERVICE_STORAGE_PATH`), so every core process must share one volume, and core cannot scale out, until an S3 backend exists |
+| 1 | **Object storage** | Files are on local disk (`FILE_SERVICE_STORAGE_PATH`), so every core process must share one volume (a ReadWriteMany volume for more than one pod) until an S3 backend exists |

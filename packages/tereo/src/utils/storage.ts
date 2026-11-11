@@ -8,7 +8,6 @@ import {
   ScratchKind,
   createScratchFile,
   discardScratchFile,
-  ensureScratchDir,
 } from "./scratchFiles.js";
 import {
   BLOB_HEADER_BYTES,
@@ -66,33 +65,6 @@ export interface SaveBlobOptions {
 export interface BlobMeta {
   fsPath: string;
   keyMaterial: EncryptedBlobKeyMaterial;
-}
-
-export async function ensureBlobDirectory(): Promise<void> {
-  await blobStore.ensureReady();
-}
-
-export async function ensureTempDirectory(): Promise<void> {
-  await ensureScratchDir();
-}
-
-export function getBlobPath(hash: string): string {
-  return blobStore.locationFor(hash);
-}
-
-export async function removeMultipartDir(uploadId: string): Promise<void> {
-  await blobStore.removeUpload(uploadId);
-}
-
-export async function placeBlobFile(
-  stagedPath: string,
-  targetPath: string
-): Promise<void> {
-  await blobStore.place(stagedPath, targetPath);
-}
-
-export async function discardStagedFile(stagedPath: string): Promise<void> {
-  await discardScratchFile(stagedPath);
 }
 
 /**
@@ -406,10 +378,4 @@ export async function loadVerifiedBlobIfSmall(
  */
 export async function assertBlobReadable(location: string): Promise<void> {
   checkBlobHeader(await blobStore.readHead(location, BLOB_HEADER_BYTES));
-}
-
-export const assertBlobFileReadable = assertBlobReadable;
-
-export async function deleteBlobFile(fsPath: string): Promise<void> {
-  await blobStore.delete(fsPath);
 }

@@ -109,11 +109,10 @@ async function processMultipartSweepTick(): Promise<{
 }
 
 /**
- * Delete files in `FILE_SERVICE_TEMP_PATH` — staged uploads and multer's
- * spool files, each the scratch of one request — that a crash left behind.
- * Only top-level files, by mtime, past a day or the multipart TTL, whichever
- * is longer: far past any request still writing one. Multipart parts live
- * under `{storage}/multipart`, swept with their upload above.
+ * Delete the scratch files — staged uploads and multer's spool files, each
+ * the scratch of one request — that a crash left behind: those past a day or
+ * the multipart TTL, whichever is longer, far past any request still writing
+ * one. Multipart parts are the blob store's, removed with their upload above.
  */
 async function sweepTempFiles(now = Date.now()): Promise<number> {
   const maxAgeMs = Math.max(

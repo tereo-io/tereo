@@ -381,7 +381,7 @@ export const listExpired = async (limit: number) => {
  * Uploads finalised long enough ago (aborted OR completed) and whose part
  * rows still exist (the signal that file cleanup hasn't completed). Used as a
  * backstop for `abortMultipart` and `completeMultipart` when their inline
- * `removeMultipartDir` failed (filesystem hiccup, partial process restart).
+ * `blobStore.removeUpload` failed (filesystem hiccup, partial process restart).
  *
  * After a successful sweep iteration the caller should delete the part rows
  * via `deleteParts` so subsequent ticks naturally skip this upload.
