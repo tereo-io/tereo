@@ -142,6 +142,20 @@ describe("public bucket access", () => {
       expect(reader.data.data[0].createdBy).toEqual(expect.any(String));
     });
 
+    it("admits no token-less request to a by-id route spelled in another case", async () => {
+      const byId = `${objects()}/BY-ID/${liveId}`;
+      // Routing ignores case, so these reach the by-id routes, not a key.
+      expect((await anon(`${byId}/presign`)).status).toBe(
+        HTTP_STATUS.UNAUTHORIZED
+      );
+      expect((await anon(`${byId}/versions/${liveOld}/restore`)).status).toBe(
+        HTTP_STATUS.UNAUTHORIZED
+      );
+      // The public reads stay public however they are spelled.
+      expect((await anon(byId)).status).toBe(HTTP_STATUS.OK);
+      expect((await anon(`${byId}/Versions`)).status).toBe(HTTP_STATUS.OK);
+    });
+
     it("names no writer to a signed-in caller without a grant", async () => {
       const versions = `${objects()}/by-id/${liveId}/versions`;
       const list = await as(memberToken, versions);

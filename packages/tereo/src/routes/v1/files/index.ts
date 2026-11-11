@@ -30,12 +30,15 @@ import {
 // `/objects/by-id/:id` with its versions (list, one version, its download).
 // `/by-id/:id/presign` is left out by the patterns. None of these routes adds
 // `requirePermission`, which would need a token even on a public bucket.
-const PUBLIC_OBJECT_KEY = /^\/buckets\/[^/]+\/objects\/(?!by-id\/|by-key\/).+$/;
-const PUBLIC_BY_KEY = /^\/buckets\/[^/]+\/objects\/by-key\/.+$/;
-const PUBLIC_BY_ID = /^\/buckets\/[^/]+\/objects\/by-id\/[^/]+$/;
+// The patterns ignore case because routing does: `/objects/BY-ID/:id/presign`
+// reaches the by-id router, so it must not pass as an object key.
+const PUBLIC_OBJECT_KEY =
+  /^\/buckets\/[^/]+\/objects\/(?!by-id\/|by-key\/).+$/i;
+const PUBLIC_BY_KEY = /^\/buckets\/[^/]+\/objects\/by-key\/.+$/i;
+const PUBLIC_BY_ID = /^\/buckets\/[^/]+\/objects\/by-id\/[^/]+$/i;
 const PUBLIC_BY_ID_VERSIONS =
-  /^\/buckets\/[^/]+\/objects\/by-id\/[^/]+\/versions(?:\/[^/]+(?:\/download)?)?$/;
-const PUBLIC_OBJECT_LIST = /^\/buckets\/[^/]+\/objects$/;
+  /^\/buckets\/[^/]+\/objects\/by-id\/[^/]+\/versions(?:\/[^/]+(?:\/download)?)?$/i;
+const PUBLIC_OBJECT_LIST = /^\/buckets\/[^/]+\/objects$/i;
 
 const requireAuth = createRequireAuth({
   area: "files",
