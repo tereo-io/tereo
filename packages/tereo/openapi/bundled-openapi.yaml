@@ -3620,7 +3620,11 @@ paths:
 
         Attempts are limited to 5 per user per 300 seconds, counted before the
         current password is checked and cleared by a correct one; past that,
-        `429 too_many_requests`. A wrong current password is logged, and from
+        `429 too_many_requests`. Each attempt also counts against the
+        account's sign-in backoff (five wrong passwords, here or at login, then
+        a delay before the next attempt that doubles up to 15 minutes; `429`
+        with `Retry-After` during it), which a correct current password
+        clears. A wrong current password is logged, and from
         the user's fifth wrong password in a row (here or at login) each one
         is audited (`metadata.action` `password_failures`).
 

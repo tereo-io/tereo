@@ -1,5 +1,4 @@
 import { getDefaultOrganizationId } from "../../../utils/defaultOrganization.js";
-import { accountPasswordFailure } from "../../../middleware/rateLimit.js";
 import { BadRequestError, NotFoundError } from "../../../utils/errors.js";
 import { beginPasswordAttempt } from "../../../utils/passwordAttempts.js";
 import { hashPassword, verifyPassword } from "../../../utils/crypto.js";
@@ -15,6 +14,10 @@ import { ChangePasswordSchema } from "./schemas.js";
 import { logger } from "../../../utils/logger.js";
 import type { Request, Response } from "express";
 import db from "../../../utils/db/index.js";
+import {
+  accountPasswordFailure,
+  loginAccountBackoff,
+} from "../../../middleware/rateLimit.js";
 
 export const getProfile = async (req: Request, res: Response) => {
   const { userId, organizationId } = validateUser(req);
@@ -71,6 +74,9 @@ export const changePassword = async (req: Request, res: Response) => {
     throw new BadRequestError("no_password", "This account has no password");
   }
   await accountPasswordFailure.check(req);
+  // The account's backoff at sign-in: a token for the account must not be a
+  // faster way to guess its password than the login page.
+  await loginAccountBackoff.check(req, user.email);
 
   const isCurrentPasswordValid = await verifyPassword(
     user.passwordHash,
@@ -86,6 +92,7 @@ export const changePassword = async (req: Request, res: Response) => {
     );
   }
   await accountPasswordFailure.reset(req);
+  await loginAccountBackoff.reset(req, user.email);
   await attempt.succeeded();
 
   if (body.currentPassword === body.newPassword) {

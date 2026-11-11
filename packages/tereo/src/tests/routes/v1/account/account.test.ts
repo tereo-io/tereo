@@ -10,6 +10,12 @@ import { createTestGuest } from "../../../support/auth/guests.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import {
+  type CookieJar,
+  absorbCookies,
+  cookieHeader,
+  newPkce,
+} from "../../../support/browserLogin.js";
+import {
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../../../support/principals.js";
@@ -360,5 +366,101 @@ describe("POST /v1/account/password", () => {
       where: { id: user.id },
     });
     expect(stored.passwordHash).toBe(user.passwordHash);
+  });
+
+  describe("the account's sign-in backoff", () => {
+    const changeAs = (token: string, currentPassword: string) =>
+      fetch(`${BASE_URL}/v1/account/password`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          currentPassword,
+          newPassword: "AnotherPassword456!",
+        }),
+      });
+
+    /** The password step of a sign-in, from an address of its own. */
+    const signIn = async (email: string, password: string, ip: string) => {
+      const jar: CookieJar = new Map();
+      const pkce = newPkce();
+      const params = {
+        response_type: "code",
+        client_id: testClient.clientId,
+        redirect_uri: testClient.redirectUris[0],
+        state: pkce.state,
+        scope: "openid",
+        code_challenge: pkce.challenge,
+        code_challenge_method: "S256",
+      };
+      const start = await fetch(
+        `${BASE_URL}/oauth/authorize?${new URLSearchParams(params)}`,
+        { redirect: "manual", headers: { "X-Forwarded-For": ip } }
+      );
+      absorbCookies(jar, start);
+      return fetch(`${BASE_URL}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": ip,
+          Cookie: cookieHeader(jar),
+        },
+        body: JSON.stringify({ ...params, email, password }),
+      });
+    };
+
+    it("is lengthened by wrong current passwords here", async () => {
+      const user = await createTestUser();
+      const token = await getAccessTokenForUser(user, testClient);
+      for (let i = 0; i < MAX_FAILURES; i++) {
+        const res = await changeAs(token, "not-the-password");
+        expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      }
+      await expectTooMany(
+        await signIn(user.email, user.plainPassword, "203.0.113.211")
+      );
+    });
+
+    it("holds back a change after wrong passwords at sign-in", async () => {
+      const user = await createTestUser();
+      const token = await getAccessTokenForUser(user, testClient);
+      for (let i = 0; i < MAX_FAILURES; i++) {
+        const res = await signIn(
+          user.email,
+          "not-the-password",
+          `203.0.113.${220 + i}`
+        );
+        expect(res.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+      }
+      await expectTooMany(await changeAs(token, user.plainPassword));
+    });
+
+    it("is cleared by a correct current password", async () => {
+      const user = await createTestUser();
+      const token = await getAccessTokenForUser(user, testClient);
+      for (let i = 0; i < MAX_FAILURES - 1; i++) {
+        const res = await changeAs(token, "not-the-password");
+        expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      }
+      const same = await changeAs(token, user.plainPassword);
+      expect(same.status).toBe(HTTP_STATUS.OK);
+
+      for (let i = 0; i < MAX_FAILURES - 1; i++) {
+        const res = await signIn(
+          user.email,
+          "not-the-password",
+          `203.0.113.${230 + i}`
+        );
+        expect(res.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+      }
+      const ok = await signIn(
+        user.email,
+        "AnotherPassword456!",
+        "203.0.113.240"
+      );
+      expect(ok.status).toBe(HTTP_STATUS.OK);
+    });
   });
 });

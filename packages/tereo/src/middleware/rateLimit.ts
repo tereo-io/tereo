@@ -162,6 +162,7 @@ export const passwordChangeFailure = createFailureLimiter({
 
 // Wrong current passwords on POST /account/password, per user: as for
 // accountTotpFailure, a stolen access token must not be a password oracle.
+// The route spends loginAccountBackoff as well, which outlasts this window.
 export const accountPasswordFailure = createFailureLimiter({
   keyPrefix: "rl:password:account:fail",
   points: 5,
