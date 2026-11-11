@@ -291,7 +291,11 @@
       are allowed. The archive itself must not have expired.
 
       The response is streamed without `Content-Length`. If an error occurs
-      after the body has started, the connection is reset.
+      after the body has started, the connection is reset. So is the
+      connection of a client that reads nothing for
+      `FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS` (default 120) while bytes
+      wait to be sent; a slow client that keeps reading is not cut off,
+      however long the download takes.
 
       An audit log entry (`archiveDownload`) and an access-log entry
       (`ARCHIVE_DOWNLOAD`) are created for each download.

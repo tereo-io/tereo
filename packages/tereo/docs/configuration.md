@@ -296,7 +296,7 @@ env (no overlap).
 | `FILE_SERVICE_MAX_UPLOAD_SIZE_MB` | `100` | Above 0, at most 10240. Single-request uploads; larger files use multipart |
 | `FILE_SERVICE_VERIFIED_READ_BUDGET_MB` | `256` | 16–65536. Plaintext all downloads together may hold in memory: a blob up to 16 MiB is decrypted and verified whole before it is sent, and waits for room in this budget. See [files.md](files.md#range-requests) |
 | `FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS` | `30` | 1–600. How long such a download waits for room before `503 temporarily_unavailable` |
-| `FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS` | `120` | 1–86400. How long such a download may take to send the plaintext it holds (at most 16 MiB) before core resets the connection and frees its share of the budget. Raise it for clients slower than about 1 Mbit/s; they can also resume with `Range` |
+| `FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS` | `120` | 1–86400. How long such a download may take to send the plaintext it holds (at most 16 MiB) before core resets the connection and frees its share of the budget. Raise it for clients slower than about 1 Mbit/s; they can also resume with `Range`. For an archive download it is an idle limit instead: how long the client may take no bytes at all before the archive is aborted, however long the whole download runs |
 | `FILE_SERVICE_MIN_PART_SIZE_MB` | `5` | Above 0, at most 5120 |
 | `FILE_SERVICE_MAX_MULTIPART_PARTS` | `10000` | 1–100000 |
 | `FILE_SERVICE_MAX_ACTIVE_MULTIPART_UPLOADS` | `100` | 1–100000. Multipart uploads one user may have in progress in a bucket |
