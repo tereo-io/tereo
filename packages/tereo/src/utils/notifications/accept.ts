@@ -149,7 +149,8 @@ const parseRecipient = (
   }
   return {
     address: parsedAddress.success ? parsedAddress.data : null,
-    userId: parsedUserId.success ? parsedUserId.data : null,
+    // Lower case, as stored: the users found are matched to it as a string.
+    userId: parsedUserId.success ? parsedUserId.data.toLowerCase() : null,
     options: options.data as Record<string, unknown>,
   };
 };

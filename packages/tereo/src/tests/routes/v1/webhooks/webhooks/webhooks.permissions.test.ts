@@ -98,6 +98,15 @@ describe("GET /v1/webhooks/webhooks and POST /v1/webhooks/webhooks", () => {
         expect(one.status).toBe(HTTP_STATUS.OK);
       });
 
+      it("takes the organization id in upper case", async () => {
+        const one = await get<WebhookEndpointResponse>(
+          `/webhooks/${otherEndpoint.id}`,
+          token,
+          { "X-Organization-ID": otherOrg.toUpperCase() }
+        );
+        expect(one.status).toBe(HTTP_STATUS.OK);
+      });
+
       it("is ignored for callers without webhooks.admin", async () => {
         const writer = await getTestPrincipalToken({
           organizationId: getTestOrgId(),

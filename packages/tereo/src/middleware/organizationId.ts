@@ -45,9 +45,10 @@ export const resolveWebhookOrganizationId = async (
     req.headers["x-organization-id"] &&
     hasPermission(req.auth?.permissions ?? [], PERMISSIONS.WEBHOOKS.ADMIN)
   ) {
+    // Lower case, as stored: endpoints are matched to it as a string.
     const requested = validateHeaders(organizationIdHeadersSchema, req)[
       "x-organization-id"
-    ];
+    ].toLowerCase();
     await db.organizations.getAny(requested);
     req.organizationId = requested;
     return next();
