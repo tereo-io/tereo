@@ -1,8 +1,12 @@
 // @module-tag int
 // @module-tag auth
-import { makeUser, manage, tag } from "../../../../../support/scimUsers.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import {
+  REDIRECT_URI,
+  sessionLifecycleHelpers,
+} from "../../../../../support/auth/sessionLifecycle.js";
 import {
   entraAttributePatch,
   entraDeactivatePatch,
@@ -12,11 +16,26 @@ import {
   oktaDeactivatePatch,
 } from "../../../../../fixtures/scim/okta.js";
 import {
+  activeState,
+  makeUser,
+  manage,
+  managedWith,
+  signedInManagedUser,
+  tag,
+} from "../../../../../support/scimUsers.js";
+import {
   createScimConnection,
   scimFetch,
 } from "../../../../../support/scim.js";
 
 const PATCH_OP = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
+
+let client: Awaited<ReturnType<typeof createTestClient>>;
+const { login, refresh } = sessionLifecycleHelpers(() => client);
+
+beforeAll(async () => {
+  client = await createTestClient({ redirectUris: [REDIRECT_URI] });
+});
 
 const patch = (token: string, id: string, body: unknown) =>
   scimFetch(token, "PATCH", `/scim/v2/Users/${id}`, body);
@@ -135,21 +154,25 @@ describe("PATCH /scim/v2/Users/:id", () => {
     expect((await row(user.id)).email).toBe(email);
   });
 
-  // Acting on active arrives with deactivation; until then the IdP's view is
-  // recorded on the link and the user is left as is.
   it.each([
     ["Okta", oktaDeactivatePatch],
     ["Entra", entraDeactivatePatch],
-  ])("accepts the %s deactivate fixture", async (_, fixture) => {
-    const c = await createScimConnection();
-    const user = await managedUser(c);
-    const { status } = await patch(c.token, user.id, fixture);
-    expect(status).toBe(200);
-    const link = await prisma.scimUser.findUniqueOrThrow({
-      where: { userId: user.id },
-    });
-    expect(link.idpActive).toBe(false);
-  });
+  ])(
+    "deactivates by the %s fixture; a refresh token issued before is refused",
+    async (_, fixture) => {
+      const c = await createScimConnection();
+      const { user, tokens } = await signedInManagedUser(c, login);
+      const { status, body } = await patch(c.token, user.id, fixture);
+      expect(status).toBe(200);
+      expect(body.active).toBe(false);
+      expect(await activeState(user.id)).toEqual({
+        isActive: false,
+        idpActive: false,
+        adminHold: false,
+      });
+      expect((await refresh(tokens.refresh_token)).status).toBe(400);
+    }
+  );
 
   it("applies nothing when a later operation names an outside address", async () => {
     const c = await createScimConnection();
@@ -225,5 +248,139 @@ describe("PATCH /scim/v2/Users/:id", () => {
     expect(body.userName).toBe("jdoe");
     expect(await row(user.id)).toEqual(before);
     expect(await userEntries(user.id)).toHaveLength(0);
+  });
+});
+
+describe("PATCH /scim/v2/Users/:id active", () => {
+  const setActive = (token: string, id: string, active: boolean) =>
+    patch(token, id, ops({ op: "replace", path: "active", value: active }));
+
+  it("deactivates with one User entry carrying the connection", async () => {
+    const c = await createScimConnection();
+    const user = await managedWith(c);
+    expect((await setActive(c.token, user.id, false)).status).toBe(200);
+    const entries = await userEntries(user.id);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      action: "UPDATE",
+      changes: { isActive: { old: true, new: false } },
+      metadata: { scimConnectionId: c.connectionId },
+    });
+  });
+
+  it("applies the profile in the deactivation's entry", async () => {
+    const c = await createScimConnection();
+    const user = await managedWith(c);
+    const { status } = await patch(
+      c.token,
+      user.id,
+      ops(
+        { op: "replace", path: "name.givenName", value: "Gone" },
+        { op: "replace", path: "active", value: false }
+      )
+    );
+    expect(status).toBe(200);
+    const entries = await userEntries(user.id);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].changes).toMatchObject({
+      isActive: { old: true, new: false },
+    });
+    expect((await row(user.id)).firstName).toBe("Gone");
+  });
+
+  it("active:true reactivates", async () => {
+    const c = await createScimConnection();
+    const user = await managedWith(c, { idpActive: false });
+    const { status, body } = await setActive(c.token, user.id, true);
+    expect(status).toBe(200);
+    expect(body.active).toBe(true);
+    expect(await activeState(user.id)).toEqual({
+      isActive: true,
+      idpActive: true,
+      adminHold: false,
+    });
+    const entries = await userEntries(user.id);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].changes).toMatchObject({
+      isActive: { old: false, new: true },
+    });
+  });
+
+  it("active:true under an admin hold answers active:false and records idpActive", async () => {
+    const c = await createScimConnection();
+    const user = await managedWith(c, { idpActive: false, adminHold: true });
+    const { status, body } = await setActive(c.token, user.id, true);
+    expect(status).toBe(200);
+    expect(body.active).toBe(false);
+    expect(await activeState(user.id)).toEqual({
+      isActive: false,
+      idpActive: true,
+      adminHold: true,
+    });
+    expect(await userEntries(user.id)).toHaveLength(0);
+  });
+
+  it("active:false under an admin hold records idpActive only", async () => {
+    const c = await createScimConnection();
+    const user = await managedWith(c, { adminHold: true });
+    const { status, body } = await setActive(c.token, user.id, false);
+    expect(status).toBe(200);
+    expect(body.active).toBe(false);
+    expect(await activeState(user.id)).toEqual({
+      isActive: false,
+      idpActive: false,
+      adminHold: true,
+    });
+    expect(await userEntries(user.id)).toHaveLength(0);
+  });
+
+  it.each([
+    ["active:true on an active user", true],
+    ["active:false on an inactive user", false],
+  ])("%s changes nothing", async (_, active) => {
+    const c = await createScimConnection();
+    const user = await managedWith(c, { idpActive: active });
+    const withLink = () =>
+      prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+        include: { scimLink: true },
+      });
+    const before = await withLink();
+    const { status, body } = await setActive(c.token, user.id, active);
+    expect(status).toBe(200);
+    expect(body.active).toBe(active);
+    expect(await withLink()).toEqual(before);
+    expect(await userEntries(user.id)).toHaveLength(0);
+  });
+
+  it("adopts and deactivates an unmanaged active user", async () => {
+    const c = await createScimConnection();
+    const user = await makeUser(`free-${tag()}@${c.domain}`);
+    const { status, body } = await setActive(c.token, user.id, false);
+    expect(status).toBe(200);
+    expect(body.active).toBe(false);
+    expect(await activeState(user.id)).toEqual({
+      isActive: false,
+      idpActive: false,
+      adminHold: false,
+    });
+    const actions = (await userEntries(user.id)).map(
+      (e) => (e.metadata as { action?: string } | null)?.action ?? null
+    );
+    expect(actions.sort()).toEqual([null, "scim_adopted"].sort());
+  });
+
+  // users.is_active = idp_active AND NOT admin_hold, after every operation.
+  it.each([
+    ["active", { idpActive: true }, false],
+    ["inactive", { idpActive: false }, true],
+    ["held", { idpActive: false, adminHold: true }, true],
+    ["held and active at the IdP", { idpActive: true, adminHold: true }, false],
+  ])("keeps the invariant for a %s user", async (_, link, active) => {
+    const c = await createScimConnection();
+    const user = await managedWith(c, link);
+    expect((await setActive(c.token, user.id, active)).status).toBe(200);
+    const s = await activeState(user.id);
+    expect(s.isActive).toBe(s.idpActive === true && s.adminHold === false);
   });
 });

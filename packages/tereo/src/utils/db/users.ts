@@ -143,6 +143,7 @@ export const createWithoutPassword = async (
     name: string | null;
     firstName: string | null;
     lastName: string | null;
+    isActive?: boolean;
   },
   tx?: Prisma.TransactionClient
 ) => {

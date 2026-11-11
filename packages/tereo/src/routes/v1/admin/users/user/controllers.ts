@@ -4,6 +4,7 @@ import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
 import { formatAdminUser } from "../../../../../utils/transformers.js";
+import { assertScimAllows } from "../../../../../utils/scim/users.js";
 import { logAuditTx, emitTx } from "../../../../../utils/outbox.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../utils/auth.js";
@@ -53,6 +54,9 @@ import {
   managerOf,
 } from "./guards.js";
 
+// What a user's SCIM connection owns.
+const PROFILE_FIELDS = ["email", "name", "firstName", "lastName"] as const;
+
 export const getUser = async (req: Request, res: Response) => {
   const { id } = validateParams(UserIdParamSchema, req);
   const user = await db.users.get(id);
@@ -76,6 +80,26 @@ export const updateUser = async (req: Request, res: Response) => {
       "You cannot deactivate your own account"
     );
   }
+
+  // A body repeating the current value is not a change.
+  const scimChange = {
+    profile: PROFILE_FIELDS.some(
+      (key) => body[key] !== undefined && body[key] !== existing[key]
+    ),
+    reactivating,
+  };
+  assertScimAllows(await db.scim.getLinkByUser(id), scimChange);
+  // Again under the user's row lock, which SCIM's writes take, so the link
+  // checked is the one the change commits against. `hold` is the admin's
+  // hold a deactivation sets and a reactivation clears.
+  const scimTx = async (tx: Prisma.TransactionClient, hold?: boolean) => {
+    await db.users.lockForSignInChange(id, tx);
+    const link = await db.scim.getLinkByUser(id, tx);
+    assertScimAllows(link, scimChange);
+    if (link && hold !== undefined && link.adminHold !== hold) {
+      await db.scim.updateLink(link.id, { adminHold: hold }, tx);
+    }
+  };
 
   const newEmail =
     body.email && body.email !== existing.email ? body.email : null;
@@ -132,7 +156,10 @@ export const updateUser = async (req: Request, res: Response) => {
     const deactivated = await deactivateUser(auth, existing, {
       authorize,
       profile,
-      alsoInTx: limitAfter,
+      alsoInTx: async (tx) => {
+        await scimTx(tx, true);
+        await limitAfter(tx);
+      },
     });
     newUser = limited ?? deactivated;
   } else if (reactivating) {
@@ -142,7 +169,10 @@ export const updateUser = async (req: Request, res: Response) => {
       authorize,
       profile,
       keepSession: id === auth.userId ? auth : null,
-      alsoInTx: limitAfter,
+      alsoInTx: async (tx) => {
+        await scimTx(tx, false);
+        await limitAfter(tx);
+      },
     });
     newUser = limited ?? reactivated;
   } else if (body.password) {
@@ -155,6 +185,7 @@ export const updateUser = async (req: Request, res: Response) => {
       id,
       keep,
       async (tx, sessionIds, ssoSessionIds) => {
+        await scimTx(tx);
         newUser = await update(tx);
         await recordRevoked(tx, sessionIds, ssoSessionIds);
       },
@@ -164,6 +195,7 @@ export const updateUser = async (req: Request, res: Response) => {
     newUser = await db.$transaction(
       async (tx) => {
         await authorize(tx);
+        await scimTx(tx);
         return await update(tx);
       },
       { timeout: 30_000 }

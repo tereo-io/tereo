@@ -155,6 +155,7 @@ export const deactivateUser = async (
     authorize?: (tx: Tx) => Promise<void>;
     alsoInTx?: (tx: Tx) => Promise<void>;
     profile?: UserProfile;
+    auditMetadata?: Record<string, unknown>;
   } = {}
 ): Promise<UserRow> => {
   const id = existing.id;
@@ -169,6 +170,7 @@ export const deactivateUser = async (
       await assertAdminRemains({ kind: "user", userId: id }, tx);
       const row = await changeUserTx(tx, actor, existing, opts.profile ?? {}, {
         isActive: false,
+        auditMetadata: opts.auditMetadata,
       });
       await opts.alsoInTx?.(tx);
       return row;
@@ -191,6 +193,7 @@ export const reactivateUser = async (
     alsoInTx?: (tx: Tx) => Promise<void>;
     keepSession?: Caller | null;
     profile?: UserProfile;
+    auditMetadata?: Record<string, unknown>;
   } = {}
 ): Promise<UserRow> => {
   const recordRevoked = recordSessionsRevoked(actor, existing);
@@ -203,6 +206,7 @@ export const reactivateUser = async (
     async (tx, sessionIds, ssoSessionIds) => {
       updated = await changeUserTx(tx, actor, existing, opts.profile ?? {}, {
         isActive: true,
+        auditMetadata: opts.auditMetadata,
       });
       await opts.alsoInTx?.(tx);
       await recordRevoked(tx, sessionIds, ssoSessionIds);
@@ -220,6 +224,7 @@ export const createUserInOrganizationTx = async (
     name: string | null;
     firstName: string | null;
     lastName: string | null;
+    isActive?: boolean;
   },
   placement: { organizationId: string; roleIds: string[] },
   auditMetadata: Record<string, unknown>,

@@ -45,6 +45,11 @@ export const PUBLIC: Allowlist = [
     "SCIM connection token, not a bearer access token",
   ],
   [
+    "delete",
+    "/scim/v2/Users/:id",
+    "SCIM connection token, not a bearer access token",
+  ],
+  [
     "get",
     "/health",
     "Liveness probe; load balancers and orchestrators send no token",

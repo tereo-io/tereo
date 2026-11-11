@@ -7,7 +7,9 @@ import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
 import { addMembers, createGroup } from "../../../../../../utils/groups.js";
 import { createTestClient } from "../../../../../support/auth/clients.js";
 import { generateUniqueId } from "../../../../../support/auth/crypto.js";
+import { createScimConnection } from "../../../../../support/scim.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { managedWith } from "../../../../../support/scimUsers.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../../support/http.js";
 import db from "../../../../../../utils/db/index.js";
@@ -161,5 +163,33 @@ describe("GET /v1/admin/users/:id/roles via groups (and PUT keeping them)", () =
       data: { archivedAt: new Date() },
     });
     expect((await rolesOf(userId)).orgGroupRoles).toEqual([]);
+  });
+});
+
+describe("GET /v1/admin/users/:id managedBy for a SCIM-managed user", () => {
+  const managedBy = async (userId: string) =>
+    (await fetchJson("GET", `${BASE_URL}/v1/admin/users/${userId}`, adminToken))
+      .body.managedBy;
+
+  it("names the connection's provider", async () => {
+    const c = await createScimConnection();
+    const user = await managedWith(c);
+    expect(await managedBy(user.id)).toEqual({
+      kind: "scim",
+      id: c.providerId,
+      name: "SCIM IdP",
+    });
+  });
+
+  it("still names it while the link is deleted", async () => {
+    const c = await createScimConnection();
+    const user = await managedWith(c, {
+      idpActive: false,
+      deletedAt: new Date(),
+    });
+    expect(await managedBy(user.id)).toMatchObject({
+      kind: "scim",
+      id: c.providerId,
+    });
   });
 });

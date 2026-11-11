@@ -35,9 +35,12 @@ export const assertNotGuest = (
 
 export type UserManager =
   | { kind: "system" }
-  | { kind: "service" | "integration"; id: string; name: string };
+  | { kind: "service" | "integration" | "scim"; id: string; name: string };
 
-/** What owns a user the admin API refuses to change, or null when it can. */
+/**
+ * What owns a user the admin API refuses to change, wholly or in part, or
+ * null when it can. For `scim`, `id` and `name` are the provider's.
+ */
 export const managerOf = async (user: {
   id: string;
   oauthClientId: string | null;
@@ -46,7 +49,11 @@ export const managerOf = async (user: {
   const owner = user.oauthClientId
     ? await db.services.getByClientId(user.oauthClientId)
     : null;
-  return owner ? { kind: owner.kind, id: owner.id, name: owner.name } : null;
+  if (owner) return { kind: owner.kind, id: owner.id, name: owner.name };
+  const link = await db.scim.getLinkWithProvider(user.id);
+  if (!link) return null;
+  const { provider } = link.connection;
+  return { kind: "scim", id: provider.id, name: provider.displayName };
 };
 
 /**

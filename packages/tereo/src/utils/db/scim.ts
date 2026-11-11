@@ -103,6 +103,14 @@ export const getLinkByUser = async (userId: string, tx?: Tx) => {
   return await (tx ?? prisma).scimUser.findUnique({ where: { userId } });
 };
 
+/** With the connection's provider; includes a link whose resource was deleted. */
+export const getLinkWithProvider = async (userId: string, tx?: Tx) => {
+  return await (tx ?? prisma).scimUser.findUnique({
+    where: { userId },
+    include: { connection: { include: { provider: true } } },
+  });
+};
+
 /** Includes links whose SCIM resource was deleted. */
 export const getLink = async (
   connectionId: string,

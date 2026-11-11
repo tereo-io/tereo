@@ -6,5 +6,6 @@ const userRouter = Router({ mergeParams: true });
 userRouter.get("/", controllers.getUser);
 userRouter.put("/", controllers.replaceUser);
 userRouter.patch("/", controllers.patchUser);
+userRouter.delete("/", controllers.deleteUser);
 
 export default userRouter;

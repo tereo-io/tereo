@@ -5,6 +5,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { createGuest, issue } from "../../../../../support/passwordSetup.js";
 import { issueVerifyLinkFor } from "../../../../../support/verifyLink.js";
+import { createScimConnection } from "../../../../../support/scim.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { waitFor } from "../../../../../support/webhooks.js";
@@ -31,6 +32,12 @@ import {
   createTestRole,
   createTestUser,
 } from "../../../../../support/auth/users.js";
+import {
+  activeState,
+  makeUser,
+  managedWith,
+  tag,
+} from "../../../../../support/scimUsers.js";
 
 const patch = (id: string, token: string, body: unknown) =>
   fetchJson("PATCH", `${BASE_URL}/v1/admin/users/${id}`, token, body);
@@ -280,4 +287,121 @@ describe("PATCH /v1/admin/users/:id and email verification", () => {
       }
     }
   );
+});
+
+describe("PATCH /v1/admin/users/:id on a SCIM-managed user", () => {
+  let writer: string;
+
+  beforeAll(async () => {
+    writer = await getTestPrincipalToken({
+      permissions: ["users.read", "users.write"],
+    });
+  });
+
+  const scimUser = async (
+    link: { idpActive?: boolean; adminHold?: boolean; deletedAt?: Date } = {}
+  ) => {
+    const c = await createScimConnection();
+    const { id } = await managedWith(c, link);
+    return await prisma.user.update({
+      where: { id },
+      data: { firstName: "Jane", lastName: "Doe" },
+    });
+  };
+
+  const expectManaged = (r: { status: number; body: unknown }) => {
+    expect(r.status).toBe(409);
+    expect(r.body).toMatchObject({ error: "managed_by_scim" });
+  };
+
+  it.each([
+    ["name", { name: "Someone Else" }],
+    ["firstName", { firstName: "Janet" }],
+    ["lastName", { lastName: "Roe" }],
+    ["email", { email: `moved-${tag()}@elsewhere.test` }],
+  ])("refuses a change to %s with 409 managed_by_scim", async (_, body) => {
+    const user = await scimUser();
+    expectManaged(await patch(user.id, writer, body));
+    expect(
+      await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+    ).toEqual(user);
+  });
+
+  it("refuses a profile change while the link is deleted", async () => {
+    const user = await scimUser({ idpActive: false, deletedAt: new Date() });
+    expectManaged(await patch(user.id, writer, { name: "Taken Back" }));
+  });
+
+  it("accepts a body repeating the current profile", async () => {
+    const user = await scimUser();
+    const r = await patch(user.id, writer, {
+      name: user.name,
+      firstName: "Jane",
+      lastName: "Doe",
+      email: user.email,
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it("deactivates and sets the admin hold", async () => {
+    const user = await scimUser();
+    const r = await patch(user.id, writer, { isActive: false });
+    expect(r.status).toBe(200);
+    expect(r.body.isActive).toBe(false);
+    expect(await activeState(user.id)).toEqual({
+      isActive: false,
+      idpActive: true,
+      adminHold: true,
+    });
+  });
+
+  it.each([
+    ["without a hold", { idpActive: false }],
+    ["under a hold", { idpActive: false, adminHold: true }],
+  ])(
+    "refuses a reactivation while the IdP has the user inactive (%s)",
+    async (_, link) => {
+      const user = await scimUser(link);
+      const before = await activeState(user.id);
+      expectManaged(await patch(user.id, writer, { isActive: true }));
+      expect(await activeState(user.id)).toEqual(before);
+    }
+  );
+
+  it("reactivates a held user the IdP has active and clears the hold", async () => {
+    const user = await scimUser({ adminHold: true });
+    const r = await patch(user.id, writer, { isActive: true });
+    expect(r.status).toBe(200);
+    expect(r.body.isActive).toBe(true);
+    expect(await activeState(user.id)).toEqual({
+      isActive: true,
+      idpActive: true,
+      adminHold: false,
+    });
+  });
+
+  it("changes the rate limit and the password", async () => {
+    const user = await scimUser();
+    const limited = await patch(user.id, writer, { rateLimitPerSecond: 7 });
+    expect(limited.status).toBe(200);
+    expect(limited.body.rateLimitPerSecond).toBe(7);
+    const reset = await patch(user.id, writer, {
+      password: "Another-Passw0rd!",
+    });
+    expect(reset.status).toBe(200);
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(row.passwordHash).not.toBeNull();
+  });
+
+  it("sets firstName and lastName of an unmanaged user", async () => {
+    const user = await makeUser(`u-${tag()}@unmanaged.test`);
+    const r = await patch(user.id, writer, {
+      firstName: "Ann",
+      lastName: "Lee",
+    });
+    expect(r.status).toBe(200);
+    expect(
+      await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+    ).toMatchObject({ firstName: "Ann", lastName: "Lee" });
+  });
 });

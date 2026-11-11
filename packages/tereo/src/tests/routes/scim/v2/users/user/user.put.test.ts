@@ -1,12 +1,23 @@
 // @module-tag int
 // @module-tag auth
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../../definitions/index.js";
-import { makeUser, manage, tag } from "../../../../../support/scimUsers.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
 import { entraReplaceUser } from "../../../../../fixtures/scim/entra.js";
 import { oktaReplaceUser } from "../../../../../fixtures/scim/okta.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import {
+  REDIRECT_URI,
+  sessionLifecycleHelpers,
+} from "../../../../../support/auth/sessionLifecycle.js";
+import {
+  activeState,
+  makeUser,
+  manage,
+  signedInManagedUser,
+  tag,
+} from "../../../../../support/scimUsers.js";
 import {
   createTestWebhookEndpoint,
   getCoreEventSubscriberToken,
@@ -16,6 +27,13 @@ import {
   createScimConnection,
   scimFetch,
 } from "../../../../../support/scim.js";
+
+let client: Awaited<ReturnType<typeof createTestClient>>;
+const { login, refresh } = sessionLifecycleHelpers(() => client);
+
+beforeAll(async () => {
+  client = await createTestClient({ redirectUris: [REDIRECT_URI] });
+});
 
 const put = (token: string, id: string, body: unknown) =>
   scimFetch(token, "PUT", `/scim/v2/Users/${id}`, body);
@@ -299,5 +317,25 @@ describe("PUT /scim/v2/Users/:id", () => {
       const r = await put(c.token, id, replacing(`x-${tag()}@${c.domain}`));
       expect(r.status).toBe(404);
     }
+  });
+});
+
+describe("PUT /scim/v2/Users/:id active", () => {
+  it("active:false deactivates; a refresh token issued before is refused", async () => {
+    const c = await createScimConnection();
+    const { user, tokens } = await signedInManagedUser(c, login);
+    const { status, body } = await put(
+      c.token,
+      user.id,
+      replacing(user.email, { active: false })
+    );
+    expect(status).toBe(200);
+    expect(body.active).toBe(false);
+    expect(await activeState(user.id)).toEqual({
+      isActive: false,
+      idpActive: false,
+      adminHold: false,
+    });
+    expect((await refresh(tokens.refresh_token)).status).toBe(400);
   });
 });

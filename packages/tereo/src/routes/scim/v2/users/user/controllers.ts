@@ -14,6 +14,7 @@ import {
   applyPatch,
 } from "../../../../../utils/scim/patch.js";
 import {
+  deleteScimUser,
   findVisible,
   patchScimUser,
   replaceScimUser,
@@ -50,4 +51,9 @@ export const patchUser = async (req: Request, res: Response) => {
   const id = userId(req);
   const input = applyPatch(validateBody(ScimPatchBodySchema, req));
   send(res, await patchScimUser(scimContext(req), id, input));
+};
+
+export const deleteUser = async (req: Request, res: Response) => {
+  await deleteScimUser(scimContext(req), userId(req));
+  res.status(204).send();
 };
