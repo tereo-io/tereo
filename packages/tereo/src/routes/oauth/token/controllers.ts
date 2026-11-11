@@ -288,6 +288,21 @@ const getClient = async (
     );
     throw clientAuthenticationFailed(res);
   }
+  // What authenticateClient refuses elsewhere. The service's own row, not
+  // only its account's, which client_credentials checks: nothing else ties
+  // the two together here.
+  if ((await db.services.getByClientId(client.id))?.isActive === false) {
+    logClientAuthFailure(
+      clientId,
+      "Client's service is inactive",
+      body.grant_type,
+      ip
+    );
+    throw new OAuth2Error(
+      "unauthorized_client",
+      "Client's service is inactive"
+    );
+  }
   return client;
 };
 

@@ -2278,8 +2278,9 @@ paths:
           refresh, a scope the refresh token was not granted
         - 400 `unauthorized_client` (grant not allowed for the client;
           client_credentials from a public client, a client without a service
-          account, one whose service account is inactive — a deactivated
-          service — or one belonging to an inactive organization)
+          account, the client of a deactivated service or integration, one
+          whose service account is inactive, or one belonging to an inactive
+          organization)
         - `invalid_client` — 400 for an unknown `client_id` sent in the body, 401
           (with `WWW-Authenticate: Basic`) for an unknown client in Basic auth
           or a failed confidential-client authentication
