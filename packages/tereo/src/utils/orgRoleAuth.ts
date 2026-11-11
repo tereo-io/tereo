@@ -25,7 +25,8 @@ const PERMISSION_MAP: Record<MinOrgRole, string> = {
  * Allows access if the user either:
  * 1. Has the corresponding platform permission (organizations.read/write), OR
  * 2. Is a member of the target org with at least the required memberRole,
- *    and, for anything above "member", the org is active
+ *    and, for anything above "member", the org is active. A guest's
+ *    membership never counts.
  *
  * The platform permissions are not org-assignable, so they come only from a
  * global role: no role granted within an organization reaches this bypass.
@@ -50,6 +51,12 @@ export async function requireOrgRole(
     throw new ForbiddenError(
       `This token's scopes do not allow ${requiredPermission}`
     );
+  }
+
+  // A guest's membership scopes their roles; it is no authority over the
+  // organization, whose record and members are not theirs to read.
+  if (auth.userType === "guest") {
+    throw new ForbiddenError("A guest cannot read or manage an organization");
   }
 
   // Check org membership

@@ -226,4 +226,28 @@ describe("guest restrictions on existing routes", () => {
       ((await res.json()) as { error_description: string }).error_description
     ).toContain("Only a person can link");
   });
+
+  it("refuses a guest the organization, its members and their roles", async () => {
+    const { user } = await createTestGuest({ organizationId: org.id });
+    const token = await getTestPrincipalToken({
+      userId: user.id,
+      organizationId: org.id,
+      permissions: [],
+    });
+    for (const path of [
+      `/v1/admin/organizations/${org.id}`,
+      `/v1/admin/organizations/${org.id}/members`,
+      `/v1/admin/organizations/${org.id}/members/${user.id}/roles`,
+    ]) {
+      const res = await call("GET", path, undefined, token);
+      expect(res.status, path).toBe(403);
+    }
+    const own = await call(
+      "GET",
+      "/v1/account/organizations",
+      undefined,
+      token
+    );
+    expect(own.status).toBe(200);
+  });
 });

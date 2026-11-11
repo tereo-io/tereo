@@ -180,7 +180,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - neither organizations.read nor membership of the organization
+        description: Forbidden - neither organizations.read nor membership of the organization, or the caller is a guest (a guest's membership gives no access here)
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '429':
@@ -435,7 +435,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - neither organizations.read nor membership of the organization
+        description: Forbidden - neither organizations.read nor membership of the organization, or the caller is a guest (a guest's membership gives no access here)
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '429':
@@ -749,7 +749,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - neither organizations.read nor membership of the organization
+        description: Forbidden - neither organizations.read nor membership of the organization, or the caller is a guest (a guest's membership gives no access here)
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: Organization not found, or the user is not a member of it

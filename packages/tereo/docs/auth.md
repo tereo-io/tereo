@@ -820,6 +820,11 @@ membership grants nothing (no token is issued for an inactive or archived organi
 joined another meanwhile, with their roles and bucket grants there, audited and emitted as
 `auth.organization.member-removed`.
 
+The membership scopes a guest's roles and nothing else: `requireOrgRole` never counts it, so the
+organization's record, its member list and members' roles (`GET /v1/admin/organizations/:id`,
+`…/members`, `…/members/:userId/roles`) answer a guest with 403. A guest sees their own organization
+through `/v1/account`.
+
 | Refused                                                                                                       | Code                            |
 | ------------------------------------------------------------------------------------------------------------- | ------------------------------- |
 | Adding a guest who already belongs to an organization to another (`POST /v1/admin/organizations/:id/members`) | 400 `user_not_addable`          |
