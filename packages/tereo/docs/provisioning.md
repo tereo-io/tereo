@@ -462,8 +462,12 @@ the CLI the exit code is non-zero.
 - **Secrets**: format, strength and the other rules of [Secrets](#secrets), across service, client
   and webhook secrets; every `secretFrom` variable must be set.
 - **Existing rows**: a service or client of the same slug or ID that exists but is not
-  provisioned is an error naming it; core never adopts a hand-made row. Delete or rename it, or
-  change the entry.
+  provisioned is an error naming it; core never adopts a hand-made row. A hand-made login client
+  can be deleted (`DELETE /v1/admin/clients/:id`). A hand-made service or integration cannot: no
+  route deletes one or changes its slug or namespace, and deactivating it does not free them, so
+  change the entry's `slug`, `namespace` or `clientId` instead. A service whose `namespace` merely
+  overlaps the entry's blocks it the same way. `provision --dry-run` reports all of this before
+  a rollout.
 
 ## Applying
 
