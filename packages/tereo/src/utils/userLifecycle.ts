@@ -222,7 +222,8 @@ export const createUserInOrganizationTx = async (
     lastName: string | null;
   },
   placement: { organizationId: string; roleIds: string[] },
-  auditMetadata: Record<string, unknown>
+  auditMetadata: Record<string, unknown>,
+  memberAuditMetadata: Record<string, unknown> = {}
 ): Promise<UserRow> => {
   const { organizationId: orgId, roleIds } = placement;
   const user = await db.users.createWithoutPassword(input, tx);
@@ -255,7 +256,11 @@ export const createUserInOrganizationTx = async (
     entityType: "OrganizationMember",
     entityId: member.id,
     entityName: user.email,
-    metadata: { userId: user.id, memberRole: member.memberRole },
+    metadata: {
+      userId: user.id,
+      memberRole: member.memberRole,
+      ...memberAuditMetadata,
+    },
   });
   await emitTx(tx, {
     organizationId: getDefaultOrganizationId(),
@@ -279,7 +284,12 @@ export const createUserInOrganizationTx = async (
       entityType: "OrganizationMember",
       entityId: member.id,
       entityName: user.email,
-      metadata: { action: "roles_changed", userId: user.id, roleIds },
+      metadata: {
+        action: "roles_changed",
+        userId: user.id,
+        roleIds,
+        ...memberAuditMetadata,
+      },
     });
     await emitTx(tx, {
       organizationId: getDefaultOrganizationId(),

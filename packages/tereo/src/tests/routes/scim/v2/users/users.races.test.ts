@@ -2,6 +2,7 @@
 // @module-tag auth
 // @module-tag race
 import { createScimConnection, scimFetch } from "../../../../support/scim.js";
+import { holdLocks, waitForLockWait } from "../../../../support/dbLocks.js";
 import { oktaCreateUser } from "../../../../fixtures/scim/okta.js";
 import { makeUser, tag } from "../../../../support/scimUsers.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
@@ -46,5 +47,21 @@ describe("POST /scim/v2/Users races", () => {
       },
     });
     expect(adopted).toBe(1);
+  });
+
+  it("refuses an adoption when the user's email changed while it waited for the lock", async () => {
+    const c = await createScimConnection();
+    const user = await makeUser(`moving-${tag()}@${c.domain}`);
+    const moved = `moved-${tag()}@${c.domain}`;
+    const release = await holdLocks((tx) =>
+      tx.user.update({ where: { id: user.id }, data: { email: moved } })
+    );
+    const pending = post(c.token, user.email);
+    await waitForLockWait("%FOR UPDATE%");
+    await release();
+    const r = await pending;
+    expect(r.status).toBe(409);
+    expect(r.body).toMatchObject({ scimType: "uniqueness" });
+    expect(await prisma.scimUser.count({ where: { userId: user.id } })).toBe(0);
   });
 });

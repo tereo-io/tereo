@@ -275,7 +275,6 @@ describe("POST /scim/v2/Users — existing accounts", () => {
   it("refuses with 409 uniqueness, identically, every account it cannot see", async () => {
     const c = await createScimConnection();
     const other = await createScimConnection({ domains: [`o-${tag()}.test`] });
-    const outside = await createScimConnection();
     const guest = await makeUser(`g-${tag()}@${c.domain}`, {
       userType: "guest",
     });
@@ -288,10 +287,9 @@ describe("POST /scim/v2/Users — existing accounts", () => {
     await manage(other.connectionId, deletedElsewhere.id, "gone", {
       deletedAt: new Date(),
     });
-    const notInDomain = await makeUser(`n-${tag()}@${outside.domain}`);
 
     const bodies: unknown[] = [];
-    for (const u of [guest, service, theirs, deletedElsewhere, notInDomain]) {
+    for (const u of [guest, service, theirs, deletedElsewhere]) {
       const r = await post(c.token, {
         ...withEmail(oktaCreateUser, u.email),
         externalId: null,
@@ -303,6 +301,41 @@ describe("POST /scim/v2/Users — existing accounts", () => {
     expect(
       await prisma.scimUser.count({ where: { connectionId: c.connectionId } })
     ).toBe(0);
+  });
+
+  it("answers an address outside its domains with 400, whether or not it has an account", async () => {
+    const c = await createScimConnection();
+    const outside = await createScimConnection();
+    const existing = await makeUser(`n-${tag()}@${outside.domain}`);
+    const absentEmail = `a-${tag()}@${outside.domain}`;
+    const send = (email: string) =>
+      post(c.token, { ...withEmail(oktaCreateUser, email), externalId: null });
+
+    const forExisting = await send(existing.email);
+    const forAbsent = await send(absentEmail);
+    expectInvalidValue(forExisting);
+    expect(forExisting.body).toEqual(forAbsent.body);
+    expect(
+      await prisma.user.findUnique({ where: { email: absentEmail } })
+    ).toBeNull();
+    expect(
+      await prisma.scimUser.count({ where: { userId: existing.id } })
+    ).toBe(0);
+  });
+
+  it("revives its deleted link for an address outside its domains", async () => {
+    const c = await createScimConnection();
+    const outside = await createScimConnection();
+    const user = await makeUser(`left-${tag()}@${outside.domain}`);
+    await manage(c.connectionId, user.id, user.email, {
+      deletedAt: new Date(),
+    });
+    const { status, body } = await post(
+      c.token,
+      withEmail(oktaCreateUser, user.email)
+    );
+    expect(status).toBe(201);
+    expect(body.id).toBe(user.id);
   });
 
   it("refuses a second POST for a user it manages", async () => {

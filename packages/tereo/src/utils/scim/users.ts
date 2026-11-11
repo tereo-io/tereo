@@ -169,6 +169,13 @@ export const applyUserInputTx = async (
   return { user, link, activeChange: activeChangeOf(user, link) };
 };
 
+// The same whether or not an account has the address.
+const outsideDomains = () =>
+  new BadRequestError(
+    "invalidValue",
+    "The email address is not in one of the provider's domains"
+  );
+
 const createTx = async (
   tx: Tx,
   ctx: ScimContext,
@@ -178,12 +185,7 @@ const createTx = async (
     emailDomain(input.email),
     tx
   );
-  if (!domain || domain.providerId !== ctx.provider.id) {
-    throw new BadRequestError(
-      "invalidValue",
-      "The email address is not in one of the provider's domains"
-    );
-  }
+  if (!domain || domain.providerId !== ctx.provider.id) throw outsideDomains();
   if (organizationClosed(domain.organization)) {
     throw new BadRequestError(
       "invalidValue",
@@ -201,7 +203,8 @@ const createTx = async (
       lastName: input.lastName ?? null,
     },
     placement,
-    auditMetadata(ctx)
+    auditMetadata(ctx),
+    { scimConnectionId: ctx.connection.id }
   );
   const link = await db.scim.createLink(
     {
@@ -222,10 +225,23 @@ const claimTx = async (
   tx: Tx,
   ctx: ScimContext,
   userId: string,
-  input: ScimUserInput
+  input: ScimUserInput & { email: string }
 ): Promise<Applied> => {
+  // Only this connection's own deleted link is revived outside its domains;
+  // any other account there gets the answer an absent one gets, and no lock.
+  const prior = await db.scim.getLinkByUser(userId, tx);
+  const revivable =
+    prior?.connectionId === ctx.connection.id && prior.deletedAt !== null;
+  if (
+    !revivable &&
+    !(await providerDomains(ctx, tx)).includes(emailDomain(input.email))
+  ) {
+    throw outsideDomains();
+  }
   await db.users.lockForSignInChange(userId, tx);
   const user = await db.users.get(userId, tx);
+  // An admin may have changed the address since it was looked up.
+  if (user.email !== input.email) throw uniqueness();
   const existing = await db.scim.getLinkByUser(userId, tx);
   if (existing) {
     if (
@@ -279,7 +295,7 @@ export const createScimUser = async (
       if (conflict) throw uniqueness();
       const existing = await db.users.getByEmail(email, tx);
       return existing
-        ? await claimTx(tx, ctx, existing.id, input)
+        ? await claimTx(tx, ctx, existing.id, { ...input, email })
         : await createTx(tx, ctx, { ...input, email, userName });
     });
   } catch (err) {

@@ -62,6 +62,11 @@ describe("POST /scim/v2/Users audit", () => {
       action: "roles_changed",
       roleIds: [role.id],
     });
+    for (const entry of entries) {
+      expect(entry.metadata).toMatchObject({
+        scimConnectionId: c.connectionId,
+      });
+    }
 
     const where = {
       webhookEndpointId: endpoint.id,
