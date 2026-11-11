@@ -153,7 +153,11 @@ export const createWithoutPassword = async (
 
 export const update = async (
   id: string,
-  data: UpdateUserInput,
+  data: Omit<UpdateUserInput, "name"> & {
+    name?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+  },
   tx?: Prisma.TransactionClient,
   options: { unverify?: boolean } = {}
 ) => {
@@ -162,7 +166,9 @@ export const update = async (
     email?: string;
     passwordHash?: string;
     passwordSetByUser?: boolean;
-    name?: string;
+    name?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
     isActive?: boolean;
     emailVerifiedAt?: null;
   } = {};
@@ -170,6 +176,8 @@ export const update = async (
   if (data.email) updateData.email = data.email;
   if (options.unverify) updateData.emailVerifiedAt = null;
   if (data.name !== undefined) updateData.name = data.name;
+  if (data.firstName !== undefined) updateData.firstName = data.firstName;
+  if (data.lastName !== undefined) updateData.lastName = data.lastName;
   if (data.isActive !== undefined) updateData.isActive = data.isActive;
   if (data.password) {
     updateData.passwordHash = await hashPassword(data.password);

@@ -1,9 +1,11 @@
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
+import { endSession, endUserSessions } from "../../../../../utils/sessions.js";
 import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
+import { formatAdminUser } from "../../../../../utils/transformers.js";
+import { logAuditTx, emitTx } from "../../../../../utils/outbox.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
-import { isUsableAccount } from "../../../../../utils/users.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
@@ -12,9 +14,11 @@ import {
   notifyUserRolesChanged,
 } from "../../../../../websocket/emitters/index.js";
 import {
-  formatAdminUser,
-  formatUser,
-} from "../../../../../utils/transformers.js";
+  deactivateUser,
+  reactivateUser,
+  updateUserProfileTx,
+  type UserRow,
+} from "../../../../../utils/userLifecycle.js";
 import {
   validateBody,
   validateParams,
@@ -24,16 +28,6 @@ import {
   listOrgGroupRoles,
 } from "../../../../../utils/groupRoles.js";
 import {
-  issueVerifyLink,
-  retireAllLinks,
-  retirePasswordLinks,
-} from "../../../../../utils/userLinks.js";
-import {
-  endDeactivatedUserSessions,
-  endSession,
-  endUserSessions,
-} from "../../../../../utils/sessions.js";
-import {
   assertCanGrant,
   globalGrantablePermissions,
 } from "../../../../../utils/grants.js";
@@ -42,11 +36,6 @@ import {
   NotFoundError,
   BadRequestError,
 } from "../../../../../utils/errors.js";
-import {
-  logAuditTx,
-  computeChanges,
-  emitTx,
-} from "../../../../../utils/outbox.js";
 import {
   RevokeAllSessionsSchema,
   RevokeSessionSchema,
@@ -107,108 +96,70 @@ export const updateUser = async (req: Request, res: Response) => {
     }
   };
 
-  const update = async (tx: Prisma.TransactionClient) => {
-    if (deactivating) {
-      await assertAdminRemains({ kind: "user", userId: id }, tx);
-    }
-    const { rateLimitPerSecond, ...profile } = body;
-    // A body of only a rate limit is not a profile update.
-    const profileChanged =
-      rateLimitPerSecond === undefined || Object.keys(profile).length > 0;
-    // The new address has proved nothing yet.
-    let updated = profileChanged
-      ? await db.users.update(id, profile, tx, { unverify: newEmail !== null })
-      : await db.users.get(id, tx);
-    // An invite is matched by email: it must not follow the account to an
-    // address the admin who issued it never saw.
-    const invitesWithdrawn = newEmail
-      ? await db.userIdentities.deleteInvitesForUser(id, tx)
-      : 0;
-    // Whoever holds a setup link or a forced-change grant must not keep a way
-    // in past a new password, a new sign-in email or a deactivation.
-    if (newEmail || deactivating) {
-      await retireAllLinks(tx, id);
-    } else if (body.password) {
-      await retirePasswordLinks(tx, id);
-    }
-    if (newEmail && isUsableAccount(updated)) {
-      try {
-        await issueVerifyLink(tx, { userId: id, createdBy: auth.userId });
-      } catch (err) {
-        // Without a connection the mail could never leave; the admin can
-        // resend once one exists. The refusal comes before any write, so the
-        // transaction carries on.
-        if (!(
-          err instanceof ConflictError && err.code === "email_not_configured"
-        )) {
-          throw err;
-        }
-      }
-    }
-    if (profileChanged) {
-      const metadata = {
-        ...(body.password && { passwordReset: true }),
-        ...(invitesWithdrawn > 0 && { invitesWithdrawn }),
-      };
-      await logAuditTx(tx, {
-        auth,
-        action: "UPDATE",
-        entityType: "User",
-        entityId: updated.id,
-        entityName: updated.email,
-        // Never the rows themselves: they carry the password hash.
-        changes: computeChanges(formatUser(existing), formatUser(updated)),
-        ...(Object.keys(metadata).length > 0 && { metadata }),
-      });
-      await emitTx(tx, {
-        organizationId: getDefaultOrganizationId(),
-        eventType: "auth.user.updated",
-        entityType: "User",
-        entityId: updated.id,
-        data: formatUser(updated) as unknown as Record<string, unknown>,
-      });
-    }
-    if (rateLimitPerSecond !== undefined) {
-      await setRateLimitTx(tx, auth, id, rateLimitPerSecond);
-      updated = await db.users.get(id, tx);
-    }
-    return updated;
+  const { rateLimitPerSecond, isActive, ...profile } = body;
+
+  const setRateLimit = async (
+    tx: Prisma.TransactionClient,
+    updated: UserRow
+  ) => {
+    if (rateLimitPerSecond === undefined) return updated;
+    await setRateLimitTx(tx, auth, id, rateLimitPerSecond);
+    return await db.users.get(id, tx);
   };
 
-  let newUser: Awaited<ReturnType<typeof update>>;
+  const update = async (tx: Prisma.TransactionClient) => {
+    // A body of only a rate limit is not a profile update.
+    const profileChanged =
+      rateLimitPerSecond === undefined ||
+      isActive !== undefined ||
+      Object.keys(profile).length > 0;
+    const updated = profileChanged
+      ? await updateUserProfileTx(tx, auth, existing, profile)
+      : await db.users.get(id, tx);
+    return await setRateLimit(tx, updated);
+  };
+
+  let newUser: UserRow | undefined;
+  // The profile shares the activation change's update and audit entry; the
+  // rate limit follows it in the same transaction.
+  let limited: UserRow | undefined;
+  const limitAfter = async (tx: Prisma.TransactionClient) => {
+    if (rateLimitPerSecond !== undefined) {
+      limited = await setRateLimit(tx, existing);
+    }
+  };
   if (deactivating) {
-    // Deactivation takes the authority and admin-remains locks before the
-    // user's row, so it keeps its own transaction rather than running inside
-    // endUserSessions, which locks the row before its callback. The user's
-    // tokens fail requireAuth as soon as it commits; the sessions end right
-    // after.
-    newUser = await db.$transaction(
-      async (tx) => {
-        await authorize(tx);
-        return await update(tx);
-      },
-      { timeout: 30_000 }
-    );
-    await endDeactivatedUserSessions(id, recordSessionsRevoked(auth, existing));
-  } else if (body.password || reactivating) {
+    const deactivated = await deactivateUser(auth, existing, {
+      authorize,
+      profile,
+      alsoInTx: limitAfter,
+    });
+    newUser = limited ?? deactivated;
+  } else if (reactivating) {
+    // An admin reactivating their own account keeps the session they act
+    // from, as sessions/all does by default.
+    const reactivated = await reactivateUser(auth, existing, {
+      authorize,
+      profile,
+      keepSession: id === auth.userId ? auth : null,
+      alsoInTx: limitAfter,
+    });
+    newUser = limited ?? reactivated;
+  } else if (body.password) {
     // A password reset signs the user out everywhere, in the transaction
     // that sets the password. An admin resetting their own keeps the session
-    // they act from, as sessions/all does by default. A reactivation does
-    // the same: a deactivation whose sign-out failed after it committed left
-    // sessions that would otherwise come back to life with the account.
+    // they act from, as sessions/all does by default.
     const recordRevoked = recordSessionsRevoked(auth, existing);
     const keep = id === auth.userId ? auth : null;
-    let reset: typeof newUser | undefined;
     await endUserSessions(
       id,
       keep,
       async (tx, sessionIds, ssoSessionIds) => {
-        reset = await update(tx);
+        newUser = await update(tx);
         await recordRevoked(tx, sessionIds, ssoSessionIds);
       },
       authorize
     );
-    newUser = reset as typeof newUser;
   } else {
     newUser = await db.$transaction(
       async (tx) => {
@@ -219,7 +170,7 @@ export const updateUser = async (req: Request, res: Response) => {
     );
   }
 
-  res.json(formatAdminUser(newUser));
+  res.json(formatAdminUser(newUser as UserRow));
 };
 
 export const getUserPermissions = async (req: Request, res: Response) => {

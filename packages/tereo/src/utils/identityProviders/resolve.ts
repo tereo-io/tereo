@@ -2,12 +2,12 @@ import { SYSTEM_USER, SYSTEM_USER_ID } from "../../definitions/index.js";
 import type { IdentityProvider, NormalizedIdentity } from "./types.js";
 import { emitTx, logAuditTx, type AuditLogInput } from "../outbox.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
+import { createUserInOrganizationTx } from "../userLifecycle.js";
 import { uniqueViolationFields } from "../prismaErrors.js";
 import { emailDomain, normalizeEmail } from "../email.js";
 import { markVerifiedFromProvider } from "./verify.js";
-import { formatUser } from "../transformers.js";
-import type { Prisma } from "../db/prisma.js";
 import { isUsableAccount } from "../users.js";
+import type { Prisma } from "../db/prisma.js";
 import { emailTrusted } from "./trust.js";
 import { logger } from "../logger.js";
 import db from "../db/index.js";
@@ -188,7 +188,9 @@ const provision = async (
   return await db.$transaction(async (tx) => {
     const firstName = clip(identity.firstName);
     const lastName = clip(identity.lastName);
-    const user = await db.users.createWithoutPassword(
+    const user = await createUserInOrganizationTx(
+      tx,
+      SYSTEM_ACTOR,
       {
         email,
         name:
@@ -197,82 +199,9 @@ const provision = async (
         firstName,
         lastName,
       },
-      tx
+      { organizationId: orgId, roleIds },
+      { providerId: provider.id }
     );
-    await logAuditTx(tx, {
-      auth: SYSTEM_ACTOR,
-      action: "CREATE",
-      entityType: "User",
-      entityId: user.id,
-      entityName: user.email,
-      metadata: {
-        email: user.email,
-        name: user.name,
-        userType: user.userType,
-        providerId: provider.id,
-      },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.user.created",
-      entityType: "User",
-      entityId: user.id,
-      data: formatUser(user) as unknown as Record<string, unknown>,
-    });
-
-    const member = await db.organizations.addMember(
-      orgId,
-      user.id,
-      "member",
-      tx
-    );
-    await logAuditTx(tx, {
-      auth: SYSTEM_ACTOR,
-      organizationId: orgId,
-      action: "CREATE",
-      entityType: "OrganizationMember",
-      entityId: member.id,
-      entityName: user.email,
-      metadata: { userId: user.id, memberRole: member.memberRole },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.organization.member-added",
-      entityType: "OrganizationMember",
-      entityId: member.id,
-      data: {
-        organizationId: orgId,
-        userId: user.id,
-        email: user.email,
-        memberRole: member.memberRole,
-      },
-    });
-
-    if (roleIds.length > 0) {
-      await db.organizations.setMemberRoles(orgId, user.id, roleIds, tx);
-      await logAuditTx(tx, {
-        auth: SYSTEM_ACTOR,
-        organizationId: orgId,
-        action: "UPDATE",
-        entityType: "OrganizationMember",
-        entityId: member.id,
-        entityName: user.email,
-        metadata: { action: "roles_changed", userId: user.id, roleIds },
-      });
-      await emitTx(tx, {
-        organizationId: getDefaultOrganizationId(),
-        eventType: "auth.organization.member-roles-changed",
-        entityType: "OrganizationMember",
-        entityId: member.id,
-        data: {
-          organizationId: orgId,
-          userId: user.id,
-          email: user.email,
-          roleIds,
-        },
-      });
-    }
-
     await linkIdentity(tx, SYSTEM_ACTOR, user.id, provider, identity);
     return user.id;
   });
