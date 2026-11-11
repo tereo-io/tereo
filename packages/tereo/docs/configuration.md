@@ -231,7 +231,8 @@ keys (`settings.read`). A new key is published in the JWKS at once and starts si
 (`activatesAt` in the response): two of the per-minute refreshes every core process runs, plus a
 margin, so every process and every app service that refetches the JWKS knows the key before a token
 carries its `kid`. The previous key signs until then. `{ "immediate": true }`, for a compromised key,
-activates the new key at once and deletes every older version, a pending one included: tokens they
+needs `admin` through a global role as well as `settings.write` (403 otherwise), since it signs
+everyone out of their current tokens. It activates the new key at once and deletes every older version, a pending one included: tokens they
 signed, ID tokens sent as `id_token_hint` included, are refused from that moment, they leave the
 JWKS, and signed-in users get tokens from the new key on their next refresh (their refresh tokens are
 opaque, not signed). The rotating process broadcasts the change over Redis so every other process

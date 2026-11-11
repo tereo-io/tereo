@@ -11097,6 +11097,9 @@ paths:
         then on, and the keys leave the JWKS. Signed-in users get tokens from
         the new key at their next refresh. Every core process is told over
         Redis to re-read its keys; without Redis each does so within a minute.
+        An immediate rotation needs `admin` through a global role as well as
+        `settings.write` (403 otherwise); a scheduled one needs only
+        `settings.write`.
 
         Refused with 409 when the signing key is supplied in env
         (`JWT_PRIVATE_KEY`), or when another rotation ran at the same moment.

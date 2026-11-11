@@ -1,5 +1,6 @@
 import { getDefaultOrganizationId } from "../../../../utils/defaultOrganization.js";
 import { emitTx, logAuditTx } from "../../../../utils/outbox.js";
+import { assertGlobalAdmin } from "../../../../utils/grants.js";
 import { validateBody } from "../../../../utils/validateReq.js";
 import { validateUser } from "../../../../utils/auth.js";
 import { RotateSigningKeySchema } from "./schemas.js";
@@ -17,12 +18,21 @@ export const listSigningKeys = async (_req: Request, res: Response) => {
  * A new JWT signing key is published at once and signs from `activatesAt`;
  * the previous one signs until then, and keeps verifying, and stays in the
  * JWKS, until tokens it signed have expired. With `immediate` the new key
- * signs at once and every older one is deleted. Audited, and
+ * signs at once and every older one is deleted; that needs a global `admin`
+ * on top of the route's settings.write. Audited, and
  * `core.signing-key.rotated` is emitted.
  */
 export const rotateSigningKeys = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { immediate } = validateBody(RotateSigningKeySchema, req);
+  // It refuses every token issued so far, which no narrower permission is
+  // bounded by.
+  if (immediate) {
+    await assertGlobalAdmin(
+      auth,
+      "Only an administrator (global admin) can rotate the signing key immediately"
+    );
+  }
   const { keys, activatesAt } = await rotateSigningKey(
     { immediate },
     async (tx, { kid, activatesAt, retired }) => {
