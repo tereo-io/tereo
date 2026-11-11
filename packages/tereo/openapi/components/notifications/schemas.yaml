@@ -405,6 +405,11 @@ NotificationDelivery:
       type: integer
     lastError:
       type: [string, 'null']
+      description: |
+        Why the last attempt failed: the provider's reply when it gave one,
+        else an error code (`no_connection`, `attachment_forbidden`,
+        `ESOCKET`, `delivery_failed`, ...). Never the transport's own
+        message, which names hosts and addresses.
     providerMessageId:
       type: [string, 'null']
     sentAt:

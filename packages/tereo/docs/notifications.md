@@ -47,6 +47,8 @@ Sent over SMTP with nodemailer.
 - `GET /v1/admin/notifications/connections` gives each connection a `lastDeliveryError`
   (`{ message, at }`): the error of its newest delivery attempt in the last day when that attempt
   failed or is waiting to retry, so a broken connection shows without opening a notification.
+  `message` is the delivery's `lastError`, in the same form (a reply or a code; see
+  [Operating](#operating)).
 - Secrets: `password`, optional.
 - Content: `subject` (1-998 characters, no line breaks), `text` and/or `html` (one is required), and
   optional `from` (`{ address, name? }`) and `replyTo`. A `from` address and a `replyTo` must each
@@ -268,7 +270,10 @@ Outcomes:
   after a default changed): marked `failed` at once, with `notification.failed`. `lastError` is the
   SMTP reply for `smtp_rejected`, else the error code (`attachment_missing`, `host_not_allowed`, ...).
 - **Other errors:** back to `pending` with `lastError` set, retried by BullMQ with exponential
-  backoff from 60 s. There are 8 attempts in all. The count is also kept on the delivery, so a
+  backoff from 60 s. `lastError` is the server's SMTP reply when it gave one (`451 …`), else the
+  transport error's code (`ESOCKET`, `ETIMEDOUT`, `EAUTH`, …), else `delivery_failed`: never the
+  mail library's message, which names the host, its address and port. Senders read `lastError`,
+  so that text goes to the worker log only (`Notification delivery job failed`, with `deliveryId`). There are 8 attempts in all. The count is also kept on the delivery, so a
   re-queue by the stale sweep does not add attempts. After the last it is `failed`; a delivery
   the sweep puts back with no attempts left is failed without sending, keeping its `lastError`
   (or `attempts_exhausted`).
@@ -354,6 +359,9 @@ removes it. Once every delivery is sent it is gone.
 | `attachment_forbidden`          | The sender can no longer read an attachment's bucket (grant or permission revoked, or the sender deactivated). Permanent                |
 | `sender_not_allowed`            | `content.from` or `content.replyTo` is not allowed on the connection used at delivery, e.g. the default changed since accept. Permanent |
 | `smtp_rejected`                 | Shown as the server's `5xx` reply text. Permanent                                                                                       |
+| `4xx …`                         | The server's reply to a refusal that is retried                                                                                         |
+| `ESOCKET`, `ETIMEDOUT`, `EAUTH`… | The mail library's error code for a connection, TLS, timeout or sign-in failure; retried. The worker log has the full error             |
+| `delivery_failed`               | A failure with neither a reply nor a code; retried. The worker log has the full error                                                   |
 | anything else                   | The error's message, e.g. a connection or `4xx` SMTP reply; retried up to 8 attempts                                                    |
 
 ## Retention

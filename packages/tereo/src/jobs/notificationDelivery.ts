@@ -22,6 +22,8 @@ import db from "../utils/db/index.js";
 import { access } from "fs/promises";
 import {
   PermanentSendError,
+  RetryableSendError,
+  providerReplyOrCode,
   type AttachmentStream,
   type NotificationChannel,
   type ResolvedRecipient,
@@ -179,13 +181,17 @@ const toResolvedRecipient = (
   options: { as: r.as },
 });
 
-/** What `last_error` records: the provider's reply, else the error's code. */
+/**
+ * What `last_error` records, which the sender reads: the provider's reply,
+ * else the error's code. The error itself goes to the log.
+ */
 const describeFailure = (err: unknown): string => {
   if (err instanceof PermanentSendError) {
     return err.code === "smtp_rejected" ? err.message : err.code;
   }
   if (err instanceof BadRequestError) return err.code;
-  return err instanceof Error ? err.message : String(err);
+  if (err instanceof RetryableSendError) return err.message;
+  return providerReplyOrCode(err) ?? "delivery_failed";
 };
 
 /** Delay the job without spending one of its attempts. */
@@ -364,7 +370,7 @@ export async function processNotificationDelivery(
         db.notifications.markFailed(tx, ref, lastError, "pending")
       ));
     logger.warn(
-      { deliveryId, notificationId, attempt, lastError },
+      { err, deliveryId, notificationId, attempt, lastError },
       settled
         ? "Notification delivery failed"
         : "Notification delivery failed, but it was already settled or claimed again"

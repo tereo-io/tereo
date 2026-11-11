@@ -59,6 +59,32 @@ export class PermanentSendError extends Error {
   }
 }
 
+/** A failure a retry may fix, raised by core: its message is safe to show. */
+export class RetryableSendError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "RetryableSendError";
+  }
+}
+
+/**
+ * A library's failure as it may be shown: the server's SMTP reply when there
+ * was one, else the error's code, else null. Not its message, which names
+ * the host and the address it resolved to, or quotes whatever a non-SMTP
+ * service there answered.
+ */
+export const providerReplyOrCode = (err: unknown): string | null => {
+  const e = err as {
+    responseCode?: unknown;
+    response?: unknown;
+    code?: unknown;
+  };
+  if (typeof e?.responseCode === "number" && typeof e.response === "string") {
+    return e.response.slice(0, 500);
+  }
+  return typeof e?.code === "string" ? e.code : null;
+};
+
 export interface ChannelAdapter<S, K, C, O> {
   channel: NotificationChannel;
   settingsSchema: z.ZodType<S>;

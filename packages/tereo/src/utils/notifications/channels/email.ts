@@ -10,6 +10,7 @@ import env from "../../../env.js";
 import { z } from "zod";
 import {
   PermanentSendError,
+  RetryableSendError,
   type ChannelAdapter,
   type ConnectionView,
   type ResolvedRecipient,
@@ -168,7 +169,9 @@ async function transportFor(
         { err, connectionId: connection.id },
         "SMTP host did not resolve"
       );
-      throw new Error("The SMTP host did not resolve", { cause: err });
+      throw new RetryableSendError("The SMTP host did not resolve", {
+        cause: err,
+      });
     }
   }
   const transport = nodemailer.createTransport({
@@ -280,7 +283,7 @@ function withDeadline<T>(send: Promise<T>): Promise<T> {
     timer = setTimeout(
       () =>
         reject(
-          new Error(
+          new RetryableSendError(
             `SMTP send did not finish within ${smtpTimeouts.totalMs / 1000} s`
           )
         ),
