@@ -7,11 +7,13 @@ import { ensureDailyPartitions } from "../../utils/partitions.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { waitFor } from "../support/webhooks.js";
+import { logger } from "../../utils/logger.js";
 import {
   closeNotificationQueues,
   getNotificationQueue,
 } from "../../jobs/notificationQueues.js";
 import {
+  PermanentDispatchError,
   createOutboxReaper,
   notifyTx,
   type OutboxDispatcher,
@@ -181,6 +183,38 @@ describe("createOutboxReaper", () => {
       expect(seen.size).toBe(30);
       expect(peak).toBeLessThanOrEqual(10);
       expect(await rowsOf(ids)).toHaveLength(0);
+    });
+
+    it("logs a dead letter by what identifies it, without the payload's content", async () => {
+      const payload = {
+        organizationId: null,
+        eventType: "reaper.test",
+        entityType: "Thing",
+        entityId: "thing-1",
+        data: { token: "s3cr3t-link" },
+      };
+      const [{ id }] = await prisma.$queryRaw<{ id: string }[]>`
+        INSERT INTO "core"."outbox" ("id", "destination", "payload", "claimed_at", "claimed_by", "next_attempt_at")
+        VALUES (gen_random_uuid(), ${DESTINATION}, ${JSON.stringify(payload)}::jsonb, NOW() - INTERVAL '1 second', 'elsewhere', '2000-01-01')
+        RETURNING "id"::text`;
+      const error = vi.spyOn(logger, "error");
+
+      await runOnce(async (_payload, row) => {
+        if (row.id === id) throw new PermanentDispatchError("never");
+      });
+
+      const logged = error.mock.calls
+        .map(([fields]) => fields as unknown as Record<string, unknown>)
+        .find((fields) => fields.outboxId === id);
+      expect(logged).toMatchObject({
+        event: "outbox.dead_letter",
+        destination: DESTINATION,
+        lastError: "never",
+        eventType: "reaper.test",
+        entityType: "Thing",
+        entityId: "thing-1",
+      });
+      expect(JSON.stringify(logged)).not.toContain("s3cr3t-link");
     });
 
     it("leaves a row re-claimed during dispatch to its new claimer", async () => {

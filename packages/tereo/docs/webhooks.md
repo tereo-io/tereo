@@ -325,7 +325,8 @@ the result is kept 24 hours:
 The reaper retries a failing outbox row with exponential backoff, capped at 30 minutes, for 100
 attempts (about 12 hours); a row that can never succeed (a malformed payload, a retired event
 type, a destination with no dispatcher) is dead-lettered at once. A dead letter stays in
-`core.outbox` with `dead_lettered_at` set and an `outbox.dead_letter` log line, and the reaper
+`core.outbox` with `dead_lettered_at` set and an `outbox.dead_letter` log line (the row's id, destination
+and what its payload is about, such as the event type and entity; the payload itself stays in the row), and the reaper
 leaves it alone. Once the cause is fixed, replay it:
 
 ```bash
