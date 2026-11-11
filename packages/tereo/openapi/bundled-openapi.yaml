@@ -2450,6 +2450,10 @@ paths:
       description: |
         Revoke an access or refresh token (RFC 7009).
         Token can be provided in request body or the `trt_{client_id}` cookie.
+        The `trt_{client_id}` and `tsi_{client_id}` cookies are cleared when the
+        cookie's token is the one revoked; a request that revokes another token
+        (the access token, say) leaves them, since the refresh token they hold
+        is still live.
         Revoking a refresh token also revokes the access tokens of its session,
         and is a logout of that browser: the SSO session the refresh token was
         issued under ends, every other token family issued under that SSO

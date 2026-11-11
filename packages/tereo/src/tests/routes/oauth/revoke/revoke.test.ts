@@ -293,6 +293,32 @@ describe("POST /oauth/revoke", () => {
         expect(refresh.status).toBe(HTTP_STATUS.BAD_REQUEST);
       });
 
+      it("clears the refresh cookie only when its token is the one revoked", async () => {
+        const tokens = await getTokens();
+        const revoke = (token?: string) =>
+          fetch(`${BASE_URL}/oauth/revoke`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Cookie: `trt_${testClient.clientId}=${tokens.refresh_token}`,
+            },
+            body: JSON.stringify({ client_id: testClient.clientId, token }),
+          });
+        const clearsCookie = (res: Response) =>
+          res.headers
+            .getSetCookie()
+            .some((c) => c.startsWith(`trt_${testClient.clientId}=;`));
+
+        // The access token: the cookie's refresh token is still live.
+        const access = await revoke(tokens.access_token);
+        expect(access.status).toBe(HTTP_STATUS.OK);
+        expect(clearsCookie(access)).toBe(false);
+
+        const same = await revoke(tokens.refresh_token);
+        expect(same.status).toBe(HTTP_STATUS.OK);
+        expect(clearsCookie(same)).toBe(true);
+      });
+
       it("should return 200 for another client's token, and leave it", async () => {
         const tokens = await getTokens();
         const otherClient = await createTestClient();

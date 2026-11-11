@@ -199,11 +199,6 @@ export const getRefreshTokenFromCookie = (
 ): string | undefined =>
   readClientCookie(req, REFRESH_TOKEN_COOKIE_NAME, clientId);
 
-export const hasRefreshTokenCookie = (
-  req: Request,
-  clientId: string
-): boolean => !!getRefreshTokenFromCookie(req, clientId);
-
 const setClientCookie = (
   res: Response,
   base: string,

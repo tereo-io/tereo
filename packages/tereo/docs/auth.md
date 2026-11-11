@@ -1526,7 +1526,8 @@ Where core knowingly departs from OAuth 2.0 / OpenID Connect:
   `400 invalid_request`.
 - **`/oauth/revoke` without a token** — neither `token` nor the `trt_{client_id}` cookie — is
   `400 invalid_request` (RFC 7009 makes `token` required). A token that is unknown, already revoked
-  or another client's is still `200`.
+  or another client's is still `200`. The refresh cookie is cleared only when its token is the one
+  revoked: a request naming another token in the body leaves the cookie, whose token is still live.
 
 ## Rate limits
 
