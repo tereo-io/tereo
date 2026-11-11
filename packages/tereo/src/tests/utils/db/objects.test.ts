@@ -119,6 +119,37 @@ describe("db.objects", () => {
       expect(await live(bucket.id)).toBe(1);
     });
 
+    it("a bulk delete that hit its cap reports more only for keys the prefix matches", async () => {
+      const bucket = await createTestBucket(token);
+      for (const key of ["a_1.txt", "ab2.txt"]) {
+        await uploadTestObject(token, bucket.name, key, createTestFile(key));
+      }
+      const capped = await db.objects.removeObjectsBulk(
+        bucket.id,
+        { kind: "prefix", prefix: "a_" },
+        getTestUserId(),
+        { maxTotal: 1 }
+      );
+      expect(capped.deletedObjects.map((o) => o.objectKey)).toEqual([
+        "a_1.txt",
+      ]);
+      expect(capped.truncated).toBe(false);
+
+      await uploadTestObject(
+        token,
+        bucket.name,
+        "ab3.txt",
+        createTestFile("3")
+      );
+      const more = await db.objects.removeObjectsBulk(
+        bucket.id,
+        { kind: "prefix", prefix: "ab" },
+        getTestUserId(),
+        { maxTotal: 1 }
+      );
+      expect(more.truncated).toBe(true);
+    });
+
     it("a history purge batch is undone when its audit entry fails", async () => {
       const bucket = await createTestBucket(token);
       await prisma.bucket.update({
