@@ -149,8 +149,8 @@ export const accountTotpFailure = createFailureLimiter({
   logExtra: (req) => ({ userId: req.auth?.userId }),
 });
 
-// Failed attempts at /oauth/password-change, per IP: a grant is 256 bits, so
-// this only bounds probing and a loop of rejected new passwords.
+// Attempts at /oauth/password-change from a browser holding a grant and its
+// cookie, per IP: bounds a loop of rejected new passwords, each one a hash.
 export const passwordChangeFailure = createFailureLimiter({
   keyPrefix: "rl:password-change:fail",
   points: 10,

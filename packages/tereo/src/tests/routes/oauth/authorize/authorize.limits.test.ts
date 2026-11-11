@@ -151,6 +151,39 @@ describe("POST /oauth/authorize", () => {
     );
   });
 
+  it("spends no attempt on a submission without the login session's cookie", async () => {
+    const user = await createTestUser();
+    const ip = freshIp();
+    const pkce = newPkce();
+    // What a page elsewhere can post from a visitor's browser: no cookie.
+    for (let i = 0; i < MAX_FAILURES + 1; i++) {
+      const res = await fetch(`${BASE_URL}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-Forwarded-For": ip,
+        },
+        body: new URLSearchParams({
+          response_type: "code",
+          client_id: client.clientId,
+          redirect_uri: REDIRECT_URI,
+          state: pkce.state,
+          scope: "openid",
+          code_challenge: pkce.challenge,
+          code_challenge_method: "S256",
+          email: unknownEmail(),
+          password: "wrong-password",
+        }),
+      });
+      expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(((await res.json()) as { error: string }).error).toBe(
+        "invalid_session"
+      );
+    }
+    const ok = await submitPassword(user.email, user.plainPassword, ip);
+    expect(ok.status).toBe(HTTP_STATUS.OK);
+  });
+
   it("backs off an account's failures across addresses, doubling the delay", async () => {
     const user = await createTestUser();
     for (let i = 0; i < MAX_FAILURES; i++) {

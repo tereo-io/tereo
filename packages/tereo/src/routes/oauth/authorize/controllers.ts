@@ -330,7 +330,6 @@ export const authorizePostHandler = async (req: Request, res: Response) => {
   const body = validateBody(AuthorizeSubmitSchema, req);
 
   const client = await getClientForAuthorize(body.client_id);
-  await authFailure.check(req, client.clientId);
   if (!client.grantTypes.includes("authorization_code")) {
     throw new OAuth2Error(
       "unauthorized_client",
@@ -349,6 +348,10 @@ export const authorizePostHandler = async (req: Request, res: Response) => {
   if (!client.redirectUris.includes(body.redirect_uri)) {
     throw new OAuth2Error("invalid_request", "Invalid redirect URI");
   }
+  // Only now is an attempt spent: the key spans everyone behind the address,
+  // and a page anywhere could otherwise post cookieless submissions from a
+  // visitor's browser to lock them all out of this client.
+  await authFailure.check(req, client.clientId);
 
   const user = await db.users.getByEmail(body.email);
   const canLogIn =

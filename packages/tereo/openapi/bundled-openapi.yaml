@@ -1582,8 +1582,10 @@ paths:
         org-select and consent steps — the sign-in has to start over. Wrong email or
         password, an inactive user or a service account is 401 `access_denied`
         — all four take the same time to answer, so the response does not reveal
-        whether the email exists. Every submission counts against the client
-        and IP before anything is checked, and a successful login gives back
+        whether the email exists. Every submission that carries the login
+        session's cookie counts against the client and IP before the password
+        is checked (one without it is `invalid_session` and counts for
+        nothing), and a successful login gives back
         its own attempt but clears none of the others, whatever the account: a
         sixth failure in five minutes is 429 for the rest of the window (503
         `temporarily_unavailable` when the limiter cannot reach Redis). Per
@@ -3207,8 +3209,9 @@ paths:
         enabled, `/oauth/totp/verify` or `/oauth/totp/recovery` answers with the
         redirect to `/login/change-password`. Only password logins meet it: a
         provider login skips it and leaves the flag set. `invalid_change_grant` and `change_expired` are
-        `400` errors. Wrong attempts are rate limited per client; no code is
-        issued until the password is changed.
+        `400` errors. Attempts that carry a grant and its cookie are rate
+        limited per IP (10 in five minutes, then 429); no code is issued until
+        the password is changed.
 
         An audit log entry is created and `auth.user.password-changed` is emitted.
       operationId: postOAuthPasswordChange
