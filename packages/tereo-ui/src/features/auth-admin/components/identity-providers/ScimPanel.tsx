@@ -202,7 +202,13 @@ export const ScimPanel = ({ providerId }: ScimPanelProps) => {
           )}
         </div>
       )}
-      <ScimTokenModal token={newToken} onClose={() => setNewToken(null)} />
+      <ScimTokenModal
+        token={newToken}
+        onClose={() => {
+          setNewToken(null);
+          createToken.reset();
+        }}
+      />
       <ConfirmationModal
         show={!!revoking}
         handleHide={() => setRevoking(null)}

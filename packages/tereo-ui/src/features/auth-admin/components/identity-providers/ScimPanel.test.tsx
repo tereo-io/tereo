@@ -36,15 +36,15 @@ const renderPanel = (conn: typeof connection | null) => {
     if (!conn) throw notFound();
     return { data: conn };
   });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
+    <QueryClientProvider client={client}>
       <ScimPanel providerId="p1" />
     </QueryClientProvider>
   );
+  return client;
 };
 
 beforeEach(() => {
@@ -111,6 +111,34 @@ describe("ScimPanel", () => {
     await waitFor(() =>
       expect(screen.queryByText("scim_secret_value")).toBeNull()
     );
+  });
+
+  it("keeps the token in no mutation after the modal closes", async () => {
+    const client = renderPanel(connection);
+    authMock.axios.post.mockResolvedValue({
+      data: {
+        id: "t2",
+        token: "scim_secret_value",
+        createdAt: "2026-11-11T00:00:00Z",
+      },
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Generate token" })
+    );
+    await screen.findByText("scim_secret_value");
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("scim_secret_value")).toBeNull()
+    );
+    const held = client
+      .getMutationCache()
+      .getAll()
+      .filter((m) =>
+        JSON.stringify(m.state.data ?? null).includes("scim_secret")
+      );
+    expect(held).toEqual([]);
   });
 
   it("disables Generate at two live tokens", async () => {

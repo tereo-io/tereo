@@ -9,6 +9,8 @@ const useCreateScimToken = () => {
   const axios = useAxios("auth");
 
   return useMutation({
+    // The token is shown once; the mutation cache must not keep it.
+    gcTime: 0,
     mutationFn: async (providerId: string): Promise<NewScimToken> => {
       const res = await axios.post(
         `/v1/admin/identity-providers/${providerId}/scim/tokens`
