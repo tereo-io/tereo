@@ -707,7 +707,12 @@
               `inline` for images, video, audio, PDF and plain text;
               `attachment` for everything else (HTML, SVG, scripts, …). Carries
               an ASCII `filename` and RFC 5987 `filename*` with the real name
-              (the key's last segment).
+              (the key's last segment). An object stored with a JavaScript
+              type (`text/javascript`, `application/javascript`,
+              `application/ecmascript`, `text/ecmascript` and their legacy
+              forms) is sent with `Content-Type: text/plain; charset=utf-8`,
+              so a browser will not run it from a `<script src>`; its
+              metadata keeps the stored type.
             schema:
               type: string
           X-Object-Id:

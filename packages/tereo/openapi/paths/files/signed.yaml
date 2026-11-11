@@ -90,7 +90,9 @@
       only when the signature covers it (share URLs with a custom
       filename); one added to a URL afterwards is ignored, and changing or
       removing a signed one is `403`. Unsafe types (HTML, JavaScript, SVG, …)
-      are always served as attachments.
+      are always served as attachments, and an object stored with a
+      JavaScript type is sent with `Content-Type: text/plain; charset=utf-8`,
+      so a signed or share URL cannot be loaded as a script.
 
       Supports one byte range (`Range`, and `If-Range` with the `ETag`) as
       on `GET /v1/files/buckets/{name}/objects/{objectKey}`, so media can seek

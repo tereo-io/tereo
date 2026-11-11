@@ -1,7 +1,6 @@
 import type { EtagPreconditions } from "../../../../../../utils/writePreconditions.js";
 import type { ObjectWithCurrent } from "../../../../../../utils/db/objects.js";
 import { noteAccessLogError } from "../../../../../../middleware/accessLog.js";
-import { normalizeContentType } from "../../../../../../utils/contentType.js";
 import { isThumbnailSource } from "../../../../../../utils/thumbnails.js";
 import { validateHeaders } from "../../../../../../utils/validateReq.js";
 import type { AuthContext } from "../../../../../../middleware/auth.js";
@@ -20,6 +19,10 @@ import {
   holdsBucketReadAccess,
   getAccessibleBucket,
 } from "../../../../../../utils/bucketAccess.js";
+import {
+  downloadContentType,
+  normalizeContentType,
+} from "../../../../../../utils/contentType.js";
 import {
   ifRangeAllows,
   parseRange,
@@ -550,7 +553,7 @@ export const prepareDownload = (
   ) {
     return true;
   }
-  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Type", downloadContentType(contentType));
   res.setHeader("X-Content-Type-Options", "nosniff");
   setContentDisposition(res, { contentType, objectKey: opts.objectKey });
   return false;

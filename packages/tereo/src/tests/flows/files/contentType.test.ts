@@ -13,6 +13,7 @@ import {
   createTestFile,
   getTestAccessToken,
   uploadTestObject,
+  versionedObject,
 } from "../../support/files.js";
 
 describe("object content types", () => {
@@ -122,6 +123,108 @@ describe("object content types", () => {
     });
     expect(res.status).toBe(HTTP_STATUS.OK);
     expect(res.headers["content-security-policy"]).toBe(SANDBOX);
+  });
+
+  describe("a stored JavaScript type", () => {
+    const PLAIN = "text/plain; charset=utf-8";
+    const SCRIPT = "alert(1)";
+
+    const script = async (policy?: "public") => {
+      const bucket = await createTestBucket(token, policy ? { policy } : {});
+      const obj = await uploadTestObject(
+        token,
+        bucket.name,
+        "app.js",
+        createTestFile(SCRIPT, "app.js", "text/javascript")
+      );
+      expect(obj.contentType).toBe("text/javascript");
+      return { bucket, obj };
+    };
+
+    const expectPlain = (res: {
+      status: number;
+      headers: Record<string, unknown>;
+    }) => {
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      expect(res.headers["content-type"]).toBe(PLAIN);
+      expect(res.headers["x-content-type-options"]).toBe("nosniff");
+    };
+
+    it("is served as plain text to its bucket's readers, while metadata keeps the stored type", async () => {
+      const { bucket, obj } = await script();
+      const base = `${BASE_URL}/buckets/${bucket.name}/objects`;
+
+      const byKey = await axios.get(`${base}/app.js`, auth());
+      expectPlain(byKey);
+      expect(byKey.data).toBe(SCRIPT);
+      expectPlain(await axios.head(`${base}/app.js`, auth()));
+
+      const byId = await axios.get(`${base}/by-id/${obj.id}`, auth());
+      expect(byId.data.contentType).toBe("text/javascript");
+      const head = await axios.head(`${base}/app.js`, auth());
+      expect(head.headers["content-type"]).toBe(PLAIN);
+    });
+
+    it("is served as plain text as a version's download", async () => {
+      const { bucket, objectId, first } = await versionedObject(token);
+      await prisma.objectVersion.update({
+        where: { id: first.id },
+        data: { contentType: "application/javascript" },
+      });
+      const base = `${BASE_URL}/buckets/${bucket.name}/objects`;
+      expectPlain(
+        await axios.get(
+          `${base}/by-id/${objectId}/versions/${first.id}/download`,
+          auth()
+        )
+      );
+      expectPlain(
+        await axios.get(`${base}/o.txt?versionId=${first.id}`, auth())
+      );
+    });
+
+    it("is served as plain text from a public bucket without a token", async () => {
+      const { bucket } = await script("public");
+      expectPlain(
+        await axios.get(`${BASE_URL}/buckets/${bucket.name}/objects/app.js`, {
+          validateStatus: () => true,
+        })
+      );
+    });
+
+    it("is served as plain text through a signed URL", async () => {
+      const { bucket, obj } = await script();
+      const presign = await axios.post(
+        `${BASE_URL}/buckets/${bucket.name}/objects/by-id/${obj.id}/presign`,
+        { operation: "read", expiresInSeconds: 60 },
+        auth()
+      );
+      expectPlain(
+        await axios.head(presign.data.url, { validateStatus: () => true })
+      );
+      expectPlain(
+        await axios.get(presign.data.url, { validateStatus: () => true })
+      );
+    });
+
+    it("is served as plain text through a share", async () => {
+      const { bucket, obj } = await script();
+      const share = await axios.post<{ url: string }>(
+        `${BASE_URL}/buckets/${bucket.name}/shares`,
+        { kind: "OBJECT", objectId: obj.id },
+        auth()
+      );
+      expect(share.status).toBe(HTTP_STATUS.CREATED);
+      const probe = await axios.head(share.data.url, {
+        maxRedirects: 0,
+        validateStatus: () => true,
+      });
+      expect(probe.status).toBe(HTTP_STATUS.OK);
+      expect(probe.headers["content-type"]).toBe(PLAIN);
+      expectPlain(
+        await axios.get(share.data.url, { validateStatus: () => true })
+      );
+    });
   });
 
   it("checks a completed multipart upload's content against the blocklist", async () => {

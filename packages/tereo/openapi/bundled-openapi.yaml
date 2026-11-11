@@ -12464,7 +12464,12 @@ paths:
                 `inline` for images, video, audio, PDF and plain text;
                 `attachment` for everything else (HTML, SVG, scripts, …). Carries
                 an ASCII `filename` and RFC 5987 `filename*` with the real name
-                (the key's last segment).
+                (the key's last segment). An object stored with a JavaScript
+                type (`text/javascript`, `application/javascript`,
+                `application/ecmascript`, `text/ecmascript` and their legacy
+                forms) is sent with `Content-Type: text/plain; charset=utf-8`,
+                so a browser will not run it from a `<script src>`; its
+                metadata keeps the stored type.
               schema:
                 type: string
             X-Object-Id:
@@ -14699,7 +14704,9 @@ paths:
         only when the signature covers it (share URLs with a custom
         filename); one added to a URL afterwards is ignored, and changing or
         removing a signed one is `403`. Unsafe types (HTML, JavaScript, SVG, …)
-        are always served as attachments.
+        are always served as attachments, and an object stored with a
+        JavaScript type is sent with `Content-Type: text/plain; charset=utf-8`,
+        so a signed or share URL cannot be loaded as a script.
 
         Supports one byte range (`Range`, and `If-Range` with the `ETag`) as
         on `GET /v1/files/buckets/{name}/objects/{objectKey}`, so media can seek

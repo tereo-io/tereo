@@ -1,6 +1,7 @@
 import { shareUnlockBackoff } from "../../../../../middleware/rateLimit.js";
 import { storeShareUrlNonce } from "../../../../../utils/shareUrlNonces.js";
 import { contentDisposition } from "../../buckets/bucket/objects/utils.js";
+import { downloadContentType } from "../../../../../utils/contentType.js";
 import { servesWithoutToken } from "../../../../../utils/bucketAccess.js";
 import { sign as presignSign } from "../../../../../utils/presigning.js";
 import { setAccessLog } from "../../../../../middleware/accessLog.js";
@@ -367,7 +368,7 @@ export const probeShareViaToken = async (req: Request, res: Response) => {
     );
     res.setHeader(
       "Content-Type",
-      details.contentType ?? "application/octet-stream"
+      downloadContentType(details.contentType ?? "application/octet-stream")
     );
     if (details.sizeBytes !== null) {
       res.setHeader("X-Share-Size-Bytes", details.sizeBytes.toString());

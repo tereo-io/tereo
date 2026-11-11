@@ -100,6 +100,19 @@ multipart initiate alike; anything else is `400`. A browser reads `image/png, te
 inline-safety is decided on the parsed type, and every download (authenticated, public, signed,
 version, archive) carries `Content-Security-Policy: sandbox; default-src 'none'`.
 
+**JavaScript is served as plain text.** A download of an object whose stored type is a JavaScript
+MIME type — `text/javascript`, `application/javascript`, `application/ecmascript`,
+`text/ecmascript` and the legacy forms browsers also run (`application/x-javascript`,
+`text/jscript`, `text/javascript1.x`, …; `JAVASCRIPT_TYPES` in `utils/contentType.ts`), which
+covers classic, module and worker scripts — is sent as `Content-Type: text/plain; charset=utf-8`,
+still as an attachment and with `X-Content-Type-Options: nosniff`, so a browser refuses it as a
+script. That holds on every path: by key and as a version, from a public bucket, through a signed
+URL and through a share (its `HEAD` probe too). The stored type is unchanged, and is what the
+object's metadata, lists and events report. The reason is that a download's disposition and CSP
+do not apply when a page loads the URL with `<script src>`: an uploaded script on core's origin
+would satisfy the admin UI's `script-src 'self'`. So **a bucket cannot host scripts for direct
+`<script src>` loading**, public or not; serve them from the app's own origin or a CDN instead.
+
 Every `Content-Disposition` — downloads, archives, the share probe — comes from
 `contentDisposition` in `objects/utils.ts`: control characters, `"` and `\` become `_`; `filename=`
 is an ASCII fallback (anything outside printable ASCII also `_`), and `filename*=UTF-8''…` carries
