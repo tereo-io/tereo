@@ -130,6 +130,23 @@ describe("first sign-in of a SCIM-provisioned user", () => {
     expect(await identitiesOf(user.id)).toEqual([]);
   });
 
+  it("does not claim on an unverified email in an auto-accept domain", async () => {
+    const c = await connected();
+    await prisma.identityProviderDomain.update({
+      where: { domain: c.domain },
+      data: { autoAccept: true },
+    });
+    const user = await provision(c.token, `unverified-aa-${tag()}@${c.domain}`);
+
+    const { location } = await signIn(c.slug, {
+      sub: `sub-${randomUUID()}`,
+      email: user.email,
+      email_verified: false,
+    });
+    expectLoginError(location, "email_unverified");
+    expect(await identitiesOf(user.id)).toEqual([]);
+  });
+
   it("ignores an oid claim from a provider that is not an Entra tenant", async () => {
     const c = await connected();
     const externalId = `oid-${tag()}`;
@@ -178,16 +195,27 @@ describe("first sign-in of a SCIM-provisioned user", () => {
       data: { isActive: false },
     });
 
-    const { location } = await signIn(c.slug, {
+    const claims = {
       sub: `sub-${randomUUID()}`,
       email: user.email,
       email_verified: true,
-    });
+    };
+    const { location } = await signIn(c.slug, claims);
     expectLoginError(location, "account_inactive");
     const after = await prisma.user.findUniqueOrThrow({
       where: { id: user.id },
     });
     expect(after.isActive).toBe(false);
+    expect(await identitiesOf(user.id)).toEqual([]);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { isActive: true },
+    });
+    expectSignedIn((await signIn(c.slug, claims)).location);
+    expect(await identitiesOf(user.id)).toMatchObject([
+      { providerId: c.providerId, subject: claims.sub },
+    ]);
   });
 
   it("does not claim a user whose SCIM resource was deleted", async () => {

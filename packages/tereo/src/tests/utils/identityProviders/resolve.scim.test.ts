@@ -163,6 +163,28 @@ describe("resolveLoginIdentity claiming a SCIM user", () => {
     expect(await identitiesOf(other.id)).toEqual([]);
   });
 
+  it.each([
+    ["a deactivated", { isActive: false }],
+    [
+      "an expired guest",
+      { userType: "guest" as const, expiresAt: new Date(Date.now() - 60_000) },
+    ],
+  ])(
+    "names %s managed user for the caller to refuse, linking nothing",
+    async (_, standing) => {
+      const { provider, connection, domain } = await scimProvider();
+      const user = await managedUser(connection.id, domain);
+      await prisma.user.update({ where: { id: user.id }, data: standing });
+
+      const result = await resolveLoginIdentity(
+        provider,
+        identity({ email: user.email, emailVerified: true })
+      );
+      expect(result).toEqual({ userId: user.id });
+      expect(await identitiesOf(user.id)).toEqual([]);
+    }
+  );
+
   it("does not claim through an inactive provider", async () => {
     const { provider, connection, domain } = await scimProvider();
     const user = await managedUser(connection.id, domain);

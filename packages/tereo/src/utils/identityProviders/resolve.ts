@@ -165,6 +165,9 @@ const claimScimUser = async (
   if (await db.userIdentities.getForUserAtProvider(user.id, provider.id)) {
     return await signInLinked(provider, identity);
   }
+  // Nothing links a deactivated or expired account. Naming it lets the
+  // callback refuse it as such; unlinked, it is never signed in.
+  if (!isUsableAccount(user)) return { userId: user.id };
   await db.$transaction((tx) =>
     linkIdentity(
       tx,
