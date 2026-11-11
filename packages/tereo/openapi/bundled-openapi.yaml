@@ -9369,6 +9369,10 @@ paths:
         verified sign-in at this domain, in `organizationId` as `member` with
         `roleIds`; `ssoOnly` refuses password sign-in for the domain's users. The two
         are independent. `domain` is lowercased and a leading `@` dropped.
+        `autoAccept: true` puts users in the organization, so it needs
+        `organizations.write` or an organization the caller acts in (a member, or
+        a service account whose client belongs to it): otherwise 403
+        `organization_not_permitted`, whether or not the organization exists.
         `ssoOnly: true` is refused with 409 `provider_inactive` while the provider
         is deactivated, since the domain's users would have no way to sign in, and
         with 403 unless the caller holds `admin` through a global role: a password
@@ -9462,7 +9466,10 @@ paths:
         roles; roles the domain already hands out are kept without the grant check, so
         a narrower admin can still edit a domain a broader one set up. Moving the domain
         to another `organizationId` grants its roles (those sent, or else its current
-        ones) in that organization, so all of them are checked there. Errors are those
+        ones) in that organization, so all of them are checked there. Turning
+        `autoAccept` on, or moving a domain that auto-accepts, needs
+        `organizations.write` or to act in the organization it will add users to
+        (403 `organization_not_permitted`), as on create. Errors are those
         of adding a domain, including 409 `provider_inactive` for `ssoOnly: true` on a
         deactivated provider. Turning `ssoOnly` on or off, or changing the `domain` of
         an SSO-only domain, needs `admin` through a global role (403 otherwise).
@@ -9605,7 +9612,11 @@ paths:
         With `organizationId` it is **org-bound**: its tokens carry that `org_id`,
         its account is a member of the organization, and it holds org roles
         there. Without one it is a **platform** integration: no `org_id`, global
-        roles. The organization is fixed at creation.
+        roles. The organization is fixed at creation. Binding to an organization
+        puts an account in it, so it needs `organizations.write` or an
+        organization the caller acts in (a member, or a service account whose
+        client belongs to it): otherwise `403 organization_not_permitted`,
+        whether or not the organization exists.
 
         `slug` defaults to the name, lowercased and hyphenated. Returns
         `409 slug_taken` when the slug is taken by a service or another
@@ -9644,7 +9655,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing integrations.write permission
+          description: Forbidden - missing integrations.write permission, or `organization_not_permitted`
         '409':
           $ref: '#/components/responses/ConflictResponse'
           description: The slug is taken

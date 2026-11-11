@@ -19,6 +19,7 @@ import {
   logAuditTx,
 } from "../../../../../../../utils/outbox.js";
 import {
+  assertMayAutoAcceptInto,
   assertMayChangeSsoOnly,
   assertProviderActive,
   changesSsoOnly,
@@ -70,6 +71,16 @@ export const updateDomain = async (req: Request, res: Response) => {
         body.roleIds ?? currentRoleIds,
         movesOrg ? new Set() : new Set(currentRoleIds),
         tx
+      );
+    }
+    // Auto-accept newly on, or carried into another organization.
+    if (
+      (body.autoAccept ?? current.autoAccept) &&
+      (movesOrg || !current.autoAccept)
+    ) {
+      await assertMayAutoAcceptInto(
+        auth,
+        body.organizationId ?? current.organizationId
       );
     }
     if (changesSsoOnly(current, body)) await assertMayChangeSsoOnly(auth, tx);

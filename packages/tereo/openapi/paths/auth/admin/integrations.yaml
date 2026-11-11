@@ -63,7 +63,11 @@
       With `organizationId` it is **org-bound**: its tokens carry that `org_id`,
       its account is a member of the organization, and it holds org roles
       there. Without one it is a **platform** integration: no `org_id`, global
-      roles. The organization is fixed at creation.
+      roles. The organization is fixed at creation. Binding to an organization
+      puts an account in it, so it needs `organizations.write` or an
+      organization the caller acts in (a member, or a service account whose
+      client belongs to it): otherwise `403 organization_not_permitted`,
+      whether or not the organization exists.
 
       `slug` defaults to the name, lowercased and hyphenated. Returns
       `409 slug_taken` when the slug is taken by a service or another
@@ -101,7 +105,7 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing integrations.write permission
+        description: Forbidden - missing integrations.write permission, or `organization_not_permitted`
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
         description: The slug is taken

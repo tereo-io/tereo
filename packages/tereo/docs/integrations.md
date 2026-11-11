@@ -24,6 +24,11 @@ Integrations.
 | `/oauth/check-permission` | answered for that organization's members, as for any organization client | refused: only a service's client may ask without an organization |
 | Webhook endpoints | in its organization | `organizationId: null`, sent every organization's events |
 
+Binding to an organization makes the integration's account a member of it, so the caller needs
+`organizations.write` or to act in that organization (a member of it, or a service account whose
+client belongs to it) on top of `integrations.write`: otherwise `403 organization_not_permitted`,
+whether or not the organization exists. Provisioning documents are not subject to this.
+
 The organization cannot be changed. A platform integration given a global role holds it
 everywhere, so grant sparingly: the admin UI warns when you do.
 

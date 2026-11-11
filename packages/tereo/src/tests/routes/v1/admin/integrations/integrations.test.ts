@@ -7,8 +7,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../support/coreUrl.js";
 import { fetchJson } from "../../../../support/http.js";
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import {
+  ensureTestMembership,
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../../../../support/principals.js";
@@ -71,6 +72,7 @@ beforeAll(async () => {
     permissions: [
       "integrations.read",
       "integrations.write",
+      "organizations.write",
       "services.read",
       "services.write",
       "services.approve",
@@ -147,6 +149,48 @@ describe("POST /v1/admin/integrations and GET /v1/admin/integrations", () => {
       });
       expect(res.status).toBe(400);
       expect(res.body.error).toBe("unknown_organization");
+    });
+
+    it("binds to an organization only for organizations.write or a caller acting in it", async () => {
+      const memberId = randomUUID();
+      const writerToken = await getTestPrincipalToken({
+        userId: memberId,
+        permissions: ["integrations.write"],
+      });
+      const bind = (organizationId: string) => {
+        const slug = `int-${rand()}`;
+        createdSlugs.push(slug);
+        return api(
+          "POST",
+          "/v1/admin/integrations",
+          { name: `Integration ${slug}`, slug, organizationId },
+          writerToken
+        );
+      };
+
+      const refused = await bind(orgId);
+      expect(refused.status).toBe(403);
+      expect(refused.body.error).toBe("organization_not_permitted");
+      // An organization that does not exist is refused the same way.
+      expect(
+        (await bind("00000000-0000-7000-8000-00000000dead")).body.error
+      ).toBe("organization_not_permitted");
+
+      await ensureTestMembership(memberId, "integrations-org");
+      const allowed = await bind(orgId);
+      expect(allowed.status).toBe(201);
+      expect(allowed.body.organizationId).toBe(orgId);
+
+      const unbound = await api(
+        "POST",
+        "/v1/admin/integrations",
+        {
+          name: "Platform",
+          slug: createdSlugs[createdSlugs.push(`int-${rand()}`) - 1],
+        },
+        await getTestPrincipalToken({ permissions: ["integrations.write"] })
+      );
+      expect(unbound.status).toBe(201);
     });
 
     it("requires integrations.read and integrations.write", async () => {

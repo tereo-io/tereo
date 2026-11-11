@@ -1,6 +1,7 @@
 import { OrgMemberRole } from "../../prisma/generated/client/index.js";
+import { AppError, ForbiddenError } from "./errors.js";
+import { canActInOrganization } from "./users.js";
 import { hasPermission } from "./permissions.js";
-import { ForbiddenError } from "./errors.js";
 import type { Prisma } from "./db/prisma.js";
 import type { Request } from "express";
 import db from "./db/index.js";
@@ -87,6 +88,27 @@ export async function requireOrgRole(
 
   return membership.memberRole;
 }
+
+/**
+ * Passes for organizations.write, which acts in every organization, and for
+ * an organization the caller acts in: as a member, or as a service account
+ * whose client belongs to it. Otherwise 403 `organization_not_permitted`
+ * with `message` — also for an organization that does not exist.
+ */
+export const assertActsInOrganization = async (
+  auth: { userId: string; permissions: string[] },
+  organizationId: string | null,
+  message: string
+): Promise<void> => {
+  if (hasPermission(auth.permissions, "organizations.write")) return;
+  if (
+    organizationId !== null &&
+    (await canActInOrganization(auth.userId, organizationId))
+  ) {
+    return;
+  }
+  throw new AppError(403, "organization_not_permitted", message);
+};
 
 /**
  * Serializes changes to one organization's owners. Taken before the change, so

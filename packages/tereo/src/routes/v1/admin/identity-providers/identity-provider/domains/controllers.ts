@@ -15,6 +15,7 @@ import {
   validateParams,
 } from "../../../../../../utils/validateReq.js";
 import {
+  assertMayAutoAcceptInto,
   assertMayChangeSsoOnly,
   assertProviderActive,
   emitDomainTx,
@@ -31,6 +32,7 @@ export const createDomain = async (req: Request, res: Response) => {
   const { id: providerId } = validateParams(IdentityProviderIdParamSchema, req);
   const body = validateBody(CreateDomainSchema, req);
 
+  if (body.autoAccept) await assertMayAutoAcceptInto(auth, body.organizationId);
   await db.organizations.get(body.organizationId);
   if (await db.identityProviders.findDomain(body.domain)) {
     throw new ConflictError(

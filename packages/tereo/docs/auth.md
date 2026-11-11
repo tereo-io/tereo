@@ -425,7 +425,11 @@ to **one organization** and a set of **default roles** in it, and has two indepe
 
 They combine freely: "staff must use Google, and nobody joins automatically" is `ssoOnly` without
 `autoAccept`. Default roles must be roles assignable within an organization, and the admin setting
-them must be able to grant them, as when assigning roles to a user. Domains are managed at
+them must be able to grant them, as when assigning roles to a user. An `autoAccept` domain adds
+members to its organization, so turning `autoAccept` on (on create or `PATCH`), or moving a domain
+that auto-accepts to another organization, needs `organizations.write` or to act in that organization
+(a member of it, or a service account whose client belongs to it), as for inviting a guest:
+otherwise `403 organization_not_permitted`. Domains are managed at
 `/v1/admin/identity-providers/{id}/domains`; `PATCH` changes only the fields sent, and `roleIds`
 replaces the set (roles the domain already hands out skip the grant check, except when the `PATCH`
 moves the domain to another organization: then every role it will hand out there, sent or kept, is

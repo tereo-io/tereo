@@ -1,6 +1,7 @@
 import { getDefaultOrganizationId } from "../../../../../../utils/defaultOrganization.js";
 import type { Prisma } from "../../../../../../../prisma/generated/client/index.js";
 import { formatDomain } from "../../../../../../utils/identityProviders/format.js";
+import { assertActsInOrganization } from "../../../../../../utils/orgRoleAuth.js";
 import type { AuthContext } from "../../../../../../middleware/auth.js";
 import { assertGlobalAdmin } from "../../../../../../utils/grants.js";
 import { ConflictError } from "../../../../../../utils/errors.js";
@@ -49,6 +50,20 @@ export const assertMayChangeSsoOnly = (
     auth,
     "Only an administrator (global admin) can make a domain SSO-only, move an SSO-only domain or lift SSO-only",
     tx
+  );
+
+/**
+ * An auto-accept domain makes everyone signing in from it a member of its
+ * organization, so binding one needs authority over that organization.
+ */
+export const assertMayAutoAcceptInto = (
+  auth: Pick<AuthContext, "userId" | "permissions">,
+  organizationId: string
+) =>
+  assertActsInOrganization(
+    auth,
+    organizationId,
+    "You can auto-accept a domain only into an organization you belong to"
   );
 
 type DomainEvent =

@@ -1,4 +1,5 @@
 import { validateBody, validateQuery } from "../../../../utils/validateReq.js";
+import { assertActsInOrganization } from "../../../../utils/orgRoleAuth.js";
 import { createIntegrationTx } from "../../../../utils/integrations.js";
 import { formatIntegration } from "../../../../utils/transformers.js";
 import { BadRequestError } from "../../../../utils/errors.js";
@@ -32,6 +33,15 @@ export const createIntegration = async (req: Request, res: Response) => {
     throw new BadRequestError(
       "invalid_name",
       "Name has no letters to derive a slug from"
+    );
+  }
+
+  // The integration's service account becomes a member of the organization.
+  if (body.organizationId) {
+    await assertActsInOrganization(
+      auth,
+      body.organizationId,
+      "You can bind an integration only to an organization you belong to"
     );
   }
 
