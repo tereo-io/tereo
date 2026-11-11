@@ -8,6 +8,7 @@ import { SYSTEM_USER_ID } from "../../../../../definitions/index.js";
 import { ipRateLimitKey } from "../../../../../utils/rateLimit.js";
 import { verifyPassword } from "../../../../../utils/password.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
+import { isUsableAccount } from "../../../../../utils/users.js";
 import { clientIp } from "../../../../../utils/requestId.js";
 import db from "../../../../../utils/db/index.js";
 import { Request, Response } from "express";
@@ -65,7 +66,7 @@ async function loadShareForDownload(
 ): Promise<LoadedShare | null> {
   const share = await db.shares.getByTokenRaw(token);
   if (!share) return null;
-  if (share.revokedAt || !share.creator.isActive) return null;
+  if (share.revokedAt || !isUsableAccount(share.creator)) return null;
   if (share.expiresAt && share.expiresAt.getTime() < Date.now()) return null;
   if (
     share.maxDownloads !== null &&

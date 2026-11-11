@@ -1,6 +1,7 @@
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
 import { hashPassword } from "../../../../../../utils/password.js";
+import { isUsableAccount } from "../../../../../../utils/users.js";
 import { trimTrailing } from "../../../../../../utils/strings.js";
 import { toUserRef } from "../../../../../../utils/refs.js";
 import db from "../../../../../../utils/db/index.js";
@@ -104,7 +105,9 @@ function shareStatus(
   share: ShareWithTargets
 ): "active" | "revoked" | "creator_inactive" | "expired" | "exhausted" {
   if (share.revokedAt) return "revoked";
-  if (share.creator && !share.creator.isActive) return "creator_inactive";
+  if (share.creator && !isUsableAccount(share.creator)) {
+    return "creator_inactive";
+  }
   if (share.expiresAt && share.expiresAt.getTime() < Date.now())
     return "expired";
   if (
