@@ -1529,7 +1529,12 @@ request that authenticates otherwise (a secret, a code, a token in the body) is 
 other clients' cookies it carries. Setting the cookie follows the same rule as using it:
 `/oauth/token` with `refresh_token_response_mode=cookie` answers `403 access_denied`, before the
 grant is spent, to a request from any other origin, so a page elsewhere cannot post its own code or
-refresh token from a visitor's browser and leave that browser signed in to its account. `CORS_ALLOWED_ORIGINS` is only the CORS list: being on it lets a
+refresh token from a visitor's browser and leave that browser signed in to its account. The admin
+UI checks as well (`tereo-ui/src/lib/auth/useRefreshToken.ts`): when a refresh by cookie answers
+with a token whose `sub` is not the user the tab holds a token for, it does not adopt the token,
+clears its stored tokens, marks itself signed out (so the cookie is not refreshed from again) and
+goes to its signed-out page; a load with no stored token has nothing to compare and takes the
+cookie's user. `CORS_ALLOWED_ORIGINS` is only the CORS list: being on it lets a
 page read core's API responses, not use another client's session. Credentialed CORS headers are not
 sent on `GET /oauth/authorize`, which is navigated to (a fetch following its redirect could read
 the code from the response URL), nor on the UI's pages.
