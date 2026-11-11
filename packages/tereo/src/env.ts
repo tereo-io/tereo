@@ -476,6 +476,13 @@ const EnvFields = z
       Number.MAX_SAFE_INTEGER,
       100 * 1024 * 1024 * 1024
     ),
+    // The same, for an app service's or integration's service account, whose
+    // uploads on behalf of all its users count as one.
+    FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_SERVICE_ACCOUNT: int(
+      1,
+      Number.MAX_SAFE_INTEGER,
+      1024 * 1024 * 1024 * 1024
+    ),
     FILE_SERVICE_MAX_PRESIGN_TTL_SECONDS: int(1, 365 * DAY, 7 * 24 * 60 * 60),
     FILE_SERVICE_MAX_ARCHIVE_OBJECTS: int(1, 10_000_000, 10_000),
     FILE_SERVICE_MAX_ARCHIVE_TOTAL_BYTES: int(

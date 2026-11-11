@@ -277,9 +277,11 @@ the total past it (a part sent again replaces itself) is `409 multipart_staged_b
 until one of the uploads is completed, aborted or expires; with a `Content-Length` before its body
 is read, otherwise once staged, under a per-user advisory lock that orders that user's parts
 (`upsertPart` / `userStagedBytes` in `utils/db/multipartUploads.ts`), and its file deleted. The
-user is the upload's initiator, so an app service's uploads all count against its service-account
-user: size the setting for the service's concurrent uploads, or give its buckets quotas. The
-default leaves room for one object of the largest size.
+user is the upload's initiator, so an app service's or integration's uploads all count against its
+service-account user. A service account therefore has its own cap,
+`FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_SERVICE_ACCOUNT` (default 1 TiB): size it for the
+service's concurrent uploads, or give its buckets quotas. The per-user default leaves room for one
+object of the largest size.
 
 **Staging against the quota.** In a bucket with a quota, an active upload (not completed, aborted
 or expired) holds its `expectedSize` against the quota. Initiate is `507 insufficient_storage`
@@ -455,6 +457,7 @@ The files-specific ones, from `src/env.ts`; core's shared settings (`DATABASE_UR
 | `FILE_SERVICE_MAX_MULTIPART_PARTS` | Default 10000 |
 | `FILE_SERVICE_MAX_ACTIVE_MULTIPART_UPLOADS` | Default 100 — multipart uploads one user may have in progress in a bucket |
 | `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER` | Default 100 GiB — part bytes one user may have staged across uploads in progress that no quota bounds |
+| `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_SERVICE_ACCOUNT` | Default 1 TiB — the same cap for a service account |
 | `FILE_SERVICE_MAX_PRESIGN_TTL_SECONDS` | Default 7 days |
 | `FILE_SERVICE_MAX_ARCHIVE_OBJECTS` | Default 10000 — cap on objects in a single archive request |
 | `FILE_SERVICE_MAX_ARCHIVE_TOTAL_BYTES` | Default 50 GiB — cap on archive plaintext size |

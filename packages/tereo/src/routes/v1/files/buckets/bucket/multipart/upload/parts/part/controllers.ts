@@ -50,7 +50,11 @@ export const uploadPart = async (req: Request, res: Response) => {
     ? undefined
     : {
         userId: upload.createdBy,
-        maxBytes: BigInt(env.FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER),
+        maxBytes: BigInt(
+          (await db.users.get(upload.createdBy)).userType === "service_account"
+            ? env.FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_SERVICE_ACCOUNT
+            : env.FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER
+        ),
       };
   if (declared !== undefined) {
     const otherParts = await db.multipartUploads.stagedBytes(

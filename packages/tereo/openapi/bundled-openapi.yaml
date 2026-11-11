@@ -13453,8 +13453,10 @@ paths:
         or of one initiated without an `expectedSize` — also count against a
         limit per user: a part that would take the bytes its uploader has staged
         across all their such uploads in progress, in any bucket, past
-        `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER` (default 100 GiB) is
-        `409 multipart_staged_bytes_exceeded` until one of them is completed,
+        `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER` (default 100 GiB; for
+        a service account
+        `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_SERVICE_ACCOUNT`, default
+        1 TiB) is `409 multipart_staged_bytes_exceeded` until one of them is completed,
         aborted or expires.
         With a `Content-Length` the part is refused before its body is read;
         otherwise once it is staged, and the staged bytes are discarded.
@@ -13503,7 +13505,7 @@ paths:
           description: Upload not found, not active, or in another bucket; a missing bucket only for a `file-service.admin` holder
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API; `multipart_staged_bytes_exceeded` - the uploader''s parts in progress would total more than `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER`'
+          description: '`bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API; `multipart_staged_bytes_exceeded` - the uploader''s parts in progress would total more than `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER` (or the service-account setting)'
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
           description: '`payload_too_large` - the part is over `FILE_SERVICE_MAX_UPLOAD_SIZE_MB`; `exceeds_expected_size` - the upload''s parts would total more than its `expectedSize`; `object_too_large` - they would total more than an object can be'

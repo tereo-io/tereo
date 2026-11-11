@@ -238,6 +238,41 @@ describe("PUT /v1/files/buckets/:name/multipart/:uploadId/parts/:partNumber", ()
       ).toBe(HTTP_STATUS.OK);
     });
 
+    it("gives a service account its own, higher cap", async () => {
+      const cap = BigInt(
+        env.FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_SERVICE_ACCOUNT
+      );
+      const userCap = BigInt(
+        env.FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER
+      );
+      expect(cap).toBeGreaterThan(userCap);
+      const asType = (userType: "human" | "service_account") =>
+        prisma.user.update({
+          where: { id: getTestUserId() },
+          data: { userType },
+        });
+
+      const first = await createTestBucket(token);
+      const held = (await initiate(first.name)).data.uploadId;
+      await fakePart(held, 1, userCap);
+      const second = await createTestBucket(token);
+      const { uploadId } = (await initiate(second.name)).data;
+
+      await asType("service_account");
+      try {
+        expect(
+          (await putPart(second.name, uploadId, 1, Buffer.alloc(8))).status
+        ).toBe(HTTP_STATUS.OK);
+
+        await fakePart(held, 2, cap - userCap - 8n);
+        const over = await putPart(second.name, uploadId, 2, Buffer.alloc(1));
+        expect(over.status).toBe(HTTP_STATUS.CONFLICT);
+        expect(over.data.error).toBe("multipart_staged_bytes_exceeded");
+      } finally {
+        await asType("human");
+      }
+    });
+
     it("refuses an upload whose expectedSize, with the others staged, passes the quota", async () => {
       const bucket = await createTestBucket(token, { storageQuotaBytes: "10" });
       const first = await initiate(bucket.name, { expectedSize: 6 });
