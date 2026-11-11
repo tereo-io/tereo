@@ -32,9 +32,12 @@ agree):
 | Token issued to                                                                    | Admitted                         | Rights                                                 |
 | ---------------------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------ |
 | Core's UI (`tereo-ui`, `isFirstPartyClient`)                                       | everywhere                       | the user's live permissions                            |
-| A service (a client with a `core.services` row, or any `client_credentials` token) | everywhere                       | the account's live permissions                         |
+| A service or integration acting as itself (a `client_credentials` token) | everywhere                       | the account's live permissions                         |
 | Any other client, granted core API scopes — its token's `aud` then includes `core` | the areas its scopes name        | the live permissions, cut down to the scopes' ceilings |
 | Any other client, without core API scopes                                          | nowhere: **401 `invalid_token`** | —                                                      |
+
+A user's token issued to a service's client is "any other client" here: the service row gives it
+nothing, only the client's own `client_credentials` token acts as the service.
 
 A delegated token that reaches an area its scopes do not name gets **403 `insufficient_scope`**,
 with a `WWW-Authenticate: Bearer error="insufficient_scope", scope="…"` challenge naming the scopes
@@ -129,8 +132,9 @@ Outside core's resource routes:
 - `/oauth/userinfo` is the OIDC endpoint every relying party uses: any active user access token
   carrying `openid` (otherwise 403 `insufficient_scope` with a `scope="openid"` challenge), with
   `profile`/`email` claims by scope. `roles`, `permissions` and `organizations` — core's
-  authorization — are included only for a token that is not `none` above (the UI, a service's
-  client, or a core API scope); any other relying party gets the OIDC claims (and `org_id`/`org_name`
+  authorization — are included only for a token that is not `none` above (the UI, a
+  `client_credentials` token, or a core API scope; a user's token issued to a service's client
+  counts as any other client's); any other relying party gets the OIDC claims (and `org_id`/`org_name`
   for the token's organization) without them. A `delegated` token is told what `requireAuth` would
   let it use: `permissions` cut down to its scopes' ceilings, `roles` empty (a role is not capped;
   its permissions are), and `organizations` only with `core:account` or `core:organizations`, the

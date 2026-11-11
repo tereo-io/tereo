@@ -209,7 +209,7 @@ effective roles does push a permission change to each affected member's open ses
 `/oauth/userinfo` returns `groups: [{ id, slug, name, organizationId }]`: the user's active global
 groups plus those of the token's organization while it is active and not archived and the user is
 still a member of it (otherwise the global ones only, as `roles` leaves out its group roles too). It
-goes to the UI, a service's client and a token with a core scope, as `roles` does; a delegated token
+goes to the UI, a `client_credentials` token and a token with a core scope, as `roles` does; a delegated token
 gets `groups` only with the `account` or `admin` area (an empty list otherwise) and an empty `roles`. It is never in
 a token. Discovery lists `groups` in `claims_supported`. `groups` is an admin domain, so the
 `core:admin` and `core:admin.read` ceilings cover `groups.*`.

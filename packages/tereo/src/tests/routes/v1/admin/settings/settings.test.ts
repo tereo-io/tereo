@@ -2,12 +2,10 @@
 // @module-tag auth
 
 import { BASE_URL, HTTP_STATUS } from "../../../../support/auth/constants.js";
+import { getUiAccessTokenForUser } from "../../../../support/auth/login.js";
 import { getTestPrincipalToken } from "../../../../support/principals.js";
-import { getAccessTokenForUser } from "../../../../support/auth/login.js";
-import { createTestClient } from "../../../../support/auth/clients.js";
 import { createAdminUser } from "../../../../support/auth/users.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { makeServiceOf } from "../../../../support/testService.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import env from "../../../../../env.js";
 
@@ -20,20 +18,17 @@ interface SettingsResponse {
 }
 
 describe("GET /v1/admin/settings and PATCH /v1/admin/settings", () => {
-  let testClient: Awaited<ReturnType<typeof createTestClient>>;
   let adminUser: Awaited<ReturnType<typeof createAdminUser>>;
   let adminToken: string;
   let originalSettings: SettingsResponse;
 
   beforeAll(async () => {
-    testClient = await createTestClient();
-    // A service's client: its tokens carry the user's full rights. Any other
-    // client's are capped by its core scopes, which never reach the `admin`
-    // relaxing the 2FA policy needs.
-    await makeServiceOf(testClient.id);
     adminUser = await createAdminUser();
 
-    adminToken = await getAccessTokenForUser(adminUser, testClient);
+    // Core's UI: its tokens carry the user's full rights. Any other client's
+    // are capped by its core scopes, which never reach the `admin` relaxing
+    // the 2FA policy needs.
+    adminToken = await getUiAccessTokenForUser(adminUser);
 
     // Store original settings to restore after tests
     const response = await fetch(`${BASE_URL}/v1/admin/settings`, {

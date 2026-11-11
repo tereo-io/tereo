@@ -153,14 +153,21 @@ describe("roles and permissions at /oauth/userinfo", () => {
     );
   });
 
-  it("are reported to a service's client", async () => {
+  it("are not reported for a user's token issued to a service's client", async () => {
     const client = await createTestClient();
     await makeServiceOf(client.id);
     const user = await createTestUser();
     await grantPermissions(user.id, ["users.read"]);
-    expectAuthorization(
-      await userinfo(await loginToken(client, user, "openid"))
-    );
+    const token = await loginToken(client, user, "openid");
+    const info = await userinfo(token);
+    expect(info.sub).toBe(user.id);
+    expect(info).not.toHaveProperty("roles");
+    expect(info).not.toHaveProperty("permissions");
+
+    // Only the client's own client_credentials token acts in core's API.
+    const res = await call(token, "/v1/admin/users");
+    expect(res.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    expect(await errorOf(res)).toBe("invalid_token");
   });
 
   it("are cut down to a delegated token's ceiling, without roles", async () => {

@@ -629,8 +629,8 @@
       scopes' ceilings, as core's own API cuts them, so an app is told no
       more than the token may do in core. They are omitted when a client
       that is not a service's introspects its own token and that token has
-      no core access (not issued to core's UI or a service's client, and no
-      core API scope), as `/oauth/userinfo` omits them.
+      no core access (not issued to core's UI, not a `client_credentials`
+      token, and no core API scope), as `/oauth/userinfo` omits them.
 
       Only a confidential client may introspect, authenticated with HTTP
       Basic. A missing or unknown client, a public client (which has no
@@ -757,8 +757,9 @@
       token must carry `openid`. The standard claims follow the token's
       scopes (`profile`, `email`). `roles`, `permissions`,
       `organizations` and `groups` — core's authorization — are returned only
-      when the token was issued to core's UI or to a service's client, or
-      carries a core API scope (`core:*`); for any other client all four are
+      when the token was issued to core's UI, is a `client_credentials`
+      token, or carries a core API scope (`core:*`); for any other token —
+      a user's token issued to a service's client included — all four are
       omitted. A token delegated to a third-party client by core API scopes
       gets its `permissions` cut down to those scopes' ceilings, `roles`
       empty, `organizations` only with `core:account` or `core:organizations`

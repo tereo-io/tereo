@@ -2399,8 +2399,8 @@ paths:
         scopes' ceilings, as core's own API cuts them, so an app is told no
         more than the token may do in core. They are omitted when a client
         that is not a service's introspects its own token and that token has
-        no core access (not issued to core's UI or a service's client, and no
-        core API scope), as `/oauth/userinfo` omits them.
+        no core access (not issued to core's UI, not a `client_credentials`
+        token, and no core API scope), as `/oauth/userinfo` omits them.
 
         Only a confidential client may introspect, authenticated with HTTP
         Basic. A missing or unknown client, a public client (which has no
@@ -2527,8 +2527,9 @@ paths:
         token must carry `openid`. The standard claims follow the token's
         scopes (`profile`, `email`). `roles`, `permissions`,
         `organizations` and `groups` — core's authorization — are returned only
-        when the token was issued to core's UI or to a service's client, or
-        carries a core API scope (`core:*`); for any other client all four are
+        when the token was issued to core's UI, is a `client_credentials`
+        token, or carries a core API scope (`core:*`); for any other token —
+        a user's token issued to a service's client included — all four are
         omitted. A token delegated to a third-party client by core API scopes
         gets its `permissions` cut down to those scopes' ceilings, `roles`
         empty, `organizations` only with `core:account` or `core:organizations`
@@ -25556,15 +25557,15 @@ components:
           type: array
           items:
             type: string
-          description: Names of the user's global roles and, when the token carries `org_id`, of their roles in that organization — unexpired, of an active, unarchived, unretired role. Only for a token of core's UI or a service's client, or one carrying a core API scope
+          description: Names of the user's global roles and, when the token carries `org_id`, of their roles in that organization — unexpired, of an active, unarchived, unretired role. Only for a token of core's UI, a `client_credentials` token, or one carrying a core API scope
         permissions:
           type: array
           items:
             type: string
-          description: Effective permissions — from global roles and roles in the token's organization when it carries `org_id` (only the org-assignable permissions of those), from global roles alone otherwise. Only for a token of core's UI or a service's client, or one carrying a core API scope
+          description: Effective permissions — from global roles and roles in the token's organization when it carries `org_id` (only the org-assignable permissions of those), from global roles alone otherwise. Only for a token of core's UI, a `client_credentials` token, or one carrying a core API scope
         groups:
           type: array
-          description: The unarchived groups the user belongs to that count for this token, global ones and those of the token's organization while it is active and the user still a member. For a token of core's UI or a service's client, or one carrying a core API scope; a delegated token gets them (and an empty `roles`) only with the `account` or `admin` area, an empty list otherwise.
+          description: The unarchived groups the user belongs to that count for this token, global ones and those of the token's organization while it is active and the user still a member. For a token of core's UI, a `client_credentials` token, or one carrying a core API scope; a delegated token gets them (and an empty `roles`) only with the `account` or `admin` area, an empty list otherwise.
           items:
             type: object
             required:
@@ -25595,7 +25596,7 @@ components:
           description: Name of `org_id`'s organization; omitted with it
         organizations:
           type: array
-          description: The user's active organization memberships. Only for a token of core's UI or a service's client, or one carrying a core API scope
+          description: The user's active organization memberships. Only for a token of core's UI, a `client_credentials` token, or one carrying a core API scope
           items:
             type: object
             required:
