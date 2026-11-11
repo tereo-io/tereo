@@ -112,6 +112,49 @@ describe("applyPatch", () => {
     ).toThrow(expect.objectContaining({ code: "invalidValue" }));
   });
 
+  it.each([
+    ["name.givenName", "firstName"],
+    ["name.familyName", "lastName"],
+    ["name.formatted", "name"],
+    ["displayName", "name"],
+    ["externalId", "externalId"],
+  ])("clears %s on a blank value, as PUT does", (path, key) => {
+    for (const value of ["", "   ", null]) {
+      expect(patch({ op: "replace", path, value })).toEqual({ [key]: null });
+    }
+  });
+
+  it("clears blank sub-attributes of a name object", () => {
+    expect(
+      patch({
+        op: "replace",
+        path: "name",
+        value: { givenName: " ", familyName: "Roe" },
+      })
+    ).toEqual({ firstName: null, lastName: "Roe" });
+  });
+
+  it("keeps a non-blank value as given", () => {
+    expect(
+      patch({ op: "replace", path: "name.givenName", value: " Ann " })
+    ).toEqual({ firstName: " Ann " });
+  });
+
+  it.each(["name.familyName", "name.formatted", "displayName", "externalId"])(
+    "refuses an over-long %s",
+    (path) => {
+      expect(() =>
+        patch({ op: "replace", path, value: "a".repeat(256) })
+      ).toThrow(expect.objectContaining({ code: "invalidValue" }));
+    }
+  );
+
+  it("refuses an over-long blank-padded value rather than clearing it", () => {
+    expect(() =>
+      patch({ op: "replace", path: "name.givenName", value: " ".repeat(101) })
+    ).toThrow(expect.objectContaining({ code: "invalidValue" }));
+  });
+
   it("refuses a non-boolean active", () => {
     expect(() =>
       patch({ op: "replace", path: "active", value: "maybe" })

@@ -1,13 +1,13 @@
+import { BadRequestError, ConflictError, NotFoundError } from "../errors.js";
 import { SYSTEM_USER, SYSTEM_USER_ID } from "../../definitions/index.js";
 import type { Prisma } from "../../../prisma/generated/client/index.js";
-import { BadRequestError, ConflictError } from "../errors.js";
 import { uniqueViolationFields } from "../prismaErrors.js";
+import { emailDomain, normalizeEmail } from "../email.js";
 import type { ScimUserInput } from "./mapping.js";
 import type { ScimUserLink } from "../db/scim.js";
 import type { ScimContext } from "./context.js";
 import type { ScimFilter } from "./filter.js";
 import { logAuditTx } from "../outbox.js";
-import { emailDomain } from "../email.js";
 import db from "../db/index.js";
 import {
   domainPlacement,
@@ -139,6 +139,31 @@ const profileChanges = (user: UserRow, input: ScimUserInput): UserProfile => {
   return profile;
 };
 
+// The same whether or not an account has the address.
+const outsideDomains = () =>
+  new BadRequestError(
+    "invalidValue",
+    "The email address is not in one of the provider's domains"
+  );
+
+// The domain is decided before the lookup, so an outside address answers
+// the same whether or not an account has it.
+const emailChange = async (
+  tx: Tx,
+  ctx: ScimContext,
+  user: UserRow,
+  input: ScimUserInput
+): Promise<string | undefined> => {
+  if (input.email === undefined) return undefined;
+  const email = normalizeEmail(input.email);
+  if (email === user.email) return undefined;
+  if (!(await providerDomains(ctx, tx)).includes(emailDomain(email))) {
+    throw outsideDomains();
+  }
+  if (await db.users.getByEmail(email, tx)) throw uniqueness();
+  return email;
+};
+
 /** Applies what `input` names; `activeChange` is left for the caller to act on. */
 export const applyUserInputTx = async (
   tx: Tx,
@@ -147,6 +172,7 @@ export const applyUserInputTx = async (
   input: ScimUserInput
 ): Promise<Applied> => {
   let { user, link } = target;
+  const email = await emailChange(tx, ctx, user, input);
   const linkData: Parameters<typeof db.scim.updateLink>[1] = {};
   if (input.userName !== undefined && input.userName !== link.userName) {
     linkData.userName = input.userName;
@@ -161,6 +187,7 @@ export const applyUserInputTx = async (
     link = await db.scim.updateLink(link.id, linkData, tx);
   }
   const profile = profileChanges(user, input);
+  if (email !== undefined) profile.email = email;
   if (Object.keys(profile).length > 0) {
     user = await updateUserProfileTx(tx, SYSTEM_ACTOR, user, profile, {
       auditMetadata: auditMetadata(ctx),
@@ -168,13 +195,6 @@ export const applyUserInputTx = async (
   }
   return { user, link, activeChange: activeChangeOf(user, link) };
 };
-
-// The same whether or not an account has the address.
-const outsideDomains = () =>
-  new BadRequestError(
-    "invalidValue",
-    "The email address is not in one of the provider's domains"
-  );
 
 const createTx = async (
   tx: Tx,
@@ -303,3 +323,37 @@ export const createScimUser = async (
     throw err;
   }
 };
+
+const notFound = () => new NotFoundError("User not found");
+
+/** Adopts an unmanaged visible user first; one transaction for all of it. */
+const updateScimUser = async (
+  ctx: ScimContext,
+  userId: string,
+  input: ScimUserInput
+): Promise<Visible> => {
+  try {
+    return await db.$transaction(async (tx) => {
+      // An invisible user is refused before any lock is taken.
+      if (!(await findVisible(ctx, userId, tx))) throw notFound();
+      await db.users.lockForSignInChange(userId, tx);
+      const found = await findVisible(ctx, userId, tx);
+      if (!found) throw notFound();
+      const link = found.link ?? (await adoptTx(tx, ctx, found.user, input));
+      const { user, link: applied } = await applyUserInputTx(
+        tx,
+        ctx,
+        { user: found.user, link },
+        input
+      );
+      return { user, link: applied };
+    });
+  } catch (err) {
+    if (isScimUniqueness(err)) throw uniqueness();
+    throw err;
+  }
+};
+
+export const replaceScimUser = updateScimUser;
+
+export const patchScimUser = updateScimUser;

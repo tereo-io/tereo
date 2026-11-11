@@ -38,8 +38,12 @@ const str = (v: unknown, attr: string, max: number): string => {
   return v;
 };
 
-const nullableStr = (v: unknown, attr: string, max: number) =>
-  v === null || v === "" ? null : str(v, attr, max);
+// A blank value clears the attribute, as it does in a PUT body.
+const nullableStr = (v: unknown, attr: string, max: number) => {
+  if (v === null) return null;
+  const s = str(v, attr, max);
+  return s.trim() === "" ? null : s;
+};
 
 const emailFrom = (v: unknown): string => {
   const raw = Array.isArray(v) ? pickEmail(v) : v;
