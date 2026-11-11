@@ -1,5 +1,4 @@
 import type { NotificationConnection } from "../../../../../../../prisma/generated/client/index.js";
-import { PermanentSendError } from "../../../../../../utils/notifications/channels/types.js";
 import { getAdapter } from "../../../../../../utils/notifications/channels/index.js";
 import { computeChanges, logAuditTx } from "../../../../../../utils/outbox.js";
 import type { Prisma } from "../../../../../../utils/db/prisma.js";
@@ -15,6 +14,10 @@ import {
   record,
   seal,
 } from "../../../../../../utils/notifications/connectionAdmin.js";
+import {
+  PermanentSendError,
+  providerReplyOrCode,
+} from "../../../../../../utils/notifications/channels/types.js";
 import {
   openConnectionSecrets,
   toConnectionView,
@@ -187,15 +190,7 @@ const describeTestFailure = (err: unknown): string | null => {
     return err.code === "smtp_rejected" ? err.message : err.code;
   }
   if (err instanceof AppError) return err.message;
-  const e = err as {
-    responseCode?: unknown;
-    response?: unknown;
-    code?: unknown;
-  };
-  if (typeof e?.responseCode === "number" && typeof e.response === "string") {
-    return e.response.slice(0, 500);
-  }
-  return typeof e?.code === "string" ? e.code : null;
+  return providerReplyOrCode(err);
 };
 
 /**

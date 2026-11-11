@@ -1,6 +1,6 @@
+import { ForbiddenError, NotFoundError } from "../../../../utils/errors.js";
 import { signedObjectParamsSchema, signedQuerySchema } from "./schemas.js";
 import { validateQuery } from "../../../../utils/validateReq.js";
-import { ForbiddenError } from "../../../../utils/errors.js";
 import type { Prisma } from "../../../../utils/db/prisma.js";
 import { isUsableAccount } from "../../../../utils/users.js";
 import { prisma } from "../../../../utils/db/prisma.js";
@@ -69,6 +69,7 @@ export async function assertShareServeable(
   if (!share) {
     throw new ForbiddenError("Share is no longer available");
   }
+  if (share.organizationInactive) throw new NotFoundError("Share not found");
   return share;
 }
 

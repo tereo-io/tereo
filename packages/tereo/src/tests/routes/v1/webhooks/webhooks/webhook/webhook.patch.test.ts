@@ -272,6 +272,83 @@ describe("PATCH /v1/webhooks/webhooks/:id", () => {
         expect(patchResponse.status).toBe(HTTP_STATUS.OK);
         expect(patchResponse.data.customHeaders).toBeNull();
       });
+
+      describe("when the URL's origin changes", () => {
+        const STORED = { "X-Api-Key": "secret-key" };
+
+        const endpointWithHeader = async () => {
+          const ep = await createTestWebhookEndpoint(testToken);
+          await prisma.webhookEndpoint.update({
+            where: { id: ep.id },
+            data: { customHeaders: STORED },
+          });
+          return ep;
+        };
+
+        const patch = (id: string, body: Record<string, unknown>) =>
+          axios.patch(`${BASE_URL}/webhooks/${id}`, body, {
+            headers: { Authorization: `Bearer ${testToken}` },
+            validateStatus: () => true,
+          });
+
+        const row = (id: string) =>
+          prisma.webhookEndpoint.findUniqueOrThrow({ where: { id } });
+
+        const elsewhere = () =>
+          `https://elsewhere-${generateUniqueId()}.example.com/webhook`;
+
+        it.each([
+          ["omitted", {}],
+          ["sent back as the mask", { customHeaders: { "X-Api-Key": MASK } }],
+        ])(
+          "returns 400 masked_header_value for stored values %s, and changes nothing",
+          async (_case, headers) => {
+            const ep = await endpointWithHeader();
+
+            const response = await patch(ep.id, {
+              url: elsewhere(),
+              ...headers,
+            });
+
+            expect(response.status).toBe(HTTP_STATUS.BAD_REQUEST);
+            expect(response.data.error).toBe("masked_header_value");
+            const stored = await row(ep.id);
+            expect(stored.url).toBe(ep.url);
+            expect(stored.customHeaders).toEqual(STORED);
+          }
+        );
+
+        it("takes values supplied again, and null to drop them", async () => {
+          const ep = await endpointWithHeader();
+
+          const resupplied = await patch(ep.id, {
+            url: elsewhere(),
+            customHeaders: { "X-Api-Key": "new-key" },
+          });
+          expect(resupplied.status).toBe(HTTP_STATUS.OK);
+          expect((await row(ep.id)).customHeaders).toEqual({
+            "X-Api-Key": "new-key",
+          });
+
+          const dropped = await patch(ep.id, {
+            url: elsewhere(),
+            customHeaders: null,
+          });
+          expect(dropped.status).toBe(HTTP_STATUS.OK);
+          expect((await row(ep.id)).customHeaders).toBeNull();
+        });
+
+        it("keeps stored values when only the path changes, or the endpoint has none", async () => {
+          const ep = await endpointWithHeader();
+          const samePlace = await patch(ep.id, { url: `${ep.url}/v2` });
+          expect(samePlace.status).toBe(HTTP_STATUS.OK);
+          expect((await row(ep.id)).customHeaders).toEqual(STORED);
+
+          const bare = await createTestWebhookEndpoint(testToken);
+          const moved = await patch(bare.id, { url: elsewhere() });
+          expect(moved.status).toBe(HTTP_STATUS.OK);
+        });
+      });
     });
   });
 

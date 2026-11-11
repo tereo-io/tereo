@@ -21,6 +21,34 @@ export function maskCustomHeaders(value: unknown): Headers | null {
   );
 }
 
+const origin = (url: string): string => new URL(url).origin;
+
+/**
+ * Stored values were given for the host they are sent to. An update that
+ * moves the endpoint to another origin must say what the new one gets: real
+ * values, or null for none. Keeping a stored value, by its placeholder or by
+ * leaving the headers out, would hand it to whoever changed the URL.
+ */
+export function assertHeadersResuppliedForOrigin(
+  url: { from: string; to: string | undefined },
+  incoming: Headers | null | undefined,
+  stored: unknown
+): void {
+  if (url.to === undefined || origin(url.to) === origin(url.from)) return;
+  const kept =
+    incoming === undefined
+      ? Object.keys(asHeaders(stored) ?? {})
+      : Object.entries(incoming ?? {})
+          .filter(([, value]) => value === HEADER_VALUE_MASK)
+          .map(([name]) => name);
+  if (kept.length > 0) {
+    throw new BadRequestError(
+      "masked_header_value",
+      `The URL's origin changes, so stored header values are not kept (${kept.join(", ")}): send each header's real value, or customHeaders: null to send none.`
+    );
+  }
+}
+
 /**
  * An update's headers with each placeholder replaced by the stored value, so
  * a client can send back what it read and keep the values it did not change.

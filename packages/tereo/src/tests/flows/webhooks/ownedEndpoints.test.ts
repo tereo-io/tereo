@@ -569,6 +569,20 @@ describe("API", () => {
     expect(row.status).toBe("ACTIVE");
     expect(row.consecutiveFailures).toBe(0);
   });
+
+  it("refuses to pause a provisioned endpoint with 409 managed_by_provisioning", async () => {
+    const res = await api.patch(
+      url(),
+      { status: "PAUSED" },
+      { headers: auth(adminToken) }
+    );
+    expect(res.status, JSON.stringify(res.data)).toBe(HTTP_STATUS.CONFLICT);
+    expect(res.data.error).toBe("managed_by_provisioning");
+    const row = await prisma.webhookEndpoint.findUniqueOrThrow({
+      where: { id: endpointId },
+    });
+    expect(row.status).toBe("ACTIVE");
+  });
 });
 
 describe("access", () => {

@@ -227,6 +227,16 @@ describe("authenticateClient", () => {
       });
     });
 
+    it("is minted nothing at /oauth/token", async () => {
+      const res = await post(client, "/oauth/token", {
+        grant_type: "client_credentials",
+      });
+      expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(((await res.json()) as { error: string }).error).toBe(
+        "unauthorized_client"
+      );
+    });
+
     it("is refused at /oauth/introspect", async () => {
       await expectInvalidClient(
         await post(client, "/oauth/introspect", { token })

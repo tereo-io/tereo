@@ -79,7 +79,7 @@ export const checkAccessToken = async (
   }
   const access = resolveCoreAccess({
     clientId: token.client.clientId,
-    isServiceClient: isClientToken || token.client.service !== null,
+    isClientToken,
     scopes: token.scopes,
   });
   return { active: true, token, user, isClientToken, access };

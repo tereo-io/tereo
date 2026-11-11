@@ -1,12 +1,15 @@
 import { shareUnlockBackoff } from "../../../../../middleware/rateLimit.js";
 import { storeShareUrlNonce } from "../../../../../utils/shareUrlNonces.js";
 import { contentDisposition } from "../../buckets/bucket/objects/utils.js";
+import { downloadContentType } from "../../../../../utils/contentType.js";
+import { servesWithoutToken } from "../../../../../utils/bucketAccess.js";
 import { sign as presignSign } from "../../../../../utils/presigning.js";
 import { setAccessLog } from "../../../../../middleware/accessLog.js";
 import { SYSTEM_USER_ID } from "../../../../../definitions/index.js";
 import { ipRateLimitKey } from "../../../../../utils/rateLimit.js";
 import { verifyPassword } from "../../../../../utils/password.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
+import { isUsableAccount } from "../../../../../utils/users.js";
 import { clientIp } from "../../../../../utils/requestId.js";
 import db from "../../../../../utils/db/index.js";
 import { Request, Response } from "express";
@@ -64,7 +67,7 @@ async function loadShareForDownload(
 ): Promise<LoadedShare | null> {
   const share = await db.shares.getByTokenRaw(token);
   if (!share) return null;
-  if (share.revokedAt || !share.creator.isActive) return null;
+  if (share.revokedAt || !isUsableAccount(share.creator)) return null;
   if (share.expiresAt && share.expiresAt.getTime() < Date.now()) return null;
   if (
     share.maxDownloads !== null &&
@@ -76,7 +79,7 @@ async function loadShareForDownload(
   // A soft-deleted or missing bucket is "not found" like any unserveable
   // share, so the public endpoint leaks nothing.
   const bucket = await nullIfNotFound(db.buckets.get(share.bucketId));
-  if (!bucket) return null;
+  if (!bucket || !(await servesWithoutToken(bucket))) return null;
 
   // Kind-aware target resolution. Rejecting soft-deleted objects / pinned
   // versions here is what stops a tombstoned target from consuming the
@@ -365,7 +368,7 @@ export const probeShareViaToken = async (req: Request, res: Response) => {
     );
     res.setHeader(
       "Content-Type",
-      details.contentType ?? "application/octet-stream"
+      downloadContentType(details.contentType ?? "application/octet-stream")
     );
     if (details.sizeBytes !== null) {
       res.setHeader("X-Share-Size-Bytes", details.sizeBytes.toString());

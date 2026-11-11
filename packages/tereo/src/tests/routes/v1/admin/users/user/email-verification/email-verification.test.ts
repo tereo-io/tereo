@@ -104,6 +104,18 @@ describe("POST /v1/admin/users/:id/email-verification", () => {
     expect((await send(other.id, writer)).status).toBe(202);
   });
 
+  it("counts sends for one user together whatever the letter case of the id", async () => {
+    const user = await createTestUser({ emailVerified: false });
+    const upper = user.id.toUpperCase();
+    expect(upper).not.toBe(user.id);
+
+    for (let i = 0; i < 5; i++) {
+      expect((await send(i % 2 ? upper : user.id, writer)).status).toBe(202);
+    }
+    expect((await send(upper, writer)).status).toBe(429);
+    expect((await send(user.id, writer)).status).toBe(429);
+  });
+
   it("already verified → 409 already_verified", async () => {
     const user = await createTestUser();
     const res = await send(user.id, writer);

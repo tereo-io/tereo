@@ -109,6 +109,8 @@ owners and the platform can. The platform means any holder of `groups.write` or 
 platform permissions come from global roles granted by platform admins and override the org tiers, as
 `organizations.write` does for org roles, so a `groups.write` holder may change an owner's membership
 of an org group (still only granting and taking away what they hold in that organization).
+The same holds for what a group gives an owner: an org admin cannot change the roles of, archive or
+restore a group an owner belongs to (403).
 
 The caller may only grant and take away what they hold, as elsewhere ([Granting](auth.md#granting-only-what-you-hold)):
 adding members, restoring and changing roles check the caller can grant every role the group holds
@@ -207,7 +209,7 @@ effective roles does push a permission change to each affected member's open ses
 `/oauth/userinfo` returns `groups: [{ id, slug, name, organizationId }]`: the user's active global
 groups plus those of the token's organization while it is active and not archived and the user is
 still a member of it (otherwise the global ones only, as `roles` leaves out its group roles too). It
-goes to the UI, a service's client and a token with a core scope, as `roles` does; a delegated token
+goes to the UI, a `client_credentials` token and a token with a core scope, as `roles` does; a delegated token
 gets `groups` only with the `account` or `admin` area (an empty list otherwise) and an empty `roles`. It is never in
 a token. Discovery lists `groups` in `claims_supported`. `groups` is an admin domain, so the
 `core:admin` and `core:admin.read` ceilings cover `groups.*`.

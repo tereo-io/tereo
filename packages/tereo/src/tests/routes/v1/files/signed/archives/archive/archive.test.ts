@@ -287,6 +287,40 @@ describe("GET and HEAD /v1/files/signed/archives/:id", () => {
         );
       });
 
+      it("keeps entries apart when the prefix is not a folder", async () => {
+        const put = (key: string, body: string) =>
+          uploadTestObject(
+            testToken,
+            testBucket.name,
+            key,
+            createTestFile(body, key.split("/").pop(), "text/plain")
+          );
+        await put("rep/x.txt", "in the folder");
+        await put("repx.txt", "beside it");
+        await put("re_z.txt", "underscore");
+
+        const entriesFor = async (prefix: string) => {
+          const createRes = await axios.post<CreateArchiveResponse>(
+            `${BASE_URL}/buckets/${testBucket.name}/archives`,
+            { prefix },
+            { headers: { Authorization: `Bearer ${testToken}` } }
+          );
+          const dlRes = await axios.get(createRes.data.url, {
+            responseType: "stream",
+          });
+          return await readArchiveEntries(dlRes.data);
+        };
+
+        const entries = await entriesFor("rep");
+        expect(Object.keys(entries).sort()).toEqual(["rep/x.txt", "repx.txt"]);
+        expect(entries["rep/x.txt"].toString()).toBe("in the folder");
+        expect(entries["repx.txt"].toString()).toBe("beside it");
+
+        // `_` in a prefix is a literal, not LIKE's any-character.
+        expect(Object.keys(await entriesFor("re_"))).toEqual(["re_z.txt"]);
+        expect(Object.keys(await entriesFor("rep/"))).toEqual(["x.txt"]);
+      });
+
       it("rejects a tampered signature", async () => {
         const createRes = await axios.post<CreateArchiveResponse>(
           `${BASE_URL}/buckets/${testBucket.name}/archives`,

@@ -1,4 +1,5 @@
 import { buildRedisConnection, type RedisEnv } from "./redisEnv.js";
+import { ServiceUnavailableError } from "./errors.js";
 import { redisRetryStrategy } from "./redisRetry.js";
 import { Redis, type RedisOptions } from "ioredis";
 import { logger } from "./logger.js";
@@ -110,16 +111,65 @@ export const closeRedisConnection = async (): Promise<void> => {
   LOCK_PREFIX = null;
 };
 
-export const acquireLock = async (key: string): Promise<string | null> => {
+const COMMAND_DEADLINE_MS = 2_000;
+const UNAVAILABLE_RETRY_AFTER_SECONDS = 5;
+
+const redisUnavailable = (reason: string): ServiceUnavailableError => {
+  const err = new ServiceUnavailableError(
+    "The service is temporarily unavailable. Please try again later.",
+    UNAVAILABLE_RETRY_AFTER_SECONDS
+  );
+  err.cause = new Error(reason);
+  return err;
+};
+
+/**
+ * Runs a command on the shared client on behalf of a request. The client
+ * retries forever and has no command timeout, so a command sent while Redis
+ * is unreachable would wait in the offline queue until it is back, and the
+ * request with it. Here it is refused at once while the client is not ready
+ * and given up on after `COMMAND_DEADLINE_MS`, either way with
+ * `503 temporarily_unavailable`. A command given up on may still have run.
+ */
+export const redisCommand = async <T>(
+  run: (redis: Redis) => Promise<T>
+): Promise<T> => {
   const redis = getRedisClient();
+  if (redis.status !== "ready") {
+    throw redisUnavailable("Redis connection is not ready");
+  }
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(redisUnavailable("Redis did not answer in time")),
+      COMMAND_DEADLINE_MS
+    );
+  });
+  const command = run(redis);
+  // Settles unobserved when the deadline wins.
+  command.catch(() => undefined);
+  try {
+    return await Promise.race([command, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+export const acquireLock = async (key: string): Promise<string | null> => {
   const lockKey = `${LOCK_PREFIX || ""}${key}`;
   const lockToken = crypto.randomUUID();
-  const result = await redis.set(lockKey, lockToken, "EX", LOCK_TTL, "NX");
+  const result = await redisCommand((redis) =>
+    redis.set(lockKey, lockToken, "EX", LOCK_TTL, "NX")
+  );
   return result === "OK" ? lockToken : null;
 };
 
+/**
+ * False when the lock was no longer this holder's, and when Redis could not
+ * be reached: the lock then lapses with its TTL, and the work done under it
+ * is not failed for it.
+ */
 export const releaseLock = async (key: string, token: string) => {
-  const redis = getRedisClient();
   const lockKey = `${LOCK_PREFIX || ""}${key}`;
 
   const script = `
@@ -130,6 +180,13 @@ export const releaseLock = async (key: string, token: string) => {
     end
   `;
 
-  const result = await redis.eval(script, 1, lockKey, token);
-  return result === 1;
+  try {
+    const result = await redisCommand((redis) =>
+      redis.eval(script, 1, lockKey, token)
+    );
+    return result === 1;
+  } catch (err) {
+    logger.warn({ key, err }, "Lock not released; left to expire");
+    return false;
+  }
 };

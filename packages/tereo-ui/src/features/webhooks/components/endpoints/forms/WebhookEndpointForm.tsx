@@ -111,6 +111,14 @@ const validateHeaders = (
   return null;
 };
 
+const originOf = (url: string): string | null => {
+  try {
+    return new URL(url.trim()).origin;
+  } catch {
+    return null;
+  }
+};
+
 const sameSet = (a: string[], b: string[]) =>
   a.length === b.length &&
   [...a].sort().join("\n") === [...b].sort().join("\n");
@@ -161,6 +169,16 @@ export const WebhookEndpointForm = ({
         ]
       : STATUS_OPTIONS;
 
+  // Core gave the saved header values to the origin they were entered for,
+  // and refuses to pass them on to another (400 masked_header_value).
+  const storedHeaders = endpoint?.customHeaders ?? {};
+  const newOrigin = originOf(url);
+  const originMoved =
+    !!endpoint &&
+    Object.keys(storedHeaders).length > 0 &&
+    newOrigin !== null &&
+    newOrigin !== originOf(endpoint.url);
+
   const updateHeader = (key: string, patch: Partial<HeaderRow>) =>
     setHeaders((rows) =>
       rows.map((r) => (r.key === key ? { ...r, ...patch } : r))
@@ -182,6 +200,17 @@ export const WebhookEndpointForm = ({
     if (headerError) {
       setError(headerError);
       return;
+    }
+    if (originMoved) {
+      const kept = headers
+        .filter((r) => r.name.trim() && r.value === HEADER_VALUE_MASK)
+        .map((r) => `"${r.name.trim()}"`);
+      if (kept.length > 0) {
+        setError(
+          `Enter the value of ${kept.join(", ")} again, or remove ${kept.length > 1 ? "those headers" : "that header"}: saved values are not sent to ${newOrigin}.`
+        );
+        return;
+      }
     }
     setError(null);
 
@@ -207,8 +236,9 @@ export const WebhookEndpointForm = ({
     if (status !== endpoint.status && status !== "DISABLED")
       updates.status = status as "ACTIVE" | "PAUSED";
     if (
+      originMoved ||
       JSON.stringify(customHeaders) !==
-      JSON.stringify(endpoint.customHeaders ?? {})
+        JSON.stringify(endpoint.customHeaders ?? {})
     )
       updates.customHeaders = hasHeaders ? customHeaders : null;
     onSubmit(updates);
@@ -277,6 +307,15 @@ export const WebhookEndpointForm = ({
             X-Webhook-* headers cannot be overridden. Saved values are never
             shown: leave {HEADER_VALUE_MASK} in place to keep one.
           </p>
+          {originMoved && (
+            <Alert variant="warning">
+              The URL now points to {newOrigin}. The headers below were saved
+              for {originOf(endpoint.url)}, and saved header values are not sent
+              to the new one, since they may hold credentials meant for the old
+              one. Enter each value again, or remove the headers, to save this
+              change.
+            </Alert>
+          )}
           {headers.map((row) => (
             <div key={row.key} className="t-webhook-header-row">
               <Input

@@ -26,3 +26,23 @@ export const assertAdminRemains = async (
     );
   }
 };
+
+/**
+ * Refuses deactivating an identity provider that is the only way in for
+ * every administrator who can sign in now: an administrator counts with a
+ * password or an identity at another active provider. Takes the same lock
+ * as `assertAdminRemains`, so a change to who is an administrator runs
+ * before or after it.
+ */
+export const assertAdminCanSignInWithout = async (
+  providerId: string,
+  tx: Prisma.TransactionClient
+): Promise<void> => {
+  await assertAdminRemains(null, tx);
+  const signsIn = (exceptProviderId: string | null) =>
+    db.roles.adminExists({ kind: "signIn", exceptProviderId }, tx);
+  if ((await signsIn(providerId)) || !(await signsIn(null))) return;
+  throw new ConflictError(
+    "Deactivating this provider would leave no administrator able to sign in; give one a password or an identity at another provider first"
+  );
+};

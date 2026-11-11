@@ -101,6 +101,7 @@ const listKeys = (token: string) =>
 describe("/v1/admin/signing-keys", () => {
   describe("JWT signing key rotation", () => {
     let adminToken: string;
+    let globalAdminToken: string;
     let readerToken: string;
     let oldKid: string;
     let oldPrivateKey: string;
@@ -118,6 +119,9 @@ describe("/v1/admin/signing-keys", () => {
       endpointId = endpoint.id;
       adminToken = await getTestPrincipalToken({
         permissions: ["settings.write"],
+      });
+      globalAdminToken = await getTestPrincipalToken({
+        permissions: ["admin"],
       });
       readerToken = await getTestPrincipalToken({
         permissions: ["settings.read"],
@@ -143,6 +147,16 @@ describe("/v1/admin/signing-keys", () => {
         headers: auth(readerToken),
       });
       expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+    });
+
+    it("refuses immediate: true to settings.write without a global admin", async () => {
+      const response = await fetch(`${BASE_URL}/v1/admin/signing-keys/rotate`, {
+        method: "POST",
+        headers: { ...auth(adminToken), "Content-Type": "application/json" },
+        body: JSON.stringify({ immediate: true }),
+      });
+      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect((await fetchJwks()).keys.map((k) => k.kid)).toEqual([oldKid]);
     });
 
     it("refuses a malformed rotation body", async () => {
@@ -361,7 +375,10 @@ describe("/v1/admin/signing-keys", () => {
       const before = Date.now();
       const response = await fetch(`${BASE_URL}/v1/admin/signing-keys/rotate`, {
         method: "POST",
-        headers: { ...auth(adminToken), "Content-Type": "application/json" },
+        headers: {
+          ...auth(globalAdminToken),
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ immediate: true }),
       });
       expect(response.status).toBe(HTTP_STATUS.OK);

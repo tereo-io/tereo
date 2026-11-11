@@ -25,7 +25,6 @@ const invalidGrant = () =>
 
 export const passwordChangeHandler = async (req: Request, res: Response) => {
   const body = validateBody(PasswordChangeSchema, req);
-  await passwordChangeFailure.check(req);
 
   const grant = await db.passwordChangeGrants.get(
     hashTotpSetupGrant(body.change_grant)
@@ -42,6 +41,10 @@ export const passwordChangeHandler = async (req: Request, res: Response) => {
   ) {
     throw invalidGrant();
   }
+  // Only now is an attempt spent: the key is the address alone, and a page
+  // anywhere could otherwise post cookieless requests from a visitor's
+  // browser to hold everyone behind its IP out of this step.
+  await passwordChangeFailure.check(req);
 
   if (grant.expiresAt < new Date()) {
     await db.passwordChangeGrants.consume(grant.id);

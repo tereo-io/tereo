@@ -186,16 +186,20 @@ const assertNotProvisioned = (actor: GroupActor, group: Group) => {
   }
 };
 
+const OWNER_IN_GROUP =
+  "Only organization owners can change the roles of, archive or restore a group an owner belongs to";
+
 /**
  * Lock step 4 for an org admin: an organization's owners are changed only by
  * its owners or the platform, so an org admin may not move one in or out of
- * the org's groups.
+ * the org's groups, nor change what a group one belongs to gives its members.
  */
 const assertOrgAdminSparesOwners = async (
   actor: GroupActor,
   group: Group,
   userIds: string[],
-  tx: Tx
+  tx: Tx,
+  refusal = "Only organization owners can add or remove an owner in the organization's groups"
 ) => {
   if (
     actor.mode !== "admin" ||
@@ -213,9 +217,7 @@ const assertOrgAdminSparesOwners = async (
     },
   });
   if (owners > 0) {
-    throw new ForbiddenError(
-      "Only organization owners can add or remove an owner in the organization's groups"
-    );
+    throw new ForbiddenError(refusal);
   }
 };
 
@@ -660,6 +662,15 @@ export const setGroupRoles = async (
   const current = new Set(await db.groups.getRoleIds(groupId, tx));
   const toAdd = wanted.filter((id) => !current.has(id));
   const toRemove = [...current].filter((id) => !wanted.includes(id));
+  if (toAdd.length > 0 || toRemove.length > 0) {
+    await assertOrgAdminSparesOwners(
+      actor,
+      group,
+      memberIds,
+      tx,
+      OWNER_IN_GROUP
+    );
+  }
   const addedRoles =
     toAdd.length > 0 ? await checkAddedRoles(actor, group, toAdd, tx) : [];
   if (actor.mode === "admin" && toRemove.length > 0) {
@@ -728,6 +739,7 @@ export const archiveGroup = async (
   if (group.archivedAt)
     throw new AlreadyArchivedError("Group is already archived");
   const memberIds = await lockLateMembers(groupId, locked, tx);
+  await assertOrgAdminSparesOwners(actor, group, memberIds, tx, OWNER_IN_GROUP);
 
   if (actor.mode === "admin") {
     assertCanTakeAway(
@@ -765,6 +777,7 @@ export const restoreGroup = async (
   const group = await db.groups.getAny(groupId, tx);
   if (!group.archivedAt) throw new NotArchivedError("Group is not archived");
   const memberIds = await lockLateMembers(groupId, locked, tx);
+  await assertOrgAdminSparesOwners(actor, group, memberIds, tx, OWNER_IN_GROUP);
 
   // Shared, against a change to the roles' permissions, which checks under
   // its row lock whether the role is held in an organization.

@@ -1182,8 +1182,9 @@ InitiateMultipartRequest:
         - video/mp4
     expectedSize:
       description: |
-        Optional final object size in bytes — a positive decimal string or
-        integer. When given, a part that would take the staged total past it
+        Final object size in bytes — a positive decimal string or integer.
+        Required when the bucket has a storage quota
+        (`400 expected_size_required`), optional otherwise. When given, a part that would take the staged total past it
         is refused (`413 exceeds_expected_size`), and `complete` refuses parts
         whose total size differs (`400 size_mismatch`).
       type: [string, integer]

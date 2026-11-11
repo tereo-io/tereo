@@ -70,7 +70,7 @@
         description: Invalid filter, sort, limit or cursor (`invalid_cursor`); `invalid_sort` for `sizeBytes` with `deleted=true`
       '401':
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
-        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
         description: Forbidden - missing bucket-level canRead permission (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
@@ -126,7 +126,7 @@
         description: Invalid object key
       '401':
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
-        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
         description: Forbidden - missing file-service.objects.read permission or bucket-level canRead (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
@@ -196,7 +196,7 @@
         description: Invalid prefix, delimiter, limit or cursor (`invalid_cursor`)
       '401':
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
-        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
         description: Forbidden - missing bucket-level canRead permission (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
@@ -707,7 +707,12 @@
               `inline` for images, video, audio, PDF and plain text;
               `attachment` for everything else (HTML, SVG, scripts, …). Carries
               an ASCII `filename` and RFC 5987 `filename*` with the real name
-              (the key's last segment).
+              (the key's last segment). An object stored with a JavaScript
+              type (`text/javascript`, `application/javascript`,
+              `application/ecmascript`, `text/ecmascript` and their legacy
+              forms) is sent with `Content-Type: text/plain; charset=utf-8`,
+              so a browser will not run it from a `<script src>`; its
+              metadata keeps the stored type.
             schema:
               type: string
           X-Object-Id:
@@ -739,7 +744,7 @@
         description: Invalid object key, `versionId` or `thumbnail`
       '401':
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
-        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
         description: Forbidden - missing bucket-level canRead permission (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
@@ -905,7 +910,7 @@
         description: '`id` is not a UUID'
       '401':
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
-        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
       '404':
@@ -1160,7 +1165,7 @@
         description: Versioning is not enabled for this bucket (`versioning_disabled`), or invalid parameters
       '401':
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
-        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
       '404':
@@ -1217,7 +1222,7 @@
         description: Versioning is not enabled for this bucket (`versioning_disabled`), or invalid parameters
       '401':
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
-        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
       '404':
@@ -1367,7 +1372,7 @@
         description: Versioning is not enabled for this bucket (`versioning_disabled`).
       '401':
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
-        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+        description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
       '403':
         $ref: '../../components/responses.yaml#/ForbiddenResponse'
       '404':

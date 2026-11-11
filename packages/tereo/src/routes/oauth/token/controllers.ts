@@ -1,3 +1,4 @@
+import { maySetClientCookies } from "../../../middleware/originCheck.js";
 import { acquireLock, releaseLock } from "../../../utils/redis.js";
 import { validateBody } from "../../../utils/validateReq.js";
 import { ClientRecord } from "../../../utils/db/clients.js";
@@ -123,6 +124,16 @@ export const tokenHandler = async (req: Request, res: Response) => {
 
   const client = await getClient(req, res, basicAuth, body);
 
+  // Before the grant is spent, so the client's own page can still use it.
+  const responseMode = getRefreshTokenResponseMode(body);
+  if (responseMode === "cookie" && !maySetClientCookies(req, client)) {
+    throw new OAuth2Error(
+      "access_denied",
+      "Cross-origin request refused: this origin may not set this client's session cookie",
+      403
+    );
+  }
+
   const ip = req.ip || req.socket.remoteAddress;
   const refreshTokenFromCookie = getRefreshTokenFromRequest(req, body, client);
   const response = await getResponse(client, body, ip, refreshTokenFromCookie);
@@ -138,7 +149,6 @@ export const tokenHandler = async (req: Request, res: Response) => {
     throw new OAuth2Error(response.error, response.error_description);
   }
 
-  const responseMode = getRefreshTokenResponseMode(body);
   if (responseMode === "cookie" && response.refresh_token) {
     const stored = await db.refreshTokens.get(response.refresh_token);
     setAuthCookies(
@@ -277,6 +287,21 @@ const getClient = async (
       ip
     );
     throw clientAuthenticationFailed(res);
+  }
+  // What authenticateClient refuses elsewhere. The service's own row, not
+  // only its account's, which client_credentials checks: nothing else ties
+  // the two together here.
+  if ((await db.services.getByClientId(client.id))?.isActive === false) {
+    logClientAuthFailure(
+      clientId,
+      "Client's service is inactive",
+      body.grant_type,
+      ip
+    );
+    throw new OAuth2Error(
+      "unauthorized_client",
+      "Client's service is inactive"
+    );
   }
   return client;
 };

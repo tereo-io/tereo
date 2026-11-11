@@ -284,6 +284,46 @@ describe("processNotificationDelivery", () => {
     });
   });
 
+  describe("what lastError records", () => {
+    it("records a transport failure as its code, not the library's message naming the host and port", async () => {
+      const gone = await startFakeSmtpServer({});
+      const { port } = gone;
+      await gone.close();
+      await prisma.notificationConnection.update({
+        where: { id: connection.id },
+        data: {
+          settings: {
+            host: "127.0.0.1",
+            port,
+            security: "none",
+            defaultFrom: { address: "billing@acme.com" },
+            allowedSenders: ["@acme.com"],
+          },
+        },
+      });
+      const seeded = await seed({ status: "pending", attempts: 0 });
+
+      await expect(
+        processNotificationDelivery(jobFor(seeded))
+      ).rejects.toThrow();
+
+      const after = await reload(seeded.delivery.id);
+      expect(after.status).toBe("pending");
+      expect(after.lastError).toMatch(/^[A-Z_]+$/);
+    });
+
+    it("records a retried refusal as the server's reply alone", async () => {
+      code = 451;
+      const seeded = await seed({ status: "pending", attempts: 0 });
+
+      await expect(
+        processNotificationDelivery(jobFor(seeded))
+      ).rejects.toThrow();
+
+      expect((await reload(seeded.delivery.id)).lastError).toMatch(/^451 /);
+    });
+  });
+
   describe("send deadline", () => {
     const totalMs = smtpTimeouts.totalMs;
     let slow: FakeSmtpServer;

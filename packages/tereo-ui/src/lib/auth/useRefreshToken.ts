@@ -1,8 +1,9 @@
+import { isLoggedOut, markLoggedOut, readStoredTokens } from "./logoutMarker";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { isLoggedOut, readStoredTokens } from "./logoutMarker";
 import { isRefreshRejected } from "./refreshTokenManager";
 import { useLocalStorage } from "@kosmeo-ui/react";
 import type { StoredTokens } from "./types";
+import { decodeAccessToken } from "./jwt";
 import { errorLog } from "./logger";
 import axiosBase from "axios";
 import env from "./config";
@@ -16,6 +17,9 @@ interface TokenResponse {
   scope: string;
 }
 
+const subjectOf = (accessToken: string | undefined) =>
+  accessToken ? (decodeAccessToken(accessToken)?.sub ?? null) : null;
+
 // Uses axiosBase directly instead of usePublicAxios because this hook is
 // called from inside AxiosProvider — the context isn't available yet to its
 // own children's render bodies.
@@ -24,6 +28,9 @@ const useRefreshToken = () => {
   const queryClient = useQueryClient();
 
   const mutationFn = async (): Promise<StoredTokens> => {
+    // Who the tab is signed in as; nobody on a load with no stored token.
+    const signedInAs = subjectOf(readStoredTokens()?.access_token);
+
     const res = await axiosBase.post<TokenResponse>(
       `${env.AUTH_SERVER_URL}/oauth/token`,
       new URLSearchParams({
@@ -39,6 +46,16 @@ const useRefreshToken = () => {
 
     // Signed out in another tab while this refresh was in flight.
     if (isLoggedOut()) throw new Error("Signed out during token refresh");
+
+    // The refresh cookie is not this user's: something outside the UI put
+    // it there. Marked signed out so that it is not refreshed from again,
+    // with nothing stored to compare against; clearing the tokens sends the
+    // tab to the login page (AuthProvider).
+    if (signedInAs && subjectOf(res.data.access_token) !== signedInAs) {
+      markLoggedOut();
+      setTokens(null);
+      throw new Error("Token refresh answered for another user");
+    }
 
     // A refresh returns a fresh id_token for the same login, which logout
     // sends as the end-session id_token_hint; keep the stored one if not.

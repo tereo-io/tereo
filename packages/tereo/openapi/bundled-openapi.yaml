@@ -1582,8 +1582,10 @@ paths:
         org-select and consent steps — the sign-in has to start over. Wrong email or
         password, an inactive user or a service account is 401 `access_denied`
         — all four take the same time to answer, so the response does not reveal
-        whether the email exists. Every submission counts against the client
-        and IP before anything is checked, and a successful login gives back
+        whether the email exists. Every submission that carries the login
+        session's cookie counts against the client and IP before the password
+        is checked (one without it is `invalid_session` and counts for
+        nothing), and a successful login gives back
         its own attempt but clears none of the others, whatever the account: a
         sixth failure in five minutes is 429 for the rest of the window (503
         `temporarily_unavailable` when the limiter cannot reach Redis). Per
@@ -2276,8 +2278,9 @@ paths:
           refresh, a scope the refresh token was not granted
         - 400 `unauthorized_client` (grant not allowed for the client;
           client_credentials from a public client, a client without a service
-          account, one whose service account is inactive — a deactivated
-          service — or one belonging to an inactive organization)
+          account, the client of a deactivated service or integration, one
+          whose service account is inactive, or one belonging to an inactive
+          organization)
         - `invalid_client` — 400 for an unknown `client_id` sent in the body, 401
           (with `WWW-Authenticate: Basic`) for an unknown client in Basic auth
           or a failed confidential-client authentication
@@ -2292,7 +2295,10 @@ paths:
 
         With `refresh_token_response_mode=cookie` the refresh token is set in the
         `trt_{client_id}` cookie (path `/oauth`) and omitted from the body, and a
-        readable `tsi_{client_id}` session-indicator cookie is set. A refresh
+        readable `tsi_{client_id}` session-indicator cookie is set. Cookie mode
+        is answered only for a request from core, the UI, an origin of one of
+        the client's redirect URIs, or no browser page; any other origin gets
+        403 `access_denied` and the grant is not spent. A refresh
         that takes its token from the `trt_{client_id}` cookie and fails with
         400 `invalid_grant` (revoked, rotated, expired or unknown token, or an
         inactive user) clears both cookies in that 400 response, so the browser
@@ -2393,8 +2399,8 @@ paths:
         scopes' ceilings, as core's own API cuts them, so an app is told no
         more than the token may do in core. They are omitted when a client
         that is not a service's introspects its own token and that token has
-        no core access (not issued to core's UI or a service's client, and no
-        core API scope), as `/oauth/userinfo` omits them.
+        no core access (not issued to core's UI, not a `client_credentials`
+        token, and no core API scope), as `/oauth/userinfo` omits them.
 
         Only a confidential client may introspect, authenticated with HTTP
         Basic. A missing or unknown client, a public client (which has no
@@ -2445,6 +2451,10 @@ paths:
       description: |
         Revoke an access or refresh token (RFC 7009).
         Token can be provided in request body or the `trt_{client_id}` cookie.
+        The `trt_{client_id}` and `tsi_{client_id}` cookies are cleared when the
+        cookie's token is the one revoked; a request that revokes another token
+        (the access token, say) leaves them, since the refresh token they hold
+        is still live.
         Revoking a refresh token also revokes the access tokens of its session,
         and is a logout of that browser: the SSO session the refresh token was
         issued under ends, every other token family issued under that SSO
@@ -2517,8 +2527,9 @@ paths:
         token must carry `openid`. The standard claims follow the token's
         scopes (`profile`, `email`). `roles`, `permissions`,
         `organizations` and `groups` — core's authorization — are returned only
-        when the token was issued to core's UI or to a service's client, or
-        carries a core API scope (`core:*`); for any other client all four are
+        when the token was issued to core's UI, is a `client_credentials`
+        token, or carries a core API scope (`core:*`); for any other token —
+        a user's token issued to a service's client included — all four are
         omitted. A token delegated to a third-party client by core API scopes
         gets its `permissions` cut down to those scopes' ceilings, `roles`
         empty, `organizations` only with `core:account` or `core:organizations`
@@ -2601,7 +2612,15 @@ paths:
         - OAuth2/OIDC - Session
       summary: End session endpoint (GET)
       description: |
-        OpenID Connect RP-initiated logout for **this browser only**.
+        OpenID Connect RP-initiated logout of **one browser**: the one making
+        the request and, with an `id_token_hint`, the one whose SSO session the
+        hint's `sid` names. A valid hint is all that takes: no cookie from that
+        session's browser is needed, so whoever holds a user's ID token for the
+        client, until it is `ID_TOKEN_HINT_GRACE_SECONDS` past its expiry, can
+        sign that browser out of the client (and nothing more: an SSO session
+        is per browser and per client). The token travels in this URL's query
+        string; a client that would rather keep it out of logs and history can
+        send the POST form.
 
         **Without `id_token_hint` the session is not ended here.** Nothing shows
         such a request came from the client — any page can send a browser to
@@ -3204,8 +3223,9 @@ paths:
         enabled, `/oauth/totp/verify` or `/oauth/totp/recovery` answers with the
         redirect to `/login/change-password`. Only password logins meet it: a
         provider login skips it and leaves the flag set. `invalid_change_grant` and `change_expired` are
-        `400` errors. Wrong attempts are rate limited per client; no code is
-        issued until the password is changed.
+        `400` errors. Attempts that carry a grant and its cookie are rate
+        limited per IP (10 in five minutes, then 429); no code is issued until
+        the password is changed.
 
         An audit log entry is created and `auth.user.password-changed` is emitted.
       operationId: postOAuthPasswordChange
@@ -3614,7 +3634,11 @@ paths:
 
         Attempts are limited to 5 per user per 300 seconds, counted before the
         current password is checked and cleared by a correct one; past that,
-        `429 too_many_requests`. A wrong current password is logged, and from
+        `429 too_many_requests`. Each attempt also counts against the
+        account's sign-in backoff (five wrong passwords, here or at login, then
+        a delay before the next attempt that doubles up to 15 minutes; `429`
+        with `Retry-After` during it), which a correct current password
+        clears. A wrong current password is logged, and from
         the user's fifth wrong password in a row (here or at login) each one
         is audited (`metadata.action` `password_failures`).
 
@@ -4066,8 +4090,13 @@ paths:
         - `sso_required`: the user's email domain is `ssoOnly` for this
           identity's provider.
 
+        The user's other sessions end in the same transaction, as after a
+        password change: every refresh token and SSO session but the caller's
+        own. A session obtained through the identity must not outlive it.
+
         An audit log entry is created and an `auth.user.identity-unlinked`
-        webhook event is emitted.
+        webhook event is emitted; when any session ended, so are a
+        `sessions_revoked` entry and an `auth.user.sessions-revoked` event.
       operationId: deleteAccountIdentity
       security:
         - BearerAuth: []
@@ -4745,6 +4774,9 @@ paths:
         `isActive: false`, which also revokes all of the user's active sessions
         and their access tokens and ends the user's SSO sessions in every
         browser, so silent login (`prompt=none`) and org switching stop working.
+        Reactivating (`isActive: true` on an inactive user) ends, in the same
+        transaction, any session a deactivation left behind, so none comes
+        back to life with the account.
 
         The system user cannot be modified (`400 system_user`), nor a
         service's service-account user (`403` — manage it under
@@ -5319,8 +5351,15 @@ paths:
         lacks, otherwise). The caller's own permissions count from global roles only,
         capped by a delegated token's scopes.
 
+        The user's sessions end in the same transaction, like
+        `DELETE /v1/admin/users/{id}/sessions/all` (a caller unlinking their
+        own identity keeps the session they act from): a session obtained
+        through the identity must not outlive it.
+
         An audit log entry is created (the admin as actor) and an
-        `auth.user.identity-unlinked` webhook event is emitted.
+        `auth.user.identity-unlinked` webhook event is emitted; when any
+        session ended, so are a `sessions_revoked` entry and an
+        `auth.user.sessions-revoked` event.
       operationId: deleteAdminUserIdentity
       security:
         - BearerAuth:
@@ -5962,6 +6001,9 @@ paths:
               $ref: '#/components/headers/X-RateLimit-Reset'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: A browser request whose `Origin` is not core's own, the admin UI's or one listed in `CORS_ALLOWED_ORIGINS`. Refused before any limit is counted; a request with no `Origin` header is not checked
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -6031,6 +6073,9 @@ paths:
                 $ref: '#/components/schemas/EmailVerificationInspectResponse'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: A browser request whose `Origin` is not core's own, the admin UI's or one listed in `CORS_ALLOWED_ORIGINS`. Refused before any limit is counted; a request with no `Origin` header is not checked
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '429':
@@ -6069,6 +6114,9 @@ paths:
               $ref: '#/components/headers/X-RateLimit-Reset'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: A browser request whose `Origin` is not core's own, the admin UI's or one listed in `CORS_ALLOWED_ORIGINS`. Refused before any limit is counted; a request with no `Origin` header is not checked
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '429':
@@ -6199,6 +6247,9 @@ paths:
                 $ref: '#/components/schemas/PasswordSetupInspectResponse'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: A browser request whose `Origin` is not core's own, the admin UI's or one listed in `CORS_ALLOWED_ORIGINS`. Refused before any limit is counted; a request with no `Origin` header is not checked
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Unknown, used or expired token, or a user the link no longer reaches
@@ -6248,6 +6299,9 @@ paths:
               $ref: '#/components/headers/X-RateLimit-Reset'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: A browser request whose `Origin` is not core's own, the admin UI's or one listed in `CORS_ALLOWED_ORIGINS`. Refused before any limit is counted; a request with no `Origin` header is not checked
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Unknown, used or expired token, or a user the link no longer reaches
@@ -6502,6 +6556,10 @@ paths:
         `${UI_BASE_URL}/callback` in production; elsewhere that callback comes
         first, beside the loopback callbacks of other local cores sharing the
         database.
+        Its `scopes` may gain others but must keep the ones the UI signs in with
+        (`openid`, `profile`, `email`, `offline_access`): a list without one is
+        refused with `409`. Its `postLogoutRedirectUris` must be on the origin
+        of `UI_BASE_URL`: a list with any other entry is refused with `409`.
 
         Adding core API scopes (`core:*`) to a client's `scopes` lets its users
         grant it access to core's API, capped by those scopes (see
@@ -6548,7 +6606,7 @@ paths:
           description: Client not found
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes`, `clientType`, `consentRequired` or `audience`
+          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes`, `clientType`, `consentRequired` or `audience`, drops a scope the UI signs in with, or lists a post-logout URI off the UI's origin
         '422':
           $ref: '#/components/responses/UnprocessableEntityResponse'
           description: An `audience` slug that names core or no service (`invalid_audience`)
@@ -6923,6 +6981,8 @@ paths:
         archiving takes them from every member at once. Archiving a global group that holds the
         last live administrator's role is refused. A provisioned group is archived only by
         provisioning (`409 managed_by_provisioning`).
+        An organization `admin` (not `owner`) may not archive a group one of the organization's
+        owners belongs to.
 
         **Authorization:** `groups.archive`, or, for an organization's group, being an
         `admin` or `owner` of that organization (`organizations.write` also passes, as on
@@ -6959,7 +7019,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), or the grant check refuses
+          description: No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), the grant check refuses, or an organization admin acting on a group an owner belongs to
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Group not found (to a caller holding the route's `groups.*` permission; anyone else gets `403`)
@@ -6982,6 +7042,8 @@ paths:
         permission that cannot be granted within an organization is refused
         (`400 role_not_org_assignable`); change its roles first. Access tokens of members from a
         password-only sign-in are revoked when a restored role requires two-factor authentication.
+        An organization `admin` (not `owner`) may not restore a group one of the organization's
+        owners belongs to.
 
         **Authorization:** `groups.archive`, or, for an organization's group, being an
         `admin` or `owner` of that organization (`organizations.write` also passes, as on
@@ -7019,7 +7081,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), or the grant check refuses
+          description: No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), the grant check refuses, or an organization admin acting on a group an owner belongs to
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Group not found (to a caller holding the route's `groups.*` permission; anyone else gets `403`)
@@ -7257,6 +7319,8 @@ paths:
         request waited for it, must be restored first (`409 resource_archived`). Access tokens
         of members from a password-only sign-in are revoked when an added role requires
         two-factor authentication.
+        An organization `admin` (not `owner`) may not change the roles of a group one of the
+        organization's owners belongs to.
 
         **Authorization:** `groups.write`, or, for an organization's group, being an
         `admin` or `owner` of that organization (`organizations.write` also passes, as on
@@ -7300,7 +7364,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group); the grant check refuses; or a system role on an organization's group
+          description: No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group); the grant check refuses; a system role on an organization's group; or an organization admin changing the roles of a group an owner belongs to
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Group not found (to a caller holding the route's `groups.*` permission; anyone else gets `403`)
@@ -7478,8 +7542,9 @@ paths:
         (`409 resource_archived`). Changing `requires2fa` needs a caller
         holding every permission the role grants (`403` otherwise), so only an
         `admin` changes it on core's `admin` role; so does reactivating it
-        (`isActive: true`). Both count only the caller's global roles, not
-        those held in the token's organization.
+        (`isActive: true`), and so does turning `guestAssignable` on. All three
+        count only the caller's global roles, not those held in the token's
+        organization.
 
         Deactivating a role (`isActive: false`) revokes the access tokens of
         the service clients holding it. People's tokens are not revoked:
@@ -7966,6 +8031,9 @@ paths:
         a member's roles does: `organizations.write`, or being an `admin` or
         `owner` of that organization while it is active (`403` otherwise) —
         and an organization `admin` cannot remove an `owner`'s role (`403`).
+        The caller must also hold, in that organization, every permission the
+        role grants (`403`, naming those lacking), and the organization must
+        not be archived (`409 resource_archived`).
         Removing a global assignment from another user needs a caller holding
         every permission that user holds, from global roles or roles in any
         organization; the caller's count from global roles only, capped by a
@@ -8018,12 +8086,12 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing roles.delete permission, the user is a service's service account, or (with `organizationId`) the caller has no authority over the organization
+          description: Forbidden - missing roles.delete permission, the user is a service's service account, or (with `organizationId`) the caller has no authority over the organization or does not hold there every permission the role grants
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Role or user not found, or the user holds no assignment of the role in that scope
         '409':
-          description: The removal would leave no active administrator (`conflict`), or the role is archived (`resource_archived`); restore it first
+          description: The removal would leave no active administrator (`conflict`), or the role or (with `organizationId`) the organization is archived (`resource_archived`); restore it first
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
@@ -8231,7 +8299,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - neither organizations.read nor membership of the organization
+          description: Forbidden - neither organizations.read nor membership of the organization, or the caller is a guest (a guest's membership gives no access here)
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '429':
@@ -8491,7 +8559,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - neither organizations.read nor membership of the organization
+          description: Forbidden - neither organizations.read nor membership of the organization, or the caller is a guest (a guest's membership gives no access here)
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '429':
@@ -8813,7 +8881,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - neither organizations.read nor membership of the organization
+          description: Forbidden - neither organizations.read nor membership of the organization, or the caller is a guest (a guest's membership gives no access here)
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Organization not found, or the user is not a member of it
@@ -9235,9 +9303,18 @@ paths:
       summary: Deactivate an identity provider
       description: |
         Takes the provider off the login page and refuses sign-ins that are under
-        way. Identities already linked stay. Refused with 409 `sso_only_domain` while
+        way. Identities already linked stay. Shortly after, in the background,
+        it ends the federated sessions (those signed in to through an identity
+        provider) of every user holding an identity at this provider, audited
+        and emitted as `auth.user.sessions-revoked`; their password sessions are
+        kept. A session does not record which provider it came from, so a user
+        with identities at two providers loses the federated sessions from both.
+        Refused with 409 `sso_only_domain` while
         any of its domains is SSO-only, since those users would have no way in: turn
         `ssoOnly` off first.
+        Refused with 409 `conflict` when it would leave no administrator able to
+        sign in: one counts with a password or an identity at another active
+        provider. Other users whose only way in is this provider are not counted.
 
         An audit log entry is created for this action.
         An `auth.identity-provider.deactivated` webhook event is emitted.
@@ -9314,6 +9391,10 @@ paths:
         verified sign-in at this domain, in `organizationId` as `member` with
         `roleIds`; `ssoOnly` refuses password sign-in for the domain's users. The two
         are independent. `domain` is lowercased and a leading `@` dropped.
+        `autoAccept: true` puts users in the organization, so it needs
+        `organizations.write` or a caller who is an admin or owner of the
+        organization, while it is active: otherwise 403
+        `organization_not_permitted`, whether or not the organization exists.
         `ssoOnly: true` is refused with 409 `provider_inactive` while the provider
         is deactivated, since the domain's users would have no way to sign in, and
         with 403 unless the caller holds `admin` through a global role: a password
@@ -9407,7 +9488,10 @@ paths:
         roles; roles the domain already hands out are kept without the grant check, so
         a narrower admin can still edit a domain a broader one set up. Moving the domain
         to another `organizationId` grants its roles (those sent, or else its current
-        ones) in that organization, so all of them are checked there. Errors are those
+        ones) in that organization, so all of them are checked there. Turning
+        `autoAccept` on, or moving a domain that auto-accepts, needs
+        `organizations.write` or an admin or owner of the organization it will add
+        users to (403 `organization_not_permitted`), as on create. Errors are those
         of adding a domain, including 409 `provider_inactive` for `ssoOnly: true` on a
         deactivated provider. Turning `ssoOnly` on or off, or changing the `domain` of
         an SSO-only domain, needs `admin` through a global role (403 otherwise).
@@ -9550,7 +9634,11 @@ paths:
         With `organizationId` it is **org-bound**: its tokens carry that `org_id`,
         its account is a member of the organization, and it holds org roles
         there. Without one it is a **platform** integration: no `org_id`, global
-        roles. The organization is fixed at creation.
+        roles. The organization is fixed at creation. Binding to an organization
+        puts an account in it, so it needs `organizations.write` or a caller who
+        is an admin or owner of the organization, while it is active: otherwise
+        `403 organization_not_permitted`,
+        whether or not the organization exists.
 
         `slug` defaults to the name, lowercased and hyphenated. Returns
         `409 slug_taken` when the slug is taken by a service or another
@@ -9589,7 +9677,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing integrations.write permission
+          description: Forbidden - missing integrations.write permission, or `organization_not_permitted`
         '409':
           $ref: '#/components/responses/ConflictResponse'
           description: The slug is taken
@@ -11030,6 +11118,9 @@ paths:
         then on, and the keys leave the JWKS. Signed-in users get tokens from
         the new key at their next refresh. Every core process is told over
         Redis to re-read its keys; without Redis each does so within a minute.
+        An immediate rotation needs `admin` through a global role as well as
+        `settings.write` (403 otherwise); a scheduled one needs only
+        `settings.write`.
 
         Refused with 409 when the signing key is supplied in env
         (`JWT_PRIVATE_KEY`), or when another rotation ran at the same moment.
@@ -11728,7 +11819,7 @@ paths:
           description: Invalid filter, sort, limit or cursor (`invalid_cursor`); `invalid_sort` for `sizeBytes` with `deleted=true`
         '401':
           $ref: '#/components/responses/FilesUnauthorizedResponse'
-          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
           description: Forbidden - missing bucket-level canRead permission (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
@@ -11797,7 +11888,7 @@ paths:
           description: Invalid prefix, delimiter, limit or cursor (`invalid_cursor`)
         '401':
           $ref: '#/components/responses/FilesUnauthorizedResponse'
-          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
           description: Forbidden - missing bucket-level canRead permission (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
@@ -12033,7 +12124,7 @@ paths:
           description: Invalid object key
         '401':
           $ref: '#/components/responses/FilesUnauthorizedResponse'
-          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
           description: Forbidden - missing file-service.objects.read permission or bucket-level canRead (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
@@ -12373,7 +12464,12 @@ paths:
                 `inline` for images, video, audio, PDF and plain text;
                 `attachment` for everything else (HTML, SVG, scripts, …). Carries
                 an ASCII `filename` and RFC 5987 `filename*` with the real name
-                (the key's last segment).
+                (the key's last segment). An object stored with a JavaScript
+                type (`text/javascript`, `application/javascript`,
+                `application/ecmascript`, `text/ecmascript` and their legacy
+                forms) is sent with `Content-Type: text/plain; charset=utf-8`,
+                so a browser will not run it from a `<script src>`; its
+                metadata keeps the stored type.
               schema:
                 type: string
             X-Object-Id:
@@ -12405,7 +12501,7 @@ paths:
           description: Invalid object key, `versionId` or `thumbnail`
         '401':
           $ref: '#/components/responses/FilesUnauthorizedResponse'
-          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
           description: Forbidden - missing bucket-level canRead permission (private buckets only); or a delegated token whose core API scopes do not reach `/v1/files` (`insufficient_scope`), public bucket or not
@@ -12566,7 +12662,7 @@ paths:
           description: '`id` is not a UUID'
         '401':
           $ref: '#/components/responses/FilesUnauthorizedResponse'
-          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
@@ -12824,7 +12920,7 @@ paths:
           description: Versioning is not enabled for this bucket (`versioning_disabled`), or invalid parameters
         '401':
           $ref: '#/components/responses/FilesUnauthorizedResponse'
-          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
@@ -12880,7 +12976,7 @@ paths:
           description: Versioning is not enabled for this bucket (`versioning_disabled`), or invalid parameters
         '401':
           $ref: '#/components/responses/FilesUnauthorizedResponse'
-          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
@@ -13030,7 +13126,7 @@ paths:
           description: Versioning is not enabled for this bucket (`versioning_disabled`).
         '401':
           $ref: '#/components/responses/FilesUnauthorizedResponse'
-          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one
+          description: Unauthorized - an invalid token, or no token for a private or missing bucket (`invalid_token`); a public bucket is served without one (`404` without a token while its organization is deactivated or archived)
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
@@ -13145,9 +13241,10 @@ paths:
         holds its `expectedSize` against the quota until it is completed,
         aborted or expires: an upload whose `expectedSize`, added to the bytes
         the bucket stores and the `expectedSize`s of its other active uploads,
-        passes the quota is `507 insufficient_storage`. An upload without an
-        `expectedSize` holds nothing, and is refused only once the others'
-        already pass it.
+        passes the quota is `507 insufficient_storage`. Such a bucket therefore
+        requires `expectedSize`: an initiate without it is
+        `400 expected_size_required`. In a bucket without a quota it stays
+        optional.
 
         **Required permissions:**
         - System: `file-service.objects.write` AND bucket-level `canWrite`
@@ -13202,7 +13299,7 @@ paths:
                 $ref: '#/components/schemas/InitiateMultipartResponse'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
-          description: '`invalid_request` - invalid body; `reserved_object_key` - the key is `prefixes` or starts with `by-id/`, `by-key/` or `.thumbnails/`'
+          description: '`invalid_request` - invalid body; `reserved_object_key` - the key is `prefixes` or starts with `by-id/`, `by-key/` or `.thumbnails/`; `expected_size_required` - the bucket has a storage quota and the body has no `expectedSize`'
         '401':
           $ref: '#/components/responses/FilesUnauthorizedResponse'
         '403':
@@ -13352,6 +13449,15 @@ paths:
         initiate (`413 exceeds_expected_size`), past the largest object a
         bucket can store, 68,719,476,704 bytes (`413 object_too_large`), or
         past what the bucket has left of its quota (`507 insufficient_storage`).
+        Parts no quota bounds — those of an upload in a bucket without a quota,
+        or of one initiated without an `expectedSize` — also count against a
+        limit per user: a part that would take the bytes its uploader has staged
+        across all their such uploads in progress, in any bucket, past
+        `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER` (default 100 GiB; for
+        a service account
+        `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_SERVICE_ACCOUNT`, default
+        1 TiB) is `409 multipart_staged_bytes_exceeded` until one of them is completed,
+        aborted or expires.
         With a `Content-Length` the part is refused before its body is read;
         otherwise once it is staged, and the staged bytes are discarded.
 
@@ -13399,7 +13505,7 @@ paths:
           description: Upload not found, not active, or in another bucket; a missing bucket only for a `file-service.admin` holder
         '409':
           $ref: '#/components/responses/FilesConflictResponse'
-          description: '`bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
+          description: '`bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API; `multipart_staged_bytes_exceeded` - the uploader''s parts in progress would total more than `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER` (or the service-account setting)'
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
           description: '`payload_too_large` - the part is over `FILE_SERVICE_MAX_UPLOAD_SIZE_MB`; `exceeds_expected_size` - the upload''s parts would total more than its `expectedSize`; `object_too_large` - they would total more than an object can be'
@@ -13871,7 +13977,8 @@ paths:
         without one, the share expires that long after creation. An
         ARCHIVE share has the same caps and errors as `POST /v1/files/buckets/{name}/archives`
         (`archive_too_large`, `archive_empty`). An OBJECT share pinned to a
-        delete marker (`versionId`) is `400 cannot_share_delete_marker`.
+        delete marker (`versionId`) is `400 cannot_share_delete_marker`, and
+        a `versionId` in a bucket without versioning is `400 versioning_disabled`.
 
         **Required permissions:**
         - System: `file-service.shares.write`
@@ -14599,7 +14706,9 @@ paths:
         only when the signature covers it (share URLs with a custom
         filename); one added to a URL afterwards is ignored, and changing or
         removing a signed one is `403`. Unsafe types (HTML, JavaScript, SVG, …)
-        are always served as attachments.
+        are always served as attachments, and an object stored with a
+        JavaScript type is sent with `Content-Type: text/plain; charset=utf-8`,
+        so a signed or share URL cannot be loaded as a script.
 
         Supports one byte range (`Range`, and `If-Range` with the `ETag`) as
         on `GET /v1/files/buckets/{name}/objects/{objectKey}`, so media can seek
@@ -14664,7 +14773,7 @@ paths:
         '403':
           $ref: '#/components/responses/SignatureRejectedResponse'
         '404':
-          description: Bucket or object not found, or the object has no current content (or the pinned version is a delete marker or gone).
+          description: Bucket or object not found, or the object has no current content (or the pinned version is a delete marker or gone). Also a URL minted from a share while its bucket's organization is deactivated or archived.
           content:
             application/json:
               schema:
@@ -14798,7 +14907,11 @@ paths:
         are allowed. The archive itself must not have expired.
 
         The response is streamed without `Content-Length`. If an error occurs
-        after the body has started, the connection is reset.
+        after the body has started, the connection is reset. So is the
+        connection of a client that reads nothing for
+        `FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS` (default 120) while bytes
+        wait to be sent; a slow client that keeps reading is not cut off,
+        however long the download takes.
 
         An audit log entry (`archiveDownload`) and an access-log entry
         (`ARCHIVE_DOWNLOAD`) are created for each download.
@@ -14850,9 +14963,10 @@ paths:
           $ref: '#/components/responses/SignatureRejectedResponse'
         '404':
           description: |
-            The `id` is not a UUID. A well-formed id of a missing archive (one
-            deleted `FILE_SERVICE_SHARE_RETENTION_DAYS` after it expires
-            included) is `403`, like a wrong signature.
+            The `id` is not a UUID, or the URL was minted from a share whose
+            bucket's organization is deactivated or archived. A well-formed id
+            of a missing archive (one deleted `FILE_SERVICE_SHARE_RETENTION_DAYS`
+            after it expires included) is `403`, like a wrong signature.
           content:
             application/json:
               schema:
@@ -15115,14 +15229,17 @@ paths:
         The signing secret and custom header values are masked in the response.
         A custom header sent with the mask `********` as its value keeps its
         stored value; the mask for a header with no stored value is refused
-        with `400 masked_header_value`. The URL and event types
+        with `400 masked_header_value`, as is keeping stored values (by the
+        mask, or by omitting `customHeaders`) while `url` moves to another
+        origin. The URL and event types
         are validated as on create, and the caller must be able to read every
         event type the endpoint ends up subscribed to (`403` otherwise), with
         create's exception for `auth.group.*` types and the endpoint's
         organization's admins and owners.
         Archived endpoints are rejected (`409 resource_archived`). A provisioned
-        endpoint refuses every change except a body carrying only `status` (to
-        re-enable it): `409 managed_by_provisioning`.
+        endpoint refuses every change except a body carrying only
+        `status: ACTIVE` (to re-enable it): `409 managed_by_provisioning`,
+        pausing it included.
 
         File events are sent by the endpoint creator's bucket access, so only
         its creator or a `webhooks.admin` holder may change where they go: a
@@ -16660,6 +16777,10 @@ paths:
         recipients. An address named twice is sent once, under the highest of to, cc, bcc.
         Attachments total at most 20 MB; `contentType` and `size` come from the stored version,
         and `filename` defaults to the last segment of the object's key.
+
+        `sensitive: true` marks the content as a credential (a one-time code, a sign-in link):
+        the admin log never returns it, it is dropped as soon as no delivery is pending, and the
+        notification cannot be retried from the log. It is off unless asked for.
 
         `idempotencyKey` makes a retry safe: the same key and body answer the first result, a
         different body is a `422`.
@@ -25481,15 +25602,15 @@ components:
           type: array
           items:
             type: string
-          description: Names of the user's global roles and, when the token carries `org_id`, of their roles in that organization — unexpired, of an active, unarchived, unretired role. Only for a token of core's UI or a service's client, or one carrying a core API scope
+          description: Names of the user's global roles and, when the token carries `org_id`, of their roles in that organization — unexpired, of an active, unarchived, unretired role. Only for a token of core's UI, a `client_credentials` token, or one carrying a core API scope
         permissions:
           type: array
           items:
             type: string
-          description: Effective permissions — from global roles and roles in the token's organization when it carries `org_id` (only the org-assignable permissions of those), from global roles alone otherwise. Only for a token of core's UI or a service's client, or one carrying a core API scope
+          description: Effective permissions — from global roles and roles in the token's organization when it carries `org_id` (only the org-assignable permissions of those), from global roles alone otherwise. Only for a token of core's UI, a `client_credentials` token, or one carrying a core API scope
         groups:
           type: array
-          description: The unarchived groups the user belongs to that count for this token, global ones and those of the token's organization while it is active and the user still a member. For a token of core's UI or a service's client, or one carrying a core API scope; a delegated token gets them (and an empty `roles`) only with the `account` or `admin` area, an empty list otherwise.
+          description: The unarchived groups the user belongs to that count for this token, global ones and those of the token's organization while it is active and the user still a member. For a token of core's UI, a `client_credentials` token, or one carrying a core API scope; a delegated token gets them (and an empty `roles`) only with the `account` or `admin` area, an empty list otherwise.
           items:
             type: object
             required:
@@ -25520,7 +25641,7 @@ components:
           description: Name of `org_id`'s organization; omitted with it
         organizations:
           type: array
-          description: The user's active organization memberships. Only for a token of core's UI or a service's client, or one carrying a core API scope
+          description: The user's active organization memberships. Only for a token of core's UI, a `client_credentials` token, or one carrying a core API scope
           items:
             type: object
             required:
@@ -29980,8 +30101,9 @@ components:
             - video/mp4
         expectedSize:
           description: |
-            Optional final object size in bytes — a positive decimal string or
-            integer. When given, a part that would take the staged total past it
+            Final object size in bytes — a positive decimal string or integer.
+            Required when the bucket has a storage quota
+            (`400 expected_size_required`), optional otherwise. When given, a part that would take the staged total past it
             is refused (`413 exceeds_expected_size`), and `complete` refuses parts
             whose total size differs (`400 size_mismatch`).
           type:
@@ -31004,6 +31126,11 @@ components:
             matched case-insensitively. The mask for a header name that has no
             stored value (a new or renamed header) is
             refused with `400 masked_header_value`.
+
+            A stored value is not kept when `url` moves to another origin (scheme,
+            host or port): the mask, or leaving `customHeaders` out while the
+            endpoint has headers, is then `400 masked_header_value`. Send each
+            header's real value again, or `null` to send none.
           examples:
             - X-Custom-Auth: '********'
               X-Tenant-Id: tenant-456
@@ -32177,6 +32304,15 @@ components:
           maxItems: 50
           items:
             $ref: '#/components/schemas/NotificationAttachmentRequest'
+        sensitive:
+          description: |
+            Marks the content as a credential. The admin log then never returns it
+            (`content: null`, `contentRedacted: true`), it is dropped as soon as no delivery is
+            pending (a failed delivery included), and the notification cannot be retried from the
+            log (`409 content_redacted`). Set it for one-time codes and sign-in links. Never set
+            for the caller.
+          type: boolean
+          default: false
     SendNotificationResponse:
       type: object
       required:
@@ -32380,7 +32516,7 @@ components:
               additionalProperties: true
             contentRedacted:
               type: boolean
-              description: True for a sensitive notification, such as a password-setup email, whose content is never returned and is dropped once the notification is terminal. Retrying one is `409 content_redacted`.
+              description: True for a sensitive notification (one sent with `sensitive` set, or one of core's own such as a password-setup email), whose content is never returned and is dropped once the notification is terminal. Retrying one is `409 content_redacted`.
             deliveries:
               type: array
               items:
@@ -32445,6 +32581,11 @@ components:
           type:
             - string
             - 'null'
+          description: |
+            Why the last attempt failed: the provider's reply when it gave one,
+            else an error code (`no_connection`, `attachment_forbidden`,
+            `ESOCKET`, `delivery_failed`, ...). Never the transport's own
+            message, which names hosts and addresses.
         providerMessageId:
           type:
             - string

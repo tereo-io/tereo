@@ -1,7 +1,6 @@
 import type { EtagPreconditions } from "../../../../../../utils/writePreconditions.js";
 import type { ObjectWithCurrent } from "../../../../../../utils/db/objects.js";
 import { noteAccessLogError } from "../../../../../../middleware/accessLog.js";
-import { normalizeContentType } from "../../../../../../utils/contentType.js";
 import { isThumbnailSource } from "../../../../../../utils/thumbnails.js";
 import { validateHeaders } from "../../../../../../utils/validateReq.js";
 import type { AuthContext } from "../../../../../../middleware/auth.js";
@@ -9,6 +8,7 @@ import { fileTypeFromBuffer, fileTypeFromFile } from "file-type";
 import type { UserRef } from "../../../../../../utils/refs.js";
 import { logger } from "../../../../../../utils/logger.js";
 import { Request, Response } from "express";
+import env from "../../../../../../env.js";
 import { finished } from "stream";
 import fs from "fs/promises";
 import {
@@ -19,6 +19,10 @@ import {
   holdsBucketReadAccess,
   getAccessibleBucket,
 } from "../../../../../../utils/bucketAccess.js";
+import {
+  downloadContentType,
+  normalizeContentType,
+} from "../../../../../../utils/contentType.js";
 import {
   ifRangeAllows,
   parseRange,
@@ -549,7 +553,7 @@ export const prepareDownload = (
   ) {
     return true;
   }
-  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Type", downloadContentType(contentType));
   res.setHeader("X-Content-Type-Options", "nosniff");
   setContentDisposition(res, { contentType, objectKey: opts.objectKey });
   return false;
@@ -624,7 +628,12 @@ export const sendBlobBody = async (
   };
 
   // Throws before anything is sent, so tampered storage is a clean 500.
-  const verified = await loadVerifiedBlobIfSmall(meta, blob.hash, size);
+  const verified = await loadVerifiedBlobIfSmall(
+    meta,
+    blob.hash,
+    size,
+    requested ?? undefined
+  );
   try {
     await options.beforeBody?.();
   } catch (err) {
@@ -632,11 +641,20 @@ export const sendBlobBody = async (
     throw err;
   }
   if (verified) {
-    finished(res, verified.release);
-    const { buffer } = verified;
-    res.end(
-      requested ? buffer.subarray(requested.start, requested.end + 1) : buffer
-    );
+    // A reader that stalls would otherwise hold the buffer, and its share of
+    // the budget, for as long as it keeps the connection open.
+    const sendTimer = setTimeout(() => {
+      verified.release();
+      const err = new Error("Timed out sending a verified blob");
+      logger.warn({ err, hash: blob.hash }, "Blob send timed out");
+      noteAccessLogError(res, err);
+      res.destroy(err);
+    }, env.FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS * 1000);
+    finished(res, () => {
+      clearTimeout(sendTimer);
+      verified.release();
+    });
+    res.end(verified.buffer);
     return;
   }
 

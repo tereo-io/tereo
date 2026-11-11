@@ -190,10 +190,12 @@ export const updateUser = async (req: Request, res: Response) => {
       { timeout: 30_000 }
     );
     await endDeactivatedUserSessions(id, recordSessionsRevoked(auth, existing));
-  } else if (body.password) {
+  } else if (body.password || reactivating) {
     // A password reset signs the user out everywhere, in the transaction
     // that sets the password. An admin resetting their own keeps the session
-    // they act from, as sessions/all does by default.
+    // they act from, as sessions/all does by default. A reactivation does
+    // the same: a deactivation whose sign-out failed after it committed left
+    // sessions that would otherwise come back to life with the account.
     const recordRevoked = recordSessionsRevoked(auth, existing);
     const keep = id === auth.userId ? auth : null;
     let reset: typeof newUser | undefined;

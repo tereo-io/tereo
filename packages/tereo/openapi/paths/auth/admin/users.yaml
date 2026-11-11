@@ -173,6 +173,9 @@
       `isActive: false`, which also revokes all of the user's active sessions
       and their access tokens and ends the user's SSO sessions in every
       browser, so silent login (`prompt=none`) and org switching stop working.
+      Reactivating (`isActive: true` on an inactive user) ends, in the same
+      transaction, any session a deactivation left behind, so none comes
+      back to life with the account.
 
       The system user cannot be modified (`400 system_user`), nor a
       service's service-account user (`403` — manage it under

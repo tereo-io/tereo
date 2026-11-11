@@ -367,11 +367,32 @@ const computeNextAttemptAt = (
   return new Date(Date.now() + Math.floor(Math.random() * exp));
 };
 
+const PAYLOAD_ID_FIELDS = [
+  "organizationId",
+  "serviceId",
+  "eventType",
+  "entityType",
+  "entityId",
+  "notificationId",
+];
+
+/** The payload's fields that say what it is about; never an event's `data`. */
+const payloadIds = (payload: unknown): Record<string, string> => {
+  if (!payload || typeof payload !== "object") return {};
+  const fields = payload as Record<string, unknown>;
+  return Object.fromEntries(
+    PAYLOAD_ID_FIELDS.flatMap((key) => {
+      const value = fields[key];
+      return typeof value === "string" ? [[key, value]] : [];
+    })
+  );
+};
+
 /**
  * Dead-letters emit a structured `outbox.dead_letter` log line; the row
- * itself is kept with `dead_lettered_at` set, for `npm run cli --
- * outbox-replay`, until the retention sweep (`jobs/outboxRetention.ts`)
- * deletes it.
+ * itself, payload included, is kept with `dead_lettered_at` set, for `npm run
+ * cli -- outbox-replay`, until the retention sweep
+ * (`jobs/outboxRetention.ts`) deletes it.
  */
 const logDeadLetter = (row: OutboxRow, lastError: string): void => {
   logger.error(
@@ -383,7 +404,7 @@ const logDeadLetter = (row: OutboxRow, lastError: string): void => {
       createdAt: row.created_at.toISOString(),
       claimedBy: row.claimed_by,
       lastError,
-      payload: row.payload,
+      ...payloadIds(row.payload),
     },
     "outbox.dead_letter"
   );

@@ -7,6 +7,10 @@ import { markShuttingDown, resetShuttingDown } from "./jobUtils.js";
 import { startShareSweep, stopShareSweep } from "./shareSweep.js";
 import { logger } from "../utils/logger.js";
 import {
+  startProviderDeactivationSessionSweep,
+  stopProviderDeactivationSessionSweep,
+} from "./providerDeactivationSessionSweep.js";
+import {
   startDiskBlobReconciliation,
   stopDiskBlobReconciliation,
 } from "./diskBlobReconciliation.js";
@@ -64,6 +68,7 @@ export async function startBackgroundJobs(): Promise<void> {
     await startBrandingReconcile();
     await startAuthCleanup();
     await startSsoOnlySessionSweep();
+    await startProviderDeactivationSessionSweep();
   } catch (err) {
     logger.error(
       {
@@ -98,6 +103,7 @@ export async function stopBackgroundJobs(): Promise<void> {
     stopBrandingReconcile(),
     stopAuthCleanup(),
     stopSsoOnlySessionSweep(),
+    stopProviderDeactivationSessionSweep(),
   ]);
   started = false;
 }

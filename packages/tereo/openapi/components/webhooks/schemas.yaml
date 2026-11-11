@@ -332,6 +332,11 @@ UpdateWebhookEndpointRequest:
         matched case-insensitively. The mask for a header name that has no
         stored value (a new or renamed header) is
         refused with `400 masked_header_value`.
+
+        A stored value is not kept when `url` moves to another origin (scheme,
+        host or port): the mask, or leaving `customHeaders` out while the
+        endpoint has headers, is then `400 masked_header_value`. Send each
+        header's real value again, or `null` to send none.
       examples:
         - { "X-Custom-Auth": "********", "X-Tenant-Id": "tenant-456" }
 

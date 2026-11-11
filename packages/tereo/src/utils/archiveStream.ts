@@ -2,6 +2,7 @@ import type { ObjectForArchiveStream } from "./db/archives.js";
 import { Archiver, TarArchive, ZipArchive } from "archiver";
 import { ServiceUnavailableError } from "./errors.js";
 import { PassThrough, type Readable } from "stream";
+import type { ServerResponse } from "http";
 import { logger } from "./logger.js";
 import {
   assertBlobFileReadable,
@@ -39,6 +40,38 @@ export class ArchiveAbortedError extends Error {
 }
 
 const MANIFEST_FILENAME = "MISSING_FILES.txt";
+
+/**
+ * Calls `onIdle`, once, when `res` has had bytes waiting to be sent for
+ * `idleTimeoutMs` and its connection took none of them in that time: the
+ * client has stopped reading. A client that takes any bytes, however slowly,
+ * is not idle, and neither is a response with nothing waiting (the archive
+ * is still being read), so this bounds no download's total duration.
+ */
+export function onSendIdle(
+  res: ServerResponse,
+  idleTimeoutMs: number,
+  onIdle: () => void
+): void {
+  let sent = res.socket?.bytesWritten ?? 0;
+  let progressAt = Date.now();
+  const timer = setInterval(
+    () => {
+      const now = res.socket?.bytesWritten ?? sent;
+      if (now !== sent || res.writableLength === 0) {
+        sent = now;
+        progressAt = Date.now();
+        return;
+      }
+      if (Date.now() - progressAt >= idleTimeoutMs) {
+        clearInterval(timer);
+        onIdle();
+      }
+    },
+    Math.ceil(idleTimeoutMs / 4)
+  );
+  res.once("close", () => clearInterval(timer));
+}
 
 /**
  * Build a streaming zip/tar from pre-loaded object metadata. An entry whose
@@ -183,8 +216,11 @@ function entryNameFor(
   objectKey: string,
   stripPrefix: string | null | undefined
 ): string {
-  if (stripPrefix && objectKey.startsWith(stripPrefix)) {
-    const stripped = objectKey.slice(stripPrefix.length);
+  // Only the prefix's folders are dropped: stripping a partial segment would
+  // name `rep/x.txt` and `repx.txt` alike under the prefix `rep`.
+  const folders = stripPrefix?.slice(0, stripPrefix.lastIndexOf("/") + 1);
+  if (folders && objectKey.startsWith(folders)) {
+    const stripped = objectKey.slice(folders.length);
     // Never emit an empty or absolute-looking entry name.
     return stripped.length > 0 ? stripped.replace(/^\/+/, "") : objectKey;
   }

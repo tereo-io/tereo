@@ -32,8 +32,9 @@ export interface NotificationInput {
   recipients: RecipientInput[];
   content: unknown;
   /**
-   * Core-internal: the content is a credential, so the log never returns it
-   * and it is dropped once the deliveries settle. Not in the public schema.
+   * The content is a credential, so the log never returns it and it is
+   * dropped once the deliveries settle. Kept out of `notificationInputSchema`:
+   * the send route adds it to its own.
    */
   sensitive?: boolean;
   attachments?: {
@@ -149,7 +150,8 @@ const parseRecipient = (
   }
   return {
     address: parsedAddress.success ? parsedAddress.data : null,
-    userId: parsedUserId.success ? parsedUserId.data : null,
+    // Lower case, as stored: the users found are matched to it as a string.
+    userId: parsedUserId.success ? parsedUserId.data.toLowerCase() : null,
     options: options.data as Record<string, unknown>,
   };
 };

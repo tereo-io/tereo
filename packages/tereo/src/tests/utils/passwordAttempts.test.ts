@@ -110,6 +110,35 @@ describe("beginPasswordAttempt", () => {
     expect(await failuresTtl(user.id)).toBeGreaterThan(0);
   });
 
+  it("refuses with 503 instead of waiting while Redis is not ready", async () => {
+    const user = await createTestUser();
+    const redis = getRedisClient() as unknown as { status: string };
+    const attempt = beginPasswordAttempt(
+      { ip: freshIp() } as Request,
+      user,
+      "login"
+    );
+    const soon = (promise: Promise<void>) =>
+      Promise.race([
+        promise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("still waiting for Redis")), 1_000)
+        ),
+      ]);
+    const unavailable = { statusCode: 503, code: "temporarily_unavailable" };
+    redis.status = "reconnecting";
+    try {
+      await expect(soon(attempt.succeeded())).rejects.toMatchObject(
+        unavailable
+      );
+      await expect(
+        soon(attempt.failed("invalid_password"))
+      ).rejects.toMatchObject(unavailable);
+    } finally {
+      redis.status = "ready";
+    }
+  });
+
   it("audits a known user's fifth wrong login password in a row", async () => {
     const user = await createTestUser();
     for (let i = 0; i < MAX_FAILURES - 1; i++) {

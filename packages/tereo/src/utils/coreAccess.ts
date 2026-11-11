@@ -12,8 +12,8 @@ import {
  * What an access token may do in core's own API (/account, /admin, /files,
  * /audit, /webhooks):
  *
- * - `full` — issued to core's UI or to a service: the user's (or service
- *   account's) live permissions, everywhere.
+ * - `full` — issued to core's UI, or a client_credentials token: the user's
+ *   (or service account's) live permissions, everywhere.
  * - `delegated` — issued to any other client with core API scopes, and so
  *   with core in its audience: only the areas those scopes name, and the live
  *   permissions cut down to their ceilings.
@@ -27,11 +27,14 @@ export type CoreAccess =
 
 export const resolveCoreAccess = (token: {
   clientId: string;
-  /** The client belongs to a service, or the token is client_credentials. */
-  isServiceClient: boolean;
+  /**
+   * A client_credentials token. A user's token issued to a service's client
+   * does not count: the service row alone gives it nothing.
+   */
+  isClientToken: boolean;
   scopes: string[];
 }): CoreAccess => {
-  if (isFirstPartyClient(token.clientId) || token.isServiceClient) {
+  if (isFirstPartyClient(token.clientId) || token.isClientToken) {
     return { kind: "full" };
   }
   const scopes = coreScopesOf(token.scopes);

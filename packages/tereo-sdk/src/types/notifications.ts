@@ -34,6 +34,12 @@ interface NotificationBase {
   /** A connection's slug; default: the channel's default connection. */
   connection?: string;
   organizationId?: string;
+  /**
+   * The content is a credential (a one-time code, a sign-in link): core never
+   * returns it from its log, drops it once no delivery is pending, and refuses
+   * to retry the notification from the log. Default false.
+   */
+  sensitive?: boolean;
 }
 
 export type EmailNotificationInput = NotificationBase & {

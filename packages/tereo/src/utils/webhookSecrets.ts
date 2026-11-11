@@ -105,8 +105,10 @@ export const openEndpointSecrets = async (
 const SEAL_PAGE_SIZE = 100;
 
 /**
- * Seals every endpoint secret not yet sealed under the current KEK: plaintext
- * rows from before sealing, and rows under the dev or previous KEK. Each write
+ * Seals every endpoint secret not yet sealed under the current KEK: rows
+ * under the previous KEK and, outside production, plaintext rows from before
+ * sealing and rows under the dev KEK (production refuses to open those). Each
+ * write
  * applies only while the row still holds what was read, so replicas starting
  * together are safe; once done it finds nothing. A row that cannot be opened
  * is logged and left for its deliveries to fail on. A previous secret past

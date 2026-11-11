@@ -43,8 +43,8 @@ POST /v1/admin/services
 | `GET /v1/admin/services/access` | `services.read` | Access rows across every service, each with its `service` (`id`, `slug`, `name`). Filter `status`, `kind`, `serviceId`, `target` (`?filter[status]=approved`); sort `requestedAt` (default, newest first) or `id` |
 | `GET /v1/admin/services/:id` | `services.read` | One service with everything it declared (retired included), its access, and `settings` |
 | `PATCH /v1/admin/services/:id` `{ name?, isActive? }` | `services.write` | Rename; deactivate (its tokens are revoked in the same transaction, counted in the audit entry's `accessTokensRevoked`) or reactivate |
-| `POST /v1/admin/services/:id/regenerate-secret` | `services.write`, and every permission the service's account holds | New secret, shown once. The old one keeps working for `SERVICE_SECRET_OVERLAP_HOURS` (24) |
-| `POST /v1/admin/services/:id/revoke-previous-secret` | `services.write`, and every permission the service's account holds | End that overlap now. The secret is retired: provisioning never accepts it again |
+| `POST /v1/admin/services/:id/regenerate-secret` | `services.write`, and every permission the service's account holds | New secret, shown once. The old one keeps working for `SERVICE_SECRET_OVERLAP_HOURS` (24). Access tokens already minted with either secret are not revoked |
+| `POST /v1/admin/services/:id/revoke-previous-secret` | `services.write`, and every permission the service's account holds | End that overlap now. The secret is retired: provisioning never accepts it again. It mints no more tokens, but those it already minted stay valid until they expire (`JWT_ACCESS_TOKEN_TTL`, an hour by default); deactivating the service revokes them |
 | `POST /v1/admin/services/:id/access/approve` `{ ids }` | `services.approve` | Grant access rows, such as one an admin revoked |
 | `POST /v1/admin/services/:id/access/revoke` `{ ids }` | `services.approve` | Take them away; the service's tokens are revoked in the same transaction (`accessTokensRevoked` in the audit entry) |
 
@@ -195,3 +195,38 @@ Core's declaration is `CORE_DECLARATION` (`definitions/declaration.ts`), version
 system user. Its names keep their historical
 prefixes, all reserved for it, and its roles are exempt from the `<namespace>_` rule. To add a permission, role, bucket or event type to core, add it under
 `definitions/`; to remove one, delete it there and it retires a day after the deploy.
+
+### Rolling core back
+
+A start ignores core's declaration when its version is lower than the one recorded (it logs
+`Ignored a declaration older than the one applied`), so a replica of the previous release that
+restarts during a rolling deploy cannot undo the rollout. The same rule means a rollback changes
+nothing by itself: whatever the newer release dropped stays `missingSince` and retires after
+`REGISTRY_RETIREMENT_GRACE_HOURS`, while the release now running still depends on it, and whatever
+the newer release added stays declared.
+
+When the rollback is meant to stay, tell core so, from the release rolled back to:
+
+```sh
+npm run cli -- register-core --accept-older      # in the image: node dist/cli/index.js register-core --accept-older
+```
+
+It applies the running release's declaration although it is older: everything that declaration
+contains is no longer missing or retired, anything only the newer release declared becomes missing
+and retires after the grace, and the recorded version becomes this release's. It prints
+`{ applied, changed, version, acceptOlder }`. The apply is audited like any other (`UPDATE` on
+`Service`, `metadata.via: "declaration"`) with `acceptedOlder: true` and `replacedVersion`, emits
+`core.service.declared`, and logs `Applied a declaration older than the one applied before` with
+both versions. Without the flag the command registers as a start does, and exits 1 when a newer
+declaration is recorded. It needs core's environment, as `provision` does.
+
+- Run it once every process of the newer release is gone. One that starts afterwards registers its
+  newer declaration again, as in any rollout.
+- The override is a command, never a setting read at start: a start-time flag would let every stale
+  replica undo a rollout for as long as it stayed set.
+- Without it, the rollback must be over (core back on a release at least as new as the one
+  recorded) or `REGISTRY_RETIREMENT_GRACE_HOURS` raised before the grace elapses. Past that, the
+  dropped items are retired; nothing is deleted, and the command still brings them back.
+
+App services need none of this: a provisioning document with a lower `version` is applied as a
+deliberate rollback ([provisioning](provisioning.md#applying)).

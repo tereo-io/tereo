@@ -33,7 +33,8 @@ export const openRowSecret = async (
     name,
     stored,
     previousKek,
-    env.NODE_ENV === "production"
+    env.NODE_ENV === "production",
+    "row"
   );
   return {
     value,

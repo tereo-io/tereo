@@ -1,14 +1,19 @@
 // @module-tag int
 // @module-tag files
 // @module-tag race
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { withIdempotency } from "../../utils/uploadIdempotency.js";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { FIXTURE_USER_IDS } from "../support/principals.js";
+import { getRedisClient } from "../../utils/redis.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import FormData from "form-data";
 import axios from "axios";
+import {
+  isClaimHeld,
+  withExclusiveClaim,
+  withIdempotency,
+} from "../../utils/uploadIdempotency.js";
 import {
   discardStagedFile,
   getBlobPath,
@@ -298,5 +303,53 @@ describe("withIdempotency", () => {
       });
       expect(versions).toBe(1);
     });
+  });
+});
+
+describe("claims while the Redis client is not ready", () => {
+  const client = () => getRedisClient() as unknown as { status: string };
+  const unavailable = { statusCode: 503, code: "temporarily_unavailable" };
+  const soon = <T>(promise: Promise<T>) =>
+    Promise.race([
+      promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("still waiting for Redis")), 1_000)
+      ),
+    ]);
+
+  afterEach(() => {
+    client().status = "ready";
+  });
+
+  it("refuse with 503 instead of waiting, and run nothing", async () => {
+    let ran = false;
+    const handler = async () => {
+      ran = true;
+      return { status: 200, body: {} };
+    };
+    client().status = "reconnecting";
+
+    await expect(
+      soon(
+        withIdempotency(
+          {
+            scope: "redis-outage",
+            key: randomUUID(),
+            requestHash: "h",
+            userId: FIXTURE_USER_IDS[0],
+          },
+          handler
+        )
+      )
+    ).rejects.toMatchObject(unavailable);
+    await expect(
+      soon(
+        withExclusiveClaim(`outage:${randomUUID()}`, () => new Error(), handler)
+      )
+    ).rejects.toMatchObject(unavailable);
+    await expect(
+      soon(isClaimHeld(`outage:${randomUUID()}`))
+    ).rejects.toMatchObject(unavailable);
+    expect(ran).toBe(false);
   });
 });

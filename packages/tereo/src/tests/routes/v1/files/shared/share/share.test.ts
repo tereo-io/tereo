@@ -532,6 +532,44 @@ describe("GET and HEAD /v1/files/shared/:token, POST /v1/files/shared/:token/unl
       await cleanupTestEntities();
     });
 
+    it("stops serving the share of a creator whose account has expired", async () => {
+      const owner = await member();
+      const creator = await member();
+      const bucket = await createTestBucket(owner.token);
+      const object = await uploadTestObject(
+        owner.token,
+        bucket.name,
+        "doc.txt",
+        createTestFile("doc")
+      );
+      await grant(owner.token, bucket.name, creator.userId, { canRead: true });
+      const share = await axios.post(
+        `${BASE_URL}/buckets/${bucket.name}/shares`,
+        { kind: "OBJECT", objectId: object.id },
+        as(creator.token)
+      );
+      const anon = { maxRedirects: 0, validateStatus: () => true };
+      const minted = await axios.get(share.data.url, anon);
+      expect(minted.status).toBe(302);
+
+      await prisma.user.update({
+        where: { id: creator.userId },
+        data: { userType: "guest", expiresAt: new Date(Date.now() - 1000) },
+      });
+
+      expect((await axios.get(share.data.url, anon)).status).toBe(
+        HTTP_STATUS.NOT_FOUND
+      );
+      expect((await axios.get(minted.headers["location"], anon)).status).toBe(
+        HTTP_STATUS.FORBIDDEN
+      );
+      const res = await axios.get(
+        `${BASE_URL}/buckets/${bucket.name}/shares/by-id/${share.data.id}`,
+        as(owner.token)
+      );
+      expect(res.data.status).toBe("creator_inactive");
+    });
+
     it("reports a deactivated creator's share as not serving", async () => {
       const owner = await member();
       const creator = await member();

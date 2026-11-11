@@ -59,6 +59,40 @@ settings go under `env` (see [configuration](https://github.com/tereo-io/tereo/b
 Rendering fails, rather than core failing at start, on a missing `publicUrl` or `trustProxy`, a
 non-https `publicUrl`, `trustProxy: "true"`, or no secret.
 
+### `trustProxy` and who can reach the pod
+
+Core takes the client's address — rate-limit keys, and the IP in auth logs, access logs and audit
+entries — from `X-Forwarded-For`, as far as `trustProxy` says to believe it. A hop count such as
+`"1"` trusts **whoever connects to the pod**, not only the ingress controller: a workload in the
+cluster that reaches the Service or pod directly can send any `X-Forwarded-For` and be taken for
+that address, getting a fresh per-IP rate-limit key with every request. Requests arriving through
+the ingress cannot do this. So with a hop count, only the ingress controller and workloads you
+trust may be able to connect to core. Either:
+
+- set `trustProxy` to the ingress controller's address range (a CIDR list) instead of a count, so
+  the header is believed only from it; or
+- enable `networkPolicy` and list in `networkPolicy.ingressFrom` the peers allowed to connect to
+  the API pods — the ingress controller, and the app services that call core through the Service:
+
+  ```yaml
+  networkPolicy:
+    enabled: true
+    ingressFrom:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: billing
+  ```
+
+The policy is off by default and takes effect only where the cluster's network plugin enforces
+NetworkPolicy. Rendering fails when it is enabled with no peer listed. A listed app service is
+still a direct peer and, with a hop count, is believed about `X-Forwarded-For`; the CIDR form
+closes that too. The policy covers the API pods' HTTP port and leaves egress alone.
+[`ci/networkpolicy-values.yaml`](https://github.com/tereo-io/tereo/blob/master/charts/tereo/ci/networkpolicy-values.yaml)
+is a complete example.
+
 ## How it runs
 
 - **Migrations.** A Job runs the image's `migrate-and-seed.sh` as a pre-install and pre-upgrade

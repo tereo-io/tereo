@@ -56,7 +56,7 @@ beforeAll(async () => {
   );
   eventsEndpointId = endpoint.id;
   writeToken = await getTestPrincipalToken({
-    permissions: ["identity-providers.write"],
+    permissions: ["identity-providers.write", "organizations.write"],
   });
   readToken = await getTestPrincipalToken({
     permissions: ["identity-providers.read"],
@@ -129,7 +129,11 @@ describe("GET, PATCH and DELETE /v1/admin/identity-providers/:id/domains/:domain
     permName = `idp.test.p${generateUniqueId().toLowerCase()}`;
     roleWithOrgPerm = await makeRole(permName, true);
     ownerToken = await getTestPrincipalToken({
-      permissions: ["identity-providers.write", permName],
+      permissions: [
+        "identity-providers.write",
+        "organizations.write",
+        permName,
+      ],
     });
   });
 

@@ -274,8 +274,10 @@
       org-select and consent steps — the sign-in has to start over. Wrong email or
       password, an inactive user or a service account is 401 `access_denied`
       — all four take the same time to answer, so the response does not reveal
-      whether the email exists. Every submission counts against the client
-      and IP before anything is checked, and a successful login gives back
+      whether the email exists. Every submission that carries the login
+      session's cookie counts against the client and IP before the password
+      is checked (one without it is `invalid_session` and counts for
+      nothing), and a successful login gives back
       its own attempt but clears none of the others, whatever the account: a
       sixth failure in five minutes is 429 for the rest of the window (503
       `temporarily_unavailable` when the limiter cannot reach Redis). Per
@@ -506,8 +508,9 @@
         refresh, a scope the refresh token was not granted
       - 400 `unauthorized_client` (grant not allowed for the client;
         client_credentials from a public client, a client without a service
-        account, one whose service account is inactive — a deactivated
-        service — or one belonging to an inactive organization)
+        account, the client of a deactivated service or integration, one
+        whose service account is inactive, or one belonging to an inactive
+        organization)
       - `invalid_client` — 400 for an unknown `client_id` sent in the body, 401
         (with `WWW-Authenticate: Basic`) for an unknown client in Basic auth
         or a failed confidential-client authentication
@@ -522,7 +525,10 @@
 
       With `refresh_token_response_mode=cookie` the refresh token is set in the
       `trt_{client_id}` cookie (path `/oauth`) and omitted from the body, and a
-      readable `tsi_{client_id}` session-indicator cookie is set. A refresh
+      readable `tsi_{client_id}` session-indicator cookie is set. Cookie mode
+      is answered only for a request from core, the UI, an origin of one of
+      the client's redirect URIs, or no browser page; any other origin gets
+      403 `access_denied` and the grant is not spent. A refresh
       that takes its token from the `trt_{client_id}` cookie and fails with
       400 `invalid_grant` (revoked, rotated, expired or unknown token, or an
       inactive user) clears both cookies in that 400 response, so the browser
@@ -623,8 +629,8 @@
       scopes' ceilings, as core's own API cuts them, so an app is told no
       more than the token may do in core. They are omitted when a client
       that is not a service's introspects its own token and that token has
-      no core access (not issued to core's UI or a service's client, and no
-      core API scope), as `/oauth/userinfo` omits them.
+      no core access (not issued to core's UI, not a `client_credentials`
+      token, and no core API scope), as `/oauth/userinfo` omits them.
 
       Only a confidential client may introspect, authenticated with HTTP
       Basic. A missing or unknown client, a public client (which has no
@@ -675,6 +681,10 @@
     description: |
       Revoke an access or refresh token (RFC 7009).
       Token can be provided in request body or the `trt_{client_id}` cookie.
+      The `trt_{client_id}` and `tsi_{client_id}` cookies are cleared when the
+      cookie's token is the one revoked; a request that revokes another token
+      (the access token, say) leaves them, since the refresh token they hold
+      is still live.
       Revoking a refresh token also revokes the access tokens of its session,
       and is a logout of that browser: the SSO session the refresh token was
       issued under ends, every other token family issued under that SSO
@@ -747,8 +757,9 @@
       token must carry `openid`. The standard claims follow the token's
       scopes (`profile`, `email`). `roles`, `permissions`,
       `organizations` and `groups` — core's authorization — are returned only
-      when the token was issued to core's UI or to a service's client, or
-      carries a core API scope (`core:*`); for any other client all four are
+      when the token was issued to core's UI, is a `client_credentials`
+      token, or carries a core API scope (`core:*`); for any other token —
+      a user's token issued to a service's client included — all four are
       omitted. A token delegated to a third-party client by core API scopes
       gets its `permissions` cut down to those scopes' ceilings, `roles`
       empty, `organizations` only with `core:account` or `core:organizations`
@@ -831,7 +842,15 @@
       - OAuth2/OIDC - Session
     summary: End session endpoint (GET)
     description: |
-      OpenID Connect RP-initiated logout for **this browser only**.
+      OpenID Connect RP-initiated logout of **one browser**: the one making
+      the request and, with an `id_token_hint`, the one whose SSO session the
+      hint's `sid` names. A valid hint is all that takes: no cookie from that
+      session's browser is needed, so whoever holds a user's ID token for the
+      client, until it is `ID_TOKEN_HINT_GRACE_SECONDS` past its expiry, can
+      sign that browser out of the client (and nothing more: an SSO session
+      is per browser and per client). The token travels in this URL's query
+      string; a client that would rather keep it out of logs and history can
+      send the POST form.
 
       **Without `id_token_hint` the session is not ended here.** Nothing shows
       such a request came from the client — any page can send a browser to
@@ -1486,8 +1505,9 @@
       enabled, `/oauth/totp/verify` or `/oauth/totp/recovery` answers with the
       redirect to `/login/change-password`. Only password logins meet it: a
       provider login skips it and leaves the flag set. `invalid_change_grant` and `change_expired` are
-      `400` errors. Wrong attempts are rate limited per client; no code is
-      issued until the password is changed.
+      `400` errors. Attempts that carry a grant and its cookie are rate
+      limited per IP (10 in five minutes, then 429); no code is issued until
+      the password is changed.
 
       An audit log entry is created and `auth.user.password-changed` is emitted.
     operationId: postOAuthPasswordChange

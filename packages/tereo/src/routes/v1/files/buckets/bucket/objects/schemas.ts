@@ -1,5 +1,6 @@
 import { createCursorQuerySchema } from "../../../../../../utils/parseQueryString.js";
 import { normalizeContentType } from "../../../../../../utils/contentType.js";
+import { hasNul, pgText } from "../../../../../../utils/pgInput.js";
 import { z } from "zod";
 
 type MetadataValue = string | number | boolean | null | MetadataValue[];
@@ -30,10 +31,13 @@ export const metadataSchema = z
   })
   .refine((d) => (d ? Object.keys(d).length <= 100 : true), {
     message: "Metadata cannot have more than 100 keys",
+  })
+  .refine((d) => !hasNul(d), {
+    message: "Metadata must not contain a NUL character",
   });
 
 /** An object's tags, from a JSON body's `tags` or the `X-Tags` header. */
-export const tagsSchema = z.array(z.string().min(1).max(128)).max(50);
+export const tagsSchema = z.array(pgText().min(1).max(128)).max(50);
 
 /**
  * Headers of an upload that carry object fields. The size, JSON and content
@@ -66,12 +70,23 @@ export const listObjectsQuerySchema = createCursorQuerySchema({
   filters: {
     objectKey: {
       operators: ["contains", "startsWith", "equals"],
-      schema: z.string().max(1024),
+      schema: pgText().max(1024),
       maxValueLength: 1024,
     },
+    // The content type is the current version's, not the object's.
     contentType: {
       operators: ["contains", "equals"],
-      schema: z.string().max(255),
+      schema: pgText().max(255),
+      toWhere: (clause) => ({
+        versions: {
+          some: {
+            isCurrent: true,
+            deletedAt: null,
+            isDeleteMarker: false,
+            contentType: clause,
+          },
+        },
+      }),
     },
   },
   sortFields: {
@@ -95,8 +110,8 @@ export const listObjectsExtraQuerySchema = z.object({
 });
 
 export const listPrefixesQuerySchema = z.object({
-  prefix: z.string().max(1024).default(""),
-  delimiter: z.string().min(1).max(4).default("/"),
+  prefix: pgText().max(1024).default(""),
+  delimiter: pgText().min(1).max(4).default("/"),
   limit: z.coerce.number().int().min(1).max(1000).default(100),
   cursor: z.string().optional(),
 });
@@ -112,7 +127,7 @@ export type ListPrefixesQuery = z.infer<typeof listPrefixesQuerySchema>;
  */
 export const bulkDeleteBodySchema = z
   .object({
-    prefix: z.string().min(1).max(1024).optional(),
+    prefix: pgText().min(1).max(1024).optional(),
     ids: z.array(z.guid()).min(1).max(1000).optional(),
   })
   .refine(

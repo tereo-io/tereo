@@ -63,3 +63,17 @@ export const deletePendingForUser = async (
     where: { userId, usedAt: null, ...outsideKept },
   });
 };
+
+/**
+ * Deletes the user's login steps whose first factor came from the provider
+ * (by slug): finished, they would start a session through it.
+ */
+export const deletePendingFromProvider = async (
+  userId: string,
+  provider: string,
+  tx: Prisma.TransactionClient
+): Promise<void> => {
+  await tx.consentSession.deleteMany({ where: { userId, provider } });
+  await tx.orgSelectionSession.deleteMany({ where: { userId, provider } });
+  await tx.totpVerification.deleteMany({ where: { userId, provider } });
+};

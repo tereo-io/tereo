@@ -164,7 +164,8 @@ events to the service. They are ordinary endpoints with an owner:
   only the service's own provisioned endpoints get the exception: endpoints made through the API, or
   owned by another service or an integration, never do.
 - Provisioned endpoints answer `409 managed_by_provisioning` to `PATCH` (except one carrying only
-  `status`, to re-enable), `DELETE`, archive, restore, rotate-secret and revoke-previous-secret.
+  `status: "ACTIVE"`, to re-enable; `PAUSED` is refused, since no apply would start the service's
+  events again), `DELETE`, archive, restore, rotate-secret and revoke-previous-secret.
   Delivery views, retries and test sends work. An endpoint a document drops is archived at once.
 
 ## List Filters
@@ -201,9 +202,12 @@ Event types carry `serviceName`, the declaring service's name, beside `source` (
   The masked value comes from `signing_secret_hint`, the first 8 characters kept beside it. The
   delivery job opens them to sign. A secret under the previous KEK (or, outside production, a plaintext
   one or one under the dev KEK) still signs, and is written back sealed under the current KEK when opened; on start
-  every process also seals the ones left (`sealWebhookSecrets`, paged, each write conditional on
+  every process also seals the ones left that it can open (`sealWebhookSecrets`, paged, each write conditional on
   the row still holding what was read, so replicas starting together are safe). A KEK rotation is
   covered the same way: with `CORE_KEK_PREVIOUS` set, the start pass re-seals rows under the old KEK.
+  In production a plaintext secret or one under the dev KEK is refused, on start and when signing
+  ([configuration.md](configuration.md#key-encryption)): rotate the endpoint's secret and revoke
+  the previous one.
   A previous secret past its overlap signs nothing, so the start pass clears it (column and expiry
   set to `NULL`) instead of sealing it.
 
@@ -220,6 +224,13 @@ that differ only in case are a `400`. On `PATCH`, a header sent with the mask as
 its stored value (matched case-insensitively), so a client can send back what it read with only some values
 changed (the admin UI does); the mask for a header with no stored value — a new or renamed one — is
 `400 masked_header_value`.
+
+A stored value was given for the host it is sent to, so it does not follow the endpoint to another
+one. A `PATCH` whose `url` has a different origin (scheme, host or port) must supply the headers
+again: real values, or `customHeaders: null` to send none. The mask for any header, or
+`customHeaders` left out while the endpoint has headers, is `400 masked_header_value` and nothing
+is changed. Otherwise anyone allowed to edit the endpoint could point it at a host of their own and
+be sent values the API never shows them. A change of path or query on the same origin keeps them.
 
 Endpoint responses also carry `hasDeliveries`: true while delivery history references the endpoint,
 which makes a hard DELETE 409 until retention purges it.
@@ -314,7 +325,8 @@ the result is kept 24 hours:
 The reaper retries a failing outbox row with exponential backoff, capped at 30 minutes, for 100
 attempts (about 12 hours); a row that can never succeed (a malformed payload, a retired event
 type, a destination with no dispatcher) is dead-lettered at once. A dead letter stays in
-`core.outbox` with `dead_lettered_at` set and an `outbox.dead_letter` log line, and the reaper
+`core.outbox` with `dead_lettered_at` set and an `outbox.dead_letter` log line (the row's id, destination
+and what its payload is about, such as the event type and entity; the payload itself stays in the row), and the reaper
 leaves it alone. Once the cause is fixed, replay it:
 
 ```bash

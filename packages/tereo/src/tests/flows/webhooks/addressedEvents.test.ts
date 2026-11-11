@@ -83,7 +83,11 @@ const endpointsOf = (deliveries: { webhookEndpointId: string }[]) =>
 
 beforeAll(async () => {
   adminToken = await getTestPrincipalToken({
-    permissions: ["integrations.read", "integrations.write"],
+    permissions: [
+      "integrations.read",
+      "integrations.write",
+      "organizations.write",
+    ],
   });
   emitterToken = await getTestPrincipalToken({
     permissions: ["webhooks.admin"],

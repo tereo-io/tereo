@@ -19,6 +19,7 @@ import {
   logAuditTx,
 } from "../../../../../../../utils/outbox.js";
 import {
+  assertMayAutoAcceptInto,
   assertMayChangeSsoOnly,
   assertProviderActive,
   changesSsoOnly,
@@ -47,22 +48,6 @@ export const updateDomain = async (req: Request, res: Response) => {
       );
     }
   }
-  const currentRoleIds = existing.roles.map(({ role }) => role.id);
-  const movesOrg =
-    body.organizationId !== undefined &&
-    body.organizationId !== existing.organizationId;
-  if (body.roleIds !== undefined || movesOrg) {
-    // Roles the domain already hands out in its organization stay as they
-    // are; moved to another organization, every role is a new grant there,
-    // including the current ones when no roleIds are sent.
-    await assertOrgAssignableRoles(
-      auth,
-      body.organizationId ?? existing.organizationId,
-      body.roleIds ?? currentRoleIds,
-      movesOrg ? new Set() : new Set(currentRoleIds)
-    );
-  }
-
   const closedAt = await db.$transaction(async (tx) => {
     // Every domain write takes the provider's lock, so the row read under it
     // holds until this one is written.
@@ -72,6 +57,32 @@ export const updateDomain = async (req: Request, res: Response) => {
       domainId,
       tx
     );
+    const currentRoleIds = current.roles.map(({ role }) => role.id);
+    const movesOrg =
+      body.organizationId !== undefined &&
+      body.organizationId !== current.organizationId;
+    if (body.roleIds !== undefined || movesOrg) {
+      // Roles the domain already hands out in its organization stay as they
+      // are; moved to another organization, every role is a new grant there,
+      // including the current ones when no roleIds are sent.
+      await assertOrgAssignableRoles(
+        auth,
+        body.organizationId ?? current.organizationId,
+        body.roleIds ?? currentRoleIds,
+        movesOrg ? new Set() : new Set(currentRoleIds),
+        tx
+      );
+    }
+    // Auto-accept newly on, or carried into another organization.
+    if (
+      (body.autoAccept ?? current.autoAccept) &&
+      (movesOrg || !current.autoAccept)
+    ) {
+      await assertMayAutoAcceptInto(
+        auth,
+        body.organizationId ?? current.organizationId
+      );
+    }
     if (changesSsoOnly(current, body)) await assertMayChangeSsoOnly(auth, tx);
     if (body.ssoOnly) await assertProviderActive(providerId, tx);
     await mapUniqueViolation(

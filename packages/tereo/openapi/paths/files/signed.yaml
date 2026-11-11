@@ -90,7 +90,9 @@
       only when the signature covers it (share URLs with a custom
       filename); one added to a URL afterwards is ignored, and changing or
       removing a signed one is `403`. Unsafe types (HTML, JavaScript, SVG, …)
-      are always served as attachments.
+      are always served as attachments, and an object stored with a
+      JavaScript type is sent with `Content-Type: text/plain; charset=utf-8`,
+      so a signed or share URL cannot be loaded as a script.
 
       Supports one byte range (`Range`, and `If-Range` with the `ETag`) as
       on `GET /v1/files/buckets/{name}/objects/{objectKey}`, so media can seek
@@ -153,7 +155,7 @@
       '403':
         $ref: '../../components/files/responses.yaml#/SignatureRejectedResponse'
       '404':
-        description: Bucket or object not found, or the object has no current content (or the pinned version is a delete marker or gone).
+        description: Bucket or object not found, or the object has no current content (or the pinned version is a delete marker or gone). Also a URL minted from a share while its bucket's organization is deactivated or archived.
         content:
           application/json:
             schema:
@@ -289,7 +291,11 @@
       are allowed. The archive itself must not have expired.
 
       The response is streamed without `Content-Length`. If an error occurs
-      after the body has started, the connection is reset.
+      after the body has started, the connection is reset. So is the
+      connection of a client that reads nothing for
+      `FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS` (default 120) while bytes
+      wait to be sent; a slow client that keeps reading is not cut off,
+      however long the download takes.
 
       An audit log entry (`archiveDownload`) and an access-log entry
       (`ARCHIVE_DOWNLOAD`) are created for each download.
@@ -340,9 +346,10 @@
         $ref: '../../components/files/responses.yaml#/SignatureRejectedResponse'
       '404':
         description: |
-          The `id` is not a UUID. A well-formed id of a missing archive (one
-          deleted `FILE_SERVICE_SHARE_RETENTION_DAYS` after it expires
-          included) is `403`, like a wrong signature.
+          The `id` is not a UUID, or the URL was minted from a share whose
+          bucket's organization is deactivated or archived. A well-formed id
+          of a missing archive (one deleted `FILE_SERVICE_SHARE_RETENTION_DAYS`
+          after it expires included) is `403`, like a wrong signature.
         content:
           application/json:
             schema:

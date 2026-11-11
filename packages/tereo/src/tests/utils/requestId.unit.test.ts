@@ -69,3 +69,49 @@ describe("clientIp and getRequestIpAddress", () => {
     expect(res.data.mixin.request_id).toBe(id);
   });
 });
+
+describe("createRequestIdMiddleware", () => {
+  const servers: Server[] = [];
+
+  const listen = async (trustProxy: unknown) => {
+    const app = express();
+    app.set("trust proxy", trustProxy);
+    app.use(createRequestIdMiddleware());
+    app.get("/", (req, res) => {
+      res.json({ requestId: req.requestId });
+    });
+    const server = await new Promise<Server>((resolve) => {
+      const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+    });
+    servers.push(server);
+    return `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
+  };
+
+  afterAll(async () => {
+    await Promise.all(
+      servers.map((server) => new Promise((resolve) => server.close(resolve)))
+    );
+  });
+
+  it.each([
+    ["trust proxy is off", false],
+    ["the peer is not one of the trusted proxies", "10.0.0.0/8"],
+  ])("generates an id over the client's when %s", async (_, trustProxy) => {
+    const res = await axios.get(await listen(trustProxy), {
+      headers: { "X-Request-ID": "req-123" },
+    });
+    expect(res.data.requestId).toMatch(/^[0-9a-f]{32}$/);
+    expect(res.headers["x-request-id"]).toBe(res.data.requestId);
+  });
+
+  it.each([
+    ["an address list naming the peer", "127.0.0.1/32"],
+    ["a hop count", 1],
+  ])("keeps the id a trusted proxy sent: %s", async (_, trustProxy) => {
+    const res = await axios.get(await listen(trustProxy), {
+      headers: { "X-Request-ID": "req-123" },
+    });
+    expect(res.data.requestId).toBe("req-123");
+    expect(res.headers["x-request-id"]).toBe("req-123");
+  });
+});

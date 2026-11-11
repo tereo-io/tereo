@@ -289,6 +289,16 @@ const isAppErrorLike = (
 };
 
 /**
+ * Express's router, on a route param whose percent-escape does not decode:
+ * a `URIError` it marks with `status` 400. One a handler's own
+ * `decodeURIComponent` throws has no status and stays a 500.
+ */
+const isUndecodableParam = (err: unknown): boolean =>
+  err instanceof URIError && (err as { status?: unknown }).status === 400;
+
+const UNEXPECTED_ERROR_MESSAGE = "An unexpected error occurred";
+
+/**
  * A body-parser (`express.json` / `express.urlencoded`) rejection: an
  * http-errors 4xx with a string `type` such as `entity.parse.failed` or
  * `entity.too.large`, but no `code`.
@@ -368,7 +378,20 @@ const errorResponse = (err: Error): ErrorResponse => {
   }
 
   if (isAppErrorLike(err)) {
-    return { status: err.statusCode, code: err.code, message: err.message };
+    return {
+      status: err.statusCode,
+      code: err.code,
+      // A library's 5xx message may name hosts or queries.
+      message: err.statusCode >= 500 ? UNEXPECTED_ERROR_MESSAGE : err.message,
+    };
+  }
+
+  if (isUndecodableParam(err)) {
+    return {
+      status: 400,
+      code: "invalid_request",
+      message: "The URL path is malformed",
+    };
   }
 
   // A write conflict or deadlock (P2034): retryable, so 409 lets clients
@@ -414,7 +437,7 @@ const errorResponse = (err: Error): ErrorResponse => {
   return {
     status: 500,
     code: "server_error",
-    message: "An unexpected error occurred",
+    message: UNEXPECTED_ERROR_MESSAGE,
   };
 };
 

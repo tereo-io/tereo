@@ -268,6 +268,21 @@ describe("POST /v1/webhooks/webhooks/:id/archive, /restore, /rotate-secret, /rev
         ]);
       });
 
+      it("rotates through an id in upper case to a secret deliveries can sign with", async () => {
+        const ep = await createTestWebhookEndpoint(token);
+        const upper = ep.id.toUpperCase();
+        expect(upper).not.toBe(ep.id);
+
+        const rotate = await post(`/webhooks/${upper}/rotate-secret`);
+        expect(rotate.status).toBe(HTTP_STATUS.OK);
+
+        const { timestamp, body, values } = await deliveredSignatures(ep.id);
+        expect(values).toEqual([
+          sign(rotate.data.signingSecret, timestamp, body),
+          sign(ep.signingSecret, timestamp, body),
+        ]);
+      });
+
       it("stops signing with the old secret once the overlap has expired", async () => {
         const ep = await createTestWebhookEndpoint(token);
         const rotate = await post(`/webhooks/${ep.id}/rotate-secret`);

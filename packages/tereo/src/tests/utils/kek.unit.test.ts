@@ -111,6 +111,38 @@ describe("aesGcmKek, sealSecret and openSecret", () => {
       { value: "old", rewrap: true }
     );
   });
+
+  it("names a row's secret as one, with a remedy that applies to it", async () => {
+    const kek = envKek();
+    const name = "webhook-endpoint:1";
+    const devSealed = await sealSecret(devKek, name, "dev");
+    for (const stored of ["plain", devSealed]) {
+      const refusal = await openSecret(
+        kek,
+        name,
+        stored,
+        undefined,
+        true,
+        "row"
+      ).catch((err: Error) => err.message);
+      expect(refusal).toContain(`Row secret "${name}"`);
+      expect(refusal).toContain("Set the secret again");
+      expect(refusal).not.toMatch(/core\.secrets|Delete the row/);
+    }
+    await expect(
+      openSecret(envKek(), name, await sealSecret(kek, name, "v"))
+    ).rejects.toThrow(/^core\.secrets/);
+    await expect(
+      openSecret(
+        envKek(),
+        name,
+        await sealSecret(kek, name, "v"),
+        undefined,
+        false,
+        "row"
+      )
+    ).rejects.toThrow(/^Row secret/);
+  });
 });
 
 describe("resolveKek", () => {

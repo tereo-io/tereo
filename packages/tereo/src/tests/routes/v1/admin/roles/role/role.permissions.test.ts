@@ -4,6 +4,7 @@
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
 import { createTestClient } from "../../../../../support/auth/clients.js";
+import { ensurePermission } from "../../../../../support/testService.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { randomBytes } from "crypto";
@@ -84,6 +85,48 @@ describe("PATCH /v1/admin/roles/:id", () => {
       body: JSON.stringify({ requires2fa: true }),
     });
     expect(response.status).toBe(HTTP_STATUS.OK);
+  });
+
+  it("treats flagging a role guest-assignable as granting what it carries", async () => {
+    const name = `test-fixtures.flag${randomBytes(6).toString("hex").replace(/[0-9]/g, "x")}.read`;
+    const permission = await prisma.permission.update({
+      where: { name: (await ensurePermission(name)).name },
+      data: { orgAssignable: true },
+    });
+    const role = await createTestRole();
+    await prisma.rolePermission.create({
+      data: { roleId: role.id, permissionId: permission.id },
+    });
+    const flag = (token: string, guestAssignable: boolean) =>
+      fetch(`${BASE_URL}/v1/admin/roles/${role.id}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ guestAssignable }),
+      });
+
+    const writer = await getTestPrincipalToken({
+      permissions: ["roles.write"],
+    });
+    const refused = await flag(writer, true);
+    expect(refused.status).toBe(HTTP_STATUS.FORBIDDEN);
+    expect(
+      ((await refused.json()) as { error_description: string })
+        .error_description
+    ).toContain(name);
+    expect(
+      (await prisma.role.findUniqueOrThrow({ where: { id: role.id } }))
+        .guestAssignable
+    ).toBe(false);
+
+    const holder = await getTestPrincipalToken({
+      permissions: ["roles.write", name],
+    });
+    expect((await flag(holder, true)).status).toBe(HTTP_STATUS.OK);
+    // Already flagged: sending the flag again grants nothing new.
+    expect((await flag(writer, true)).status).toBe(HTTP_STATUS.OK);
   });
 
   describe("permission checks come before the archive state", () => {

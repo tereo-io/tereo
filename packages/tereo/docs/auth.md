@@ -32,9 +32,12 @@ agree):
 | Token issued to                                                                    | Admitted                         | Rights                                                 |
 | ---------------------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------ |
 | Core's UI (`tereo-ui`, `isFirstPartyClient`)                                       | everywhere                       | the user's live permissions                            |
-| A service (a client with a `core.services` row, or any `client_credentials` token) | everywhere                       | the account's live permissions                         |
+| A service or integration acting as itself (a `client_credentials` token) | everywhere                       | the account's live permissions                         |
 | Any other client, granted core API scopes — its token's `aud` then includes `core` | the areas its scopes name        | the live permissions, cut down to the scopes' ceilings |
 | Any other client, without core API scopes                                          | nowhere: **401 `invalid_token`** | —                                                      |
+
+A user's token issued to a service's client is "any other client" here: the service row gives it
+nothing, only the client's own `client_credentials` token acts as the service.
 
 A delegated token that reaches an area its scopes do not name gets **403 `insufficient_scope`**,
 with a `WWW-Authenticate: Bearer error="insufficient_scope", scope="…"` challenge naming the scopes
@@ -129,8 +132,9 @@ Outside core's resource routes:
 - `/oauth/userinfo` is the OIDC endpoint every relying party uses: any active user access token
   carrying `openid` (otherwise 403 `insufficient_scope` with a `scope="openid"` challenge), with
   `profile`/`email` claims by scope. `roles`, `permissions` and `organizations` — core's
-  authorization — are included only for a token that is not `none` above (the UI, a service's
-  client, or a core API scope); any other relying party gets the OIDC claims (and `org_id`/`org_name`
+  authorization — are included only for a token that is not `none` above (the UI, a
+  `client_credentials` token, or a core API scope; a user's token issued to a service's client
+  counts as any other client's); any other relying party gets the OIDC claims (and `org_id`/`org_name`
   for the token's organization) without them. A `delegated` token is told what `requireAuth` would
   let it use: `permissions` cut down to its scopes' ceilings, `roles` empty (a role is not capped;
   its permissions are), and `organizations` only with `core:account` or `core:organizations`, the
@@ -214,7 +218,13 @@ A refresh token issued under an organization is refused (`invalid_grant`) and it
 the user is no longer a member or the organization is inactive or archived. Deactivating an
 organization revokes its refresh and access tokens and SSO sessions in the deactivating transaction,
 under the session-end lock on every member and token holder, and by organization rather than by a
-list read beforehand, so a refresh racing it cannot leave a live successor.
+list read beforehand, so a refresh racing it cannot leave a live successor. The other grants check
+the organization again where the deactivation cannot slip between check and issue: a code exchange
+under the user's token-issue lock, and `client_credentials` for an organization's client while
+holding the organization's row shared, which the deactivation's update waits for. What needs no
+token stops too, without being revoked: while the organization is deactivated or archived, share
+links on its buckets, the signed URLs they minted and anonymous reads of its public buckets answer
+404, and serve again once it is reactivated (see [files.md](files.md#shares)).
 
 ## The admin UI's login client
 
@@ -228,7 +238,11 @@ Elsewhere that callback is added first and the other loopback callbacks already 
 `npm run dev` core (UI at `:4000`) sharing one database can both log in. A non-loopback URI is
 dropped even in development: the client skips the consent screen, so a stale callback on a host
 nobody controls would receive its codes. `PATCH /v1/admin/clients/:id` refuses to change its `redirectUris`,
-`grantTypes`, `clientType`, `consentRequired` or `audience` with 409; its name, scopes and post-logout URIs stay editable, and it
+`grantTypes`, `clientType`, `consentRequired` or `audience` with 409, and a `scopes` list that drops one
+the UI signs in with (`loginClientConfig`: `openid`, `profile`, `email`, `offline_access`; they are put
+back at every start). Its `postLogoutRedirectUris` must be on the origin of `UI_BASE_URL`: a list
+with any other entry is refused with 409, so signing out of the admin UI never sends the browser to
+another site. Its name, further scopes and post-logout URIs on that origin stay editable, and it
 cannot be deleted.
 
 **Audience and consent.** A login client carries two admin-set fields. `audience` lists the slugs
@@ -250,6 +264,17 @@ and `GET /v1/admin/clients/:id` reads one of them. With `clients.admin` as well,
 client — services', organizations' and login clients alike — with their metadata (name, type,
 redirect URIs, scopes, grant types, audience, owner, organization, service). No secret is ever
 returned; a client secret is shown once, when it is created or regenerated.
+
+**What a change does to tokens already issued.** Editing a client changes what it can obtain from
+then on, not what it holds. Regenerating a client's secret
+(`POST /v1/admin/clients/:id/regenerate-secret`) revokes no access token: those minted with the old
+secret stay valid until they expire (`JWT_ACCESS_TOKEN_TTL`, an hour by default), as they do for a
+service's or an integration's `regenerate-secret` and `revoke-previous-secret`. Removing a scope or
+an audience (`PATCH /v1/admin/clients/:id`) applies to the next authorization and the next refresh,
+which narrows the token to the client's current scopes; an access token already issued keeps the
+scopes and `aud` it was minted with until it expires. To cut tokens off sooner, deactivate the
+service or integration (its tokens are revoked in the same transaction), or end the user's
+sessions.
 
 ## Requested authentication class (`acr_values`)
 
@@ -379,8 +404,27 @@ for. Create
 and edit contact the issuer, so an unreachable or inconsistent issuer is a 400
 `provider_unreachable` or `invalid_provider_config`. A new provider is active and appears on the
 login page (`GET /oauth/upstream/providers`). `POST …/deactivate` hides it and refuses new
-sign-ins; it is refused with 409 `sso_only_domain` while any of its domains is SSO-only.
+sign-ins; it is refused with 409 `sso_only_domain` while any of its domains is SSO-only, and with
+409 `conflict` when it would leave no administrator able to sign in (none of those who can now has a
+password or an identity at another active provider). Other users whose only way in is the provider
+are not counted: they are locked out until it is activated again or they are given a password.
 `POST …/activate` re-checks the issuer. Providers cannot be deleted, only deactivated.
+
+**Deactivating a provider** also ends the sessions obtained through it. Once the deactivation
+commits core enqueues a sweep (`jobs/providerDeactivationSessionSweep.ts`, named by the provider and
+its `updatedAt`) over every person holding an identity at the provider. For each, in one
+transaction, it ends their federated sessions — the SSO sessions and token families whose login
+used a provider (`amr` contains `fed`), with their access tokens and sockets — and deletes the
+login steps the provider vouched for that are still under way (consent, organization pick, TOTP
+verification). It is audited and emitted as an admin session revoke (`sessions_revoked`,
+`auth.user.sessions-revoked`) by the admin who deactivated. Sessions from a password sign-in are
+kept. A session records that it came from a provider but not which one, so a person with identities
+at two providers loses the federated sessions from both and signs in again through the one still
+active. The sweep reads the provider as it is when it runs and does nothing once it is active
+again; deactivating a provider that is already inactive enqueues nothing. Failures and retries are
+handled as in the SSO-only sweep below (10 attempts, the users that failed only; run in the request,
+once, when the job cannot be enqueued), so the sessions end shortly after the response rather than
+with it.
 
 Once any user has linked an identity, `PATCH` refuses a new `slug` with 409 `slug_in_use` and a new
 `issuer` with 409 `issuer_in_use`: a `sub` is unique only within its issuer, so under another issuer
@@ -403,7 +447,10 @@ to **one organization** and a set of **default roles** in it, and has two indepe
 
 They combine freely: "staff must use Google, and nobody joins automatically" is `ssoOnly` without
 `autoAccept`. Default roles must be roles assignable within an organization, and the admin setting
-them must be able to grant them, as when assigning roles to a user. Domains are managed at
+them must be able to grant them, as when assigning roles to a user. An `autoAccept` domain adds
+members to its organization, so turning `autoAccept` on (on create or `PATCH`), or moving a domain
+that auto-accepts to another organization, needs `organizations.write` or to be an admin or owner of that organization while it is active
+(plain membership is not enough): otherwise `403 organization_not_permitted`. Domains are managed at
 `/v1/admin/identity-providers/{id}/domains`; `PATCH` changes only the fields sent, and `roleIds`
 replaces the set (roles the domain already hands out skip the grant check, except when the `PATCH`
 moves the domain to another organization: then every role it will hand out there, sent or kept, is
@@ -517,6 +564,12 @@ already gone (a link session with no user lands on `/account?error=session_expir
 at a deactivated provider is no way in), and with 409 `sso_required` when their email's domain is
 `ssoOnly` for that provider. An admin can unlink with
 `DELETE /v1/admin/users/{id}/identities/{identityId}`, with the same 409s but no recent-login rule.
+Either unlink ends the user's sessions in the same transaction, as a password change does (the
+caller's own session is kept when they unlink their own; `sessions_revoked` is audited and
+`auth.user.sessions-revoked` emitted): a session obtained through the identity must not outlive
+it, and a session does not record which identity it came from, so all of them go. Deactivating a
+provider ends its users' federated sessions and leaves their password sessions (see _Deactivating a
+provider_ above).
 
 For an `ssoOnly` domain, the password check runs first and unchanged, so nothing reveals whether an
 account exists: an unknown email and a wrong password both answer 401 `Invalid credentials`. A correct
@@ -713,10 +766,10 @@ permissions to cover every permission the user holds, in any scope (`assertMayDi
 strip an administrator, nor `users.delete` sign one out, nor `roles.delete` take an administrator's
 `admin` role. Acting on yourself is not checked. Removing an org-scoped assignment
 (`DELETE /v1/admin/roles/:id/users/:userId?organizationId=`) is bounded instead as setting a
-member's org roles is: organization authority, and an org `admin` cannot remove an `owner`'s role.
-Setting a member's org roles (`PUT /v1/admin/organizations/:id/members/:userId/roles`) also needs
-the caller to hold, in that organization, every permission of each role it removes
-(`assertCanTakeAway`) — otherwise 403 naming those lacking.
+member's org roles (`PUT /v1/admin/organizations/:id/members/:userId/roles`) is: organization
+authority, an org `admin` cannot remove an `owner`'s role, and the caller must hold, in that
+organization, every permission of each role removed (`assertCanTakeAway`) — otherwise 403 naming
+those lacking. Neither changes an archived organization (409 `resource_archived`).
 
 A service's or an integration's secret is a way into its account: `regenerate-secret` and
 `revoke-previous-secret` under `/v1/admin/services/:id` and `/v1/admin/integrations/:id` need the
@@ -809,6 +862,11 @@ membership grants nothing (no token is issued for an inactive or archived organi
 joined another meanwhile, with their roles and bucket grants there, audited and emitted as
 `auth.organization.member-removed`.
 
+The membership scopes a guest's roles and nothing else: `requireOrgRole` never counts it, so the
+organization's record, its member list and members' roles (`GET /v1/admin/organizations/:id`,
+`…/members`, `…/members/:userId/roles`) answer a guest with 403. A guest sees their own organization
+through `/v1/account`.
+
 | Refused                                                                                                       | Code                            |
 | ------------------------------------------------------------------------------------------------------------- | ------------------------------- |
 | Adding a guest who already belongs to an organization to another (`POST /v1/admin/organizations/:id/members`) | 400 `user_not_addable`          |
@@ -886,7 +944,9 @@ outsider learns nothing about the user. Promotion is not scoped: it is a `users.
 **Granting.** "Granting: only what you hold" does not apply to guest-assignable roles given through
 the guest endpoints: flagging the role was the grant decision and `users.guests.write` the right to
 apply it (a service account does not hold its own service's permissions). The ordinary role
-endpoints follow the normal rule.
+endpoints follow the normal rule, and the flag is itself a grant: turning `guestAssignable` on
+(`PATCH /v1/admin/roles/:id`) needs a caller whose global roles hold every permission the role
+carries (403 otherwise, naming those lacking).
 
 | Route                                                       | Permission                                                          | Does                                                                                                                                                   |
 | ----------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1412,7 +1472,12 @@ the login. Core never reads them back.
 
 `/oauth/end-session` with a valid `id_token_hint` logs this browser out at once, unless the browser
 is signed in to that client as a different user than the hint's `sub` (`signedInAsOther`): any
-site can hold an ID token of its own user, so that browser is asked to confirm as below. It then
+site can hold an ID token of its own user, so that browser is asked to confirm as below. The hint
+also ends the SSO session its `sid` names when that is the `sub`'s, whichever browser holds it:
+as OIDC RP-initiated logout specifies, the ID token alone vouches for the request, and no cookie
+from that browser is needed. So a user's ID token for a client, until it is past the grace below,
+is enough to sign the browser it was issued to out of that client — and of nothing else, since an
+SSO session belongs to one browser and one client. It then
 redirects to
 `post_logout_redirect_uri` or, for a navigation without one, to where the user signs in to the
 client again (`clientSignInUrl`: the UI's root for core's own client, else the origin of its first
@@ -1460,10 +1525,30 @@ from a browser page and passes. The cookie getters in `utils/cookies.ts` refuse 
 `403 access_denied` when a handler reads them: refresh and revoke by cookie, the login submit,
 consent, org selection, the 2FA steps, identity linking and the sign-out confirmation alike. A
 request that authenticates otherwise (a secret, a code, a token in the body) is not affected by the
-other clients' cookies it carries. `CORS_ALLOWED_ORIGINS` is only the CORS list: being on it lets a
+other clients' cookies it carries. Setting the cookie follows the same rule as using it:
+`/oauth/token` with `refresh_token_response_mode=cookie` answers `403 access_denied`, before the
+grant is spent, to a request from any other origin, so a page elsewhere cannot post its own code or
+refresh token from a visitor's browser and leave that browser signed in to its account. The admin
+UI checks as well (`tereo-ui/src/lib/auth/useRefreshToken.ts`): when a refresh by cookie answers
+with a token whose `sub` is not the user the tab holds a token for, it does not adopt the token,
+clears its stored tokens, marks itself signed out (so the cookie is not refreshed from again) and
+goes to its signed-out page; a load with no stored token has nothing to compare and takes the
+cookie's user. `CORS_ALLOWED_ORIGINS` is only the CORS list: being on it lets a
 page read core's API responses, not use another client's session. Credentialed CORS headers are not
 sent on `GET /oauth/authorize`, which is navigated to (a fetch following its redirect could read
 the code from the response URL), nor on the UI's pages.
+
+**Public link routes.** `POST /v1/password-setup`, `/v1/password-setup/inspect`,
+`/v1/email-verification`, `/v1/email-verification/inspect` and `/v1/password-reset` take no cookie,
+so the rule above never applies to them, but they count misses and requests per IP. A page anywhere
+could otherwise post to them from a visitor's browser and use up that IP's allowance, so links stop
+redeeming and reset requests send nothing. `refuseForeignOrigins` (same file) therefore answers 403
+`forbidden`, ahead of every limiter on those routes, when the request has an `Origin` that is not
+core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) or an entry of `CORS_ALLOWED_ORIGINS` (`*`
+admits all); `Sec-Fetch-Site: same-origin` also passes, for a core reached under another host name.
+Here a listed origin passes from any site, since no cookie is involved. A request with no `Origin`
+header (a server, curl, the SDK) is not checked and is counted as before; someone sharing the IP can
+still spend its allowance directly, which is the accepted cost of a per-IP limit.
 
 ## Deviations from the specs
 
@@ -1488,7 +1573,8 @@ Where core knowingly departs from OAuth 2.0 / OpenID Connect:
   `400 invalid_request`.
 - **`/oauth/revoke` without a token** — neither `token` nor the `trt_{client_id}` cookie — is
   `400 invalid_request` (RFC 7009 makes `token` required). A token that is unknown, already revoked
-  or another client's is still `200`.
+  or another client's is still `200`. The refresh cookie is cleared only when its token is the one
+  revoked: a request naming another token in the body leaves the cookie, whose token is still live.
 
 ## Rate limits
 
@@ -1501,11 +1587,11 @@ All in Redis; limiters in `utils/rateLimit.ts`, instances in `middleware/rateLim
   - **Defaults** come from `RATE_LIMIT_PER_SECOND`, `RATE_LIMIT_INTERNAL_PER_SECOND`, `RATE_LIMIT_PRE_AUTH_PER_SECOND` and `RATE_LIMIT_PRE_AUTH_INTERNAL_PER_SECOND` (see [configuration](configuration.md)). A pre-auth value below its general counterpart would make the general limit unreachable, so startup fails.
   - **Per-user override** — `auth.users.rate_limit_per_second` (`rateLimitPerSecond`, 1–100000) replaces the caller's tier default, internal or external; null means the default. It never applies to anonymous requests. It is set with `PATCH /v1/admin/users/:id`, `/v1/admin/services/:id` and `/v1/admin/integrations/:id`, in the admin UI, and for provisioned services and integrations in the provisioning document (omitting it clears it). A change is audited and emitted as `auth.user.rate-limit-changed`. Lowering it takes effect on the next request, which is refused if the caller's count is already above the new value. Changing another user's limit through `PATCH /v1/admin/users/:id` needs `users.write` and is refused (403) when the target holds any permission the caller does not, as deactivation is; changing your own is allowed.
   - **Pre-auth caveat** — the per-IP pre-auth limit applies before the override is known, so an override above it does not help a single-IP external caller: raise `RATE_LIMIT_PRE_AUTH_PER_SECOND` as well. The active values are in `GET /v1/admin/settings` (`rateLimits`).
-- **Credentials** — counted before the credential is checked, atomically, and cleared by a success: login passwords per client and IP (`authFailure`, keyed by the body's `client_id` once that client is found — never by a header the login does not authenticate with, which a caller could vary per request; the key spans every account tried from that address, so a success only gives back its own attempt — clearing the count would let a login to one's own account wipe the failures against everyone else's) and per account (`loginAccountBackoff`: keyed on a hash of the normalised email, so unknown emails behave the same; five attempts, then a delay doubling from 1 s to 15 min — a backoff, not a lockout); provider callbacks per IP once their round trip is consumed (see _Errors_ under _Sign in with an identity provider_); confidential-client secrets at `/oauth/token`, `/oauth/revoke` and `/oauth/introspect` per client and IP (`clientSecretFailure`: 10 wrong secrets per 5 min, keyed with the IP so one address cannot lock a client out for its other callers. Unlike the others it counts only failures — read before the secret is hashed, spent after a wrong one — so any number of concurrent correct secrets from one address, such as pods behind one NAT, pass. Once the count is full every attempt is refused before hashing, the right secret included, until the window expires: a correct secret cannot clear a full count, so a stale-secret pod sharing an address can hold the client off for up to 5 min. Concurrent wrong secrets can overshoot the limit by the burst, acceptable for high-entropy secrets); login 2FA setup per user; `/v1/account/password` and `/v1/account/totp/*` per user; setup per IP; share unlock per token and IP.
+- **Credentials** — counted before the credential is checked, atomically, and cleared by a success: login passwords per client and IP (`authFailure`, spent only by a submission that carries the login session's cookie, so a page elsewhere posting from a visitor's browser cannot use up the address's attempts; keyed by the body's `client_id` once that client is found — never by a header the login does not authenticate with, which a caller could vary per request; the key spans every account tried from that address, so a success only gives back its own attempt — clearing the count would let a login to one's own account wipe the failures against everyone else's) and per account (`loginAccountBackoff`: keyed on a hash of the normalised email, so unknown emails behave the same; five attempts, then a delay doubling from 1 s to 15 min — a backoff, not a lockout; `POST /v1/account/password` spends and clears the same backoff for its current-password check, beside its own per-user window, so a token for the account is no faster a way to guess its password than the login page); provider callbacks per IP once their round trip is consumed (see _Errors_ under _Sign in with an identity provider_); confidential-client secrets at `/oauth/token`, `/oauth/revoke` and `/oauth/introspect` per client and IP (`clientSecretFailure`: 10 wrong secrets per 5 min, keyed with the IP so one address cannot lock a client out for its other callers. Unlike the others it counts only failures — read before the secret is hashed, spent after a wrong one — so any number of concurrent correct secrets from one address, such as pods behind one NAT, pass. Once the count is full every attempt is refused before hashing, the right secret included, until the window expires: a correct secret cannot clear a full count, so a stale-secret pod sharing an address can hold the client off for up to 5 min. Concurrent wrong secrets can overshoot the limit by the burst, acceptable for high-entropy secrets); login 2FA setup per user; the forced password change per IP, once the grant and its cookie match (`passwordChangeFailure`); `/v1/account/password` and `/v1/account/totp/*` per user; setup per IP; share unlock per token and IP.
 - **Login 2FA** — `/oauth/totp/verify` and `/oauth/totp/recovery` share `totpBackoff`, per user, which nothing resets: a sliding 24-hour window (`createWindowedBackoffLimiter`) in which five attempts pass, then each next one waits a delay after the last that doubles from 1 s to an hour. Each attempt is spent before the code is checked; a right code takes back only its own, so the owner signing in hands an attacker who holds the password no fresh guesses, and the attacker gets some forty guesses a day at most. From the fifth attempt in the window every failure writes an audit entry (`User`, action `UPDATE`, `metadata.action` `totp_failures`, with `method` and `recentFailures`). The trade-off is the owner's access while an attacker keeps the delay at its cap: a browser holding the user's known-device cookie (set by a completed login) is let through the delay, its attempts still counting toward it, capped at 5 per hour per cookie (`knownDeviceTotp`); a browser without one competes with the attacker for the next attempt, at most an hour away, so an attacker who spends each one as it opens can keep the owner out until they sign in from a known device or an admin resets the password. A per-2FA-session limit would add nothing, since the password buys a new session. The setup verify (`/oauth/totp/setup/verify`), whose caller holds the secret, keeps a fixed 5 per 300 s per user (`totpSetupFailure`).
 - **Wrong passwords** — every failed password check at `POST /oauth/authorize` and `POST /v1/account/password` is logged (`authLog` `password_failure`: user, client, IP, `check` and `reason` — `unknown_user`, `login_not_allowed`, `no_password` or `invalid_password` — never what was typed). For an existing user, `utils/passwordAttempts.ts` counts the failures in a row in Redis (both routes share the count; a correct password clears it, and it lapses after 24 hours without a failure), and from the fifth each one writes an audit entry (`User`, action `UPDATE`, `metadata.action` `password_failures`, with `check`, `reason` and `consecutiveFailures`). An email no account has is only logged.
 - **Known device** — so that someone holding an account in backoff does not lock its owner out, a completed login (after 2FA when required) sets `tereo_known_device` (`utils/knownDevice.ts`; httpOnly, `SameSite=Lax`, path `/oauth` or a `__Host-` cookie as in [Browser cookies](#browser-cookies), 90 days): `<userId>.<issuedAt>.<HMAC>`, keyed with `KNOWN_DEVICE_KEY` and covering the user's password hash, so a password change or admin reset (a freshly salted hash) voids every earlier cookie with no extra column. At the login submit, while the account is delayed (`loginAccountBackoff.isDelayed`), a cookie valid for that same user skips the delay: `authFailure` and the password check still apply, the attempt still counts toward the account (`spendUnblocked`, which lengthens the delay without being refused by it), and `knownDeviceFailure` caps it at 5 wrong passwords per 15 min per cookie, so a stolen cookie is not an unlimited guess. Outside a delay a known device is treated like any browser. The cookie is checked only against the user the email names, so it reveals nothing about other emails; sign-out leaves it, since it is not a session.
-- **Redis down** — credential limiters fail closed with `503 temporarily_unavailable`, except `clientSecretFailure`, which fails open: the secret is still verified, and client authentication (`/oauth/token`, `/oauth/revoke`, `/oauth/introspect`) must not go down with Redis; the general and pre-auth limiters fail open, so an outage does not take the API down. None waits in ioredis's offline queue: each refuses (or passes) at once while the client is not ready.
+- **Redis down** — credential limiters fail closed with `503 temporarily_unavailable`, except `clientSecretFailure`, which fails open: the secret is still verified, and client authentication (`/oauth/token`, `/oauth/revoke`, `/oauth/introspect`) must not go down with Redis; the general and pre-auth limiters fail open, so an outage does not take the API down. None waits in ioredis's offline queue: each refuses (or passes) at once while the client is not ready. The same holds for the other Redis commands a request sends, through `redisCommand` (`utils/redis.ts`): refused at once while the client is not ready and given up on after 2 seconds, with `503 temporarily_unavailable` and `Retry-After`. So a limiter's `reset` or `refund` after a correct credential fails the way its limiter does; the code and refresh-token grants at `/oauth/token`, which take a Redis lock per code or token, answer `503` (`client_credentials` takes no lock and keeps working); and the count of wrong passwords answers `503`. Releasing that lock never fails a request: a lock that cannot be released lapses with its 30-second TTL.
 - **Tests** run every limiter at its production limits. `tests/setup/setup.ts` clears limiter keys before each test; a test needing several client addresses sends `X-Forwarded-For`, trusted from loopback by the default `TRUST_PROXY`.
 
 `authLog` (`utils/audit.ts`) logs failures (wrong passwords included) and code/refresh-token reuse at `warn`, successes at `info`, and per-request and introspection lines at `debug`.

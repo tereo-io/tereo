@@ -1,5 +1,4 @@
 import { setContentDisposition } from "../../../buckets/bucket/objects/utils.js";
-import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { SYSTEM_USER_ID } from "../../../../../../definitions/index.js";
 import { logAuditTx } from "../../../../../../utils/outbox.js";
 import { logger } from "../../../../../../utils/logger.js";
@@ -8,8 +7,13 @@ import db from "../../../../../../utils/db/index.js";
 import { Request, Response } from "express";
 import env from "../../../../../../env.js";
 import {
+  noteAccessLogError,
+  setAccessLog,
+} from "../../../../../../middleware/accessLog.js";
+import {
   ArchiveAbortedError,
   buildArchiveStream,
+  onSendIdle,
 } from "../../../../../../utils/archiveStream.js";
 import {
   BadRequestError,
@@ -175,6 +179,16 @@ export const downloadArchiveViaSignedUrl = async (
   // and closes the blob it is reading.
   res.on("close", () => {
     if (!res.writableFinished) abort();
+  });
+  // A reader that stalls would otherwise hold the entry being sent (a blob
+  // file, or a verified buffer and its share of the read budget) for as long
+  // as it keeps the connection open.
+  onSendIdle(res, env.FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS * 1000, () => {
+    const err = new Error("Timed out sending an archive");
+    logger.warn({ err, archiveId: archive.id }, "Archive send timed out");
+    noteAccessLogError(res, err);
+    abort();
+    res.destroy(err);
   });
   stream.pipe(res);
 

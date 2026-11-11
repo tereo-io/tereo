@@ -187,9 +187,18 @@
     summary: Deactivate an identity provider
     description: |
       Takes the provider off the login page and refuses sign-ins that are under
-      way. Identities already linked stay. Refused with 409 `sso_only_domain` while
+      way. Identities already linked stay. Shortly after, in the background,
+      it ends the federated sessions (those signed in to through an identity
+      provider) of every user holding an identity at this provider, audited
+      and emitted as `auth.user.sessions-revoked`; their password sessions are
+      kept. A session does not record which provider it came from, so a user
+      with identities at two providers loses the federated sessions from both.
+      Refused with 409 `sso_only_domain` while
       any of its domains is SSO-only, since those users would have no way in: turn
       `ssoOnly` off first.
+      Refused with 409 `conflict` when it would leave no administrator able to
+      sign in: one counts with a password or an identity at another active
+      provider. Other users whose only way in is this provider are not counted.
 
       An audit log entry is created for this action.
       An `auth.identity-provider.deactivated` webhook event is emitted.
@@ -305,6 +314,10 @@
       verified sign-in at this domain, in `organizationId` as `member` with
       `roleIds`; `ssoOnly` refuses password sign-in for the domain's users. The two
       are independent. `domain` is lowercased and a leading `@` dropped.
+      `autoAccept: true` puts users in the organization, so it needs
+      `organizations.write` or a caller who is an admin or owner of the
+      organization, while it is active: otherwise 403
+      `organization_not_permitted`, whether or not the organization exists.
       `ssoOnly: true` is refused with 409 `provider_inactive` while the provider
       is deactivated, since the domain's users would have no way to sign in, and
       with 403 unless the caller holds `admin` through a global role: a password
@@ -399,7 +412,10 @@
       roles; roles the domain already hands out are kept without the grant check, so
       a narrower admin can still edit a domain a broader one set up. Moving the domain
       to another `organizationId` grants its roles (those sent, or else its current
-      ones) in that organization, so all of them are checked there. Errors are those
+      ones) in that organization, so all of them are checked there. Turning
+      `autoAccept` on, or moving a domain that auto-accepts, needs
+      `organizations.write` or an admin or owner of the organization it will add
+      users to (403 `organization_not_permitted`), as on create. Errors are those
       of adding a domain, including 409 `provider_inactive` for `ssoOnly: true` on a
       deactivated provider. Turning `ssoOnly` on or off, or changing the `domain` of
       an SSO-only domain, needs `admin` through a global role (403 otherwise).

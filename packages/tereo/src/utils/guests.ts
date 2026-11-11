@@ -4,6 +4,7 @@ import { AppError, BadRequestError, ConflictError } from "./errors.js";
 import { getDefaultOrganizationId } from "./defaultOrganization.js";
 import { PASSWORD_LINK_PURPOSES } from "./db/userLinkTokens.js";
 import { revokeOrganizationGrantsTx } from "./bucketGrants.js";
+import { assertActsInOrganization } from "./orgRoleAuth.js";
 import type { AuthContext } from "../middleware/auth.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { prisma, type Prisma } from "./db/prisma.js";
@@ -90,23 +91,15 @@ export const getManagedGuest = async (
  * acts in: as a member, or as a service account whose client belongs to it.
  * organizations.write acts in every organization.
  */
-export const assertMayManageGuestsIn = async (
+export const assertMayManageGuestsIn = (
   auth: GuestManager,
   organizationId: string | null
-): Promise<void> => {
-  if (managesAllGuests(auth)) return;
-  if (
-    organizationId !== null &&
-    (await canActInOrganization(auth.userId, organizationId))
-  ) {
-    return;
-  }
-  throw new AppError(
-    403,
-    "organization_not_permitted",
+): Promise<void> =>
+  assertActsInOrganization(
+    auth,
+    organizationId,
     "You can manage guests only in an organization you belong to"
   );
-};
 
 /** `assertMayManageGuestsIn` for the organization guest `id` belongs to. */
 export const assertMayManageGuest = async (

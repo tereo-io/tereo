@@ -47,6 +47,8 @@ Sent over SMTP with nodemailer.
 - `GET /v1/admin/notifications/connections` gives each connection a `lastDeliveryError`
   (`{ message, at }`): the error of its newest delivery attempt in the last day when that attempt
   failed or is waiting to retry, so a broken connection shows without opening a notification.
+  `message` is the delivery's `lastError`, in the same form (a reply or a code; see
+  [Operating](#operating)).
 - Secrets: `password`, optional.
 - Content: `subject` (1-998 characters, no line breaks), `text` and/or `html` (one is required), and
   optional `from` (`{ address, name? }`) and `replyTo`. A `from` address and a `replyTo` must each
@@ -62,7 +64,8 @@ Sent over SMTP with nodemailer.
   accept and again when the delivery is sent, as at accept: the sender's live permissions and
   grants, in the token's organization and capped by its scopes (both stored on the notification as
   `sender_access`, never returned). Access lost in between fails the delivery permanently with
-  `attachment_forbidden`; core's own sends read every bucket. As in the files API, a public
+  `attachment_forbidden`, as does a sender whose account was deactivated or has expired, or whose
+  token's organization was deactivated or archived, since accept; core's own sends read every bucket. As in the files API, a public
   bucket's history is not public: at accept, a version that is no longer current takes a grant on
   the bucket (or `file-service.admin`), and is `attachment_not_found` without one. At send the
   same holds for a version no longer current by then: without the grant, the delivery fails with
@@ -157,6 +160,9 @@ Paths are under `/v1/admin/notifications/connections`.
   object id and version id. The sender must be able to read the bucket. The version is pinned, and
   its bytes are read from storage when the message is sent. `filename` defaults to the last part of
   the object's key.
+- `sensitive: true` (optional, default `false`) marks the content as a credential; see
+  [Sensitive notifications](#sensitive-notifications). Set it on anything carrying a one-time code
+  or a sign-in link.
 - Everything is checked before anything is stored, in the order a sender would fix it. Nothing is
   written on failure.
 - The send is audited (`CREATE` on `Notification`) and written with its delivery rows and an outbox
@@ -195,6 +201,25 @@ checked before the organization's existence so a refused caller can't probe ids:
 - `notifications.admin` may name any.
 - Leaving `organizationId` out (or null) is always allowed, and means the token's organization.
 - `notifyTx` is unrestricted.
+
+### Sensitive notifications
+
+A send with `"sensitive": true` gets the treatment core gives its own link emails ("Set your
+password", "Reset your password", "Confirm your email address"), which are the same flag on the
+same row:
+
+- Its content is never returned. The admin log's detail reads `content: null` with
+  `contentRedacted: true`, even while a delivery is still pending.
+- Its content is dropped as soon as no delivery is pending, a failed delivery included, rather
+  than only once every delivery is sent.
+- It cannot be retried from the admin log (`409 content_redacted`): send it again instead. The
+  delivery's own automatic attempts are unaffected.
+
+The flag is never set for the caller: content is not inspected, and a send without it keeps its
+content while any delivery is unsent, where every `notifications.read` holder can read it in the
+admin log for up to the retention window. An app that mails one-time codes, magic sign-in links,
+invitations that sign the recipient in, or anything else that works as a credential should set
+it. `summary` (the email's subject) is kept either way, so keep the secret out of the subject.
 
 ### Idempotency
 
@@ -268,7 +293,10 @@ Outcomes:
   after a default changed): marked `failed` at once, with `notification.failed`. `lastError` is the
   SMTP reply for `smtp_rejected`, else the error code (`attachment_missing`, `host_not_allowed`, ...).
 - **Other errors:** back to `pending` with `lastError` set, retried by BullMQ with exponential
-  backoff from 60 s. There are 8 attempts in all. The count is also kept on the delivery, so a
+  backoff from 60 s. `lastError` is the server's SMTP reply when it gave one (`451 …`), else the
+  transport error's code (`ESOCKET`, `ETIMEDOUT`, `EAUTH`, …), else `delivery_failed`: never the
+  mail library's message, which names the host, its address and port. Senders read `lastError`,
+  so that text goes to the worker log only (`Notification delivery job failed`, with `deliveryId`). There are 8 attempts in all. The count is also kept on the delivery, so a
   re-queue by the stale sweep does not add attempts. After the last it is `failed`; a delivery
   the sweep puts back with no attempts left is failed without sending, keeping its `lastError`
   (or `attempts_exhausted`).
@@ -332,10 +360,14 @@ Retry resets the notification's `failed` deliveries to `pending` with their atte
 many were reset) and is audited (`UPDATE` on `Notification`, `metadata: { retried }`). A
 notification with no failed delivery is `409 nothing_to_retry`.
 
-A notification sent with `sensitive: true` (core's three link emails are: "Set your password", "Reset your password" and "Confirm your email address") is never shown: its `content` reads `null` with `contentRedacted: true` in the admin log, is nulled once the notification is terminal, and `POST /:id/retry` on it is `409 content_redacted`.
+A notification sent with `sensitive: true` (by an app through the API, or by core: its three link
+emails are "Set your password", "Reset your password" and "Confirm your email address") is never
+shown: its `content` reads `null` with `contentRedacted: true` in the admin log, is nulled once the
+notification is terminal, and `POST /:id/retry` on it is `409 content_redacted`
+([Sensitive notifications](#sensitive-notifications)).
 
-`content` is kept while any delivery is unsent, so a failed delivery can be retried until retention
-removes it. Once every delivery is sent it is gone.
+Any other notification's `content` is kept while any delivery is unsent, so a failed delivery can
+be retried until retention removes it. Once every delivery is sent it is gone.
 
 ## Operating
 
@@ -351,9 +383,12 @@ removes it. Once every delivery is sent it is gone.
 | `host_not_allowed`              | The SMTP host resolves to a private or reserved address. Permanent                                                                      |
 | `The SMTP host did not resolve` | DNS failed; retried. The worker logs the DNS error (`SMTP host did not resolve`, with `connectionId`)                                   |
 | `attachment_missing`            | An attached version is no longer stored, or its object or bucket is in the trash. Permanent                                             |
-| `attachment_forbidden`          | The sender can no longer read an attachment's bucket (grant or permission revoked, or the sender deactivated). Permanent                |
+| `attachment_forbidden`          | The sender can no longer read an attachment's bucket (grant or permission revoked, the sender deactivated or expired, or the organization it sent from deactivated or archived). Permanent |
 | `sender_not_allowed`            | `content.from` or `content.replyTo` is not allowed on the connection used at delivery, e.g. the default changed since accept. Permanent |
 | `smtp_rejected`                 | Shown as the server's `5xx` reply text. Permanent                                                                                       |
+| `4xx …`                         | The server's reply to a refusal that is retried                                                                                         |
+| `ESOCKET`, `ETIMEDOUT`, `EAUTH`… | The mail library's error code for a connection, TLS, timeout or sign-in failure; retried. The worker log has the full error             |
+| `delivery_failed`               | A failure with neither a reply nor a code; retried. The worker log has the full error                                                   |
 | anything else                   | The error's message, e.g. a connection or `4xx` SMTP reply; retried up to 8 attempts                                                    |
 
 ## Retention

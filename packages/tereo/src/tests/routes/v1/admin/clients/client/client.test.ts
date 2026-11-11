@@ -522,6 +522,22 @@ describe("PATCH /v1/admin/clients/:id", () => {
       expect(response.status).toBe(HTTP_STATUS.CONFLICT);
     }
   });
+
+  it("refuses to drop a scope the admin UI signs in with from core's login client", async () => {
+    const loginClient = await prisma.oAuthClient.findUniqueOrThrow({
+      where: { clientId: LOGIN_CLIENT.clientId },
+    });
+    for (const scopes of [[], ["openid", "profile", "email"]]) {
+      const response = await send(clientsAdmin, "PATCH", `/${loginClient.id}`, {
+        scopes,
+      });
+      expect(response.status).toBe(HTTP_STATUS.CONFLICT);
+    }
+    const kept = await send(clientsAdmin, "PATCH", `/${loginClient.id}`, {
+      scopes: loginClient.scopes,
+    });
+    expect(kept.status).toBe(HTTP_STATUS.OK);
+  });
 });
 
 describe("POST /v1/admin/clients/:id/regenerate-secret", () => {

@@ -4,7 +4,10 @@ import { ensureDailyPartitions } from "../../../../utils/partitions.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { waitFor } from "../../../support/webhooks.js";
+import { CORE_URL } from "../../../support/coreUrl.js";
+import { fetchJson } from "../../../support/http.js";
 import { randomBytes, randomUUID } from "crypto";
+import db from "../../../../utils/db/index.js";
 import {
   closeNotificationQueues,
   getNotificationQueue,
@@ -13,6 +16,7 @@ import {
   cleanNotifications,
   createNotificationConnection,
   notificationMessage,
+  notificationsApi,
   sendNotification,
   expectError,
   currentVersion,
@@ -269,6 +273,67 @@ describe("POST /v1/notifications", () => {
           where: { connectionId: connection.id },
         })
       ).toBe(1);
+    });
+  });
+
+  describe("sensitive", () => {
+    const adminLog = (method: string, path: string, token: string) =>
+      fetchJson(method, `${CORE_URL}/v1/admin/notifications${path}`, token);
+
+    it("defaults to false, and refuses a value that is not a boolean", async () => {
+      const res = await send(message());
+      expect(res.status, JSON.stringify(res.body)).toBe(202);
+      const row = await prisma.notification.findFirstOrThrow({
+        where: { id: res.body.id },
+      });
+      expect(row.sensitive).toBe(false);
+
+      expect((await send(message({ sensitive: "yes" }))).status).toBe(400);
+    });
+
+    it("redacts the content in the log, refuses a retry and drops the content once settled", async () => {
+      const res = await send(
+        message({
+          sensitive: true,
+          content: { subject: "Your code", text: "Code 493021" },
+        })
+      );
+      expect(res.status, JSON.stringify(res.body)).toBe(202);
+      const id = res.body.id;
+      const row = await prisma.notification.findFirstOrThrow({ where: { id } });
+      expect(row.sensitive).toBe(true);
+
+      const adminToken = await getTestPrincipalToken({
+        permissions: ["notifications.admin"],
+      });
+      const detail = await adminLog("GET", `/${id}`, adminToken);
+      expect(detail.status, JSON.stringify(detail.body)).toBe(200);
+      expect(detail.body.content).toBeNull();
+      expect(detail.body.contentRedacted).toBe(true);
+      expect(JSON.stringify(detail.body)).not.toContain("493021");
+
+      const own = await notificationsApi("GET", `/${id}`, senderToken);
+      expect(own.status).toBe(200);
+      expect(JSON.stringify(own.body)).not.toContain("493021");
+
+      await prisma.notificationDelivery.updateMany({
+        where: { notificationId: id },
+        data: { status: "failed" },
+      });
+      const status = await prisma.$transaction((tx) =>
+        db.notifications.rollUp(tx, id, row.createdAt)
+      );
+      expect(status).toBe("failed");
+      const settled = await prisma.notification.findFirstOrThrow({
+        where: { id },
+      });
+      expect(settled.content).toBeNull();
+
+      expectError(
+        await adminLog("POST", `/${id}/retry`, adminToken),
+        409,
+        "content_redacted"
+      );
     });
   });
 

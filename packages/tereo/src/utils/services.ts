@@ -126,10 +126,6 @@ export interface ServiceToUpdate {
   accountUserId: string;
 }
 
-export const revokeServiceTokens = async (clientRowId: string) => {
-  await db.accessTokens.revokeByClientId(clientRowId);
-};
-
 // The caller revokes the tokens of a service it deactivated.
 export const updateServiceTx = async (
   tx: Prisma.TransactionClient,

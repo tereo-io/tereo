@@ -199,38 +199,5 @@ describe("password setup", () => {
       expect(res.data.contentRedacted).toBe(true);
       expect(JSON.stringify(res.data)).not.toContain("SECRET");
     });
-
-    it("never takes `sensitive` from the public API", async () => {
-      const conn = await createNotificationConnection({
-        isDefault: true,
-        settings: smtpSettings(smtp.port),
-      });
-      const token = await getTestPrincipalToken({
-        permissions: ["notifications.send"],
-      });
-
-      const res = await axios.post(
-        `${BASE_URL}/v1/notifications`,
-        {
-          channel: "email",
-          connection: conn.slug,
-          sensitive: true,
-          recipients: [{ address: "pub@test.local" }],
-          content: { subject: "s", text: "t" },
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          validateStatus: () => true,
-        }
-      );
-      if (res.status === 202) {
-        const row = await prisma.notification.findFirstOrThrow({
-          where: { id: res.data.id },
-        });
-        expect(row.sensitive).toBe(false);
-      } else {
-        expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
-      }
-    });
   });
 });

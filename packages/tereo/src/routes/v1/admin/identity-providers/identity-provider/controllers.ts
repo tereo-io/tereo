@@ -1,7 +1,9 @@
+import { enqueueProviderDeactivationSessionSweep } from "../../../../../jobs/providerDeactivationSessionSweep.js";
 import { broadcastIdentityProviderInvalidate } from "../../../../../utils/cacheBroadcast.js";
 import { assertMayCountAsMfa } from "../../../../../utils/identityProviders/mfaGuard.js";
 import { getDefaultOrganizationId } from "../../../../../utils/defaultOrganization.js";
 import { formatProvider } from "../../../../../utils/identityProviders/format.js";
+import { assertAdminCanSignInWithout } from "../../../../../utils/adminGuard.js";
 import { BadRequestError, ConflictError } from "../../../../../utils/errors.js";
 import { adapterFor } from "../../../../../utils/identityProviders/index.js";
 import { mapUniqueViolation } from "../../../../../utils/prismaErrors.js";
@@ -241,10 +243,15 @@ const setActive = async (req: Request, res: Response, isActive: boolean) => {
   const auth = validateUser(req);
   const { id } = validateParams(IdentityProviderIdParamSchema, req);
 
-  const provider = await db.$transaction(async (tx) => {
+  const { provider, wasActive } = await db.$transaction(async (tx) => {
+    // The admin guard's lock comes before any row lock.
+    if (!isActive) await assertAdminCanSignInWithout(id, tx);
     // Under the row lock a domain turning SSO-only takes too, so the two
     // can't both pass their checks.
-    await db.identityProviders.lockForUpdate(id, tx);
+    const { isActive: wasActive } = await db.identityProviders.lockForUpdate(
+      id,
+      tx
+    );
     // SSO-only users could not sign in at all.
     if (!isActive && (await db.identityProviders.hasSsoOnlyDomain(id, tx))) {
       throw new ConflictError(
@@ -271,9 +278,15 @@ const setActive = async (req: Request, res: Response, isActive: boolean) => {
       entityId: id,
       data: { id, slug: updated.slug, displayName: updated.displayName },
     });
-    return updated;
+    return { provider: updated, wasActive };
   });
 
   await broadcastIdentityProviderInvalidate(id);
+  if (wasActive && !isActive) {
+    await enqueueProviderDeactivationSessionSweep(
+      { actor: { userId: auth.userId, email: auth.email }, providerId: id },
+      provider.updatedAt
+    );
+  }
   res.json(formatProvider(provider));
 };

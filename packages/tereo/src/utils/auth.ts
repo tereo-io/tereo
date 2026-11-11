@@ -218,27 +218,38 @@ export const handleClientCredentials = async (
     };
   }
 
+  const mint = (tx?: Prisma.TransactionClient) =>
+    handleCreateTokens(
+      client,
+      requestedScopes,
+      "client_credentials",
+      undefined,
+      undefined,
+      undefined,
+      client.organizationId ?? undefined,
+      undefined,
+      undefined,
+      tx
+    );
+  const { organizationId } = client;
   // A deactivated organization's tokens are revoked; none is minted for it.
-  if (
-    client.organizationId &&
-    !(await isActiveOrganization(client.organizationId))
-  ) {
+  // Checked holding its row shared: a deactivation in flight either commits
+  // first and is seen here, or waits and revokes the token minted.
+  const minted = organizationId
+    ? await db.$transaction(async (tx) => {
+        await db.organizations.lockForTokenIssue(organizationId, tx);
+        if (!(await isActiveOrganization(organizationId, tx))) return null;
+        return mint(tx);
+      })
+    : await mint();
+  if (!minted) {
     return {
       status: "error",
       error: "unauthorized_client",
       error_description: "Client's organization is inactive",
     };
   }
-
-  const { token, expiresIn } = await handleCreateTokens(
-    client,
-    requestedScopes,
-    "client_credentials",
-    undefined,
-    undefined,
-    undefined,
-    client.organizationId ?? undefined
-  );
+  const { token, expiresIn } = minted;
   return {
     status: "success",
     access_token: token,
@@ -277,6 +288,14 @@ export const handleAuthorizationCode = async (
       if (!(await db.authorizationCode.markUsed(code.id, tx))) {
         throw new InvalidGrantError();
       }
+      // Again under the lock: a deactivation or removal that committed since
+      // the check above has revoked what it found, and would miss this.
+      if (
+        code.organizationId &&
+        !(await maySelectGrantOrganization(code, tx))
+      ) {
+        throw new InvalidGrantError();
+      }
       return handleCreateTokens(
         client,
         code.scopes,
@@ -306,18 +325,21 @@ export const handleAuthorizationCode = async (
  * Whether the user may still select the grant's organization: a member of it
  * or a support-access holder, and it is active.
  */
-const maySelectGrantOrganization = async (grant: {
-  userId: string;
-  organizationId: string | null;
-}): Promise<boolean> => {
+const maySelectGrantOrganization = async (
+  grant: { userId: string; organizationId: string | null },
+  tx?: Prisma.TransactionClient
+): Promise<boolean> => {
   if (!grant.organizationId) return false;
-  return (await maySelectOrganization(grant.userId, grant.organizationId))
+  return (await maySelectOrganization(grant.userId, grant.organizationId, tx))
     .allowed;
 };
 
 /** False for an inactive, archived or missing organization. */
-export const isActiveOrganization = async (id: string): Promise<boolean> => {
-  const org = await db.organizations.get(id).catch((err) => {
+export const isActiveOrganization = async (
+  id: string,
+  tx?: Prisma.TransactionClient
+): Promise<boolean> => {
+  const org = await db.organizations.get(id, tx).catch((err) => {
     if (err instanceof NotFoundError) return null;
     throw err;
   });

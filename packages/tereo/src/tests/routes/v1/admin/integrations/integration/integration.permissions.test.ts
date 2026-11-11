@@ -56,6 +56,7 @@ beforeAll(async () => {
     permissions: [
       "integrations.read",
       "integrations.write",
+      "organizations.write",
       "services.read",
       "services.write",
       "services.approve",

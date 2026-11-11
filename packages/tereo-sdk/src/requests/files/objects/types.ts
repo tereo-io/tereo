@@ -134,6 +134,14 @@ export interface UploadObjectInput {
    * threshold and a multipart upload above it; a stream is read once.
    */
   file: Buffer | Readable;
+  /**
+   * A stream's exact length in bytes, when the caller knows it. Sent as
+   * `expectedSize` when the upload goes multipart, which core requires in a
+   * bucket with a storage quota (`400 expected_size_required` without it); a
+   * stream of any other length then fails at complete with `400
+   * size_mismatch`. Not used for a `Buffer`, whose length is sent.
+   */
+  expectedSize?: number;
   contentType?: string;
   metadata?: FileServiceObjectMetadata;
   /**

@@ -1,6 +1,7 @@
 import { OrgMemberRole } from "../../prisma/generated/client/index.js";
+import { AppError, ForbiddenError } from "./errors.js";
+import { canActInOrganization } from "./users.js";
 import { hasPermission } from "./permissions.js";
-import { ForbiddenError } from "./errors.js";
 import type { Prisma } from "./db/prisma.js";
 import type { Request } from "express";
 import db from "./db/index.js";
@@ -25,7 +26,8 @@ const PERMISSION_MAP: Record<MinOrgRole, string> = {
  * Allows access if the user either:
  * 1. Has the corresponding platform permission (organizations.read/write), OR
  * 2. Is a member of the target org with at least the required memberRole,
- *    and, for anything above "member", the org is active
+ *    and, for anything above "member", the org is active. A guest's
+ *    membership never counts.
  *
  * The platform permissions are not org-assignable, so they come only from a
  * global role: no role granted within an organization reaches this bypass.
@@ -50,6 +52,12 @@ export async function requireOrgRole(
     throw new ForbiddenError(
       `This token's scopes do not allow ${requiredPermission}`
     );
+  }
+
+  // A guest's membership scopes their roles; it is no authority over the
+  // organization, whose record and members are not theirs to read.
+  if (auth.userType === "guest") {
+    throw new ForbiddenError("A guest cannot read or manage an organization");
   }
 
   // Check org membership
@@ -80,6 +88,55 @@ export async function requireOrgRole(
 
   return membership.memberRole;
 }
+
+/**
+ * Passes for organizations.write, which acts in every organization, and for
+ * an organization the caller acts in: as a member, or as a service account
+ * whose client belongs to it. Otherwise 403 `organization_not_permitted`
+ * with `message` — also for an organization that does not exist.
+ */
+export const assertActsInOrganization = async (
+  auth: { userId: string; permissions: string[] },
+  organizationId: string | null,
+  message: string
+): Promise<void> => {
+  if (hasPermission(auth.permissions, "organizations.write")) return;
+  if (
+    organizationId !== null &&
+    (await canActInOrganization(auth.userId, organizationId))
+  ) {
+    return;
+  }
+  throw new AppError(403, "organization_not_permitted", message);
+};
+
+/**
+ * Passes for organizations.write and for an admin or owner of an active
+ * organization, the tier that manages its members. Otherwise 403
+ * `organization_not_permitted` with `message` — also for an organization that
+ * does not exist.
+ */
+export const assertAdministersOrganization = async (
+  auth: { userId: string; permissions: string[]; ceiling?: string[] },
+  organizationId: string,
+  message: string
+): Promise<void> => {
+  if (hasPermission(auth.permissions, "organizations.write")) return;
+  // A delegated token's scopes cap the member role's authority.
+  const capped =
+    auth.ceiling && !hasPermission(auth.ceiling, "organizations.write");
+  const membership = capped
+    ? null
+    : await db.organizations.getMembership(organizationId, auth.userId);
+  if (
+    membership &&
+    ROLE_LEVEL[membership.memberRole] >= ROLE_LEVEL.admin &&
+    (await db.organizations.getAny(organizationId)).isActive
+  ) {
+    return;
+  }
+  throw new AppError(403, "organization_not_permitted", message);
+};
 
 /**
  * Serializes changes to one organization's owners. Taken before the change, so

@@ -5,6 +5,7 @@
 import { getTestPrincipalToken } from "../../../../../../../support/principals.js";
 import { getAccessTokenForUser } from "../../../../../../../support/auth/login.js";
 import { createTestClient } from "../../../../../../../support/auth/clients.js";
+import { lockOrgOwners } from "../../../../../../../../utils/orgRoleAuth.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
@@ -19,6 +20,10 @@ import {
   createTestUser,
   createAdminUser,
 } from "../../../../../../../support/auth/users.js";
+import {
+  holdLocks,
+  waitForLockWait,
+} from "../../../../../../../support/dbLocks.js";
 
 const ITERATIONS = 60;
 
@@ -66,6 +71,28 @@ describe("PATCH and DELETE /v1/admin/organizations/:id/members/:userId", () => {
 
   const memberPath = (orgId: string, userId: string) =>
     `/v1/admin/organizations/${orgId}/members/${userId}`;
+
+  it("waits on the organization's owners lock when the id is in upper case", async () => {
+    const { org, target } = await setup();
+    await addTestOrgMember(adminToken, org.id, target.id, "owner");
+    const upper = org.id.toUpperCase();
+    expect(upper).not.toBe(org.id);
+
+    const release = await holdLocks((tx) => lockOrgOwners(tx, org.id));
+    let settled = false;
+    const removal = call(
+      "DELETE",
+      memberPath(upper, target.id.toUpperCase()),
+      adminToken
+    ).finally(() => (settled = true));
+    try {
+      await waitForLockWait("%pg_advisory_xact_lock%");
+      expect(settled).toBe(false);
+    } finally {
+      await release();
+    }
+    expect((await removal).status).toBe(204);
+  });
 
   it("never changes the tier of someone who is an owner by then", async () => {
     const { org, orgAdminToken, target } = await setup();

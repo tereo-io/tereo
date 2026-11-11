@@ -241,6 +241,50 @@ const findSizeBytesSort = (
   return null;
 };
 
+type ListFilterNode = Record<string, unknown>;
+
+/**
+ * The object list's filters as SQL, for the size-sorted query, which Prisma
+ * cannot build: `where` as `listObjectsQuerySchema` produces it, with
+ * `objectKey` clauses and, under `versions.some`, `contentType` ones.
+ * Patterns arrive with LIKE's wildcards escaped.
+ */
+const listFilterSql = (where: Prisma.ObjectWhereInput | undefined) => {
+  const conditions: Prisma.Sql[] = [];
+  const add = (column: Prisma.Sql, clause: ListFilterNode) => {
+    for (const [operator, value] of Object.entries(clause)) {
+      if (operator === "mode") continue;
+      if (operator === "equals") {
+        conditions.push(Prisma.sql`AND ${column} = ${value}`);
+      } else if (operator === "contains") {
+        conditions.push(
+          Prisma.sql`AND ${column} ILIKE ('%' || ${value} || '%')`
+        );
+      } else if (operator === "startsWith") {
+        conditions.push(Prisma.sql`AND ${column} ILIKE (${value} || '%')`);
+      } else {
+        throw new Error(`Object list filter "${operator}" has no SQL form`);
+      }
+    }
+  };
+  const visit = (node: ListFilterNode) => {
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "AND") {
+        (value as ListFilterNode[]).forEach(visit);
+      } else if (key === "objectKey") {
+        add(Prisma.sql`o."object_key"`, value as ListFilterNode);
+      } else if (key === "versions") {
+        const { contentType } = (value as { some: ListFilterNode }).some;
+        add(Prisma.sql`ov."content_type"`, contentType as ListFilterNode);
+      } else {
+        throw new Error(`Object list filter on "${key}" has no SQL form`);
+      }
+    }
+  };
+  if (where) visit(where as ListFilterNode);
+  return conditions.length > 0 ? Prisma.join(conditions, " ") : Prisma.empty;
+};
+
 export const getPaginated = async (options: GetPaginatedOptions) => {
   const {
     bucketId,
@@ -283,6 +327,7 @@ export const getPaginated = async (options: GetPaginatedOptions) => {
       WHERE o."bucket_id" = ${bucketId}
         AND o."deleted_at" IS NULL
         AND o."thumbnail_for" IS NULL
+        ${listFilterSql(additionalWhere)}
     `;
 
     const cursorClause = sizeBytesCursor
@@ -1674,7 +1719,8 @@ export const removeObjectsBulk = async (
     const more = await prisma.object.findFirst({
       where: {
         bucketId,
-        objectKey: { startsWith: filter.prefix },
+        // As the deletes match it: Prisma hands LIKE's wildcards through.
+        objectKey: { startsWith: escapeLike(filter.prefix) },
         deletedAt: null,
         thumbnailFor: null,
       },

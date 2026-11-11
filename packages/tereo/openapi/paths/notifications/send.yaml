@@ -23,6 +23,10 @@
       Attachments total at most 20 MB; `contentType` and `size` come from the stored version,
       and `filename` defaults to the last segment of the object's key.
 
+      `sensitive: true` marks the content as a credential (a one-time code, a sign-in link):
+      the admin log never returns it, it is dropped as soon as no delivery is pending, and the
+      notification cannot be retried from the log. It is off unless asked for.
+
       `idempotencyKey` makes a retry safe: the same key and body answer the first result, a
       different body is a `422`.
 

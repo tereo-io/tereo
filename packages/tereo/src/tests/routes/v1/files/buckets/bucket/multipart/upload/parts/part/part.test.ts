@@ -3,8 +3,8 @@
 import { multipartCompleteClaim } from "../../../../../../../../../../routes/v1/files/buckets/bucket/multipart/utils.js";
 import { MAX_BLOB_BYTES } from "../../../../../../../../../../utils/encryption.js";
 import { multipartClient } from "../../../../../../../../../support/multipart.js";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../../../../../utils/db/prisma.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import env from "../../../../../../../../../../env.js";
 import { randomBytes, randomUUID } from "crypto";
 import { PassThrough, Readable } from "stream";
@@ -96,6 +96,19 @@ describe("PUT /v1/files/buckets/:name/multipart/:uploadId/parts/:partNumber", ()
       token = await getTestAccessToken();
     });
 
+    // The fake parts below would otherwise count against the user's staged
+    // bytes in every later test.
+    afterEach(async () => {
+      await prisma.multipartUpload.updateMany({
+        where: {
+          createdBy: getTestUserId(),
+          completedAt: null,
+          abortedAt: null,
+        },
+        data: { abortedAt: new Date() },
+      });
+    });
+
     afterAll(async () => {
       await cleanupTestEntities();
     });
@@ -136,14 +149,128 @@ describe("PUT /v1/files/buckets/:name/multipart/:uploadId/parts/:partNumber", ()
       expect(tooBig.status).toBe(HTTP_STATUS.INSUFFICIENT_STORAGE);
       expect(tooBig.data.error).toBe("insufficient_storage");
 
-      const { uploadId } = (await initiate(bucket.name)).data;
+      // An upload from before the bucket had a quota reserved nothing, so
+      // its parts are checked against the quota as they arrive.
+      const unbounded = await createTestBucket(token);
+      const { uploadId } = (await initiate(unbounded.name)).data;
+      await prisma.bucket.update({
+        where: { id: unbounded.id },
+        data: { storageQuotaBytes: 10n },
+      });
       expect(
-        (await putPart(bucket.name, uploadId, 1, Buffer.alloc(8))).status
+        (await putPart(unbounded.name, uploadId, 1, Buffer.alloc(8))).status
       ).toBe(HTTP_STATUS.OK);
-      const over = await putPart(bucket.name, uploadId, 2, Buffer.alloc(8));
+      const over = await putPart(unbounded.name, uploadId, 2, Buffer.alloc(8));
       expect(over.status).toBe(HTTP_STATUS.INSUFFICIENT_STORAGE);
       expect(over.data.error).toBe("insufficient_storage");
       expect(await prisma.multipartPart.count({ where: { uploadId } })).toBe(1);
+    });
+
+    it("requires expectedSize to initiate in a bucket with a quota", async () => {
+      const bucket = await createTestBucket(token, {
+        storageQuotaBytes: "1000",
+      });
+      const refused = await initiate(bucket.name);
+      expect(refused.status).toBe(HTTP_STATUS.BAD_REQUEST);
+      expect(refused.data.error).toBe("expected_size_required");
+      expect(
+        await prisma.multipartUpload.count({ where: { bucketId: bucket.id } })
+      ).toBe(0);
+
+      expect((await initiate(bucket.name, { expectedSize: 10 })).status).toBe(
+        HTTP_STATUS.CREATED
+      );
+    });
+
+    it("caps the bytes one user has staged across uploads no quota bounds", async () => {
+      const cap = BigInt(env.FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER);
+      const first = await createTestBucket(token);
+      const held = (await initiate(first.name)).data.uploadId;
+      await fakePart(held, 1, cap - 4n);
+
+      // Bytes a quota reservation covers are not counted.
+      const quota = await createTestBucket(token, {
+        storageQuotaBytes: (2n * cap).toString(),
+      });
+      const reserved = await initiate(quota.name, {
+        expectedSize: (cap / 2n).toString(),
+      });
+      expect(reserved.status).toBe(HTTP_STATUS.CREATED);
+      await fakePart(reserved.data.uploadId, 1, cap / 2n);
+
+      const second = await createTestBucket(token);
+      const { uploadId } = (await initiate(second.name)).data;
+      const declared = await putPart(second.name, uploadId, 1, Buffer.alloc(8));
+      expect(declared.status).toBe(HTTP_STATUS.CONFLICT);
+      expect(declared.data.error).toBe("multipart_staged_bytes_exceeded");
+
+      // Without a Content-Length, refused once staged, and its file removed.
+      const chunked = await putPart(
+        second.name,
+        uploadId,
+        1,
+        Readable.from([Buffer.alloc(8)])
+      );
+      expect(chunked.status).toBe(HTTP_STATUS.CONFLICT);
+      expect(chunked.data.error).toBe("multipart_staged_bytes_exceeded");
+      expect(await prisma.multipartPart.count({ where: { uploadId } })).toBe(0);
+      expect(await stagedFiles(uploadId)).toBe(0);
+
+      expect(
+        (await putPart(second.name, uploadId, 1, Buffer.alloc(4))).status
+      ).toBe(HTTP_STATUS.OK);
+      // A part sent again replaces itself rather than adding to the total.
+      expect(
+        (await putPart(second.name, uploadId, 1, Buffer.alloc(4))).status
+      ).toBe(HTTP_STATUS.OK);
+      expect(
+        (await putPart(second.name, uploadId, 2, Buffer.alloc(1))).status
+      ).toBe(HTTP_STATUS.CONFLICT);
+
+      // An aborted upload no longer holds its share.
+      const aborted = await axios.delete(
+        `${BASE_URL}/buckets/${first.name}/multipart/${held}`,
+        as()
+      );
+      expect(aborted.status).toBeLessThan(300);
+      expect(
+        (await putPart(second.name, uploadId, 2, Buffer.alloc(8))).status
+      ).toBe(HTTP_STATUS.OK);
+    });
+
+    it("gives a service account its own, higher cap", async () => {
+      const cap = BigInt(
+        env.FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_SERVICE_ACCOUNT
+      );
+      const userCap = BigInt(
+        env.FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER
+      );
+      expect(cap).toBeGreaterThan(userCap);
+      const asType = (userType: "human" | "service_account") =>
+        prisma.user.update({
+          where: { id: getTestUserId() },
+          data: { userType },
+        });
+
+      const first = await createTestBucket(token);
+      const held = (await initiate(first.name)).data.uploadId;
+      await fakePart(held, 1, userCap);
+      const second = await createTestBucket(token);
+      const { uploadId } = (await initiate(second.name)).data;
+
+      await asType("service_account");
+      try {
+        expect(
+          (await putPart(second.name, uploadId, 1, Buffer.alloc(8))).status
+        ).toBe(HTTP_STATUS.OK);
+
+        await fakePart(held, 2, cap - userCap - 8n);
+        const over = await putPart(second.name, uploadId, 2, Buffer.alloc(1));
+        expect(over.status).toBe(HTTP_STATUS.CONFLICT);
+        expect(over.data.error).toBe("multipart_staged_bytes_exceeded");
+      } finally {
+        await asType("human");
+      }
     });
 
     it("refuses an upload whose expectedSize, with the others staged, passes the quota", async () => {
@@ -351,6 +478,58 @@ describe("PUT /v1/files/buckets/:name/multipart/:uploadId/parts/:partNumber", ()
           await getRedisClient().del(claim);
         }
       });
+
+      it("answers the same 404 for an unknown upload and one of another bucket", async () => {
+        const other = await createTestBucket(token);
+        const elsewhere = await axios.post(
+          `${BASE_URL}/buckets/${other.name}/multipart`,
+          { objectKey: "o.bin", contentType: "application/octet-stream" },
+          as()
+        );
+        expect(elsewhere.status).toBe(HTTP_STATUS.CREATED);
+
+        const unknown = await putPart(randomUUID(), 1, text());
+        const foreign = await putPart(elsewhere.data.uploadId, 1, text());
+        expect(unknown.status).toBe(HTTP_STATUS.NOT_FOUND);
+        expect(foreign.status).toBe(HTTP_STATUS.NOT_FOUND);
+        const { request_id: _a, ...unknownBody } = unknown.data;
+        const { request_id: _b, ...foreignBody } = foreign.data;
+        expect(foreignBody).toEqual(unknownBody);
+      });
+
+      it("treats an upload id in upper case as the same upload", async () => {
+        const uploadId = await initiate();
+        const upper = uploadId.toUpperCase();
+        expect(upper).not.toBe(uploadId);
+        const stagingDirs = () =>
+          fs.readdir(path.join(env.FILE_SERVICE_STORAGE_PATH, "multipart"));
+
+        const first = await putPart(upper, 1, text());
+        expect(first.status).toBe(HTTP_STATUS.OK);
+        expect(await stagingDirs()).toContain(uploadId);
+        expect(await stagingDirs()).not.toContain(upper);
+
+        const claim = redisKey(multipartCompleteClaim(uploadId));
+        await getRedisClient().set(claim, "held-by-test", "EX", 60);
+        try {
+          const res = await putPart(upper, 1, text());
+          expect(res.status).toBe(HTTP_STATUS.CONFLICT);
+          expect(res.data.error).toBe("multipart_complete_in_progress");
+        } finally {
+          await getRedisClient().del(claim);
+        }
+
+        const second = await putPart(upper, 2, text());
+        expect(second.status).toBe(HTTP_STATUS.OK);
+        const abort = await axios.delete(
+          `${BASE_URL}/buckets/${bucketName}/multipart/${upper}`,
+          as()
+        );
+        expect(abort.status).toBe(HTTP_STATUS.NO_CONTENT);
+        const left = await stagingDirs();
+        expect(left).not.toContain(uploadId);
+        expect(left).not.toContain(upper);
+      });
     }
   );
 
@@ -415,5 +594,44 @@ describe("PUT /v1/files/buckets/:name/multipart/:uploadId/parts/:partNumber", ()
         expect(await download(bucket.name, "parts.bin")).toBe(body);
       }
     );
+
+    it("streams a part and parses a large complete when the path ends in a slash", async () => {
+      const body = '{"hello":"world"}';
+      const bucket = await createTestBucket(token);
+      const init = await axios.post(
+        `${BASE_URL}/buckets/${bucket.name}/multipart`,
+        { objectKey: "slash.bin", contentType: "application/octet-stream" },
+        { headers: auth() }
+      );
+      const upload = `${BASE_URL}/buckets/${bucket.name}/multipart/${init.data.uploadId}`;
+
+      const part = await axios.put(`${upload}/parts/1/`, body, {
+        headers: { ...auth(), "Content-Type": "application/json" },
+        transformRequest: (data) => data,
+        validateStatus: () => true,
+      });
+      expect(part.status).toBe(HTTP_STATUS.OK);
+      expect(part.data.sizeBytes).toBe(String(Buffer.byteLength(body)));
+
+      // Past the 1mb of the area's JSON parser, within the route's own 5mb.
+      const parts = JSON.stringify({
+        parts: [{ partNumber: 1, etag: part.data.etag }],
+      });
+      const complete = await axios.post(
+        `${upload}/complete/`,
+        parts + " ".repeat(1_200_000),
+        {
+          headers: {
+            ...auth(),
+            "Content-Type": "application/json",
+            "Idempotency-Key": testIdempotencyKey(),
+          },
+          transformRequest: (data) => data,
+          validateStatus: () => true,
+        }
+      );
+      expect([HTTP_STATUS.OK, HTTP_STATUS.CREATED]).toContain(complete.status);
+      expect(await download(bucket.name, "slash.bin")).toBe(body);
+    });
   });
 });

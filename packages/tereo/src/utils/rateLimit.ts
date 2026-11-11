@@ -1,7 +1,7 @@
 import { ServiceUnavailableError, TooManyRequestsError } from "./errors.js";
 import { Request, RequestHandler, Response, NextFunction } from "express";
 import { RateLimiterRedis, RateLimiterRes } from "rate-limiter-flexible";
-import { getRedisClient, redisKey } from "./redis.js";
+import { getRedisClient, redisCommand, redisKey } from "./redis.js";
 import { BlockList, isIPv4, isIPv6 } from "node:net";
 import { createHash, randomUUID } from "node:crypto";
 import { redactUrl } from "../telemetry/redact.js";
@@ -16,7 +16,8 @@ import env from "../env.js";
 //   createPreAuthRateLimitMiddleware) fail open, so an outage does not take
 //   the whole API down with it.
 // All of them give up at once while the client is not "ready", rather than
-// waiting in ioredis's offline queue for Redis to come back.
+// waiting in ioredis's offline queue for Redis to come back. That includes
+// `reset` and `refund`, which fail the way their limiter does.
 
 const DURATION_SECONDS = 1;
 const UNAVAILABLE_RETRY_AFTER_SECONDS = 5;
@@ -405,23 +406,15 @@ export function createFailureLimiter(
 
   return {
     async reset(req, subject) {
-      if (!failOpen) {
-        await getLimiter().delete(getKey(req, subject));
-        return;
-      }
       try {
-        await whenReady().delete(getKey(req, subject));
+        await redisCommand(() => getLimiter().delete(getKey(req, subject)));
       } catch (err) {
         unavailable(err);
       }
     },
     async refund(req, subject) {
-      if (!failOpen) {
-        await getLimiter().reward(getKey(req, subject), 1);
-        return;
-      }
       try {
-        await whenReady().reward(getKey(req, subject), 1);
+        await redisCommand(() => getLimiter().reward(getKey(req, subject), 1));
       } catch (err) {
         unavailable(err);
       }
@@ -541,11 +534,7 @@ export function createBackoffLimiter(
     fn: (redis: ReturnType<typeof getRedisClient>) => Promise<T>
   ): Promise<T> => {
     try {
-      const redis = getRedisClient();
-      if (!isRedisReady(redis)) {
-        throw new Error("Redis connection is not ready");
-      }
-      return await fn(redis);
+      return await redisCommand(fn);
     } catch (error) {
       throw failClosed(keyPrefix, error);
     }
@@ -567,7 +556,7 @@ export function createBackoffLimiter(
 
   return {
     async reset(req, subject) {
-      await getRedisClient().del(keyOf(req, subject));
+      await run((redis) => redis.del(keyOf(req, subject)));
     },
     async check(req, subject) {
       const [allowed, ms] = await spend(req, subject, false);
@@ -724,7 +713,7 @@ export function createWindowedBackoffLimiter(
       // A refund lost to Redis costs the user one attempt, not the login.
       refund: async () => {
         try {
-          await getRedisClient().zrem(key, member);
+          await redisCommand((redis) => redis.zrem(key, member));
         } catch (err) {
           logger.warn({ keyPrefix, err }, "Could not refund a backoff attempt");
         }

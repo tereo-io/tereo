@@ -30,12 +30,15 @@ import {
 // `/objects/by-id/:id` with its versions (list, one version, its download).
 // `/by-id/:id/presign` is left out by the patterns. None of these routes adds
 // `requirePermission`, which would need a token even on a public bucket.
-const PUBLIC_OBJECT_KEY = /^\/buckets\/[^/]+\/objects\/(?!by-id\/|by-key\/).+$/;
-const PUBLIC_BY_KEY = /^\/buckets\/[^/]+\/objects\/by-key\/.+$/;
-const PUBLIC_BY_ID = /^\/buckets\/[^/]+\/objects\/by-id\/[^/]+$/;
+// The patterns ignore case because routing does: `/objects/BY-ID/:id/presign`
+// reaches the by-id router, so it must not pass as an object key.
+const PUBLIC_OBJECT_KEY =
+  /^\/buckets\/[^/]+\/objects\/(?!by-id\/|by-key\/).+$/i;
+const PUBLIC_BY_KEY = /^\/buckets\/[^/]+\/objects\/by-key\/.+$/i;
+const PUBLIC_BY_ID = /^\/buckets\/[^/]+\/objects\/by-id\/[^/]+$/i;
 const PUBLIC_BY_ID_VERSIONS =
-  /^\/buckets\/[^/]+\/objects\/by-id\/[^/]+\/versions(?:\/[^/]+(?:\/download)?)?$/;
-const PUBLIC_OBJECT_LIST = /^\/buckets\/[^/]+\/objects$/;
+  /^\/buckets\/[^/]+\/objects\/by-id\/[^/]+\/versions(?:\/[^/]+(?:\/download)?)?$/i;
+const PUBLIC_OBJECT_LIST = /^\/buckets\/[^/]+\/objects$/i;
 
 const requireAuth = createRequireAuth({
   area: "files",
@@ -58,12 +61,13 @@ router.use(accessLogMiddleware);
 // Signed URLs and share links carry their own credential (an HMAC, or the
 // share token and optional password), so they are mounted before
 // authentication. The global limiter still bounds them: without it, token
-// probing and replay of leaked signed URLs would be unthrottled. Signed URLs
-// take no parsed body: a presigned PUT streams its raw bytes.
+// probing and replay of leaked signed URLs would be unthrottled. Their
+// refusals write an access-log row, except a 429. Signed URLs take no parsed
+// body: a presigned PUT streams its raw bytes.
 router.use("/signed", rateLimitGeneral, filesSignedRouter);
 router.use("/shared", rateLimitGeneral, parseBody, filesSharedRouter);
 
-// Past here, a 401 or 429 that no controller logged writes no access-log row:
+// Past here, a 401 that no controller logged writes no access-log row either:
 // anyone can send those, as fast as the limiters let them.
 router.use(skipRejectedAccessLogs);
 router.use(rateLimitPreAuth);

@@ -340,6 +340,13 @@ admins as usual):
 | `requires2fa` | Default `false`. `true`: holders must sign in with 2FA, as for a hand-made role. A guest-assignable role that comes to require it revokes the password-only access tokens of the guests holding it |
 | `guestAssignable` | Default `false`. `true` lets [guest users](auth.md#guest-users) hold the role. Needs `orgAssignable: true` and no core permission besides `file-service.objects.read` and `file-service.objects.write`. Custom roles only: a service's `systemRoles` never are. Not editable in the admin API (`409 managed_by_provisioning`) |
 
+A role an integration holds, hand-made ones included, cannot gain `admin` or come back carrying it:
+the apply is refused, naming the integrations, as the admin API refuses it
+([integrations](integrations.md)). Take the role from them first.
+
+Nor can an apply take `admin` from a role when that would leave no active administrator: it is
+refused, as the admin API refuses it ([auth](auth.md)). Grant `admin` to another user first.
+
 ### `guests`
 
 ```json
@@ -455,8 +462,12 @@ the CLI the exit code is non-zero.
 - **Secrets**: format, strength and the other rules of [Secrets](#secrets), across service, client
   and webhook secrets; every `secretFrom` variable must be set.
 - **Existing rows**: a service or client of the same slug or ID that exists but is not
-  provisioned is an error naming it; core never adopts a hand-made row. Delete or rename it, or
-  change the entry.
+  provisioned is an error naming it; core never adopts a hand-made row. A hand-made login client
+  can be deleted (`DELETE /v1/admin/clients/:id`). A hand-made service or integration cannot: no
+  route deletes one or changes its slug or namespace, and deactivating it does not free them, so
+  change the entry's `slug`, `namespace` or `clientId` instead. A service whose `namespace` merely
+  overlaps the entry's blocks it the same way. `provision --dry-run` reports all of this before
+  a rollout.
 
 ## Applying
 
@@ -468,7 +479,9 @@ apply it once. A set that has not changed writes nothing and audits nothing.
 2. **Declarations**: a service whose declaration or `version` changed has its permissions, system
    roles, buckets and event types applied ([registry](registry.md)). A `version` **lower** than the
    stored one is applied anyway, because the documents are the intended state and a lower version is
-   a deliberate rollback; core logs a warning naming both versions.
+   a deliberate rollback; core logs a warning naming both versions. Core's own declaration is the
+   exception: a start ignores a lower version, and a rollback of core is confirmed with
+   `register-core --accept-older` ([registry](registry.md#rolling-core-back)).
 3. **Custom roles**: created or updated, their permission set replaced.
 4. **Access**: every `access` entry becomes an approved access row, decided by the system user.
    **Access follows the role**: an entry for another service's role grants whatever the role holds
@@ -559,6 +572,11 @@ If the old secret leaked, end a service's overlap at once with
 `POST /v1/admin/services/:id/revoke-previous-secret` (the admin UI's "End Overlap Now"). That route
 is allowed on a provisioned service, since the file cannot express it.
 
+Rotating a secret, or ending its overlap, stops the old secret minting tokens; it does not revoke
+the access tokens already minted with it, which stay valid until they expire
+(`JWT_ACCESS_TOKEN_TTL`, an hour by default). Deactivating the service
+(`PATCH /v1/admin/services/:id` with `isActive: false`) revokes them at once.
+
 Core refuses to start if the new value is the previous secret, which is what happens when a deploy
 is rolled back to the old Secret: the message says to generate a new secret. A secret that stops
 working is **retired**, and refused for good for this client and every other. That is the previous
@@ -583,7 +601,8 @@ runs older documents does nothing. After that the hourly retirement job
 - **deletes** a login client, as the admin delete does;
 - **archives** a custom role or a group (its members are kept). Groups are archived in a
   transaction of their own, after the rest: one that fails is logged and retried the next hour,
-  and holds back nothing else.
+  and holds back nothing else. A role whose archiving would leave no active administrator is kept,
+  with a warning in the log, and tried again the next hour.
 
 An entry that returns, before or after, is reactivated: a deactivated service becomes active again and an archived role is restored. A deleted login client is created anew. Items a service's declaration
 stops listing retire as in [registry](registry.md#retirement); its dropped webhooks are archived at
@@ -613,7 +632,7 @@ Provisioned rows change only in the documents. The admin API answers `409` with 
 | Login client | `PATCH`, `DELETE`, `regenerate-secret` on `/v1/admin/clients/:id` | Reading it |
 | Custom role | Edit, delete, archive, restore, and changing its permissions | Assigning it to users and organization members, and duplicating it |
 | Group | `PATCH`, role changes, archive and restore on `/v1/admin/groups/:id` | Reading it, and adding and removing members |
-| Webhook endpoint | `PATCH` (except a status-only re-enable), `DELETE`, archive, restore, `rotate-secret`, `revoke-previous-secret` | Delivery views, retries, test sends, a status-only `PATCH` to re-enable |
+| Webhook endpoint | `PATCH` (except a status-only re-enable; pausing is refused), `DELETE`, archive, restore, `rotate-secret`, `revoke-previous-secret` | Delivery views, retries, test sends, a status-only `PATCH` to re-enable |
 
 Responses carry `provisioned: true` (an endpoint also `ownerService`), and the admin UI shows a
 "Managed by provisioning" badge and hides the change controls.
@@ -623,6 +642,7 @@ Responses carry `provisioned: true` (an endpoint also `ownerService`), and the a
 ```sh
 npm run cli -- provision [--path <path>] [--dry-run]
 npm run cli -- provisioning-schema
+npm run cli -- register-core [--accept-older]
 ```
 
 - `provision` registers core's own declaration first, as start does, so documents may use what this
@@ -638,6 +658,11 @@ npm run cli -- provisioning-schema
   change. It writes nothing to the provisioned state. On a never-started database it can still
   create the rows `loadKeys()` and the default organization need, and registers core's declaration.
 - `provisioning-schema` prints the JSON Schema.
+- `register-core` registers core's own declaration and nothing else. `provision` and a start never
+  apply one older than the one recorded, so after rolling core back to an earlier release run
+  `register-core --accept-older` from that release, or what the newer release dropped retires after
+  `REGISTRY_RETIREMENT_GRACE_HOURS` ([registry](registry.md#rolling-core-back)). The documents
+  themselves roll back without it.
 
 Run `provision --dry-run` in a pipeline before rolling out, to catch a bad set before core refuses
 to start on it.

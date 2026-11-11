@@ -1,4 +1,4 @@
-import { isBucketReader } from "../../../../../../../../../utils/bucketAccess.js";
+import { holdsBucketReadAccess } from "../../../../../../../../../utils/bucketAccess.js";
 import { validateParams } from "../../../../../../../../../utils/validateReq.js";
 import { validateUser } from "../../../../../../../../../middleware/auth.js";
 import { withUserRefs } from "../../../../../../../../../utils/users.js";
@@ -75,15 +75,16 @@ export async function getVisibleVersion(
 
 /**
  * Versions as the list and the detail return them. Who wrote each is named
- * only to readers of the bucket: writers' ids, emails and names are not for
- * the public a public bucket is served to.
+ * only to callers who could read the bucket were it private: writers' ids,
+ * emails and names are not for those a public bucket is served to only
+ * because it is public, signed in or not.
  */
 export async function serializeVersions(
   req: Request,
   bucketName: string,
   versions: (ObjectVersion & { contentBlob: ContentBlob | null })[]
 ) {
-  const reader = await isBucketReader(req, bucketName);
+  const reader = await holdsBucketReadAccess(req, bucketName);
   const named = reader
     ? await withUserRefs(versions, { creator: "createdBy" })
     : versions.map((v) => ({ ...v, creator: null }));

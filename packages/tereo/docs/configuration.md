@@ -14,7 +14,7 @@ With `NODE_ENV=production`, core refuses to start unless these are set:
 | `REDIS_URL`, or `REDIS_SENTINELS` + `REDIS_MASTER_NAME` | Redis — single node or Sentinel |
 | `PUBLIC_URL` | Externally reachable `https://` URL of core, not localhost/127.0.0.1/[::1]. The OIDC issuer, share and presigned links, and the UI's default address are built from it |
 | `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call core's API with credentials; `*` is refused, and so is an `http://` origin other than loopback (`localhost`, `127.0.0.1`, `[::1]`). A security setting: a listed origin's pages can read core's API responses made with the user's credentials — list only origins you trust |
-| `TRUST_PROXY` | The proxies in front of core (`1`, a CIDR list, …), or `loopback`/`false` when there are none. Left at the development default behind a load balancer, `req.ip` — rate-limit keys and audit IPs — would be the proxy's address, so it must be chosen, not inherited. `true` is refused: it trusts every `X-Forwarded-For` hop, so a client could pick its own address |
+| `TRUST_PROXY` | The proxies in front of core (`1`, a CIDR list, …), or `loopback`/`false` when there are none. Left at the development default behind a load balancer, `req.ip` — rate-limit keys and audit IPs — would be the proxy's address, so it must be chosen, not inherited. `true` is refused: it trusts every `X-Forwarded-For` hop, so a client could pick its own address. A hop count trusts whoever connects to core, not only the proxy: see [Trusted proxies](#trusted-proxies) |
 | `CORE_KEK` | Base64, 32 bytes. Encrypts the keys core keeps in `core.secrets`; keep it outside the database (a secret manager), since without it the stored keys cannot be read. See [Key encryption](#key-encryption) |
 
 It also refuses, with no override, `COOKIE_SECURE=false` (or `0`), and a `UI_BASE_URL` or `ISSUER`
@@ -29,6 +29,32 @@ Set these too, though core starts without them:
 Apart from `CORE_KEK`, no key needs to be supplied: core generates any that env leaves unset into
 `core.secrets` on first start, encrypted with the KEK. A key set in env always wins and is never
 stored.
+
+### Trusted proxies
+
+`TRUST_PROXY` decides whose `X-Forwarded-For` core believes, and so what `req.ip` is: the key of
+every per-IP rate limit and the address written to auth logs, access logs and audit entries.
+
+- **A hop count** (`1` behind a single ingress) trusts whoever opens the connection, whatever its
+  address. Through the proxy that is the proxy, and a client cannot choose its address. But any peer
+  that reaches core without passing through the proxy — another workload in the cluster connecting
+  to the Service or the pod — is trusted the same way: it sends `X-Forwarded-For: <anything>` and
+  core takes that as its address, so it gets a fresh per-IP limit with every request and writes
+  addresses of its choosing into the logs and the audit trail. The per-account and per-token limits
+  are not keyed by address and still hold.
+- **A CIDR list** (the proxy's address range) believes the header only from those addresses; a
+  direct peer outside it is seen at its own address.
+
+The same setting decides whose `X-Request-ID` core keeps as the request's id (in its logs, access
+logs and audit entries, and echoed in the response): only one sent by a peer that is a trusted proxy
+— an address in the list, `loopback` for a local caller, or any peer with a hop count. With `false`,
+or from any other peer, the header is ignored and core generates the id. An app service that calls
+core directly and forwards its request id (the SDK does) is therefore correlated only when its
+address is one `TRUST_PROXY` trusts.
+
+So with a hop count, the network must let only the proxy and workloads you trust connect to core:
+a NetworkPolicy (the Helm chart ships an optional one, `networkPolicy`), a security group, or a
+listener bound where only the proxy can reach it. Where that cannot be arranged, use the CIDR list.
 
 ## Process roles
 
@@ -120,7 +146,7 @@ notes as a range; a value outside its range stops core at startup with the varia
 | `REDIS_PASSWORD` | — | Sentinel connections only |
 | `REDIS_DB` | URL's path, else `0` | 0–15. The database index, in URL, unix socket and Sentinel modes alike; set, it overrides a database in `REDIS_URL`'s path |
 | `REDIS_KEY_PREFIX` | empty | Up to 64 of `A-Z a-z 0-9 : _ . -`, e.g. `app1:`. Put in front of every key, pub/sub channel, BullMQ prefix (`<prefix>bull`) and socket.io adapter key (`<prefix>socket.io`) core uses, so several cores can share one Redis database. Pub/sub channels span every database index, so cores that share a Redis server on different `REDIS_DB`s still need distinct prefixes. App services must pass the same value as `channelPrefix` to `createCoreClient` to hear core's cache invalidations. Changing it orphans existing keys and jobs: change it only on a fresh Redis or with core stopped and its queues drained |
-| `TRUST_PROXY` | `loopback` outside production | Required in production. Express `trust proxy`: `loopback`, `linklocal`, `uniquelocal`, a hop count, a comma-separated IP/CIDR list, or `true`/`false`; `true` is refused in production |
+| `TRUST_PROXY` | `loopback` outside production | Required in production. Express `trust proxy`: `loopback`, `linklocal`, `uniquelocal`, a hop count, a comma-separated IP/CIDR list, or `true`/`false`; `true` is refused in production. A hop count trusts every peer that can connect: see [Trusted proxies](#trusted-proxies) |
 | `CORS_ALLOWED_ORIGINS` | `UI_BASE_URL`'s origin outside production | Comma-separated. Required in production, `https://` or loopback only. The origins sent credentialed CORS headers on core's API (`/v1`, `/oauth` but for `GET /oauth/authorize`, `/.well-known`, `/health`); the admin UI's pages get none. It does not decide which pages may use the browser's cookies: an app's page may use only its own client's (see [auth.md](auth.md#browser-cookies)); list only origins you control |
 | `SETUP_TOKEN` | generated and logged | 24 characters or more. Core accepts it as the first-boot setup token until setup completes, so setup can run unattended; it is never logged. Set it in production: a generated token is printed in core's log until setup completes, and logs are often shipped where more people can read them than should create the first admin. It replaces any other setup token, so changing or unsetting it before setup completes retires the old one. Compared case-insensitively, ignoring whitespace and hyphens |
 | `PROVISIONING_PATH` | unset | Path of a JSON file, or a directory of `*.json` files, declaring the app services (with what they own and their access and webhooks), login clients and custom roles core applies at every start, as `provisioned` rows. Documents that cannot be applied stop core from starting. Secrets are read from environment variables the documents name, never from the documents. See [provisioning](provisioning.md) |
@@ -166,7 +192,11 @@ as associated data, so a value cannot be moved to another row. The KEK id is a h
   was read, so replicas starting together are safe; it is a no-op once done.
 - **In production** such a row is refused, naming it — so nobody with write access to the table can
   plant a key every replica adopts. Delete the row (core regenerates the keys it generates) or seal it
-  under `CORE_KEK`. Column-sealed secrets (below) follow the same rule.
+  under `CORE_KEK`. Column-sealed secrets (below) follow the same rule, on start and on use: the
+  start passes that re-seal them log such a row and leave it, and it fails to open ("Row secret
+  … is stored unencrypted" or "… encrypted with the public development KEK") until the secret is
+  set again through the admin API — a webhook endpoint's signing secret rotated and the previous one
+  revoked, an identity provider's or notification connection's secret saved anew.
 - **A row under neither `CORE_KEK` nor `CORE_KEK_PREVIOUS`** (nor the dev KEK) stops the start, naming
   the KEK ids involved.
 - **Secrets kept in a table's own column** use the same envelope, with the row as the name: identity
@@ -208,12 +238,14 @@ keys (`settings.read`). A new key is published in the JWKS at once and starts si
 (`activatesAt` in the response): two of the per-minute refreshes every core process runs, plus a
 margin, so every process and every app service that refetches the JWKS knows the key before a token
 carries its `kid`. The previous key signs until then. `{ "immediate": true }`, for a compromised key,
-activates the new key at once and deletes every older version, a pending one included: tokens they
+needs `admin` through a global role as well as `settings.write` (403 otherwise), since it signs
+everyone out of their current tokens. It activates the new key at once and deletes every older version, a pending one included: tokens they
 signed, ID tokens sent as `id_token_hint` included, are refused from that moment, they leave the
 JWKS, and signed-in users get tokens from the new key on their next refresh (their refresh tokens are
 opaque, not signed). The rotating process broadcasts the change over Redis so every other process
 re-reads its keys at once; without Redis they do so at their next per-minute refresh, or on the first
-token carrying the new `kid`. The rotation is audited and emits `core.signing-key.rotated` (the new
+token carrying the new `kid`. So when that broadcast is lost, another replica can go on accepting
+tokens signed by a deleted key for up to 60 seconds after an immediate rotation. The rotation is audited and emits `core.signing-key.rotated` (the new
 `kid` and its `activatesAt`, and the retired `kid` with its expiry; no key material), so app services
 caching the JWKS can refetch it. A key pair supplied in env is the only key and is rotated by changing
 env (no overlap).
@@ -250,7 +282,7 @@ env (no overlap).
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `REGISTRY_RETIREMENT_GRACE_HOURS` | `24` | 0–8760. How long an item may be missing from a declaration before it retires, and how long a service, integration, login client, custom role or group dropped from the [provisioning documents](provisioning.md) lasts before it is deactivated, deleted or archived |
+| `REGISTRY_RETIREMENT_GRACE_HOURS` | `24` | 0–8760. How long an item may be missing from a declaration before it retires, and how long a service, integration, login client, custom role or group dropped from the [provisioning documents](provisioning.md) lasts before it is deactivated, deleted or archived. After rolling core back to an earlier release, run `npm run cli -- register-core --accept-older` or raise this before the grace elapses: a start does not apply an older declaration of core's ([registry](registry.md#rolling-core-back)) |
 | `SERVICE_SECRET_OVERLAP_HOURS` | `24` | 0–8760. How long a replaced service secret keeps working |
 
 ### Files
@@ -258,15 +290,18 @@ env (no overlap).
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `FILE_SERVICE_STORAGE_PATH` | `./storage` | Blobs live under `blobs/` |
-| `FILE_SERVICE_TEMP_PATH` | `./storage/temp` | multer spools single-request uploads here unencrypted while they are processed, so put it on an encrypted volume or a tmpfs. See [files.md](files.md#multipart-uploads) |
+| `FILE_SERVICE_TEMP_PATH` | `./storage/temp` | multer spools single-request uploads here unencrypted while they are processed, so put it on an encrypted volume or a tmpfs. Encrypted blobs are staged here too before they are moved into the blob store: on a volume of its own each is copied across rather than renamed, and a tmpfs has to hold the largest upload (a multipart complete stages the whole object). See [files.md](files.md#multipart-uploads) |
 | `FILE_SERVICE_PUBLIC_BASE_URL` | `${PUBLIC_URL}/v1/files` | Base of presigned and share URLs; not localhost in production |
 | `FILE_SERVICE_SHARE_UI_BASE_URL` | `UI_BASE_URL` | Where password-protected shares send browsers to unlock |
 | `FILE_SERVICE_MAX_UPLOAD_SIZE_MB` | `100` | Above 0, at most 10240. Single-request uploads; larger files use multipart |
 | `FILE_SERVICE_VERIFIED_READ_BUDGET_MB` | `256` | 16–65536. Plaintext all downloads together may hold in memory: a blob up to 16 MiB is decrypted and verified whole before it is sent, and waits for room in this budget. See [files.md](files.md#range-requests) |
 | `FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS` | `30` | 1–600. How long such a download waits for room before `503 temporarily_unavailable` |
+| `FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS` | `120` | 1–86400. How long such a download may take to send the plaintext it holds (at most 16 MiB) before core resets the connection and frees its share of the budget. Raise it for clients slower than about 1 Mbit/s; they can also resume with `Range`. For an archive download it is an idle limit instead: how long the client may take no bytes at all before the archive is aborted, however long the whole download runs |
 | `FILE_SERVICE_MIN_PART_SIZE_MB` | `5` | Above 0, at most 5120 |
 | `FILE_SERVICE_MAX_MULTIPART_PARTS` | `10000` | 1–100000 |
 | `FILE_SERVICE_MAX_ACTIVE_MULTIPART_UPLOADS` | `100` | 1–100000. Multipart uploads one user may have in progress in a bucket |
+| `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER` | `107374182400` (100 GiB) | At least 1. Part bytes one person may have staged across their multipart uploads in progress that no bucket quota bounds; a part past it is `409 multipart_staged_bytes_exceeded`. See [files.md](files.md#multipart-uploads) |
+| `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_SERVICE_ACCOUNT` | `1099511627776` (1 TiB) | At least 1. The same cap for a service account, whose uploads for all of an app service's or integration's users count as one |
 | `FILE_SERVICE_MULTIPART_UPLOAD_TTL_HOURS` | `24` | 1–8760 |
 | `FILE_SERVICE_PRESIGN_CLOCK_SKEW_SECONDS` | `30` | 0–3600 |
 | `FILE_SERVICE_MAX_PRESIGN_TTL_SECONDS` | `604800` | 1–31536000 (365 d) |

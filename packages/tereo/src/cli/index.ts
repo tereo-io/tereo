@@ -2,6 +2,7 @@ import "../preload.js";
 import { closeRedisEmitter } from "../websocket/emitters/redisEmitter.js";
 import { runGenerateSecretCli } from "./generateSecret/index.js";
 import { runOutboxReplayCli } from "./outboxReplay/index.js";
+import { runRegisterCoreCli } from "./registerCore/index.js";
 import { disconnectDatabase } from "../utils/db/prisma.js";
 import { runRewrapCli } from "./rewrapMasterKey/index.js";
 import {
@@ -32,6 +33,9 @@ async function main() {
     console.error(
       "  provisioning-schema  Print the JSON Schema provisioning documents validate against"
     );
+    console.error(
+      "  register-core        Register this release's own declaration [--accept-older, after a rollback]"
+    );
     process.exit(command ? 0 : 1);
   }
 
@@ -45,6 +49,8 @@ async function main() {
     await runProvisionCli(args.slice(1));
   } else if (command === "provisioning-schema") {
     runProvisioningSchemaCli();
+  } else if (command === "register-core") {
+    await runRegisterCoreCli(args.slice(1));
   } else {
     console.error(`Unknown command: ${command}`);
     process.exit(1);

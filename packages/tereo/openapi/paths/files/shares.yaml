@@ -26,7 +26,8 @@
       without one, the share expires that long after creation. An
       ARCHIVE share has the same caps and errors as `POST /v1/files/buckets/{name}/archives`
       (`archive_too_large`, `archive_empty`). An OBJECT share pinned to a
-      delete marker (`versionId`) is `400 cannot_share_delete_marker`.
+      delete marker (`versionId`) is `400 cannot_share_delete_marker`, and
+      a `versionId` in a bucket without versioning is `400 versioning_disabled`.
 
       **Required permissions:**
       - System: `file-service.shares.write`

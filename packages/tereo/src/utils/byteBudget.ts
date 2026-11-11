@@ -1,8 +1,15 @@
 import { ServiceUnavailableError } from "./errors.js";
 
+/** Returns a grant's bytes to its budget. Idempotent. */
+export interface Release {
+  (): void;
+  /** Keep `bytes` of the grant and return the rest. Never grows it. */
+  shrinkTo(bytes: number): void;
+}
+
 interface Waiter {
   bytes: number;
-  grant: (release: () => void) => void;
+  grant: (release: Release) => void;
   timer: NodeJS.Timeout;
 }
 
@@ -30,7 +37,7 @@ export class ByteBudget {
     return this.queue.length;
   }
 
-  acquire(requested: number): Promise<() => void> {
+  acquire(requested: number): Promise<Release> {
     const bytes = Math.min(Math.max(0, requested), this.capacity);
     if (this.queue.length === 0 && this.inUse + bytes <= this.capacity) {
       return Promise.resolve(this.take(bytes));
@@ -56,15 +63,17 @@ export class ByteBudget {
     });
   }
 
-  private take(bytes: number): () => void {
+  private take(bytes: number): Release {
     this.inUse += bytes;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.inUse -= bytes;
+    let held = bytes;
+    const shrinkTo = (keep: number) => {
+      const next = Math.max(0, keep);
+      if (next >= held) return;
+      this.inUse -= held - next;
+      held = next;
       this.drain();
     };
+    return Object.assign(() => shrinkTo(0), { shrinkTo });
   }
 
   private drain() {

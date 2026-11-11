@@ -2,7 +2,6 @@ import { answerReadPreconditions } from "../../../../../../../../utils/condition
 import { broadcastObjectInvalidate } from "../../../../../../../../utils/cacheBroadcast.js";
 import { emitObjectWrittenTx } from "../../../../../buckets/bucket/objects/events.js";
 import { createEncryptStream } from "../../../../../../../../utils/encryption.js";
-import { parseContentType } from "../../../../../../../../utils/contentType.js";
 import { setAccessLog } from "../../../../../../../../middleware/accessLog.js";
 import { SYSTEM_USER_ID } from "../../../../../../../../definitions/index.js";
 import { logAuditTx } from "../../../../../../../../utils/outbox.js";
@@ -26,6 +25,10 @@ import {
   assertBucketWritable,
   assertNotCoreBucket,
 } from "../../../../../../../../utils/bucketAccess.js";
+import {
+  downloadContentType,
+  parseContentType,
+} from "../../../../../../../../utils/contentType.js";
 import {
   assertUnreadBody,
   getBlobPath,
@@ -69,7 +72,7 @@ const resolveSignedDownload = async (req: Request, res: Response) => {
   const etag = current.etag ?? "";
   const lastModified = verified.version ? current.createdAt : object.updatedAt;
 
-  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Type", downloadContentType(contentType));
   res.setHeader("ETag", `"${etag}"`);
   res.setHeader("Last-Modified", lastModified.toUTCString());
   res.setHeader("Cache-Control", "private, max-age=60");

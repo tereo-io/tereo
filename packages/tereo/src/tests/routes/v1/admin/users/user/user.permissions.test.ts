@@ -1,11 +1,10 @@
 // @module-tag int
 // @module-tag auth
 
-import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { getUiAccessTokenForUser } from "../../../../../support/auth/login.js";
 import { createTestClient } from "../../../../../support/auth/clients.js";
 import { CORE_SERVICE_ID } from "../../../../../../definitions/index.js";
 import { createTestGuest } from "../../../../../support/auth/guests.js";
-import { makeServiceOf } from "../../../../../support/testService.js";
 import { browserLogin } from "../../../../../support/browserLogin.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
@@ -37,13 +36,11 @@ describe("PATCH /v1/admin/users/:id and POST /v1/admin/users/:id/totp/reset", ()
   let adminRoleId: string;
 
   beforeAll(async () => {
-    const testClient = await createTestClient();
-    // A service's client: its tokens carry the user's full rights. A token
-    // of any other client is capped by its core scopes, which never reach
-    // the `admin` an admin's credential reset needs.
-    await makeServiceOf(testClient.id);
     const admin = await createAdminUser();
-    adminToken = await getAccessTokenForUser(admin, testClient);
+    // Core's UI: its tokens carry the user's full rights. A token of any
+    // other client is capped by its core scopes, which never reach the
+    // `admin` an admin's credential reset needs.
+    adminToken = await getUiAccessTokenForUser(admin);
     writerToken = await getTestPrincipalToken({ permissions: ["users.write"] });
     adminRoleId = (
       await prisma.role.findFirstOrThrow({

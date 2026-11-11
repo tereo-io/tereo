@@ -1,3 +1,4 @@
+import { closeProviderDeactivationSessionSweepQueue } from "./jobs/providerDeactivationSessionSweep.js";
 import { closeSsoOnlySessionSweepQueue } from "./jobs/ssoOnlySessionSweep.js";
 import { startBackgroundJobs, stopBackgroundJobs } from "./jobs/index.js";
 import { createOutboxReaper, type OutboxReaper } from "./utils/outbox.js";
@@ -110,4 +111,5 @@ export async function closeWorkerQueues(): Promise<void> {
   await closeAuditQueues();
   await closeNotificationQueues();
   await closeSsoOnlySessionSweepQueue();
+  await closeProviderDeactivationSessionSweepQueue();
 }

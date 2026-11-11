@@ -1,5 +1,5 @@
+import { getRedisClient, redisCommand, redisKey } from "./redis.js";
 import { isRedisReady, limiterUnavailable } from "./rateLimit.js";
-import { getRedisClient, redisKey } from "./redis.js";
 import { hashFlowToken } from "./crypto.js";
 import { logger } from "./logger.js";
 import env from "../env.js";
@@ -80,7 +80,7 @@ export async function resetUnlockAttempts(
   ip: string
 ): Promise<void> {
   try {
-    await getRedisClient().del(keyOf(token, ip));
+    await redisCommand((redis) => redis.del(keyOf(token, ip)));
   } catch (err) {
     logger.warn(
       {

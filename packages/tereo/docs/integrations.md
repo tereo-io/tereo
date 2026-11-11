@@ -24,6 +24,11 @@ Integrations.
 | `/oauth/check-permission` | answered for that organization's members, as for any organization client | refused: only a service's client may ask without an organization |
 | Webhook endpoints | in its organization | `organizationId: null`, sent every organization's events |
 
+Binding to an organization makes the integration's account a member of it, so the caller needs
+`organizations.write` or to be an admin or owner of that organization, while it is active, on top
+of `integrations.write` (plain membership is not enough): otherwise `403 organization_not_permitted`,
+whether or not the organization exists. Provisioning documents are not subject to this.
+
 The organization cannot be changed. A platform integration given a global role holds it
 everywhere, so grant sparingly: the admin UI warns when you do.
 
@@ -103,7 +108,10 @@ Creation (`POST /v1/admin/integrations`, `{ name, slug?, organizationId? }`) ret
 core secret. `POST …/:id/regenerate-secret` returns a new one and keeps the old working for
 `SERVICE_SECRET_OVERLAP_HOURS`; `POST …/:id/revoke-previous-secret` ends the overlap at once. Both
 need the caller's global permissions to cover every permission the integration's account holds (403
-otherwise), since the new secret acts as the account. A
+otherwise), since the new secret acts as the account. Neither
+revokes access tokens: one already minted with a replaced or revoked secret stays valid until it
+expires (`JWT_ACCESS_TOKEN_TTL`, an hour by default), so after a leak deactivate the integration,
+which revokes its tokens, if that window is too long. A
 provisioned integration takes its secret from the environment variable its `secretFrom` names and
 rotates when that value changes ([provisioning](provisioning.md#rotating-a-secret)).
 

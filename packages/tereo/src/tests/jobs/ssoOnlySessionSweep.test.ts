@@ -47,7 +47,7 @@ let orgId: string;
 beforeAll(async () => {
   fake = await startFakeOidcProvider();
   writeToken = await getTestPrincipalToken({
-    permissions: ["identity-providers.write"],
+    permissions: ["identity-providers.write", "organizations.write"],
   });
   // SSO-only changes and moving such a provider need a global admin.
   adminToken = await getTestPrincipalToken({ permissions: ["admin"] });

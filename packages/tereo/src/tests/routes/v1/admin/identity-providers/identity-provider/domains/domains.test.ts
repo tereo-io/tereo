@@ -13,6 +13,7 @@ import {
   FakeOidcProvider,
 } from "../../../../../../support/fakeOidcProvider.js";
 import {
+  ensureTestMembership,
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../../../../../../support/principals.js";
@@ -35,7 +36,7 @@ let orgId: string;
 beforeAll(async () => {
   fake = await startFakeOidcProvider();
   writeToken = await getTestPrincipalToken({
-    permissions: ["identity-providers.write"],
+    permissions: ["identity-providers.write", "organizations.write"],
   });
   readToken = await getTestPrincipalToken({
     permissions: ["identity-providers.read"],
@@ -109,6 +110,45 @@ describe("GET and POST /v1/admin/identity-providers/:id/domains", () => {
       roleIds: [],
       ...body,
     });
+
+  it("binds an auto-accept domain only for organizations.write or an admin of the organization", async () => {
+    const provider = await newProvider();
+    const userId = randomUUID();
+    const token = await getTestPrincipalToken({
+      userId,
+      permissions: ["identity-providers.write"],
+    });
+    const domain = () => `aa-${generateUniqueId().toLowerCase()}.com`;
+
+    const refused = await postDomain(token, provider.id, {
+      domain: domain(),
+      autoAccept: true,
+    });
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error).toBe("organization_not_permitted");
+
+    // Without auto-accept the domain adds nobody to the organization.
+    const manual = await postDomain(token, provider.id, { domain: domain() });
+    expect(manual.status).toBe(201);
+
+    // Plain membership is not authority over the organization.
+    await ensureTestMembership(userId, orgId);
+    const asMember = await postDomain(token, provider.id, {
+      domain: domain(),
+      autoAccept: true,
+    });
+    expect((await asMember.json()).error).toBe("organization_not_permitted");
+
+    await prisma.organizationMember.update({
+      where: { organizationId_userId: { organizationId: orgId, userId } },
+      data: { memberRole: "admin" },
+    });
+    const allowed = await postDomain(token, provider.id, {
+      domain: domain(),
+      autoAccept: true,
+    });
+    expect(allowed.status).toBe(201);
+  });
 
   it("normalizes the domain and lists it", async () => {
     const provider = await newProvider();

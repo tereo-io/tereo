@@ -171,6 +171,56 @@ describe("/v1/admin/groups/:id authorization", () => {
     expect(byOwner.status).toBe(HTTP_STATUS.OK);
   });
 
+  it("an org admin cannot change the roles of, archive or restore a group an org owner belongs to", async () => {
+    const orgId = await newOrg();
+    const role = await roleGranting();
+    const holding = async (memberRole: "admin" | "owner") => {
+      const userId = randomUUID();
+      const token = await getTestPrincipalToken({ userId, permissions: [] });
+      await joinOrg(orgId, userId, memberRole);
+      // Held in the organization, so the grant bounds are not what refuses.
+      await prisma.userRole.create({
+        data: { userId, roleId: role.id, organizationId: orgId },
+      });
+      return token;
+    };
+    const token = await holding("admin");
+    const ownerToken = await holding("owner");
+    const owner = await orgUser(orgId, "owner");
+    const group = track(
+      await postGroup(roleAdmin, { organizationId: orgId, roleIds: [role.id] })
+    );
+    const seeded = await adminApi(
+      "POST",
+      `/groups/${group.id}/members`,
+      roleAdmin,
+      { userIds: [owner] }
+    );
+    expect(seeded.status).toBe(HTTP_STATUS.OK);
+    const roles = (as: string, roleIds: string[]) =>
+      adminApi("PUT", `/groups/${group.id}/roles`, as, { roleIds });
+    const lifecycle = (as: string, action: "archive" | "restore") =>
+      adminApi("POST", `/groups/${group.id}/${action}`, as);
+
+    expect((await roles(token, [])).status).toBe(HTTP_STATUS.FORBIDDEN);
+    // Nothing changes for the owner, so nothing is refused.
+    expect((await roles(token, [role.id])).status).toBe(HTTP_STATUS.OK);
+    expect((await lifecycle(token, "archive")).status).toBe(
+      HTTP_STATUS.FORBIDDEN
+    );
+    expect((await lifecycle(ownerToken, "archive")).status).toBe(
+      HTTP_STATUS.OK
+    );
+    expect((await lifecycle(token, "restore")).status).toBe(
+      HTTP_STATUS.FORBIDDEN
+    );
+    expect((await lifecycle(ownerToken, "restore")).status).toBe(
+      HTTP_STATUS.OK
+    );
+    expect((await roles(ownerToken, [])).status).toBe(HTTP_STATUS.OK);
+    expect((await roles(token, [role.id])).status).toBe(HTTP_STATUS.FORBIDDEN);
+  });
+
   it("an org admin removes a member from an org group holding a role they hold in the org", async () => {
     const orgId = await newOrg();
     const role = await roleGranting();

@@ -148,18 +148,28 @@ export interface OpenedSecret {
  * With `refuseUnsealed` (production), a plaintext row or one under the public
  * dev KEK is refused rather than adopted: anyone who can write the table
  * could otherwise plant a key that every replica picks up.
+ *
+ * `kind` words the errors: a `row` secret sits in its own table's column, and
+ * is set again rather than regenerated.
  */
 export const openSecret = async (
   kek: KeyEncryptionKey,
   name: string,
   stored: string,
   previous?: KeyEncryptionKey,
-  refuseUnsealed = false
+  refuseUnsealed = false,
+  kind: "key" | "row" = "key"
 ): Promise<OpenedSecret> => {
+  const what =
+    kind === "row" ? `Row secret "${name}"` : `core.secrets "${name}"`;
+  const remedy =
+    kind === "row"
+      ? "Set the secret again through the admin API (for a webhook endpoint, rotate its signing secret and revoke the previous one) or seal it under CORE_KEK."
+      : "Delete the row (core regenerates generated keys) or seal it under CORE_KEK.";
   if (!stored.startsWith(`${ENVELOPE_PREFIX}:`)) {
     if (refuseUnsealed) {
       throw new Error(
-        `core.secrets "${name}" is stored unencrypted, which production refuses. Delete the row (core regenerates generated keys) or seal it under CORE_KEK.`
+        `${what} is stored unencrypted, which production refuses. ${remedy}`
       );
     }
     return { value: stored, rewrap: true };
@@ -167,14 +177,14 @@ export const openSecret = async (
   const [, id, payload] = stored.split(":");
   if (refuseUnsealed && id === devKek.id && kek !== devKek) {
     throw new Error(
-      `core.secrets "${name}" is encrypted with the public development KEK, which production refuses. Delete the row (core regenerates generated keys) or seal it under CORE_KEK.`
+      `${what} is encrypted with the public development KEK, which production refuses. ${remedy}`
     );
   }
   const opener = [kek, previous, devKek].find((k) => k?.id === id);
   if (!opener || payload === undefined) {
     const known = previous ? `${kek.id} (and previous ${previous.id})` : kek.id;
     throw new Error(
-      `core.secrets "${name}" is encrypted with KEK ${id}, but this process ` +
+      `${what} is encrypted with KEK ${id}, but this process ` +
         `has KEK ${known}. Start core with the CORE_KEK it was written with, ` +
         `or set it as CORE_KEK_PREVIOUS to re-encrypt under the new one.`
     );
@@ -184,7 +194,7 @@ export const openSecret = async (
     plaintext = await opener.unwrap(Buffer.from(payload, "base64url"), name);
   } catch {
     throw new Error(
-      `core.secrets "${name}" could not be decrypted with KEK ${id}: the row is corrupt or was moved from another name`
+      `${what} could not be decrypted with KEK ${id}: the row is corrupt or was moved from another name`
     );
   }
   return { value: plaintext.toString("utf8"), rewrap: opener !== kek };

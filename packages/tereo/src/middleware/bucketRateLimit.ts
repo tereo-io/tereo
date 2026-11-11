@@ -14,6 +14,7 @@ interface CachedConfig {
     requestCost: number;
   } | null;
   bucketId: number | null;
+  isPublic: boolean;
 }
 
 // Keyed by the bucket name in the URL, which anyone can vary: bounded.
@@ -60,6 +61,7 @@ async function getConfig(name: string): Promise<CachedConfig> {
     const fresh: CachedConfig = {
       value: raw ?? null,
       bucketId: bucket?.id ?? null,
+      isPublic: bucket?.policy === "public",
     };
     if (generation === startedAt) cache.set(name, fresh);
     return fresh;
@@ -69,7 +71,7 @@ async function getConfig(name: string): Promise<CachedConfig> {
       { err, bucket: name },
       "Per-bucket rate-limit config lookup failed; failing open"
     );
-    return { value: null, bucketId: null };
+    return { value: null, bucketId: null, isPublic: false };
   }
 }
 
@@ -86,12 +88,17 @@ export const bucketRateLimit = async (
   const bucketName = Array.isArray(rawName) ? rawName[0] : rawName;
   if (!bucketName) return next();
 
-  const { value, bucketId } = await getConfig(bucketName);
+  const { value, bucketId, isPublic } = await getConfig(bucketName);
   if (!value || !bucketId) return next();
+
+  const userId = (req as Request & { auth?: { userId?: string } }).auth?.userId;
+  // A token-less caller of a private bucket gets the controller's 401 whether
+  // or not the bucket exists; a 429 here would tell them it does. Signed
+  // routes (`:bucket`) have verified an HMAC by now, so they keep counting.
+  if (!userId && !isPublic && req.params?.name !== undefined) return next();
 
   // Anonymous callers (public buckets, signed URLs) are counted per address:
   // one shared key would let a single client exhaust everyone's allowance.
-  const userId = (req as Request & { auth?: { userId?: string } }).auth?.userId;
   const caller = userId ? `user:${userId}` : `ip:${getIpIdentifier(req)}`;
   const key = redisKey(`file-service:bucket:${bucketId}:${caller}`);
 

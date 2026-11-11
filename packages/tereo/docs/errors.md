@@ -23,13 +23,17 @@ query string and no share token (`redactUrl`). A `PrismaClientValidationError` r
 values included, so only its first line is logged (`loggableError`), and a files access-log row keeps
 just a Prisma error's class and code (`accessLogErrorMessage` in `middleware/accessLog.ts`).
 
+An error that is not one of these classes but carries an integer `statusCode` and a string `code`
+(a library's HTTP error) is answered with that status and code. Its message is returned only for a
+4xx; a 5xx gets the fixed `server_error` description, and the message goes to the log.
+
 ## Shared codes
 
 One condition, one code, in every area:
 
 | Status | Code                                                     | Meaning                                                                                                                                                                                               |
 | ------ | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 400    | `invalid_request`                                        | Validation failed, or the body is not valid JSON / form data                                                                                                                                          |
+| 400    | `invalid_request`                                        | Validation failed, the body is not valid JSON / form data, or a percent-escape in the URL path does not decode                                                                                        |
 | 400    | `unknown_user` / `unknown_organization` / `unknown_role` | An id in the request **body** names no user / organization / assignable role                                                                                                                          |
 | 400    | `file_upload_required`                                   | A multipart upload has no `file` part                                                                                                                                                                 |
 | 401    | `unauthorized` / `invalid_token`                         | Missing, or invalid / expired / revoked, access token                                                                                                                                                 |

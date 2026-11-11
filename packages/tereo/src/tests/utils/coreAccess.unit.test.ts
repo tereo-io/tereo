@@ -20,18 +20,18 @@ const can = (live: string[], access: CoreAccess, permission: string) =>
   hasPermission(effectivePermissions(live, access), permission);
 
 describe("resolveCoreAccess", () => {
-  it("gives core's UI and services full access, whatever their scopes", () => {
+  it("gives core's UI and client_credentials tokens full access, whatever their scopes", () => {
     expect(
       resolveCoreAccess({
         clientId: "tereo-ui",
-        isServiceClient: false,
+        isClientToken: false,
         scopes: [],
       })
     ).toEqual({ kind: "full" });
     expect(
       resolveCoreAccess({
         clientId: "svc",
-        isServiceClient: true,
+        isClientToken: true,
         scopes: ["core:files.read"],
       })
     ).toEqual({ kind: "full" });
@@ -40,7 +40,7 @@ describe("resolveCoreAccess", () => {
   it("delegates by core scopes, and gives nothing without them", () => {
     const access = resolveCoreAccess({
       clientId: "third-party",
-      isServiceClient: false,
+      isClientToken: false,
       scopes: ["openid", "core:audit.read"],
     });
     expect(access.kind).toBe("delegated");
@@ -49,7 +49,7 @@ describe("resolveCoreAccess", () => {
     expect(
       resolveCoreAccess({
         clientId: "third-party",
-        isServiceClient: false,
+        isClientToken: false,
         scopes: ["openid", "profile", "email", "offline_access"],
       })
     ).toEqual({ kind: "none" });

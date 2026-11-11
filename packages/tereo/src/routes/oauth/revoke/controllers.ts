@@ -14,7 +14,6 @@ import {
   clearAuthCookies,
   clearUserSessionCookie,
   getRefreshTokenFromCookie,
-  hasRefreshTokenCookie,
 } from "../../../utils/cookies.js";
 
 export const revokeHandler = async (req: Request, res: Response) => {
@@ -95,7 +94,9 @@ export const revokeHandler = async (req: Request, res: Response) => {
     req.ip || req.socket.remoteAddress
   );
 
-  if (hasRefreshTokenCookie(req, client.clientId)) {
+  // Only the cookie whose token this revoked: clearing another's would
+  // leave a live session the browser can no longer see or end.
+  if (getRefreshTokenFromCookie(req, client.clientId) === tokenToRevoke) {
     clearAuthCookies(res, "explicit_revocation", client.clientId);
   }
 

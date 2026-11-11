@@ -1,3 +1,4 @@
+import { isUsableAccount } from "../users.js";
 import { NotFoundError } from "../errors.js";
 import { userRefSelect } from "../refs.js";
 import { prisma } from "./prisma.js";
@@ -53,7 +54,9 @@ const includeTargets = {
     },
   },
   // `isActive`: a deactivated creator's shares stop serving.
-  creator: { select: { ...userRefSelect.select, isActive: true } },
+  creator: {
+    select: { ...userRefSelect.select, isActive: true, expiresAt: true },
+  },
   revoker: userRefSelect,
 } satisfies Prisma.ShareInclude;
 
@@ -97,7 +100,7 @@ export const get = async (id: string) => {
 export const getByTokenRaw = async (token: string) => {
   return await prisma.share.findUnique({
     where: { token },
-    include: { creator: { select: { isActive: true } } },
+    include: { creator: { select: { isActive: true, expiresAt: true } } },
   });
 };
 
@@ -163,11 +166,12 @@ export const getObjectTargetDetails = async (
 /**
  * For a signed URL minted from a share: null when the share no longer serves
  * (a deactivated creator's included); otherwise whether it has a download
- * cap, whose URLs are single-use.
+ * cap, whose URLs are single-use, and whether its bucket's organization is
+ * deactivated or archived, which hides the share until it is reactivated.
  */
 export const getServeableShare = async (
   id: string
-): Promise<{ capped: boolean } | null> => {
+): Promise<{ capped: boolean; organizationInactive: boolean } | null> => {
   const share = await prisma.share.findUnique({
     where: { id },
     select: {
@@ -175,16 +179,26 @@ export const getServeableShare = async (
       expiresAt: true,
       maxDownloads: true,
       downloadCount: true,
-      creator: { select: { isActive: true } },
+      creator: { select: { isActive: true, expiresAt: true } },
+      bucket: {
+        select: {
+          organization: { select: { isActive: true, archivedAt: true } },
+        },
+      },
     },
   });
   if (!share) return null;
-  if (share.revokedAt || !share.creator.isActive) return null;
+  if (share.revokedAt || !isUsableAccount(share.creator)) return null;
   if (share.expiresAt && share.expiresAt.getTime() < Date.now()) return null;
   if (share.maxDownloads !== null && share.downloadCount > share.maxDownloads) {
     return null;
   }
-  return { capped: share.maxDownloads !== null };
+  const { organization } = share.bucket;
+  return {
+    capped: share.maxDownloads !== null,
+    organizationInactive:
+      !!organization && (!organization.isActive || !!organization.archivedAt),
+  };
 };
 
 export const update = async (

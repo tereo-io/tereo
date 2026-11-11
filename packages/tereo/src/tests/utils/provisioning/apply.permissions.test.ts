@@ -625,5 +625,80 @@ describe("applyProvisioning", () => {
         await prisma.user.delete({ where: { id: user.id } });
       }
     });
+
+    /** A hand-made platform integration holding the role. */
+    const integrationHolding = async (roleId: string) => {
+      const slug = `int-${rand()}`;
+      createdSlugs.push(slug);
+      const made = await roleApi("POST", "/v1/admin/integrations", {
+        name: `Integration ${slug}`,
+        slug,
+      });
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      const held = await roleApi(
+        "PUT",
+        `/v1/admin/integrations/${made.body.id}/roles`,
+        { roleIds: [roleId] }
+      );
+      expect(held.status, JSON.stringify(held.body)).toBe(200);
+      return slug;
+    };
+
+    const grantsAdmin = async (name: string) =>
+      (await roleRow(name)).rolePermissions.some(
+        (rp) => rp.permission.name === "admin"
+      );
+
+    it("refuses to give admin to a role a hand-made integration holds, and applies nothing", async () => {
+      const role = roleSpec(["roles.read"]);
+      const other = roleSpec(["roles.read"]);
+      await apply(rolesDoc(role, other));
+      const slug = await integrationHolding((await roleRow(role.name)).id);
+
+      await expect(
+        apply(
+          rolesDoc(
+            { ...other, displayName: "Changed" },
+            { ...role, permissions: ["roles.read", "admin"] }
+          )
+        )
+      ).rejects.toThrow(
+        new RegExp(
+          `roles\\[${role.name}\\]: integrations can't hold a role carrying the admin permission, and this one is held by: ${slug}`
+        )
+      );
+      expect(await grantsAdmin(role.name)).toBe(false);
+      expect((await roleRow(other.name)).displayName).toBe(other.displayName);
+    });
+
+    it("refuses to bring back a role carrying admin that a hand-made integration holds", async () => {
+      const role = roleSpec(["roles.read"]);
+      await apply(rolesDoc(role));
+      const row = await roleRow(role.name);
+      await integrationHolding(row.id);
+      // Archived carrying admin, as a role dropped from the documents is.
+      const admin = await prisma.permission.findUniqueOrThrow({
+        where: { name: "admin" },
+      });
+      await prisma.rolePermission.create({
+        data: { roleId: row.id, permissionId: admin.id },
+      });
+      await prisma.role.update({
+        where: { id: row.id },
+        data: { isActive: false, archivedAt: new Date() },
+      });
+
+      await expect(
+        apply(rolesDoc({ ...role, permissions: ["roles.read", "admin"] }))
+      ).rejects.toThrow(/integrations can't hold a role carrying the admin/);
+      expect((await roleRow(role.name)).archivedAt).not.toBe(null);
+    });
+
+    it("gives admin to a role no integration holds", async () => {
+      const role = roleSpec(["roles.read"]);
+      await apply(rolesDoc(role));
+      await apply(rolesDoc({ ...role, permissions: ["roles.read", "admin"] }));
+      expect(await grantsAdmin(role.name)).toBe(true);
+    });
   });
 });

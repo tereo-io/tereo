@@ -2,7 +2,7 @@
 // @module-tag auth
 
 import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrganization.js";
-import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { createAppServiceAccount } from "../../../../../support/testService.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { createTestClient } from "../../../../../support/auth/clients.js";
 import { generateUniqueId } from "../../../../../support/auth/crypto.js";
@@ -19,9 +19,9 @@ import {
   SYSTEM_USER_ID,
 } from "../../../../../../definitions/index.js";
 import {
-  createAppServiceAccount,
-  makeServiceOf,
-} from "../../../../../support/testService.js";
+  getAccessTokenForUser,
+  getUiAccessTokenForUser,
+} from "../../../../../support/auth/login.js";
 import {
   createTestUser,
   createAdminUser,
@@ -600,10 +600,6 @@ describe("PATCH /v1/admin/users/:id with a password", () => {
 
   beforeAll(async () => {
     testClient = await createTestClient();
-    // A service's client: its tokens carry the user's full rights. A token
-    // of any other client is capped by its core scopes, which never reach
-    // the `admin` an admin's credential reset needs.
-    await makeServiceOf(testClient.id);
     writerToken = await getTestPrincipalToken({ permissions: ["users.write"] });
   });
 
@@ -696,10 +692,29 @@ describe("PATCH /v1/admin/users/:id with a password", () => {
     expect(await liveSessions(user.id)).toBe(0);
   });
 
+  it("ends the sessions a deactivation left live when reactivating", async () => {
+    const { user, token } = await signedInUser();
+    // A deactivation whose sign-out step failed after it committed.
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { isActive: false },
+    });
+    expect(await liveSessions(user.id)).toBeGreaterThan(0);
+
+    const response = await patchUser(writerToken, user.id, { isActive: true });
+    expect(response.status).toBe(HTTP_STATUS.OK);
+
+    expect(await liveSessions(user.id)).toBe(0);
+    expect((await userinfo(token)).status).toBe(HTTP_STATUS.UNAUTHORIZED);
+  });
+
   it("keeps the caller's own session when they reset their own password", async () => {
     const admin = await createAdminUser();
-    const current = await getAccessTokenForUser(admin, testClient);
-    const other = await getAccessTokenForUser(admin, testClient);
+    // Core's UI: its tokens carry the user's full rights. A token of any
+    // other client is capped by its core scopes, which never reach the
+    // `admin` an admin's credential reset needs.
+    const current = await getUiAccessTokenForUser(admin);
+    const other = await getUiAccessTokenForUser(admin);
     expect(await liveSessions(admin.id)).toBe(2);
 
     const response = await patchUser(current, admin.id, {

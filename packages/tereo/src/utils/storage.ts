@@ -116,20 +116,41 @@ export async function removeMultipartDir(uploadId: string): Promise<void> {
  * was just deleted — so nothing reads it under the row's key material.
  *
  * The staged file is fsynced first, so a crash can't leave a short file at
- * the content address for later reads to serve.
+ * the content address for later reads to serve. A staged file on another
+ * filesystem (`FILE_SERVICE_TEMP_PATH` on its own volume) cannot be renamed
+ * across: it is copied beside the target, fsynced and renamed from there, so
+ * the content address still never holds a partial file.
  */
 export async function placeBlobFile(
   stagedPath: string,
   targetPath: string
 ): Promise<void> {
-  const fh = await fs.open(stagedPath, "r");
+  await syncFile(stagedPath);
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  try {
+    await fs.rename(stagedPath, targetPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+    const copyPath = `${targetPath}.${crypto.randomBytes(8).toString("hex")}.tmp`;
+    try {
+      await fs.copyFile(stagedPath, copyPath);
+      await syncFile(copyPath);
+      await fs.rename(copyPath, targetPath);
+    } catch (copyErr) {
+      await fs.unlink(copyPath).catch(() => {});
+      throw copyErr;
+    }
+    await fs.unlink(stagedPath).catch(() => {});
+  }
+}
+
+async function syncFile(filePath: string): Promise<void> {
+  const fh = await fs.open(filePath, "r");
   try {
     await fh.sync();
   } finally {
     await fh.close();
   }
-  await fs.mkdir(path.dirname(targetPath), { recursive: true });
-  await fs.rename(stagedPath, targetPath);
 }
 
 /** Remove a staged file that was not placed. Ignores ENOENT. */
@@ -384,7 +405,7 @@ async function readBlob(meta: BlobMeta, blobHash: string): Promise<Buffer> {
 // price lists, JSON — all small, predictable-plaintext targets) cheaply.
 const INTEGRITY_VERIFY_MAX_BYTES = 16 * 1024 * 1024; // 16 MiB
 
-const verifiedReadBudget = new ByteBudget(
+export const verifiedReadBudget = new ByteBudget(
   env.FILE_SERVICE_VERIFIED_READ_BUDGET_MB * 1024 * 1024,
   env.FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS * 1000
 );
@@ -393,6 +414,12 @@ export interface VerifiedBlob {
   buffer: Buffer;
   /** Returns the buffer's bytes to the verified-read budget. Idempotent. */
   release: () => void;
+}
+
+export interface ByteRange {
+  start: number;
+  /** Inclusive. */
+  end: number;
 }
 
 /**
@@ -407,11 +434,15 @@ export interface VerifiedBlob {
  * The plaintext counts against a process-wide budget
  * (`FILE_SERVICE_VERIFIED_READ_BUDGET_MB`) until the caller calls `release`,
  * once the buffer has been sent; a read that finds no room in time is a 503.
+ *
+ * With `range`, the buffer is a copy of those bytes alone and, once the whole
+ * blob is verified, only they stay charged.
  */
 export async function loadVerifiedBlobIfSmall(
   meta: BlobMeta,
   blobHash: string,
-  sizeBytes: number
+  sizeBytes: number,
+  range?: ByteRange
 ): Promise<VerifiedBlob | null> {
   if (sizeBytes > INTEGRITY_VERIFY_MAX_BYTES) return null;
   const release = await verifiedReadBudget.acquire(sizeBytes);
@@ -423,7 +454,10 @@ export async function loadVerifiedBlobIfSmall(
         `Blob integrity check failed: content hash mismatch for ${blobHash}`
       );
     }
-    return { buffer, release };
+    if (!range) return { buffer, release };
+    const slice = Buffer.from(buffer.subarray(range.start, range.end + 1));
+    release.shrinkTo(slice.length);
+    return { buffer: slice, release };
   } catch (err) {
     release();
     throw err;

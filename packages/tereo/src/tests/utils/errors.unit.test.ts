@@ -6,6 +6,7 @@ import { logger } from "../../utils/logger.js";
 import {
   AppError,
   NotFoundError,
+  ServiceUnavailableError,
   TooManyRequestsError,
   errorHandler,
 } from "../../utils/errors.js";
@@ -77,6 +78,44 @@ describe("errorHandler", () => {
       status: 403,
       body: { error: "forbidden", error_description: "Nope" },
     });
+  });
+
+  it("keeps a foreign 5xx's message out of the response", () => {
+    expect(
+      handle(new ForeignError(502, "bad_gateway", "connect to 10.0.0.7:5432"))
+    ).toEqual({
+      status: 502,
+      body: {
+        error: "bad_gateway",
+        error_description: "An unexpected error occurred",
+      },
+    });
+  });
+
+  it("keeps the message of its own 5xx", () => {
+    expect(
+      handle(new ServiceUnavailableError("Try again later")).body
+    ).toMatchObject({ error_description: "Try again later" });
+  });
+
+  /** What Express's router throws for a param it cannot decode. */
+  const undecodable = () =>
+    Object.assign(new URIError("Failed to decode param '%E0%A4%A'"), {
+      status: 400,
+    });
+
+  it("answers the router's undecodable param with 400 invalid_request", () => {
+    expect(handle(undecodable())).toEqual({
+      status: 400,
+      body: {
+        error: "invalid_request",
+        error_description: "The URL path is malformed",
+      },
+    });
+  });
+
+  it("leaves a URIError thrown by a handler a 500", () => {
+    expect(handle(new URIError("URI malformed")).status).toBe(500);
   });
 
   it.each([
@@ -262,6 +301,16 @@ describe("errorHandler logging", () => {
       status: 500,
       err: boom,
     });
+  });
+
+  it("logs the router's undecodable param at warn", () => {
+    const { warn, error } = run(
+      Object.assign(new URIError("Failed to decode param '%ZZ'"), {
+        status: 400,
+      })
+    );
+    expect(error).toHaveLength(0);
+    expect(warn[0][0]).toMatchObject({ status: 400, code: "invalid_request" });
   });
 
   it("leaves a share link's token out of the path", () => {

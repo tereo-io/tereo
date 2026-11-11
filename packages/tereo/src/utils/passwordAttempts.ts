@@ -1,4 +1,4 @@
-import { getRedisClient, redisKey } from "./redis.js";
+import { redisCommand, redisKey } from "./redis.js";
 import { logPasswordFailure } from "./audit.js";
 import { logAuditTx } from "./outbox.js";
 import type { Request } from "express";
@@ -40,7 +40,7 @@ export const beginPasswordAttempt = (
   clientId?: string
 ): PasswordAttempt => ({
   async succeeded() {
-    if (user) await getRedisClient().del(failuresKey(user.id));
+    if (user) await redisCommand((redis) => redis.del(failuresKey(user.id)));
   },
   async failed(reason) {
     if (!user) {
@@ -49,11 +49,9 @@ export const beginPasswordAttempt = (
     }
     const key = failuresKey(user.id);
     // One transaction, so a count is never left without its expiry.
-    const exec = await getRedisClient()
-      .multi()
-      .incr(key)
-      .expire(key, FAILURES_TTL_SECONDS)
-      .exec();
+    const exec = await redisCommand((redis) =>
+      redis.multi().incr(key).expire(key, FAILURES_TTL_SECONDS).exec()
+    );
     const [err, count] = exec?.[0] ?? [new Error("Redis transaction aborted")];
     if (err) throw err;
     const failures = Number(count);

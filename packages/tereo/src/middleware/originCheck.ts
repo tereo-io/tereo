@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { httpOrigin } from "../utils/authorization.js";
+import { ForbiddenError } from "../utils/errors.js";
 import db from "../utils/db/index.js";
 import env from "../env.js";
 import {
@@ -70,4 +71,50 @@ export const requireAllowedOriginForCookies = async (
   }
   restrictCookieClients(req, allowed);
   next();
+};
+
+/**
+ * Whether the request may be answered with a client's cookie: the rule for
+ * using one, applied to setting one. A page elsewhere could otherwise post
+ * its own grant from a visitor's browser and leave them signed in as it.
+ */
+export const maySetClientCookies = (
+  req: Request,
+  client: { redirectUris: string[] }
+): boolean => {
+  const origin = requestOrigin(req);
+  if (origin === FIRST_PARTY) return true;
+  if (origin === null) return false;
+  return client.redirectUris.some((uri) => httpOrigin(uri) === origin);
+};
+
+const corsAllows = (origin: string) =>
+  env.CORS_ALLOWED_ORIGINS === "*" || env.CORS_ALLOWED_ORIGINS.includes(origin);
+
+/**
+ * Refuses an unsafe request from a page that is not core's own, the UI's or
+ * at a `CORS_ALLOWED_ORIGINS` origin. For the public routes that take no
+ * cookie and count misses per IP: mounted ahead of their limiters, so a page
+ * elsewhere cannot spend a visitor's allowance from their browser. Unlike the
+ * cookie rule above, a cross-site page at an allowed origin passes, since no
+ * cookie is at stake; so does a request with no `Origin` (a server, curl, the
+ * SDK), which the limiters still count.
+ */
+export const refuseForeignOrigins = (
+  req: Request,
+  _res: Response,
+  next: NextFunction
+) => {
+  const origin = req.get("origin");
+  if (
+    SAFE_METHODS.has(req.method) ||
+    origin === undefined ||
+    req.get("sec-fetch-site") === "same-origin" ||
+    firstPartyOrigins().has(origin) ||
+    corsAllows(origin)
+  ) {
+    next();
+    return;
+  }
+  throw new ForbiddenError("Requests from this origin are not allowed");
 };

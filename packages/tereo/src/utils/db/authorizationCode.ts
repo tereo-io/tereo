@@ -90,6 +90,21 @@ export const getIdsByUserSessionIds = async (
 };
 
 /**
+ * The user's token families (code ids) from a login through an identity
+ * provider, those whose SSO session is gone included.
+ */
+export const getFederatedIdsByUserId = async (
+  userId: string,
+  tx: Prisma.TransactionClient
+): Promise<string[]> => {
+  const codes = await tx.authorizationCode.findMany({
+    where: { userId, authMethods: { has: "fed" } },
+    select: { id: true },
+  });
+  return codes.map((c) => c.id);
+};
+
+/**
  * Marks the code used; false when it already was, or when the SSO session it
  * was issued under has ended (ending one sets `user_session_id` to null), so
  * a code obtained before a sign-out cannot start a session after it.

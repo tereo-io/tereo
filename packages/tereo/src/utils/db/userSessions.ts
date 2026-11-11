@@ -111,6 +111,18 @@ export const getIdsByUserAndOrganization = async (
   return sessions.map((s) => s.id);
 };
 
+/** The user's SSO sessions signed in to through an identity provider. */
+export const getFederatedIdsByUserId = async (
+  userId: string,
+  tx: Prisma.TransactionClient
+): Promise<string[]> => {
+  const sessions = await tx.userSession.findMany({
+    where: { userId, authMethods: { has: "fed" } },
+    select: { id: true },
+  });
+  return sessions.map((s) => s.id);
+};
+
 const deleteWhere = async (
   where: Prisma.UserSessionWhereInput,
   tx?: Prisma.TransactionClient

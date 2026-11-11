@@ -29,6 +29,9 @@ const DECODE_OPTIONS = {
 // Each image is decoded a few times and never again, so libvips' operation
 // cache only holds memory.
 sharp.cache(false);
+// Thumbnails are of raster images only. Blocking the loader keeps content
+// that is SVG under another stored type from reaching librsvg at all.
+sharp.block({ operation: ["VipsForeignLoadSvg"] });
 
 /**
  * Whether a stored content type gets thumbnails. SVG is left out: rasterising

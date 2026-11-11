@@ -74,9 +74,8 @@ describe("POST /v1/admin/signing-keys/rotate", () => {
         { eventTypes: ["core.signing-key.rotated"] }
       );
       endpointId = endpoint.id;
-      token = await getTestPrincipalToken({
-        permissions: ["settings.write"],
-      });
+      // An immediate rotation needs a global admin.
+      token = await getTestPrincipalToken({ permissions: ["admin"] });
       signingKid = getJwtHeader(token).kid!;
       localToken = generateAccessToken({
         subject: "immediate-rotation-test",

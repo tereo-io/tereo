@@ -39,6 +39,10 @@ const oneRequestLimit = {
 
 const randomBucketId = () => 900_000_000 + Math.floor(Math.random() * 1e8);
 
+// `fakeReq` carries no token, and a token-less caller is limited only on a
+// public bucket.
+const policy = "public";
+
 /** Sends three requests and returns how many the bucket limit refused. */
 const refusedOfThree = async (name: string) => {
   const errors: unknown[] = [];
@@ -81,12 +85,16 @@ describe("bucketRateLimit", () => {
 
         const pending = bucketRateLimit(fakeReq(name), fakeRes().res, () => {});
         await invalidate(name);
-        oldRead.resolve({ id: bucketId, rateLimitConfig: null });
+        oldRead.resolve({ id: bucketId, policy, rateLimitConfig: null });
         await pending;
 
         spy.mockImplementation(
           async () =>
-            ({ id: bucketId, rateLimitConfig: oneRequestLimit }) as never
+            ({
+              id: bucketId,
+              policy,
+              rateLimitConfig: oneRequestLimit,
+            }) as never
         );
         expect(await refusedOfThree(name)).toBe(2);
       });
@@ -100,6 +108,7 @@ describe("bucketRateLimit", () => {
         .mockRejectedValueOnce(new Error("Connection terminated unexpectedly"))
         .mockResolvedValue({
           id: randomBucketId(),
+          policy,
           rateLimitConfig: oneRequestLimit,
         } as never);
 
@@ -167,6 +176,40 @@ describe("bucketRateLimit", () => {
       expect((await list("203.0.113.10")).status).toBe(HTTP_STATUS.OK);
       expect((await list("203.0.113.10")).status).toBe(429);
       expect((await list("203.0.113.11")).status).toBe(HTTP_STATUS.OK);
+    });
+
+    it("answers a token-less caller of a private bucket the same with a limit as without", async () => {
+      const bucket = await createTestBucket(testToken);
+      const set = await axios.put(
+        `${BASE_URL}/buckets/${bucket.name}`,
+        { rateLimitConfig: { tokensPerSecond: 0.01, maxTokens: 1 } },
+        {
+          headers: { Authorization: `Bearer ${testToken}` },
+          validateStatus: () => true,
+        }
+      );
+      expect(set.status).toBe(HTTP_STATUS.OK);
+
+      const list = () =>
+        axios.get(`${BASE_URL}/buckets/${bucket.name}/objects`, {
+          headers: { "X-Forwarded-For": "203.0.113.20" },
+          validateStatus: () => true,
+        });
+      for (let i = 0; i < 3; i++) {
+        const res = await list();
+        expect(res.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+        expect(res.headers["x-ratelimit-limit"]).not.toBe("1");
+      }
+
+      // The skipped requests spent nothing of the owner's allowance either.
+      const authed = await axios.get(
+        `${BASE_URL}/buckets/${bucket.name}/objects`,
+        {
+          headers: { Authorization: `Bearer ${testToken}` },
+          validateStatus: () => true,
+        }
+      );
+      expect(authed.status).toBe(HTTP_STATUS.OK);
     });
   });
 });

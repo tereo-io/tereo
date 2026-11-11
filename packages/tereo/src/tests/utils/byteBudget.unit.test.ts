@@ -30,6 +30,25 @@ describe("ByteBudget", () => {
     expect(budget.used).toBe(0);
   });
 
+  it("shrinks a grant to what is still held, and lets a waiter in", async () => {
+    const budget = new ByteBudget(100, 1000);
+    const release = await budget.acquire(90);
+    const waiting = budget.acquire(60);
+    expect(await settled(waiting)).toBe(false);
+
+    release.shrinkTo(30);
+    expect(await settled(waiting)).toBe(true);
+    expect(budget.used).toBe(90);
+
+    release.shrinkTo(80);
+    expect(budget.used).toBe(90);
+
+    release();
+    release.shrinkTo(10);
+    (await waiting)();
+    expect(budget.used).toBe(0);
+  });
+
   it("serves waiters in order, so a small request does not pass a large one", async () => {
     const budget = new ByteBudget(100, 1000);
     const release = await budget.acquire(50);

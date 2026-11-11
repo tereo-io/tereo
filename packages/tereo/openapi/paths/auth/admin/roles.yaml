@@ -162,8 +162,9 @@
       (`409 resource_archived`). Changing `requires2fa` needs a caller
       holding every permission the role grants (`403` otherwise), so only an
       `admin` changes it on core's `admin` role; so does reactivating it
-      (`isActive: true`). Both count only the caller's global roles, not
-      those held in the token's organization.
+      (`isActive: true`), and so does turning `guestAssignable` on. All three
+      count only the caller's global roles, not those held in the token's
+      organization.
 
       Deactivating a role (`isActive: false`) revokes the access tokens of
       the service clients holding it. People's tokens are not revoked:
@@ -635,6 +636,9 @@
       a member's roles does: `organizations.write`, or being an `admin` or
       `owner` of that organization while it is active (`403` otherwise) —
       and an organization `admin` cannot remove an `owner`'s role (`403`).
+      The caller must also hold, in that organization, every permission the
+      role grants (`403`, naming those lacking), and the organization must
+      not be archived (`409 resource_archived`).
       Removing a global assignment from another user needs a caller holding
       every permission that user holds, from global roles or roles in any
       organization; the caller's count from global roles only, capped by a
@@ -686,12 +690,12 @@
         $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
       '403':
         $ref: '../../../components/responses.yaml#/ForbiddenResponse'
-        description: Forbidden - missing roles.delete permission, the user is a service's service account, or (with `organizationId`) the caller has no authority over the organization
+        description: Forbidden - missing roles.delete permission, the user is a service's service account, or (with `organizationId`) the caller has no authority over the organization or does not hold there every permission the role grants
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
         description: Role or user not found, or the user holds no assignment of the role in that scope
       '409':
-        description: The removal would leave no active administrator (`conflict`), or the role is archived (`resource_archived`); restore it first
+        description: The removal would leave no active administrator (`conflict`), or the role or (with `organizationId`) the organization is archived (`resource_archived`); restore it first
         headers:
           X-RateLimit-Limit:
             $ref: '../../../components/headers.yaml#/X-RateLimit-Limit'

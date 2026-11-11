@@ -1,6 +1,5 @@
 import { isClaimHeld } from "../../../../../../../../../utils/uploadIdempotency.js";
 import { setAccessLog } from "../../../../../../../../../middleware/accessLog.js";
-import { assertMultipartFits, multipartCompleteClaim } from "../../../utils.js";
 import { validateUser } from "../../../../../../../../../middleware/auth.js";
 import { stagePart } from "../../../../../../../../../utils/storage.js";
 import { declaredLengthHeadersSchema } from "../../../../schemas.js";
@@ -25,6 +24,12 @@ import {
   ConflictError,
   PayloadTooLargeError,
 } from "../../../../../../../../../utils/errors.js";
+import {
+  assertMultipartFits,
+  assertUserStagingFits,
+  isQuotaReserved,
+  multipartCompleteClaim,
+} from "../../../utils.js";
 
 export const uploadPart = async (req: Request, res: Response) => {
   const auth = validateUser(req);
@@ -40,12 +45,30 @@ export const uploadPart = async (req: Request, res: Response) => {
   const declared = validateHeaders(declaredLengthHeadersSchema, req)[
     "content-length"
   ];
+  // Counted against the uploader, who alone may send the upload's parts.
+  const stagedCap = isQuotaReserved(upload, bucket)
+    ? undefined
+    : {
+        userId: upload.createdBy,
+        maxBytes: BigInt(
+          (await db.users.get(upload.createdBy)).userType === "service_account"
+            ? env.FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_SERVICE_ACCOUNT
+            : env.FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER
+        ),
+      };
   if (declared !== undefined) {
     const otherParts = await db.multipartUploads.stagedBytes(
       params.uploadId,
       params.partNumber
     );
     assertMultipartFits(upload, bucket, otherParts + BigInt(declared));
+    if (stagedCap) {
+      const others = await db.multipartUploads.userStagedBytes(
+        stagedCap.userId,
+        params
+      );
+      assertUserStagingFits(others + BigInt(declared), stagedCap.maxBytes);
+    }
   }
 
   const stagingDek = db.multipartUploads.unwrapStagingDek(upload);
@@ -103,6 +126,14 @@ export const uploadPart = async (req: Request, res: Response) => {
             bucket,
             otherParts + BigInt(staged.sizeBytes)
           ),
+        userStaging: stagedCap && {
+          userId: stagedCap.userId,
+          assertFits: (others) =>
+            assertUserStagingFits(
+              others + BigInt(staged.sizeBytes),
+              stagedCap.maxBytes
+            ),
+        },
       }
     ));
   } catch (err) {
