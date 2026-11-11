@@ -224,6 +224,13 @@ its stored value (matched case-insensitively), so a client can send back what it
 changed (the admin UI does); the mask for a header with no stored value — a new or renamed one — is
 `400 masked_header_value`.
 
+A stored value was given for the host it is sent to, so it does not follow the endpoint to another
+one. A `PATCH` whose `url` has a different origin (scheme, host or port) must supply the headers
+again: real values, or `customHeaders: null` to send none. The mask for any header, or
+`customHeaders` left out while the endpoint has headers, is `400 masked_header_value` and nothing
+is changed. Otherwise anyone allowed to edit the endpoint could point it at a host of their own and
+be sent values the API never shows them. A change of path or query on the same origin keeps them.
+
 Endpoint responses also carry `hasDeliveries`: true while delivery history references the endpoint,
 which makes a hard DELETE 409 until retention purges it.
 

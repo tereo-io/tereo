@@ -206,7 +206,9 @@
       The signing secret and custom header values are masked in the response.
       A custom header sent with the mask `********` as its value keeps its
       stored value; the mask for a header with no stored value is refused
-      with `400 masked_header_value`. The URL and event types
+      with `400 masked_header_value`, as is keeping stored values (by the
+      mask, or by omitting `customHeaders`) while `url` moves to another
+      origin. The URL and event types
       are validated as on create, and the caller must be able to read every
       event type the endpoint ends up subscribed to (`403` otherwise), with
       create's exception for `auth.group.*` types and the endpoint's

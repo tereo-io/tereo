@@ -17,6 +17,7 @@ import {
 import {
   maskCustomHeaders,
   resolveMaskedHeaders,
+  assertHeadersResuppliedForOrigin,
 } from "../../../../../utils/webhookHeaders.js";
 import {
   assertMayRedirectFileEvents,
@@ -130,6 +131,11 @@ export const updateWebhookEndpoint = async (req: Request, res: Response) => {
     if (current.archivedAt) {
       throw new ArchivedError("Webhook endpoint is archived");
     }
+    assertHeadersResuppliedForOrigin(
+      { from: current.url, to: body.url },
+      body.customHeaders,
+      current.customHeaders
+    );
     const customHeaders = body.customHeaders
       ? resolveMaskedHeaders(body.customHeaders, current.customHeaders)
       : body.customHeaders;

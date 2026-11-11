@@ -15131,7 +15131,9 @@ paths:
         The signing secret and custom header values are masked in the response.
         A custom header sent with the mask `********` as its value keeps its
         stored value; the mask for a header with no stored value is refused
-        with `400 masked_header_value`. The URL and event types
+        with `400 masked_header_value`, as is keeping stored values (by the
+        mask, or by omitting `customHeaders`) while `url` moves to another
+        origin. The URL and event types
         are validated as on create, and the caller must be able to read every
         event type the endpoint ends up subscribed to (`403` otherwise), with
         create's exception for `auth.group.*` types and the endpoint's
@@ -31020,6 +31022,11 @@ components:
             matched case-insensitively. The mask for a header name that has no
             stored value (a new or renamed header) is
             refused with `400 masked_header_value`.
+
+            A stored value is not kept when `url` moves to another origin (scheme,
+            host or port): the mask, or leaving `customHeaders` out while the
+            endpoint has headers, is then `400 masked_header_value`. Send each
+            header's real value again, or `null` to send none.
           examples:
             - X-Custom-Auth: '********'
               X-Tenant-Id: tenant-456
