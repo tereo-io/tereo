@@ -109,6 +109,8 @@ owners and the platform can. The platform means any holder of `groups.write` or 
 platform permissions come from global roles granted by platform admins and override the org tiers, as
 `organizations.write` does for org roles, so a `groups.write` holder may change an owner's membership
 of an org group (still only granting and taking away what they hold in that organization).
+The same holds for what a group gives an owner: an org admin cannot change the roles of, archive or
+restore a group an owner belongs to (403).
 
 The caller may only grant and take away what they hold, as elsewhere ([Granting](auth.md#granting-only-what-you-hold)):
 adding members, restoring and changing roles check the caller can grant every role the group holds

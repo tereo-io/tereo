@@ -6923,6 +6923,8 @@ paths:
         archiving takes them from every member at once. Archiving a global group that holds the
         last live administrator's role is refused. A provisioned group is archived only by
         provisioning (`409 managed_by_provisioning`).
+        An organization `admin` (not `owner`) may not archive a group one of the organization's
+        owners belongs to.
 
         **Authorization:** `groups.archive`, or, for an organization's group, being an
         `admin` or `owner` of that organization (`organizations.write` also passes, as on
@@ -6959,7 +6961,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), or the grant check refuses
+          description: No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), the grant check refuses, or an organization admin acting on a group an owner belongs to
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Group not found (to a caller holding the route's `groups.*` permission; anyone else gets `403`)
@@ -6982,6 +6984,8 @@ paths:
         permission that cannot be granted within an organization is refused
         (`400 role_not_org_assignable`); change its roles first. Access tokens of members from a
         password-only sign-in are revoked when a restored role requires two-factor authentication.
+        An organization `admin` (not `owner`) may not restore a group one of the organization's
+        owners belongs to.
 
         **Authorization:** `groups.archive`, or, for an organization's group, being an
         `admin` or `owner` of that organization (`organizations.write` also passes, as on
@@ -7019,7 +7023,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), or the grant check refuses
+          description: No authority over the group (to a caller without `groups.archive`, the same `403` as for a missing group), the grant check refuses, or an organization admin acting on a group an owner belongs to
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Group not found (to a caller holding the route's `groups.*` permission; anyone else gets `403`)
@@ -7257,6 +7261,8 @@ paths:
         request waited for it, must be restored first (`409 resource_archived`). Access tokens
         of members from a password-only sign-in are revoked when an added role requires
         two-factor authentication.
+        An organization `admin` (not `owner`) may not change the roles of a group one of the
+        organization's owners belongs to.
 
         **Authorization:** `groups.write`, or, for an organization's group, being an
         `admin` or `owner` of that organization (`organizations.write` also passes, as on
@@ -7300,7 +7306,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group); the grant check refuses; or a system role on an organization's group
+          description: No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group); the grant check refuses; a system role on an organization's group; or an organization admin changing the roles of a group an owner belongs to
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Group not found (to a caller holding the route's `groups.*` permission; anyone else gets `403`)
