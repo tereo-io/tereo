@@ -146,9 +146,9 @@ export const setAccessLog = (
 };
 
 /**
- * Marks the request so `accessLogErrorFallback` writes no row for a 401 or
- * 429 that reached it with no access log set: a rejection an unauthenticated
- * caller can produce at will.
+ * Marks the request so `accessLogErrorFallback` writes no row for a 401 that
+ * reached it with no access log set: a rejection an unauthenticated caller
+ * can produce at will. A 429 writes none with or without the mark.
  */
 export const skipRejectedAccessLogs = (
   _req: Request,
@@ -175,10 +175,12 @@ export const accessLogErrorFallback = (
   next: NextFunction
 ) => {
   const status = err instanceof AppError ? err.statusCode : undefined;
+  // A row per 429 would let a flood past the limiter write as fast as it
+  // sends, on signed URLs and share links too.
   if (
     !res.accessLog &&
-    res.locals.skipRejectedAccessLogs === true &&
-    (status === 401 || status === 429)
+    (status === 429 ||
+      (status === 401 && res.locals.skipRejectedAccessLogs === true))
   ) {
     return next(err);
   }

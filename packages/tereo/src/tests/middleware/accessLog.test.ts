@@ -501,6 +501,51 @@ describe("accessLogMiddleware", () => {
         expect(row.statusCode).toBe(response.status);
       });
 
+      it.each([
+        [
+          "a signed URL",
+          () => `signed/objects/x/by-id/${randomUUID()}?sig=bad&exp=1`,
+        ],
+        ["a share link", () => `shared/${randomUUID()}`],
+      ])(
+        "logs no row for %s refused by the rate limit",
+        async (_name, path) => {
+          const ip = `198.51.100.${200 + Math.floor(Math.random() * 50)}`;
+          const limited: string[] = [];
+          const refused: string[] = [];
+          // In batches, so the flood lands inside the one-second window.
+          for (let batch = 0; batch < 10 && limited.length === 0; batch++) {
+            await Promise.all(
+              Array.from({ length: 50 }, async () => {
+                const requestId = randomUUID();
+                const res = await axios.get(`${BASE_URL}/${path()}`, {
+                  headers: { "X-Request-ID": requestId, "X-Forwarded-For": ip },
+                  validateStatus: () => true,
+                });
+                (res.status === 429 ? limited : refused).push(requestId);
+              })
+            );
+          }
+          expect(limited.length).toBeGreaterThan(0);
+          expect(refused.length).toBeGreaterThan(0);
+
+          // The other refusals are still logged, and their rows are written no
+          // earlier than a 429's would be.
+          await waitFor(
+            async () =>
+              (await prisma.accessLog.count({
+                where: { requestId: { in: refused } },
+              })) === refused.length,
+            10_000
+          );
+          expect(
+            await prisma.accessLog.count({
+              where: { requestId: { in: limited } },
+            })
+          ).toBe(0);
+        }
+      );
+
       it("should log 400 errors with error message", async () => {
         const response = await axios.post(
           `${BASE_URL}/buckets`,

@@ -58,12 +58,13 @@ router.use(accessLogMiddleware);
 // Signed URLs and share links carry their own credential (an HMAC, or the
 // share token and optional password), so they are mounted before
 // authentication. The global limiter still bounds them: without it, token
-// probing and replay of leaked signed URLs would be unthrottled. Signed URLs
-// take no parsed body: a presigned PUT streams its raw bytes.
+// probing and replay of leaked signed URLs would be unthrottled. Their
+// refusals write an access-log row, except a 429. Signed URLs take no parsed
+// body: a presigned PUT streams its raw bytes.
 router.use("/signed", rateLimitGeneral, filesSignedRouter);
 router.use("/shared", rateLimitGeneral, parseBody, filesSharedRouter);
 
-// Past here, a 401 or 429 that no controller logged writes no access-log row:
+// Past here, a 401 that no controller logged writes no access-log row either:
 // anyone can send those, as fast as the limiters let them.
 router.use(skipRejectedAccessLogs);
 router.use(rateLimitPreAuth);

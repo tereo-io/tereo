@@ -399,7 +399,7 @@ Emitted with `emitTx` on mutations. Event types are declared in `src/definitions
 | `Share` | DB-backed revocable download link (kind OBJECT|ARCHIVE), optional password/TTL/cap |
 | `BucketLifecyclePolicy` | Per-bucket retention rules |
 | `BucketPermission` | Per-user per-bucket grants |
-| `AccessLog` | Per-request access audit, kept `ACCESS_LOG_RETENTION_DAYS` (default 90) by a daily sweep. A 401 or 429 refused before any controller (a missing or bad token, a rate limit) writes none; signed URLs and share links log theirs |
+| `AccessLog` | Per-request access audit, kept `ACCESS_LOG_RETENTION_DAYS` (default 90) by a daily sweep. A 401 or 429 refused before any controller (a missing or bad token, a rate limit) writes none. Signed URLs and share links log their refusals (a bad signature, an unknown token, a password share's 401), except a 429: a flood past the rate limit writes no rows |
 | `IdempotencyRecord` | 24h replay cache for upload idempotency keys (scope + key unique, expiresAt indexed) |
 
 Tables live in the `files` schema. Bucket/Object use soft deletion; BucketPermission uses `revokedAt`. A bucket name is unique among live buckets only (the partial index `buckets_live_name_key`), so deleting a bucket frees its name for a new one, which shares nothing with it: objects, grants and shares belong to the bucket's id.
