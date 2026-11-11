@@ -4076,8 +4076,13 @@ paths:
         - `sso_required`: the user's email domain is `ssoOnly` for this
           identity's provider.
 
+        The user's other sessions end in the same transaction, as after a
+        password change: every refresh token and SSO session but the caller's
+        own. A session obtained through the identity must not outlive it.
+
         An audit log entry is created and an `auth.user.identity-unlinked`
-        webhook event is emitted.
+        webhook event is emitted; when any session ended, so are a
+        `sessions_revoked` entry and an `auth.user.sessions-revoked` event.
       operationId: deleteAccountIdentity
       security:
         - BearerAuth: []
@@ -5332,8 +5337,15 @@ paths:
         lacks, otherwise). The caller's own permissions count from global roles only,
         capped by a delegated token's scopes.
 
+        The user's sessions end in the same transaction, like
+        `DELETE /v1/admin/users/{id}/sessions/all` (a caller unlinking their
+        own identity keeps the session they act from): a session obtained
+        through the identity must not outlive it.
+
         An audit log entry is created (the admin as actor) and an
-        `auth.user.identity-unlinked` webhook event is emitted.
+        `auth.user.identity-unlinked` webhook event is emitted; when any
+        session ended, so are a `sessions_revoked` entry and an
+        `auth.user.sessions-revoked` event.
       operationId: deleteAdminUserIdentity
       security:
         - BearerAuth:
@@ -9261,7 +9273,8 @@ paths:
       summary: Deactivate an identity provider
       description: |
         Takes the provider off the login page and refuses sign-ins that are under
-        way. Identities already linked stay. Refused with 409 `sso_only_domain` while
+        way. Identities already linked stay, and so do the sessions their users
+        already hold: this ends none. Refused with 409 `sso_only_domain` while
         any of its domains is SSO-only, since those users would have no way in: turn
         `ssoOnly` off first.
         Refused with 409 `conflict` when it would leave no administrator able to

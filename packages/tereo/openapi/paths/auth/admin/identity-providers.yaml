@@ -187,7 +187,8 @@
     summary: Deactivate an identity provider
     description: |
       Takes the provider off the login page and refuses sign-ins that are under
-      way. Identities already linked stay. Refused with 409 `sso_only_domain` while
+      way. Identities already linked stay, and so do the sessions their users
+      already hold: this ends none. Refused with 409 `sso_only_domain` while
       any of its domains is SSO-only, since those users would have no way in: turn
       `ssoOnly` off first.
       Refused with 409 `conflict` when it would leave no administrator able to

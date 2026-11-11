@@ -1,5 +1,7 @@
 import { emitTx, logAuditTx, type AuditLogInput } from "../outbox.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
+import { endUserSessions, type Caller } from "../sessions.js";
+import { recordSessionsRevoked } from "../sessionEvents.js";
 import { ConflictError, NotFoundError } from "../errors.js";
 import type { Prisma } from "../db/prisma.js";
 import { emailDomain } from "../email.js";
@@ -26,12 +28,14 @@ export const formatUserIdentity = (identity: IdentityRow) => ({
 
 /**
  * Removes one of the user's identities, unless it is their last way in or
- * their email's domain must sign in through its provider. Throws
- * NotFoundError for an identity that is not the user's. `prepare` runs first
- * in the transaction, before the user's row is locked.
+ * their email's domain must sign in through its provider, and in the same
+ * transaction ends the user's sessions, the caller's own excepted: one
+ * obtained through the identity must not outlive it, and nothing records
+ * which were. Throws NotFoundError for an identity that is not the user's.
+ * `prepare` runs first in the transaction, before the user's row is locked.
  */
 export const unlinkIdentity = async (
-  auth: AuditLogInput["auth"],
+  auth: AuditLogInput["auth"] & Caller,
   userId: string,
   identityId: string,
   prepare?: (tx: Prisma.TransactionClient) => Promise<void>
@@ -39,11 +43,13 @@ export const unlinkIdentity = async (
   const identity = await db.userIdentities.get(userId, identityId);
   const provider = await db.identityProviders.get(identity.providerId);
 
-  await db.$transaction(
-    async (tx) => {
-      await prepare?.(tx);
-      // Two unlinks at once must not both find another way in.
-      await db.users.lockForSignInChange(userId, tx);
+  const self = auth.userId === userId;
+  await endUserSessions(
+    userId,
+    self ? auth : null,
+    // The user's row is locked: two unlinks at once cannot both find
+    // another way in.
+    async (tx, sessionIds, ssoSessionIds) => {
       const user = await db.users.get(userId, tx);
       const others = await db.userIdentities.countUsableForUser(
         userId,
@@ -96,7 +102,12 @@ export const unlinkIdentity = async (
           email: identity.email,
         },
       });
+      await recordSessionsRevoked(auth, user, { self })(
+        tx,
+        sessionIds,
+        ssoSessionIds
+      );
     },
-    { timeout: 30_000 }
+    prepare
   );
 };

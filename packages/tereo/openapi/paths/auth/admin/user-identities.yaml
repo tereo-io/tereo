@@ -64,8 +64,15 @@
       lacks, otherwise). The caller's own permissions count from global roles only,
       capped by a delegated token's scopes.
 
+      The user's sessions end in the same transaction, like
+      `DELETE /v1/admin/users/{id}/sessions/all` (a caller unlinking their
+      own identity keeps the session they act from): a session obtained
+      through the identity must not outlive it.
+
       An audit log entry is created (the admin as actor) and an
-      `auth.user.identity-unlinked` webhook event is emitted.
+      `auth.user.identity-unlinked` webhook event is emitted; when any
+      session ended, so are a `sessions_revoked` entry and an
+      `auth.user.sessions-revoked` event.
     operationId: deleteAdminUserIdentity
     security:
       - BearerAuth: [users.write]

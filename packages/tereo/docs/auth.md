@@ -536,6 +536,12 @@ already gone (a link session with no user lands on `/account?error=session_expir
 at a deactivated provider is no way in), and with 409 `sso_required` when their email's domain is
 `ssoOnly` for that provider. An admin can unlink with
 `DELETE /v1/admin/users/{id}/identities/{identityId}`, with the same 409s but no recent-login rule.
+Either unlink ends the user's sessions in the same transaction, as a password change does (the
+caller's own session is kept when they unlink their own; `sessions_revoked` is audited and
+`auth.user.sessions-revoked` emitted): a session obtained through the identity must not outlive
+it, and a session does not record which identity it came from, so all of them go. Deactivating a
+provider ends no session: it only refuses new sign-ins, and the sessions its users already hold
+last until they expire or are revoked (`DELETE /v1/admin/users/{id}/sessions/all`).
 
 For an `ssoOnly` domain, the password check runs first and unchanged, so nothing reveals whether an
 account exists: an unknown email and a wrong password both answer 401 `Invalid credentials`. A correct
