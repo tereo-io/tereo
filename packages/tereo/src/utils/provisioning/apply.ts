@@ -53,7 +53,6 @@ import {
 } from "../guestRoles.js";
 import {
   createServiceTx,
-  revokeServiceTokens,
   serviceAccountEmail,
   updateServiceTx,
 } from "../services.js";
@@ -916,8 +915,9 @@ const roleFields = (spec: CustomRoleEntry) => ({
 
 /**
  * Creates or updates each custom role, its permission set replaced. Returns
- * the ids of roles whose permissions or activity changed, for the holders'
- * tokens and sessions once the transaction commits.
+ * the ids of roles whose permissions or activity changed: the holders'
+ * client tokens are revoked in the transaction, and their sessions told once
+ * it commits.
  */
 export const applyRoles = async (
   tx: Tx,
@@ -1555,11 +1555,7 @@ const applyServicesContent = async (
   p: Entries,
   now: Date,
   result: ProvisioningResult
-): Promise<{
-  problems: string[];
-  revokedClients: string[];
-  bucketNames: string[];
-}> => {
+): Promise<{ problems: string[]; bucketNames: string[] }> => {
   const rows = new Map(
     (
       await tx.service.findMany({
@@ -1587,8 +1583,7 @@ const applyServicesContent = async (
       bucketNames.push(...applied.bucketNames);
     });
   }
-  const revokedClients: string[] = [];
-  if (problems.length > 0) return { problems, revokedClients, bucketNames };
+  if (problems.length > 0) return { problems, bucketNames };
 
   for (const entry of p.services) {
     const row = rows.get(entry.service.slug)!;
@@ -1624,10 +1619,10 @@ const applyServicesContent = async (
         changes.narrowed.length > 0 ||
         lostPermissions
       )
-        revokedClients.push(client.id);
+        await db.accessTokens.revokeByClientId(client.id, tx);
     });
   }
-  return { problems, revokedClients, bucketNames };
+  return { problems, bucketNames };
 };
 
 class DryRunRollback extends Error {
@@ -1711,6 +1706,8 @@ export const applyProvisioning = async (
         if (integrationProblems.length > 0)
           throw new ProvisioningError(integrationProblems);
         const groupChanges = await applyGroups(tx, set, now, result);
+        for (const id of roleChanges.permissionsChanged)
+          await revokeHolderClientTokens(tx, id);
         await applyWebhooks(tx, p, now, result);
         for (const entry of p.clients)
           await applyClient(tx, entry, state, now, result);
@@ -1721,7 +1718,6 @@ export const applyProvisioning = async (
         if (options.dryRun) throw new DryRunRollback(result);
         return {
           result,
-          revokedClients: content.revokedClients,
           bucketNames: content.bucketNames,
           roleChanges,
           groupChanges,
@@ -1733,10 +1729,8 @@ export const applyProvisioning = async (
     if (err instanceof DryRunRollback) return err.result;
     throw err;
   }
-  const { result, revokedClients, bucketNames, roleChanges, groupChanges } =
-    applied;
-  // Tokens first: a failed push must not leave a revoked role's holders with
-  // working tokens. The apply is committed, so a failure here is logged.
+  const { result, bucketNames, roleChanges, groupChanges } = applied;
+  // The apply is committed, so a failure here is logged.
   const after = async (what: string, step: () => Promise<unknown>) => {
     try {
       await step();
@@ -1744,13 +1738,7 @@ export const applyProvisioning = async (
       logger.error({ err }, `Provisioning: ${what} failed after commit`);
     }
   };
-  for (const id of revokedClients)
-    await after("revoking service tokens", () => revokeServiceTokens(id));
   disconnectTokenSockets(roleChanges.revokedJtis);
-  for (const id of roleChanges.permissionsChanged)
-    await after("revoking role holders' client tokens", () =>
-      revokeHolderClientTokens(id)
-    );
   for (const id of roleChanges.permissionsChanged)
     await after("notifying a role's permission change", () =>
       notifyRolePermissionsChanged(id)
@@ -1770,13 +1758,13 @@ export const applyProvisioning = async (
 };
 
 /** A service client holding the role gets its next token with what it grants now. */
-const revokeHolderClientTokens = async (roleId: string) => {
-  const holders = await db.roles.getUserIdsByRoleId(roleId);
+const revokeHolderClientTokens = async (tx: Tx, roleId: string) => {
+  const holders = await db.roles.getUserIdsByRoleId(roleId, tx);
   const clientIds = new Set(
     holders.flatMap((h) => (h.user.oauthClientId ? [h.user.oauthClientId] : []))
   );
   for (const clientId of clientIds)
-    await db.accessTokens.revokeByClientId(clientId);
+    await db.accessTokens.revokeByClientId(clientId, tx);
 };
 
 /**
@@ -1847,7 +1835,6 @@ export const deprovisionMissing = async (
     now.getTime() - env.REGISTRY_RETIREMENT_GRACE_HOURS * 60 * 60 * 1000
   );
   const {
-    serviceClientIds,
     missingBuckets,
     jtis,
     services,
@@ -1862,7 +1849,6 @@ export const deprovisionMissing = async (
         where: { ...stale, kind: "service", isActive: true },
         include: { client: { include: { serviceAccountUser: true } } },
       });
-      const serviceClientIds: string[] = [];
       const missingBuckets: string[] = [];
       for (const service of dueServices) {
         const { client, accountUserId } = serviceRows(service);
@@ -1878,7 +1864,7 @@ export const deprovisionMissing = async (
           { isActive: false },
           SYSTEM_ACTOR
         );
-        serviceClientIds.push(client.id);
+        await db.accessTokens.revokeByClientId(client.id, tx);
         // No declaration is left to drop them from; they retire, and can be
         // deleted, as if one had. A cleared hash makes a return re-apply the
         // declaration, which brings back the buckets it lists.
@@ -1928,8 +1914,9 @@ export const deprovisionMissing = async (
         jtis.push(...(await deleteLoginClientTx(tx, client, SYSTEM_ACTOR)));
 
       const archivedRoles = await archiveDueRoles(tx, cutoff, now);
+      for (const { id } of archivedRoles)
+        await revokeHolderClientTokens(tx, id);
       return {
-        serviceClientIds,
         missingBuckets,
         jtis,
         services: dueServices.length,
@@ -1940,13 +1927,11 @@ export const deprovisionMissing = async (
     },
     { timeout: 30_000 }
   );
-  for (const id of serviceClientIds) await revokeServiceTokens(id);
   for (const name of missingBuckets) await broadcastBucketInvalidate(name);
   disconnectTokenSockets(jtis);
   // Deleted clients took their profiles with them.
   if (clients > 0) await invalidateAfterWrite();
   for (const { id } of archivedRoles) {
-    await revokeHolderClientTokens(id);
     notifyRoleDeleted(
       (await db.roles.getUserIdsByRoleId(id)).map((h) => h.userId)
     );

@@ -6,10 +6,10 @@ import { deprovisionMissing } from "../../../utils/provisioning/apply.js";
 import { applyProvisioning } from "../../../utils/provisioning/index.js";
 import { storeBrandingImage } from "../../../utils/branding/storage.js";
 import { SYSTEM_USER_ID } from "../../../definitions/systemUser.js";
-import { lockWaiters, untilQueued } from "../../support/dbLocks.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateClientSecret } from "../../../utils/crypto.js";
 import { checkImage } from "../../../utils/branding/images.js";
+import { serviceToken } from "../../support/clientToken.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import db from "../../../utils/db/index.js";
 import { randomBytes } from "node:crypto";
@@ -31,6 +31,12 @@ import {
   brandingPrincipal,
   createBrandingClient,
 } from "../../support/branding.js";
+import {
+  holdLocks,
+  lockWaiters,
+  untilQueued,
+  waitForLockWait,
+} from "../../support/dbLocks.js";
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
@@ -165,6 +171,73 @@ describe("applyProvisioning", () => {
       },
     });
     expect(approvals).toBe(1);
+  });
+});
+
+describe("token revocation", () => {
+  /** The token's row lock, so the revocation waits; `row` reads it back. */
+  const holdToken = async (token: string) => {
+    const { jti } = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64url").toString()
+    ) as { jti: string };
+    const release = await holdLocks(
+      (tx) =>
+        tx.$queryRaw`SELECT 1 FROM "auth"."access_tokens" WHERE jti = ${jti} FOR UPDATE`
+    );
+    return {
+      release,
+      row: () => prisma.accessToken.findUniqueOrThrow({ where: { jti } }),
+    };
+  };
+
+  it("commits revoked access together with the revocation of the tokens carrying it", async () => {
+    const d = serviceDoc({ access: { roles: ["file_user"], audiences: [] } });
+    await applyProvisioning(setOf(d));
+    const accountId = (await serviceRow(d.service.slug)).client!
+      .serviceAccountUser!.id;
+    const held = await holdToken(await serviceToken(d));
+
+    d.service.access = { roles: [], audiences: [] };
+    const applying = applyProvisioning(setOf(d));
+    try {
+      await waitForLockWait("%access_tokens%");
+      // Not committed while the token is still good.
+      expect(
+        await prisma.userRole.count({ where: { userId: accountId } })
+      ).toBe(1);
+    } finally {
+      await held.release();
+      await applying;
+    }
+    expect(await prisma.userRole.count({ where: { userId: accountId } })).toBe(
+      0
+    );
+    expect((await held.row()).revokedAt).not.toBeNull();
+  });
+
+  it("commits a retired service's deactivation together with the revocation of its tokens", async () => {
+    const d = serviceDoc();
+    await applyProvisioning(setOf(d));
+    const held = await holdToken(await serviceToken(d));
+    await prisma.service.update({
+      where: { slug: d.service.slug },
+      data: {
+        unprovisionedAt: new Date(
+          Date.now() - (env.REGISTRY_RETIREMENT_GRACE_HOURS + 1) * 3_600_000
+        ),
+      },
+    });
+
+    const retiring = deprovisionMissing();
+    try {
+      await waitForLockWait("%access_tokens%");
+      expect((await serviceRow(d.service.slug)).isActive).toBe(true);
+    } finally {
+      await held.release();
+      await retiring;
+    }
+    expect((await serviceRow(d.service.slug)).isActive).toBe(false);
+    expect((await held.row()).revokedAt).not.toBeNull();
   });
 });
 
