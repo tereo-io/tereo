@@ -351,6 +351,40 @@ describe("PUT /v1/files/buckets/:name/multipart/:uploadId/parts/:partNumber", ()
           await getRedisClient().del(claim);
         }
       });
+
+      it("treats an upload id in upper case as the same upload", async () => {
+        const uploadId = await initiate();
+        const upper = uploadId.toUpperCase();
+        expect(upper).not.toBe(uploadId);
+        const stagingDirs = () =>
+          fs.readdir(path.join(env.FILE_SERVICE_STORAGE_PATH, "multipart"));
+
+        const first = await putPart(upper, 1, text());
+        expect(first.status).toBe(HTTP_STATUS.OK);
+        expect(await stagingDirs()).toContain(uploadId);
+        expect(await stagingDirs()).not.toContain(upper);
+
+        const claim = redisKey(multipartCompleteClaim(uploadId));
+        await getRedisClient().set(claim, "held-by-test", "EX", 60);
+        try {
+          const res = await putPart(upper, 1, text());
+          expect(res.status).toBe(HTTP_STATUS.CONFLICT);
+          expect(res.data.error).toBe("multipart_complete_in_progress");
+        } finally {
+          await getRedisClient().del(claim);
+        }
+
+        const second = await putPart(upper, 2, text());
+        expect(second.status).toBe(HTTP_STATUS.OK);
+        const abort = await axios.delete(
+          `${BASE_URL}/buckets/${bucketName}/multipart/${upper}`,
+          as()
+        );
+        expect(abort.status).toBe(HTTP_STATUS.NO_CONTENT);
+        const left = await stagingDirs();
+        expect(left).not.toContain(uploadId);
+        expect(left).not.toContain(upper);
+      });
     }
   );
 
