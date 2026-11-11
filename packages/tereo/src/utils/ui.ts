@@ -11,6 +11,7 @@ export const RESERVED_PREFIXES: readonly string[] = [
   "/health",
   "/ws",
   "/assets",
+  "/scim",
 ];
 
 // Lowercased because Express matches routes case-insensitively: `/V1/...`

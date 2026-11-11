@@ -42,6 +42,7 @@ import * as shares from "./shares.js";
 import { prisma } from "./prisma.js";
 import * as roles from "./roles.js";
 import * as users from "./users.js";
+import * as scim from "./scim.js";
 import * as totp from "./totp.js";
 
 const $transaction = <T>(
@@ -70,6 +71,7 @@ export default {
   permissions,
   refreshTokens,
   roles,
+  scim,
   scopes,
   settings,
   totp,
