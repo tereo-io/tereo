@@ -179,6 +179,45 @@ describe("POST /oauth/totp/verify", () => {
     expect(res.status).toBe(HTTP_STATUS.OK);
   });
 
+  it("caps a known device's attempts through a delay, whatever its earlier logins", async () => {
+    const user = await createTestUser();
+    const secret = await enableTotp(user.id);
+
+    // Two logins outside any delay; the second carries the first's cookie,
+    // which stays valid after the second replaces it in the browser.
+    const owner = new Map<string, string>();
+    const cookies: string[] = [];
+    for (const step of [0, 1]) {
+      const session = await startLogin(user, owner);
+      const res = await submitTotp(
+        owner,
+        session,
+        generateTotpCode(secret, step)
+      );
+      expect(res.status).toBe(HTTP_STATUS.OK);
+      absorbCookies(owner, res);
+      cookies.push(owner.get("tereo_known_device")!);
+    }
+
+    const attacker = new Map<string, string>();
+    const attackerSession = await startLogin(user, attacker);
+    for (let i = 0; i < MAX_FAILURES; i++) {
+      await submitTotp(attacker, attackerSession, wrongCode(secret));
+    }
+    await expectTooMany(
+      await submitTotp(attacker, attackerSession, wrongCode(secret))
+    );
+
+    // A copy of the cookie buys five guesses through the delay, no more.
+    const copy = new Map([["tereo_known_device", cookies[0]]]);
+    const session = await startLogin(user, copy);
+    for (let i = 0; i < MAX_FAILURES; i++) {
+      const res = await submitTotp(copy, session, wrongCode(secret));
+      expect(res.status).toBe(HTTP_STATUS.UNAUTHORIZED);
+    }
+    await expectTooMany(await submitTotp(copy, session, wrongCode(secret)));
+  });
+
   it("audits repeated login 2FA failures", async () => {
     const user = await createTestUser();
     const secret = await enableTotp(user.id);

@@ -34,8 +34,12 @@ export const beginTotpAttempt = async (
 ): Promise<TotpAttempt> => {
   const device = knownDeviceFor(req, user);
   let attempt: BackoffAttempt;
+  // The device's own allowance is spent only for an attempt let through a
+  // delay, so only such an attempt gives one back.
+  let spentDevice: string | null = null;
   if (device && (await totpBackoff.isDelayed(req, user.id))) {
     await knownDeviceTotp.check(req, device);
+    spentDevice = device;
     attempt = await totpBackoff.spendUnblocked(req, user.id);
   } else {
     attempt = await totpBackoff.check(req, user.id);
@@ -44,7 +48,7 @@ export const beginTotpAttempt = async (
   return {
     async succeeded() {
       await attempt.refund();
-      if (device) await knownDeviceTotp.refund(req, device);
+      if (spentDevice) await knownDeviceTotp.refund(req, spentDevice);
     },
     async failed() {
       logger.warn(
