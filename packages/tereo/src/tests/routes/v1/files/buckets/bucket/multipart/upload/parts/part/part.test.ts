@@ -467,5 +467,44 @@ describe("PUT /v1/files/buckets/:name/multipart/:uploadId/parts/:partNumber", ()
         expect(await download(bucket.name, "parts.bin")).toBe(body);
       }
     );
+
+    it("streams a part and parses a large complete when the path ends in a slash", async () => {
+      const body = '{"hello":"world"}';
+      const bucket = await createTestBucket(token);
+      const init = await axios.post(
+        `${BASE_URL}/buckets/${bucket.name}/multipart`,
+        { objectKey: "slash.bin", contentType: "application/octet-stream" },
+        { headers: auth() }
+      );
+      const upload = `${BASE_URL}/buckets/${bucket.name}/multipart/${init.data.uploadId}`;
+
+      const part = await axios.put(`${upload}/parts/1/`, body, {
+        headers: { ...auth(), "Content-Type": "application/json" },
+        transformRequest: (data) => data,
+        validateStatus: () => true,
+      });
+      expect(part.status).toBe(HTTP_STATUS.OK);
+      expect(part.data.sizeBytes).toBe(String(Buffer.byteLength(body)));
+
+      // Past the 1mb of the area's JSON parser, within the route's own 5mb.
+      const parts = JSON.stringify({
+        parts: [{ partNumber: 1, etag: part.data.etag }],
+      });
+      const complete = await axios.post(
+        `${upload}/complete/`,
+        parts + " ".repeat(1_200_000),
+        {
+          headers: {
+            ...auth(),
+            "Content-Type": "application/json",
+            "Idempotency-Key": testIdempotencyKey(),
+          },
+          transformRequest: (data) => data,
+          validateStatus: () => true,
+        }
+      );
+      expect([HTTP_STATUS.OK, HTTP_STATUS.CREATED]).toContain(complete.status);
+      expect(await download(bucket.name, "slash.bin")).toBe(body);
+    });
   });
 });

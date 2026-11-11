@@ -2,9 +2,9 @@ import express, { RequestHandler } from "express";
 
 // A multipart part PUT streams its raw body; a parser that matched its
 // Content-Type would consume it and leave an empty part.
-const PART_UPLOAD = /^\/buckets\/[^/]+\/multipart\/[^/]+\/parts\/[^/]+$/i;
+const PART_UPLOAD = /^\/buckets\/[^/]+\/multipart\/[^/]+\/parts\/[^/]+\/?$/i;
 // The route parses its own part list, up to 5mb.
-const MULTIPART_COMPLETE = /^\/buckets\/[^/]+\/multipart\/[^/]+\/complete$/i;
+const MULTIPART_COMPLETE = /^\/buckets\/[^/]+\/multipart\/[^/]+\/complete\/?$/i;
 // Up to 1000 keys of up to 1024 characters each.
 const ARCHIVE_CREATE = /^\/buckets\/[^/]+\/archives\/?$/i;
 
