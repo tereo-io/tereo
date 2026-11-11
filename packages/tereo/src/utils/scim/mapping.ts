@@ -139,13 +139,13 @@ export const toUserInput = (
 
 export const toScimUser = (
   user: UserRow,
-  link: ScimUserLink,
+  link: ScimUserLink | null,
   baseUrl: string
 ): Record<string, unknown> => ({
   schemas: [USER_SCHEMA],
   id: user.id,
-  ...(link.externalId && { externalId: link.externalId }),
-  userName: link.userName,
+  ...(link?.externalId && { externalId: link.externalId }),
+  userName: link?.userName ?? user.email,
   name: {
     ...(user.name && { formatted: user.name }),
     ...(user.firstName && { givenName: user.firstName }),

@@ -1,5 +1,7 @@
 import type { ScimUser as ScimUserLink } from "../../../prisma/generated/client/index.js";
 import { Prisma } from "../../../prisma/generated/client/index.js";
+import { SYSTEM_USER_ID } from "../../definitions/systemUser.js";
+import type { ScimFilter } from "../scim/filter.js";
 import { NotFoundError } from "../errors.js";
 import { prisma } from "./prisma.js";
 
@@ -165,4 +167,110 @@ export const findClaimable = async (
             userName: { equals: by.email, mode: "insensitive" },
           },
   });
+};
+
+interface VisibilityScope {
+  connectionId: string;
+  providerId: string;
+}
+
+/** Domains are stored as typed; email addresses are stored lower case. */
+export const listProviderDomains = async (providerId: string, tx?: Tx) => {
+  const rows = await (tx ?? prisma).identityProviderDomain.findMany({
+    where: { providerId },
+    select: { domain: true },
+  });
+  return rows.map((r) => r.domain.toLowerCase());
+};
+
+const managed = (connectionId: string) =>
+  ({ scimLink: { is: { connectionId, deletedAt: null } } }) as const;
+
+// A link with deleted_at set, in any connection, makes the user invisible as
+// unmanaged: only a user with no link at all is claimable by domain.
+const unmanagedInDomains = (domains: string[]): Prisma.UserWhereInput => ({
+  scimLink: { is: null },
+  OR: domains.map((d) => ({
+    email: { endsWith: `@${d}`, mode: "insensitive" as const },
+  })),
+});
+
+const visibleWhere = (
+  scope: VisibilityScope,
+  domains: string[]
+): Prisma.UserWhereInput => ({
+  userType: "human",
+  id: { not: SYSTEM_USER_ID },
+  OR: [managed(scope.connectionId), unmanagedInDomains(domains)],
+});
+
+const clauseWhere = (
+  connectionId: string,
+  clause: ScimFilter[number]
+): Prisma.UserWhereInput => {
+  const insensitive = { equals: clause.value, mode: "insensitive" as const };
+  switch (clause.attr) {
+    case "email":
+      return { email: insensitive };
+    case "externalId":
+      return {
+        scimLink: {
+          is: { connectionId, deletedAt: null, externalId: clause.value },
+        },
+      };
+    case "userName":
+      return {
+        OR: [
+          {
+            scimLink: {
+              is: { connectionId, deletedAt: null, userName: insensitive },
+            },
+          },
+          { scimLink: { is: null }, email: insensitive },
+        ],
+      };
+  }
+};
+
+export const findVisibleUser = async (
+  scope: VisibilityScope,
+  userId: string,
+  tx?: Tx
+) => {
+  const domains = await listProviderDomains(scope.providerId, tx);
+  return await (tx ?? prisma).user.findFirst({
+    where: { AND: [{ id: userId }, visibleWhere(scope, domains)] },
+    include: { scimLink: true },
+  });
+};
+
+/** Without a filter, only the connection's managed users are listed. */
+export const listVisibleUsers = async (
+  scope: VisibilityScope,
+  filter: ScimFilter,
+  page: { skip: number; take: number },
+  tx?: Tx
+) => {
+  const domains = await listProviderDomains(scope.providerId, tx);
+  const where: Prisma.UserWhereInput = {
+    AND: [
+      { userType: "human", id: { not: SYSTEM_USER_ID } },
+      filter.length === 0
+        ? managed(scope.connectionId)
+        : visibleWhere(scope, domains),
+      ...filter.map((c) => clauseWhere(scope.connectionId, c)),
+    ],
+  };
+  const client = tx ?? prisma;
+  const [items, total] = await Promise.all([
+    client.user.findMany({
+      where,
+      include: { scimLink: true },
+      orderBy: { id: "asc" },
+      skip: page.skip,
+      take: page.take,
+    }),
+    client.user.count({ where }),
+  ]);
+  return { items, total };
 };

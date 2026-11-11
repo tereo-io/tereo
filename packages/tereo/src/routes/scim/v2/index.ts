@@ -1,5 +1,6 @@
 import { scimBodyParsers } from "../../../middleware/bodyParsers.js";
 import { requireScimToken, scimErrorHandler } from "./middleware.js";
+import usersRouter from "./users/index.js";
 import { Router } from "express";
 import {
   rateLimitPreAuth,
@@ -25,7 +26,7 @@ router.use(
 router.get("/ServiceProviderConfig", getServiceProviderConfig);
 router.get("/ResourceTypes", getResourceTypes);
 router.get("/Schemas", getSchemas);
-// /Users is mounted here by the Users task.
+router.use("/Users", usersRouter);
 
 router.use(notFound);
 router.use(scimErrorHandler);
