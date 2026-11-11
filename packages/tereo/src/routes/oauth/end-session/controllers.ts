@@ -62,8 +62,10 @@ export const endSessionPostHandler = async (req: Request, res: Response) => {
 };
 
 /**
- * RP-initiated logout for this browser only. A request with a valid
- * `id_token_hint` ends the session at once; without one nothing shows the
+ * RP-initiated logout of one browser: this one, and the one whose SSO
+ * session a valid `id_token_hint` names in `sid`, which need not be this
+ * one — the hint alone vouches for it, as OIDC specifies. A request with a
+ * valid hint ends the session at once; without one nothing shows the
  * client asked for it — any site can send the browser here — so the browser
  * goes to the UI's confirmation page instead, and only
  * POST /oauth/end-session/confirm ends the session.

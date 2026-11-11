@@ -1447,7 +1447,12 @@ the login. Core never reads them back.
 
 `/oauth/end-session` with a valid `id_token_hint` logs this browser out at once, unless the browser
 is signed in to that client as a different user than the hint's `sub` (`signedInAsOther`): any
-site can hold an ID token of its own user, so that browser is asked to confirm as below. It then
+site can hold an ID token of its own user, so that browser is asked to confirm as below. The hint
+also ends the SSO session its `sid` names when that is the `sub`'s, whichever browser holds it:
+as OIDC RP-initiated logout specifies, the ID token alone vouches for the request, and no cookie
+from that browser is needed. So a user's ID token for a client, until it is past the grace below,
+is enough to sign the browser it was issued to out of that client — and of nothing else, since an
+SSO session belongs to one browser and one client. It then
 redirects to
 `post_logout_redirect_uri` or, for a navigation without one, to where the user signs in to the
 client again (`clientSignInUrl`: the UI's root for core's own client, else the origin of its first

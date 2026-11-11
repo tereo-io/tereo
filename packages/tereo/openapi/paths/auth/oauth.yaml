@@ -841,7 +841,15 @@
       - OAuth2/OIDC - Session
     summary: End session endpoint (GET)
     description: |
-      OpenID Connect RP-initiated logout for **this browser only**.
+      OpenID Connect RP-initiated logout of **one browser**: the one making
+      the request and, with an `id_token_hint`, the one whose SSO session the
+      hint's `sid` names. A valid hint is all that takes: no cookie from that
+      session's browser is needed, so whoever holds a user's ID token for the
+      client, until it is `ID_TOKEN_HINT_GRACE_SECONDS` past its expiry, can
+      sign that browser out of the client (and nothing more: an SSO session
+      is per browser and per client). The token travels in this URL's query
+      string; a client that would rather keep it out of logs and history can
+      send the POST form.
 
       **Without `id_token_hint` the session is not ended here.** Nothing shows
       such a request came from the client — any page can send a browser to
