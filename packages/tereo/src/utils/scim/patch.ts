@@ -80,6 +80,9 @@ const applyValue = (
   switch (lower) {
     case "username":
       out.userName = str(value, "userName", USER_NAME_MAX);
+      if (out.userName.trim() === "") {
+        throw invalidValue("userName must not be empty");
+      }
       return;
     case "externalid":
       out.externalId = nullableStr(value, "externalId", EXTERNAL_ID_MAX);

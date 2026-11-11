@@ -117,4 +117,10 @@ describe("applyPatch", () => {
       patch({ op: "replace", path: "active", value: "maybe" })
     ).toThrow(expect.objectContaining({ code: "invalidValue" }));
   });
+
+  it.each(["", "   "])("refuses an empty userName %j", (value) => {
+    expect(() => patch({ op: "replace", path: "userName", value })).toThrow(
+      expect.objectContaining({ code: "invalidValue" })
+    );
+  });
 });
