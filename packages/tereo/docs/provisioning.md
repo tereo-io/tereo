@@ -479,7 +479,9 @@ apply it once. A set that has not changed writes nothing and audits nothing.
 2. **Declarations**: a service whose declaration or `version` changed has its permissions, system
    roles, buckets and event types applied ([registry](registry.md)). A `version` **lower** than the
    stored one is applied anyway, because the documents are the intended state and a lower version is
-   a deliberate rollback; core logs a warning naming both versions.
+   a deliberate rollback; core logs a warning naming both versions. Core's own declaration is the
+   exception: a start ignores a lower version, and a rollback of core is confirmed with
+   `register-core --accept-older` ([registry](registry.md#rolling-core-back)).
 3. **Custom roles**: created or updated, their permission set replaced.
 4. **Access**: every `access` entry becomes an approved access row, decided by the system user.
    **Access follows the role**: an entry for another service's role grants whatever the role holds
@@ -640,6 +642,7 @@ Responses carry `provisioned: true` (an endpoint also `ownerService`), and the a
 ```sh
 npm run cli -- provision [--path <path>] [--dry-run]
 npm run cli -- provisioning-schema
+npm run cli -- register-core [--accept-older]
 ```
 
 - `provision` registers core's own declaration first, as start does, so documents may use what this
@@ -655,6 +658,11 @@ npm run cli -- provisioning-schema
   change. It writes nothing to the provisioned state. On a never-started database it can still
   create the rows `loadKeys()` and the default organization need, and registers core's declaration.
 - `provisioning-schema` prints the JSON Schema.
+- `register-core` registers core's own declaration and nothing else. `provision` and a start never
+  apply one older than the one recorded, so after rolling core back to an earlier release run
+  `register-core --accept-older` from that release, or what the newer release dropped retires after
+  `REGISTRY_RETIREMENT_GRACE_HOURS` ([registry](registry.md#rolling-core-back)). The documents
+  themselves roll back without it.
 
 Run `provision --dry-run` in a pipeline before rolling out, to catch a bad set before core refuses
 to start on it.

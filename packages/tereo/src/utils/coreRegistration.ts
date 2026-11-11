@@ -15,12 +15,15 @@ import {
  * Register core's own declaration, in-process, as the system user. Runs on
  * every start; unchanged since the last start, it is a no-op. Core's buckets
  * are then put back to their declared settings, whether or not it changed.
+ * `acceptOlder` is for the `register-core` CLI alone, after a rollback.
  */
-export const registerCore = async () => {
-  const result = await registerDeclaration(CORE_SERVICE, CORE_DECLARATION, {
-    userId: SYSTEM_USER.id,
-    email: null,
-  });
+export const registerCore = async (options: { acceptOlder?: boolean } = {}) => {
+  const result = await registerDeclaration(
+    CORE_SERVICE,
+    CORE_DECLARATION,
+    { userId: SYSTEM_USER.id, email: null },
+    options
+  );
   await resetCoreBuckets();
   await reportInertOrgAssignments();
   return result;
@@ -31,7 +34,9 @@ export const registerCore = async () => {
  * provision CLI the chart's Job runs, possibly before any pod of the release
  * has started.
  */
-export const prepareAndRegisterCore = async () => {
+export const prepareAndRegisterCore = async (
+  options: { acceptOlder?: boolean } = {}
+) => {
   // Webhook events need the default organization's id.
   await ensureDefaultOrganization();
   // The actor on system writes; every actor column references it.
@@ -43,7 +48,7 @@ export const prepareAndRegisterCore = async () => {
     logger.error({ err }, "Startup partition check failed");
   });
   // Core's own permissions, roles, buckets and event types.
-  return registerCore();
+  return registerCore(options);
 };
 
 /**

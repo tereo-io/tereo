@@ -195,3 +195,38 @@ Core's declaration is `CORE_DECLARATION` (`definitions/declaration.ts`), version
 system user. Its names keep their historical
 prefixes, all reserved for it, and its roles are exempt from the `<namespace>_` rule. To add a permission, role, bucket or event type to core, add it under
 `definitions/`; to remove one, delete it there and it retires a day after the deploy.
+
+### Rolling core back
+
+A start ignores core's declaration when its version is lower than the one recorded (it logs
+`Ignored a declaration older than the one applied`), so a replica of the previous release that
+restarts during a rolling deploy cannot undo the rollout. The same rule means a rollback changes
+nothing by itself: whatever the newer release dropped stays `missingSince` and retires after
+`REGISTRY_RETIREMENT_GRACE_HOURS`, while the release now running still depends on it, and whatever
+the newer release added stays declared.
+
+When the rollback is meant to stay, tell core so, from the release rolled back to:
+
+```sh
+npm run cli -- register-core --accept-older      # in the image: node dist/cli/index.js register-core --accept-older
+```
+
+It applies the running release's declaration although it is older: everything that declaration
+contains is no longer missing or retired, anything only the newer release declared becomes missing
+and retires after the grace, and the recorded version becomes this release's. It prints
+`{ applied, changed, version, acceptOlder }`. The apply is audited like any other (`UPDATE` on
+`Service`, `metadata.via: "declaration"`) with `acceptedOlder: true` and `replacedVersion`, emits
+`core.service.declared`, and logs `Applied a declaration older than the one applied before` with
+both versions. Without the flag the command registers as a start does, and exits 1 when a newer
+declaration is recorded. It needs core's environment, as `provision` does.
+
+- Run it once every process of the newer release is gone. One that starts afterwards registers its
+  newer declaration again, as in any rollout.
+- The override is a command, never a setting read at start: a start-time flag would let every stale
+  replica undo a rollout for as long as it stayed set.
+- Without it, the rollback must be over (core back on a release at least as new as the one
+  recorded) or `REGISTRY_RETIREMENT_GRACE_HOURS` raised before the grace elapses. Past that, the
+  dropped items are retired; nothing is deleted, and the command still brings them back.
+
+App services need none of this: a provisioning document with a lower `version` is applied as a
+deliberate rollback ([provisioning](provisioning.md#applying)).

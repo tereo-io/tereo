@@ -292,6 +292,53 @@ describe("registerDeclaration", () => {
     expect((await stored(service.id)).declarationVersion).toBe("1.10.0");
   });
 
+  it("applies an older declaration when the operator accepts it, restoring what the newer one dropped", async () => {
+    const service = await newService();
+    const ns = service.namespace;
+    const previous = declarationFor(ns, "1.0.0");
+    await registerDeclaration(service, previous, actor);
+    await registerDeclaration(
+      service,
+      declarationFor(ns, "1.1.0", ["read", "export"]),
+      actor
+    );
+    expect(await missingSince(`${ns}.items.write`)).not.toBeNull();
+
+    // Rolled back to 1.0.0: on its own, a start changes nothing.
+    expect(await registerDeclaration(service, previous, actor)).toEqual({
+      applied: false,
+      changed: false,
+    });
+    expect(await missingSince(`${ns}.items.write`)).not.toBeNull();
+
+    expect(
+      await registerDeclaration(service, previous, actor, {
+        acceptOlder: true,
+      })
+    ).toEqual({ applied: true, changed: true });
+    expect(await missingSince(`${ns}.items.write`)).toBeNull();
+    // What only the newer release declared now waits out the grace.
+    expect(await missingSince(`${ns}.items.export`)).not.toBeNull();
+    expect((await stored(service.id)).declarationVersion).toBe("1.0.0");
+
+    const audit = await prisma.auditLogEntry.findFirstOrThrow({
+      where: { entityType: "Service", entityId: service.id },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(audit.metadata).toMatchObject({
+      via: "declaration",
+      acceptedOlder: true,
+      replacedVersion: "1.1.0",
+      version: "1.0.0",
+    });
+
+    // The rolled-back release's later starts are no-ops.
+    expect(await registerDeclaration(service, previous, actor)).toEqual({
+      applied: true,
+      changed: false,
+    });
+  });
+
   it("moves the version on when only the version changed", async () => {
     const service = await newService();
     const ns = service.namespace;

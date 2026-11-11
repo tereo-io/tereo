@@ -282,7 +282,7 @@ env (no overlap).
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `REGISTRY_RETIREMENT_GRACE_HOURS` | `24` | 0–8760. How long an item may be missing from a declaration before it retires, and how long a service, integration, login client, custom role or group dropped from the [provisioning documents](provisioning.md) lasts before it is deactivated, deleted or archived |
+| `REGISTRY_RETIREMENT_GRACE_HOURS` | `24` | 0–8760. How long an item may be missing from a declaration before it retires, and how long a service, integration, login client, custom role or group dropped from the [provisioning documents](provisioning.md) lasts before it is deactivated, deleted or archived. After rolling core back to an earlier release, run `npm run cli -- register-core --accept-older` or raise this before the grace elapses: a start does not apply an older declaration of core's ([registry](registry.md#rolling-core-back)) |
 | `SERVICE_SECRET_OVERLAP_HOURS` | `24` | 0–8760. How long a replaced service secret keeps working |
 
 ### Files

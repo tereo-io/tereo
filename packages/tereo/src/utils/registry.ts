@@ -424,11 +424,16 @@ export const lockRegistries = async (tx: Tx, serviceIds: Iterable<string>) => {
  * beyond recording a newer version. A declaration that breaks a rule is
  * refused whole, with every problem listed. Serialized, so copies starting
  * together apply it once. App services' declarations come from provisioning.
+ *
+ * `acceptOlder` is the operator's word that core was rolled back on purpose:
+ * the older declaration is applied, which restores what the newer one
+ * dropped. Never set on a start.
  */
 export const registerDeclaration = async (
   service: RegistryService,
   input: Declaration | ParsedDeclaration,
-  actor: { userId: string; email: string | null }
+  actor: { userId: string; email: string | null },
+  { acceptOlder = false }: { acceptOlder?: boolean } = {}
 ): Promise<RegisterResult> => {
   const declaration = declarationSchema.parse(input);
   const hash = declarationHash(declaration);
@@ -459,11 +464,13 @@ export const registerDeclaration = async (
   };
   const isOlder = (stored: string | null): stored is string =>
     stored !== null && compareSemver(version, stored) < 0;
+  const isIgnored = (stored: string | null): stored is string =>
+    !acceptOlder && isOlder(stored);
 
   const current = await prisma.service.findUniqueOrThrow({
     where: { id: service.id },
   });
-  if (isOlder(current.declarationVersion)) {
+  if (isIgnored(current.declarationVersion)) {
     return ignored(current.declarationVersion);
   }
   if (
@@ -479,7 +486,7 @@ export const registerDeclaration = async (
       const locked = await tx.service.findUniqueOrThrow({
         where: { id: service.id },
       });
-      if (isOlder(locked.declarationVersion)) {
+      if (isIgnored(locked.declarationVersion)) {
         return {
           result: ignored(locked.declarationVersion),
           bucketNames: [],
@@ -500,7 +507,10 @@ export const registerDeclaration = async (
         service,
         declaration,
         actor,
-        new Date()
+        new Date(),
+        isOlder(locked.declarationVersion)
+          ? { acceptedOlder: true, replacedVersion: locked.declarationVersion }
+          : {}
       );
       logger.info(
         { service: service.slug, version, hash, ...summary },
