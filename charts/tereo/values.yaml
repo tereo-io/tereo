@@ -22,7 +22,30 @@ corsAllowedOrigins: []
 
 # The proxies in front of core (required): "1" for a single ingress hop, a CIDR
 # list, or "false" when nothing proxies. "true" is refused by core.
+# A hop count trusts whoever connects to the pod, not only the ingress: a
+# workload that reaches core directly then picks its own client IP with
+# X-Forwarded-For. Use the ingress controller's CIDR, or keep the count and
+# limit who can connect with networkPolicy below.
 trustProxy: ""
+
+# A NetworkPolicy letting only the listed peers connect to the API pods; it
+# needs a network plugin that enforces NetworkPolicy. ingressFrom takes
+# NetworkPolicyPeer entries and must name everything that calls core: the
+# ingress controller, and the app services that reach it through the Service.
+# Egress is not restricted.
+#
+# networkPolicy:
+#   enabled: true
+#   ingressFrom:
+#     - namespaceSelector:
+#         matchLabels:
+#           kubernetes.io/metadata.name: ingress-nginx
+#     - podSelector:
+#         matchLabels:
+#           app.kubernetes.io/name: billing
+networkPolicy:
+  enabled: false
+  ingressFrom: []
 
 # Where core's admin UI is served. Empty means publicUrl, where core serves it.
 uiBaseUrl: ""

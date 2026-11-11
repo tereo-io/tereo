@@ -14,7 +14,7 @@ With `NODE_ENV=production`, core refuses to start unless these are set:
 | `REDIS_URL`, or `REDIS_SENTINELS` + `REDIS_MASTER_NAME` | Redis — single node or Sentinel |
 | `PUBLIC_URL` | Externally reachable `https://` URL of core, not localhost/127.0.0.1/[::1]. The OIDC issuer, share and presigned links, and the UI's default address are built from it |
 | `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call core's API with credentials; `*` is refused, and so is an `http://` origin other than loopback (`localhost`, `127.0.0.1`, `[::1]`). A security setting: a listed origin's pages can read core's API responses made with the user's credentials — list only origins you trust |
-| `TRUST_PROXY` | The proxies in front of core (`1`, a CIDR list, …), or `loopback`/`false` when there are none. Left at the development default behind a load balancer, `req.ip` — rate-limit keys and audit IPs — would be the proxy's address, so it must be chosen, not inherited. `true` is refused: it trusts every `X-Forwarded-For` hop, so a client could pick its own address |
+| `TRUST_PROXY` | The proxies in front of core (`1`, a CIDR list, …), or `loopback`/`false` when there are none. Left at the development default behind a load balancer, `req.ip` — rate-limit keys and audit IPs — would be the proxy's address, so it must be chosen, not inherited. `true` is refused: it trusts every `X-Forwarded-For` hop, so a client could pick its own address. A hop count trusts whoever connects to core, not only the proxy: see [Trusted proxies](#trusted-proxies) |
 | `CORE_KEK` | Base64, 32 bytes. Encrypts the keys core keeps in `core.secrets`; keep it outside the database (a secret manager), since without it the stored keys cannot be read. See [Key encryption](#key-encryption) |
 
 It also refuses, with no override, `COOKIE_SECURE=false` (or `0`), and a `UI_BASE_URL` or `ISSUER`
@@ -29,6 +29,25 @@ Set these too, though core starts without them:
 Apart from `CORE_KEK`, no key needs to be supplied: core generates any that env leaves unset into
 `core.secrets` on first start, encrypted with the KEK. A key set in env always wins and is never
 stored.
+
+### Trusted proxies
+
+`TRUST_PROXY` decides whose `X-Forwarded-For` core believes, and so what `req.ip` is: the key of
+every per-IP rate limit and the address written to auth logs, access logs and audit entries.
+
+- **A hop count** (`1` behind a single ingress) trusts whoever opens the connection, whatever its
+  address. Through the proxy that is the proxy, and a client cannot choose its address. But any peer
+  that reaches core without passing through the proxy — another workload in the cluster connecting
+  to the Service or the pod — is trusted the same way: it sends `X-Forwarded-For: <anything>` and
+  core takes that as its address, so it gets a fresh per-IP limit with every request and writes
+  addresses of its choosing into the logs and the audit trail. The per-account and per-token limits
+  are not keyed by address and still hold.
+- **A CIDR list** (the proxy's address range) believes the header only from those addresses; a
+  direct peer outside it is seen at its own address.
+
+So with a hop count, the network must let only the proxy and workloads you trust connect to core:
+a NetworkPolicy (the Helm chart ships an optional one, `networkPolicy`), a security group, or a
+listener bound where only the proxy can reach it. Where that cannot be arranged, use the CIDR list.
 
 ## Process roles
 
@@ -120,7 +139,7 @@ notes as a range; a value outside its range stops core at startup with the varia
 | `REDIS_PASSWORD` | — | Sentinel connections only |
 | `REDIS_DB` | URL's path, else `0` | 0–15. The database index, in URL, unix socket and Sentinel modes alike; set, it overrides a database in `REDIS_URL`'s path |
 | `REDIS_KEY_PREFIX` | empty | Up to 64 of `A-Z a-z 0-9 : _ . -`, e.g. `app1:`. Put in front of every key, pub/sub channel, BullMQ prefix (`<prefix>bull`) and socket.io adapter key (`<prefix>socket.io`) core uses, so several cores can share one Redis database. Pub/sub channels span every database index, so cores that share a Redis server on different `REDIS_DB`s still need distinct prefixes. App services must pass the same value as `channelPrefix` to `createCoreClient` to hear core's cache invalidations. Changing it orphans existing keys and jobs: change it only on a fresh Redis or with core stopped and its queues drained |
-| `TRUST_PROXY` | `loopback` outside production | Required in production. Express `trust proxy`: `loopback`, `linklocal`, `uniquelocal`, a hop count, a comma-separated IP/CIDR list, or `true`/`false`; `true` is refused in production |
+| `TRUST_PROXY` | `loopback` outside production | Required in production. Express `trust proxy`: `loopback`, `linklocal`, `uniquelocal`, a hop count, a comma-separated IP/CIDR list, or `true`/`false`; `true` is refused in production. A hop count trusts every peer that can connect: see [Trusted proxies](#trusted-proxies) |
 | `CORS_ALLOWED_ORIGINS` | `UI_BASE_URL`'s origin outside production | Comma-separated. Required in production, `https://` or loopback only. The origins sent credentialed CORS headers on core's API (`/v1`, `/oauth` but for `GET /oauth/authorize`, `/.well-known`, `/health`); the admin UI's pages get none. It does not decide which pages may use the browser's cookies: an app's page may use only its own client's (see [auth.md](auth.md#browser-cookies)); list only origins you control |
 | `SETUP_TOKEN` | generated and logged | 24 characters or more. Core accepts it as the first-boot setup token until setup completes, so setup can run unattended; it is never logged. Set it in production: a generated token is printed in core's log until setup completes, and logs are often shipped where more people can read them than should create the first admin. It replaces any other setup token, so changing or unsetting it before setup completes retires the old one. Compared case-insensitively, ignoring whitespace and hyphens |
 | `PROVISIONING_PATH` | unset | Path of a JSON file, or a directory of `*.json` files, declaring the app services (with what they own and their access and webhooks), login clients and custom roles core applies at every start, as `provisioned` rows. Documents that cannot be applied stop core from starting. Secrets are read from environment variables the documents name, never from the documents. See [provisioning](provisioning.md) |

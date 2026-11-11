@@ -82,6 +82,9 @@ files: blobs live on the volume, so every core pod must share it.
 {{- if eq (toString .Values.trustProxy) "true" }}
 {{- fail "trustProxy \"true\" is refused by core: it would trust any client's X-Forwarded-For" }}
 {{- end }}
+{{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.ingressFrom) }}
+{{- fail "networkPolicy.ingressFrom is required when networkPolicy.enabled: with no peer listed, nothing could reach core, the ingress included" }}
+{{- end }}
 {{- if not (regexMatch "^[0-9]+$" (toString .Values.preStopSleepSeconds)) }}
 {{- fail "preStopSleepSeconds must be a whole number of seconds, 0 or more" }}
 {{- end }}

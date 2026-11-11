@@ -78,6 +78,7 @@ jobs:
             helm lint --strict charts/tereo -f "$values"
           done
           charts/tereo/tests/provisioning.sh
+          charts/tereo/tests/networkpolicy.sh
 
       - name: Type check
         run: npx nx $NX_SCOPE -t check --parallel=4
