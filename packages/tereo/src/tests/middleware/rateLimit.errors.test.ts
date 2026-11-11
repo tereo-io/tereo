@@ -20,7 +20,7 @@ beforeAll(async () => {
   // Imported here: the limiters take the Redis client when created, and the
   // setup file connects it in its own beforeAll.
   const limits = await import("../../middleware/rateLimit.js");
-  const { recordUnlockAttempt } =
+  const { recordUnlockAttempt, resetUnlockAttempts } =
     await import("../../utils/shareUnlockLimiter.js");
   const { verifyClientSecretLimited } = await import("../../utils/auth.js");
   const { hashFlowToken } = await import("../../utils/crypto.js");
@@ -44,6 +44,18 @@ beforeAll(async () => {
   });
   app.post("/unlock", async (_req, res) => {
     await recordUnlockAttempt("some-share-token", "192.0.2.1");
+    res.json({ ok: true });
+  });
+  app.post("/failure-reset", async (req, res) => {
+    await limits.setupFailure.reset(req);
+    res.json({ ok: true });
+  });
+  app.post("/backoff-reset", async (req, res) => {
+    await limits.loginAccountBackoff.reset(req, "someone@test.local");
+    res.json({ ok: true });
+  });
+  app.post("/unlock-reset", async (_req, res) => {
+    await resetUnlockAttempts("some-share-token", "192.0.2.1");
     res.json({ ok: true });
   });
   app.post("/client-secret/:secret", async (req, res) => {
@@ -84,7 +96,14 @@ let server: Server;
 let url: string;
 
 const call = (method: "get" | "post", path: string) =>
-  axios.request({ method, url: `${url}${path}`, validateStatus: () => true });
+  axios.request({
+    method,
+    url: `${url}${path}`,
+    validateStatus: () => true,
+    // A request left waiting for Redis fails here rather than at the test's
+    // own timeout.
+    timeout: 5_000,
+  });
 
 const expectUnavailable = async (path: string) => {
   const res = await call("post", path);
@@ -116,6 +135,13 @@ describe("rateLimit", () => {
       await expectUnavailable("/failure");
       await expectUnavailable("/backoff");
       await expectUnavailable("/unlock");
+    });
+
+    it("answers a limiter's reset at once", async () => {
+      goDown();
+      await expectUnavailable("/failure-reset");
+      await expectUnavailable("/backoff-reset");
+      expect((await call("post", "/unlock-reset")).status).toBe(200);
     });
 
     it("still verifies client secrets", async () => {

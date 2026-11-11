@@ -1,5 +1,5 @@
+import { getRedisClient, redisCommand, redisKey } from "./redis.js";
 import { Prisma } from "../../prisma/generated/client/index.js";
-import { getRedisClient, redisKey } from "./redis.js";
 import { randomUUID } from "node:crypto";
 import { prisma } from "./db/prisma.js";
 import { logger } from "./logger.js";
@@ -36,7 +36,7 @@ function keepClaimAlive(key: string, token: string): () => void {
 }
 
 async function releaseClaim(key: string, token: string): Promise<void> {
-  await getRedisClient().eval(RELEASE_IF_OWNED, 1, key, token);
+  await redisCommand((redis) => redis.eval(RELEASE_IF_OWNED, 1, key, token));
 }
 
 /**
@@ -51,12 +51,8 @@ export async function withExclusiveClaim<T>(
 ): Promise<T> {
   const key = redisKey(name);
   const token = randomUUID();
-  const claimed = await getRedisClient().set(
-    key,
-    token,
-    "EX",
-    PENDING_TTL_SECONDS,
-    "NX"
+  const claimed = await redisCommand((redis) =>
+    redis.set(key, token, "EX", PENDING_TTL_SECONDS, "NX")
   );
   if (claimed !== "OK") throw busy();
   const stop = keepClaimAlive(key, token);
@@ -70,7 +66,7 @@ export async function withExclusiveClaim<T>(
 
 /** Whether `withExclusiveClaim(name, …)` is running somewhere now. */
 export async function isClaimHeld(name: string): Promise<boolean> {
-  return (await getRedisClient().exists(redisKey(name))) === 1;
+  return (await redisCommand((redis) => redis.exists(redisKey(name)))) === 1;
 }
 
 export interface IdempotencyInput {
@@ -155,19 +151,14 @@ export async function withIdempotency<T>(
   ) => Promise<{ status: number; body: T }>
 ): Promise<IdempotencyResult<T>> {
   const { scope, key, requestHash } = input;
-  const redis = getRedisClient();
   const claimKey = pendingRedisKey(scope, key);
 
   const preExisting = await findLiveRecord(scope, key);
   if (preExisting) return replayOrConflict<T>(preExisting, requestHash);
 
   const token = randomUUID();
-  const claimed = await redis.set(
-    claimKey,
-    token,
-    "EX",
-    PENDING_TTL_SECONDS,
-    "NX"
+  const claimed = await redisCommand((redis) =>
+    redis.set(claimKey, token, "EX", PENDING_TTL_SECONDS, "NX")
   );
 
   if (claimed !== "OK") {
