@@ -116,20 +116,41 @@ export async function removeMultipartDir(uploadId: string): Promise<void> {
  * was just deleted — so nothing reads it under the row's key material.
  *
  * The staged file is fsynced first, so a crash can't leave a short file at
- * the content address for later reads to serve.
+ * the content address for later reads to serve. A staged file on another
+ * filesystem (`FILE_SERVICE_TEMP_PATH` on its own volume) cannot be renamed
+ * across: it is copied beside the target, fsynced and renamed from there, so
+ * the content address still never holds a partial file.
  */
 export async function placeBlobFile(
   stagedPath: string,
   targetPath: string
 ): Promise<void> {
-  const fh = await fs.open(stagedPath, "r");
+  await syncFile(stagedPath);
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  try {
+    await fs.rename(stagedPath, targetPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+    const copyPath = `${targetPath}.${crypto.randomBytes(8).toString("hex")}.tmp`;
+    try {
+      await fs.copyFile(stagedPath, copyPath);
+      await syncFile(copyPath);
+      await fs.rename(copyPath, targetPath);
+    } catch (copyErr) {
+      await fs.unlink(copyPath).catch(() => {});
+      throw copyErr;
+    }
+    await fs.unlink(stagedPath).catch(() => {});
+  }
+}
+
+async function syncFile(filePath: string): Promise<void> {
+  const fh = await fs.open(filePath, "r");
   try {
     await fh.sync();
   } finally {
     await fh.close();
   }
-  await fs.mkdir(path.dirname(targetPath), { recursive: true });
-  await fs.rename(stagedPath, targetPath);
 }
 
 /** Remove a staged file that was not placed. Ignores ENOENT. */

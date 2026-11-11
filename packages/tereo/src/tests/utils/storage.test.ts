@@ -13,6 +13,7 @@ import {
   assertUnreadBody,
   openBlobRangeStream,
   openBlobStream,
+  placeBlobFile,
 } from "../../utils/storage.js";
 
 // Records every file stream storage opens, so a test can see it was closed.
@@ -86,6 +87,43 @@ describe("openBlobStream", () => {
     await fs.writeFile(fsPath, cipher);
     return { fsPath, key, hash };
   }
+});
+
+describe("placeBlobFile", () => {
+  let dir: string;
+
+  beforeAll(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "place-blob-"));
+  });
+
+  afterAll(async () => {
+    vi.restoreAllMocks();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("copies a staged file that is on another filesystem than the blob store", async () => {
+    const staged = path.join(dir, "staged");
+    const target = path.join(dir, "blobs", "ab", "cd", "abcd");
+    await fs.writeFile(staged, "ciphertext");
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, "left by a write that rolled back");
+
+    const rename = fs.rename.bind(fs);
+    vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (from === staged) {
+        throw Object.assign(new Error("cross-device link not permitted"), {
+          code: "EXDEV",
+        });
+      }
+      await rename(from, to);
+    });
+
+    await placeBlobFile(staged, target);
+
+    expect(await fs.readFile(target, "utf8")).toBe("ciphertext");
+    await expect(fs.access(staged)).rejects.toThrow();
+    expect(await fs.readdir(path.dirname(target))).toEqual(["abcd"]);
+  });
 });
 
 describe("openBlobRangeStream and assertUnreadBody", () => {

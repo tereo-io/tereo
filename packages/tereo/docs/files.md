@@ -411,7 +411,7 @@ The files-specific ones, from `src/env.ts`; core's shared settings (`DATABASE_UR
 
 | Variable | Description |
 |----------|-------------|
-| `FILE_SERVICE_STORAGE_PATH` / `_TEMP_PATH` | On-disk paths (default `./storage`, `./storage/temp`). Uploads are spooled unencrypted in `_TEMP_PATH` while processed: put it on an encrypted volume or a tmpfs |
+| `FILE_SERVICE_STORAGE_PATH` / `_TEMP_PATH` | On-disk paths (default `./storage`, `./storage/temp`). Uploads are spooled unencrypted in `_TEMP_PATH` while processed: put it on an encrypted volume or a tmpfs. The encrypted blob is staged there as well and then moved into the blob store — renamed on the same filesystem, copied, fsynced and renamed into place across filesystems (`placeBlobFile`, `utils/storage.ts`) |
 | `FILE_SERVICE_MAX_UPLOAD_SIZE_MB` | Single-request upload ceiling (default 100) |
 | `FILE_SERVICE_VERIFIED_READ_BUDGET_MB` | Plaintext that downloads verified in memory (blobs up to 16 MiB) may hold at once (default 256); a download waits up to `FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS` (default 30) for room, then `503`, and has `FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS` (default 120) to send what it holds |
 | `FILE_SERVICE_MASTER_KEY_V1` | Envelope encryption master key (base64, 32 bytes). Generated into `core.secrets` when unset |
