@@ -360,6 +360,27 @@ describe("GET and POST /v1/files/buckets/:name/shares", () => {
         expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
         expect(res.data.error).toBe("cannot_share_delete_marker");
       });
+
+      it("refuses a version pin in a bucket without versioning", async () => {
+        const bucket = await createTestBucket(token, { policy: "private" });
+        const obj = await upload(bucket.name, "p.txt", `p ${randomUUID()}`);
+        const [current] = await versions(obj.id);
+
+        const pinned = await axios.post(
+          `${BASE_URL}/buckets/${bucket.name}/shares`,
+          { kind: "OBJECT", objectId: obj.id, versionId: current.id },
+          auth()
+        );
+        expect(pinned.status).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(pinned.data.error).toBe("versioning_disabled");
+
+        const unpinned = await axios.post(
+          `${BASE_URL}/buckets/${bucket.name}/shares`,
+          { kind: "OBJECT", objectId: obj.id },
+          auth()
+        );
+        expect(unpinned.status).toBe(HTTP_STATUS.CREATED);
+      });
     });
   });
 

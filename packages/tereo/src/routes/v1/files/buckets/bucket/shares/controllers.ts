@@ -364,6 +364,14 @@ async function prepareObjectShare(
   const object = await db.objects.getById(bucket.id, body.objectId);
 
   if (body.versionId) {
+    // Without versioning the next overwrite deletes the version, and the
+    // share would go on serving whatever replaced it.
+    if (!bucket.versioningEnabled) {
+      throw new BadRequestError(
+        "versioning_disabled",
+        "A share can be pinned to a version only in a bucket with versioning enabled"
+      );
+    }
     const version = await db.objectVersions.getByVersionId(
       object.id,
       body.versionId
