@@ -14,8 +14,8 @@ import ManageRolesButton from "./buttons/ManageRolesButton";
 import ExtendGuestButton from "./buttons/ExtendGuestButton";
 import useUserGroups from "../../api/groups/useUserGroups";
 import useUpdateUser from "../../api/users/useUpdateUser";
+import UnlinkScimButton from "./buttons/UnlinkScimButton";
 import useSettings from "../../api/settings/useSettings";
-import type { UserManager } from "../../api/users/types";
 import ResetTotpButton from "./buttons/ResetTotpButton";
 import useUserRoles from "../../api/users/useUserRoles";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
@@ -27,6 +27,10 @@ import useUser from "../../api/users/useUser";
 import { useAuth } from "@/lib/auth";
 import "../groups/styles.css";
 import "./sessions.css";
+import type {
+  UserDetail as UserDetailData,
+  UserManager,
+} from "../../api/users/types";
 import {
   Alert,
   Badge,
@@ -43,7 +47,34 @@ import {
   TagCard,
 } from "@kosmeo-ui/react";
 
-const ManagedNotice = ({ manager }: { manager: UserManager }) => {
+const ManagedNotice = ({
+  manager,
+  user,
+  canUnlink,
+}: {
+  manager: UserManager;
+  user: UserDetailData;
+  canUnlink: boolean;
+}) => {
+  if (manager.kind === "scim") {
+    return (
+      <Alert variant="secondary">
+        Managed by SCIM:{" "}
+        <Link to={`/identity-providers/${manager.id}`} className="v-link">
+          {manager.name}
+        </Link>{" "}
+        creates and updates this user, so its name and email cannot be edited
+        here. Unlink it to take over.{" "}
+        {canUnlink && (
+          <UnlinkScimButton
+            userId={user.id}
+            email={user.email}
+            providerName={manager.name}
+          />
+        )}
+      </Alert>
+    );
+  }
   if (manager.kind === "system") {
     return (
       <Alert variant="secondary">
@@ -108,7 +139,10 @@ export const UserDetail = () => {
   }
 
   // Core refuses to update, re-role, reset 2FA for or invite these accounts.
-  const editable = canWrite && !user.managedBy;
+  // A SCIM-managed user keeps its status and roles here; only its name and
+  // email are the provider's (the edit form disables them).
+  const editable =
+    canWrite && (!user.managedBy || user.managedBy.kind === "scim");
   const isGuest = user.userType === "guest";
 
   return (
@@ -144,7 +178,13 @@ export const UserDetail = () => {
             : []),
         ]}
       />
-      {user.managedBy && <ManagedNotice manager={user.managedBy} />}
+      {user.managedBy && (
+        <ManagedNotice
+          manager={user.managedBy}
+          user={user}
+          canUnlink={canWrite}
+        />
+      )}
       <Row>
         <Col>
           <ListCard

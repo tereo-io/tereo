@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { formatDateTime } from "@/utils/formatDate";
 import { ProviderDomains } from "./ProviderDomains";
 import { useParams } from "react-router-dom";
+import { ScimPanel } from "./ScimPanel";
 import { useAuth } from "@/lib/auth";
 import "./styles.css";
 import {
@@ -113,6 +114,7 @@ export const IdentityProviderDetail = () => {
         </Col>
         <Col>
           <ProviderDomains providerId={provider.id} />
+          <ScimPanel providerId={provider.id} />
         </Col>
       </Row>
     </Page>

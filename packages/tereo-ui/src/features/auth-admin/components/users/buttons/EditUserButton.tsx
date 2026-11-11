@@ -1,12 +1,16 @@
-import { UpdateUserInput, User } from "@/features/auth-admin/api/users/types";
 import useUpdateUser from "@/features/auth-admin/api/users/useUpdateUser";
 import { Button, IconButton, Modal } from "@kosmeo-ui/react";
 import { faEdit } from "@fortawesome/free-solid-svg-icons";
 import { UserForm } from "../forms/UserForm";
 import { useState } from "react";
+import {
+  UpdateUserInput,
+  User,
+  UserManager,
+} from "@/features/auth-admin/api/users/types";
 
 interface EditUserButtonProps {
-  user: User;
+  user: User & { managedBy?: UserManager | null };
 }
 
 const EditUserButton = ({ user }: EditUserButtonProps) => {

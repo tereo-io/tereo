@@ -349,6 +349,58 @@ describe("UserDetail", () => {
     ).toHaveAttribute("href", href);
   });
 
+  describe("a SCIM-managed user", () => {
+    const scimUser: UserDetailData = {
+      ...person,
+      managedBy: { kind: "scim", id: "p1", name: "Okta" },
+    };
+
+    it("names the provider that manages it", async () => {
+      renderDetail(scimUser);
+
+      expect(await screen.findByText(/Managed by SCIM/)).toBeVisible();
+      expect(screen.getByRole("link", { name: "Okta" })).toHaveAttribute(
+        "href",
+        "/identity-providers/p1"
+      );
+    });
+
+    it("disables the name and email inputs but keeps Edit", async () => {
+      renderDetail(scimUser);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+
+      expect(await screen.findByLabelText(/^Email/)).toBeDisabled();
+      expect(screen.getByLabelText("Name")).toBeDisabled();
+    });
+
+    it("unlinks behind a confirmation", async () => {
+      authMock.axios.delete.mockReset();
+      authMock.axios.delete.mockResolvedValue({});
+      renderDetail(scimUser);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Unlink" }));
+      expect(authMock.axios.delete).not.toHaveBeenCalled();
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Unlink user" })
+      );
+
+      await waitFor(() =>
+        expect(authMock.axios.delete).toHaveBeenCalledWith(
+          "/v1/admin/users/u1/scim"
+        )
+      );
+    });
+
+    it("hides Unlink without users.write", async () => {
+      denied.add("users.write");
+      renderDetail(scimUser);
+
+      await screen.findByText(/Managed by SCIM/);
+      expect(screen.queryByRole("button", { name: "Unlink" })).toBeNull();
+    });
+  });
+
   it("renders after a settings save whose response has no rate limits", async () => {
     const client = new QueryClient();
     authMock.axios.patch.mockResolvedValue({
