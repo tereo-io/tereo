@@ -109,6 +109,18 @@ describe("sweepStaleScratchFiles", () => {
     await expect(fs.stat(folder)).resolves.toBeDefined();
   });
 
+  it("stops when told to, leaving the rest for the next run", async () => {
+    const now = Date.now();
+    await fs.mkdir(dir, { recursive: true });
+    const p = path.join(dir, "upload-0a1b2c");
+    await fs.writeFile(p, "x");
+    const t = new Date(now - 5000);
+    await fs.utimes(p, t, t);
+
+    expect(await scratch.sweepStaleScratchFiles(1000, now, () => true)).toBe(0);
+    await expect(fs.stat(p)).resolves.toBeDefined();
+  });
+
   it("finds nothing when the directory does not exist", async () => {
     expect(await scratch.sweepStaleScratchFiles(1000)).toBe(0);
   });

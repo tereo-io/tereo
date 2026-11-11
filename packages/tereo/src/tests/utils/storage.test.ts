@@ -5,6 +5,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createEncryptStream } from "../../utils/encryption.js";
 import { encryptBuffer } from "../support/pure/blobCrypto.js";
 import { PayloadTooLargeError } from "../../utils/errors.js";
+import { blobStore } from "../../utils/blobStore/index.js";
 import { PassThrough, Readable } from "stream";
 import type { ReadStream } from "fs";
 import fs from "fs/promises";
@@ -16,6 +17,7 @@ import {
   openBlobRangeStream,
   openBlobStream,
   saveBlobStream,
+  stagePart,
 } from "../../utils/storage.js";
 
 // Records every file stream storage opens, so a test can see it was closed.
@@ -89,6 +91,27 @@ describe("openBlobStream", () => {
     await fs.writeFile(fsPath, cipher);
     return { fsPath, key, hash };
   }
+});
+
+describe("stagePart", () => {
+  afterAll(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("stops reading the body when the part cannot be stored", async () => {
+    const failure = Object.assign(new Error("no space left on device"), {
+      code: "ENOSPC",
+    });
+    vi.spyOn(blobStore, "writePart").mockRejectedValueOnce(failure);
+    const body = new PassThrough();
+    body.write(Buffer.alloc(1024));
+
+    await expect(
+      stagePart("upload-1", 1, body, 1024 * 1024, crypto.randomBytes(32))
+    ).rejects.toBe(failure);
+    await tick();
+    expect(body.destroyed).toBe(true);
+  });
 });
 
 describe("saveBlobStream", () => {

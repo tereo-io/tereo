@@ -138,7 +138,15 @@ export async function stagePart(
   const ciphertext = pipelineCb(source, meter, partCipher, () => {});
   // Each stage gets a location of its own; the DB upsert decides which one
   // wins, and the controller deletes the prior one (if any) after it.
-  const fsPath = await blobStore.writePart(uploadId, partNumber, ciphertext);
+  let fsPath: string;
+  try {
+    fsPath = await blobStore.writePart(uploadId, partNumber, ciphertext);
+  } catch (err) {
+    // A store that failed before it read anything leaves the body flowing
+    // into a stream nobody drains; destroying it destroys the source too.
+    ciphertext.destroy(err as Error);
+    throw err;
+  }
   return {
     fsPath,
     sizeBytes,

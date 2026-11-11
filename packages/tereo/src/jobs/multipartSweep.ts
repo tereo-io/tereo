@@ -119,7 +119,7 @@ async function sweepTempFiles(now = Date.now()): Promise<number> {
     24 * HOUR_MS,
     env.FILE_SERVICE_MULTIPART_UPLOAD_TTL_HOURS * HOUR_MS
   );
-  return await sweepStaleScratchFiles(maxAgeMs, now);
+  return await sweepStaleScratchFiles(maxAgeMs, now, isShuttingDown);
 }
 
 async function processMultipartSweepJob(job: Job): Promise<void> {

@@ -66,11 +66,13 @@ export async function discardScratchFile(filePath: string): Promise<void> {
 
 /**
  * Delete the scratch files a crash left behind: top-level files core named,
- * by mtime, older than `maxAgeMs`. Returns how many were removed.
+ * by mtime, older than `maxAgeMs`. Returns how many were removed. `shouldStop`
+ * is asked before each file, so a shutdown need not wait out the directory.
  */
 export async function sweepStaleScratchFiles(
   maxAgeMs: number,
-  now = Date.now()
+  now = Date.now(),
+  shouldStop: () => boolean = () => false
 ): Promise<number> {
   const root = scratchDir();
   let entries;
@@ -83,6 +85,7 @@ export async function sweepStaleScratchFiles(
 
   let removed = 0;
   for (const entry of entries) {
+    if (shouldStop()) break;
     if (!entry.isFile() || !SCRATCH_NAME.test(entry.name)) continue;
     const p = path.join(root, entry.name);
     try {

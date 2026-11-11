@@ -3,7 +3,7 @@
 // @module-tag job
 // @module-tag race
 import { processDiskReconShard } from "../../jobs/diskBlobReconciliation.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getRedisClient, redisKey } from "../../utils/redis.js";
 import { blobStore } from "../../utils/blobStore/index.js";
 import { prisma } from "../../utils/db/prisma.js";
@@ -227,6 +227,28 @@ describe("processDiskReconShard", () => {
         ceiling.previous;
       await fs.rm(storage.root, { recursive: true, force: true });
       await getRedisClient().del(seenKey, cursorKey);
+    });
+
+    it("takes no note of a file that vanished after it was listed", async () => {
+      const gone = `${shard}${sub}ff${randomBytes(29).toString("hex")}`;
+      const listBlobs = blobStore.listBlobs.bind(blobStore);
+      const spy = vi
+        .spyOn(blobStore, "listBlobs")
+        .mockImplementationOnce(async function* () {
+          yield {
+            hash: gone,
+            location: path.join(storage.root, "blobs", shard, sub, gone),
+            cursor: { sub, afterFile: gone },
+          };
+        });
+      try {
+        await runShard(shard);
+        expect(await sighted()).toEqual([]);
+      } finally {
+        spy.mockImplementation(listBlobs);
+        spy.mockRestore();
+        await getRedisClient().del(seenKey, cursorKey);
+      }
     });
 
     it("resumes where the last run's ceiling stopped it, and starts over once done", async () => {

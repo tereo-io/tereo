@@ -60,10 +60,6 @@ async function processDiskReconOrchestrator(): Promise<void> {
   const shardQueue = getDiskReconShardQueue();
 
   const shards = await blobStore.listShards();
-  if (shards.length === 0) {
-    logger.info("Disk reconciliation: no blob shards; nothing to do");
-    return;
-  }
 
   let enqueued = 0;
   for (const shard of shards) {
@@ -207,6 +203,9 @@ async function tickShard(
     resume = listing.cursor;
     const { hash: name, location } = listing;
     const sub = listing.cursor.sub!;
+    // Removed since it was listed (a racing cleanup): not scanned, and not
+    // noted as missing a row.
+    if (!(await blobStore.exists(location))) continue;
     counters.scanned++;
     processed++;
 
