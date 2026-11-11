@@ -5,10 +5,14 @@ import { invalidateAfterWrite } from "../../../../../utils/branding/write.js";
 import { UpdateClientSchema, type UpdateClientInput } from "./schemas.js";
 import { generateClientSecret } from "../../../../../utils/crypto.js";
 import { formatClient } from "../../../../../utils/transformers.js";
-import { LOGIN_CLIENT } from "../../../../../definitions/index.js";
 import { validateUser } from "../../../../../utils/auth.js";
 import db from "../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
+import env from "../../../../../env.js";
+import {
+  LOGIN_CLIENT,
+  loginClientConfig,
+} from "../../../../../definitions/index.js";
 import {
   validateBody,
   validateParams,
@@ -64,6 +68,8 @@ const refuseProvisioned = (client: { provisioned: boolean }) => {
  * UI_BASE_URL and are set at every start (`loginClientConfig`); an edit would
  * only lock the UI out until the next one. Consent is always skipped for it
  * and its audience comes from its scopes, so those two have no effect.
+ * The scopes the UI signs in with are put back at every start too: more may
+ * be added, none of those removed.
  */
 const refuseLockedLoginClientFields = (body: UpdateClientInput) => {
   const locked = (
@@ -78,6 +84,17 @@ const refuseLockedLoginClientFields = (body: UpdateClientInput) => {
   if (locked.length > 0) {
     throw new ConflictError(
       `The admin UI's login client fixes ${locked.join(", ")}; they cannot be edited`
+    );
+  }
+  const scopes = body.scopes;
+  const dropped = scopes
+    ? loginClientConfig(env.UI_BASE_URL).scopes.filter(
+        (scope) => !scopes.includes(scope)
+      )
+    : [];
+  if (dropped.length > 0) {
+    throw new ConflictError(
+      `The admin UI signs in with the scopes ${dropped.join(", ")}; they cannot be removed from its login client`
     );
   }
 };

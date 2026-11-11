@@ -228,8 +228,10 @@ Elsewhere that callback is added first and the other loopback callbacks already 
 `npm run dev` core (UI at `:4000`) sharing one database can both log in. A non-loopback URI is
 dropped even in development: the client skips the consent screen, so a stale callback on a host
 nobody controls would receive its codes. `PATCH /v1/admin/clients/:id` refuses to change its `redirectUris`,
-`grantTypes`, `clientType`, `consentRequired` or `audience` with 409; its name, scopes and post-logout URIs stay editable, and it
-cannot be deleted.
+`grantTypes`, `clientType`, `consentRequired` or `audience` with 409, and a `scopes` list that drops one
+the UI signs in with (`loginClientConfig`: `openid`, `profile`, `email`, `offline_access`; they are put
+back at every start). Its name, further scopes and post-logout URIs stay editable, and it cannot be
+deleted.
 
 **Audience and consent.** A login client carries two admin-set fields. `audience` lists the slugs
 of services its tokens may name: each must be an existing service other than core

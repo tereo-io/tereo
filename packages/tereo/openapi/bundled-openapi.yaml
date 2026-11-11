@@ -6502,6 +6502,9 @@ paths:
         `${UI_BASE_URL}/callback` in production; elsewhere that callback comes
         first, beside the loopback callbacks of other local cores sharing the
         database.
+        Its `scopes` may gain others but must keep the ones the UI signs in with
+        (`openid`, `profile`, `email`, `offline_access`): a list without one is
+        refused with `409`.
 
         Adding core API scopes (`core:*`) to a client's `scopes` lets its users
         grant it access to core's API, capped by those scopes (see
