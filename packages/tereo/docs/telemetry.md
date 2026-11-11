@@ -45,10 +45,12 @@ the app (`utils/otel.ts`, `utils/bullmq.ts`, `utils/outbox.ts`) are the API's no
 `trace_id` / `span_id` then, since there is no span; each line logged during a request still carries
 its `request_id`, which ties a request's lines together.
 
-The `request_id` is the client's `X-Request-ID` when it matches `^[A-Za-z0-9._:-]{1,64}$`, and a
+The `request_id` is the incoming `X-Request-ID` when a trusted proxy sent it
+([`TRUST_PROXY`](configuration.md#trusted-proxies)) and it matches `^[A-Za-z0-9._:-]{1,64}$`, and a
 generated one otherwise (`utils/requestId.ts`); either way it is echoed in the response's
 `X-Request-ID`. The id is also stored — in access logs and as audit entries' correlation id — so a
-longer or odder value is never trusted.
+longer or odder value is never trusted, and neither is one from a caller that is not a trusted proxy,
+who could otherwise file its requests under another request's id.
 
 With only the metrics endpoint set, the SDK starts without a trace exporter (`OTEL_TRACES_EXPORTER`
 defaults to `none` in that case); metrics also need `OTEL_METRICS_EXPORTER=otlp`, as below.

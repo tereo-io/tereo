@@ -67,20 +67,36 @@ export function clientIp(req: Request): string {
 }
 
 /**
- * Middleware that assigns a unique request ID to each request.
- * Reads from the incoming header if present, otherwise generates one.
- * Sets the ID on `req.requestId`, echoes it via the response header,
- * and propagates it along with the client IP address through
- * AsyncLocalStorage for automatic access in downstream code
- * (e.g., audit logging) without explicit passing.
- */
-/**
- * A client's own X-Request-ID is kept only in this shape: it is stored in
+ * An incoming X-Request-ID is kept only in this shape: it is stored in
  * columns as narrow as VarChar(64) (`access_logs.request_id`) and echoed in
  * logs and the response header. Anything else gets a generated id.
  */
 const CLIENT_REQUEST_ID = /^[A-Za-z0-9._:-]{1,64}$/;
 
+/**
+ * Whether the connection's peer is a proxy Express's `trust proxy` setting
+ * trusts: the test Express applies to the first hop when it resolves
+ * `req.ip`. Never with trust proxy off; with a hop count, any peer.
+ */
+const fromTrustedProxy = (req: Request): boolean => {
+  const trusts = req.app.get("trust proxy fn") as (
+    address: string,
+    hop: number
+  ) => boolean;
+  const peer = req.socket?.remoteAddress;
+  return peer !== undefined && trusts(peer, 0);
+};
+
+/**
+ * Middleware that assigns a unique request ID to each request.
+ * Keeps the incoming header's when a trusted proxy sent it — a caller's own
+ * would let it file its requests under another's id in the audit trail —
+ * otherwise generates one.
+ * Sets the ID on `req.requestId`, echoes it via the response header,
+ * and propagates it along with the client IP address through
+ * AsyncLocalStorage for automatic access in downstream code
+ * (e.g., audit logging) without explicit passing.
+ */
 export function createRequestIdMiddleware(
   config?: RequestIdConfig
 ): RequestHandler {
@@ -89,7 +105,9 @@ export function createRequestIdMiddleware(
   return (req: Request, res: Response, next: NextFunction) => {
     const existing = req.headers[headerName];
     const requestId =
-      typeof existing === "string" && CLIENT_REQUEST_ID.test(existing)
+      typeof existing === "string" &&
+      CLIENT_REQUEST_ID.test(existing) &&
+      fromTrustedProxy(req)
         ? existing
         : crypto.randomBytes(16).toString("hex");
 

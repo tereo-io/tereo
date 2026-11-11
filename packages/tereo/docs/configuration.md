@@ -45,6 +45,13 @@ every per-IP rate limit and the address written to auth logs, access logs and au
 - **A CIDR list** (the proxy's address range) believes the header only from those addresses; a
   direct peer outside it is seen at its own address.
 
+The same setting decides whose `X-Request-ID` core keeps as the request's id (in its logs, access
+logs and audit entries, and echoed in the response): only one sent by a peer that is a trusted proxy
+— an address in the list, `loopback` for a local caller, or any peer with a hop count. With `false`,
+or from any other peer, the header is ignored and core generates the id. An app service that calls
+core directly and forwards its request id (the SDK does) is therefore correlated only when its
+address is one `TRUST_PROXY` trusts.
+
 So with a hop count, the network must let only the proxy and workloads you trust connect to core:
 a NetworkPolicy (the Helm chart ships an optional one, `networkPolicy`), a security group, or a
 listener bound where only the proxy can reach it. Where that cannot be arranged, use the CIDR list.
