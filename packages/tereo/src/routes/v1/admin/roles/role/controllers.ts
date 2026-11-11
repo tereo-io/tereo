@@ -120,9 +120,12 @@ export const updateRole = async (req: Request, res: Response) => {
       // The 2FA policy guards everything the role grants: only a caller
       // holding all of it may change it (`admin` for core's admin role).
       // Reactivating hands the role's permissions back to everyone holding
-      // it, the caller included: the same as granting them.
+      // it, the caller included: the same as granting them. So is flagging
+      // it guest-assignable, since inviting a guest with a flagged role is
+      // not bounded by what the inviter holds.
       if (
         reactivated ||
+        (body.guestAssignable === true && !current.guestAssignable) ||
         (body.requires2fa !== undefined &&
           body.requires2fa !== current.requires2fa)
       ) {

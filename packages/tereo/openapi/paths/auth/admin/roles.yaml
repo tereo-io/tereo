@@ -162,8 +162,9 @@
       (`409 resource_archived`). Changing `requires2fa` needs a caller
       holding every permission the role grants (`403` otherwise), so only an
       `admin` changes it on core's `admin` role; so does reactivating it
-      (`isActive: true`). Both count only the caller's global roles, not
-      those held in the token's organization.
+      (`isActive: true`), and so does turning `guestAssignable` on. All three
+      count only the caller's global roles, not those held in the token's
+      organization.
 
       Deactivating a role (`isActive: false`) revokes the access tokens of
       the service clients holding it. People's tokens are not revoked:

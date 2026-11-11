@@ -902,7 +902,9 @@ outsider learns nothing about the user. Promotion is not scoped: it is a `users.
 **Granting.** "Granting: only what you hold" does not apply to guest-assignable roles given through
 the guest endpoints: flagging the role was the grant decision and `users.guests.write` the right to
 apply it (a service account does not hold its own service's permissions). The ordinary role
-endpoints follow the normal rule.
+endpoints follow the normal rule, and the flag is itself a grant: turning `guestAssignable` on
+(`PATCH /v1/admin/roles/:id`) needs a caller whose global roles hold every permission the role
+carries (403 otherwise, naming those lacking).
 
 | Route                                                       | Permission                                                          | Does                                                                                                                                                   |
 | ----------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
