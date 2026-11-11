@@ -141,6 +141,24 @@ describe("public bucket access", () => {
       const reader = await as(token, `${objects()}/by-id/${liveId}/versions`);
       expect(reader.data.data[0].createdBy).toEqual(expect.any(String));
     });
+
+    it("names no writer to a signed-in caller without a grant", async () => {
+      const versions = `${objects()}/by-id/${liveId}/versions`;
+      const list = await as(memberToken, versions);
+      expect(list.status).toBe(HTTP_STATUS.OK);
+      expect(list.data.data[0]).toMatchObject({
+        createdBy: null,
+        createdByEmail: null,
+        createdByName: null,
+        creator: null,
+      });
+      const one = await as(
+        memberToken,
+        `${versions}/${list.data.data[0].versionId}`
+      );
+      expect(one.status).toBe(HTTP_STATUS.OK);
+      expect(one.data).toMatchObject({ createdBy: null, creator: null });
+    });
   });
 
   describe("Object Management", () => {
