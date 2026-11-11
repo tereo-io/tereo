@@ -66,6 +66,10 @@ await prisma.$transaction(async (tx) => {
 });
 ```
 
+Set `sensitive: true` on a message that carries a one-time code or a sign-in link: core then keeps
+its content out of the admin log, drops it as soon as delivery settles and will not retry it from
+the log. With `notify`, the content also sits in the app's own outbox table until the row is relayed, and stays there if the row is dead-lettered.
+
 `notify` refuses an unknown channel, fewer than 1 or more than 50 recipients, or an email with no
 `to` recipient (one without `as` counts as `to`) at once. Core
 validates the rest (allowed senders, users, attachments) when the reaper relays the row; a 4xx

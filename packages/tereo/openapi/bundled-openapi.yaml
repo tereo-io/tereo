@@ -16776,6 +16776,10 @@ paths:
         Attachments total at most 20 MB; `contentType` and `size` come from the stored version,
         and `filename` defaults to the last segment of the object's key.
 
+        `sensitive: true` marks the content as a credential (a one-time code, a sign-in link):
+        the admin log never returns it, it is dropped as soon as no delivery is pending, and the
+        notification cannot be retried from the log. It is off unless asked for.
+
         `idempotencyKey` makes a retry safe: the same key and body answer the first result, a
         different body is a `422`.
 
@@ -32298,6 +32302,15 @@ components:
           maxItems: 50
           items:
             $ref: '#/components/schemas/NotificationAttachmentRequest'
+        sensitive:
+          description: |
+            Marks the content as a credential. The admin log then never returns it
+            (`content: null`, `contentRedacted: true`), it is dropped as soon as no delivery is
+            pending (a failed delivery included), and the notification cannot be retried from the
+            log (`409 content_redacted`). Set it for one-time codes and sign-in links. Never set
+            for the caller.
+          type: boolean
+          default: false
     SendNotificationResponse:
       type: object
       required:
@@ -32501,7 +32514,7 @@ components:
               additionalProperties: true
             contentRedacted:
               type: boolean
-              description: True for a sensitive notification, such as a password-setup email, whose content is never returned and is dropped once the notification is terminal. Retrying one is `409 content_redacted`.
+              description: True for a sensitive notification (one sent with `sensitive` set, or one of core's own such as a password-setup email), whose content is never returned and is dropped once the notification is terminal. Retrying one is `409 content_redacted`.
             deliveries:
               type: array
               items:

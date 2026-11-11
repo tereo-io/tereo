@@ -160,6 +160,9 @@ Paths are under `/v1/admin/notifications/connections`.
   object id and version id. The sender must be able to read the bucket. The version is pinned, and
   its bytes are read from storage when the message is sent. `filename` defaults to the last part of
   the object's key.
+- `sensitive: true` (optional, default `false`) marks the content as a credential; see
+  [Sensitive notifications](#sensitive-notifications). Set it on anything carrying a one-time code
+  or a sign-in link.
 - Everything is checked before anything is stored, in the order a sender would fix it. Nothing is
   written on failure.
 - The send is audited (`CREATE` on `Notification`) and written with its delivery rows and an outbox
@@ -198,6 +201,25 @@ checked before the organization's existence so a refused caller can't probe ids:
 - `notifications.admin` may name any.
 - Leaving `organizationId` out (or null) is always allowed, and means the token's organization.
 - `notifyTx` is unrestricted.
+
+### Sensitive notifications
+
+A send with `"sensitive": true` gets the treatment core gives its own link emails ("Set your
+password", "Reset your password", "Confirm your email address"), which are the same flag on the
+same row:
+
+- Its content is never returned. The admin log's detail reads `content: null` with
+  `contentRedacted: true`, even while a delivery is still pending.
+- Its content is dropped as soon as no delivery is pending, a failed delivery included, rather
+  than only once every delivery is sent.
+- It cannot be retried from the admin log (`409 content_redacted`): send it again instead. The
+  delivery's own automatic attempts are unaffected.
+
+The flag is never set for the caller: content is not inspected, and a send without it keeps its
+content while any delivery is unsent, where every `notifications.read` holder can read it in the
+admin log for up to the retention window. An app that mails one-time codes, magic sign-in links,
+invitations that sign the recipient in, or anything else that works as a credential should set
+it. `summary` (the email's subject) is kept either way, so keep the secret out of the subject.
 
 ### Idempotency
 
@@ -338,10 +360,14 @@ Retry resets the notification's `failed` deliveries to `pending` with their atte
 many were reset) and is audited (`UPDATE` on `Notification`, `metadata: { retried }`). A
 notification with no failed delivery is `409 nothing_to_retry`.
 
-A notification sent with `sensitive: true` (core's three link emails are: "Set your password", "Reset your password" and "Confirm your email address") is never shown: its `content` reads `null` with `contentRedacted: true` in the admin log, is nulled once the notification is terminal, and `POST /:id/retry` on it is `409 content_redacted`.
+A notification sent with `sensitive: true` (by an app through the API, or by core: its three link
+emails are "Set your password", "Reset your password" and "Confirm your email address") is never
+shown: its `content` reads `null` with `contentRedacted: true` in the admin log, is nulled once the
+notification is terminal, and `POST /:id/retry` on it is `409 content_redacted`
+([Sensitive notifications](#sensitive-notifications)).
 
-`content` is kept while any delivery is unsent, so a failed delivery can be retried until retention
-removes it. Once every delivery is sent it is gone.
+Any other notification's `content` is kept while any delivery is unsent, so a failed delivery can
+be retried until retention removes it. Once every delivery is sent it is gone.
 
 ## Operating
 

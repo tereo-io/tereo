@@ -35,6 +35,15 @@ describe("NotificationsClient", () => {
     });
   });
 
+  it("passes sensitive through to core", async () => {
+    await client.send({ ...input, sensitive: true, idempotencyKey: "k" });
+    expect(createNotification).toHaveBeenCalledWith({
+      ...input,
+      sensitive: true,
+      idempotencyKey: "k",
+    });
+  });
+
   it("generates a key per send when the caller gives none", async () => {
     await client.send(input);
     await client.send(input);

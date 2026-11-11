@@ -32,8 +32,9 @@ export interface NotificationInput {
   recipients: RecipientInput[];
   content: unknown;
   /**
-   * Core-internal: the content is a credential, so the log never returns it
-   * and it is dropped once the deliveries settle. Not in the public schema.
+   * The content is a credential, so the log never returns it and it is
+   * dropped once the deliveries settle. Kept out of `notificationInputSchema`:
+   * the send route adds it to its own.
    */
   sensitive?: boolean;
   attachments?: {

@@ -351,6 +351,15 @@ SendNotificationRequest:
       maxItems: 50
       items:
         $ref: '#/NotificationAttachmentRequest'
+    sensitive:
+      description: |
+        Marks the content as a credential. The admin log then never returns it
+        (`content: null`, `contentRedacted: true`), it is dropped as soon as no delivery is
+        pending (a failed delivery included), and the notification cannot be retried from the
+        log (`409 content_redacted`). Set it for one-time codes and sign-in links. Never set
+        for the caller.
+      type: boolean
+      default: false
 
 SendNotificationResponse:
   type: object
@@ -595,7 +604,7 @@ NotificationLogDetail:
           additionalProperties: true
         contentRedacted:
           type: boolean
-          description: True for a sensitive notification, such as a password-setup email, whose content is never returned and is dropped once the notification is terminal. Retrying one is `409 content_redacted`.
+          description: True for a sensitive notification (one sent with `sensitive` set, or one of core's own such as a password-setup email), whose content is never returned and is dropped once the notification is terminal. Retrying one is `409 content_redacted`.
         deliveries:
           type: array
           items:
