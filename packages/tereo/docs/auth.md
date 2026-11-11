@@ -1534,6 +1534,18 @@ page read core's API responses, not use another client's session. Credentialed C
 sent on `GET /oauth/authorize`, which is navigated to (a fetch following its redirect could read
 the code from the response URL), nor on the UI's pages.
 
+**Public link routes.** `POST /v1/password-setup`, `/v1/password-setup/inspect`,
+`/v1/email-verification`, `/v1/email-verification/inspect` and `/v1/password-reset` take no cookie,
+so the rule above never applies to them, but they count misses and requests per IP. A page anywhere
+could otherwise post to them from a visitor's browser and use up that IP's allowance, so links stop
+redeeming and reset requests send nothing. `refuseForeignOrigins` (same file) therefore answers 403
+`forbidden`, ahead of every limiter on those routes, when the request has an `Origin` that is not
+core's own (`PUBLIC_URL`), the UI's (`UI_BASE_URL`) or an entry of `CORS_ALLOWED_ORIGINS` (`*`
+admits all); `Sec-Fetch-Site: same-origin` also passes, for a core reached under another host name.
+Here a listed origin passes from any site, since no cookie is involved. A request with no `Origin`
+header (a server, curl, the SDK) is not checked and is counted as before; someone sharing the IP can
+still spend its allowance directly, which is the accepted cost of a per-IP limit.
+
 ## Deviations from the specs
 
 Where core knowingly departs from OAuth 2.0 / OpenID Connect:

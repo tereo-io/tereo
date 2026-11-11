@@ -1,3 +1,4 @@
+import { refuseForeignOrigins } from "../../../middleware/originCheck.js";
 import { postPasswordReset } from "./controllers.js";
 import statusRouter from "./status/index.js";
 import { Router } from "express";
@@ -9,7 +10,12 @@ import {
 // No authentication: anyone may ask for a reset link to be sent to an address.
 const passwordResetRouter = Router();
 
-passwordResetRouter.use(rateLimitPreAuth, rateLimitGeneral);
+// Before the limiters, which a refused request must not spend.
+passwordResetRouter.use(
+  refuseForeignOrigins,
+  rateLimitPreAuth,
+  rateLimitGeneral
+);
 
 passwordResetRouter.use("/status", statusRouter);
 passwordResetRouter.post("/", postPasswordReset);
