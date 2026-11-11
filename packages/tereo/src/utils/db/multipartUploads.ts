@@ -186,12 +186,19 @@ export const getActiveWithParts = async (uploadId: string) =>
  * upload runs, and `assertFits` gets the bytes the upload's other parts hold
  * and throws to refuse the part; the caller then unlinks its file. An upload
  * completed, aborted or expired since the caller read it is refused too.
+ *
+ * `userStaging`, given for an upload no quota bounds, gets the bytes the
+ * user's other such parts hold, under a lock that orders that user's parts.
  */
 export const upsertPart = async (
   input: UpsertPartInput,
   checks: {
     assertNotCompleting: () => Promise<void>;
     assertFits: (otherPartsBytes: bigint) => void;
+    userStaging?: {
+      userId: string;
+      assertFits: (otherPartsBytes: bigint) => void;
+    };
   }
 ) =>
   prisma.$transaction(async (tx) => {
@@ -213,8 +220,42 @@ export const upsertPart = async (
     }
     await checks.assertNotCompleting();
     checks.assertFits(await stagedBytes(input.uploadId, input.partNumber, tx));
+    if (checks.userStaging) {
+      const { userId, assertFits } = checks.userStaging;
+      // Parts of one user's uploads are counted one at a time, so each sees
+      // the bytes the others staged.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`files:multipart-staged:${userId}`}, 0))`;
+      assertFits(await userStagedBytes(userId, input, tx));
+    }
     return recordPart(input, tx);
   });
+
+/**
+ * Bytes staged for the parts of a user's active uploads that no bucket quota
+ * bounds (the bucket has none, or the upload reserved no `expectedSize`), but
+ * for the part `except` names, which the part being uploaded replaces.
+ */
+export const userStagedBytes = async (
+  userId: string,
+  except: { uploadId: string; partNumber: number },
+  tx?: Prisma.TransactionClient
+): Promise<bigint> => {
+  const client = tx ?? prisma;
+  const rows = await client.$queryRaw<{ total: bigint }[]>`
+    SELECT COALESCE(SUM(p."size_bytes"), 0)::bigint AS "total"
+    FROM "files"."multipart_parts" p
+    JOIN "files"."multipart_uploads" u ON u."id" = p."upload_id"
+    JOIN "files"."buckets" b ON b."id" = u."bucket_id"
+    WHERE u."created_by" = ${userId}::uuid
+      AND u."completed_at" IS NULL
+      AND u."aborted_at" IS NULL
+      AND u."expires_at" > NOW()
+      AND (b."storage_quota_bytes" IS NULL OR u."expected_size" IS NULL)
+      AND NOT (p."upload_id" = ${except.uploadId}::uuid
+        AND p."part_number" = ${except.partNumber})
+  `;
+  return rows[0]?.total ?? 0n;
+};
 
 /**
  * Bytes staged for an upload's parts, but for `exceptPartNumber`'s, which the

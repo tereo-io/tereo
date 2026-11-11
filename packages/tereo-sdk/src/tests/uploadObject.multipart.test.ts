@@ -250,6 +250,22 @@ describe("FileServiceClient.uploadObject", () => {
     expect(mockRequests.files.completeMultipart).toHaveBeenCalledTimes(1);
   });
 
+  it("a stream's expectedSize is sent at initiate, and a Buffer's own length wins", async () => {
+    const source = pattern(12 * MiB);
+    await client().uploadObject("b", "k", {
+      file: streamOf(source),
+      expectedSize: source.length,
+    });
+    expect(
+      mockRequests.files.initiateMultipart.mock.calls[0][2].expectedSize
+    ).toBe(12 * MiB);
+
+    await client().uploadObject("b", "k", { file: source, expectedSize: 1 });
+    expect(
+      mockRequests.files.initiateMultipart.mock.calls[1][2].expectedSize
+    ).toBe(12 * MiB);
+  });
+
   it("a stream delivering one 12 MiB chunk is split into 5/5/2 MiB parts", async () => {
     const source = pattern(12 * MiB);
     await client().uploadObject("b", "k", {

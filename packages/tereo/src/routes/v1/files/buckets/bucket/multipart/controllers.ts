@@ -3,6 +3,7 @@ import { getAccessibleBucket } from "../../../../../../utils/bucketAccess.js";
 import { setAccessLog } from "../../../../../../middleware/accessLog.js";
 import { initiateBodySchema, initiateParamsSchema } from "./schemas.js";
 import { validateUser } from "../../../../../../middleware/auth.js";
+import { BadRequestError } from "../../../../../../utils/errors.js";
 import { assertMultipartFits, assertStagingFits } from "./utils.js";
 import db from "../../../../../../utils/db/index.js";
 import { Request, Response } from "express";
@@ -30,6 +31,13 @@ export const initiateMultipart = async (req: Request, res: Response) => {
   assertObjectKeyNotReserved(body.objectKey);
   if (body.expectedSize !== undefined) {
     assertMultipartFits({ expectedSize: null }, bucket, body.expectedSize);
+  } else if (bucket.storageQuotaBytes !== null) {
+    // Without it the upload would reserve nothing, and its parts would be
+    // staged outside what the quota counts.
+    throw new BadRequestError(
+      "expected_size_required",
+      "This bucket has a storage quota, so a multipart upload must be initiated with its expectedSize"
+    );
   }
   // Advisory: complete re-checks under lock. Failing here spares the caller
   // sending every part first.

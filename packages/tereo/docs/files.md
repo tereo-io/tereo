@@ -233,7 +233,7 @@ S3-style flow — safe for very large files (no memory ceiling). Every route
 lives under a single `/multipart` namespace; the object key travels in the
 initiate body so no splat is needed:
 
-1. `POST /buckets/:name/multipart` `{ objectKey, contentType, expectedSize?, metadata?, tags? }` → `{ uploadId }` (`metadata` has the same limits as on upload — see [Object metadata](#object-metadata))
+1. `POST /buckets/:name/multipart` `{ objectKey, contentType, expectedSize?, metadata?, tags? }` → `{ uploadId }` (`expectedSize` is required in a bucket with a quota: `400 expected_size_required`; `metadata` has the same limits as on upload — see [Object metadata](#object-metadata))
 2. `PUT /buckets/:name/multipart/:uploadId/parts/:partNumber` (binary stream, stored byte for byte whatever its `Content-Type` — no body parser runs on this route)
 3. `POST /buckets/:name/multipart/:uploadId/complete` `{ parts: [{partNumber, etag}] }` — when `expectedSize` was given at initiate, parts totalling any other size are `400 size_mismatch` (the upload stays active)
 4. `DELETE /buckets/:name/multipart/:uploadId` — abort. Takes `file-service.objects.delete` and the bucket's delete grant (not the write grant), and works on a retired bucket, where deletes go on
@@ -256,14 +256,28 @@ at `FILE_SERVICE_MAX_UPLOAD_SIZE_MB` (at most 10 GiB), never approach it. A user
 initiating another is `409 too_many_multipart_uploads` until one is completed, aborted or
 expires.
 
+**Staging without a quota.** Where no reservation bounds an upload — its bucket has no quota, or
+it was initiated without an `expectedSize` — its parts count against a cap per user instead:
+`FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER` (default 100 GiB), over all such uploads the
+user has in progress (not completed, aborted or expired) in every bucket. A part that would take
+the total past it (a part sent again replaces itself) is `409 multipart_staged_bytes_exceeded`
+until one of the uploads is completed, aborted or expires; with a `Content-Length` before its body
+is read, otherwise once staged, under a per-user advisory lock that orders that user's parts
+(`upsertPart` / `userStagedBytes` in `utils/db/multipartUploads.ts`), and its file deleted. The
+user is the upload's initiator, so an app service's uploads all count against its service-account
+user: size the setting for the service's concurrent uploads, or give its buckets quotas. The
+default leaves room for one object of the largest size.
+
 **Staging against the quota.** In a bucket with a quota, an active upload (not completed, aborted
 or expired) holds its `expectedSize` against the quota. Initiate is `507 insufficient_storage`
 unless the bucket's usage, the `expectedSize`s of its active uploads — every user's — and the new
 upload's `expectedSize` together fit the quota. The check runs under a per-bucket advisory lock
 taken by every initiate (`initiate` in `utils/db/multipartUploads.ts`), so concurrent initiates
-see each other's reservations. An upload without an `expectedSize` holds nothing: it is refused at
-initiate only when the others' already pass the quota, and its parts are checked against the
-quota as they arrive, as above. Nothing is reserved in `currentUsageBytes`; the bytes are charged
+see each other's reservations. An upload without an `expectedSize` would hold nothing, so in a
+bucket with a quota initiate requires one (`400 expected_size_required`): every byte staged there
+is within a reservation the quota has counted. An upload initiated before the bucket got its quota
+has none; its parts are checked against the quota as they arrive, as above, and count against the
+per-user cap below. Nothing is reserved in `currentUsageBytes`; the bytes are charged
 when the upload completes, and a reservation ends when the upload does. Every other write's quota
 check (`reserveQuota`, under the same advisory lock) counts active uploads' `expectedSize`s too,
 so a direct upload cannot take the room a multipart upload holds; the completing upload's own
@@ -427,6 +441,7 @@ The files-specific ones, from `src/env.ts`; core's shared settings (`DATABASE_UR
 | `FILE_SERVICE_MIN_PART_SIZE_MB` | Multipart minimum part size (default 5) |
 | `FILE_SERVICE_MAX_MULTIPART_PARTS` | Default 10000 |
 | `FILE_SERVICE_MAX_ACTIVE_MULTIPART_UPLOADS` | Default 100 — multipart uploads one user may have in progress in a bucket |
+| `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER` | Default 100 GiB — part bytes one user may have staged across uploads in progress that no quota bounds |
 | `FILE_SERVICE_MAX_PRESIGN_TTL_SECONDS` | Default 7 days |
 | `FILE_SERVICE_MAX_ARCHIVE_OBJECTS` | Default 10000 — cap on objects in a single archive request |
 | `FILE_SERVICE_MAX_ARCHIVE_TOTAL_BYTES` | Default 50 GiB — cap on archive plaintext size |

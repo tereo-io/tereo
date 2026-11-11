@@ -1,6 +1,7 @@
 import { MAX_BLOB_BYTES } from "../../../../../../utils/encryption.js";
 import {
   AppError,
+  ConflictError,
   InsufficientStorageError,
 } from "../../../../../../utils/errors.js";
 
@@ -55,6 +56,29 @@ export const assertStagingFits = (
       bucket.storageQuotaBytes
   ) {
     throw new InsufficientStorageError("Storage quota exceeded");
+  }
+};
+
+/**
+ * Whether the bucket's quota bounds what `upload` may stage: it reserved its
+ * `expectedSize` against one at initiate. Any other upload's parts count
+ * against its creator's staged-bytes cap instead.
+ */
+export const isQuotaReserved = (
+  upload: { expectedSize: bigint | null },
+  bucket: { storageQuotaBytes: bigint | null }
+) => bucket.storageQuotaBytes !== null && upload.expectedSize !== null;
+
+/**
+ * Refuse a part that would take the bytes its uploader has staged, across
+ * their active uploads that no quota bounds, to `totalBytes`, past `maxBytes`.
+ */
+export const assertUserStagingFits = (totalBytes: bigint, maxBytes: bigint) => {
+  if (totalBytes > maxBytes) {
+    throw new ConflictError(
+      `Your multipart uploads in progress would hold more than ${maxBytes} bytes of parts, the most allowed; complete or abort one first`,
+      "multipart_staged_bytes_exceeded"
+    );
   }
 };
 

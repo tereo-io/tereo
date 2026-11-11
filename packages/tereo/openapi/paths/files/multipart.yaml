@@ -23,9 +23,10 @@
       holds its `expectedSize` against the quota until it is completed,
       aborted or expires: an upload whose `expectedSize`, added to the bytes
       the bucket stores and the `expectedSize`s of its other active uploads,
-      passes the quota is `507 insufficient_storage`. An upload without an
-      `expectedSize` holds nothing, and is refused only once the others'
-      already pass it.
+      passes the quota is `507 insufficient_storage`. Such a bucket therefore
+      requires `expectedSize`: an initiate without it is
+      `400 expected_size_required`. In a bucket without a quota it stays
+      optional.
 
       **Required permissions:**
       - System: `file-service.objects.write` AND bucket-level `canWrite`
@@ -79,7 +80,7 @@
               $ref: '../../components/files/schemas.yaml#/InitiateMultipartResponse'
       '400':
         $ref: '../../components/responses.yaml#/BadRequestResponse'
-        description: '`invalid_request` - invalid body; `reserved_object_key` - the key is `prefixes` or starts with `by-id/`, `by-key/` or `.thumbnails/`'
+        description: '`invalid_request` - invalid body; `reserved_object_key` - the key is `prefixes` or starts with `by-id/`, `by-key/` or `.thumbnails/`; `expected_size_required` - the bucket has a storage quota and the body has no `expectedSize`'
       '401':
         $ref: '../../components/files/responses.yaml#/FilesUnauthorizedResponse'
       '403':
@@ -229,6 +230,13 @@
       initiate (`413 exceeds_expected_size`), past the largest object a
       bucket can store, 68,719,476,704 bytes (`413 object_too_large`), or
       past what the bucket has left of its quota (`507 insufficient_storage`).
+      Parts no quota bounds — those of an upload in a bucket without a quota,
+      or of one initiated without an `expectedSize` — also count against a
+      limit per user: a part that would take the bytes its uploader has staged
+      across all their such uploads in progress, in any bucket, past
+      `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER` (default 100 GiB) is
+      `409 multipart_staged_bytes_exceeded` until one of them is completed,
+      aborted or expires.
       With a `Content-Length` the part is refused before its body is read;
       otherwise once it is staged, and the staged bytes are discarded.
 
@@ -275,7 +283,7 @@
         description: Upload not found, not active, or in another bucket; a missing bucket only for a `file-service.admin` holder
       '409':
         $ref: '../../components/files/responses.yaml#/FilesConflictResponse'
-        description: '`bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API'
+        description: '`bucket_retired` - the bucket is read-only; `bucket_managed_by_core` - the bucket is core''s own and read-only through this API; `multipart_staged_bytes_exceeded` - the uploader''s parts in progress would total more than `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER`'
       '413':
         $ref: '../../components/files/responses.yaml#/PayloadTooLargeResponse'
         description: '`payload_too_large` - the part is over `FILE_SERVICE_MAX_UPLOAD_SIZE_MB`; `exceeds_expected_size` - the upload''s parts would total more than its `expectedSize`; `object_too_large` - they would total more than an object can be'

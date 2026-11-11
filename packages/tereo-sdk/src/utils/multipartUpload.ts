@@ -343,6 +343,7 @@ export const uploadMultipart = (
   const reader = new StreamReader(source.rest);
   return runMultipart(bucket, key, input, options, {
     nextPart: streamParts(source.head, reader, options.partSizeBytes),
+    expectedSize: input.expectedSize,
     stream: { rest: source.rest, reader },
   });
 };

@@ -300,6 +300,7 @@ env (no overlap).
 | `FILE_SERVICE_MIN_PART_SIZE_MB` | `5` | Above 0, at most 5120 |
 | `FILE_SERVICE_MAX_MULTIPART_PARTS` | `10000` | 1–100000 |
 | `FILE_SERVICE_MAX_ACTIVE_MULTIPART_UPLOADS` | `100` | 1–100000. Multipart uploads one user may have in progress in a bucket |
+| `FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER` | `107374182400` (100 GiB) | At least 1. Part bytes one user (an app service's uploads all count as its service account) may have staged across their multipart uploads in progress that no bucket quota bounds; a part past it is `409 multipart_staged_bytes_exceeded`. See [files.md](files.md#multipart-uploads) |
 | `FILE_SERVICE_MULTIPART_UPLOAD_TTL_HOURS` | `24` | 1–8760 |
 | `FILE_SERVICE_PRESIGN_CLOCK_SKEW_SECONDS` | `30` | 0–3600 |
 | `FILE_SERVICE_MAX_PRESIGN_TTL_SECONDS` | `604800` | 1–31536000 (365 d) |

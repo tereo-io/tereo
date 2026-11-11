@@ -469,6 +469,13 @@ const EnvFields = z
     FILE_SERVICE_MAX_MULTIPART_PARTS: int(1, 100_000, 10_000),
     // Active (not completed, aborted or expired) uploads per user per bucket.
     FILE_SERVICE_MAX_ACTIVE_MULTIPART_UPLOADS: int(1, 100_000, 100),
+    // Part bytes one user may have staged, across buckets, in active uploads
+    // that no bucket quota bounds.
+    FILE_SERVICE_MAX_STAGED_MULTIPART_BYTES_PER_USER: int(
+      1,
+      Number.MAX_SAFE_INTEGER,
+      100 * 1024 * 1024 * 1024
+    ),
     FILE_SERVICE_MAX_PRESIGN_TTL_SECONDS: int(1, 365 * DAY, 7 * 24 * 60 * 60),
     FILE_SERVICE_MAX_ARCHIVE_OBJECTS: int(1, 10_000_000, 10_000),
     FILE_SERVICE_MAX_ARCHIVE_TOTAL_BYTES: int(
