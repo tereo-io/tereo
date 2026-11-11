@@ -1,4 +1,4 @@
-import { deleteBlobFile } from "../utils/storage.js";
+import { blobStore } from "../utils/blobStore/index.js";
 import { TrackedWorker } from "./workerRegistry.js";
 import { getRedisClient } from "../utils/redis.js";
 import { isShuttingDown } from "./jobUtils.js";
@@ -91,7 +91,7 @@ async function processOrphanBlobCleanup(hash: string): Promise<void> {
       );
       return;
     }
-    await deleteBlobFile(claimed.fs_path);
+    await blobStore.delete(claimed.fs_path);
   });
 }
 

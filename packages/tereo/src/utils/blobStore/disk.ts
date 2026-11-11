@@ -7,7 +7,6 @@ import crypto from "crypto";
 import path from "path";
 
 const SHARD_NAME = /^[0-9a-f]{2}$/;
-const BLOB_NAME = /^[0-9a-f]{64}$/;
 
 const isEnoent = (err: unknown): boolean =>
   (err as NodeJS.ErrnoException | null)?.code === "ENOENT";
@@ -55,25 +54,25 @@ async function listNames(
 }
 
 /**
- * Blobs and multipart parts as files under `root`: a blob at
+ * Blobs and multipart parts as files under `root()`, read at each call: a blob at
  * `blobs/{hash[0:2]}/{hash[2:4]}/{hash}`, a part at
  * `multipart/{uploadId}/{partNumber}.{nonce}`. A location is the file's path.
  */
-export function createDiskBlobStore(root: string): BlobStore {
-  const blobsRoot = path.join(root, "blobs");
+export function createDiskBlobStore(root: () => string): BlobStore {
+  const blobsRoot = () => path.join(root(), "blobs");
   const uploadDir = (uploadId: string) =>
-    path.join(root, "multipart", uploadId);
+    path.join(root(), "multipart", uploadId);
 
   return {
     async ensureReady() {
-      await fs.mkdir(blobsRoot, { recursive: true });
+      await fs.mkdir(blobsRoot(), { recursive: true });
     },
 
     locationFor(hash) {
       if (hash.length < 4) {
         throw new Error("Hash too short for sharding");
       }
-      return path.join(blobsRoot, hash.slice(0, 2), hash.slice(2, 4), hash);
+      return path.join(blobsRoot(), hash.slice(0, 2), hash.slice(2, 4), hash);
     },
 
     // Only the writer that created the blob's row calls this, holding the
@@ -135,7 +134,7 @@ export function createDiskBlobStore(root: string): BlobStore {
     listShards() {
       // Only sharded names: stragglers like lost+found are not shards.
       return listNames(
-        blobsRoot,
+        blobsRoot(),
         (e) => e.isDirectory() && SHARD_NAME.test(e.name)
       );
     },
@@ -144,7 +143,7 @@ export function createDiskBlobStore(root: string): BlobStore {
       shard: string,
       cursor: BlobListCursor = {}
     ): AsyncIterable<BlobListing> {
-      const shardPath = path.join(blobsRoot, shard);
+      const shardPath = path.join(blobsRoot(), shard);
       const subs = await listNames(
         shardPath,
         (e) => e.isDirectory() && SHARD_NAME.test(e.name)
@@ -153,10 +152,7 @@ export function createDiskBlobStore(root: string): BlobStore {
         if (cursor.sub && sub < cursor.sub) continue;
         const after = sub === cursor.sub ? cursor.afterFile : undefined;
         const subPath = path.join(shardPath, sub);
-        const names = await listNames(
-          subPath,
-          (e) => e.isFile() && BLOB_NAME.test(e.name)
-        );
+        const names = await listNames(subPath, (e) => e.isFile());
         for (const hash of names) {
           if (after && hash <= after) continue;
           yield {

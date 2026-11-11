@@ -35,7 +35,7 @@ let store: BlobStore;
 
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "disk-blob-store-"));
-  store = createDiskBlobStore(root);
+  store = createDiskBlobStore(() => root);
 });
 
 afterEach(async () => {
@@ -168,21 +168,26 @@ describe("listing", () => {
     return out;
   };
 
-  it("lists a shard's blobs by sub-directory then name, skipping other files", async () => {
+  it("lists a shard's files by sub-directory then name, strays included", async () => {
     const h1 = hashOf("ab12a");
     const h2 = hashOf("ab12b");
     const h3 = hashOf("ab34");
     for (const h of [h3, h2, h1]) await put(h);
-    await fs.writeFile(
-      path.join(root, "blobs", "ab", "12", `${h1}.deadbeef.tmp`),
-      "a copy in progress"
-    );
+    const stray = `${h1}.deadbeef.tmp`;
+    const strayPath = path.join(root, "blobs", "ab", "12", stray);
+    await fs.writeFile(strayPath, "a copy a crash left behind");
+    await fs.mkdir(path.join(root, "blobs", "ab", "12", "a-directory"));
 
     expect(await collect("ab")).toEqual([
       {
         hash: h1,
         location: store.locationFor(h1),
         cursor: { sub: "12", afterFile: h1 },
+      },
+      {
+        hash: stray,
+        location: strayPath,
+        cursor: { sub: "12", afterFile: stray },
       },
       {
         hash: h2,

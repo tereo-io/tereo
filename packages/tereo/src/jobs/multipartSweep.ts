@@ -1,16 +1,15 @@
 import { getMultipartSweepQueue, MULTIPART_SWEEP_QUEUE } from "./queues.js";
 import { bucketEventScope, emitTx, logAuditTx } from "../utils/outbox.js";
 import { createTimeBoxedLoop, isShuttingDown } from "./jobUtils.js";
-import { removeMultipartDir } from "../utils/storage.js";
+import { sweepStaleScratchFiles } from "../utils/scratchFiles.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
+import { blobStore } from "../utils/blobStore/index.js";
 import { TrackedWorker } from "./workerRegistry.js";
 import { getRedisClient } from "../utils/redis.js";
 import { logger } from "../utils/logger.js";
 import db from "../utils/db/index.js";
 import { Job, Worker } from "bullmq";
-import fs from "fs/promises";
 import env from "../env.js";
-import path from "path";
 
 const JOB_INTERVAL_MS = 60 * 60 * 1000; // hourly
 const BATCH_LIMIT = 100;
@@ -63,7 +62,7 @@ async function processMultipartSweepTick(): Promise<{
       });
       // Finalized by a concurrent complete or abort, which cleans up itself.
       if (!aborted) continue;
-      await removeMultipartDir(upload.id);
+      await blobStore.removeUpload(upload.id);
       await db.multipartUploads.deleteParts(upload.id);
     } catch (err) {
       logger.warn(
@@ -78,7 +77,7 @@ async function processMultipartSweepTick(): Promise<{
 
   // Stage 2: finalised uploads (aborted OR completed) whose inline cleanup
   // failed or never ran (process crashed between markAborted/markCompleted
-  // and removeMultipartDir). Re-run the cleanup so leaked staging files
+  // and removeUpload). Re-run the cleanup so leaked staging files
   // don't accumulate. The `parts: { some: {} }` filter inside
   // `listFinalisedNeedingCleanup` keeps this bounded — once part rows are
   // removed the upload is skipped on subsequent ticks.
@@ -89,7 +88,7 @@ async function processMultipartSweepTick(): Promise<{
   for (const upload of orphaned) {
     if (isShuttingDown()) break;
     try {
-      await removeMultipartDir(upload.id);
+      await blobStore.removeUpload(upload.id);
       await db.multipartUploads.deleteParts(upload.id);
     } catch (err) {
       logger.warn(
@@ -116,40 +115,12 @@ async function processMultipartSweepTick(): Promise<{
  * is longer: far past any request still writing one. Multipart parts live
  * under `{storage}/multipart`, swept with their upload above.
  */
-/** Temp files core writes: staged uploads, signed uploads, multipart completes. */
-const CORE_TEMP_FILE = /^(upload|signed-upload|mp-complete)-[0-9a-f]+$/;
-
 async function sweepTempFiles(now = Date.now()): Promise<number> {
-  const root = env.FILE_SERVICE_TEMP_PATH;
   const maxAgeMs = Math.max(
     24 * HOUR_MS,
     env.FILE_SERVICE_MULTIPART_UPLOAD_TTL_HOURS * HOUR_MS
   );
-  let entries;
-  try {
-    entries = await fs.readdir(root, { withFileTypes: true });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return 0;
-    throw err;
-  }
-
-  let removed = 0;
-  for (const entry of entries) {
-    if (isShuttingDown()) break;
-    // Only names core writes: the directory may be shared (`/tmp`).
-    if (!entry.isFile() || !CORE_TEMP_FILE.test(entry.name)) continue;
-    const p = path.join(root, entry.name);
-    try {
-      const { mtimeMs } = await fs.stat(p);
-      if (now - mtimeMs < maxAgeMs) continue;
-      await fs.unlink(p);
-      removed++;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
-      logger.warn({ err, path: p }, "Failed to remove stale temp file");
-    }
-  }
-  return removed;
+  return await sweepStaleScratchFiles(maxAgeMs, now);
 }
 
 async function processMultipartSweepJob(job: Job): Promise<void> {

@@ -15,6 +15,11 @@ export interface BlobListCursor {
 }
 
 export interface BlobListing {
+  /**
+   * The stored name: a blob's hash. Anything else kept among the blobs (a
+   * copy a crash left behind) is listed too, under a name no row has, so
+   * reconciliation removes it.
+   */
   hash: string;
   location: BlobLocation;
   /** Resumes the listing after this blob. */

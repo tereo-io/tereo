@@ -11,7 +11,7 @@ export type {
 
 /** Where core keeps blob and multipart-part bytes. Disk is the only backend. */
 export const blobStore: BlobStore = createDiskBlobStore(
-  env.FILE_SERVICE_STORAGE_PATH
+  () => env.FILE_SERVICE_STORAGE_PATH
 );
 
 export const isBlobMissing = (err: unknown): boolean =>
