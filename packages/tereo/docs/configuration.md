@@ -185,7 +185,11 @@ as associated data, so a value cannot be moved to another row. The KEK id is a h
   was read, so replicas starting together are safe; it is a no-op once done.
 - **In production** such a row is refused, naming it — so nobody with write access to the table can
   plant a key every replica adopts. Delete the row (core regenerates the keys it generates) or seal it
-  under `CORE_KEK`. Column-sealed secrets (below) follow the same rule.
+  under `CORE_KEK`. Column-sealed secrets (below) follow the same rule, on start and on use: the
+  start passes that re-seal them log such a row and leave it, and it fails to open ("Row secret
+  … is stored unencrypted" or "… encrypted with the public development KEK") until the secret is
+  set again through the admin API — a webhook endpoint's signing secret rotated and the previous one
+  revoked, an identity provider's or notification connection's secret saved anew.
 - **A row under neither `CORE_KEK` nor `CORE_KEK_PREVIOUS`** (nor the dev KEK) stops the start, naming
   the KEK ids involved.
 - **Secrets kept in a table's own column** use the same envelope, with the row as the name: identity

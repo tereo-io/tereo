@@ -82,8 +82,8 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
 
       // Before anything signs, verifies or decrypts.
       await loadKeys();
-      // Signing still opens a plaintext secret, so a failure here only delays
-      // sealing to the next start or the endpoint's next delivery.
+      // A delivery opens and seals its endpoint's secret the same way, so a
+      // failure here only delays sealing to the next start or delivery.
       await sealWebhookSecrets().catch((err) => {
         logger.error({ err }, "Sealing webhook signing secrets failed");
       });

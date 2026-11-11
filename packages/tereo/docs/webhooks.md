@@ -201,9 +201,12 @@ Event types carry `serviceName`, the declaring service's name, beside `source` (
   The masked value comes from `signing_secret_hint`, the first 8 characters kept beside it. The
   delivery job opens them to sign. A secret under the previous KEK (or, outside production, a plaintext
   one or one under the dev KEK) still signs, and is written back sealed under the current KEK when opened; on start
-  every process also seals the ones left (`sealWebhookSecrets`, paged, each write conditional on
+  every process also seals the ones left that it can open (`sealWebhookSecrets`, paged, each write conditional on
   the row still holding what was read, so replicas starting together are safe). A KEK rotation is
   covered the same way: with `CORE_KEK_PREVIOUS` set, the start pass re-seals rows under the old KEK.
+  In production a plaintext secret or one under the dev KEK is refused, on start and when signing
+  ([configuration.md](configuration.md#key-encryption)): rotate the endpoint's secret and revoke
+  the previous one.
   A previous secret past its overlap signs nothing, so the start pass clears it (column and expiry
   set to `NULL`) instead of sealing it.
 

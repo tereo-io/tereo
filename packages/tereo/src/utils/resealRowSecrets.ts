@@ -6,7 +6,7 @@ import { logger } from "./logger.js";
 /**
  * Opens every row-sealed secret (identity providers' client secrets,
  * notification connections' secrets), which reseals any still under the
- * previous or the dev KEK. Opening them on use alone would leave a provider or
+ * previous KEK or, outside production, the dev KEK. Opening them on use alone would leave a provider or
  * connection nobody used during a KEK rotation under the old key, unreadable
  * once `CORE_KEK_PREVIOUS` is removed. Run on start, after `loadKeys()`; a row
  * that fails is logged and left for the next start.
