@@ -1,10 +1,11 @@
 import { getDefaultOrganizationId } from "../../../../../../../utils/defaultOrganization.js";
 import { notifyUserRolesChanged } from "../../../../../../../websocket/emitters/index.js";
+import { callerPermissionsIn } from "../../../../../../../utils/orgRoleAssignment.js";
 import { assertAdminRemains } from "../../../../../../../utils/adminGuard.js";
 import { RemoveRoleUserQuerySchema, UserIdParamSchema } from "./schemas.js";
 import { logAuditTx, emitTx } from "../../../../../../../utils/outbox.js";
+import { assertCanTakeAway } from "../../../../../../../utils/grants.js";
 import { assertMayDisempower } from "../../../../users/user/guards.js";
-import { ForbiddenError } from "../../../../../../../utils/errors.js";
 import { validateUser } from "../../../../../../../utils/auth.js";
 import { RoleIdParamSchema } from "../../../schemas.js";
 import db from "../../../../../../../utils/db/index.js";
@@ -17,14 +18,19 @@ import {
   validateParams,
   validateQuery,
 } from "../../../../../../../utils/validateReq.js";
+import {
+  ArchivedError,
+  ForbiddenError,
+} from "../../../../../../../utils/errors.js";
 
 /**
  * Removes one assignment: the global one, or with `organizationId` the one
  * scoped to that organization, which also takes the organization authority
  * that managing its member roles does (requireOrgRole "admin", and an org
- * admin does not manage an owner). Removing a global assignment needs the
- * caller to hold every permission the user holds, as `PUT /admin/users/:id/roles`
- * does.
+ * admin does not manage an owner, the caller holds there every permission the
+ * role grants, and the organization is not archived). Removing a global
+ * assignment needs the caller to hold every permission the user holds, as
+ * `PUT /admin/users/:id/roles` does.
  */
 export const removeRoleUser = async (req: Request, res: Response) => {
   const auth = validateUser(req);
@@ -38,6 +44,14 @@ export const removeRoleUser = async (req: Request, res: Response) => {
   const callerOrgRole = organizationId
     ? await requireOrgRole("admin", req, organizationId)
     : null;
+  // After the authority check, so archive state is not shown to a caller
+  // without it.
+  if (
+    organizationId &&
+    (await db.organizations.getAny(organizationId)).archivedAt
+  ) {
+    throw new ArchivedError();
+  }
   const role = await db.roles.get(roleId);
   const user = await db.users.get(userId);
   // A service's roles are what an admin approved for it (/admin/services);
@@ -79,6 +93,12 @@ export const removeRoleUser = async (req: Request, res: Response) => {
             "Only organization owners can change an owner's roles"
           );
         }
+      }
+      if (organizationId) {
+        assertCanTakeAway(
+          await callerPermissionsIn(auth, organizationId, tx),
+          db.roles.grantedPermissionNames([role])
+        );
       }
       // Org-scoped assignments never count as administrators, so removing one
       // always passes; the guard still runs, under its lock, for both. The

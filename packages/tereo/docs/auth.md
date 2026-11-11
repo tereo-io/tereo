@@ -724,10 +724,10 @@ permissions to cover every permission the user holds, in any scope (`assertMayDi
 strip an administrator, nor `users.delete` sign one out, nor `roles.delete` take an administrator's
 `admin` role. Acting on yourself is not checked. Removing an org-scoped assignment
 (`DELETE /v1/admin/roles/:id/users/:userId?organizationId=`) is bounded instead as setting a
-member's org roles is: organization authority, and an org `admin` cannot remove an `owner`'s role.
-Setting a member's org roles (`PUT /v1/admin/organizations/:id/members/:userId/roles`) also needs
-the caller to hold, in that organization, every permission of each role it removes
-(`assertCanTakeAway`) — otherwise 403 naming those lacking.
+member's org roles (`PUT /v1/admin/organizations/:id/members/:userId/roles`) is: organization
+authority, an org `admin` cannot remove an `owner`'s role, and the caller must hold, in that
+organization, every permission of each role removed (`assertCanTakeAway`) — otherwise 403 naming
+those lacking. Neither changes an archived organization (409 `resource_archived`).
 
 A service's or an integration's secret is a way into its account: `regenerate-secret` and
 `revoke-previous-secret` under `/v1/admin/services/:id` and `/v1/admin/integrations/:id` need the

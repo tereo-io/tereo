@@ -22,6 +22,7 @@ import {
   createTestUser,
   createAdminUser,
   createTestRole,
+  createTestPermission,
 } from "../../../../../../../support/auth/users.js";
 
 interface ErrorResponse {
@@ -186,6 +187,46 @@ describe("DELETE /v1/admin/roles/:id/users/:userId?organizationId", () => {
       HTTP_STATUS.NO_CONTENT
     );
     expect(await scopes(user.id, role.id)).toEqual([org.id]);
+  });
+
+  it("refuses removing an org-scoped role carrying a permission the caller lacks there", async () => {
+    const { user, org, role } = await setUp();
+    const permission = await createTestPermission();
+    await prisma.rolePermission.create({
+      data: { roleId: role.id, permissionId: permission.id },
+    });
+    const platform = await getTestPrincipalToken({
+      permissions: ["roles.delete", "organizations.write"],
+    });
+
+    const res = await remove(platform, role.id, user.id, org.id);
+    expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
+    expect(((await res.json()) as ErrorResponse).error_description).toContain(
+      permission.name
+    );
+    expect(await scopes(user.id, role.id)).toContain(org.id);
+
+    const holder = await getTestPrincipalToken({
+      permissions: ["roles.delete", "organizations.write", permission.name],
+    });
+    expect((await remove(holder, role.id, user.id, org.id)).status).toBe(
+      HTTP_STATUS.NO_CONTENT
+    );
+  });
+
+  it("refuses an org-scoped removal in an archived organization", async () => {
+    const { user, org, role } = await setUp();
+    await prisma.organization.update({
+      where: { id: org.id },
+      data: { isActive: false, archivedAt: new Date() },
+    });
+
+    const res = await remove(adminToken, role.id, user.id, org.id);
+    expect(res.status).toBe(HTTP_STATUS.CONFLICT);
+    expect(((await res.json()) as ErrorResponse).error).toBe(
+      "resource_archived"
+    );
+    expect(await scopes(user.id, role.id)).toContain(org.id);
   });
 
   it("rejects an organizationId that is not a uuid", async () => {

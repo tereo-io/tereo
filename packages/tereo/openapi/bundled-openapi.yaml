@@ -7967,6 +7967,9 @@ paths:
         a member's roles does: `organizations.write`, or being an `admin` or
         `owner` of that organization while it is active (`403` otherwise) —
         and an organization `admin` cannot remove an `owner`'s role (`403`).
+        The caller must also hold, in that organization, every permission the
+        role grants (`403`, naming those lacking), and the organization must
+        not be archived (`409 resource_archived`).
         Removing a global assignment from another user needs a caller holding
         every permission that user holds, from global roles or roles in any
         organization; the caller's count from global roles only, capped by a
@@ -8019,12 +8022,12 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
-          description: Forbidden - missing roles.delete permission, the user is a service's service account, or (with `organizationId`) the caller has no authority over the organization
+          description: Forbidden - missing roles.delete permission, the user is a service's service account, or (with `organizationId`) the caller has no authority over the organization or does not hold there every permission the role grants
         '404':
           $ref: '#/components/responses/NotFoundResponse'
           description: Role or user not found, or the user holds no assignment of the role in that scope
         '409':
-          description: The removal would leave no active administrator (`conflict`), or the role is archived (`resource_archived`); restore it first
+          description: The removal would leave no active administrator (`conflict`), or the role or (with `organizationId`) the organization is archived (`resource_archived`); restore it first
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'
