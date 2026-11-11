@@ -378,6 +378,14 @@ export const deleteRole = async (req: Request, res: Response) => {
     await lockGroupsHoldingRole(params.id, tx);
     await assertAdminRemains({ kind: "role", roleId: params.id }, tx);
     await db.roles.lockRoles([params.id], "update", tx);
+    // Again under the row lock every writer to the role takes: it may have
+    // gained a permission since the read above.
+    const current = await db.roles.getAny(params.id, tx);
+    refuseProvisioned(current);
+    assertCanTakeAway(
+      await globalGrantablePermissions(auth, tx),
+      db.roles.grantedPermissionNames([current])
+    );
     // Read before the delete: assignments and group holds cascade away with
     // the row.
     const affectedUserIds = await db.roles.getUserIdsByRoleId(params.id, tx);
@@ -427,36 +435,39 @@ export const setRolePermissions = async (req: Request, res: Response) => {
   }
 
   const nextIds = new Set(body.permissionIds);
-  assertCanTakeAway(
-    await globalGrantablePermissions(auth),
-    db.roles.grantedPermissionNames([
-      {
-        rolePermissions: existing.rolePermissions.filter(
-          (rp) => !nextIds.has(rp.permissionId)
-        ),
-      },
-    ])
-  );
-
-  if (body.permissionIds.length > 0) {
-    // Retired permissions may stay on a custom role, but not be added to one.
-    const permissions = await db.permissions.getByIds(body.permissionIds);
-    const foundIds = new Set([
-      ...permissions.map((p) => p.id),
-      ...existing.rolePermissions.map((rp) => rp.permissionId),
-    ]);
-    if (body.permissionIds.some((id) => !foundIds.has(id))) {
-      const missingIds = body.permissionIds.filter((id) => !foundIds.has(id));
+  // Retired permissions may stay on a custom role, but not be added to one.
+  const permissions = await db.permissions.getByIds(body.permissionIds);
+  // What the role carries is kept unchecked and what it loses is the caller's
+  // to take away, so both depend on the role as read: checked here, and
+  // again under its row lock.
+  const assertBounds = (
+    role: Pick<typeof existing, "rolePermissions">,
+    grantable: string[]
+  ) => {
+    assertCanTakeAway(
+      grantable,
+      db.roles.grantedPermissionNames([
+        {
+          rolePermissions: role.rolePermissions.filter(
+            (rp) => !nextIds.has(rp.permissionId)
+          ),
+        },
+      ])
+    );
+    const kept = new Set(role.rolePermissions.map((rp) => rp.permissionId));
+    const foundIds = new Set([...permissions.map((p) => p.id), ...kept]);
+    const missingIds = body.permissionIds.filter((id) => !foundIds.has(id));
+    if (missingIds.length > 0) {
       throw new ValidationError(
         `Permissions not found: ${missingIds.join(", ")}`
       );
     }
-    const kept = new Set(existing.rolePermissions.map((rp) => rp.permissionId));
     assertCanGrant(
-      await globalGrantablePermissions(auth),
+      grantable,
       permissions.filter((p) => !kept.has(p.id)).map((p) => p.name)
     );
-  }
+  };
+  assertBounds(existing, await globalGrantablePermissions(auth));
 
   const { role, revokedJtis } = await db.$transaction(async (tx) => {
     const keepsAdmin = await tx.permission.count({
@@ -471,15 +482,18 @@ export const setRolePermissions = async (req: Request, res: Response) => {
     // PATCH guestAssignable checks under this same lock, so one of the two
     // sees the other's result; the flag is read after taking it.
     await db.roles.lockRoles([params.id], "update", tx);
+    const current = await db.roles.get(params.id, tx);
+    refuseProvisioned(current);
+    assertBounds(current, await globalGrantablePermissions(auth, tx));
     // Under the row lock, which restoring a group holding the role shares:
     // one of the two sees the other's result.
     await assertOrgAssignableWhileAssignedInOrg(
       tx,
       params.id,
-      existing.rolePermissions.map((rp) => rp.permissionId),
+      current.rolePermissions.map((rp) => rp.permissionId),
       body.permissionIds
     );
-    if ((await db.roles.get(params.id, tx)).guestAssignable) {
+    if (current.guestAssignable) {
       const next = await tx.permission.findMany({
         where: { id: { in: body.permissionIds } },
         select: { name: true, orgAssignable: true, retiredAt: true },

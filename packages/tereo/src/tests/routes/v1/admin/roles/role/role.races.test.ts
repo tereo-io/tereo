@@ -11,6 +11,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import {
   createTestRole,
   createTestUser,
+  createTestPermission,
 } from "../../../../../support/auth/users.js";
 
 const call = (method: string, path: string, token: string, body?: unknown) =>
@@ -277,5 +278,57 @@ describe("PUT /v1/admin/roles/:id/permissions and a concurrent user-role assignm
     release();
     await holder;
     expect((await pending).status).toBe(200);
+  });
+});
+
+/**
+ * What a role already carries is kept without a grant check, and what it
+ * loses is checked against the caller: both read under the role's row lock,
+ * not from the role as it was before the request waited.
+ */
+describe("role grant bounds against a concurrent permission change", () => {
+  it("PUT permissions does not put back, unchecked, a permission removed meanwhile", async () => {
+    const role = await createTestRole();
+    const permission = await createTestPermission();
+    await prisma.rolePermission.create({
+      data: { roleId: role.id, permissionId: permission.id },
+    });
+    const writer = await getTestPrincipalToken({
+      permissions: ["roles.write"],
+    });
+
+    const res = await whileLocked(
+      "roles",
+      role.id,
+      () =>
+        call("PUT", `/v1/admin/roles/${role.id}/permissions`, writer, {
+          permissionIds: [permission.id],
+        }),
+      (tx) => tx.rolePermission.deleteMany({ where: { roleId: role.id } })
+    );
+    expect(res.status).toBe(403);
+    expect(
+      await prisma.rolePermission.count({ where: { roleId: role.id } })
+    ).toBe(0);
+  });
+
+  it("DELETE does not take away a permission added meanwhile that the caller lacks", async () => {
+    const role = await createTestRole();
+    const permission = await createTestPermission();
+    const deleter = await getTestPrincipalToken({
+      permissions: ["roles.delete"],
+    });
+
+    const res = await whileLocked(
+      "roles",
+      role.id,
+      () => call("DELETE", `/v1/admin/roles/${role.id}`, deleter),
+      (tx) =>
+        tx.rolePermission.create({
+          data: { roleId: role.id, permissionId: permission.id },
+        })
+    );
+    expect(res.status).toBe(403);
+    expect(await prisma.role.count({ where: { id: role.id } })).toBe(1);
   });
 });
