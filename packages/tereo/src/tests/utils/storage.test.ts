@@ -1,8 +1,11 @@
 // @module-tag int
 // @module-tag files
+import { discardScratchFile, scratchDir } from "../../utils/scratchFiles.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createEncryptStream } from "../../utils/encryption.js";
 import { encryptBuffer } from "../support/pure/blobCrypto.js";
+import { PayloadTooLargeError } from "../../utils/errors.js";
+import { blobStore } from "../../utils/blobStore/index.js";
 import { PassThrough, Readable } from "stream";
 import type { ReadStream } from "fs";
 import fs from "fs/promises";
@@ -13,7 +16,8 @@ import {
   assertUnreadBody,
   openBlobRangeStream,
   openBlobStream,
-  placeBlobFile,
+  saveBlobStream,
+  stagePart,
 } from "../../utils/storage.js";
 
 // Records every file stream storage opens, so a test can see it was closed.
@@ -89,40 +93,72 @@ describe("openBlobStream", () => {
   }
 });
 
-describe("placeBlobFile", () => {
-  let dir: string;
-
-  beforeAll(async () => {
-    dir = await fs.mkdtemp(path.join(os.tmpdir(), "place-blob-"));
-  });
-
-  afterAll(async () => {
+describe("stagePart", () => {
+  afterAll(() => {
     vi.restoreAllMocks();
-    await fs.rm(dir, { recursive: true, force: true });
   });
 
-  it("copies a staged file that is on another filesystem than the blob store", async () => {
-    const staged = path.join(dir, "staged");
-    const target = path.join(dir, "blobs", "ab", "cd", "abcd");
-    await fs.writeFile(staged, "ciphertext");
-    await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, "left by a write that rolled back");
-
-    const rename = fs.rename.bind(fs);
-    vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
-      if (from === staged) {
-        throw Object.assign(new Error("cross-device link not permitted"), {
-          code: "EXDEV",
-        });
-      }
-      await rename(from, to);
+  it("stops reading the body when the part cannot be stored", async () => {
+    const failure = Object.assign(new Error("no space left on device"), {
+      code: "ENOSPC",
     });
+    vi.spyOn(blobStore, "writePart").mockRejectedValueOnce(failure);
+    const body = new PassThrough();
+    body.write(Buffer.alloc(1024));
 
-    await placeBlobFile(staged, target);
+    await expect(
+      stagePart("upload-1", 1, body, 1024 * 1024, crypto.randomBytes(32))
+    ).rejects.toBe(failure);
+    await tick();
+    expect(body.destroyed).toBe(true);
+  });
+});
 
-    expect(await fs.readFile(target, "utf8")).toBe("ciphertext");
-    await expect(fs.access(staged)).rejects.toThrow();
-    expect(await fs.readdir(path.dirname(target))).toEqual(["abcd"]);
+describe("saveBlobStream", () => {
+  const scratchNames = async () => {
+    try {
+      return (await fs.readdir(scratchDir())).sort();
+    } catch {
+      return [];
+    }
+  };
+
+  it("refuses a body past the cap and leaves no scratch file", async () => {
+    const before = await scratchNames();
+    await expect(
+      saveBlobStream(Readable.from([Buffer.alloc(10)]), {
+        maxBytes: 5,
+        tooLarge: () => new PayloadTooLargeError("Upload exceeds max size"),
+      })
+    ).rejects.toThrow(PayloadTooLargeError);
+    expect(await scratchNames()).toEqual(before);
+  });
+
+  it("returns the leading plaintext bytes it was asked to sample", async () => {
+    const sampled = await saveBlobStream(
+      Readable.from([Buffer.from("hello "), Buffer.from("world")]),
+      { sniffBytes: 5 }
+    );
+    const plain = await saveBlobStream(Readable.from([Buffer.from("hello")]));
+    try {
+      expect(sampled.head.toString()).toBe("hello");
+      expect(sampled.sizeBytes).toBe(11);
+      expect(plain.head).toHaveLength(0);
+    } finally {
+      await discardScratchFile(sampled.stagedPath);
+      await discardScratchFile(plain.stagedPath);
+    }
+  });
+
+  it("names its scratch file by kind", async () => {
+    const saved = await saveBlobStream(Readable.from([Buffer.from("x")]), {
+      kind: "signed-upload",
+    });
+    try {
+      expect(path.basename(saved.stagedPath)).toMatch(/^signed-upload-/);
+    } finally {
+      await discardScratchFile(saved.stagedPath);
+    }
   });
 });
 

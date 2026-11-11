@@ -3,7 +3,7 @@
 // @module-tag job
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getOrphanBlobCleanupQueue } from "../../jobs/queues.js";
-import { getBlobPath } from "../../utils/storage.js";
+import { blobStore } from "../../utils/blobStore/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import env from "../../env.js";
@@ -156,7 +156,9 @@ describe("processOrphanBlobCleanup", () => {
     expect(
       await prisma.contentBlob.findUnique({ where: { hash } })
     ).toMatchObject({ refCount: 1, orphanedAt: null });
-    await expect(fs.access(getBlobPath(hash))).resolves.toBeUndefined();
+    await expect(
+      fs.access(blobStore.locationFor(hash))
+    ).resolves.toBeUndefined();
     expect(
       await prisma.objectVersion.count({ where: { contentBlobHash: hash } })
     ).toBe(1);

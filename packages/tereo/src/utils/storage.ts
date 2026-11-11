@@ -1,11 +1,14 @@
 import { Readable, Transform, pipeline as pipelineCb } from "stream";
-import { createReadStream, createWriteStream } from "fs";
+import { blobStore } from "./blobStore/index.js";
 import { ByteBudget } from "./byteBudget.js";
 import { promisify } from "util";
-import fs from "fs/promises";
 import crypto from "crypto";
 import env from "../env.js";
-import path from "path";
+import {
+  ScratchKind,
+  createScratchFile,
+  discardScratchFile,
+} from "./scratchFiles.js";
 import {
   BLOB_HEADER_BYTES,
   EncryptedBlobKeyMaterial,
@@ -32,10 +35,10 @@ export function assertUnreadBody(source: Readable): void {
 }
 
 /**
- * An encrypted blob written to a temp file, not yet at its content-addressed
- * path. `contentBlobs.attach` moves it to `fsPath` only when its write
- * creates the `ContentBlob` row; otherwise the existing row and file are
- * shared and the staged file is dropped.
+ * An encrypted blob written to a scratch file (`stagedPath`), not yet at its
+ * content-addressed location (`fsPath`, the blob store's). `contentBlobs.attach`
+ * places it there only when its write creates the `ContentBlob` row; otherwise
+ * the existing row and blob are shared and the staged file is dropped.
  */
 export interface SaveBlobResult {
   hash: string;
@@ -44,128 +47,34 @@ export interface SaveBlobResult {
   sizeBytes: number;
   stagedPath: string;
   keyMaterial: EncryptedBlobKeyMaterial;
+  /** The leading plaintext bytes asked for with `sniffBytes`; empty without. */
+  head: Buffer;
 }
 
+export interface SaveBlobOptions {
+  /** Names the scratch file. */
+  kind?: ScratchKind;
+  /** Plaintext size past which the save fails with `tooLarge()`. */
+  maxBytes?: number;
+  tooLarge?: () => Error;
+  /** How many leading plaintext bytes to return as `head`. */
+  sniffBytes?: number;
+}
+
+/** `fsPath` is the blob's location in the blob store (`content_blobs.fs_path`). */
 export interface BlobMeta {
   fsPath: string;
   keyMaterial: EncryptedBlobKeyMaterial;
 }
 
 /**
- * Ensure the global blob root directory exists.
- */
-export async function ensureBlobDirectory(): Promise<void> {
-  await fs.mkdir(blobRootPath(), { recursive: true });
-}
-
-/**
- * Ensure temp directory exists
- */
-export async function ensureTempDirectory(): Promise<void> {
-  await fs.mkdir(env.FILE_SERVICE_TEMP_PATH, { recursive: true });
-}
-
-function blobRootPath(): string {
-  return path.join(env.FILE_SERVICE_STORAGE_PATH, "blobs");
-}
-
-export function getBlobPath(hash: string): string {
-  const { level1, level2, filename } = getShardedPath(hash);
-  return path.join(blobRootPath(), level1, level2, filename);
-}
-
-function getMultipartDirPath(uploadId: string): string {
-  return path.join(env.FILE_SERVICE_STORAGE_PATH, "multipart", uploadId);
-}
-
-/**
- * Build a unique on-disk path for a freshly-staged part. Each PUT picks a
- * fresh nonce so concurrent retries to the same `partNumber` never write to
- * the same file — the DB upsert serialises which one becomes "live" via the
- * `(uploadId, partNumber)` unique index, and the loser's bytes get unlinked
- * by the controller. A deterministic-by-(uploadId,partNumber) path used to be
- * a hidden race: two streams would `createWriteStream` the same file with
- * the default truncate flag, intermix bytes, and the DB row's etag/sizeBytes
- * could end up describing one writer's bytes while the disk held the other's.
- */
-function getMultipartPartPath(
-  uploadId: string,
-  partNumber: number,
-  nonce: string
-): string {
-  return path.join(getMultipartDirPath(uploadId), `${partNumber}.${nonce}`);
-}
-
-async function ensureMultipartDir(uploadId: string): Promise<void> {
-  await fs.mkdir(
-    path.join(env.FILE_SERVICE_STORAGE_PATH, "multipart", uploadId),
-    { recursive: true }
-  );
-}
-
-export async function removeMultipartDir(uploadId: string): Promise<void> {
-  const dir = path.join(env.FILE_SERVICE_STORAGE_PATH, "multipart", uploadId);
-  await fs.rm(dir, { recursive: true, force: true });
-}
-
-/**
- * Move a staged encrypted file to its content-addressed path, replacing
- * whatever is there. Only the writer that created the blob's row calls this,
- * holding the blob's lock (`contentBlobs.attach`): a file already at the path
- * then belongs to no row — a write that rolled back, or an orphan whose row
- * was just deleted — so nothing reads it under the row's key material.
+ * Stage a multipart part **encrypted** under the upload's staging DEK.
  *
- * The staged file is fsynced first, so a crash can't leave a short file at
- * the content address for later reads to serve. A staged file on another
- * filesystem (`FILE_SERVICE_TEMP_PATH` on its own volume) cannot be renamed
- * across: it is copied beside the target, fsynced and renamed from there, so
- * the content address still never holds a partial file.
- */
-export async function placeBlobFile(
-  stagedPath: string,
-  targetPath: string
-): Promise<void> {
-  await syncFile(stagedPath);
-  await fs.mkdir(path.dirname(targetPath), { recursive: true });
-  try {
-    await fs.rename(stagedPath, targetPath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
-    const copyPath = `${targetPath}.${crypto.randomBytes(8).toString("hex")}.tmp`;
-    try {
-      await fs.copyFile(stagedPath, copyPath);
-      await syncFile(copyPath);
-      await fs.rename(copyPath, targetPath);
-    } catch (copyErr) {
-      await fs.unlink(copyPath).catch(() => {});
-      throw copyErr;
-    }
-    await fs.unlink(stagedPath).catch(() => {});
-  }
-}
-
-async function syncFile(filePath: string): Promise<void> {
-  const fh = await fs.open(filePath, "r");
-  try {
-    await fh.sync();
-  } finally {
-    await fh.close();
-  }
-}
-
-/** Remove a staged file that was not placed. Ignores ENOENT. */
-export async function discardStagedFile(stagedPath: string): Promise<void> {
-  await deleteBlobFile(stagedPath);
-}
-
-/**
- * Stage a multipart part to disk **encrypted** under the upload's staging DEK.
- *
- * On-disk layout per part: `iv(12) || ciphertext || tag(16)` — the IV is
+ * Stored layout per part: `iv(12) || ciphertext || tag(16)` — the IV is
  * fresh per part so reusing the same DEK across parts of one upload is safe.
  * The hash, etag, and size returned here are all over the *plaintext* (so the
  * S3-compatible per-part MD5 etag and the dedup-hint SHA-256 stay
- * content-addressed). `sizeBytes` is plaintext length; the on-disk file is
+ * content-addressed). `sizeBytes` is plaintext length; the stored part is
  * `sizeBytes + 28` bytes long.
  *
  * Computes BOTH a SHA-256 (used internally for part identity/dedup hints) and
@@ -186,12 +95,6 @@ export async function stagePart(
   sha256: string;
 }> {
   assertUnreadBody(source);
-  await ensureMultipartDir(uploadId);
-  // Each stage uses a fresh nonce so concurrent retries cannot collide on the
-  // same on-disk file. The DB upsert decides which one wins; the prior
-  // fsPath (if any) is unlinked by the controller after the upsert.
-  const nonce = crypto.randomBytes(8).toString("hex");
-  const fsPath = getMultipartPartPath(uploadId, partNumber, nonce);
 
   const sha256Hasher = crypto.createHash("sha256");
   const md5Hasher = crypto.createHash("md5");
@@ -230,10 +133,18 @@ export async function stagePart(
     stagingDek,
     aadForPart(uploadId, partNumber)
   );
+  // A failure upstream destroys the ciphertext stream with its error, which
+  // the store's write then rejects with, having stored nothing.
+  const ciphertext = pipelineCb(source, meter, partCipher, () => {});
+  // Each stage gets a location of its own; the DB upsert decides which one
+  // wins, and the controller deletes the prior one (if any) after it.
+  let fsPath: string;
   try {
-    await pipeline(source, meter, partCipher, createWriteStream(fsPath));
+    fsPath = await blobStore.writePart(uploadId, partNumber, ciphertext);
   } catch (err) {
-    await fs.unlink(fsPath).catch(() => {});
+    // A store that failed before it read anything leaves the body flowing
+    // into a stream nobody drains; destroying it destroys the source too.
+    ciphertext.destroy(err as Error);
     throw err;
   }
   return {
@@ -255,8 +166,8 @@ export function openMultipartPartStream(
   aad: Buffer | null
 ): Readable {
   const decrypt = createMultipartPartDecryptStream(stagingDek, aad);
-  // pipeline, not pipe: a read error (a missing file) reaches the reader.
-  pipelineCb(createReadStream(fsPath), decrypt, () => {});
+  // pipeline, not pipe: a read error (a missing part) reaches the reader.
+  pipelineCb(blobStore.openPart(fsPath), decrypt, () => {});
   return decrypt;
 }
 
@@ -264,7 +175,7 @@ export function openMultipartPartStream(
  * Save a plaintext stream as an encrypted content-addressed blob.
  *
  * The SHA-256 is computed over the PLAINTEXT so dedup is content-based.
- * The on-disk file (v1 format) is `BLOB_MAGIC_V1 || ciphertext || tag(16)`.
+ * The stored blob (v1 format) is `BLOB_MAGIC_V1 || ciphertext || tag(16)`.
  *
  * The DEK is wrapped *after* the hash is known, with AAD = blob hash bytes.
  * That binds the wrapped DEK to its content so an attacker with DB write
@@ -275,26 +186,35 @@ export function openMultipartPartStream(
  * existing one. Callers discard `stagedPath` when they are done either way.
  */
 export async function saveBlobStream(
-  source: Readable
+  source: Readable,
+  options: SaveBlobOptions = {}
 ): Promise<SaveBlobResult> {
   // Hash the plaintext by tee-ing the stream through a SHA-256 while we also
-  // feed an encrypted copy into a tmp file. We can't know the final hash until
-  // the stream ends, so we write to a temp name first and rename once we know.
-  const tempPath = path.join(
-    env.FILE_SERVICE_TEMP_PATH,
-    `upload-${crypto.randomBytes(12).toString("hex")}`
-  );
-  await ensureTempDirectory();
+  // feed an encrypted copy into a scratch file. We can't know the final hash
+  // until the stream ends, so the blob is placed only once we know.
+  const { maxBytes, tooLarge, sniffBytes = 0 } = options;
+  const scratch = await createScratchFile(options.kind ?? "upload");
 
   const plaintextHasher = crypto.createHash("sha256");
   const md5Hasher = crypto.createHash("md5");
   let plaintextSize = 0;
+  const headChunks: Buffer[] = [];
+  let headBytes = 0;
 
   const plaintextMeter = new Transform({
     transform(chunk, _enc, cb) {
       plaintextSize += chunk.length;
+      if (maxBytes !== undefined && plaintextSize > maxBytes) {
+        return cb(tooLarge ? tooLarge() : new Error("Upload exceeds max size"));
+      }
       plaintextHasher.update(chunk);
       md5Hasher.update(chunk);
+      if (headBytes < sniffBytes) {
+        const need = sniffBytes - headBytes;
+        const slice = chunk.length > need ? chunk.subarray(0, need) : chunk;
+        headChunks.push(Buffer.from(slice));
+        headBytes += slice.length;
+      }
       cb(null, chunk);
     },
   });
@@ -302,14 +222,9 @@ export async function saveBlobStream(
   const { stream: encryptStream, finalize } = createEncryptStream();
 
   try {
-    await pipeline(
-      source,
-      plaintextMeter,
-      encryptStream,
-      createWriteStream(tempPath)
-    );
+    await pipeline(source, plaintextMeter, encryptStream, scratch.stream);
   } catch (err) {
-    await fs.unlink(tempPath).catch(() => {});
+    await discardScratchFile(scratch.path).catch(() => {});
     throw err;
   }
 
@@ -317,10 +232,11 @@ export async function saveBlobStream(
   return {
     hash,
     etag: md5Hasher.digest("hex"),
-    fsPath: getBlobPath(hash),
+    fsPath: blobStore.locationFor(hash),
     sizeBytes: plaintextSize,
-    stagedPath: tempPath,
+    stagedPath: scratch.path,
     keyMaterial: finalize(hash),
+    head: Buffer.concat(headChunks),
   };
 }
 
@@ -337,7 +253,7 @@ export async function saveBlobBuffer(buf: Buffer): Promise<SaveBlobResult> {
  * required because v1 blobs bind the wrapped DEK to it via AAD.
  */
 export function openBlobStream(meta: BlobMeta, blobHash: string) {
-  const fileStream = createReadStream(meta.fsPath);
+  const fileStream = blobStore.openRead(meta.fsPath);
   const decrypt = createDecryptStream(meta.keyMaterial, blobHash);
   // Not `.pipe`: destroying the returned stream must close the file too, and
   // a read error must surface on it. Errors reach callers through `decrypt`.
@@ -346,7 +262,7 @@ export function openBlobStream(meta: BlobMeta, blobHash: string) {
 
 /**
  * Plaintext bytes `start`..`end` (inclusive) of an encrypted blob, read from
- * the middle of the file rather than decrypting everything before `start`
+ * the middle of the blob rather than decrypting everything before `start`
  * (see `createRangeDecipher`). Not authenticated by the GCM tag.
  */
 export async function openBlobRangeStream(
@@ -355,13 +271,13 @@ export async function openBlobRangeStream(
   start: number,
   end: number
 ): Promise<Readable> {
-  await assertBlobFileReadable(meta.fsPath);
+  await assertBlobReadable(meta.fsPath);
   const { decipher, fileOffset, skip } = createRangeDecipher(
     meta.keyMaterial,
     blobHash,
     start
   );
-  const file = createReadStream(meta.fsPath, {
+  const file = blobStore.openRead(meta.fsPath, {
     start: fileOffset,
     end: BLOB_HEADER_BYTES + end,
   });
@@ -465,47 +381,9 @@ export async function loadVerifiedBlobIfSmall(
 }
 
 /**
- * Throws unless the blob file is there and starts with a blob header, so a
- * missing or foreign file is caught before its stream is handed on.
+ * Throws unless the blob is there and starts with a blob header, so a
+ * missing or foreign one is caught before its stream is handed on.
  */
-export async function assertBlobFileReadable(fsPath: string): Promise<void> {
-  const fh = await fs.open(fsPath, "r");
-  try {
-    const header = Buffer.alloc(BLOB_HEADER_BYTES);
-    const { bytesRead } = await fh.read(header, 0, BLOB_HEADER_BYTES, 0);
-    checkBlobHeader(header.subarray(0, bytesRead));
-  } finally {
-    await fh.close();
-  }
-}
-
-/**
- * Delete a blob file from disk. Ignores ENOENT.
- */
-export async function deleteBlobFile(fsPath: string): Promise<void> {
-  try {
-    await fs.unlink(fsPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  }
-}
-
-/**
- * Get the sharded path components for a hash (2-level directory sharding).
- */
-function getShardedPath(hash: string): {
-  level1: string;
-  level2: string;
-  filename: string;
-} {
-  if (hash.length < 4) {
-    throw new Error("Hash too short for sharding");
-  }
-  return {
-    level1: hash.slice(0, 2),
-    level2: hash.slice(2, 4),
-    filename: hash,
-  };
+export async function assertBlobReadable(location: string): Promise<void> {
+  checkBlobHeader(await blobStore.readHead(location, BLOB_HEADER_BYTES));
 }

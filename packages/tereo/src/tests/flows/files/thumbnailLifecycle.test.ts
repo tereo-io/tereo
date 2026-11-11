@@ -1,10 +1,11 @@
 // @module-tag int
 // @module-tag files
 // @module-tag job
-import { getBlobPath, saveBlobBuffer } from "../../../utils/storage.js";
 import { SYSTEM_USER_ID } from "../../../definitions/systemUser.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateThumbnails } from "../../../utils/thumbnails.js";
+import { blobStore } from "../../../utils/blobStore/index.js";
+import { saveBlobBuffer } from "../../../utils/storage.js";
 import { prisma } from "../../../utils/db/prisma.js";
 import { randomBytes, randomInt } from "crypto";
 import db from "../../../utils/db/index.js";
@@ -425,7 +426,7 @@ describe("thumbnail lifecycle", () => {
         {
           hash: saved.hash,
           sizeBytes: BigInt(saved.sizeBytes),
-          fsPath: getBlobPath(saved.hash),
+          fsPath: blobStore.locationFor(saved.hash),
           wrappedDek: saved.keyMaterial.wrappedDek,
           iv: saved.keyMaterial.iv,
           masterKeyVersion: saved.keyMaterial.masterKeyVersion,

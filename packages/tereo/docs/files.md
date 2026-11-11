@@ -28,7 +28,9 @@ src/
 └── utils/
     ├── encryption.ts, masterKeys.ts  # Envelope encryption (AES-256-GCM + wrapped DEK)
     ├── presigning.ts   # HMAC-SHA256 stateless signed URLs
-    ├── storage.ts      # Blob-layer storage (streaming save, sharded paths)
+    ├── storage.ts      # Blob pipeline: hashing, encryption, streaming save and reads
+    ├── blobStore/      # Where blob and multipart-part bytes are kept: the BlobStore interface, its disk implementation
+    ├── scratchFiles.ts # A request's temp files in FILE_SERVICE_TEMP_PATH
     ├── thumbnails.ts   # sharp-based image thumbnail pipeline (no SVG; inputs over 50 MP skipped)
     ├── uploadIdempotency.ts, archiveStream.ts, shareUnlockLimiter.ts, password.ts
     └── cacheBroadcast.ts  # Redis pub/sub for SDK cache invalidation
@@ -53,6 +55,8 @@ Creating a bucket also grants its creator full object access (`canRead`, `canWri
 `PUT /buckets/:name` with `storageQuotaBytes: null` clears the quota, as `null` on create sets none. An upload (`PUT /objects/*objectKey`) whose `Content-Length`, with the bucket's usage and the active multipart uploads' `expectedSize`s, would pass the quota is `507 insufficient_storage` before its body is read (`assertUploadMayFit`); in a bucket without versioning the current version it would replace counts as room. The length is the whole request body, a little more than the file, so only a file within that margin of the quota is refused early that would otherwise fit; the authoritative check stays in the write's transaction. A bucket's `rateLimitConfig` is a per-user token bucket applied on top of the general limiter; going over it answers like the general limiter — `429 too_many_requests` with `retry_after`, `Retry-After` and `X-RateLimit-Limit/Remaining/Reset` (for the bucket's limit). A caller without a token is counted per address, on a public bucket and on signed and shared URLs. On the `/buckets/:name` routes a token-less request to a private bucket is not counted at all: it gets the same `401` with or without a limit set, so the limit doesn't show that the bucket exists (the general limiter still applies).
 
 ## Storage Architecture
+
+Blob bytes are reached in one place. `utils/blobStore` keeps the stored ciphertext of blobs and multipart parts behind the `BlobStore` interface; disk is its only implementation, and the only code that reads `FILE_SERVICE_STORAGE_PATH`. `utils/scratchFiles.ts` owns a request's local temp files (`FILE_SERVICE_TEMP_PATH`). `utils/storage.ts` hashes, encrypts and decrypts on top of the two. `content_blobs.fs_path` and a multipart part's `fs_path` hold the location the blob store issued (for disk, the file's path), which only the blob store reads. Nothing else imports `fs` for blob work (`tests/conventions/storageAccess.unit.test.ts`).
 
 Files stored content-addressably by SHA-256 hash at a **global** path:
 - `{FILE_SERVICE_STORAGE_PATH}/blobs/{hash[0:2]}/{hash[2:4]}/{hash}`
@@ -440,7 +444,7 @@ The files-specific ones, from `src/env.ts`; core's shared settings (`DATABASE_UR
 
 | Variable | Description |
 |----------|-------------|
-| `FILE_SERVICE_STORAGE_PATH` / `_TEMP_PATH` | On-disk paths (default `./storage`, `./storage/temp`). Uploads are spooled unencrypted in `_TEMP_PATH` while processed: put it on an encrypted volume or a tmpfs. The encrypted blob is staged there as well and then moved into the blob store — renamed on the same filesystem, copied, fsynced and renamed into place across filesystems (`placeBlobFile`, `utils/storage.ts`) |
+| `FILE_SERVICE_STORAGE_PATH` / `_TEMP_PATH` | On-disk paths (default `./storage`, `./storage/temp`). Uploads are spooled unencrypted in `_TEMP_PATH` while processed: put it on an encrypted volume or a tmpfs. The encrypted blob is staged there as well and then moved into the blob store — renamed on the same filesystem, copied, fsynced and renamed into place across filesystems (`blobStore.place`, `utils/blobStore/disk.ts`) |
 | `FILE_SERVICE_MAX_UPLOAD_SIZE_MB` | Single-request upload ceiling (default 100) |
 | `FILE_SERVICE_VERIFIED_READ_BUDGET_MB` | Plaintext that downloads verified in memory (blobs up to 16 MiB) may hold at once (default 256); a download waits up to `FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS` (default 30) for room, then `503`, and has `FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS` (default 120) to send what it holds |
 | `FILE_SERVICE_MASTER_KEY_V1` | Envelope encryption master key (base64, 32 bytes). Generated into `core.secrets` when unset |

@@ -2,7 +2,10 @@
 // @module-tag files
 // @module-tag race
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { discardScratchFile } from "../../utils/scratchFiles.js";
 import { FIXTURE_USER_IDS } from "../support/principals.js";
+import { blobStore } from "../../utils/blobStore/index.js";
+import { saveBlobBuffer } from "../../utils/storage.js";
 import { getRedisClient } from "../../utils/redis.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
@@ -14,11 +17,6 @@ import {
   withExclusiveClaim,
   withIdempotency,
 } from "../../utils/uploadIdempotency.js";
-import {
-  discardStagedFile,
-  getBlobPath,
-  saveBlobBuffer,
-} from "../../utils/storage.js";
 import {
   BASE_URL,
   HTTP_STATUS,
@@ -259,7 +257,7 @@ describe("withIdempotency", () => {
                   createdBy: getTestUserId(),
                   stagedPath: saved.stagedPath,
                 },
-                getBlobPath(saved.hash),
+                blobStore.locationFor(saved.hash),
                 saved.keyMaterial,
                 tx
               );
@@ -271,7 +269,7 @@ describe("withIdempotency", () => {
             await db.contentBlobs.releaseStaged(saved);
             throw err;
           } finally {
-            await discardStagedFile(saved.stagedPath);
+            await discardScratchFile(saved.stagedPath);
           }
         }
       );

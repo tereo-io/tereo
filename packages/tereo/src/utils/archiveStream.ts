@@ -1,11 +1,12 @@
 import type { ObjectForArchiveStream } from "./db/archives.js";
 import { Archiver, TarArchive, ZipArchive } from "archiver";
 import { ServiceUnavailableError } from "./errors.js";
+import { isBlobMissing } from "./blobStore/index.js";
 import { PassThrough, type Readable } from "stream";
 import type { ServerResponse } from "http";
 import { logger } from "./logger.js";
 import {
-  assertBlobFileReadable,
+  assertBlobReadable,
   loadVerifiedBlobIfSmall,
   openBlobStream,
 } from "./storage.js";
@@ -154,7 +155,7 @@ export function buildArchiveStream(
           entryStream = new PassThrough().end(verified.buffer);
           entryStream.once("close", verified.release);
         } else {
-          await assertBlobFileReadable(meta.fsPath);
+          await assertBlobReadable(meta.fsPath);
           entryStream = openBlobStream(meta, obj.contentBlob.hash);
         }
       } catch (err) {
@@ -205,7 +206,7 @@ export function buildArchiveStream(
 
 /** A manifest line's reason; an fs error's message would name the path. */
 function entryFailure(err: unknown): string {
-  if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+  if (isBlobMissing(err)) {
     return "content file is missing";
   }
   if (err instanceof ServiceUnavailableError) return "server busy";

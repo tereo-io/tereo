@@ -8,6 +8,7 @@ import { senderAccessSchema } from "../utils/notifications/accept.js";
 import { takeSendToken } from "../utils/notifications/rateLimit.js";
 import type { DeliveryRef } from "../utils/db/notifications.js";
 import { SYSTEM_USER_ID } from "../definitions/index.js";
+import { blobStore } from "../utils/blobStore/index.js";
 import { capToCeiling } from "../utils/coreAccess.js";
 import { openBlobStream } from "../utils/storage.js";
 import { BadRequestError } from "../utils/errors.js";
@@ -20,7 +21,6 @@ import { prisma } from "../utils/db/prisma.js";
 import { emitTx } from "../utils/outbox.js";
 import { logger } from "../utils/logger.js";
 import db from "../utils/db/index.js";
-import { access } from "fs/promises";
 import {
   PermanentSendError,
   RetryableSendError,
@@ -158,11 +158,7 @@ const toAttachmentStream = (a: StoredAttachment): AttachmentStream => ({
     });
     const blob = version?.contentBlob;
     if (!blob) throw attachmentMissing(a);
-    try {
-      await access(blob.fsPath);
-    } catch {
-      throw attachmentMissing(a);
-    }
+    if (!(await blobStore.exists(blob.fsPath))) throw attachmentMissing(a);
     return openBlobStream(
       {
         fsPath: blob.fsPath,

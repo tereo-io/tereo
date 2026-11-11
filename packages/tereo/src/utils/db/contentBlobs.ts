@@ -1,12 +1,9 @@
 import { Prisma } from "../../../prisma/generated/client/index.js";
+import { discardScratchFile } from "../scratchFiles.js";
+import { blobStore } from "../blobStore/index.js";
 import { NotFoundError } from "../errors.js";
 import { logger } from "../logger.js";
 import { prisma } from "./prisma.js";
-import {
-  deleteBlobFile,
-  discardStagedFile,
-  placeBlobFile,
-} from "../storage.js";
 
 export interface UpsertContentBlobInput {
   hash: string;
@@ -56,7 +53,7 @@ export const lockHash = async (
  * attach creates the row and later ones (concurrent or not) find it:
  *
  * - **Created here**: the row takes this write's key material and the staged
- *   file is moved to `fsPath` (`placeBlobFile`), replacing any file there —
+ *   file is moved to `fsPath` (`blobStore.place`), replacing any file there —
  *   with no row, no reader uses it.
  * - **Already there**: the row keeps its key material, which the file on disk
  *   was encrypted under, and the staged file is dropped. `orphaned_at` is
@@ -101,9 +98,9 @@ export const attach = async (
   `;
   const created = rows[0]?.created === true;
   if (created) {
-    await placeBlobFile(input.stagedPath, input.fsPath);
+    await blobStore.place(input.stagedPath, input.fsPath);
   } else {
-    await discardStagedFile(input.stagedPath);
+    await discardScratchFile(input.stagedPath);
   }
   return { created };
 };
@@ -120,14 +117,14 @@ export const releaseStaged = async (blob: {
   fsPath: string;
   stagedPath: string;
 }): Promise<void> => {
-  await discardStagedFile(blob.stagedPath);
+  await discardScratchFile(blob.stagedPath);
   await prisma.$transaction(async (tx) => {
     await lockHash(blob.hash, tx);
     const row = await tx.contentBlob.findUnique({
       where: { hash: blob.hash },
       select: { hash: true },
     });
-    if (!row) await deleteBlobFile(blob.fsPath);
+    if (!row) await blobStore.delete(blob.fsPath);
   });
 };
 

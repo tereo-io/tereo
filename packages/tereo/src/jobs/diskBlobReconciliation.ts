@@ -1,11 +1,10 @@
+import { BlobListCursor, blobStore } from "../utils/blobStore/index.js";
 import { getRedisClient, redisKey } from "../utils/redis.js";
 import { TrackedWorker } from "./workerRegistry.js";
 import { logger } from "../utils/logger.js";
 import db from "../utils/db/index.js";
 import { Job, Worker } from "bullmq";
-import fs from "fs/promises";
 import env from "../env.js";
-import path from "path";
 import {
   createTimeBoxedLoop,
   isShuttingDown,
@@ -39,10 +38,6 @@ const SHARD_CURSOR_TTL_SECONDS = (4 * JOB_INTERVAL_MS) / 1000;
 let orchestratorWorker: Worker | null = null;
 let shardWorker: Worker | null = null;
 
-function blobsRoot(): string {
-  return path.join(env.FILE_SERVICE_STORAGE_PATH, "blobs");
-}
-
 function weekStamp(d = new Date()): string {
   // ISO week-ish key: YYYYww. Good enough to dedupe continuation id bursts
   // to within a week.
@@ -56,43 +51,22 @@ function weekStamp(d = new Date()): string {
 // --- Orchestrator ---------------------------------------------------------
 
 /**
- * Discover top-level blob shards (2-char dirs under `{storage}/blobs/`) and
+ * Discover the blob shards (the first two hash characters) that hold blobs and
  * enqueue one reconciliation job per shard. Uses `jobId` dedupe so the daily
  * scheduler firing twice in one week collapses to N jobs total.
  */
 async function processDiskReconOrchestrator(): Promise<void> {
-  const root = blobsRoot();
   const stamp = weekStamp();
   const shardQueue = getDiskReconShardQueue();
 
-  let entries: Array<{ name: string; isDirectory(): boolean }>;
-  try {
-    entries = (await fs.readdir(root, { withFileTypes: true })) as Array<{
-      name: string;
-      isDirectory(): boolean;
-    }>;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      logger.info(
-        {
-          root,
-        },
-        "Disk reconciliation: blobs root missing; nothing to do"
-      );
-      return;
-    }
-    throw err;
-  }
+  const shards = await blobStore.listShards();
 
   let enqueued = 0;
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    // Only top-level sharded names are valid; ignore stragglers like lost+found.
-    if (!/^[0-9a-f]{2}$/.test(entry.name)) continue;
+  for (const shard of shards) {
     await shardQueue.add(
       "disk-blob-reconciliation-shard",
-      { shard: entry.name, continuation: 0 } satisfies ShardJobData,
-      { jobId: `disk-blob-reconciliation-shard__${entry.name}__${stamp}` }
+      { shard, continuation: 0 } satisfies ShardJobData,
+      { jobId: `disk-blob-reconciliation-shard__${shard}__${stamp}` }
     );
     enqueued++;
   }
@@ -108,12 +82,7 @@ async function processDiskReconOrchestrator(): Promise<void> {
 
 // --- Per-shard worker -----------------------------------------------------
 
-interface ShardCursor {
-  /** Second-level dir within the shard (`{storage}/blobs/{shard}/{sub}`). */
-  sub?: string;
-  /** File name within the sub-dir to resume after. */
-  afterFile?: string;
-}
+type ShardCursor = BlobListCursor;
 
 interface ShardJobData {
   shard: string;
@@ -122,43 +91,6 @@ interface ShardJobData {
   filesScanned?: number;
   filesRemoved?: number;
   continuation?: number;
-}
-
-/**
- * List the second-level dirs (`{shard}/{sub}`) in stable sorted order.
- */
-async function listSubdirs(shardPath: string): Promise<string[]> {
-  let entries: Array<{ name: string; isDirectory(): boolean }>;
-  try {
-    entries = (await fs.readdir(shardPath, { withFileTypes: true })) as Array<{
-      name: string;
-      isDirectory(): boolean;
-    }>;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw err;
-  }
-  return entries
-    .filter((e) => e.isDirectory() && /^[0-9a-f]{2}$/.test(e.name))
-    .map((e) => e.name)
-    .sort();
-}
-
-async function listFiles(subPath: string): Promise<string[]> {
-  let entries: Array<{ name: string; isFile(): boolean }>;
-  try {
-    entries = (await fs.readdir(subPath, { withFileTypes: true })) as Array<{
-      name: string;
-      isFile(): boolean;
-    }>;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw err;
-  }
-  return entries
-    .filter((e) => e.isFile())
-    .map((e) => e.name)
-    .sort();
 }
 
 /**
@@ -258,100 +190,68 @@ async function tickShard(
   counters: { scanned: number; removed: number; dbChecked: number },
   ceiling: number
 ): Promise<{ cursor: ShardCursor; hasMore: boolean; processed: number }> {
-  const root = blobsRoot();
-  const shardPath = path.join(root, shard);
-  const subs = await listSubdirs(shardPath);
-  if (subs.length === 0) {
-    return { cursor, hasMore: false, processed: 0 };
-  }
-
-  const startSubIdx = cursor.sub ? subs.indexOf(cursor.sub) : 0;
-  const effectiveStart = startSubIdx < 0 ? 0 : startSubIdx;
   const now = Date.now();
   let processed = 0;
+  // Where the listing resumes if this tick stops early: after the last blob
+  // visited, or where it started when none was.
+  let resume = cursor;
 
-  for (let i = effectiveStart; i < subs.length; i++) {
-    const sub = subs[i];
-    const subPath = path.join(shardPath, sub);
-    const files = await listFiles(subPath);
-    // Resume point within this sub-dir (if we crashed mid-way).
-    const resumeAfter =
-      cursor.sub === sub && cursor.afterFile ? cursor.afterFile : null;
-    let lastVisited = resumeAfter;
-    for (const name of files) {
-      if (resumeAfter && name <= resumeAfter) continue;
-      if (counters.scanned >= ceiling || processed >= batchLimit) {
-        return {
-          cursor: lastVisited ? { sub, afterFile: lastVisited } : { sub },
-          hasMore: true,
-          processed,
-        };
-      }
-      lastVisited = name;
-
-      const p = path.join(subPath, name);
-      try {
-        // We still stat the file so that a racing unlink (ENOENT) doesn't
-        // crash the scan. We do NOT use mtime as a deletion gate anymore.
-        await fs.stat(p);
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw err;
-      }
-      counters.scanned++;
-      processed++;
-
-      // Filename under the sharded layout is the hash. PK lookup.
-      counters.dbChecked++;
-      const row = await db.contentBlobs.getByHash(name);
-      if (row) {
-        // File is referenced — drop any stale "seen missing" bookkeeping so
-        // a later orphan is aged from fresh instead of inheriting an old ts.
-        await clearFirstSeenMissing(shard, sub, name);
-        continue;
-      }
-
-      // No DB row. Record when we first noticed and only delete if we've
-      // seen it missing for at least MIN_AGE_MS. This is the sole safety
-      // window — mtime is no longer consulted.
-      const firstSeen = await touchFirstSeenMissing(shard, sub, name, now);
-      if (now - firstSeen < MIN_AGE_MS) continue;
-
-      try {
-        // Re-check and unlink under the blob's lock: an upload creating the
-        // row holds it from before it places its file until it commits, so
-        // its row is seen here or its file lands after the unlink.
-        const removed = await db.$transaction(async (tx) => {
-          await db.contentBlobs.lockHash(name, tx);
-          if (await db.contentBlobs.getByHash(name, tx)) return false;
-          await fs.unlink(p);
-          return true;
-        });
-        if (removed) counters.removed++;
-        // Clean up the seen-missing entry after a successful delete so the
-        // hash doesn't accumulate dead keys for already-removed files.
-        await clearFirstSeenMissing(shard, sub, name);
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-          // Someone else (manual cleanup, another worker) unlinked it —
-          // clear our bookkeeping and move on.
-          await clearFirstSeenMissing(shard, sub, name);
-          continue;
-        }
-        logger.warn(
-          {
-            path: p,
-            err,
-          },
-          "disk-blob-reconciliation unlink failed"
-        );
-      }
+  for await (const listing of blobStore.listBlobs(shard, cursor)) {
+    if (counters.scanned >= ceiling || processed >= batchLimit) {
+      return { cursor: resume, hasMore: true, processed };
     }
-    // Finished this sub-dir; clear the per-sub resume marker.
-    cursor = { sub: i + 1 < subs.length ? subs[i + 1] : undefined };
+    resume = listing.cursor;
+    const { hash: name, location } = listing;
+    const sub = listing.cursor.sub!;
+    // Removed since it was listed (a racing cleanup): not scanned, and not
+    // noted as missing a row.
+    if (!(await blobStore.exists(location))) continue;
+    counters.scanned++;
+    processed++;
+
+    // A blob's name under the sharded layout is its hash. PK lookup.
+    counters.dbChecked++;
+    const row = await db.contentBlobs.getByHash(name);
+    if (row) {
+      // The blob is referenced — drop any stale "seen missing" bookkeeping so
+      // a later orphan is aged from fresh instead of inheriting an old ts.
+      await clearFirstSeenMissing(shard, sub, name);
+      continue;
+    }
+
+    // No DB row. Record when we first noticed and only delete if we've
+    // seen it missing for at least MIN_AGE_MS. This is the sole safety
+    // window — mtime is no longer consulted.
+    const firstSeen = await touchFirstSeenMissing(shard, sub, name, now);
+    if (now - firstSeen < MIN_AGE_MS) continue;
+
+    try {
+      // Re-check and delete under the blob's lock: an upload creating the
+      // row holds it from before it places its blob until it commits, so
+      // its row is seen here or its blob lands after the delete.
+      const removed = await db.$transaction(async (tx) => {
+        await db.contentBlobs.lockHash(name, tx);
+        if (await db.contentBlobs.getByHash(name, tx)) return false;
+        // False when someone else (manual cleanup, another worker) already
+        // removed it.
+        return await blobStore.delete(location);
+      });
+      if (removed) counters.removed++;
+      // Clean up the seen-missing entry after a delete so the hash doesn't
+      // accumulate dead keys for already-removed blobs.
+      await clearFirstSeenMissing(shard, sub, name);
+    } catch (err) {
+      logger.warn(
+        {
+          path: location,
+          err,
+        },
+        "disk-blob-reconciliation unlink failed"
+      );
+    }
   }
 
-  return { cursor, hasMore: false, processed };
+  return { cursor: {}, hasMore: false, processed };
 }
 
 async function processDiskReconShard(job: Job<ShardJobData>): Promise<void> {

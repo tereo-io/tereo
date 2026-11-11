@@ -1,19 +1,17 @@
 import type { EtagPreconditions } from "../../../../../../../utils/writePreconditions.js";
 import { broadcastObjectInvalidate } from "../../../../../../../utils/cacheBroadcast.js";
+import { discardScratchFile } from "../../../../../../../utils/scratchFiles.js";
 import { setAccessLog } from "../../../../../../../middleware/accessLog.js";
 import { assertMultipartFits, multipartCompleteClaim } from "../utils.js";
 import { completeBodySchema, uploadIdParamsSchema } from "./schemas.js";
 import { validateUser } from "../../../../../../../middleware/auth.js";
-import { Readable, Transform, pipeline as pipelineCb } from "stream";
+import { aadForPart } from "../../../../../../../utils/encryption.js";
 import { emitObjectWrittenTx } from "../../objects/events.js";
 import db from "../../../../../../../utils/db/index.js";
 import env from "../../../../../../../env.js";
 import { Request, Response } from "express";
-import { createWriteStream } from "fs";
-import { promisify } from "util";
-import fs from "fs/promises";
+import { Readable } from "stream";
 import crypto from "crypto";
-import path from "path";
 import {
   canonicalJson,
   findStoredResponse,
@@ -22,6 +20,10 @@ import {
   withExclusiveClaim,
   withIdempotency,
 } from "../../../../../../../utils/uploadIdempotency.js";
+import {
+  blobStore,
+  isBlobMissing,
+} from "../../../../../../../utils/blobStore/index.js";
 import {
   assertUploadInBucket,
   getAccessibleBucket,
@@ -32,13 +34,8 @@ import {
   validateParams,
 } from "../../../../../../../utils/validateReq.js";
 import {
-  aadForPart,
-  createEncryptStream,
-} from "../../../../../../../utils/encryption.js";
-import {
-  getBlobPath,
   openMultipartPartStream,
-  removeMultipartDir,
+  saveBlobStream,
 } from "../../../../../../../utils/storage.js";
 import {
   bucketEventScope,
@@ -56,8 +53,6 @@ import {
   serializeObject,
   validateMimeType,
 } from "../../objects/utils.js";
-
-const pipeline = promisify(pipelineCb);
 
 // Enough for the magic bytes `file-type` looks for, as on presigned uploads.
 const MIME_SNIFF_BYTES = 4 * 1024;
@@ -149,7 +144,7 @@ export const abortMultipart = async (req: Request, res: Response) => {
       },
     });
   });
-  await removeMultipartDir(params.uploadId);
+  await blobStore.removeUpload(params.uploadId);
   await db.multipartUploads.deleteParts(params.uploadId);
 
   setAccessLog(res, {
@@ -322,37 +317,11 @@ const runComplete = async (
   assertMultipartFits(activeUpload, bucket, claimedSize);
 
   // Stream concatenation through SHA-256 hashing AND encryption to a
-  // single temp file. The final blob hash (plaintext SHA-256) becomes the
+  // single scratch file (`saveBlobStream`). The final blob hash (plaintext SHA-256) becomes the
   // content blob id. The final object ETag follows the S3 multipart
   // convention: md5(concat(binary_md5_of_each_part))-{partCount}
-  const plaintextHasher = crypto.createHash("sha256");
-  let plaintextSize = 0;
-  // The head of the content, for the same file-type check an upload gets.
-  const sniffChunks: Buffer[] = [];
-  let sniffBytes = 0;
-
-  const plaintextMeter = new Transform({
-    transform(chunk: Buffer, _enc, cb) {
-      plaintextSize += chunk.length;
-      plaintextHasher.update(chunk);
-      if (sniffBytes < MIME_SNIFF_BYTES) {
-        const slice = chunk.subarray(0, MIME_SNIFF_BYTES - sniffBytes);
-        sniffChunks.push(Buffer.from(slice));
-        sniffBytes += slice.length;
-      }
-      cb(null, chunk);
-    },
-  });
-
-  const { stream: encryptStream, finalize } = createEncryptStream();
-  const tempPath = path.join(
-    env.FILE_SERVICE_TEMP_PATH,
-    `mp-complete-${crypto.randomBytes(8).toString("hex")}`
-  );
-  await fs.mkdir(env.FILE_SERVICE_TEMP_PATH, { recursive: true });
-
   // Each staged part is encrypted on disk under the upload's staging DEK.
-  // Decrypt as we concat so the plaintextMeter sees real bytes for hashing
+  // Decrypt as we concat so the save's meter sees real bytes for hashing
   // + size accounting, then re-encrypt the whole concatenation under the
   // final blob DEK. Each part's plaintext must hash to the etag it was
   // recorded with, which the combined etag below is built from.
@@ -370,7 +339,7 @@ const runComplete = async (
           yield chunk as Buffer;
         }
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") throw err;
+        if (isBlobMissing(err)) throw err;
         throw partIntegrityError(part.partNumber);
       }
       if (md5.digest("hex") !== part.etag) {
@@ -379,19 +348,19 @@ const runComplete = async (
     }
   };
 
+  // The head of the content, for the same file-type check an upload gets.
+  const saved = await saveBlobStream(Readable.from(concatSource()), {
+    kind: "mp-complete",
+    sniffBytes: MIME_SNIFF_BYTES,
+  });
+  const tempPath = saved.stagedPath;
   try {
-    await pipeline(
-      Readable.from(concatSource()),
-      plaintextMeter,
-      encryptStream,
-      createWriteStream(tempPath)
-    );
     await validateMimeType({
-      buffer: Buffer.concat(sniffChunks),
+      buffer: saved.head,
       mimetype: activeUpload.contentType,
     });
   } catch (err) {
-    await fs.unlink(tempPath).catch(() => {});
+    await discardScratchFile(tempPath).catch(() => {});
     throw err;
   }
 
@@ -402,10 +371,10 @@ const runComplete = async (
     combinedEtagHasher.update(Buffer.from(part.etag, "hex"));
   }
 
-  const hash = plaintextHasher.digest("hex");
+  const { hash, keyMaterial } = saved;
+  const plaintextSize = saved.sizeBytes;
   const etag = `${combinedEtagHasher.digest("hex")}-${ordered.length}`;
-  const targetPath = getBlobPath(hash);
-  const keyMaterial = finalize(hash);
+  const targetPath = saved.fsPath;
 
   let result;
   try {
@@ -512,7 +481,7 @@ const runComplete = async (
   // Part rows are dropped only after dir removal succeeds so that, on
   // failure, the sweep's `parts: { some: {} }` filter still picks the
   // upload up for retry.
-  await removeMultipartDir(params.uploadId);
+  await blobStore.removeUpload(params.uploadId);
   await db.multipartUploads.deleteParts(params.uploadId);
 
   setAccessLog(res, {

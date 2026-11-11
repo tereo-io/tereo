@@ -1,5 +1,4 @@
 import "./preload.js";
-import { ensureBlobDirectory, ensureTempDirectory } from "./utils/storage.js";
 import { ProvisioningError, provision } from "./utils/provisioning/index.js";
 import { closeRedisEmitter } from "./websocket/emitters/redisEmitter.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
@@ -9,9 +8,11 @@ import { prepareAndRegisterCore } from "./utils/coreRegistration.js";
 import { loadKeys, startSigningKeyRefresh } from "./utils/keys.js";
 import { resealRowSecrets } from "./utils/resealRowSecrets.js";
 import { sealWebhookSecrets } from "./utils/webhookSecrets.js";
+import { ensureScratchDir } from "./utils/scratchFiles.js";
 import { ensureLoginClient } from "./utils/loginClient.js";
 import { announceSetupIfPending } from "./utils/setup.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
+import { blobStore } from "./utils/blobStore/index.js";
 import { shutdownOtel } from "./telemetry/index.js";
 import env, { stalePathWarnings } from "./env.js";
 import { createServer, Server } from "http";
@@ -89,8 +90,8 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
       });
       // Picks up a signing key rotated by another process.
       stopKeyRefresh = startSigningKeyRefresh();
-      await ensureTempDirectory();
-      await ensureBlobDirectory();
+      await ensureScratchDir();
+      await blobStore.ensureReady();
       await initializeRedis(env);
       await startCacheSubscriber();
       await prepareAndRegisterCore();

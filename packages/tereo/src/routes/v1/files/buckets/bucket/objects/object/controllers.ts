@@ -4,12 +4,12 @@ import { parseContentType } from "../../../../../../../utils/contentType.js";
 import { setAccessLog } from "../../../../../../../middleware/accessLog.js";
 import { validateUser } from "../../../../../../../middleware/auth.js";
 import { downloadQuerySchema, objectParamsSchema } from "./schemas.js";
+import { saveBlobStream } from "../../../../../../../utils/storage.js";
 import { logAuditTx } from "../../../../../../../utils/outbox.js";
 import { declaredLengthHeadersSchema } from "../../schemas.js";
 import { NextFunction, Request, Response } from "express";
 import db from "../../../../../../../utils/db/index.js";
 import { emitObjectWrittenTx } from "../events.js";
-import { createReadStream } from "fs";
 import { createHash } from "crypto";
 import {
   canonicalJson,
@@ -18,14 +18,14 @@ import {
   withIdempotency,
 } from "../../../../../../../utils/uploadIdempotency.js";
 import {
+  discardScratchFile,
+  openScratchRead,
+} from "../../../../../../../utils/scratchFiles.js";
+import {
   validateHeaders,
   validateParams,
   validateQuery,
 } from "../../../../../../../utils/validateReq.js";
-import {
-  discardStagedFile,
-  saveBlobStream,
-} from "../../../../../../../utils/storage.js";
 import {
   BadRequestError,
   NotFoundError,
@@ -121,7 +121,7 @@ const storeUpload = async (req: Request, res: Response) => {
   // of this idempotency key has had its chance to answer.
   const preconditions = parseEtagPreconditions(req);
 
-  const saved = await saveBlobStream(createReadStream(req.file.path));
+  const saved = await saveBlobStream(openScratchRead(req.file.path));
   await cleanupMulterTempFile(req.file);
 
   // Idempotency requestHash binds the bucket, object key, blob content,
@@ -232,7 +232,7 @@ const storeUpload = async (req: Request, res: Response) => {
         body: result.body,
       };
     }
-  ).finally(() => discardStagedFile(saved.stagedPath));
+  ).finally(() => discardScratchFile(saved.stagedPath));
 
   if (idem.replayed) res.setHeader("Idempotency-Replay", "true");
   if (idem.body.etag) res.setHeader("ETag", `"${idem.body.etag}"`);

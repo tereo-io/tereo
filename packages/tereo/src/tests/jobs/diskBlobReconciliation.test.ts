@@ -3,9 +3,9 @@
 // @module-tag job
 // @module-tag race
 import { processDiskReconShard } from "../../jobs/diskBlobReconciliation.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getRedisClient, redisKey } from "../../utils/redis.js";
-import { getBlobPath } from "../../utils/storage.js";
+import { blobStore } from "../../utils/blobStore/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomBytes } from "node:crypto";
 import db from "../../utils/db/index.js";
@@ -71,8 +71,10 @@ describe("processDiskReconShard", () => {
       freshOrphan.hash = orphan();
       agedOrphan.hash = orphan();
       for (const { hash } of [freshOrphan, agedOrphan]) {
-        await fs.mkdir(path.dirname(getBlobPath(hash)), { recursive: true });
-        await fs.writeFile(getBlobPath(hash), "orphan");
+        await fs.mkdir(path.dirname(blobStore.locationFor(hash)), {
+          recursive: true,
+        });
+        await fs.writeFile(blobStore.locationFor(hash), "orphan");
       }
 
       // Both the aged orphan and the live blob look as if first seen missing
@@ -86,19 +88,19 @@ describe("processDiskReconShard", () => {
     });
 
     afterAll(async () => {
-      await fs.rm(getBlobPath(freshOrphan.hash), { force: true });
-      await fs.rm(getBlobPath(agedOrphan.hash), { force: true });
+      await fs.rm(blobStore.locationFor(freshOrphan.hash), { force: true });
+      await fs.rm(blobStore.locationFor(agedOrphan.hash), { force: true });
       await getRedisClient().hdel(seenKey, freshOrphan.hash, agedOrphan.hash);
       await cleanupTestEntities();
     });
 
     it("keeps a blob with a content_blobs row and clears its sighting", async () => {
-      expect(await exists(getBlobPath(liveHash))).toBe(true);
+      expect(await exists(blobStore.locationFor(liveHash))).toBe(true);
       expect(await getRedisClient().hexists(seenKey, liveHash)).toBe(0);
     });
 
     it("keeps an orphan on its first sighting, recording when it was seen", async () => {
-      expect(await exists(getBlobPath(freshOrphan.hash))).toBe(true);
+      expect(await exists(blobStore.locationFor(freshOrphan.hash))).toBe(true);
       const seen = Number(
         await getRedisClient().hget(seenKey, freshOrphan.hash)
       );
@@ -106,7 +108,7 @@ describe("processDiskReconShard", () => {
     });
 
     it("deletes an orphan first seen missing over a day ago", async () => {
-      expect(await exists(getBlobPath(agedOrphan.hash))).toBe(false);
+      expect(await exists(blobStore.locationFor(agedOrphan.hash))).toBe(false);
       expect(await getRedisClient().hexists(seenKey, agedOrphan.hash)).toBe(0);
     });
   });
@@ -132,13 +134,15 @@ describe("processDiskReconShard", () => {
 
     afterAll(async () => {
       await prisma.contentBlob.deleteMany({ where: { hash } });
-      await fs.rm(getBlobPath(hash), { force: true });
+      await fs.rm(blobStore.locationFor(hash), { force: true });
       await getRedisClient().del(seenKey);
     });
 
     it("leaves a file whose row an upload is creating under the blob's lock", async () => {
-      await fs.mkdir(path.dirname(getBlobPath(hash)), { recursive: true });
-      await fs.writeFile(getBlobPath(hash), "stale");
+      await fs.mkdir(path.dirname(blobStore.locationFor(hash)), {
+        recursive: true,
+      });
+      await fs.writeFile(blobStore.locationFor(hash), "stale");
       await getRedisClient().hset(
         seenKey,
         hash,
@@ -158,7 +162,7 @@ describe("processDiskReconShard", () => {
             data: {
               hash,
               sizeBytes: 5n,
-              fsPath: getBlobPath(hash),
+              fsPath: blobStore.locationFor(hash),
               wrappedDek: Buffer.alloc(16),
               iv: Buffer.alloc(12),
               masterKeyVersion: 1,
@@ -177,7 +181,7 @@ describe("processDiskReconShard", () => {
       await upload;
       await run;
 
-      expect(await exists(getBlobPath(hash))).toBe(true);
+      expect(await exists(blobStore.locationFor(hash))).toBe(true);
     });
   });
 
@@ -223,6 +227,28 @@ describe("processDiskReconShard", () => {
         ceiling.previous;
       await fs.rm(storage.root, { recursive: true, force: true });
       await getRedisClient().del(seenKey, cursorKey);
+    });
+
+    it("takes no note of a file that vanished after it was listed", async () => {
+      const gone = `${shard}${sub}ff${randomBytes(29).toString("hex")}`;
+      const listBlobs = blobStore.listBlobs.bind(blobStore);
+      const spy = vi
+        .spyOn(blobStore, "listBlobs")
+        .mockImplementationOnce(async function* () {
+          yield {
+            hash: gone,
+            location: path.join(storage.root, "blobs", shard, sub, gone),
+            cursor: { sub, afterFile: gone },
+          };
+        });
+      try {
+        await runShard(shard);
+        expect(await sighted()).toEqual([]);
+      } finally {
+        spy.mockImplementation(listBlobs);
+        spy.mockRestore();
+        await getRedisClient().del(seenKey, cursorKey);
+      }
     });
 
     it("resumes where the last run's ceiling stopped it, and starts over once done", async () => {
