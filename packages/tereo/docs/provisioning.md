@@ -340,6 +340,10 @@ admins as usual):
 | `requires2fa` | Default `false`. `true`: holders must sign in with 2FA, as for a hand-made role. A guest-assignable role that comes to require it revokes the password-only access tokens of the guests holding it |
 | `guestAssignable` | Default `false`. `true` lets [guest users](auth.md#guest-users) hold the role. Needs `orgAssignable: true` and no core permission besides `file-service.objects.read` and `file-service.objects.write`. Custom roles only: a service's `systemRoles` never are. Not editable in the admin API (`409 managed_by_provisioning`) |
 
+A role an integration holds, hand-made ones included, cannot gain `admin` or come back carrying it:
+the apply is refused, naming the integrations, as the admin API refuses it
+([integrations](integrations.md)). Take the role from them first.
+
 ### `guests`
 
 ```json

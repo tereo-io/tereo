@@ -938,6 +938,8 @@ const applyRoles = async (
     select: { id: true, name: true },
   });
   const idOf = new Map(permissions.map((perm) => [perm.name, perm.id]));
+  const adminId = idOf.get("admin");
+  const problems: string[] = [];
 
   for (const from of p.roles) {
     const spec = from.role;
@@ -1026,6 +1028,20 @@ const applyRoles = async (
     );
     if (!changes && !permissionsDiffer) continue;
 
+    const grantedAdmin =
+      !reactivated && adminId !== undefined && held.includes(adminId);
+    if (spec.permissions.includes("admin") && !grantedAdmin) {
+      // The lock an integration taking the role waits on (lockRoles).
+      await db.roles.lockRoles([existing.id], "update", tx);
+      const holders = await db.roles.integrationHolderSlugs(existing.id, tx);
+      if (holders.length > 0) {
+        problems.push(
+          `${roleLabel(from)}: integrations can't hold a role carrying the admin permission, and this one is held by: ${holders.join(", ")}`
+        );
+        continue;
+      }
+    }
+
     await tx.role.update({
       where: { id: existing.id },
       data: {
@@ -1103,6 +1119,7 @@ const applyRoles = async (
     if (reactivated) statusChanged.push(role.id);
     result.roles.push(entry);
   }
+  if (problems.length > 0) throw new ProvisioningError(problems);
   return { permissionsChanged, statusChanged, revokedJtis };
 };
 
