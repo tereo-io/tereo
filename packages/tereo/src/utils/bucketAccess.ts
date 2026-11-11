@@ -264,7 +264,8 @@ export const assertUploadInBucket = (
   bucket: { id: number }
 ) => {
   if (upload.bucketId !== bucket.id) {
-    throw new NotFoundError("Multipart upload not found in this bucket");
+    // As for an unknown id, so the answer names no other bucket's uploads.
+    throw new NotFoundError("Multipart upload not found");
   }
 };
 

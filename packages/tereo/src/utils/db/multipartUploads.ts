@@ -128,8 +128,7 @@ export const getActive = async (uploadId: string) => {
       expiresAt: { gt: new Date() },
     },
   });
-  if (!upload)
-    throw new NotFoundError("Multipart upload not found or no longer active");
+  if (!upload) throw new NotFoundError("Multipart upload not found");
   return upload;
 };
 
@@ -168,8 +167,7 @@ export const getActiveWithParts = async (uploadId: string) =>
         expiresAt: { gt: new Date() },
       },
     });
-    if (!upload)
-      throw new NotFoundError("Multipart upload not found or no longer active");
+    if (!upload) throw new NotFoundError("Multipart upload not found");
     const parts = await tx.multipartPart.findMany({
       where: { uploadId },
       orderBy: { partNumber: "asc" },

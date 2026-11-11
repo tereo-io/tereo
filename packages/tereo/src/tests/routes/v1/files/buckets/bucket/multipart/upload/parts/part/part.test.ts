@@ -352,6 +352,24 @@ describe("PUT /v1/files/buckets/:name/multipart/:uploadId/parts/:partNumber", ()
         }
       });
 
+      it("answers the same 404 for an unknown upload and one of another bucket", async () => {
+        const other = await createTestBucket(token);
+        const elsewhere = await axios.post(
+          `${BASE_URL}/buckets/${other.name}/multipart`,
+          { objectKey: "o.bin", contentType: "application/octet-stream" },
+          as()
+        );
+        expect(elsewhere.status).toBe(HTTP_STATUS.CREATED);
+
+        const unknown = await putPart(randomUUID(), 1, text());
+        const foreign = await putPart(elsewhere.data.uploadId, 1, text());
+        expect(unknown.status).toBe(HTTP_STATUS.NOT_FOUND);
+        expect(foreign.status).toBe(HTTP_STATUS.NOT_FOUND);
+        const { request_id: _a, ...unknownBody } = unknown.data;
+        const { request_id: _b, ...foreignBody } = foreign.data;
+        expect(foreignBody).toEqual(unknownBody);
+      });
+
       it("treats an upload id in upper case as the same upload", async () => {
         const uploadId = await initiate();
         const upper = uploadId.toUpperCase();
