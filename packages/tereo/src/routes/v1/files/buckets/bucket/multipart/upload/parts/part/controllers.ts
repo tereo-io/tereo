@@ -1,5 +1,6 @@
 import { isClaimHeld } from "../../../../../../../../../utils/uploadIdempotency.js";
 import { setAccessLog } from "../../../../../../../../../middleware/accessLog.js";
+import { blobStore } from "../../../../../../../../../utils/blobStore/index.js";
 import { validateUser } from "../../../../../../../../../middleware/auth.js";
 import { stagePart } from "../../../../../../../../../utils/storage.js";
 import { declaredLengthHeadersSchema } from "../../../../schemas.js";
@@ -8,8 +9,6 @@ import db from "../../../../../../../../../utils/db/index.js";
 import env from "../../../../../../../../../env.js";
 import { partParamsSchema } from "./schemas.js";
 import { Request, Response } from "express";
-import fs from "fs/promises";
-import path from "path";
 import {
   assertUploadInBucket,
   getAccessibleBucket,
@@ -137,31 +136,29 @@ export const uploadPart = async (req: Request, res: Response) => {
       }
     ));
   } catch (err) {
-    await fs.unlink(staged.fsPath).catch(() => {});
-    // Staging recreated the dir of an upload finalized meanwhile; rmdir
-    // leaves it if another part is still in it.
+    await blobStore.deletePart(staged.fsPath).catch(() => {});
+    // Staging recreated the dir of an upload finalized meanwhile; the
+    // release leaves it if another part is still in it.
     if (err instanceof AppError && err.code === "upload_not_active") {
-      await fs.rmdir(path.dirname(staged.fsPath)).catch(() => {});
+      await blobStore.releaseUploadIfEmpty(params.uploadId);
     }
     throw err;
   }
 
   // A prior staged file (from an earlier retry of the same partNumber) is
-  // displaced by this upsert — unlink it best-effort. Any leak survives until
-  // the upload's `removeMultipartDir` at complete/abort/expire.
+  // displaced by this upsert — delete it best-effort. Any leak survives until
+  // the upload's `removeUpload` at complete/abort/expire.
   if (priorFsPath) {
-    await fs.unlink(priorFsPath).catch((err) => {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        logger.warn(
-          {
-            uploadId: params.uploadId,
-            partNumber: params.partNumber,
-            priorFsPath,
-            err,
-          },
-          "Failed to unlink displaced multipart part"
-        );
-      }
+    await blobStore.deletePart(priorFsPath).catch((err) => {
+      logger.warn(
+        {
+          uploadId: params.uploadId,
+          partNumber: params.partNumber,
+          priorFsPath,
+          err,
+        },
+        "Failed to unlink displaced multipart part"
+      );
     });
   }
 

@@ -1,18 +1,14 @@
 import { answerReadPreconditions } from "../../../../../../../../utils/conditionalRequests.js";
 import { broadcastObjectInvalidate } from "../../../../../../../../utils/cacheBroadcast.js";
 import { emitObjectWrittenTx } from "../../../../../buckets/bucket/objects/events.js";
-import { createEncryptStream } from "../../../../../../../../utils/encryption.js";
+import { discardScratchFile } from "../../../../../../../../utils/scratchFiles.js";
 import { setAccessLog } from "../../../../../../../../middleware/accessLog.js";
 import { SYSTEM_USER_ID } from "../../../../../../../../definitions/index.js";
 import { logAuditTx } from "../../../../../../../../utils/outbox.js";
 import db from "../../../../../../../../utils/db/index.js";
 import env from "../../../../../../../../env.js";
-import { Readable, Transform } from "stream";
 import { Request, Response } from "express";
-import { createWriteStream } from "fs";
-import fs from "fs/promises";
-import crypto from "crypto";
-import path from "path";
+import { Readable } from "stream";
 import {
   assertObjectKeyNotReserved,
   queueObjectWriteFollowUps,
@@ -31,7 +27,7 @@ import {
 } from "../../../../../../../../utils/contentType.js";
 import {
   assertUnreadBody,
-  getBlobPath,
+  saveBlobStream,
 } from "../../../../../../../../utils/storage.js";
 import {
   PayloadTooLargeError,
@@ -40,7 +36,6 @@ import {
 } from "../../../../../../../../utils/errors.js";
 import {
   MIME_SNIFF_BYTES,
-  pipeline,
   signedObjectParams,
   assertShareServeable,
   assertSignerMayAccess,
@@ -172,69 +167,29 @@ export const uploadViaSignedUrl = async (req: Request, res: Response) => {
   );
   const maxBytes = env.FILE_SERVICE_MAX_UPLOAD_SIZE_MB * 1024 * 1024;
 
-  const plaintextHasher = crypto.createHash("sha256");
-  const md5Hasher = crypto.createHash("md5");
-  let plaintextSize = 0;
+  assertUnreadBody(req);
   // Capture the first MIME_SNIFF_BYTES of plaintext so we can run the same
   // executable/MIME blocklist that authenticated uploads get.
-  const sniffChunks: Buffer[] = [];
-  let sniffBytes = 0;
-
-  const plaintextMeter = new Transform({
-    transform(chunk, _enc, cb) {
-      plaintextSize += chunk.length;
-      if (plaintextSize > maxBytes) {
-        return cb(new PayloadTooLargeError("Upload exceeds max size"));
-      }
-      plaintextHasher.update(chunk);
-      md5Hasher.update(chunk);
-      if (sniffBytes < MIME_SNIFF_BYTES) {
-        const need = MIME_SNIFF_BYTES - sniffBytes;
-        const slice = chunk.length > need ? chunk.subarray(0, need) : chunk;
-        sniffChunks.push(Buffer.from(slice));
-        sniffBytes += slice.length;
-      }
-      cb(null, chunk);
-    },
+  const saved = await saveBlobStream(req as unknown as Readable, {
+    kind: "signed-upload",
+    maxBytes,
+    tooLarge: () => new PayloadTooLargeError("Upload exceeds max size"),
+    sniffBytes: MIME_SNIFF_BYTES,
   });
-
-  const { stream: encryptStream, finalize } = createEncryptStream();
-  const tempPath = path.join(
-    env.FILE_SERVICE_TEMP_PATH,
-    `signed-upload-${crypto.randomBytes(8).toString("hex")}`
-  );
-  await fs.mkdir(env.FILE_SERVICE_TEMP_PATH, { recursive: true });
-
-  try {
-    assertUnreadBody(req);
-    await pipeline(
-      req as unknown as Readable,
-      plaintextMeter,
-      encryptStream,
-      createWriteStream(tempPath)
-    );
-  } catch (err) {
-    await fs.unlink(tempPath).catch(() => {});
-    throw err;
-  }
 
   // Enforce the same MIME/executable blocklist that authenticated uploads get.
   // Done after the stream finishes but before the blob is attached, so a
   // rejected upload never appears in the blob tree.
   try {
-    await validateMimeType({
-      buffer: Buffer.concat(sniffChunks),
-      mimetype: contentType,
-    });
+    await validateMimeType({ buffer: saved.head, mimetype: contentType });
   } catch (err) {
-    await fs.unlink(tempPath).catch(() => {});
+    await discardScratchFile(saved.stagedPath).catch(() => {});
     throw err;
   }
 
-  const hash = plaintextHasher.digest("hex");
-  const etag = md5Hasher.digest("hex");
-  const fsPath = getBlobPath(hash);
-  const keyMaterial = finalize(hash);
+  const { hash, etag, fsPath, keyMaterial } = saved;
+  const plaintextSize = saved.sizeBytes;
+  const tempPath = saved.stagedPath;
 
   let result;
   try {

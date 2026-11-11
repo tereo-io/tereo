@@ -10,11 +10,14 @@ import { logger } from "../../../../../../utils/logger.js";
 import { Request, Response } from "express";
 import env from "../../../../../../env.js";
 import { finished } from "stream";
-import fs from "fs/promises";
 import {
   answerReadPreconditions,
   parseEntityTagList,
 } from "../../../../../../utils/conditionalRequests.js";
+import {
+  discardScratchFile,
+  readScratchHead,
+} from "../../../../../../utils/scratchFiles.js";
 import {
   holdsBucketReadAccess,
   getAccessibleBucket,
@@ -124,14 +127,7 @@ const looksLikeText = async (file: MimeSource): Promise<boolean> => {
   if (file.buffer) {
     sample = file.buffer.subarray(0, TEXT_SNIFF_BYTES);
   } else if (file.path) {
-    const handle = await fs.open(file.path, "r");
-    try {
-      const buf = Buffer.alloc(TEXT_SNIFF_BYTES);
-      const { bytesRead } = await handle.read(buf, 0, TEXT_SNIFF_BYTES, 0);
-      sample = buf.subarray(0, bytesRead);
-    } finally {
-      await handle.close();
-    }
+    sample = await readScratchHead(file.path, TEXT_SNIFF_BYTES);
   } else {
     return false;
   }
@@ -445,7 +441,7 @@ export const cleanupMulterTempFile = async (
   file: Express.Multer.File | undefined
 ) => {
   if (!file?.path) return;
-  await fs.unlink(file.path).catch(() => {});
+  await discardScratchFile(file.path).catch(() => {});
 };
 
 /**
