@@ -1,6 +1,7 @@
 import { requirePermission } from "../../../../../middleware/auth.js";
 import { requireProvider } from "./middleware.js";
 import domainsRouter from "./domains/index.js";
+import scimRouter from "./scim/index.js";
 import { Router } from "express";
 import {
   activateIdentityProvider,
@@ -17,6 +18,7 @@ router.use(requirePermission("identity-providers.read"));
 router.use(requireProvider);
 
 router.use("/domains", domainsRouter);
+router.use("/scim", scimRouter);
 
 router.post(
   "/deactivate",

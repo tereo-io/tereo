@@ -13,6 +13,12 @@ export const getConnectionByProvider = async (providerId: string, tx?: Tx) => {
   });
 };
 
+export const getConnection = async (id: string, tx?: Tx) => {
+  return await (tx ?? prisma).scimConnection.findUniqueOrThrow({
+    where: { id },
+  });
+};
+
 /** Row-locks the connection for the rest of `tx`; serializes token minting. */
 export const lockConnection = async (id: string, tx: Tx) => {
   const locked = await tx.$queryRaw<{ id: string }[]>`
