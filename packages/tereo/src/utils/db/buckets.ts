@@ -416,3 +416,9 @@ export const assertUploadMayFit = async (
     throw new InsufficientStorageError("Storage quota exceeded");
   }
 };
+
+/** Whether a bucket's organization is neither deactivated nor archived. */
+export const organizationInStanding = async (organizationId: string) =>
+  (await prisma.organization.count({
+    where: { id: organizationId, isActive: true, archivedAt: null },
+  })) > 0;

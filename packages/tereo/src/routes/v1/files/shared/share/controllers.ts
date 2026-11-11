@@ -1,6 +1,7 @@
 import { shareUnlockBackoff } from "../../../../../middleware/rateLimit.js";
 import { storeShareUrlNonce } from "../../../../../utils/shareUrlNonces.js";
 import { contentDisposition } from "../../buckets/bucket/objects/utils.js";
+import { servesWithoutToken } from "../../../../../utils/bucketAccess.js";
 import { sign as presignSign } from "../../../../../utils/presigning.js";
 import { setAccessLog } from "../../../../../middleware/accessLog.js";
 import { SYSTEM_USER_ID } from "../../../../../definitions/index.js";
@@ -76,7 +77,7 @@ async function loadShareForDownload(
   // A soft-deleted or missing bucket is "not found" like any unserveable
   // share, so the public endpoint leaks nothing.
   const bucket = await nullIfNotFound(db.buckets.get(share.bucketId));
-  if (!bucket) return null;
+  if (!bucket || !(await servesWithoutToken(bucket))) return null;
 
   // Kind-aware target resolution. Rejecting soft-deleted objects / pinned
   // versions here is what stops a tombstoned target from consuming the

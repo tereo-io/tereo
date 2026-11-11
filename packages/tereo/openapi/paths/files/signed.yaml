@@ -153,7 +153,7 @@
       '403':
         $ref: '../../components/files/responses.yaml#/SignatureRejectedResponse'
       '404':
-        description: Bucket or object not found, or the object has no current content (or the pinned version is a delete marker or gone).
+        description: Bucket or object not found, or the object has no current content (or the pinned version is a delete marker or gone). Also a URL minted from a share while its bucket's organization is deactivated or archived.
         content:
           application/json:
             schema:
@@ -340,9 +340,10 @@
         $ref: '../../components/files/responses.yaml#/SignatureRejectedResponse'
       '404':
         description: |
-          The `id` is not a UUID. A well-formed id of a missing archive (one
-          deleted `FILE_SERVICE_SHARE_RETENTION_DAYS` after it expires
-          included) is `403`, like a wrong signature.
+          The `id` is not a UUID, or the URL was minted from a share whose
+          bucket's organization is deactivated or archived. A well-formed id
+          of a missing archive (one deleted `FILE_SERVICE_SHARE_RETENTION_DAYS`
+          after it expires included) is `403`, like a wrong signature.
         content:
           application/json:
             schema:

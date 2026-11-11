@@ -163,11 +163,12 @@ export const getObjectTargetDetails = async (
 /**
  * For a signed URL minted from a share: null when the share no longer serves
  * (a deactivated creator's included); otherwise whether it has a download
- * cap, whose URLs are single-use.
+ * cap, whose URLs are single-use, and whether its bucket's organization is
+ * deactivated or archived, which hides the share until it is reactivated.
  */
 export const getServeableShare = async (
   id: string
-): Promise<{ capped: boolean } | null> => {
+): Promise<{ capped: boolean; organizationInactive: boolean } | null> => {
   const share = await prisma.share.findUnique({
     where: { id },
     select: {
@@ -176,6 +177,11 @@ export const getServeableShare = async (
       maxDownloads: true,
       downloadCount: true,
       creator: { select: { isActive: true } },
+      bucket: {
+        select: {
+          organization: { select: { isActive: true, archivedAt: true } },
+        },
+      },
     },
   });
   if (!share) return null;
@@ -184,7 +190,12 @@ export const getServeableShare = async (
   if (share.maxDownloads !== null && share.downloadCount > share.maxDownloads) {
     return null;
   }
-  return { capped: share.maxDownloads !== null };
+  const { organization } = share.bucket;
+  return {
+    capped: share.maxDownloads !== null,
+    organizationInactive:
+      !!organization && (!organization.isActive || !!organization.archivedAt),
+  };
 };
 
 export const update = async (

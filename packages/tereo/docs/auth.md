@@ -214,7 +214,10 @@ A refresh token issued under an organization is refused (`invalid_grant`) and it
 the user is no longer a member or the organization is inactive or archived. Deactivating an
 organization revokes its refresh and access tokens and SSO sessions in the deactivating transaction,
 under the session-end lock on every member and token holder, and by organization rather than by a
-list read beforehand, so a refresh racing it cannot leave a live successor.
+list read beforehand, so a refresh racing it cannot leave a live successor. What needs no token
+stops too, without being revoked: while the organization is deactivated or archived, share links on
+its buckets, the signed URLs they minted and anonymous reads of its public buckets answer 404, and
+serve again once it is reactivated (see [files.md](files.md#shares)).
 
 ## The admin UI's login client
 

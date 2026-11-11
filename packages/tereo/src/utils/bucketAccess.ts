@@ -135,13 +135,29 @@ export const getGrantedBucket = async (
 };
 
 /**
+ * Whether a bucket is served to callers who hold no token — a share link, a
+ * URL a share minted, an anonymous read of a public bucket: not while its
+ * organization is deactivated or archived. Nothing is revoked, so they serve
+ * again once it is reactivated.
+ */
+export const servesWithoutToken = async (bucket: {
+  organizationId: string | null;
+}) =>
+  bucket.organizationId === null ||
+  (await db.buckets.organizationInStanding(bucket.organizationId));
+
+/**
  * For the read routes admitted without a token: a public bucket is served to
- * anyone. Otherwise — private or missing alike — the caller needs a token
+ * anyone, unless its organization is inactive, when a caller without a token
+ * gets 404. Otherwise — private or missing alike — the caller needs a token
  * (401) and then read access (403).
  */
 export const getReadableBucket = async (req: Request, bucketName: string) => {
   const bucket = await db.buckets.checkByName(bucketName);
-  if (bucket?.policy === "public") return bucket;
+  if (bucket?.policy === "public") {
+    if (await servesWithoutToken(bucket)) return bucket;
+    if (!req.auth) throw new NotFoundError("Bucket not found");
+  }
   return await getAccessibleBucket(validateUser(req), bucketName, "read");
 };
 
