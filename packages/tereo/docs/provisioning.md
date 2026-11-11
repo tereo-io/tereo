@@ -559,6 +559,11 @@ If the old secret leaked, end a service's overlap at once with
 `POST /v1/admin/services/:id/revoke-previous-secret` (the admin UI's "End Overlap Now"). That route
 is allowed on a provisioned service, since the file cannot express it.
 
+Rotating a secret, or ending its overlap, stops the old secret minting tokens; it does not revoke
+the access tokens already minted with it, which stay valid until they expire
+(`JWT_ACCESS_TOKEN_TTL`, an hour by default). Deactivating the service
+(`PATCH /v1/admin/services/:id` with `isActive: false`) revokes them at once.
+
 Core refuses to start if the new value is the previous secret, which is what happens when a deploy
 is rolled back to the old Secret: the message says to generate a new secret. A secret that stops
 working is **retired**, and refused for good for this client and every other. That is the previous

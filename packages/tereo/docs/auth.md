@@ -251,6 +251,17 @@ client — services', organizations' and login clients alike — with their meta
 redirect URIs, scopes, grant types, audience, owner, organization, service). No secret is ever
 returned; a client secret is shown once, when it is created or regenerated.
 
+**What a change does to tokens already issued.** Editing a client changes what it can obtain from
+then on, not what it holds. Regenerating a client's secret
+(`POST /v1/admin/clients/:id/regenerate-secret`) revokes no access token: those minted with the old
+secret stay valid until they expire (`JWT_ACCESS_TOKEN_TTL`, an hour by default), as they do for a
+service's or an integration's `regenerate-secret` and `revoke-previous-secret`. Removing a scope or
+an audience (`PATCH /v1/admin/clients/:id`) applies to the next authorization and the next refresh,
+which narrows the token to the client's current scopes; an access token already issued keeps the
+scopes and `aud` it was minted with until it expires. To cut tokens off sooner, deactivate the
+service or integration (its tokens are revoked in the same transaction), or end the user's
+sessions.
+
 ## Requested authentication class (`acr_values`)
 
 Discovery advertises `urn:auth-service:pwd` and `urn:auth-service:mfa`. An authorize request whose

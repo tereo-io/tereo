@@ -232,7 +232,8 @@ signed, ID tokens sent as `id_token_hint` included, are refused from that moment
 JWKS, and signed-in users get tokens from the new key on their next refresh (their refresh tokens are
 opaque, not signed). The rotating process broadcasts the change over Redis so every other process
 re-reads its keys at once; without Redis they do so at their next per-minute refresh, or on the first
-token carrying the new `kid`. The rotation is audited and emits `core.signing-key.rotated` (the new
+token carrying the new `kid`. So when that broadcast is lost, another replica can go on accepting
+tokens signed by a deleted key for up to 60 seconds after an immediate rotation. The rotation is audited and emits `core.signing-key.rotated` (the new
 `kid` and its `activatesAt`, and the retired `kid` with its expiry; no key material), so app services
 caching the JWKS can refetch it. A key pair supplied in env is the only key and is rotated by changing
 env (no overlap).
