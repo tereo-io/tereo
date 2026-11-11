@@ -189,7 +189,11 @@ whole, then sliced; only ranges of larger blobs — whose full downloads already
 is checked — skip verification. The plaintext held this way counts against one process-wide budget,
 `FILE_SERVICE_VERIFIED_READ_BUDGET_MB` (default 256): a download that finds no room waits, in arrival
 order, up to `FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS` and is then `503 temporarily_unavailable`
-(`ByteBudget`, `utils/byteBudget.ts`). A stream that fails is logged (`Blob stream failed`, with the
+(`ByteBudget`, `utils/byteBudget.ts`). A ranged download is charged for the whole blob only while it
+is verified, then for its range. A response still unsent after
+`FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS` (default 120) has its connection reset and its bytes
+returned to the budget, so a reader that stops reading cannot hold them (`Blob send timed out` in the
+log, and the error on the access-log row). A stream that fails is logged (`Blob stream failed`, with the
 blob's hash), and a response cut off after its headers still writes its access-log row, with the error.
 
 A share's `GET /v1/files/shared/:token` counts a download per request, a ranged one included; a player
@@ -408,7 +412,7 @@ The files-specific ones, from `src/env.ts`; core's shared settings (`DATABASE_UR
 |----------|-------------|
 | `FILE_SERVICE_STORAGE_PATH` / `_TEMP_PATH` | On-disk paths (default `./storage`, `./storage/temp`). Uploads are spooled unencrypted in `_TEMP_PATH` while processed: put it on an encrypted volume or a tmpfs |
 | `FILE_SERVICE_MAX_UPLOAD_SIZE_MB` | Single-request upload ceiling (default 100) |
-| `FILE_SERVICE_VERIFIED_READ_BUDGET_MB` | Plaintext that downloads verified in memory (blobs up to 16 MiB) may hold at once (default 256); a download waits up to `FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS` (default 30) for room, then `503` |
+| `FILE_SERVICE_VERIFIED_READ_BUDGET_MB` | Plaintext that downloads verified in memory (blobs up to 16 MiB) may hold at once (default 256); a download waits up to `FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS` (default 30) for room, then `503`, and has `FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS` (default 120) to send what it holds |
 | `FILE_SERVICE_MASTER_KEY_V1` | Envelope encryption master key (base64, 32 bytes). Generated into `core.secrets` when unset |
 | `FILE_SERVICE_MASTER_KEY_V2`, `_V3`, … | Rotated master keys |
 | `FILE_SERVICE_ACTIVE_MASTER_KEY_VERSION` | Which master key version wraps new DEKs (default 1) |

@@ -384,7 +384,7 @@ async function readBlob(meta: BlobMeta, blobHash: string): Promise<Buffer> {
 // price lists, JSON — all small, predictable-plaintext targets) cheaply.
 const INTEGRITY_VERIFY_MAX_BYTES = 16 * 1024 * 1024; // 16 MiB
 
-const verifiedReadBudget = new ByteBudget(
+export const verifiedReadBudget = new ByteBudget(
   env.FILE_SERVICE_VERIFIED_READ_BUDGET_MB * 1024 * 1024,
   env.FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS * 1000
 );
@@ -393,6 +393,12 @@ export interface VerifiedBlob {
   buffer: Buffer;
   /** Returns the buffer's bytes to the verified-read budget. Idempotent. */
   release: () => void;
+}
+
+export interface ByteRange {
+  start: number;
+  /** Inclusive. */
+  end: number;
 }
 
 /**
@@ -407,11 +413,15 @@ export interface VerifiedBlob {
  * The plaintext counts against a process-wide budget
  * (`FILE_SERVICE_VERIFIED_READ_BUDGET_MB`) until the caller calls `release`,
  * once the buffer has been sent; a read that finds no room in time is a 503.
+ *
+ * With `range`, the buffer is a copy of those bytes alone and, once the whole
+ * blob is verified, only they stay charged.
  */
 export async function loadVerifiedBlobIfSmall(
   meta: BlobMeta,
   blobHash: string,
-  sizeBytes: number
+  sizeBytes: number,
+  range?: ByteRange
 ): Promise<VerifiedBlob | null> {
   if (sizeBytes > INTEGRITY_VERIFY_MAX_BYTES) return null;
   const release = await verifiedReadBudget.acquire(sizeBytes);
@@ -423,7 +433,10 @@ export async function loadVerifiedBlobIfSmall(
         `Blob integrity check failed: content hash mismatch for ${blobHash}`
       );
     }
-    return { buffer, release };
+    if (!range) return { buffer, release };
+    const slice = Buffer.from(buffer.subarray(range.start, range.end + 1));
+    release.shrinkTo(slice.length);
+    return { buffer: slice, release };
   } catch (err) {
     release();
     throw err;

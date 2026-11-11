@@ -9,6 +9,7 @@ import { fileTypeFromBuffer, fileTypeFromFile } from "file-type";
 import type { UserRef } from "../../../../../../utils/refs.js";
 import { logger } from "../../../../../../utils/logger.js";
 import { Request, Response } from "express";
+import env from "../../../../../../env.js";
 import { finished } from "stream";
 import fs from "fs/promises";
 import {
@@ -624,7 +625,12 @@ export const sendBlobBody = async (
   };
 
   // Throws before anything is sent, so tampered storage is a clean 500.
-  const verified = await loadVerifiedBlobIfSmall(meta, blob.hash, size);
+  const verified = await loadVerifiedBlobIfSmall(
+    meta,
+    blob.hash,
+    size,
+    requested ?? undefined
+  );
   try {
     await options.beforeBody?.();
   } catch (err) {
@@ -632,11 +638,20 @@ export const sendBlobBody = async (
     throw err;
   }
   if (verified) {
-    finished(res, verified.release);
-    const { buffer } = verified;
-    res.end(
-      requested ? buffer.subarray(requested.start, requested.end + 1) : buffer
-    );
+    // A reader that stalls would otherwise hold the buffer, and its share of
+    // the budget, for as long as it keeps the connection open.
+    const sendTimer = setTimeout(() => {
+      verified.release();
+      const err = new Error("Timed out sending a verified blob");
+      logger.warn({ err, hash: blob.hash }, "Blob send timed out");
+      noteAccessLogError(res, err);
+      res.destroy(err);
+    }, env.FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS * 1000);
+    finished(res, () => {
+      clearTimeout(sendTimer);
+      verified.release();
+    });
+    res.end(verified.buffer);
     return;
   }
 

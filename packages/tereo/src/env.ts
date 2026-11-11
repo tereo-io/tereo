@@ -442,10 +442,12 @@ const EnvFields = z
       .positive()
       .max(10240)
       .default(100),
-    // Plaintext held at once by downloads of blobs verified in memory, and
-    // how long a download waits for room in it before a 503.
+    // Plaintext held at once by downloads of blobs verified in memory, how
+    // long a download waits for room in it before a 503, and how long one may
+    // take to send what it holds before its connection is reset.
     FILE_SERVICE_VERIFIED_READ_BUDGET_MB: int(16, 65536, 256),
     FILE_SERVICE_VERIFIED_READ_WAIT_SECONDS: int(1, 600, 30),
+    FILE_SERVICE_VERIFIED_SEND_TIMEOUT_SECONDS: int(1, DAY, 120),
     FILE_SERVICE_ACTIVE_MASTER_KEY_VERSION: z.coerce
       .number()
       .int()
