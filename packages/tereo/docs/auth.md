@@ -236,8 +236,10 @@ dropped even in development: the client skips the consent screen, so a stale cal
 nobody controls would receive its codes. `PATCH /v1/admin/clients/:id` refuses to change its `redirectUris`,
 `grantTypes`, `clientType`, `consentRequired` or `audience` with 409, and a `scopes` list that drops one
 the UI signs in with (`loginClientConfig`: `openid`, `profile`, `email`, `offline_access`; they are put
-back at every start). Its name, further scopes and post-logout URIs stay editable, and it cannot be
-deleted.
+back at every start). Its `postLogoutRedirectUris` must be on the origin of `UI_BASE_URL`: a list
+with any other entry is refused with 409, so signing out of the admin UI never sends the browser to
+another site. Its name, further scopes and post-logout URIs on that origin stay editable, and it
+cannot be deleted.
 
 **Audience and consent.** A login client carries two admin-set fields. `audience` lists the slugs
 of services its tokens may name: each must be an existing service other than core

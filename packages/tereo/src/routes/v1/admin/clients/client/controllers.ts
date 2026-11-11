@@ -69,7 +69,7 @@ const refuseProvisioned = (client: { provisioned: boolean }) => {
  * only lock the UI out until the next one. Consent is always skipped for it
  * and its audience comes from its scopes, so those two have no effect.
  * The scopes the UI signs in with are put back at every start too: more may
- * be added, none of those removed.
+ * be added, none of those removed. Post-logout URIs stay on the UI's origin.
  */
 const refuseLockedLoginClientFields = (body: UpdateClientInput) => {
   const locked = (
@@ -95,6 +95,17 @@ const refuseLockedLoginClientFields = (body: UpdateClientInput) => {
   if (dropped.length > 0) {
     throw new ConflictError(
       `The admin UI signs in with the scopes ${dropped.join(", ")}; they cannot be removed from its login client`
+    );
+  }
+  // The client skips consent and is trusted as core's own: a sign-out must
+  // not hand the browser to another site.
+  const uiOrigin = new URL(env.UI_BASE_URL).origin;
+  const foreign = (body.postLogoutRedirectUris ?? []).filter(
+    (uri) => new URL(uri).origin !== uiOrigin
+  );
+  if (foreign.length > 0) {
+    throw new ConflictError(
+      `The admin UI's login client returns from sign-out only to ${uiOrigin}; ${foreign.join(", ")} cannot be a post-logout redirect URI`
     );
   }
 };

@@ -6542,7 +6542,8 @@ paths:
         database.
         Its `scopes` may gain others but must keep the ones the UI signs in with
         (`openid`, `profile`, `email`, `offline_access`): a list without one is
-        refused with `409`.
+        refused with `409`. Its `postLogoutRedirectUris` must be on the origin
+        of `UI_BASE_URL`: a list with any other entry is refused with `409`.
 
         Adding core API scopes (`core:*`) to a client's `scopes` lets its users
         grant it access to core's API, capped by those scopes (see
@@ -6589,7 +6590,7 @@ paths:
           description: Client not found
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes`, `clientType`, `consentRequired` or `audience`
+          description: The client belongs to a service (its `service` is set); manage it under /v1/admin/services — or it is declared in the provisioning documents (`provisioned`, code `managed_by_provisioning`) — or it is the admin UI's client and the change touches its `redirectUris`, `grantTypes`, `clientType`, `consentRequired` or `audience`, drops a scope the UI signs in with, or lists a post-logout URI off the UI's origin
         '422':
           $ref: '#/components/responses/UnprocessableEntityResponse'
           description: An `audience` slug that names core or no service (`invalid_audience`)

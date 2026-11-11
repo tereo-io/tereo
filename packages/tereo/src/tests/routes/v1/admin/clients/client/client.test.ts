@@ -9,6 +9,7 @@ import { LOGIN_CLIENT } from "../../../../../../definitions/index.js";
 import { makeServiceOf } from "../../../../../support/testService.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
+import env from "../../../../../../env.js";
 import { createHash } from "node:crypto";
 import {
   BASE_URL,
@@ -537,6 +538,46 @@ describe("PATCH /v1/admin/clients/:id", () => {
       scopes: loginClient.scopes,
     });
     expect(kept.status).toBe(HTTP_STATUS.OK);
+  });
+
+  it("refuses a post-logout URI off the UI's origin on core's login client", async () => {
+    const loginClient = await prisma.oAuthClient.findUniqueOrThrow({
+      where: { clientId: LOGIN_CLIENT.clientId },
+    });
+    const patch = (postLogoutRedirectUris: string[]) =>
+      send(clientsAdmin, "PATCH", `/${loginClient.id}`, {
+        postLogoutRedirectUris,
+      });
+    const origin = new URL(env.UI_BASE_URL).origin;
+
+    // Another site, and the UI's host on another port.
+    for (const uri of [
+      "https://elsewhere.example/signed-out",
+      "http://localhost:4999/signed-out",
+    ]) {
+      const refused = await patch([`${origin}/signed-out`, uri]);
+      expect(refused.status).toBe(HTTP_STATUS.CONFLICT);
+    }
+    expect(
+      (
+        await prisma.oAuthClient.findUniqueOrThrow({
+          where: { id: loginClient.id },
+        })
+      ).postLogoutRedirectUris
+    ).toEqual(loginClient.postLogoutRedirectUris);
+
+    try {
+      const kept = await patch([`${origin}/signed-out`]);
+      expect(kept.status).toBe(HTTP_STATUS.OK);
+      expect(
+        ((await kept.json()) as ClientResponse).postLogoutRedirectUris
+      ).toEqual([`${origin}/signed-out`]);
+    } finally {
+      await prisma.oAuthClient.update({
+        where: { id: loginClient.id },
+        data: { postLogoutRedirectUris: loginClient.postLogoutRedirectUris },
+      });
+    }
   });
 });
 
