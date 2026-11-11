@@ -522,7 +522,10 @@
 
       With `refresh_token_response_mode=cookie` the refresh token is set in the
       `trt_{client_id}` cookie (path `/oauth`) and omitted from the body, and a
-      readable `tsi_{client_id}` session-indicator cookie is set. A refresh
+      readable `tsi_{client_id}` session-indicator cookie is set. Cookie mode
+      is answered only for a request from core, the UI, an origin of one of
+      the client's redirect URIs, or no browser page; any other origin gets
+      403 `access_denied` and the grant is not spent. A refresh
       that takes its token from the `trt_{client_id}` cookie and fails with
       400 `invalid_grant` (revoked, rotated, expired or unknown token, or an
       inactive user) clears both cookies in that 400 response, so the browser

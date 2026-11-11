@@ -286,6 +286,91 @@ describe("requireAllowedOriginForCookies", () => {
       ).toBe(200);
     });
 
+    it("refuses to set the refresh cookie for a request from a foreign origin", async () => {
+      const foreign: Record<string, string>[] = [
+        { "Sec-Fetch-Site": "cross-site", Origin: "https://elsewhere.example" },
+        { "Sec-Fetch-Site": "same-site", Origin: OTHER_ORIGIN },
+        { Origin: OTHER_ORIGIN },
+      ];
+      for (const headers of foreign) {
+        const user = await createTestUser();
+        const { code, verifier } = await browserLogin({
+          clientId: client.clientId,
+          redirectUri: REDIRECT_URI,
+          scope: "openid",
+          email: user.email,
+          password: user.plainPassword,
+        });
+        const exchange = {
+          grant_type: "authorization_code",
+          client_id: client.clientId,
+          code,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: verifier,
+          refresh_token_response_mode: "cookie",
+        };
+        const res = await postForm("/oauth/token", exchange, headers);
+        expect(res.status, JSON.stringify(headers)).toBe(403);
+        expect(((await res.json()) as { error: string }).error).toBe(
+          "access_denied"
+        );
+        expect(res.headers.getSetCookie()).toEqual([]);
+
+        // Refused before the code was spent: the client's own page still can.
+        const own = await postForm("/oauth/token", exchange, {
+          "Sec-Fetch-Site": "same-site",
+          Origin: APP_ORIGIN,
+        });
+        expect(own.status).toBe(200);
+        expect(
+          own.headers
+            .getSetCookie()
+            .some((c) => c.startsWith(`trt_${client.clientId}=`))
+        ).toBe(true);
+      }
+    });
+
+    it("refuses a foreign origin planting a refresh token from the body as the cookie", async () => {
+      const user = await createTestUser();
+      const { code, verifier } = await browserLogin({
+        clientId: client.clientId,
+        redirectUri: REDIRECT_URI,
+        scope: "openid",
+        email: user.email,
+        password: user.plainPassword,
+      });
+      const exchange = await postForm("/oauth/token", {
+        grant_type: "authorization_code",
+        client_id: client.clientId,
+        code,
+        redirect_uri: REDIRECT_URI,
+        code_verifier: verifier,
+      });
+      const { refresh_token } = (await exchange.json()) as {
+        refresh_token: string;
+      };
+      const refresh = (mode: Record<string, string>) =>
+        postForm(
+          "/oauth/token",
+          {
+            grant_type: "refresh_token",
+            client_id: client.clientId,
+            refresh_token,
+            ...mode,
+          },
+          {
+            "Sec-Fetch-Site": "cross-site",
+            Origin: "https://elsewhere.example",
+          }
+        );
+      const res = await refresh({ refresh_token_response_mode: "cookie" });
+      expect(res.status).toBe(403);
+      expect(res.headers.getSetCookie()).toEqual([]);
+
+      // Body mode sets no cookie and stays open to any caller.
+      expect((await refresh({})).status).toBe(200);
+    });
+
     it("does not refuse an app's request that uses none of the cookies it carries", async () => {
       const uiJar = await signInWithRefreshCookie(
         LOGIN_CLIENT.clientId,

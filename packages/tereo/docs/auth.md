@@ -1486,7 +1486,10 @@ from a browser page and passes. The cookie getters in `utils/cookies.ts` refuse 
 `403 access_denied` when a handler reads them: refresh and revoke by cookie, the login submit,
 consent, org selection, the 2FA steps, identity linking and the sign-out confirmation alike. A
 request that authenticates otherwise (a secret, a code, a token in the body) is not affected by the
-other clients' cookies it carries. `CORS_ALLOWED_ORIGINS` is only the CORS list: being on it lets a
+other clients' cookies it carries. Setting the cookie follows the same rule as using it:
+`/oauth/token` with `refresh_token_response_mode=cookie` answers `403 access_denied`, before the
+grant is spent, to a request from any other origin, so a page elsewhere cannot post its own code or
+refresh token from a visitor's browser and leave that browser signed in to its account. `CORS_ALLOWED_ORIGINS` is only the CORS list: being on it lets a
 page read core's API responses, not use another client's session. Credentialed CORS headers are not
 sent on `GET /oauth/authorize`, which is navigated to (a fetch following its redirect could read
 the code from the response URL), nor on the UI's pages.

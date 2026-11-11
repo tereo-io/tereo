@@ -71,3 +71,18 @@ export const requireAllowedOriginForCookies = async (
   restrictCookieClients(req, allowed);
   next();
 };
+
+/**
+ * Whether the request may be answered with a client's cookie: the rule for
+ * using one, applied to setting one. A page elsewhere could otherwise post
+ * its own grant from a visitor's browser and leave them signed in as it.
+ */
+export const maySetClientCookies = (
+  req: Request,
+  client: { redirectUris: string[] }
+): boolean => {
+  const origin = requestOrigin(req);
+  if (origin === FIRST_PARTY) return true;
+  if (origin === null) return false;
+  return client.redirectUris.some((uri) => httpOrigin(uri) === origin);
+};
