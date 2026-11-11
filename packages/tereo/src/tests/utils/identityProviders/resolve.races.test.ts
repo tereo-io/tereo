@@ -65,6 +65,7 @@ const identity = (
   firstName: "Alice",
   lastName: "Example",
   hostedDomain: null,
+  objectId: null,
   authTime: null,
   ...overrides,
 });
@@ -245,6 +246,87 @@ describe("resolveLoginIdentity", () => {
       expect(results).toContainEqual({ error: "account_exists" });
       expect(
         await prisma.userIdentity.count({ where: { userId: user!.id } })
+      ).toBe(1);
+    });
+  });
+
+  describe("concurrent first sign-ins claiming one SCIM user", () => {
+    /** A managed user of a provider's active SCIM connection. */
+    const scimUser = async () => {
+      const provider = await makeProvider();
+      const domain = await makeDomain(provider.id, { autoAccept: false });
+      const connection = await prisma.scimConnection.create({
+        data: { providerId: provider.id, createdBy: adminId },
+      });
+      const user = await createTestUser({
+        email: `scim-${unique()}@${domain.domain}`,
+      });
+      await prisma.scimUser.create({
+        data: {
+          connectionId: connection.id,
+          userId: user.id,
+          userName: user.email,
+          idpActive: true,
+        },
+      });
+      return { provider, user };
+    };
+
+    /** Holds each lookup until both have run, so both find the user unclaimed. */
+    const bothFindTheLink = () => {
+      const real = db.scim.findClaimable;
+      let looked = 0;
+      let bothLooked!: () => void;
+      const gate = new Promise<void>((resolve) => (bothLooked = resolve));
+      return vi
+        .spyOn(db.scim, "findClaimable")
+        .mockImplementation(async (...args) => {
+          const found = await real(...args);
+          if (++looked === 2) bothLooked();
+          await gate;
+          return found;
+        });
+    };
+
+    it("link one subject once, and both sign in", async () => {
+      const { provider, user } = await scimUser();
+      const id = identity({ email: user.email });
+
+      const lookup = bothFindTheLink();
+      let results;
+      try {
+        results = await Promise.all([
+          resolveLoginIdentity(provider, id),
+          resolveLoginIdentity(provider, id),
+        ]);
+      } finally {
+        lookup.mockRestore();
+      }
+
+      expect(results).toEqual([{ userId: user.id }, { userId: user.id }]);
+      expect(await identitiesFor(provider.id, id.subject)).toHaveLength(1);
+    });
+
+    it("link one of two subjects: one user, one account_exists", async () => {
+      const { provider, user } = await scimUser();
+
+      const lookup = bothFindTheLink();
+      let results;
+      try {
+        results = await Promise.all([
+          resolveLoginIdentity(provider, identity({ email: user.email })),
+          resolveLoginIdentity(provider, identity({ email: user.email })),
+        ]);
+      } finally {
+        lookup.mockRestore();
+      }
+
+      expect(results).toContainEqual({ userId: user.id });
+      expect(results).toContainEqual({ error: "account_exists" });
+      expect(
+        await prisma.userIdentity.count({
+          where: { userId: user.id, providerId: provider.id },
+        })
       ).toBe(1);
     });
   });

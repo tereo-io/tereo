@@ -159,8 +159,9 @@ export const countLinks = async (connectionId: string, tx?: Tx) => {
 };
 
 /**
- * Links of the connection matching an external id, or an email as a user name
- * (case-insensitively); the caller decides which are claimable.
+ * Live links of the connection matching an external id, or whose user's core
+ * email is `email` (case-insensitively); the caller decides which are
+ * claimable.
  */
 export const findClaimable = async (
   connectionId: string,
@@ -168,13 +169,13 @@ export const findClaimable = async (
   tx?: Tx
 ) => {
   return await (tx ?? prisma).scimUser.findMany({
-    where:
-      "externalId" in by
-        ? { connectionId, externalId: by.externalId }
-        : {
-            connectionId,
-            userName: iequals(by.email),
-          },
+    where: {
+      connectionId,
+      deletedAt: null,
+      ...("externalId" in by
+        ? { externalId: by.externalId }
+        : { user: { email: iequals(by.email) } }),
+    },
   });
 };
 

@@ -48,6 +48,8 @@ export interface NormalizedIdentity {
   lastName: string | null;
   /** Google's `hd`: the Workspace domain, absent for consumer accounts. */
   hostedDomain: string | null;
+  /** Entra's `oid`, only from an Entra tenant issuer; null for every other. */
+  objectId: string | null;
   /** When the user last authenticated at the provider (`auth_time`), if it said. */
   authTime: Date | null;
 }

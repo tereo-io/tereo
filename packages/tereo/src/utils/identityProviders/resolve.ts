@@ -7,6 +7,7 @@ import { createUserInOrganizationTx } from "../userLifecycle.js";
 import { uniqueViolationFields } from "../prismaErrors.js";
 import { emailDomain, normalizeEmail } from "../email.js";
 import { markVerifiedFromProvider } from "./verify.js";
+import type { ScimUserLink } from "../db/scim.js";
 import { isUsableAccount } from "../users.js";
 import type { Prisma } from "../db/prisma.js";
 import { emailTrusted } from "./trust.js";
@@ -111,12 +112,81 @@ const signInLinked = async (
   return { userId: linked.userId };
 };
 
+type ClaimRule = "objectId" | "email";
+
+/** The one live link a rule finds, or "ambiguous" (logged) when it finds several. */
+const claimableBy = async (
+  provider: IdentityProvider,
+  connectionId: string,
+  rule: ClaimRule,
+  by: { externalId: string } | { email: string }
+): Promise<ScimUserLink | "ambiguous" | null> => {
+  const found = await db.scim.findClaimable(connectionId, by);
+  if (found.length <= 1) return found[0] ?? null;
+  logger.warn(
+    { providerId: provider.id, rule, matches: found.length },
+    "Several SCIM users match a first sign-in; claiming none"
+  );
+  return "ambiguous";
+};
+
+/**
+ * A first sign-in of a user this provider's SCIM connection manages: by
+ * Entra's object id as the SCIM `externalId`, else by a trusted email equal
+ * to the user's own. Null falls through to the invite lookup.
+ */
+const claimScimUser = async (
+  provider: IdentityProvider,
+  identity: NormalizedIdentity
+): Promise<Resolution | null> => {
+  if (!provider.isActive) return null;
+  const connection = await db.scim.getConnectionByProvider(provider.id);
+  if (!connection?.isActive) return null;
+
+  let match: ScimUserLink | "ambiguous" | null = null;
+  if (identity.objectId !== null) {
+    match = await claimableBy(provider, connection.id, "objectId", {
+      externalId: identity.objectId,
+    });
+  }
+  if (match === null && identity.email !== null) {
+    const email = normalizeEmail(identity.email);
+    if (emailTrusted(provider, identity, email, "invite")) {
+      match = await claimableBy(provider, connection.id, "email", { email });
+    }
+  }
+  if (match === null || match === "ambiguous") return null;
+
+  const user = await db.users.get(match.userId);
+  const required = await ssoProviderElsewhere(user.email, provider.id);
+  if (required) return { error: "sso_required", provider: required };
+  // One account per provider per user, unless a concurrent sign-in of this
+  // subject just linked it.
+  if (await db.userIdentities.getForUserAtProvider(user.id, provider.id)) {
+    return await signInLinked(provider, identity);
+  }
+  await db.$transaction((tx) =>
+    linkIdentity(
+      tx,
+      { userId: user.id, email: user.email },
+      user.id,
+      provider,
+      identity,
+      { via: "scim", scimConnectionId: connection.id }
+    )
+  );
+  return { userId: user.id };
+};
+
 const resolveOnce = async (
   provider: IdentityProvider,
   identity: NormalizedIdentity
 ): Promise<Resolution> => {
   const linked = await signInLinked(provider, identity);
   if (linked) return linked;
+
+  const scim = await claimScimUser(provider, identity);
+  if (scim) return scim;
 
   if (identity.email === null) return { error: "no_account" };
   const email = normalizeEmail(identity.email);
@@ -210,7 +280,8 @@ export const linkIdentity = async (
   userId: string,
   provider: IdentityProvider,
   identity: Pick<NormalizedIdentity, "subject" | "email"> &
-    Partial<Pick<NormalizedIdentity, "emailVerified" | "hostedDomain">>
+    Partial<Pick<NormalizedIdentity, "emailVerified" | "hostedDomain">>,
+  auditMetadata: Record<string, string> = {}
 ): Promise<{ id: string }> => {
   const email = identity.email === null ? null : normalizeEmail(identity.email);
   const created = await db.userIdentities.create(
@@ -226,6 +297,7 @@ export const linkIdentity = async (
     entityId: created.id,
     entityName: user.email,
     metadata: {
+      ...auditMetadata,
       userId,
       providerId: provider.id,
       provider: provider.slug,

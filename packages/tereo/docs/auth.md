@@ -497,13 +497,19 @@ never carry `hd`, cannot be auto-accepted: those users can arrive only by **invi
 ### No matching by email
 
 A provider identity (the pair of provider and the provider's stable `sub`) is **never matched to an
-existing account by email**. A first sign-in lands in exactly one of three ways, tried in order:
+existing account by email**. A first sign-in lands in exactly one of four ways, tried in order:
 
 1. The identity is already linked: it signs in that user, unless the user's email domain is SSO-only
    for another provider (below).
-2. An unexpired **invite** exists for that provider, the invited user's email equals the provider's
+2. The provider's active **SCIM connection** manages exactly one user it matches, by Entra's `oid`
+   equal to the SCIM `externalId` (only from an issuer
+   `https://login.microsoftonline.com/<tenant>/v2.0`), or else by a verified email (the invite rule,
+   `hd` included) equal to the user's own. A deleted SCIM resource, or a user who already has an
+   identity at the provider, is not claimed; several matches claim none. The identity is linked,
+   audited with `via: "scim"`.
+3. An unexpired **invite** exists for that provider, the invited user's email equals the provider's
    verified email (and `hd`, for Google): the invite is claimed, once, and the identity linked.
-3. The email's domain is an `autoAccept` domain of this provider and no account has that email: a new
+4. The email's domain is an `autoAccept` domain of this provider and no account has that email: a new
    user is created. If an account already has the email, the sign-in is refused with
    `account_exists`.
 

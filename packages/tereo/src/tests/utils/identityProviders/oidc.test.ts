@@ -223,6 +223,8 @@ describe("oidcAdapter.authorizationUrl and oidcAdapter.complete", () => {
       given_name: "Ada",
       family_name: "Lovelace",
       hd: "example.com",
+      // Not an Entra tenant issuer: ignored.
+      oid: "00000000-0000-0000-66f3-3332eca7ea81",
     });
 
     await expect(signIn(provider)).resolves.toEqual({
@@ -233,6 +235,7 @@ describe("oidcAdapter.authorizationUrl and oidcAdapter.complete", () => {
       firstName: "Ada",
       lastName: "Lovelace",
       hostedDomain: "example.com",
+      objectId: null,
       authTime: null,
     });
   });
@@ -263,6 +266,7 @@ describe("oidcAdapter.authorizationUrl and oidcAdapter.complete", () => {
       firstName: null,
       lastName: null,
       hostedDomain: null,
+      objectId: null,
       authTime: null,
     });
   });

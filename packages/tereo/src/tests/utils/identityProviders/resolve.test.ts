@@ -69,6 +69,7 @@ const identity = (
   firstName: "Alice",
   lastName: "Example",
   hostedDomain: null,
+  objectId: null,
   authTime: null,
   ...overrides,
 });

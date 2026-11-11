@@ -12,6 +12,8 @@ export interface FakeClaims {
   given_name: string;
   family_name: string;
   hd: string;
+  /** Entra's object id; core reads it only from an Entra tenant issuer. */
+  oid: string;
   /** Seconds since the epoch. */
   auth_time: number;
 }

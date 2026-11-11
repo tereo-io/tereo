@@ -164,4 +164,51 @@ describe("db.scim", () => {
       []
     );
   });
+
+  it("claims by the user's core email, not the SCIM user name", async () => {
+    const connection = await makeConnection("claim-core-email");
+    const user = await prisma.user.create({
+      data: { email: `core-${run}@claim.test` },
+    });
+    await prisma.scimUser.create({
+      data: {
+        connectionId: connection.id,
+        userId: user.id,
+        userName: `upn-${run}@claim.test`,
+        idpActive: true,
+      },
+    });
+    const byEmail = await db.scim.findClaimable(connection.id, {
+      email: user.email,
+    });
+    expect(byEmail.map((l) => l.userId)).toEqual([user.id]);
+    expect(
+      await db.scim.findClaimable(connection.id, {
+        email: `upn-${run}@claim.test`,
+      })
+    ).toEqual([]);
+  });
+
+  it("never returns a deleted link", async () => {
+    const connection = await makeConnection("claim-deleted");
+    const user = await prisma.user.create({
+      data: { email: `deleted-${run}@claim.test` },
+    });
+    await prisma.scimUser.create({
+      data: {
+        connectionId: connection.id,
+        userId: user.id,
+        userName: user.email,
+        externalId: `ext-${run}`,
+        idpActive: false,
+        deletedAt: new Date(),
+      },
+    });
+    expect(
+      await db.scim.findClaimable(connection.id, { email: user.email })
+    ).toEqual([]);
+    expect(
+      await db.scim.findClaimable(connection.id, { externalId: `ext-${run}` })
+    ).toEqual([]);
+  });
 });
