@@ -64,7 +64,8 @@ Sent over SMTP with nodemailer.
   accept and again when the delivery is sent, as at accept: the sender's live permissions and
   grants, in the token's organization and capped by its scopes (both stored on the notification as
   `sender_access`, never returned). Access lost in between fails the delivery permanently with
-  `attachment_forbidden`; core's own sends read every bucket. As in the files API, a public
+  `attachment_forbidden`, as does a sender whose account was deactivated or has expired, or whose
+  token's organization was deactivated or archived, since accept; core's own sends read every bucket. As in the files API, a public
   bucket's history is not public: at accept, a version that is no longer current takes a grant on
   the bucket (or `file-service.admin`), and is `attachment_not_found` without one. At send the
   same holds for a version no longer current by then: without the grant, the delivery fails with
@@ -356,7 +357,7 @@ removes it. Once every delivery is sent it is gone.
 | `host_not_allowed`              | The SMTP host resolves to a private or reserved address. Permanent                                                                      |
 | `The SMTP host did not resolve` | DNS failed; retried. The worker logs the DNS error (`SMTP host did not resolve`, with `connectionId`)                                   |
 | `attachment_missing`            | An attached version is no longer stored, or its object or bucket is in the trash. Permanent                                             |
-| `attachment_forbidden`          | The sender can no longer read an attachment's bucket (grant or permission revoked, or the sender deactivated). Permanent                |
+| `attachment_forbidden`          | The sender can no longer read an attachment's bucket (grant or permission revoked, the sender deactivated or expired, or the organization it sent from deactivated or archived). Permanent |
 | `sender_not_allowed`            | `content.from` or `content.replyTo` is not allowed on the connection used at delivery, e.g. the default changed since accept. Permanent |
 | `smtp_rejected`                 | Shown as the server's `5xx` reply text. Permanent                                                                                       |
 | `4xx …`                         | The server's reply to a refusal that is retried                                                                                         |

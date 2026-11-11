@@ -3,8 +3,8 @@
 // @module-tag job
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
+import { getTestPrincipalToken, testOrgId } from "../support/principals.js";
 import { ensureDailyPartitions } from "../../utils/partitions.js";
-import { getTestPrincipalToken } from "../support/principals.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { waitFor } from "../support/webhooks.js";
@@ -195,12 +195,12 @@ describe("processNotificationDelivery", () => {
       });
 
       /** Accepted with no connection yet, so it waits until `release()`. */
-      const sendHeld = async () => {
+      const sendHeld = async (token = senderToken) => {
         const { objectId, versionId } = await upload(`held ${rand()}`);
         const res = await fetch(`${CORE_URL}/v1/notifications`, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${senderToken}`,
+            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(
@@ -312,6 +312,80 @@ describe("processNotificationDelivery", () => {
         });
         expect((await notificationOf(id)).status).toBe("failed");
         expect(smtp.messages).toHaveLength(0);
+      });
+
+      const expectForbidden = async (id: string) => {
+        const delivery = await waitForDelivery(
+          id,
+          (d) => d.status === "failed"
+        );
+        expect(delivery).toMatchObject({
+          lastError: "attachment_forbidden",
+          attempts: 1,
+        });
+        expect(smtp.messages).toHaveLength(0);
+      };
+
+      /** A sender whose token is for a new organization, with a grant on the bucket. */
+      const orgSender = async () => {
+        const organizationId = testOrgId(`notification-sender-${rand()}`);
+        const userId = randomUUID();
+        const token = await getTestPrincipalToken({
+          userId,
+          organizationId,
+          permissions: ["notifications.send", "file-service.objects.read"],
+        });
+        await grantTestPermission(await getTestAccessToken(), bucket, userId, {
+          canRead: true,
+        });
+        return { organizationId, userId, token };
+      };
+
+      it("fails once the sender's account has expired", async () => {
+        const { organizationId, userId, token } = await orgSender();
+        const { id, release } = await sendHeld(token);
+        // Only a guest's account expires, and no guest can send. One is made
+        // of the sender here, reading the bucket as a guest may, so that the
+        // expiry alone is what stops the send.
+        const read = await prisma.permission.findUniqueOrThrow({
+          where: { name: "file-service.objects.read" },
+        });
+        const role = await prisma.role.create({
+          data: {
+            name: `notification-guest-${rand()}`,
+            displayName: "Guest reader",
+            guestAssignable: true,
+            rolePermissions: { create: [{ permissionId: read.id }] },
+          },
+        });
+        await prisma.userRole.create({
+          data: { userId, roleId: role.id, organizationId },
+        });
+        await prisma.user.update({
+          where: { id: userId },
+          data: {
+            userType: "guest",
+            expiresAt: new Date(Date.now() - 60_000),
+          },
+        });
+        try {
+          await release();
+          await expectForbidden(id);
+        } finally {
+          await prisma.userRole.deleteMany({ where: { roleId: role.id } });
+          await prisma.role.delete({ where: { id: role.id } });
+        }
+      });
+
+      it("fails once the organization the sender sent from was deactivated", async () => {
+        const { organizationId, token } = await orgSender();
+        const { id, release } = await sendHeld(token);
+        await prisma.organization.update({
+          where: { id: organizationId },
+          data: { isActive: false },
+        });
+        await release();
+        await expectForbidden(id);
       });
     });
   });

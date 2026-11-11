@@ -11,6 +11,7 @@ import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { capToCeiling } from "../utils/coreAccess.js";
 import { openBlobStream } from "../utils/storage.js";
 import { BadRequestError } from "../utils/errors.js";
+import { isUsableAccount } from "../utils/users.js";
 import { TrackedWorker } from "./workerRegistry.js";
 import type { Prisma } from "../utils/db/prisma.js";
 import { getRedisClient } from "../utils/redis.js";
@@ -77,7 +78,9 @@ const attachmentForbidden = (bucket: string) =>
  * Accept checked that the sender could read every attachment's bucket; a
  * grant or permission revoked since must not still send its files. Checked
  * as at accept: the sender's live permissions in the token's organization,
- * capped by its scopes. Core reads every bucket.
+ * capped by its scopes. A sender whose account is no longer usable, or whose
+ * token's organization is no longer active, would not be let in at accept
+ * either. Core reads every bucket.
  */
 const assertAttachmentsReadable = async (
   notification: Notification,
@@ -89,12 +92,19 @@ const assertAttachmentsReadable = async (
   const access = senderAccessSchema.safeParse(notification.senderAccess);
   const sender = await prisma.user.findUnique({
     where: { id: notification.senderUserId },
-    select: { isActive: true },
+    select: { isActive: true, expiresAt: true },
   });
-  if (!access.success || !sender?.isActive) {
+  if (!access.success || !sender || !isUsableAccount(sender)) {
     throw attachmentForbidden(buckets[0]);
   }
   const { organizationId, ceiling } = access.data;
+  if (organizationId) {
+    const organization = await prisma.organization.findFirst({
+      where: { id: organizationId, isActive: true, archivedAt: null },
+      select: { id: true },
+    });
+    if (!organization) throw attachmentForbidden(buckets[0]);
+  }
   const auth = {
     userId: notification.senderUserId,
     organizationId,
