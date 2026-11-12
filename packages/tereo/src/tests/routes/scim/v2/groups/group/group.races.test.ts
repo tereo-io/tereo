@@ -346,7 +346,10 @@ describe("SCIM group changes racing", { tags: ["race"] }, () => {
     }
   });
 
-  it("a SCIM user DELETE keeps the membership of a group an admin unlinked while it waited", async () => {
+  it("an admin user unlink keeps the membership of a group unlinked while it waited on the group lock", async () => {
+    const writer = await getTestPrincipalToken({
+      permissions: ["users.read", "users.write"],
+    });
     const c = await orgConnection();
     const user = await managedUser(c);
     const pushed = await pushGroup(c.token, {
@@ -363,14 +366,22 @@ describe("SCIM group changes racing", { tags: ["race"] }, () => {
         data: { definitionSource: "local", membershipSource: "local" },
       });
     });
-    let deleting;
+    let unlinking;
     try {
-      deleting = scimFetch(c.token, "DELETE", `/scim/v2/Users/${user.id}`);
+      unlinking = fetchJson(
+        "DELETE",
+        `${BASE_URL}/v1/admin/users/${user.id}/scim`,
+        writer
+      );
       await waitForLockWait('%FROM "auth"."groups"%FOR UPDATE%');
     } finally {
       await release();
     }
-    expect((await deleting).status).toBe(204);
+    expect((await unlinking).status).toBe(204);
+    const link = await prisma.scimUser.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+    expect(link.unlinkedAt).not.toBeNull();
     expect(await memberIds(id)).toEqual([user.id]);
   });
 
