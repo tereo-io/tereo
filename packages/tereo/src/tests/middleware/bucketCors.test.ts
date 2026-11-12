@@ -1,9 +1,11 @@
 // @module-tag int
 // @module-tag files
 import { bucketCors } from "../../middleware/bucketCors.js";
+import { spendRateLimit } from "../support/redis.js";
 import { prisma } from "../../utils/db/prisma.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
+import env from "../../env.js";
 import axios from "axios";
 import {
   closeCacheBroadcast,
@@ -295,7 +297,8 @@ describe("bucketCors", () => {
 
   it("limits bucket preflights per address", async () => {
     // The default TRUST_PROXY (loopback) honours X-Forwarded-For; a proxied
-    // caller gets the external tier, 300 a second.
+    // caller gets the external tier.
+    const limit = env.RATE_LIMIT_PRE_AUTH_PER_SECOND;
     const send = (ip: string) =>
       axios.options(
         `${BASE_URL}/buckets/missing-${randomUUID()}/objects/a.txt`,
@@ -308,10 +311,25 @@ describe("bucketCors", () => {
           validateStatus: () => true,
         }
       );
-    const statuses = (
-      await Promise.all(Array.from({ length: 400 }, () => send("198.51.100.7")))
-    ).map((r) => r.status);
-    expect(statuses).toContain(429);
-    expect((await send("198.51.100.8")).status).not.toBe(429);
+    await spendRateLimit("preflight", "198.51.100.7", limit, 5);
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, () => send("198.51.100.7"))
+    );
+    const refused = responses.filter((r) => r.status === 429);
+    expect(refused).toHaveLength(5);
+    expect(refused[0]!.data).toMatchObject({
+      error: "too_many_requests",
+      retry_after: expect.any(Number),
+    });
+    expect(refused[0]!.data.retry_after).toBeGreaterThan(0);
+    expect(refused[0]!.headers["retry-after"]).toBe(
+      String(refused[0]!.data.retry_after)
+    );
+    expect(refused[0]!.headers["x-ratelimit-limit"]).toBe(String(limit));
+
+    // The rest were answered as another address's preflight is.
+    const other = (await send("198.51.100.8")).status;
+    expect(other).not.toBe(429);
+    expect(responses.filter((r) => r.status === other)).toHaveLength(5);
   });
 });

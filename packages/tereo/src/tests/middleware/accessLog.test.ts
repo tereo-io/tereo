@@ -2,9 +2,11 @@
 // @module-tag files
 // @module-tag security
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { spendRateLimit } from "../support/redis.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "node:crypto";
 import FormData from "form-data";
+import env from "../../env.js";
 import axios from "axios";
 import {
   BASE_URL,
@@ -513,21 +515,19 @@ describe("accessLogMiddleware", () => {
           const ip = `198.51.100.${200 + Math.floor(Math.random() * 50)}`;
           const limited: string[] = [];
           const refused: string[] = [];
-          // In batches, so the flood lands inside the one-second window.
-          for (let batch = 0; batch < 10 && limited.length === 0; batch++) {
-            await Promise.all(
-              Array.from({ length: 50 }, async () => {
-                const requestId = randomUUID();
-                const res = await axios.get(`${BASE_URL}/${path()}`, {
-                  headers: { "X-Request-ID": requestId, "X-Forwarded-For": ip },
-                  validateStatus: () => true,
-                });
-                (res.status === 429 ? limited : refused).push(requestId);
-              })
-            );
-          }
-          expect(limited.length).toBeGreaterThan(0);
-          expect(refused.length).toBeGreaterThan(0);
+          await spendRateLimit("general", ip, env.RATE_LIMIT_PER_SECOND, 5);
+          await Promise.all(
+            Array.from({ length: 10 }, async () => {
+              const requestId = randomUUID();
+              const res = await axios.get(`${BASE_URL}/${path()}`, {
+                headers: { "X-Request-ID": requestId, "X-Forwarded-For": ip },
+                validateStatus: () => true,
+              });
+              (res.status === 429 ? limited : refused).push(requestId);
+            })
+          );
+          expect(limited).toHaveLength(5);
+          expect(refused).toHaveLength(5);
 
           // The other refusals are still logged, and their rows are written no
           // earlier than a 429's would be.
