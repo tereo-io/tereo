@@ -1,10 +1,14 @@
 // @module-tag int
 // @module-tag auth
-import { ensureTestUser } from "../../support/principals.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../utils/db/prisma.js";
 import db from "../../../utils/db/index.js";
+import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import {
+  ensureTestOrganization,
+  ensureTestUser,
+} from "../../support/principals.js";
 
 const run = randomUUID().slice(0, 8);
 
@@ -175,6 +179,7 @@ describe("db.scim", () => {
         connectionId: connection.id,
         userId: user.id,
         userName: `upn-${run}@claim.test`,
+        userNameKey: `upn-${run}@claim.test`,
         idpActive: true,
       },
     });
@@ -199,6 +204,7 @@ describe("db.scim", () => {
         connectionId: connection.id,
         userId: user.id,
         userName: user.email,
+        userNameKey: user.email,
         externalId: `ext-${run}`,
         idpActive: false,
         deletedAt: new Date(),
@@ -210,5 +216,125 @@ describe("db.scim", () => {
     expect(
       await db.scim.findClaimable(connection.id, { externalId: `ext-${run}` })
     ).toEqual([]);
+  });
+
+  it("keeps the user name's lower-cased key with the name", async () => {
+    const connection = await makeConnection("key");
+    const row = await link(connection.id, `Mixed-${run}@Example.com`, null);
+    expect(row.userNameKey).toBe(`mixed-${run}@example.com`);
+    const updated = await db.$transaction((tx) =>
+      db.scim.updateLink(row.id, { userName: `Other-${run}` }, tx)
+    );
+    expect(updated.userNameKey).toBe(`other-${run}`);
+  });
+
+  describe("lookups by exact value", () => {
+    // Under enable_seqscan = off a plan names an index only when one fits.
+    const plan = async (sql: string, ...values: unknown[]) =>
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe("SET LOCAL enable_seqscan = off");
+        const rows = await tx.$queryRawUnsafe<{ "QUERY PLAN": string }[]>(
+          `EXPLAIN ${sql}`,
+          ...values
+        );
+        return rows.map((r) => r["QUERY PLAN"]).join("\n");
+      });
+
+    it("can find a user by email through users_email_key", async () => {
+      expect(
+        await plan(
+          `SELECT * FROM "auth"."users" WHERE "email" = $1`,
+          `x-${run}@example.com`
+        )
+      ).toContain("users_email_key");
+    });
+
+    it("can find a link by user name through its connection's key index", async () => {
+      expect(
+        await plan(
+          `SELECT * FROM "auth"."scim_users" WHERE "connection_id" = $1::uuid AND "user_name_key" = $2`,
+          randomUUID(),
+          `x-${run}`
+        )
+      ).toContain("scim_users_connection_user_name_key");
+    });
+
+    it("can find a link by external id through its connection's partial index", async () => {
+      expect(
+        await plan(
+          `SELECT * FROM "auth"."scim_users" WHERE "connection_id" = $1::uuid AND "external_id" = $2`,
+          randomUUID(),
+          `x-${run}`
+        )
+      ).toContain("scim_users_connection_external_id_key");
+    });
+
+    it("compares with plain equality only", async () => {
+      const source = await readFile(
+        new URL("../../../utils/db/scim.ts", import.meta.url),
+        "utf8"
+      );
+      for (const pattern of [
+        "insensitive",
+        "endsWith",
+        "contains",
+        "iequals",
+        "escapeLike",
+      ]) {
+        expect(source, pattern).not.toContain(pattern);
+      }
+    });
+  });
+
+  it("treats an unlinked user as no longer the connection's", async () => {
+    const connection = await makeConnection("unlinked");
+    const domain = `unlinked-${run}.test`;
+    await prisma.identityProviderDomain.create({
+      data: {
+        providerId: connection.providerId,
+        domain,
+        organizationId: await ensureTestOrganization(`scim-unlinked-${run}`),
+        createdBy: actorId,
+      },
+    });
+    const user = await prisma.user.create({
+      data: { email: `u-${run}@${domain}` },
+    });
+    await prisma.scimUser.create({
+      data: {
+        connectionId: connection.id,
+        userId: user.id,
+        userName: user.email,
+        userNameKey: user.email,
+        idpActive: true,
+        unlinkedAt: new Date(),
+      },
+    });
+    const scope = {
+      connectionId: connection.id,
+      providerId: connection.providerId,
+    };
+    const page = { skip: 0, take: 10 };
+
+    expect(await db.scim.findVisibleUser(scope, user.id)).toBeNull();
+    for (const filter of [
+      [],
+      [{ attr: "userName" as const, value: user.email }],
+      [{ attr: "email" as const, value: user.email }],
+    ]) {
+      const listed = await db.scim.listVisibleUsers(scope, filter, page);
+      expect(listed.total, JSON.stringify(filter)).toBe(0);
+    }
+    expect(
+      await db.scim.findClaimable(connection.id, { email: user.email })
+    ).toEqual([]);
+    expect(
+      await db.scim.findLiveConflict(connection.id, {
+        email: user.email,
+        userName: `other-${run}`,
+        externalId: null,
+      })
+    ).toBeNull();
+    expect(await db.scim.countLinks(connection.id)).toBe(0);
   });
 });

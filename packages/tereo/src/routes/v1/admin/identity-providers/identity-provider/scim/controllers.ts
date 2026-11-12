@@ -111,6 +111,8 @@ export const deleteScimConnection = async (req: Request, res: Response) => {
         "scim_users_exist"
       );
     }
+    // Unlinked users' exclusions go with the connection.
+    await db.scim.deleteUnlinked(existing.id, tx);
     await db.scim.deleteConnection(existing.id, tx);
     await logAuditTx(tx, {
       auth,

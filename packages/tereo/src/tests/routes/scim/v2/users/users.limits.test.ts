@@ -21,6 +21,7 @@ const seed = async (total: number) => {
       connectionId: c.connectionId,
       userId: u.id,
       userName: u.email,
+      userNameKey: u.email,
       idpActive: true,
     })),
   });

@@ -31,9 +31,11 @@ CREATE TABLE "auth"."scim_users" (
     "user_id" UUID NOT NULL,
     "external_id" VARCHAR(255),
     "user_name" VARCHAR(255) NOT NULL,
+    "user_name_key" VARCHAR(255) NOT NULL,
     "idp_active" BOOLEAN NOT NULL,
     "admin_hold" BOOLEAN NOT NULL DEFAULT false,
     "deleted_at" TIMESTAMP(3),
+    "unlinked_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -55,6 +57,9 @@ CREATE UNIQUE INDEX "scim_users_user_id_key" ON "auth"."scim_users"("user_id");
 -- CreateIndex
 CREATE INDEX "scim_users_connection_id_idx" ON "auth"."scim_users"("connection_id");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "scim_users_connection_user_name_key" ON "auth"."scim_users"("connection_id", "user_name_key");
+
 -- AddForeignKey
 ALTER TABLE "auth"."scim_connections" ADD CONSTRAINT "scim_connections_provider_id_fkey" FOREIGN KEY ("provider_id") REFERENCES "auth"."identity_providers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
@@ -75,5 +80,3 @@ ALTER TABLE "auth"."scim_users" ADD CONSTRAINT "scim_users_user_id_fkey" FOREIGN
 
 CREATE UNIQUE INDEX "scim_users_connection_external_id_key"
   ON "auth"."scim_users" ("connection_id", "external_id") WHERE "external_id" IS NOT NULL;
-CREATE UNIQUE INDEX "scim_users_connection_user_name_key"
-  ON "auth"."scim_users" ("connection_id", lower("user_name"));

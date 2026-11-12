@@ -6,6 +6,7 @@ import { emailDomain, normalizeEmail } from "../email.js";
 import { assertAdminRemains } from "../adminGuard.js";
 import type { ScimUserInput } from "./mapping.js";
 import type { ScimUserLink } from "../db/scim.js";
+import { assertMayGrantScim } from "./tokens.js";
 import type { ScimContext } from "./context.js";
 import type { ScimFilter } from "./filter.js";
 import { logAuditTx } from "../outbox.js";
@@ -371,8 +372,11 @@ const claim = async (
   // Only this connection's own deleted link is revived outside its domains;
   // any other account there gets the answer an absent one gets, and no lock.
   const prior = await db.scim.getLinkByUser(userId);
+  // An unlinked row is an admin's exclusion: never revived.
   const revivable =
-    prior?.connectionId === ctx.connection.id && prior.deletedAt !== null;
+    prior?.connectionId === ctx.connection.id &&
+    prior.deletedAt !== null &&
+    prior.unlinkedAt === null;
   if (
     !revivable &&
     !(await providerDomains(ctx)).includes(emailDomain(input.email))
@@ -406,13 +410,14 @@ const claim = async (
   });
 };
 
-// users.email, scim_users.user_id and the connection's partial indexes on
-// external_id and lower(user_name), as the adapter or Prisma names them.
+// users.email, scim_users.user_id and the connection's indexes on
+// external_id and user_name_key, as the adapter or Prisma names them.
 const SCIM_UNIQUE_COLUMNS = new Set([
   "email",
   "userid",
   "connectionexternalid",
   "connectionusername",
+  "connectionidusernamekey",
 ]);
 
 const isScimUniqueness = (err: unknown): boolean => {
@@ -543,13 +548,13 @@ export const deleteScimUser = async (
 /**
  * Refuses an admin change to what the IdP owns: the profile, and a
  * reactivation while the IdP has the user inactive. A deleted link still
- * counts until an admin unlinks the user.
+ * counts until an admin unlinks the user; an unlinked one does not.
  */
 export const assertScimAllows = (
   link: ScimUserLink | null,
   change: { profile: boolean; reactivating: boolean }
 ): void => {
-  if (!link) return;
+  if (!link || link.unlinkedAt !== null) return;
   if (change.profile) throw new ManagedByScimError();
   if (change.reactivating && !link.idpActive) {
     throw new ManagedByScimError(
@@ -568,7 +573,7 @@ export const holdScimUserTx = async (
   auth: Actor,
   userId: string
 ): Promise<void> => {
-  const link = await db.scim.getLinkByUser(userId, tx);
+  const link = await db.scim.getManagingLink(userId, tx);
   if (!link || link.adminHold) return;
   const user = await db.users.get(userId, tx);
   // Reactivated since the caller read them: the hold alone would leave them
@@ -594,7 +599,10 @@ export const holdScimUserTx = async (
   });
 };
 
-/** The user then is managed locally; their state, active or not, is kept. */
+/**
+ * The user is then managed locally and excluded from SCIM until released;
+ * their state, active or not, is kept. The row stays as that exclusion.
+ */
 export const unlinkScimUser = async (
   auth: AuthContext,
   userId: string
@@ -602,8 +610,46 @@ export const unlinkScimUser = async (
   await db.$transaction(async (tx) => {
     await db.users.lockForSignInChange(userId, tx);
     const user = await db.users.get(userId, tx);
-    const link = await db.scim.getLinkByUser(userId, tx);
+    const link = await db.scim.getManagingLink(userId, tx);
     if (!link) throw new NotFoundError("User is not managed by SCIM");
+    const connection = await db.scim.getConnection(link.connectionId, tx);
+    await db.scim.updateLink(
+      link.id,
+      { unlinkedAt: new Date(), externalId: null },
+      tx
+    );
+    await logAuditTx(tx, {
+      auth,
+      action: "UPDATE",
+      entityType: "User",
+      entityId: user.id,
+      entityName: user.email,
+      metadata: {
+        action: "scim_unlinked",
+        scimConnectionId: link.connectionId,
+        providerId: connection.providerId,
+      },
+    });
+  });
+};
+
+/**
+ * Ends an unlinked user's exclusion: the IdP's next write adopts them as it
+ * would any unmanaged user, and with them the provider's sign-in power over
+ * the account, so it needs the authority enabling SCIM does.
+ */
+export const releaseScimUser = async (
+  auth: AuthContext,
+  userId: string
+): Promise<void> => {
+  await db.$transaction(async (tx) => {
+    await assertMayGrantScim(auth, tx);
+    await db.users.lockForSignInChange(userId, tx);
+    const user = await db.users.get(userId, tx);
+    const link = await db.scim.getLinkByUser(userId, tx);
+    if (!link || link.unlinkedAt === null) {
+      throw new NotFoundError("User is not excluded from SCIM");
+    }
     const connection = await db.scim.getConnection(link.connectionId, tx);
     await db.scim.deleteLink(link.id, tx);
     await logAuditTx(tx, {
@@ -613,7 +659,7 @@ export const unlinkScimUser = async (
       entityId: user.id,
       entityName: user.email,
       metadata: {
-        action: "scim_unlinked",
+        action: "scim_released",
         scimConnectionId: link.connectionId,
         providerId: connection.providerId,
       },

@@ -2,6 +2,7 @@
 // @module-tag auth
 import { makeUser, manage, tag } from "../../../../../support/scimUsers.js";
 import { SYSTEM_USER_ID } from "../../../../../../definitions/index.js";
+import { prisma } from "../../../../../../utils/db/prisma.js";
 import { describe, expect, it } from "vitest";
 import {
   createScimConnection,
@@ -83,5 +84,43 @@ describe("GET /scim/v2/Users/:id", () => {
       "not-a-uuid",
     ];
     for (const id of ids) expectNotFound(await get(c.token, id));
+  });
+});
+
+describe("/scim/v2/Users/:id for a user an admin unlinked", () => {
+  it("answers 404 to GET, PUT, PATCH and DELETE and changes nothing", async () => {
+    const c = await createScimConnection();
+    const user = await makeUser(`u-${tag()}@${c.domain}`);
+    await manage(c.connectionId, user.id, user.email, {
+      unlinkedAt: new Date(),
+    });
+    const before = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      include: { scimLink: true },
+    });
+    const path = `/scim/v2/Users/${user.id}`;
+    expectNotFound(await get(c.token, user.id));
+    expectNotFound(
+      await scimFetch(c.token, "PUT", path, {
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+        userName: user.email,
+        name: { givenName: "Other", familyName: "Name" },
+        emails: [{ value: user.email, primary: true }],
+        active: false,
+      })
+    );
+    expectNotFound(
+      await scimFetch(c.token, "PATCH", path, {
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        Operations: [{ op: "replace", path: "active", value: false }],
+      })
+    );
+    expectNotFound(await scimFetch(c.token, "DELETE", path));
+    expect(
+      await prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+        include: { scimLink: true },
+      })
+    ).toEqual(before);
   });
 });

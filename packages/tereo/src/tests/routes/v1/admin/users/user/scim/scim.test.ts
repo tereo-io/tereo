@@ -39,11 +39,19 @@ const deletedManagedUser = async () => {
 };
 
 describe("DELETE /v1/admin/users/:id/scim", () => {
-  it("removes the link with an audit entry and leaves the user as is", async () => {
-    const { c, user } = await deletedManagedUser();
+  it("keeps the row as an exclusion, with an audit entry, and leaves the user as is", async () => {
+    const { c, user, link } = await deletedManagedUser();
+    await prisma.scimUser.update({
+      where: { id: link.id },
+      data: { externalId: `ext-${tag()}` },
+    });
     const r = await unlink(user.id, writer);
     expect(r.status).toBe(204);
-    expect(await prisma.scimUser.count({ where: { userId: user.id } })).toBe(0);
+    const row = await prisma.scimUser.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+    expect(row.unlinkedAt).not.toBeNull();
+    expect(row.externalId).toBeNull();
     expect(
       await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
     ).toEqual(user);
@@ -72,6 +80,37 @@ describe("DELETE /v1/admin/users/:id/scim", () => {
     expect((await unlink(user.id, writer)).status).toBe(404);
   });
 
+  it("answers 404 for a user already unlinked, and writes nothing", async () => {
+    const { user } = await deletedManagedUser();
+    expect((await unlink(user.id, writer)).status).toBe(204);
+    const before = await prisma.scimUser.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+    expect((await unlink(user.id, writer)).status).toBe(404);
+    expect(
+      await prisma.scimUser.findUniqueOrThrow({ where: { userId: user.id } })
+    ).toEqual(before);
+  });
+
+  it("shows the user as excluded from SCIM rather than managed", async () => {
+    const { c, user } = await deletedManagedUser();
+    const get = () =>
+      fetchJson("GET", `${BASE_URL}/v1/admin/users/${user.id}`, writer);
+    const managed = await get();
+    expect(managed.body.managedBy).toMatchObject({
+      kind: "scim",
+      id: c.providerId,
+    });
+    expect(managed.body.scimExcluded).toBeNull();
+    await unlink(user.id, writer);
+    const excluded = await get();
+    expect(excluded.body.managedBy).toBeNull();
+    expect(excluded.body.scimExcluded).toEqual({
+      id: c.providerId,
+      name: "SCIM IdP",
+    });
+  });
+
   it("lets the admin rename and reactivate the user afterwards", async () => {
     const { user } = await deletedManagedUser();
     expect((await patch(user.id, writer, { name: "Local" })).status).toBe(409);
@@ -79,6 +118,15 @@ describe("DELETE /v1/admin/users/:id/scim", () => {
     const r = await patch(user.id, writer, { name: "Local", isActive: true });
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ name: "Local", isActive: true });
+    const row = await prisma.scimUser.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+    expect((await patch(user.id, writer, { isActive: false })).status).toBe(
+      200
+    );
+    expect(
+      await prisma.scimUser.findUniqueOrThrow({ where: { userId: user.id } })
+    ).toEqual(row);
     const managedBy = await fetchJson(
       "GET",
       `${BASE_URL}/v1/admin/users/${user.id}`,

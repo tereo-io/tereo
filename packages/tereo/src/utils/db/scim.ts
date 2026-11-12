@@ -1,9 +1,10 @@
 import type { ScimUser as ScimUserLink } from "../../../prisma/generated/client/index.js";
+import type { User } from "../../../prisma/generated/client/index.js";
 import { Prisma } from "../../../prisma/generated/client/index.js";
 import { SYSTEM_USER_ID } from "../../definitions/systemUser.js";
+import { emailDomain, normalizeEmail } from "../email.js";
 import type { ScimFilter } from "../scim/filter.js";
 import { NotFoundError } from "../errors.js";
-import { escapeLike } from "./like.js";
 import { prisma } from "./prisma.js";
 
 type Tx = Prisma.TransactionClient;
@@ -99,11 +100,19 @@ export const findLiveToken = async (hash: string) => {
   });
 };
 
+/** Any row of the user's, unlinked or deleted included. */
 export const getLinkByUser = async (userId: string, tx?: Tx) => {
   return await (tx ?? prisma).scimUser.findUnique({ where: { userId } });
 };
 
-/** With the connection's provider; includes a link whose resource was deleted. */
+/** The link that manages the user, deleted resources included; null once unlinked. */
+export const getManagingLink = async (userId: string, tx?: Tx) => {
+  return await (tx ?? prisma).scimUser.findFirst({
+    where: { userId, unlinkedAt: null },
+  });
+};
+
+/** With the connection's provider; includes deleted and unlinked rows. */
 export const getLinkWithProvider = async (userId: string, tx?: Tx) => {
   return await (tx ?? prisma).scimUser.findUnique({
     where: { userId },
@@ -111,16 +120,7 @@ export const getLinkWithProvider = async (userId: string, tx?: Tx) => {
   });
 };
 
-/** Includes links whose SCIM resource was deleted. */
-export const getLink = async (
-  connectionId: string,
-  userId: string,
-  tx?: Tx
-) => {
-  return await (tx ?? prisma).scimUser.findFirst({
-    where: { connectionId, userId },
-  });
-};
+export const userNameKey = (userName: string): string => userName.toLowerCase();
 
 export const createLink = async (
   input: {
@@ -133,7 +133,9 @@ export const createLink = async (
   },
   tx: Tx
 ) => {
-  return await tx.scimUser.create({ data: input });
+  return await tx.scimUser.create({
+    data: { ...input, userNameKey: userNameKey(input.userName) },
+  });
 };
 
 export const updateLink = async (
@@ -141,65 +143,126 @@ export const updateLink = async (
   data: Partial<
     Pick<
       ScimUserLink,
-      "externalId" | "userName" | "idpActive" | "adminHold" | "deletedAt"
+      | "externalId"
+      | "userName"
+      | "idpActive"
+      | "adminHold"
+      | "deletedAt"
+      | "unlinkedAt"
     >
   >,
   tx: Tx
 ) => {
-  return await tx.scimUser.update({ where: { id }, data });
+  return await tx.scimUser.update({
+    where: { id },
+    data: {
+      ...data,
+      ...(data.userName !== undefined && {
+        userNameKey: userNameKey(data.userName),
+      }),
+    },
+  });
 };
 
 export const deleteLink = async (id: string, tx: Tx) => {
   await tx.scimUser.delete({ where: { id } });
 };
 
-/** Deleted links are counted. */
+/** Links that manage a user: deleted resources count, unlinked rows do not. */
 export const countLinks = async (connectionId: string, tx?: Tx) => {
-  return await (tx ?? prisma).scimUser.count({ where: { connectionId } });
+  return await (tx ?? prisma).scimUser.count({
+    where: { connectionId, unlinkedAt: null },
+  });
 };
+
+export const deleteUnlinked = async (connectionId: string, tx: Tx) => {
+  await tx.scimUser.deleteMany({
+    where: { connectionId, unlinkedAt: { not: null } },
+  });
+};
+
+// A resource the IdP can still address: neither deleted by it nor unlinked
+// by an admin.
+const LIVE = { deletedAt: null, unlinkedAt: null } as const;
+
+const isLive = (
+  link: Pick<ScimUserLink, "connectionId" | "deletedAt" | "unlinkedAt">,
+  connectionId: string
+) =>
+  link.connectionId === connectionId &&
+  link.deletedAt === null &&
+  link.unlinkedAt === null;
+
+type UserWithLink = User & { scimLink: ScimUserLink | null };
+
+const userByEmail = async (
+  email: string,
+  tx?: Tx
+): Promise<UserWithLink | null> =>
+  await (tx ?? prisma).user.findUnique({
+    where: { email: normalizeEmail(email) },
+    include: { scimLink: true },
+  });
+
+const linkByUserName = async (
+  connectionId: string,
+  userName: string,
+  tx?: Tx
+) =>
+  await (tx ?? prisma).scimUser.findUnique({
+    where: {
+      connectionId_userNameKey: {
+        connectionId,
+        userNameKey: userNameKey(userName),
+      },
+    },
+    include: { user: { include: { scimLink: true } } },
+  });
+
+const linkByExternalId = async (
+  connectionId: string,
+  externalId: string,
+  tx?: Tx
+) =>
+  await (tx ?? prisma).scimUser.findFirst({
+    where: { connectionId, externalId, ...LIVE },
+    include: { user: { include: { scimLink: true } } },
+  });
 
 /**
  * Live links of the connection matching an external id, or whose user's core
- * email is `email` (case-insensitively); the caller decides which are
+ * email is `email`, in any case; the caller decides which are
  * claimable.
  */
 export const findClaimable = async (
   connectionId: string,
   by: { externalId: string } | { email: string },
   tx?: Tx
-) => {
-  return await (tx ?? prisma).scimUser.findMany({
-    where: {
-      connectionId,
-      deletedAt: null,
-      ...("externalId" in by
-        ? { externalId: by.externalId }
-        : { user: { email: iequals(by.email) } }),
-    },
-  });
+): Promise<ScimUserLink[]> => {
+  if ("externalId" in by) {
+    const link = await linkByExternalId(connectionId, by.externalId, tx);
+    return link ? [link] : [];
+  }
+  const link = (await userByEmail(by.email, tx))?.scimLink;
+  return link && isLive(link, connectionId) ? [link] : [];
 };
 
 /**
  * A live link of the connection whose user has `email`, or holding `userName`
- * (case-insensitively) or `externalId`; null when there is none.
+ * (in any case) or `externalId`; null when there is none.
  */
 export const findLiveConflict = async (
   connectionId: string,
   by: { email: string; userName: string; externalId: string | null },
   tx?: Tx
-) => {
-  return await (tx ?? prisma).scimUser.findFirst({
-    where: {
-      connectionId,
-      deletedAt: null,
-      OR: [
-        { user: { email: by.email } },
-        { userName: iequals(by.userName) },
-        ...(by.externalId === null ? [] : [{ externalId: by.externalId }]),
-      ],
-    },
-    select: { id: true },
-  });
+): Promise<{ id: string } | null> => {
+  const byEmail = (await userByEmail(by.email, tx))?.scimLink;
+  if (byEmail && isLive(byEmail, connectionId)) return { id: byEmail.id };
+  const byName = await linkByUserName(connectionId, by.userName, tx);
+  if (byName && isLive(byName, connectionId)) return { id: byName.id };
+  if (by.externalId === null) return null;
+  const byExternal = await linkByExternalId(connectionId, by.externalId, tx);
+  return byExternal ? { id: byExternal.id } : null;
 };
 
 interface VisibilityScope {
@@ -207,7 +270,6 @@ interface VisibilityScope {
   providerId: string;
 }
 
-/** Domains are stored as typed; email addresses are stored lower case. */
 export const listProviderDomains = async (providerId: string, tx?: Tx) => {
   const rows = await (tx ?? prisma).identityProviderDomain.findMany({
     where: { providerId },
@@ -216,100 +278,132 @@ export const listProviderDomains = async (providerId: string, tx?: Tx) => {
   return rows.map((r) => r.domain.toLowerCase());
 };
 
-// Prisma compiles an insensitive `equals` to ILIKE, so the value is escaped.
-const iequals = (value: string) => ({
-  equals: escapeLike(value),
-  mode: "insensitive" as const,
-});
-
-const managed = (connectionId: string) =>
-  ({ scimLink: { is: { connectionId, deletedAt: null } } }) as const;
-
-// A link with deleted_at set, in any connection, makes the user invisible as
-// unmanaged: only a user with no link at all is claimable by domain.
-const unmanagedInDomains = (domains: string[]): Prisma.UserWhereInput => ({
-  scimLink: { is: null },
-  OR: domains.map((d) => ({
-    email: { endsWith: escapeLike(`@${d}`), mode: "insensitive" as const },
-  })),
-});
-
-const visibleWhere = (
+/**
+ * A human the connection manages (a live link), or one with no link at all
+ * whose email domain is one of the provider's. Any other link, deleted or
+ * unlinked or another connection's, hides the user.
+ */
+const isVisible = async (
   scope: VisibilityScope,
-  domains: string[]
-): Prisma.UserWhereInput => ({
-  userType: "human",
-  id: { not: SYSTEM_USER_ID },
-  OR: [managed(scope.connectionId), unmanagedInDomains(domains)],
-});
+  user: UserWithLink,
+  domains: () => Promise<string[]>
+): Promise<boolean> => {
+  if (user.userType !== "human" || user.id === SYSTEM_USER_ID) return false;
+  if (user.scimLink) return isLive(user.scimLink, scope.connectionId);
+  return (await domains()).includes(emailDomain(user.email));
+};
 
-const clauseWhere = (
-  connectionId: string,
-  clause: ScimFilter[number]
-): Prisma.UserWhereInput => {
-  const insensitive = iequals(clause.value);
-  switch (clause.attr) {
-    case "email":
-      return { email: insensitive };
-    case "externalId":
-      return {
-        scimLink: {
-          is: { connectionId, deletedAt: null, externalId: clause.value },
-        },
-      };
-    case "userName":
-      return {
-        OR: [
-          {
-            scimLink: {
-              is: { connectionId, deletedAt: null, userName: insensitive },
-            },
-          },
-          { scimLink: { is: null }, email: insensitive },
-        ],
-      };
-  }
+// The provider's domains, read once and only when a user needs them.
+const domainsOnce = (providerId: string, tx?: Tx) => {
+  let read: Promise<string[]> | undefined;
+  return () => (read ??= listProviderDomains(providerId, tx));
 };
 
 export const findVisibleUser = async (
   scope: VisibilityScope,
   userId: string,
   tx?: Tx
-) => {
-  const domains = await listProviderDomains(scope.providerId, tx);
-  return await (tx ?? prisma).user.findFirst({
-    where: { AND: [{ id: userId }, visibleWhere(scope, domains)] },
+): Promise<UserWithLink | null> => {
+  const user = await (tx ?? prisma).user.findUnique({
+    where: { id: userId },
     include: { scimLink: true },
   });
+  if (!user) return null;
+  const visible = await isVisible(
+    scope,
+    user,
+    domainsOnce(scope.providerId, tx)
+  );
+  return visible ? user : null;
 };
+
+const matchesClause = (
+  connectionId: string,
+  user: UserWithLink,
+  clause: ScimFilter[number]
+): boolean => {
+  const link =
+    user.scimLink && isLive(user.scimLink, connectionId) ? user.scimLink : null;
+  switch (clause.attr) {
+    case "email":
+      return user.email === normalizeEmail(clause.value);
+    case "externalId":
+      return link?.externalId === clause.value;
+    case "userName":
+      // An unmanaged user has no userName yet: it is their email.
+      return link
+        ? link.userNameKey === userNameKey(clause.value)
+        : user.scimLink === null && user.email === normalizeEmail(clause.value);
+  }
+};
+
+// Each clause is an equality on a unique value, so it names at most a user
+// by link and one by email.
+const candidatesFor = async (
+  connectionId: string,
+  clause: ScimFilter[number]
+): Promise<UserWithLink[]> => {
+  switch (clause.attr) {
+    case "email": {
+      const user = await userByEmail(clause.value);
+      return user ? [user] : [];
+    }
+    case "externalId": {
+      const link = await linkByExternalId(connectionId, clause.value);
+      return link ? [link.user] : [];
+    }
+    case "userName": {
+      const link = await linkByUserName(connectionId, clause.value);
+      const user = await userByEmail(clause.value);
+      return [link?.user, user].filter((u): u is UserWithLink => !!u);
+    }
+  }
+};
+
+const managedWhere = (connectionId: string): Prisma.UserWhereInput => ({
+  userType: "human",
+  id: { not: SYSTEM_USER_ID },
+  scimLink: { is: { connectionId, ...LIVE } },
+});
 
 /** Without a filter, only the connection's managed users are listed. */
 export const listVisibleUsers = async (
   scope: VisibilityScope,
   filter: ScimFilter,
-  page: { skip: number; take: number },
-  tx?: Tx
-) => {
-  const domains = await listProviderDomains(scope.providerId, tx);
-  const where: Prisma.UserWhereInput = {
-    AND: [
-      { userType: "human", id: { not: SYSTEM_USER_ID } },
-      filter.length === 0
-        ? managed(scope.connectionId)
-        : visibleWhere(scope, domains),
-      ...filter.map((c) => clauseWhere(scope.connectionId, c)),
-    ],
+  page: { skip: number; take: number }
+): Promise<{ items: UserWithLink[]; total: number }> => {
+  if (filter.length === 0) {
+    const where = managedWhere(scope.connectionId);
+    // One snapshot, so the total and the page agree.
+    const [items, total] = await prisma.$transaction(
+      [
+        prisma.user.findMany({
+          where,
+          include: { scimLink: true },
+          orderBy: { id: "asc" },
+          skip: page.skip,
+          take: page.take,
+        }),
+        prisma.user.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+    );
+    return { items, total };
+  }
+
+  const domains = domainsOnce(scope.providerId);
+  const found = new Map<string, UserWithLink>();
+  for (const user of await candidatesFor(scope.connectionId, filter[0])) {
+    if (
+      filter.every((c) => matchesClause(scope.connectionId, user, c)) &&
+      (await isVisible(scope, user, domains))
+    ) {
+      found.set(user.id, user);
+    }
+  }
+  const all = [...found.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
+  return {
+    items: all.slice(page.skip, page.skip + page.take),
+    total: all.length,
   };
-  const client = tx ?? prisma;
-  const [items, total] = await Promise.all([
-    client.user.findMany({
-      where,
-      include: { scimLink: true },
-      orderBy: { id: "asc" },
-      skip: page.skip,
-      take: page.take,
-    }),
-    client.user.count({ where }),
-  ]);
-  return { items, total };
 };

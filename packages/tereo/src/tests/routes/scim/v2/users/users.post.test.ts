@@ -323,6 +323,54 @@ describe("POST /scim/v2/Users — existing accounts", () => {
     ).toBe(0);
   });
 
+  it("refuses a user an admin unlinked, deleted or not, without reviving or adopting", async () => {
+    const c = await createScimConnection();
+    const unlinked = await makeUser(`u-${tag()}@${c.domain}`);
+    await manage(c.connectionId, unlinked.id, unlinked.email, {
+      unlinkedAt: new Date(),
+    });
+    const deleted = await makeUser(`du-${tag()}@${c.domain}`);
+    await manage(c.connectionId, deleted.id, deleted.email, {
+      deletedAt: new Date(),
+      unlinkedAt: new Date(),
+    });
+    for (const user of [unlinked, deleted]) {
+      const before = await prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+        include: { scimLink: true },
+      });
+      expectUniqueness(
+        await post(c.token, {
+          ...withEmail(oktaCreateUser, user.email),
+          externalId: null,
+        })
+      );
+      expect(
+        await prisma.user.findUniqueOrThrow({
+          where: { id: user.id },
+          include: { scimLink: true },
+        })
+      ).toEqual(before);
+    }
+  });
+
+  it("answers a user it was unlinked from outside its domains as it answers an absent address", async () => {
+    const c = await createScimConnection();
+    const outside = await createScimConnection();
+    const user = await makeUser(`ul-${tag()}@${outside.domain}`);
+    await manage(c.connectionId, user.id, user.email, {
+      deletedAt: new Date(),
+      unlinkedAt: new Date(),
+    });
+    const send = (email: string) =>
+      post(c.token, { ...withEmail(oktaCreateUser, email), externalId: null });
+    const forUnlinked = await send(user.email);
+    expectInvalidValue(forUnlinked);
+    expect(forUnlinked.body).toEqual(
+      (await send(`a-${tag()}@${outside.domain}`)).body
+    );
+  });
+
   it("revives its deleted link for an address outside its domains", async () => {
     const c = await createScimConnection();
     const outside = await createScimConnection();

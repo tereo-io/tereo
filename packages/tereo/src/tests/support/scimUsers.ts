@@ -31,16 +31,18 @@ export const manage = async (
   connectionId: string,
   userId: string,
   userName: string,
-  extra: { externalId?: string; deletedAt?: Date } = {}
+  extra: { externalId?: string; deletedAt?: Date; unlinkedAt?: Date } = {}
 ) =>
   await prisma.scimUser.create({
     data: {
       connectionId,
       userId,
       userName,
+      userNameKey: userName.toLowerCase(),
       externalId: extra.externalId ?? null,
       idpActive: true,
       deletedAt: extra.deletedAt ?? null,
+      unlinkedAt: extra.unlinkedAt ?? null,
     },
   });
 

@@ -55,6 +55,7 @@ import {
   assertNotServiceAccount,
   assertNotSystemUser,
   managerOf,
+  scimExclusionOf,
 } from "./guards.js";
 
 // What a user's SCIM connection owns, of what this route changes.
@@ -63,7 +64,11 @@ const PROFILE_FIELDS = ["email", "name"] as const;
 export const getUser = async (req: Request, res: Response) => {
   const { id } = validateParams(UserIdParamSchema, req);
   const user = await db.users.get(id);
-  res.json({ ...formatAdminUser(user), managedBy: await managerOf(user) });
+  res.json({
+    ...formatAdminUser(user),
+    managedBy: await managerOf(user),
+    scimExcluded: await scimExclusionOf(user.id),
+  });
 };
 
 export const updateUser = async (req: Request, res: Response) => {
@@ -91,7 +96,7 @@ export const updateUser = async (req: Request, res: Response) => {
     ),
     reactivating,
   };
-  const scimLink = await db.scim.getLinkByUser(id);
+  const scimLink = await db.scim.getManagingLink(id);
   assertScimAllows(scimLink, scimChange);
   // Switching off a managed user the IdP already deactivated still sets the
   // admin's hold, so the IdP's next active:true does not bring them back.
@@ -102,7 +107,7 @@ export const updateUser = async (req: Request, res: Response) => {
   // hold a deactivation sets and a reactivation clears.
   const scimTx = async (tx: Prisma.TransactionClient, hold?: boolean) => {
     await db.users.lockForSignInChange(id, tx);
-    const link = await db.scim.getLinkByUser(id, tx);
+    const link = await db.scim.getManagingLink(id, tx);
     assertScimAllows(link, scimChange);
     if (link && hold !== undefined && link.adminHold !== hold) {
       await db.scim.updateLink(link.id, { adminHold: hold }, tx);

@@ -266,6 +266,7 @@ describe("resolveLoginIdentity", () => {
           connectionId: connection.id,
           userId: user.id,
           userName: user.email,
+          userNameKey: user.email,
           idpActive: true,
         },
       });

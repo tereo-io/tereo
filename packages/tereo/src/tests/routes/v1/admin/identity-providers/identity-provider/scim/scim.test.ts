@@ -123,6 +123,7 @@ describe("/v1/admin/identity-providers/:id/scim", () => {
         connectionId: put.body.id,
         userId: user.id,
         userName: user.email,
+        userNameKey: user.email,
         idpActive: true,
         adminHold: false,
       },
@@ -132,6 +133,50 @@ describe("/v1/admin/identity-providers/:id/scim", () => {
     expect(del.body.error).toBe("scim_users_exist");
     const got = await fetchJson("GET", url, adminToken);
     expect(got.body.managedUserCount).toBe(1);
+  });
+
+  it("counts deleted resources but not unlinked users, and deletes over only unlinked ones", async () => {
+    const provider = await newProvider();
+    const url = `${BASE}/${provider.id}/scim`;
+    const put = await fetchJson("PUT", url, adminToken, { isActive: true });
+    const row = async (state: { deletedAt?: Date; unlinkedAt?: Date }) => {
+      const user = await prisma.user.create({
+        data: {
+          email: `u-${randomBytes(5).toString("hex")}@scim.test`,
+          name: "U",
+        },
+      });
+      return await prisma.scimUser.create({
+        data: {
+          connectionId: put.body.id,
+          userId: user.id,
+          userName: user.email,
+          userNameKey: user.email,
+          idpActive: false,
+          ...state,
+        },
+      });
+    };
+    const deleted = await row({ deletedAt: new Date() });
+    await row({ unlinkedAt: new Date() });
+    await row({ deletedAt: new Date(), unlinkedAt: new Date() });
+
+    expect(
+      (await fetchJson("GET", url, adminToken)).body.managedUserCount
+    ).toBe(1);
+    const refused = await fetchJson("DELETE", url, adminToken);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe("scim_users_exist");
+
+    await prisma.scimUser.update({
+      where: { id: deleted.id },
+      data: { unlinkedAt: new Date() },
+    });
+    expect((await fetchJson("DELETE", url, adminToken)).status).toBe(204);
+    expect(
+      await prisma.scimUser.count({ where: { connectionId: put.body.id } })
+    ).toBe(0);
+    expect((await fetchJson("GET", url, adminToken)).status).toBe(404);
   });
 
   it("is 404 for an unknown provider", async () => {

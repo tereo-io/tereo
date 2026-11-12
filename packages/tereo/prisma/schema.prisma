@@ -891,15 +891,20 @@ model ScimUser {
   userId       String    @unique @map("user_id") @db.Uuid
   externalId   String?   @map("external_id") @db.VarChar(255)
   userName     String    @map("user_name") @db.VarChar(255)
+  // `user_name` lower-cased: what uniqueness and lookups compare.
+  userNameKey  String    @map("user_name_key") @db.VarChar(255)
   idpActive    Boolean   @map("idp_active")
   adminHold    Boolean   @default(false) @map("admin_hold")
   deletedAt    DateTime? @map("deleted_at")
+  // Set by an admin's unlink: the user is excluded from SCIM until released.
+  unlinkedAt   DateTime? @map("unlinked_at")
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
   connection ScimConnection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
   user       User           @relation(fields: [userId], references: [id], onDelete: Restrict)
 
+  @@unique([connectionId, userNameKey], map: "scim_users_connection_user_name_key")
   @@index([connectionId])
   @@map("scim_users")
   @@schema("auth")

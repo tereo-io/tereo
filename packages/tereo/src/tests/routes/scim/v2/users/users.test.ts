@@ -98,7 +98,7 @@ describe("GET /scim/v2/Users", () => {
   });
 
   describe("users that do not exist as far as SCIM can tell", () => {
-    it("returns nothing for a guest, a service account, another domain, another connection and a deleted link", async () => {
+    it("returns nothing for a guest, a service account, another domain, another connection, a deleted link and an unlinked one", async () => {
       const c = await createScimConnection();
       const other = await createScimConnection();
       const stamp = tag();
@@ -114,6 +114,10 @@ describe("GET /scim/v2/Users", () => {
       const deletedHere = await makeUser(`del-${stamp}@${c.domain}`);
       await manage(c.connectionId, deletedHere.id, deletedHere.email, {
         deletedAt: new Date(),
+      });
+      const unlinkedHere = await makeUser(`unl-${stamp}@${c.domain}`);
+      await manage(c.connectionId, unlinkedHere.id, unlinkedHere.email, {
+        unlinkedAt: new Date(),
       });
       const deletedElsewhere = await makeUser(`dele-${stamp}@${c.domain}`);
       await manage(
@@ -131,6 +135,7 @@ describe("GET /scim/v2/Users", () => {
         elsewhere,
         managedByOther,
         deletedHere,
+        unlinkedHere,
         deletedElsewhere,
       ]) {
         const { status, body } = await byUserName(c.token, user.email);
@@ -138,6 +143,8 @@ describe("GET /scim/v2/Users", () => {
         expect(body.totalResults, user.email).toBe(0);
         expect(body.Resources).toEqual([]);
       }
+      const all = await list(c.token);
+      expect(JSON.stringify(all.body)).not.toContain(unlinkedHere.id);
     });
   });
 

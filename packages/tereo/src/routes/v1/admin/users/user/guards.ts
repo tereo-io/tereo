@@ -51,9 +51,19 @@ export const managerOf = async (user: {
     : null;
   if (owner) return { kind: owner.kind, id: owner.id, name: owner.name };
   const link = await db.scim.getLinkWithProvider(user.id);
-  if (!link) return null;
+  if (!link || link.unlinkedAt !== null) return null;
   const { provider } = link.connection;
   return { kind: "scim", id: provider.id, name: provider.displayName };
+};
+
+/** The provider an admin's unlink excludes the user from, until released. */
+export const scimExclusionOf = async (
+  userId: string
+): Promise<{ id: string; name: string } | null> => {
+  const link = await db.scim.getLinkWithProvider(userId);
+  if (!link || link.unlinkedAt === null) return null;
+  const { provider } = link.connection;
+  return { id: provider.id, name: provider.displayName };
 };
 
 /**
