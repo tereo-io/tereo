@@ -11,6 +11,10 @@ type Tx = Prisma.TransactionClient;
 
 export type { ScimUserLink };
 
+// A resource the IdP can still address: neither deleted by it nor unlinked
+// by an admin.
+const LIVE = { deletedAt: null, unlinkedAt: null } as const;
+
 export const getConnectionByProvider = async (providerId: string, tx?: Tx) => {
   return await (tx ?? prisma).scimConnection.findUnique({
     where: { providerId },
@@ -45,6 +49,25 @@ export const setConnectionActive = async (
   tx: Tx
 ) => {
   return await tx.scimConnection.update({ where: { id }, data: { isActive } });
+};
+
+export type GroupsTarget =
+  | { kind: "none" | "global" }
+  | { kind: "organization"; organizationId: string };
+
+export const setGroupsTarget = async (
+  connectionId: string,
+  target: GroupsTarget,
+  tx: Tx
+) => {
+  return await tx.scimConnection.update({
+    where: { id: connectionId },
+    data: {
+      groupsTarget: target.kind,
+      groupsOrganizationId:
+        target.kind === "organization" ? target.organizationId : null,
+    },
+  });
 };
 
 export const deleteConnection = async (id: string, tx: Tx) => {
@@ -168,6 +191,20 @@ export const deleteLink = async (id: string, tx: Tx) => {
   await tx.scimUser.delete({ where: { id } });
 };
 
+/** The ids among `userIds` with a live link (deletedAt and unlinkedAt null) on the connection. */
+export const filterLiveLinked = async (
+  connectionId: string,
+  userIds: string[],
+  tx: Tx
+): Promise<string[]> => {
+  if (userIds.length === 0) return [];
+  const rows = await tx.scimUser.findMany({
+    where: { connectionId, userId: { in: userIds }, ...LIVE },
+    select: { userId: true },
+  });
+  return rows.map((r) => r.userId);
+};
+
 /** Links that manage a user: deleted resources count, unlinked rows do not. */
 export const countLinks = async (connectionId: string, tx?: Tx) => {
   return await (tx ?? prisma).scimUser.count({
@@ -180,10 +217,6 @@ export const deleteUnlinked = async (connectionId: string, tx: Tx) => {
     where: { connectionId, unlinkedAt: { not: null } },
   });
 };
-
-// A resource the IdP can still address: neither deleted by it nor unlinked
-// by an admin.
-const LIVE = { deletedAt: null, unlinkedAt: null } as const;
 
 const isLive = (
   link: Pick<ScimUserLink, "connectionId" | "deletedAt" | "unlinkedAt">,
