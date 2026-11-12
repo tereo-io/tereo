@@ -18,9 +18,14 @@ export const createRateLimiter =
     const key = `@tereo-io/mcp:${opts.service}:rl:${userId}`;
     try {
       const count = await opts.redis.incr(key);
-      if (count === 1) await opts.redis.expire(key, WINDOW_SECONDS);
-      if (count <= opts.perMinute) return { allowed: true };
+      if (count === 1) {
+        await opts.redis.expire(key, WINDOW_SECONDS);
+        return { allowed: true };
+      }
+      // A key the first call failed to expire would otherwise count forever.
       const ttl = await opts.redis.ttl(key);
+      if (ttl < 0) await opts.redis.expire(key, WINDOW_SECONDS);
+      if (count <= opts.perMinute) return { allowed: true };
       return {
         allowed: false,
         retryAfterSeconds: ttl > 0 ? ttl : WINDOW_SECONDS,

@@ -73,4 +73,58 @@ describe("createRateLimiter", () => {
     expect(lines[0]).toMatchObject({ level: 50 });
     expect((lines[0].err as { message: string }).message).toBe("ECONNREFUSED");
   });
+
+  it("allows the first call when expire fails, and re-arms the expiry on a later call", async () => {
+    const redis = fakeRedis();
+    redis.failExpire = new Error("EXPIRE lost");
+    const limit = createRateLimiter({
+      redis,
+      service: "svc",
+      perMinute: 5,
+      logger: capture().logger,
+    });
+    expect(await limit("u1")).toEqual({ allowed: true });
+    expect(redis.expiries.size).toBe(0);
+
+    redis.failExpire = null;
+    redis.ttlSeconds = -1;
+    expect(await limit("u1")).toEqual({ allowed: true });
+    expect(redis.expiries.get("@tereo-io/mcp:svc:rl:u1")).toBe(60);
+  });
+
+  it("sets an expiry on a key left without one over the limit, and reports 60", async () => {
+    const redis = fakeRedis(-1);
+    redis.counts.set("@tereo-io/mcp:svc:rl:u1", 9);
+    const limit = createRateLimiter({
+      redis,
+      service: "svc",
+      perMinute: 1,
+      logger: capture().logger,
+    });
+    expect(await limit("u1")).toEqual({
+      allowed: false,
+      retryAfterSeconds: 60,
+    });
+    expect(redis.expiries.get("@tereo-io/mcp:svc:rl:u1")).toBe(60);
+  });
+
+  it.each(["failExpire", "failTtl"] as const)(
+    "allows an over-limit call and logs at error when %s",
+    async (failure) => {
+      const redis = fakeRedis(-1);
+      redis.counts.set("@tereo-io/mcp:svc:rl:u1", 9);
+      redis[failure] = new Error("redis down");
+      const { logger, lines } = capture();
+      const limit = createRateLimiter({
+        redis,
+        service: "svc",
+        perMinute: 1,
+        logger,
+      });
+      expect(await limit("u1")).toEqual({ allowed: true });
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({ level: 50 });
+      expect((lines[0].err as { message: string }).message).toBe("redis down");
+    }
+  );
 });
