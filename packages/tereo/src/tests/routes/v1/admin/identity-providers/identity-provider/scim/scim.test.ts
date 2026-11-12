@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag auth
 
+import { ensureTestOrganization } from "../../../../../../support/principals.js";
 import { getTestPrincipalToken } from "../../../../../../support/principals.js";
 import { SYSTEM_USER_ID } from "../../../../../../../definitions/index.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -8,6 +9,11 @@ import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../../support/coreUrl.js";
 import { fetchJson } from "../../../../../../support/http.js";
 import { randomBytes } from "node:crypto";
+import {
+  createScimConnection,
+  pushGroup,
+  setGroupsTarget,
+} from "../../../../../../support/scim.js";
 
 const BASE = `${CORE_URL}/v1/admin/identity-providers`;
 
@@ -187,5 +193,212 @@ describe("/v1/admin/identity-providers/:id/scim", () => {
       { isActive: true }
     );
     expect(res.status).toBe(404);
+  });
+
+  it("reports a none target and no managed groups by default", async () => {
+    const provider = await newProvider();
+    const url = `${BASE}/${provider.id}/scim`;
+    const put = await fetchJson("PUT", url, adminToken, { isActive: true });
+    expect(put.body.groupsTarget).toEqual({ kind: "none" });
+    expect(put.body.managedGroupCount).toBe(0);
+    const got = await fetchJson("GET", url, adminToken);
+    expect(got.body.groupsTarget).toEqual({ kind: "none" });
+    expect(got.body.managedGroupCount).toBe(0);
+  });
+
+  it("sets global and organization targets and audits old and new", async () => {
+    const provider = await newProvider();
+    const url = `${BASE}/${provider.id}/scim`;
+    await fetchJson("PUT", url, adminToken, { isActive: true });
+    const organizationId = await ensureTestOrganization(
+      `gt-${randomBytes(4).toString("hex")}`
+    );
+
+    const global = await fetchJson("PUT", url, adminToken, {
+      isActive: true,
+      groupsTarget: { kind: "global" },
+    });
+    expect(global.status).toBe(200);
+    expect(global.body.groupsTarget).toEqual({ kind: "global" });
+
+    const org = await fetchJson("PUT", url, adminToken, {
+      isActive: false,
+      groupsTarget: { kind: "organization", organizationId },
+    });
+    expect(org.status).toBe(200);
+    expect(org.body.groupsTarget).toEqual({
+      kind: "organization",
+      organizationId,
+    });
+    const row = await prisma.scimConnection.findUniqueOrThrow({
+      where: { id: org.body.id },
+    });
+    expect(row.groupsOrganizationId).toBe(organizationId);
+
+    const entries = await prisma.auditLogEntry.findMany({
+      where: {
+        entityType: "ScimConnection",
+        entityId: org.body.id,
+        action: "UPDATE",
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(entries).toHaveLength(2);
+    expect(entries[0].changes).toEqual({
+      groupsTarget: { old: { kind: "none" }, new: { kind: "global" } },
+    });
+    expect(entries[1].changes).toEqual({
+      isActive: { old: true, new: false },
+      groupsTarget: {
+        old: { kind: "global" },
+        new: { kind: "organization", organizationId },
+      },
+    });
+  });
+
+  it("writes no entry for a target equal to the stored one", async () => {
+    const provider = await newProvider();
+    const url = `${BASE}/${provider.id}/scim`;
+    const put = await fetchJson("PUT", url, adminToken, { isActive: true });
+    await fetchJson("PUT", url, adminToken, {
+      isActive: true,
+      groupsTarget: { kind: "none" },
+    });
+    expect(
+      await prisma.auditLogEntry.count({
+        where: { entityId: put.body.id, action: "UPDATE" },
+      })
+    ).toBe(0);
+  });
+
+  it("rejects an unknown or archived organization", async () => {
+    const provider = await newProvider();
+    const url = `${BASE}/${provider.id}/scim`;
+    await fetchJson("PUT", url, adminToken, { isActive: true });
+    const unknown = await fetchJson("PUT", url, adminToken, {
+      isActive: true,
+      groupsTarget: {
+        kind: "organization",
+        organizationId: "00000000-0000-7000-8000-00000000dead",
+      },
+    });
+    expect(unknown.status).toBe(400);
+    expect(unknown.body.error).toBe("unknown_organization");
+
+    const organizationId = await ensureTestOrganization(
+      `gt-${randomBytes(4).toString("hex")}`
+    );
+    await prisma.organization.update({
+      where: { id: organizationId },
+      data: { isActive: false, archivedAt: new Date() },
+    });
+    const archived = await fetchJson("PUT", url, adminToken, {
+      isActive: true,
+      groupsTarget: { kind: "organization", organizationId },
+    });
+    expect(archived.status).toBe(400);
+    expect(archived.body.error).toBe("unknown_organization");
+  });
+
+  it("rejects a malformed groups target", async () => {
+    const provider = await newProvider();
+    const url = `${BASE}/${provider.id}/scim`;
+    await fetchJson("PUT", url, adminToken, { isActive: true });
+    const bodies = [
+      { kind: "organization" },
+      {
+        kind: "global",
+        organizationId: "00000000-0000-7000-8000-00000000dead",
+      },
+      { kind: "organization", organizationId: "nope" },
+      { kind: "everyone" },
+    ];
+    for (const groupsTarget of bodies) {
+      const res = await fetchJson("PUT", url, adminToken, {
+        isActive: true,
+        groupsTarget,
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("pins the target to the scope of linked groups", async () => {
+    const c = await createScimConnection();
+    const url = `${BASE}/${c.providerId}/scim`;
+    const other = await ensureTestOrganization(
+      `gt-${randomBytes(4).toString("hex")}`
+    );
+    await setGroupsTarget(c.connectionId, {
+      kind: "organization",
+      organizationId: c.organizationId,
+    });
+    const pushed = await pushGroup(c.token, {
+      displayName: `G ${randomBytes(4).toString("hex")}`,
+    });
+    expect(pushed.status).toBe(201);
+
+    const put = (groupsTarget: unknown) =>
+      fetchJson("PUT", url, adminToken, { isActive: true, groupsTarget });
+    const toOther = await put({ kind: "organization", organizationId: other });
+    expect(toOther.status).toBe(409);
+    expect(toOther.body.error).toBe("scim_groups_exist");
+    expect((await put({ kind: "global" })).status).toBe(409);
+
+    const none = await put({ kind: "none" });
+    expect(none.status).toBe(200);
+    expect(none.body.managedGroupCount).toBe(1);
+    const back = await put({
+      kind: "organization",
+      organizationId: c.organizationId,
+    });
+    expect(back.status).toBe(200);
+    expect(back.body.groupsTarget).toEqual({
+      kind: "organization",
+      organizationId: c.organizationId,
+    });
+  });
+
+  it("deletes a connection with linked groups and leaves them local", async () => {
+    const c = await createScimConnection();
+    await setGroupsTarget(c.connectionId, { kind: "global" });
+    const pushed = await pushGroup(c.token, {
+      displayName: `G ${randomBytes(4).toString("hex")}`,
+    });
+    expect(pushed.status).toBe(201);
+    const member = await prisma.user.create({
+      data: {
+        email: `m-${randomBytes(5).toString("hex")}@scim.test`,
+        name: "M",
+      },
+    });
+    await prisma.groupMember.create({
+      data: {
+        groupId: pushed.body.id,
+        userId: member.id,
+        addedBy: member.id,
+      },
+    });
+
+    const del = await fetchJson(
+      "DELETE",
+      `${BASE}/${c.providerId}/scim`,
+      adminToken
+    );
+    expect(del.status).toBe(204);
+
+    const group = await prisma.group.findUniqueOrThrow({
+      where: { id: pushed.body.id },
+      include: { members: true, scimLink: true },
+    });
+    expect(group.definitionSource).toBe("local");
+    expect(group.membershipSource).toBe("local");
+    expect(group.scimLink).toBeNull();
+    expect(group.members.map((m) => m.userId)).toEqual([member.id]);
+    await audit("ScimConnection", c.connectionId, "DELETE");
+    expect(
+      await prisma.auditLogEntry.count({
+        where: { entityId: pushed.body.id, entityType: "Group" },
+      })
+    ).toBeGreaterThan(0);
   });
 });

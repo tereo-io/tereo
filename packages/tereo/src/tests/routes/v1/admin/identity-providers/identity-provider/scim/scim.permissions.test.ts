@@ -3,12 +3,15 @@
 
 import { getTestPrincipalToken } from "../../../../../../support/principals.js";
 import { SYSTEM_USER_ID } from "../../../../../../../definitions/index.js";
-import { createScimConnection } from "../../../../../../support/scim.js";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../../support/coreUrl.js";
 import { fetchJson } from "../../../../../../support/http.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
+import {
+  createScimConnection,
+  setGroupsTarget,
+} from "../../../../../../support/scim.js";
 
 const BASE = `${CORE_URL}/v1/admin/identity-providers`;
 
@@ -89,5 +92,44 @@ describe("SCIM connection authority", () => {
     expect((await fetchJson("POST", `${url}/tokens`, readToken)).status).toBe(
       403
     );
+  });
+
+  it("requires a global admin to change the groups target, not to resend it", async () => {
+    const { providerId, connectionId } = await createScimConnection();
+    const url = `${BASE}/${providerId}/scim`;
+    const denied = await fetchJson("PUT", url, writeToken, {
+      isActive: true,
+      groupsTarget: { kind: "global" },
+    });
+    expect(denied.status).toBe(403);
+
+    expect(
+      (
+        await fetchJson("PUT", url, adminToken, {
+          isActive: true,
+          groupsTarget: { kind: "global" },
+        })
+      ).status
+    ).toBe(200);
+    const same = await fetchJson("PUT", url, writeToken, {
+      isActive: true,
+      groupsTarget: { kind: "global" },
+    });
+    expect(same.status).toBe(200);
+    const none = await fetchJson("PUT", url, writeToken, {
+      isActive: true,
+      groupsTarget: { kind: "none" },
+    });
+    expect(none.status).toBe(403);
+
+    await setGroupsTarget(connectionId, { kind: "none" });
+    expect(
+      (
+        await fetchJson("PUT", url, writeToken, {
+          isActive: true,
+          groupsTarget: { kind: "none" },
+        })
+      ).status
+    ).toBe(200);
   });
 });
