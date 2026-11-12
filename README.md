@@ -268,8 +268,10 @@ per-client edit grants.
 organization: an admin manages them (and an organization's admins its own), provisioning documents
 declare them with their roles, and apps read them through the SDK, events and the userinfo `groups`
 claim. Their roles count wherever permissions are checked.
-An identity provider can provision users over [SCIM 2.0](packages/tereo/docs/scim.md) (Okta, Entra):
-create, update and deactivate through a per-provider connection and token; users, not groups.
+An identity provider can provision users and groups over [SCIM 2.0](packages/tereo/docs/scim.md) (Okta, Entra):
+users are created, updated and deactivated, and groups are pushed with their members into
+[groups](packages/tereo/docs/groups.md#scim) that carry only the roles an admin attaches, through a per-provider
+connection and token. The manual run against real Okta and Entra tenants is still owed.
 CI checks formatting, import order, lint and types, runs the suite in Docker with real users and
 tokens, and starts the release image against a fresh database.
 

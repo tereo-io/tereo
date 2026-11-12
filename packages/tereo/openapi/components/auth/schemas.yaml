@@ -4611,7 +4611,7 @@ BrandingAssetUploadResponse:
 Group:
   type: object
   description: A set of users who all hold the group's roles. A global group's roles count everywhere; an organization's group's roles count only within that organization, for its members.
-  required: [id, organizationId, slug, name, description, definitionSource, membershipSource, unprovisionedAt, archivedAt, createdAt, updatedAt, memberCount]
+  required: [id, organizationId, slug, name, description, definitionSource, membershipSource, unprovisionedAt, archivedAt, createdAt, updatedAt, memberCount, managedBy, skippedMemberCount]
   properties:
     id:
       type: string
@@ -4632,12 +4632,12 @@ Group:
       maxLength: 500
     definitionSource:
       type: string
-      enum: [local, provisioned]
-      description: '`provisioned` groups are declared in provisioning documents: their slug, name, description, roles and archive state change only there'
+      enum: [local, provisioned, scim]
+      description: '`provisioned` groups are declared in provisioning documents: their slug, name, description, roles and archive state change only there. `scim` groups are pushed by an identity provider: the directory owns their name, members and existence (`managedBy` names the provider)'
     membershipSource:
       type: string
-      enum: [local]
-      description: Members are always managed through this API
+      enum: [local, scim]
+      description: '`scim`: the identity provider decides who is a member, so adding and removing members and renaming answer `409 managed_by_scim`'
     unprovisionedAt:
       type: [string, 'null']
       format: date-time
@@ -4655,6 +4655,25 @@ Group:
     memberCount:
       type: integer
       minimum: 0
+    managedBy:
+      description: The identity provider whose SCIM connection pushes this group; null for any other group
+      oneOf:
+        - type: object
+          required: [kind, providerId, providerName]
+          properties:
+            kind:
+              type: string
+              enum: [scim]
+            providerId:
+              type: string
+              format: uuid
+            providerName:
+              type: string
+        - type: 'null'
+    skippedMemberCount:
+      type: integer
+      minimum: 0
+      description: Members the directory named whom core could not add because they are not members of the group's organization (`GET /v1/admin/groups/{id}/scim/skipped-members`); 0 for a group that is not pushed
 
 ListGroupsResponse:
   type: object
@@ -4869,10 +4888,10 @@ GroupEventData:
       format: uuid
     definitionSource:
       type: string
-      enum: [local, provisioned]
+      enum: [local, provisioned, scim]
     membershipSource:
       type: string
-      enum: [local]
+      enum: [local, scim]
     unprovisionedAt:
       type: [string, 'null']
       format: date-time
@@ -4921,6 +4940,37 @@ GroupRolesEventData:
         type: string
         format: uuid
 
+ScimGroupsTarget:
+  description: Where the connection's pushed groups are created. Changing it needs `admin` through a global role.
+  oneOf:
+    - type: object
+      required: [kind]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [none]
+    - type: object
+      required: [kind]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [global]
+    - type: object
+      required: [kind, organizationId]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [organization]
+        organizationId:
+          type: string
+          format: uuid
+          description: A live organization (`400 unknown_organization` otherwise)
+  discriminator:
+    propertyName: kind
+
 PutScimConnectionRequest:
   type: object
   description: Unknown properties are ignored.
@@ -4928,6 +4978,8 @@ PutScimConnectionRequest:
   properties:
     isActive:
       type: boolean
+    groupsTarget:
+      $ref: '#/ScimGroupsTarget'
 
 ScimToken:
   type: object
@@ -4950,7 +5002,7 @@ ScimToken:
 ScimConnection:
   type: object
   description: An identity provider's SCIM connection.
-  required: [id, providerId, baseUrl, isActive, lastUsedAt, managedUserCount, tokens]
+  required: [id, providerId, baseUrl, isActive, lastUsedAt, managedUserCount, groupsTarget, managedGroupCount, tokens]
   properties:
     id:
       type: string
@@ -4970,10 +5022,52 @@ ScimConnection:
     managedUserCount:
       type: integer
       description: Users the connection manages, deleted SCIM resources included and users an admin unlinked left out.
+    groupsTarget:
+      $ref: '#/ScimGroupsTarget'
+    managedGroupCount:
+      type: integer
+      minimum: 0
+      description: Groups linked to the connection, archived ones included.
     tokens:
       type: array
       items:
         $ref: '#/ScimToken'
+
+ScimSkippedMember:
+  type: object
+  description: A user the directory put in a pushed group whom core could not add.
+  required: [userId, email, name, reason, skippedAt]
+  properties:
+    userId:
+      type: string
+      format: uuid
+    email:
+      type: string
+    name:
+      type: [string, 'null']
+    reason:
+      type: string
+      enum: [not_org_member]
+      description: The user is not a member of the group's organization.
+    skippedAt:
+      type: string
+      format: date-time
+
+ListScimSkippedMembersResponse:
+  type: object
+  required: [data, hasMore, limit, nextCursor]
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/ScimSkippedMember'
+    hasMore:
+      type: boolean
+    limit:
+      type: integer
+    nextCursor:
+      type: [string, 'null']
+      description: Opaque; pass it back as `cursor`. Null on the last page.
 
 CreatedScimToken:
   type: object

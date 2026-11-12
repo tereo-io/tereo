@@ -1,10 +1,10 @@
-# SCIM users
+# SCIM
 
 An identity provider (Okta, Entra) can create, update and deactivate core's users over SCIM 2.0, so
-that removing someone in the directory ends their access in core. This page covers **Users** only;
-SCIM Groups are not built (see [groups.md](groups.md#scim-later)). The admin routes that configure a
-connection are in the OpenAPI spec (`openapi/`); the `/scim/v2` protocol endpoints are documented
-here, not there.
+that removing someone in the directory ends their access in core, and can push groups and their
+members, so that who is in a core group follows the directory ([Groups](#groups)). The admin routes
+that configure a connection are in the OpenAPI spec (`openapi/`); the `/scim/v2` protocol endpoints
+are documented here, not there.
 
 ## Model
 
@@ -21,12 +21,18 @@ unique). It holds up to two live **tokens** (`auth.scim_tokens`) and one **link*
 `external_id` is unique per connection where not null, and `user_name_key` is unique per
 connection, so user names compare case-insensitively. Both stay reserved after a SCIM `DELETE`: an
 IdP that re-creates the person with the same `externalId` (or `userName`) but a different email gets
-`409 uniqueness` until an admin unlinks the old resource. The SCIM `id` of a user is the core user
+`409 uniqueness` until an admin unlinks the old resource. Unlinking frees the `externalId` only:
+the `userName` stays reserved by the unlinked row until an admin releases the user
+([Unlink and release](#unlink-and-release)) or the connection is deleted. The SCIM `id` of a user is the core user
 id. A row with `unlinked_at` set is not a link but an **exclusion** ([Unlink](#unlink-and-release)).
 
 Lookups compare with plain equality on indexed columns: emails against `users.email` (stored
 lower-cased, `users_email_lowercase`) after normalising the value, user names against
 `user_name_key`. The domain rule is applied in code to the user found.
+
+A connection also holds a **groups target** (`groups_target`, with `groups_organization_id` for an
+organization) and one link per pushed group (`auth.scim_groups`, with `auth.scim_group_skipped_members`
+for members core could not add): see [Groups](#groups).
 
 A connection is configured in the admin API and UI on the provider, not in a provisioning document.
 Deactivating the provider leaves its connection in place: SCIM calls answer `401` while the provider
@@ -40,8 +46,8 @@ changing needs `identity-providers.write`.
 | Route | Does |
 |-------|------|
 | `GET …/scim` | The connection: `baseUrl` (`${PUBLIC_URL}/scim/v2`), `isActive`, `lastUsedAt`, `managedUserCount` (deleted resources included, unlinked users not), and every token's `id`, `createdAt`, `lastUsedAt`, `revokedAt` (never its value). `404` when there is no connection |
-| `PUT …/scim` `{ isActive }` | Creates the connection (`201`) or sets `isActive` (`200`). `409 scim_connection_exists` if two creates race |
-| `DELETE …/scim` | Removes it (`204`), with the exclusions of users unlinked from it. `409 scim_users_exist` while it manages any user (including deleted resources: unlink them first) |
+| `PUT …/scim` `{ isActive, groupsTarget? }` | Creates the connection (`201`) or sets `isActive` and the [groups target](#groups-target) (`200`). `409 scim_connection_exists` if two creates race, `409 scim_groups_exist` for a target the linked groups forbid |
+| `DELETE …/scim` | Removes it (`204`), with the exclusions of users unlinked from it, and makes its pushed groups local ([Delete and unlink](#delete-and-unlink)). `409 scim_users_exist` while it manages any user (including deleted resources: unlink them first) |
 | `POST …/scim/tokens` | Mints a token (`201`, `{ id, token, createdAt }`); the value (`scim_…`) is in this response only. `409 scim_token_limit` at two unrevoked tokens |
 | `DELETE …/scim/tokens/{tokenId}` | Revokes one (`204`). `404` if unknown or already revoked |
 | `DELETE /v1/admin/users/{id}/scim` | Unlinks a user (`users.write`, `204`): see [Unlink and release](#unlink-and-release). `404` if not managed or already unlinked |
@@ -52,6 +58,8 @@ global role (`403` otherwise), on top of `identity-providers.write`: see [Trust]
 connection off, revoking a token and deleting a connection do not. So do the provider changes listed
 under [Trust](#trust), once the provider has a connection. Each change is audited
 (`ScimConnection`, `ScimToken`; no new event types).
+
+`GET` and `PUT …/scim` also return `groupsTarget` (`{ kind: "none" | "global" | "organization", organizationId? }`) and `managedGroupCount` (linked groups, archived ones included).
 
 The admin user response's `managedBy` is `{ kind: "scim", id: <provider id>, name: <provider display
 name> }` for a managed user. A link whose `deleted_at` is set still counts as managed, for `managedBy`,
@@ -66,6 +74,8 @@ managed; the response's `scimExcluded` is then `{ id: <provider id>, name: <prov
 | `/scim/v2/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | `GET` |
 | `/scim/v2/Users` | `GET` (list, `filter`, `startIndex`, `count`), `POST` |
 | `/scim/v2/Users/{id}` | `GET`, `PUT`, `PATCH`, `DELETE` |
+| `/scim/v2/Groups` | `GET` (list, `filter`, `startIndex`, `count`), `POST` |
+| `/scim/v2/Groups/{id}` | `GET`, `PUT`, `PATCH`, `DELETE` |
 
 `/scim` is a reserved prefix, so the admin UI never takes it.
 
@@ -92,11 +102,13 @@ Errors are SCIM error bodies (`schemas`, `status`, `scimType`, `detail`) with
 | 400 | `invalidValue` | Validation, a value longer than its column (refused, never clipped), an email outside the provider's domains (but see [Create](#create-post)), an archived or inactive domain organization |
 | 400 | `invalidFilter` | An unsupported filter |
 | 400 | `invalidSyntax` | Invalid JSON, an unsupported PATCH `op` |
-| 400 | `invalidPath` | PATCH `remove` without a path |
+| 400 | `invalidPath` | PATCH `remove` without a path; a Groups PATCH path core does not support |
+| 400 | `tooMany` | A Groups request over the [limits](#limits) |
 | 401 | | See above |
+| 403 | | Any `/Groups` request while the connection's groups target is `none` |
 | 404 | | The user does not exist or is not visible to the connection; also an unknown path |
 | 409 | `uniqueness` | See [Create](#create-post) |
-| 409 | (none) | A deactivation the last-admin check refuses (`idp_active` is left unchanged, so the IdP's retry means the same thing), or a write that lost a race three times. Neither carries a `scimType` |
+| 409 | (none) | A deactivation the last-admin check refuses (`idp_active` is left unchanged, so the IdP's retry means the same thing), a Groups write whose member removal the last-admin check refuses, or a write that lost a race three times. None carries a `scimType` |
 | 413, 429 | | Body too large, rate limited |
 
 ### Capabilities
@@ -108,7 +120,7 @@ so they cannot drift from what the routes accept. The enterprise-user extension 
 
 ### Filter
 
-`eq` only, on `userName`, `externalId` and `emails.value` (also `emails[type eq "work"].value`),
+On Users: `eq` only, on `userName`, `externalId` and `emails.value` (also `emails[type eq "work"].value`),
 optionally joined by `and`. Attribute names and the operator are case-insensitive. `userName` and
 email values compare as literal text, case-insensitively: `%` and `_` are not wildcards. Anything
 else answers `400 invalidFilter`. Without a filter the list holds only the connection's managed users
@@ -118,7 +130,7 @@ email (they have no `userName` yet).
 
 ### Pagination
 
-`startIndex` (1-based, default 1) and `count` (default 100, at most 200), ordered by user id, with
+`startIndex` (1-based, default 1) and `count` (default 100, at most 200), ordered by user id (group id on `/Groups`), with
 `totalResults`, `startIndex` and `itemsPerPage` in the `ListResponse`.
 
 ## The User resource
@@ -209,7 +221,7 @@ concurrent change to the same user is retried, and answers `409` after three att
 | Event | Effect |
 |-------|--------|
 | SCIM `active:false` | `idp_active` false; the shared deactivation runs if the user was active |
-| SCIM `DELETE` | As `active:false`, and `deleted_at` set; also audited as `scim_deleted`. `204`. The resource then answers `404` |
+| SCIM `DELETE` | As `active:false`, and `deleted_at` set; also audited as `scim_deleted`. The user also leaves the connection's pushed groups ([Delete and unlink](#delete-and-unlink)). `204`. The resource then answers `404` |
 | SCIM `active:true` | `idp_active` true; reactivates unless `admin_hold`. The response reports the real `active` |
 | Admin deactivates a managed user | `admin_hold` true; shared deactivation |
 | Admin `isActive:false` on an already inactive managed user | Sets the hold too: a link-only write with a `scim_admin_hold` audit entry, no event, a no-op if already held |
@@ -225,7 +237,7 @@ fields, and the account API has no profile-update route, so nothing else needs t
 
 `DELETE /v1/admin/users/{id}/scim` (`users.write`) ends SCIM's management of a user without
 deleting anything: the row stays with `unlinked_at` set and `external_id` cleared, and the same
-`scim_unlinked` audit entry is written. The user keeps their state, inactive included, and is managed
+`scim_unlinked` audit entry is written. The user also leaves every group the connection pushed. The user keeps their state, inactive included, and is managed
 locally: `managedBy` is `null`, no `managed_by_scim` refusals, no admin hold. Until released they are
 **excluded from SCIM**: every connection answers `404` for them, filters do not return them, a `POST`
 with their email answers the fixed `409 uniqueness` (`400 invalidValue` outside the provider's
@@ -236,6 +248,156 @@ unassigned) therefore cannot override the admin.
 `PUT /v1/admin/users/{id}/scim/release` deletes the exclusion (`scim_released` audit entry). The
 IdP's next write naming the user adopts them under the normal adoption rules, which gives the
 provider's sign-in power over the account back, so it needs a global `admin` as enabling SCIM does.
+
+## Groups
+
+A connection can push groups and their members, so that who is in a core group follows the
+directory. A pushed group is an ordinary core [group](groups.md) with `definitionSource` and
+`membershipSource` both `scim`. SCIM never writes roles: a pushed group grants only the roles an admin
+attaches to it, under the usual [grant checks](groups.md#authorization).
+
+### Groups target
+
+The connection's groups target says where pushed groups are created: `none` (the default), `global`,
+or one organization. It is set with `groupsTarget` on `PUT …/scim`, also when the connection is
+created. Setting it, including to `none`, needs `admin` through a global role, as enabling SCIM does,
+and an organization target must be live (`400 unknown_organization`).
+
+While the connection has linked groups, archived ones included, the target may only be `none` or the
+scope those groups are in (they share one); anything else is `409 scim_groups_exist`. `none` freezes
+them: they stay linked with their members unchanged, and every `/scim/v2/Groups` request answers
+`403` (the Users endpoints are unaffected). Setting the target back to their scope resumes them.
+`ResourceTypes` and `Schemas` list Group whatever the target.
+
+### Ownership
+
+| Change | Directory (SCIM) | Admin API |
+|--------|------------------|-----------|
+| `name` | Yes (`displayName`) | `409 managed_by_scim` |
+| Members | Yes | `409 managed_by_scim` (add and remove) |
+| Roles | Never | Yes, the usual rules |
+| `slug`, `description` | Never | Yes |
+| Archive, restore | `DELETE` archives; never restores | Yes, the usual rules |
+| Unlink | No | Yes |
+
+The directory owns a group's name, members and existence. An admin's `PATCH /v1/admin/groups/{id}`
+can still change `slug` and `description`, but not `name`.
+
+A pushed group never adopts an existing one: whatever its name, `POST /Groups` creates a new group
+with no roles, so a clash with a local group's name touches nothing. Its `slug` is derived once from
+the first `displayName`: lower-cased, runs of anything outside `[a-z0-9]` become `-`, trimmed of `-`
+and cut to fit, `group` when nothing is left; then `-2`, `-3`, … until free in the target scope
+(archived groups hold their slugs). A later rename in the directory changes `name` only, because apps
+read the slug from the `groups` claim. A `displayName` is 1 to 255 characters after trimming and need
+not be unique; an `externalId` is at most 255 (blank clears it).
+
+The SCIM `id` of a group is the core group id. A connection sees a group only through its own link:
+local groups, another connection's groups and malformed ids answer `404`. Archived pushed groups stay
+visible, and the directory may still rename them and change their members, so a group is in sync when
+an admin restores it. An archived group grants nothing.
+
+### Who can be a member
+
+A member value is a SCIM user id: the core user id.
+
+| Value | Result |
+|-------|--------|
+| A managed user with a live link on this connection | Added |
+| A managed user who is not a member of the target organization | Skipped and recorded (`not_org_member`) |
+| A guest, a service account or the system user | Left out; not an error |
+| An unknown or malformed id, or a user without a live link on this connection (another connection's, unlinked, SCIM-deleted) | Ignored |
+
+Nobody is added to the organization automatically. The audit entry of a change counts what was
+skipped and what was left out.
+
+### Skipped members
+
+A recorded skip is shown to admins (`skippedMemberCount` on every admin group response, and
+`GET /v1/admin/groups/{id}/scim/skipped-members`, `{ data, limit, hasMore, nextCursor }`, each entry
+`{ userId, email, name, reason, skippedAt }`; `nextCursor` is opaque, pass it back as `cursor`). A
+user the directory pushed who is later removed from the target organization is recorded the same way,
+so the difference from the directory stays visible.
+
+Core does not add a skipped user when they join the organization. Recorded skips are retried on any
+later request that changes the group's members, but only within what is left of the [limits](#limits)
+after that request's own changes; the rest stay recorded. A skip is deleted when the user is added,
+when the directory removes them (a `remove` naming them, or a `PUT` or `replace` without them), when
+the user leaves the connection's groups, and when the group is unlinked.
+
+### Resource
+
+`schemas`, `id`, `externalId` (when set), `displayName`, `members` (`[{ value, display, $ref }]`,
+`display` the user's name and `$ref` the user's SCIM URL) and `meta` (`resourceType: "Group"`,
+`created`, `lastModified`, `location`). `members` lists only users actually in the group. It is in
+`GET /Groups/{id}`, `POST`, `PUT` and `PATCH` responses, left out of the list, and left out of a
+single read with `excludedAttributes=members`; other `attributes` and `excludedAttributes` values are
+ignored. `meta.lastModified` moves on a name or member change.
+
+### Endpoints
+
+| Route | Does |
+|-------|------|
+| `GET /Groups` | `ListResponse`; `filter` is `displayName eq "…"` or `externalId eq "…"` (also joined by `and`; exact, `displayName` case-insensitive; anything else `400 invalidFilter`) |
+| `POST /Groups` | `displayName` required; `externalId` and `members` optional. `201` with `Location` |
+| `GET /Groups/{id}` | The group with its members |
+| `PUT /Groups/{id}` | Replaces `displayName`, `externalId` and the whole member set |
+| `PATCH /Groups/{id}` | The operations below, in one transaction. `200` with the resource |
+| `DELETE /Groups/{id}` | See [Delete and unlink](#delete-and-unlink). `204` |
+
+PATCH operation names are case-insensitive:
+
+| `op` | `path` | `value` |
+|------|--------|---------|
+| `add` | `members` | `[{ value }]` |
+| `remove` | `members` | `[{ value }]` (Entra), or none: clears the group |
+| `remove` | `members[value eq "<id>"]` | none (Okta) |
+| `replace` | `members` | `[{ value }]`: the whole set |
+| `replace` or `add` | `displayName`, `externalId` | a string (`add` is accepted as `replace`) |
+| `remove` | `externalId` | none: clears it (`displayName` cannot be removed) |
+| `add` or `replace` | none | an object with any of `displayName`, `externalId`, `members` (`add` appends members, `replace` sets them) |
+
+Any other path is `400 invalidPath`; a bad value `400 invalidValue`. Removing a user who is not a
+member does nothing. A `path` may carry the `urn:…:Group:` schema prefix.
+
+A request that changes nothing writes no audit entry, emits no event and does not move
+`meta.lastModified`. A change of `externalId` alone is not audited. A removal that would leave core
+with no administrator fails the whole request with `409`.
+
+### Limits
+
+- A group holds at most **5,000** members, and a request names at most 5,000.
+- One request changes at most **1,000** memberships, counted on the de-duplicated difference it makes
+  against the current members: a `PUT` naming 1,500 current members and 10 new ones is 10 changes. A
+  `POST` with more than 1,000 members is refused.
+- Over either limit the answer is `400` with `scimType: "tooMany"` and nothing is applied.
+
+Each change takes one database authority lock, and the cap keeps one request well inside Postgres's
+shared lock table. How Okta and Entra send a group with more than 1,000 members, in one request or in
+batches, is not verified: see the checklists.
+
+### Delete and unlink
+
+- **SCIM `DELETE /Groups/{id}`** archives the group, deletes its link and skipped records, and makes
+  it local: both sources become `local`, and an archived local group remains with its members and
+  roles. The directory creating the group again makes a **new** group with no roles; nothing is
+  revived, so roles never come back without an admin. An admin may restore the old group as a local
+  one.
+- **Admin unlink** (`DELETE /v1/admin/groups/{id}/scim`, `204`; `404` when the group is not pushed)
+  makes the group local the same way but keeps its archive state. Audit `scim_unlinked`, event
+  `auth.group.updated`. The directory cannot adopt a group, so its next push creates a new one.
+- **Deleting the connection** unlinks every group it holds, in the same transaction.
+- **A user leaves all of the connection's pushed groups**, archived ones included, when the directory
+  deletes them (`DELETE /Users/{id}`) or an admin unlinks them
+  (`DELETE /v1/admin/users/{id}/scim`): without this nobody could remove them, since an admin cannot
+  edit a pushed group's members. Deactivation (`active: false`, or an admin hold) keeps memberships,
+  which grant nothing while the user is inactive, as for every group.
+
+### Audit and events
+
+Entries are on entity `Group` with the system user as actor and `scimConnectionId` in the metadata.
+Events are the existing `auth.group.*` ones; their `definitionSource` and `membershipSource` can now
+be `scim`. A group-members entry is written only when someone is added or removed; a request that
+only changes what is recorded as skipped writes a `members_skipped` entry.
 
 ## Sign-in linking
 
@@ -314,9 +476,20 @@ and the [SCIM 2.0 reference](https://developer.okta.com/docs/api/openapi/okta-sc
    for custom integrations built with the App Integration Wizard. Core handles both.
 5. Enable create, update and deactivate; leave password sync off (core ignores it).
 6. Test the connection; core's `ServiceProviderConfig` and a `GET /Users` must answer `200`.
+7. To push groups, first set the connection's [groups target](#groups-target) (`groupsTarget` on
+   `PUT …/scim`; with `none` every `/Groups` request answers `403`). Then in Okta enable group
+   pushing for the app and push the groups you want. Core creates each as a new group with no roles;
+   attach roles in the admin UI.
+8. Push users before their groups: a member core has no link for yet is ignored, not recorded. If the
+   target is an organization, the pushed users must be members of it, or they are
+   [skipped](#skipped-members).
 
 Not verified: the exact `externalId` Okta sends in a `POST`, and the full set of attributes in the
 default Okta mapping; the documentation pages above do not state them. Record them in the manual run.
+
+Not verified, for the manual run: how Okta sends a group with more than 1,000 members (one request
+or batches; core refuses a request that changes more than 1,000), what `externalId` it sends for a
+group, and whether it reads `members` back.
 
 ### Entra
 
@@ -355,6 +528,15 @@ and [Customize attribute mappings](https://learn.microsoft.com/en-us/entra/ident
 7. **Test connection**, set the scope (assigned users and groups), turn provisioning on.
 8. The provider's issuer must be `https://login.microsoftonline.com/<tenant-guid>/v2.0` for `oid`
    claiming to apply.
+9. To push groups, set the connection's [groups target](#groups-target) first (with `none` every
+   `/Groups` request answers `403`). Under **Provisioning > Attribute Mapping**, enable the Groups
+   mapping and add the groups to the application's scope. Core creates each as a new group with no
+   roles; attach roles in the admin UI. Assign the users before their groups, and make them members of
+   the target organization if the target is one ([Skipped members](#skipped-members)).
+
+Not verified, for the manual run: how Entra sends a group with more than 1,000 members (one request
+or batches; core refuses a request that changes more than 1,000), what `externalId` it sends for a
+group (Microsoft's example maps `objectId` to it), and whether it reads `members` back.
 
 Entra's scope setting is about assigned users. Microsoft documents that a user who is unassigned,
 goes out of scope, or is soft-deleted or blocked from sign-in in Entra is disabled "via an update",
@@ -365,7 +547,7 @@ read 2026-11-12).
 
 ## Quirks accepted and limits
 
-- No Groups, bulk, sorting, ETags, enterprise-user attributes or password handling.
+- No bulk, sorting, ETags, nested groups, enterprise-user attributes, a `groups` attribute on the User resource or password handling. Groups are pushed only to a connection's own new groups: existing groups are never adopted.
 - A user's SCIM `userName` and `externalId` are the IdP's; core never rewrites them.
 - Test the real IdPs once before release: what each sends beyond the fixtures in
   `src/tests/fixtures/scim/` is recorded there.

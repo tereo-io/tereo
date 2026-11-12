@@ -893,7 +893,7 @@ tags:
   - name: Admin - Identity Provider Domains
     description: Admin endpoints for the email domains a provider claims — organization, default roles, auto-accept and SSO-only
   - name: Admin - Identity Provider SCIM
-    description: Admin endpoints for a provider's SCIM connection and tokens, and for unlinking a managed user. The `/scim/v2` protocol endpoints are described in `docs/scim.md`
+    description: Admin endpoints for a provider's SCIM connection, its tokens and groups target, and for unlinking a managed user. The `/scim/v2` protocol endpoints are described in `docs/scim.md`
   - name: Admin - Guests
     description: Admin endpoints for guest users — temporary single-organization logins that invite, extend, expire and promote
   - name: Password Setup
@@ -1208,6 +1208,10 @@ paths:
     $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups~1{id}~1members'
   /v1/admin/groups/{id}/members/{userId}:
     $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups~1{id}~1members~1{userId}'
+  /v1/admin/groups/{id}/scim:
+    $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups~1{id}~1scim'
+  /v1/admin/groups/{id}/scim/skipped-members:
+    $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups~1{id}~1scim~1skipped-members'
   /v1/admin/groups/{id}/roles:
     $ref: './paths/auth/admin/groups.yaml#/~1admin~1groups~1{id}~1roles'
   /v1/admin/roles:
