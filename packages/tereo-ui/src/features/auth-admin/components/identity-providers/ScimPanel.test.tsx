@@ -65,6 +65,35 @@ describe("ScimPanel", () => {
     expect(screen.queryByRole("button", { name: "Generate token" })).toBeNull();
   });
 
+  it.each([
+    ["a server error", 500],
+    ["a refusal", 403],
+    ["a network error", undefined],
+  ])("offers no Enable after %s, only a retry", async (_, status) => {
+    authMock.axios.get.mockRejectedValue(
+      Object.assign(new Error("Request failed"), {
+        isAxiosError: true,
+        response: status === undefined ? undefined : { status, data: {} },
+      })
+    );
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <ScimPanel providerId="p1" />
+      </QueryClientProvider>
+    );
+
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(screen.getByText(/could not be loaded/i)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Enable SCIM" })).toBeNull();
+
+    authMock.axios.get.mockResolvedValue({ data: connection });
+    fireEvent.click(retry);
+    expect(await screen.findByText(connection.baseUrl)).toBeVisible();
+  });
+
   it("creates the connection with PUT", async () => {
     renderPanel(null);
     authMock.axios.put.mockResolvedValue({ data: connection });

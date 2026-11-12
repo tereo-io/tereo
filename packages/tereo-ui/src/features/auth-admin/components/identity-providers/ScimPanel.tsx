@@ -32,7 +32,13 @@ const MAX_LIVE_TOKENS = 2;
 export const ScimPanel = ({ providerId }: ScimPanelProps) => {
   const { hasPermission } = useAuth();
   const canWrite = hasPermission("identity-providers.write");
-  const { data: connection, isLoading } = useScimConnection(providerId);
+  const {
+    data: connection,
+    isLoading,
+    isError,
+    refetch,
+    isFetching,
+  } = useScimConnection(providerId);
   const setConnection = useSetScimConnection();
   const deleteConnection = useDeleteScimConnection();
   const createToken = useCreateScimToken();
@@ -50,7 +56,26 @@ export const ScimPanel = ({ providerId }: ScimPanelProps) => {
     );
   }
 
-  if (!connection) {
+  // Only a 404 is "no connection" (null). Any other failure says nothing
+  // about the connection, and Enable could resume one an admin paused.
+  if (isError || connection === undefined) {
+    return (
+      <Card>
+        <SectionHeader title="SCIM" />
+        <p>The SCIM connection could not be loaded.</p>
+        <Button
+          variant="secondary"
+          size="sm"
+          isLoading={isFetching}
+          onClick={() => void refetch()}
+        >
+          Retry
+        </Button>
+      </Card>
+    );
+  }
+
+  if (connection === null) {
     return (
       <Card>
         <SectionHeader
