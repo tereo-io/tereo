@@ -69,6 +69,8 @@ scopes this service defines with `requireScope`.
 | `invalidateUser(...userIds)` | Nothing. Drops the cached lookup of each user, found or not | — |
 | `invalidateOrganization(...ids)` | Nothing. Drops the cached lookup of each organization, found or not | — |
 | `getService()` | `AuthServiceOwnService` — this service as core knows it: `slug`, `namespace`, `declarationVersion`, `declarationHash` and `declaredAt` of the provisioning document core last applied, and `access` (`{ kind, target, status, decidedAt }[]`). `GET /v1/account/service` over `CORE_CLIENT`; needs no permission. Throws when the client belongs to no service (404). Use it at start to check the deploy's document has been applied | None |
+| `authContextFromIntrospection(res)` | `AuthContext` — what `requireAuth` sets on `req.auth`, built from an active introspection response. Exported from the package, not a client method; for code that introspects tokens itself | — |
+| `hasPermission(userPermissions, required)` | `boolean` — the hierarchical check `requirePermission` applies. Exported from the package, not a client method | — |
 
 Introspection uses `POST /oauth/introspect` over `CORE_PUBLIC_CLIENT` (the service's credentials as
 Basic auth); users and organizations use `/v1/admin/users/:id` and `/v1/admin/organizations/:id` over

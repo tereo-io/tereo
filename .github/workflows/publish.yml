@@ -44,11 +44,11 @@ jobs:
       # Trusted publishing needs npm 11.5.1 or later; Node 22 ships npm 10.
       - run: npm install -g npm@11
 
-      # The SDK's build is tsc alone, and skipping install scripts keeps
+      # The SDK's and MCP package's builds are tsc alone, and skipping install scripts keeps
       # dependency code from running in a job that can publish.
       - run: npm ci --ignore-scripts
 
-      - run: npx nx run-many -t build --projects=@tereo-io/sdk
+      - run: npx nx run-many -t build --projects=@tereo-io/sdk,@tereo-io/mcp
 
       # npm authenticates through the package's trusted publisher (this
       # workflow's OIDC token); there is no npm token.
@@ -59,7 +59,7 @@ jobs:
           PROVENANCE: ${{ github.event.repository.private && '--no-provenance' || '--provenance' }}
         run: |
           AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
-          for name in $(node -p "require('./nx.json').release.groups.sdk.projects.join(' ')"); do
+          for name in $(node -p "const g = require('./nx.json').release.groups; [...g.sdk.projects, ...g.mcp.projects].join(' ')"); do
             version=$(npm pkg get version -w "$name" | node -p "Object.values(JSON.parse(require('fs').readFileSync(0)))[0]")
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version is already on npm"

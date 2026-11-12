@@ -1,6 +1,6 @@
-import type { ActiveIntrospectionResponse } from "../requests/auth/oauth/types.js";
 import { assertTestModeAllowed, parseTestToken } from "../utils/testTokens.js";
 import { setAuthSpanAttrs, setRequiredPermission } from "../utils/otel.js";
+import { authContextFromIntrospection } from "../utils/authContext.js";
 import type { Request, Response, NextFunction } from "express";
 import { getOriginalStatus, requests } from "../handler.js";
 import { hasPermission } from "../utils/permissions.js";
@@ -28,16 +28,6 @@ import type {
   AuthServiceOwnService,
   AuthServiceUser,
 } from "../types/auth.js";
-
-/**
- * Core sets a token's `sub` to the user it was issued for, or to the client's
- * own id for a client_credentials token. A session id is no guide: a person's
- * token minted without a refresh token has none.
- */
-export const tokenUserType = (
-  res: Pick<ActiveIntrospectionResponse, "sub" | "client_id">
-): AuthContext["userType"] =>
-  res.sub && res.sub !== res.client_id ? "human" : "service_account";
 
 // Extend Express Request type to include auth and organization context
 declare global {
@@ -431,20 +421,7 @@ export class AuthServiceClient {
         );
       }
 
-      req.auth = {
-        userId: res.user_id,
-        email: res.email || null,
-        name: res.name || null,
-        userType: tokenUserType(res),
-        permissions: res.permissions || [],
-        currentSessionId: res.sid || null,
-        clientId: res.client_id,
-        scope: res.scope ? res.scope.split(" ").filter(Boolean) : [],
-        audience: res.aud === undefined ? [] : [res.aud].flat(),
-        oauthClientId: res.client_id || null,
-        organizationId: res.org_id || null,
-        organizationName: res.org_name || null,
-      };
+      req.auth = authContextFromIntrospection(res);
 
       setAuthSpanAttrs(req.auth);
 

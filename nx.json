@@ -45,6 +45,13 @@
           "pattern": "{projectName}@{version}"
         }
       },
+      "mcp": {
+        "projects": ["@tereo-io/mcp"],
+        "projectsRelationship": "independent",
+        "releaseTag": {
+          "pattern": "{projectName}@{version}"
+        }
+      },
       "core": {
         "projects": ["tereo", "tereo-ui"],
         "projectsRelationship": "fixed",

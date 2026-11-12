@@ -1,0 +1,52 @@
+{
+  "name": "@tereo-io/mcp",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "packages/tereo-mcp/src",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "^build"
+      ],
+      "options": {
+        "command": "tsc",
+        "cwd": "packages/tereo-mcp"
+      },
+      "outputs": [
+        "{projectRoot}/dist"
+      ]
+    },
+    "check": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "^build"
+      ],
+      "options": {
+        "command": "tsc --noEmit",
+        "cwd": "packages/tereo-mcp"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run",
+        "cwd": "packages/tereo-mcp"
+      }
+    },
+    "test:docker": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run",
+        "cwd": "packages/tereo-mcp"
+      }
+    },
+    "clean": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "rm -rf dist tsconfig.tsbuildinfo",
+        "cwd": "packages/tereo-mcp"
+      }
+    }
+  }
+}
