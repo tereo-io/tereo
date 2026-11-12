@@ -46,7 +46,7 @@ changing needs `identity-providers.write`.
 | Route | Does |
 |-------|------|
 | `GET …/scim` | The connection: `baseUrl` (`${PUBLIC_URL}/scim/v2`), `isActive`, `lastUsedAt`, `managedUserCount` (deleted resources included, unlinked users not), and every token's `id`, `createdAt`, `lastUsedAt`, `revokedAt` (never its value). `404` when there is no connection |
-| `PUT …/scim` `{ isActive, groupsTarget? }` | Creates the connection (`201`) or sets `isActive` and the [groups target](#groups-target) (`200`). `409 scim_connection_exists` if two creates race, `409 scim_groups_exist` for a target the linked groups forbid |
+| `PUT …/scim` `{ isActive?, groupsTarget? }` | Creates the connection (`201`; `isActive` is required then) or sets `isActive` when given (leaving it out keeps it) and the [groups target](#groups-target) (`200`). `409 scim_connection_exists` if two creates race, `409 scim_groups_exist` for a target the linked groups forbid |
 | `DELETE …/scim` | Removes it (`204`), with the exclusions of users unlinked from it, and makes its pushed groups local ([Delete and unlink](#delete-and-unlink)). `409 scim_users_exist` while it manages any user (including deleted resources: unlink them first) |
 | `POST …/scim/tokens` | Mints a token (`201`, `{ id, token, createdAt }`); the value (`scim_…`) is in this response only. `409 scim_token_limit` at two unrevoked tokens |
 | `DELETE …/scim/tokens/{tokenId}` | Revokes one (`204`). `404` if unknown or already revoked |
@@ -83,8 +83,9 @@ managed; the response's `scimExcluded` is then `{ id: <provider id>, name: <prov
 
 Send the connection's token as `Authorization: Bearer scim_…`. A missing, unknown or revoked token,
 an inactive connection and an inactive provider all answer `401` with `WWW-Authenticate: Bearer`;
-the discovery endpoints need it too. Calls act as the system user and every audit entry carries
-`scimConnectionId` and `providerId`.
+the discovery endpoints need it too. Calls act as the system user and every User audit entry carries
+`scimConnectionId` and `providerId`; Group entries carry `scimConnectionId` only, and `scim_unlinked`
+adds `providerId`.
 
 Middleware runs in this order: a per-IP pre-auth rate limit, token authentication, a per-connection
 rate limit, then body parsing. Nothing is parsed before the token is known, so a bad body without a
@@ -372,8 +373,11 @@ with no administrator fails the whole request with `409`.
   `POST` with more than 1,000 members is refused.
 - Over either limit the answer is `400` with `scimType: "tooMany"` and nothing is applied.
 
-`POST /Groups` tries the derived slug, then up to 49 numbered suffixes (50 attempts in all); if none
-is free it answers `409`.
+`POST /Groups` derives the slug from `displayName` and, when that slug is taken in the connection's
+scope (archived groups keep theirs), takes the first free numbered one: `engineering`,
+`engineering-2`, `engineering-3`, and so on, with no fixed cap. A name with nothing slug-able becomes
+`group`. If a group outside the directory takes the chosen slug at the same moment, the create is
+retried a few times and then answers `409`.
 
 Each change takes one database authority lock, and the cap keeps one request well inside Postgres's
 shared lock table. How Okta and Entra send a group with more than 1,000 members, in one request or in
@@ -401,6 +405,9 @@ batches, is not verified: see the checklists.
 Entries are on entity `Group` with `scimConnectionId` in the metadata. Directory-driven entries have
 the system user as actor; an admin's unlink, and a connection delete, write `scim_unlinked` with the
 admin as actor.
+When a user leaves the connection's pushed groups (directory `DELETE /Users/{id}` or an admin unlink of
+the user), the `members_removed` entries on those groups have the system user as actor and
+`reason: scim_user_left`; the admin appears only on the user's own unlink entry.
 Events are the existing `auth.group.*` ones; their `definitionSource` and `membershipSource` can now
 be `scim`. A group-members entry is written only when someone is added or removed; a request that
 only changes what is recorded as skipped writes a `members_skipped` entry.
