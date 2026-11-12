@@ -54,7 +54,7 @@ export async function createTestClient(
   mcp: TereoMcp,
   opts: { token: string }
 ): Promise<{ client: Client; close(): Promise<void> }> {
-  const server = await mcp.listen(0, "127.0.0.1");
+  const server = await mcp.listen(0, "127.0.0.1", { signals: false });
   const client = new Client({
     name: "tereo-mcp-test-client",
     version: "0.0.0",

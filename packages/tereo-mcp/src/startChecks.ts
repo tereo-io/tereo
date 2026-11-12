@@ -1,5 +1,9 @@
 import type { OAuthMetadata } from "@modelcontextprotocol/server";
-import type { TereoMcpOptions, ToolDefinition } from "./types.js";
+import type {
+  ListenOptions,
+  TereoMcpOptions,
+  ToolDefinition,
+} from "./types.js";
 
 export interface StartState {
   resourceUrl: string;
@@ -63,6 +67,22 @@ const checkPermissions = (
 const checkPositiveInteger = (name: string, value: number | undefined) => {
   if (value !== undefined && !(Number.isInteger(value) && value > 0)) {
     fail(`${name} must be a positive integer, not ${String(value)}`);
+  }
+};
+
+export const checkListenOptions = (options: ListenOptions = {}): void => {
+  checkPositiveInteger("shutdownTimeoutMs", options.shutdownTimeoutMs);
+  const { signals } = options;
+  if (signals === undefined || signals === false) return;
+  if (!Array.isArray(signals)) {
+    fail("signals must be an array of signal names or false");
+  }
+  for (const signal of signals) {
+    if (typeof signal !== "string" || (signal as string) === "") {
+      fail(
+        `signals entry ${JSON.stringify(signal)} must be a non-empty string`
+      );
+    }
   }
 };
 

@@ -52,3 +52,12 @@ export interface TereoMcpOptions {
   maxResultBytes?: number;
   coreUrl?: string;
 }
+
+export interface ListenOptions {
+  /** Signals that shut the server down. Default ["SIGTERM", "SIGINT"]. `false`: the host handles signals itself. */
+  signals?: NodeJS.Signals[] | false;
+  /** How long close() waits for in-flight requests before dropping their connections. Default 25_000 ms. */
+  shutdownTimeoutMs?: number;
+  /** Runs after the server has closed, before the process exits: stop the core client, close Redis. */
+  onShutdown?: () => void | Promise<void>;
+}

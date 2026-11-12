@@ -3,6 +3,7 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import type { StartState } from "./startChecks.js";
 import { requestScope } from "./requestScope.js";
+import type { ListenOptions } from "./types.js";
 import { createVerifier } from "./verifier.js";
 import type { ServerDeps } from "./server.js";
 import type { AddressInfo } from "node:net";
@@ -79,11 +80,14 @@ export interface Listening {
 }
 
 const LOOPBACK = ["127.0.0.1", "localhost", "::1"];
+const DEFAULT_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGINT"];
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 25_000;
 
 export const listenOn = async (
   started: Started,
   port: number,
-  host = "0.0.0.0"
+  host = "0.0.0.0",
+  listenOptions: ListenOptions = {}
 ): Promise<Listening> => {
   const { options, logger } = started;
   const loopback = LOOPBACK.includes(host);
@@ -138,21 +142,99 @@ export const listenOn = async (
         ? `[${host}]`
         : host;
 
+  const timeoutMs =
+    listenOptions.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
+  const signals =
+    listenOptions.signals === false
+      ? []
+      : (listenOptions.signals ?? DEFAULT_SIGNALS);
+  let shuttingDown = false;
+  let drainTimedOut = false;
+
   let closing: Promise<void> | undefined;
   const close = () =>
     (closing ??= (async () => {
+      // On the signal path the listeners stay until exit, to catch a second signal.
+      if (!shuttingDown) removeSignalListeners();
       // Connections that go idle after their last response must not hold close() open.
       const sweep = setInterval(() => server.closeIdleConnections(), 50);
+      let deadline: NodeJS.Timeout | undefined;
       try {
         await new Promise<void>((resolve) => {
           server.close(() => resolve());
           server.closeIdleConnections();
+          deadline = setTimeout(() => {
+            drainTimedOut = true;
+            logger.warn(
+              { timeout_ms: timeoutMs },
+              "MCP server dropped requests still running at the shutdown deadline"
+            );
+            server.closeAllConnections();
+          }, timeoutMs);
         });
       } finally {
         clearInterval(sweep);
+        clearTimeout(deadline);
       }
       await route.close();
     })());
+
+  const runOnShutdown = async (): Promise<boolean> => {
+    const onShutdown = listenOptions.onShutdown;
+    if (!onShutdown) return true;
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+    });
+    try {
+      const settled = await Promise.race([
+        Promise.resolve()
+          .then(onShutdown)
+          .then(() => true as const),
+        timedOut,
+      ]);
+      if (!settled) {
+        logger.error(
+          { timeout_ms: timeoutMs },
+          "MCP server shutdown timed out"
+        );
+      }
+      return settled;
+    } catch (err) {
+      logger.error({ err }, "MCP server shutdown failed");
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const shutDown = async (signal: NodeJS.Signals) => {
+    logger.info({ signal }, "MCP server shutting down");
+    let ok = true;
+    try {
+      await close();
+      if (drainTimedOut) ok = false;
+    } catch (err) {
+      logger.error({ err }, "MCP server shutdown failed");
+      ok = false;
+    }
+    if (!(await runOnShutdown())) ok = false;
+    process.exit(ok ? 0 : 1);
+  };
+
+  const onSignal = (signal: NodeJS.Signals) => {
+    if (shuttingDown) {
+      logger.warn({ signal }, "MCP server forced to exit");
+      process.exit(1);
+      return;
+    }
+    shuttingDown = true;
+    void shutDown(signal);
+  };
+  const removeSignalListeners = () => {
+    for (const signal of signals) process.off(signal, onSignal);
+  };
+  for (const signal of signals) process.on(signal, onSignal);
 
   return {
     port: bound,

@@ -57,15 +57,19 @@ describe("createTestClient", () => {
 
     let listenedUrl = "";
     const listen = mcp.listen.bind(mcp);
-    mcp.listen = async (port, host) => {
-      const server = await listen(port, host);
+    mcp.listen = async (port, host, opts) => {
+      const server = await listen(port, host, opts);
       listenedUrl = server.url;
       return server;
     };
+    const term = process.listenerCount("SIGTERM");
+    const int = process.listenerCount("SIGINT");
 
     const { client, close } = await createTestClient(mcp, {
       token: "test-token-u1|client=claude|perms=",
     });
+    expect(process.listenerCount("SIGTERM")).toBe(term);
+    expect(process.listenerCount("SIGINT")).toBe(int);
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual(["ping"]);
     const result = await client.callTool({ name: "ping", arguments: {} });

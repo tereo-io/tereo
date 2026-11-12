@@ -1,9 +1,13 @@
-import type { TereoMcpOptions, ToolDefinition } from "./types.js";
+import { checkListenOptions, runStartChecks } from "./startChecks.js";
 import { createRateLimiter } from "./rateLimit.js";
-import { runStartChecks } from "./startChecks.js";
 import { ToolRegistry } from "./registry.js";
 import type { Router } from "express";
 import pino from "pino";
+import type {
+  ListenOptions,
+  TereoMcpOptions,
+  ToolDefinition,
+} from "./types.js";
 import {
   createRouter,
   listenOn,
@@ -14,7 +18,11 @@ import {
 export interface TereoMcp {
   define<I>(tool: ToolDefinition<I>): void;
   router(): Promise<Router>;
-  listen(port: number, host?: string): Promise<Listening>;
+  listen(
+    port: number,
+    host?: string,
+    options?: ListenOptions
+  ): Promise<Listening>;
 }
 
 const DEFAULT_PER_MINUTE = 120;
@@ -54,6 +62,9 @@ export const createTereoMcp = (options: TereoMcpOptions): TereoMcp => {
   return {
     define: (tool) => registry.define(tool as ToolDefinition),
     router: async () => createRouter(await start()),
-    listen: async (port, host) => listenOn(await start(), port, host),
+    listen: async (port, host, listenOptions) => {
+      checkListenOptions(listenOptions);
+      return listenOn(await start(), port, host, listenOptions);
+    },
   };
 };

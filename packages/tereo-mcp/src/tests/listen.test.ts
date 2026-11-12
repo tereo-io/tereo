@@ -1,10 +1,10 @@
 import { createServer, request, type Server as HttpServer } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Listening, ListenOptions } from "../index.js";
 import type { TereoMcpOptions } from "../types.js";
 import { fakeCore } from "./support/fakeCore.js";
 import { createTereoMcp } from "../tereoMcp.js";
 import { connect } from "./support/connect.js";
-import type { Listening } from "../index.js";
 import type { AddressInfo } from "node:net";
 import type { Logger } from "pino";
 import express from "express";
@@ -26,7 +26,10 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((fn) => fn()));
 });
 
-async function setup(extra: Partial<TereoMcpOptions> = {}) {
+async function setup(
+  extra: Partial<TereoMcpOptions> = {},
+  listenOptions: ListenOptions = { signals: false }
+) {
   const coreApp = express();
   coreApp.get("/core/.well-known/oauth-authorization-server", (_req, res) => {
     res.json(metadata);
@@ -44,6 +47,8 @@ async function setup(extra: Partial<TereoMcpOptions> = {}) {
   const gate = new Promise<void>((resolve) => (release = resolve));
   let entered!: () => void;
   const inHandler = new Promise<void>((resolve) => (entered = resolve));
+  let enteredHang!: () => void;
+  const inHang = new Promise<void>((resolve) => (enteredHang = resolve));
 
   const lines: Record<string, unknown>[] = [];
   const logger = pino(
@@ -73,9 +78,20 @@ async function setup(extra: Partial<TereoMcpOptions> = {}) {
       return "finished";
     },
   });
-  const server: Listening = await mcp.listen(0, "127.0.0.1");
+  mcp.define({
+    name: "hang",
+    description: "Never returns",
+    permission: "q.items.read",
+    readOnly: true,
+    input: z.object({}),
+    handler: () => {
+      enteredHang();
+      return new Promise(() => undefined);
+    },
+  });
+  const server: Listening = await mcp.listen(0, "127.0.0.1", listenOptions);
   cleanups.push(() => server.close());
-  return { mcp, server, release, inHandler, lines };
+  return { mcp, server, release, inHandler, inHang, lines };
 }
 
 const raw = (
@@ -187,6 +203,82 @@ describe("listen", () => {
     ).rejects.toThrow();
     await expect(server.close()).resolves.toBeUndefined();
     await client.close().catch(() => undefined);
+  });
+
+  it("drops a request still running at shutdownTimeoutMs, and close() resolves", async () => {
+    const { server, inHang } = await setup(
+      {},
+      { signals: false, shutdownTimeoutMs: 200 }
+    );
+    const client = await connect(server.url, token);
+
+    const call = client.callTool(
+      { name: "hang", arguments: {} },
+      {
+        timeout: 5_000,
+      }
+    );
+    const outcome = call.then(
+      () => "answered",
+      (err: Error) => err
+    );
+    await inHang;
+    const started = Date.now();
+    await server.close();
+
+    expect(Date.now() - started).toBeLessThan(2_000);
+    const dropped = await outcome;
+    expect(dropped).toBeInstanceOf(Error);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    await client.close().catch(() => undefined);
+  });
+
+  it("with signals: false installs no signal listeners", async () => {
+    const term = process.listenerCount("SIGTERM");
+    const int = process.listenerCount("SIGINT");
+
+    const { server } = await setup({}, { signals: false });
+
+    expect(process.listenerCount("SIGTERM")).toBe(term);
+    expect(process.listenerCount("SIGINT")).toBe(int);
+    await server.close();
+    expect(process.listenerCount("SIGTERM")).toBe(term);
+    expect(process.listenerCount("SIGINT")).toBe(int);
+  });
+
+  it("by default listens for SIGTERM and SIGINT once each, and close() removes them", async () => {
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    try {
+      const term = process.listenerCount("SIGTERM");
+      const int = process.listenerCount("SIGINT");
+
+      const { server } = await setup({}, {});
+
+      expect(process.listenerCount("SIGTERM")).toBe(term + 1);
+      expect(process.listenerCount("SIGINT")).toBe(int + 1);
+      await server.close();
+      expect(process.listenerCount("SIGTERM")).toBe(term);
+      expect(process.listenerCount("SIGINT")).toBe(int);
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      exit.mockRestore();
+    }
+  });
+
+  it.each([
+    [{ shutdownTimeoutMs: 0 }, /shutdownTimeoutMs/],
+    [{ shutdownTimeoutMs: 1.5 }, /shutdownTimeoutMs/],
+    [{ shutdownTimeoutMs: Number.NaN }, /shutdownTimeoutMs/],
+    [{ signals: [""] as unknown as NodeJS.Signals[] }, /signals/],
+  ])("refuses listen options %o", async (bad, message) => {
+    const { mcp } = await setup();
+
+    const attempt = mcp.listen(0, "127.0.0.1", { signals: false, ...bad });
+
+    await expect(attempt).rejects.toThrow(/cannot start/);
+    await expect(attempt).rejects.toThrow(message);
   });
 
   describe("allowedOrigins", () => {

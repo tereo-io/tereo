@@ -110,14 +110,43 @@ that tool is left out for that request.
   `hostHeaderValidation` and `originValidation` from `@modelcontextprotocol/express`. It also owns
   error handling: install a final JSON error handler, or Express answers a malformed body with its
   HTML error page, which outside production carries the stack.
-- `await mcp.listen(port, host?)` builds a standalone app, bound to `0.0.0.0` by default, that
-  accepts the host of `publicUrl` (plus loopback names when `host` is loopback), and adds
+- `await mcp.listen(port, host?, options?)` builds a standalone app, bound to `0.0.0.0` by default,
+  that accepts the host of `publicUrl` (plus loopback names when `host` is loopback), and adds
   `GET /health`. It answers a request it rejects (a malformed JSON body, say) with JSON:
   `{ "error": "invalid_request" }` and the 4xx status, or `500 { "error": "server_error" }`. It
   resolves `{ port, url, close }` (type `Listening`): `port` is the bound port (pass `0` to pick
-  one), `url` the endpoint as reached locally, and `close()` stops accepting connections, closes the
-  MCP handler and resolves when in-flight calls finish. It has no deadline: a handler that never
-  returns keeps `close()` waiting, so bound it with your own timeout if needed.
+  one), `url` the endpoint as reached locally, and `close()` stops accepting connections, waits for
+  in-flight calls to finish, and closes the MCP handler. Calls still running after
+  `shutdownTimeoutMs` have their connections dropped and `close()` resolves anyway. `close()` also
+  removes the signal listeners that `listen` installed.
+
+### Shutdown
+
+`listen`'s third parameter (type `ListenOptions`) controls shutdown:
+
+| Option | Default | |
+|--------|---------|---|
+| `signals` | `["SIGTERM", "SIGINT"]` | Signals that shut the server down. `false`: install no listeners; the host handles signals itself and calls `close()` |
+| `shutdownTimeoutMs` | `25000` | How long `close()` waits for in-flight calls before dropping their connections; also bounds `onShutdown`. A positive integer |
+| `onShutdown` | none | Runs after the server has closed, before the process exits: stop the core client, close Redis |
+
+With signals handled, `listen` owns the exit: on the first signal it logs `MCP server shutting down`,
+runs `close()`, then `onShutdown`, and then **exits the process** with code `0`. The exit code is
+`1` if the drain deadline was hit, if `close()` or `onShutdown` threw (logged at error as
+`MCP server shutdown failed`), or if `onShutdown` had not settled within `shutdownTimeoutMs`. A
+second signal during shutdown exits with `1` at once. Wire it like this:
+
+```ts
+const server = await mcp.listen(4002, undefined, {
+  onShutdown: async () => { await core.stop(); redis.disconnect(); },
+});
+```
+
+The SDK's request handler stops itself on the same signals and leaves the exit to any host that
+listens for them, so without this a served process either lingers with its core client stopped,
+refusing every token, or is killed mid-call. Tool handlers still running during the drain can no
+longer call core, because the handler refuses new work once stopped, so such a call ends as an
+internal error. `router()` installs no listeners and never exits: the host app owns its shutdown.
 
 Browsers send an `Origin` header; other MCP clients do not, and a request without one is allowed.
 With `allowedOrigins`, `listen` allows a browser request only from those origins, compared by
@@ -261,5 +290,6 @@ await stubCore.close();
 ```
 
 `startStubCore()` serves only core's authorization-server metadata, on a loopback port, so the start
-checks pass; it answers nothing else. `createTestClient` calls `mcp.listen(0, "127.0.0.1")`, so the
-start checks run, including the fetch of that metadata. `close()` stops the client and the server.
+checks pass; it answers nothing else. `createTestClient` calls
+`mcp.listen(0, "127.0.0.1", { signals: false })`, so the start checks run, including the fetch of
+that metadata, and the test process gains no signal listeners. `close()` stops the client and the server.
