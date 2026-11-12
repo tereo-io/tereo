@@ -8,6 +8,14 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../utils/db/prisma.js";
 import { fetchJson } from "../../support/http.js";
 import { tag } from "../../support/scimUsers.js";
+import {
+  localGroupWith,
+  managedUser,
+  memberIds,
+  orgConnection,
+  pushedGroup,
+  skippedIds,
+} from "../../support/scimGroups.js";
 
 const PATCH_OP = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 
@@ -118,5 +126,38 @@ describe("SCIM unlink and release", () => {
       idpActive: true,
       adminHold: false,
     });
+  });
+
+  it("takes an unlinked user out of the connection's groups and keeps their local ones", async () => {
+    const c = await orgConnection();
+    const user = await managedUser(c);
+    const other = await managedUser(c);
+    const first = await pushedGroup(c, [user.id, other.id]);
+    const second = await pushedGroup(c, [user.id]);
+    const third = await pushedGroup(c, [other.id], [user.id]);
+    const local = await localGroupWith(c, user.id);
+
+    const unlinked = await fetchJson(
+      "DELETE",
+      `${BASE_URL}/v1/admin/users/${user.id}/scim`,
+      writer
+    );
+    expect(unlinked.status).toBe(204);
+
+    expect(await memberIds(first.id)).toEqual([other.id]);
+    expect(await memberIds(second.id)).toEqual([]);
+    expect(await skippedIds(third.id)).toEqual([]);
+    expect(await memberIds(local.id)).toEqual([user.id]);
+    const entries = await prisma.auditLogEntry.findMany({
+      where: {
+        entityType: "Group",
+        entityId: { in: [first.id, second.id] },
+        metadata: { path: ["action"], equals: "members_removed" },
+      },
+    });
+    expect(entries).toHaveLength(2);
+    for (const e of entries) {
+      expect(e.metadata).toMatchObject({ reason: "scim_user_left" });
+    }
   });
 });

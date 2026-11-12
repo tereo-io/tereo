@@ -1,7 +1,13 @@
-import { createScimConnection, scimFetch, setGroupsTarget } from "./scim.js";
+import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { makeUser, manage, tag } from "./scimUsers.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { joinOrg } from "./groups.js";
+import {
+  createScimConnection,
+  pushGroup,
+  scimFetch,
+  setGroupsTarget,
+} from "./scim.js";
 
 export const PATCH_OP = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 
@@ -28,6 +34,47 @@ export const managedUser = async (
   await manage(c.connectionId, user.id, user.email);
   if (opts.inOrg ?? true) await joinOrg(c.organizationId, user.id);
   return user;
+};
+
+/** A local group in the connection's organization with `userId` as its member. */
+export const localGroupWith = async (c: ScimTestConnection, userId: string) => {
+  const group = await prisma.group.create({
+    data: {
+      organizationId: c.organizationId,
+      slug: `local-${tag()}`,
+      name: "Local group",
+      definitionSource: "local",
+      createdBy: SYSTEM_USER_ID,
+    },
+  });
+  await prisma.groupMember.create({
+    data: { groupId: group.id, userId, addedBy: SYSTEM_USER_ID },
+  });
+  return group;
+};
+
+/** Pushes a group with the members, then records `skipped` as skipped there. */
+export const pushedGroup = async (
+  c: ScimTestConnection,
+  members: string[],
+  skipped: string[] = []
+) => {
+  const pushed = await pushGroup(c.token, {
+    displayName: `G ${tag()}`,
+    members: asMembers(...members),
+  });
+  const id = pushed.body.id as string;
+  const link = await prisma.scimGroup.findUniqueOrThrow({
+    where: { groupId: id },
+  });
+  await prisma.scimGroupSkippedMember.createMany({
+    data: skipped.map((userId) => ({
+      scimGroupId: link.id,
+      userId,
+      reason: "not_org_member" as const,
+    })),
+  });
+  return { id, lastModified: pushed.body.meta.lastModified as string };
 };
 
 export const putGroup = (token: string, id: string, body: unknown) =>

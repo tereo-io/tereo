@@ -8,6 +8,15 @@ import {
   sessionLifecycleHelpers,
 } from "../../../../../support/auth/sessionLifecycle.js";
 import {
+  getGroup,
+  localGroupWith,
+  managedUser as groupMember,
+  memberIds,
+  orgConnection,
+  pushedGroup,
+  skippedIds,
+} from "../../../../../support/scimGroups.js";
+import {
   makeUser,
   manage,
   signedInManagedUser,
@@ -133,5 +142,81 @@ describe("DELETE /scim/v2/Users/:id", () => {
       expect((await del(c.token, u.id)).status).toBe(404);
       expect(await withLink(u.id)).toEqual(before);
     }
+  });
+
+  describe("the user's pushed groups", () => {
+    const events = async (groupId: string) =>
+      (
+        await prisma.outbox.findMany({
+          where: { payload: { path: ["entityId"], equals: groupId } },
+        })
+      ).map((row) => (row.payload as { eventType?: string }).eventType);
+
+    it("removes them from every pushed group, archived ones too, and deletes their skipped records", async () => {
+      const c = await orgConnection();
+      const user = await groupMember(c);
+      const other = await groupMember(c);
+      const first = await pushedGroup(c, [user.id, other.id]);
+      const second = await pushedGroup(c, [user.id]);
+      const archived = await pushedGroup(c, [user.id]);
+      const skippedOnly = await pushedGroup(c, [other.id], [user.id]);
+      await prisma.group.update({
+        where: { id: archived.id },
+        data: { archivedAt: new Date() },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect((await del(c.token, user.id)).status).toBe(204);
+
+      expect(await memberIds(first.id)).toEqual([other.id]);
+      expect(await memberIds(second.id)).toEqual([]);
+      expect(await memberIds(archived.id)).toEqual([]);
+      expect(await skippedIds(skippedOnly.id)).toEqual([]);
+      expect(await memberIds(skippedOnly.id)).toEqual([other.id]);
+
+      for (const id of [first.id, second.id, archived.id]) {
+        const [entry] = await prisma.auditLogEntry.findMany({
+          where: {
+            entityType: "Group",
+            entityId: id,
+            metadata: { path: ["action"], equals: "members_removed" },
+          },
+        });
+        expect(entry.metadata).toMatchObject({
+          reason: "scim_user_left",
+          scimConnectionId: c.connectionId,
+        });
+        expect(await events(id)).toContain("auth.group.members-removed");
+      }
+      expect(await events(skippedOnly.id)).not.toContain(
+        "auth.group.members-removed"
+      );
+      const read = await getGroup(c.token, first.id);
+      expect(Date.parse(read.body.meta.lastModified)).toBeGreaterThan(
+        Date.parse(first.lastModified)
+      );
+    });
+
+    it("keeps their memberships on active:false", async () => {
+      const c = await orgConnection();
+      const user = await groupMember(c);
+      const group = await pushedGroup(c, [user.id]);
+      const r = await scimFetch(c.token, "PATCH", `/scim/v2/Users/${user.id}`, {
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        Operations: [{ op: "replace", path: "active", value: false }],
+      });
+      expect(r.status).toBe(200);
+      expect(await memberIds(group.id)).toEqual([user.id]);
+    });
+
+    it("leaves other connections' groups and local groups alone", async () => {
+      const c = await orgConnection();
+      const user = await groupMember(c);
+      const mine = await pushedGroup(c, [user.id]);
+      const local = await localGroupWith(c, user.id);
+      expect((await del(c.token, user.id)).status).toBe(204);
+      expect(await memberIds(mine.id)).toEqual([]);
+      expect(await memberIds(local.id)).toEqual([user.id]);
+    });
   });
 });

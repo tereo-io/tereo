@@ -473,3 +473,57 @@ export const patchScimGroup = async (
   groupId: string,
   ops: GroupPatchOp[]
 ): Promise<ScimGroupView> => await changeScimGroup(ctx, groupId, ops);
+
+/**
+ * Takes the locks a user's leaving the connection needs, in the order the
+ * header of `utils/groups.ts` gives: the user's authority lock, then the row of
+ * every pushed group they are in, ascending. A caller takes them before the
+ * user's row lock and before `assertAdminRemains`, as a group write does, and
+ * never locks the connection row after them. Returns the group ids.
+ */
+export const lockScimGroupsForUser = async (
+  tx: Tx,
+  connectionId: string,
+  userId: string
+): Promise<string[]> => {
+  await db.users.lockAuthority(userId, tx);
+  const ids = (
+    await db.scimGroups.groupIdsForMember(connectionId, userId, tx)
+  ).sort();
+  await db.groups.lockGroups(ids, tx);
+  return ids;
+};
+
+/**
+ * Removes the user from every group linked to the connection, archived ones
+ * too, and deletes their skipped records there. Lock order: the user's
+ * authority lock, the groups, then `assertAdminRemains` inside each removal;
+ * the connection row is not locked. A caller that takes the user's row lock or
+ * the last-admin lock itself first calls `lockScimGroupsForUser` before
+ * either, and runs `afterGroupChange` on the result once the transaction
+ * commits.
+ */
+export const leaveScimGroupsTx = async (
+  tx: Tx,
+  connectionId: string,
+  userId: string
+): Promise<Pick<GroupChange, "affectedUserIds" | "revokedJtis">> => {
+  const groupIds = await lockScimGroupsForUser(tx, connectionId, userId);
+  const actor: GroupActor = {
+    mode: "scim",
+    connectionId,
+    reason: "scim_user_left",
+  };
+  const affected = new Set<string>();
+  const revokedJtis: string[] = [];
+  for (const groupId of groupIds) {
+    const change = await removeMembers(actor, groupId, [userId], tx);
+    if (change.removed.length === 0) continue;
+    const link = await db.scimGroups.getLinkByGroup(groupId, tx);
+    if (link) await db.scimGroups.touchLink(link.id, tx);
+    for (const id of change.affectedUserIds) affected.add(id);
+    revokedJtis.push(...change.revokedJtis);
+  }
+  await db.scimGroups.clearSkippedForUser(connectionId, userId, tx);
+  return { affectedUserIds: [...affected], revokedJtis };
+};

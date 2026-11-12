@@ -80,7 +80,7 @@ export type GroupActor =
       callerOrgRole: OrgMemberRole | null;
     }
   | { mode: "provisioning" }
-  | { mode: "scim"; connectionId: string };
+  | { mode: "scim"; connectionId: string; reason?: string };
 
 export interface GroupChange {
   group: Group;
@@ -117,7 +117,12 @@ const actorUserId = (actor: GroupActor): string =>
 
 /** Audit detail naming the connection a directory-driven change came through. */
 const scimDetail = (actor: GroupActor) =>
-  actor.mode === "scim" ? { scimConnectionId: actor.connectionId } : {};
+  actor.mode === "scim"
+    ? {
+        scimConnectionId: actor.connectionId,
+        ...(actor.reason && { reason: actor.reason }),
+      }
+    : {};
 
 const unique = (ids: string[]): string[] => [...new Set(ids)].sort();
 

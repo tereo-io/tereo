@@ -248,4 +248,89 @@ describe("SCIM group changes racing", { tags: ["race"] }, () => {
     );
     expect(bodyMemberIds(next.body)).toEqual([other.id]);
   });
+
+  it("a PATCH adding a user concurrent with their SCIM DELETE ends with them in no pushed group", async () => {
+    const c = await orgConnection();
+    for (let round = 0; round < 4; round++) {
+      const user = await managedUser(c);
+      const pushed = await pushGroup(c.token, { displayName: `Gone ${tag()}` });
+      const id = pushed.body.id;
+
+      // Whichever of the two reaches the user's authority lock second runs
+      // after the other; round parity chooses which one that is.
+      const release = await holdLocks((tx) =>
+        db.users.lockAuthority(user.id, tx)
+      );
+      let responses;
+      try {
+        const add = () =>
+          patchGroup(
+            c.token,
+            id,
+            patchOps({ op: "add", path: "members", value: asMembers(user.id) })
+          );
+        const remove = () =>
+          scimFetch(c.token, "DELETE", `/scim/v2/Users/${user.id}`);
+        const [first, second] = round % 2 === 0 ? [add, remove] : [remove, add];
+        const firstResponse = first();
+        await waitForAuthorityLockWait(user.id);
+        const secondResponse = second();
+        await new Promise((r) => setTimeout(r, 100));
+        responses = Promise.all([firstResponse, secondResponse]);
+      } finally {
+        await release();
+      }
+      const [x, y] = await responses;
+      expect(x.status, JSON.stringify(x.body)).toBeLessThan(500);
+      expect(y.status, JSON.stringify(y.body)).toBeLessThan(500);
+      expect(await memberIds(id)).toEqual([]);
+      expect(await skippedIds(id)).toEqual([]);
+    }
+  });
+
+  it("a SCIM user DELETE and a member removal in the same global group do not deadlock", async () => {
+    const c = await createScimConnection();
+    await setGroupsTarget(c.connectionId, { kind: "global" });
+    for (let round = 0; round < 3; round++) {
+      const leaving = await managedWith(c);
+      const staying = await managedWith(c);
+      const pushed = await pushGroup(c.token, {
+        displayName: `Gl ${tag()}`,
+        members: asMembers(leaving.id, staying.id),
+      });
+      const id = pushed.body.id;
+      // The DELETE holds the group row and waits on the administrator guard;
+      // the group write queues behind that row, so the guard must come after
+      // the group on both paths.
+      const release = await holdLocks(
+        (tx) =>
+          tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('core:admin-remains', 0))`
+      );
+      let responses;
+      try {
+        const deleting = scimFetch(
+          c.token,
+          "DELETE",
+          `/scim/v2/Users/${leaving.id}`
+        );
+        await waitForLockWait("%core:admin-remains%", 10_000, 1);
+        const removing = patchGroup(
+          c.token,
+          id,
+          patchOps({
+            op: "remove",
+            path: `members[value eq "${staying.id}"]`,
+          })
+        );
+        await new Promise((r) => setTimeout(r, 150));
+        responses = Promise.all([deleting, removing]);
+      } finally {
+        await release();
+      }
+      const [deleted, removed] = await responses;
+      expect(deleted.status, JSON.stringify(deleted.body)).toBe(204);
+      expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+      expect(await memberIds(id)).toEqual([]);
+    }
+  });
 });
