@@ -265,6 +265,22 @@ export const findLiveConflict = async (
   return byExternal ? { id: byExternal.id } : null;
 };
 
+/**
+ * Whether a live link of the provider's connection names a user with no
+ * identity at the provider: a standing invite its next sign-in may claim.
+ */
+export const hasUnclaimedLinks = async (providerId: string, tx?: Tx) => {
+  const row = await (tx ?? prisma).scimUser.findFirst({
+    where: {
+      connection: { providerId },
+      ...LIVE,
+      user: { identities: { none: { providerId } } },
+    },
+    select: { id: true },
+  });
+  return row !== null;
+};
+
 interface VisibilityScope {
   connectionId: string;
   providerId: string;

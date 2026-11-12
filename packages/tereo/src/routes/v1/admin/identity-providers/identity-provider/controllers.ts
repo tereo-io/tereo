@@ -6,6 +6,7 @@ import { formatProvider } from "../../../../../utils/identityProviders/format.js
 import { assertAdminCanSignInWithout } from "../../../../../utils/adminGuard.js";
 import { BadRequestError, ConflictError } from "../../../../../utils/errors.js";
 import { adapterFor } from "../../../../../utils/identityProviders/index.js";
+import { assertMayRedirectScim } from "../../../../../utils/scim/tokens.js";
 import { mapUniqueViolation } from "../../../../../utils/prismaErrors.js";
 import { sealRowSecret } from "../../../../../utils/sealedSecrets.js";
 import type { AuthContext } from "../../../../../middleware/auth.js";
@@ -63,6 +64,13 @@ const assertMayRepointSsoOnly = (
     tx
   );
 
+// A SCIM user with no identity at the provider is a standing invite too.
+const invitesPending = () =>
+  new ConflictError(
+    "The issuer cannot change while identity invites for this provider are pending; withdraw them first",
+    "provider_has_invites"
+  );
+
 /**
  * The trust behind countsAsMfa is in who asserts the identity, so moving a
  * provider that has it to another issuer or client grants it anew.
@@ -79,11 +87,33 @@ const grantsMfaTrust = (
   );
 };
 
+/** A new secret cannot be compared with the sealed one, so any counts. */
+const movesScim = (
+  row: { issuer: string | null; clientId: string },
+  body: { issuer?: string; clientId?: string; clientSecret?: string }
+) =>
+  (body.issuer !== undefined && body.issuer !== row.issuer) ||
+  (body.clientId !== undefined && body.clientId !== row.clientId) ||
+  body.clientSecret !== undefined;
+
+const assertMayMoveScim = (
+  auth: Pick<AuthContext, "userId" | "ceiling">,
+  id: string,
+  tx?: Prisma.TransactionClient
+) =>
+  assertMayRedirectScim(
+    auth,
+    id,
+    "Only an administrator (global admin) can change the issuer, client ID or secret of a provider with a SCIM connection",
+    tx
+  );
+
 export const updateIdentityProvider = async (req: Request, res: Response) => {
   const auth = validateUser(req);
   const { id } = validateParams(IdentityProviderIdParamSchema, req);
   const body = validateBody(UpdateIdentityProviderSchema, req);
   const existing = await db.identityProviders.get(id);
+  if (movesScim(existing, body)) await assertMayMoveScim(auth, id);
 
   if (body.slug !== undefined && body.slug !== existing.slug) {
     if (RESERVED_SLUGS.includes(body.slug)) {
@@ -120,11 +150,11 @@ export const updateIdentityProvider = async (req: Request, res: Response) => {
         "issuer_in_use"
       );
     }
-    if (await db.identityProviders.hasPendingInvites(id)) {
-      throw new ConflictError(
-        "The issuer cannot change while identity invites for this provider are pending; withdraw them first",
-        "provider_has_invites"
-      );
+    if (
+      (await db.identityProviders.hasPendingInvites(id)) ||
+      (await db.scim.hasUnclaimedLinks(id))
+    ) {
+      throw invitesPending();
     }
   }
 
@@ -176,6 +206,14 @@ export const updateIdentityProvider = async (req: Request, res: Response) => {
     // Again on the locked row: a concurrent PATCH could have turned the flag
     // on, or a domain SSO-only, since the checks above.
     const current = await db.identityProviders.lockForUpdate(id, tx);
+    if (movesScim(current, body)) await assertMayMoveScim(auth, id, tx);
+    if (
+      body.issuer !== undefined &&
+      body.issuer !== current.issuer &&
+      (await db.scim.hasUnclaimedLinks(id, tx))
+    ) {
+      throw invitesPending();
+    }
     if (grantsMfaTrust(current, body)) await assertMayCountAsMfa(auth);
     if (await repointsSsoOnly(id, current, body, tx)) {
       await assertMayRepointSsoOnly(auth, tx);
@@ -252,6 +290,16 @@ const setActive = async (req: Request, res: Response, isActive: boolean) => {
       id,
       tx
     );
+    // An inactive provider is a paused SCIM connection: resuming it is
+    // enabling it again.
+    if (isActive && !wasActive) {
+      await assertMayRedirectScim(
+        auth,
+        id,
+        "Only an administrator (global admin) can activate a provider with a SCIM connection",
+        tx
+      );
+    }
     // SSO-only users could not sign in at all.
     if (!isActive && (await db.identityProviders.hasSsoOnlyDomain(id, tx))) {
       throw new ConflictError(

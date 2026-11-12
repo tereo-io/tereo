@@ -3,6 +3,7 @@
 
 import { ensurePermission } from "../../../../../../support/testService.js";
 import { generateUniqueId } from "../../../../../../support/auth/crypto.js";
+import { SYSTEM_USER_ID } from "../../../../../../../definitions/index.js";
 import { createTestRole } from "../../../../../../support/auth/users.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
@@ -248,6 +249,32 @@ describe("GET and POST /v1/admin/identity-providers/:id/domains", () => {
       roleIds: [system.id],
     });
     expect(response.status).toBe(403);
+  });
+
+  it("needs a global admin to add a domain to a provider with a SCIM connection", async () => {
+    const adminToken = await getTestPrincipalToken({ permissions: ["admin"] });
+    const plain = await newProvider();
+    const scim = await newProvider();
+    await prisma.scimConnection.create({
+      data: { providerId: scim.id, createdBy: SYSTEM_USER_ID },
+    });
+    const name = () => `scimdom-${generateUniqueId().toLowerCase()}.com`;
+
+    const refused = name();
+    expect(
+      (await postDomain(writeToken, scim.id, { domain: refused })).status
+    ).toBe(403);
+    expect(
+      await prisma.identityProviderDomain.findUnique({
+        where: { domain: refused },
+      })
+    ).toBeNull();
+    expect(
+      (await postDomain(adminToken, scim.id, { domain: name() })).status
+    ).toBe(201);
+    expect(
+      (await postDomain(writeToken, plain.id, { domain: name() })).status
+    ).toBe(201);
   });
 
   it("lets only a global admin make a domain SSO-only (POST /v1/admin/identity-providers/:id/domains)", async () => {

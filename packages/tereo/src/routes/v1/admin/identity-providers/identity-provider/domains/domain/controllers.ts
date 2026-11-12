@@ -19,6 +19,7 @@ import {
   logAuditTx,
 } from "../../../../../../../utils/outbox.js";
 import {
+  assertMayAddScimDomain,
   assertMayAutoAcceptInto,
   assertMayChangeSsoOnly,
   assertProviderActive,
@@ -82,6 +83,9 @@ export const updateDomain = async (req: Request, res: Response) => {
         auth,
         body.organizationId ?? current.organizationId
       );
+    }
+    if (body.domain !== undefined && body.domain !== current.domain) {
+      await assertMayAddScimDomain(auth, providerId, tx);
     }
     if (changesSsoOnly(current, body)) await assertMayChangeSsoOnly(auth, tx);
     if (body.ssoOnly) await assertProviderActive(providerId, tx);

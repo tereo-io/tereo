@@ -207,3 +207,89 @@ describe("PATCH /v1/admin/identity-providers/:id", () => {
     }
   });
 });
+
+describe("a provider with a SCIM connection", () => {
+  const withScim = async () => {
+    const provider = await newProvider();
+    await prisma.scimConnection.create({
+      data: { providerId: provider.id, createdBy: SYSTEM_USER_ID },
+    });
+    return provider;
+  };
+
+  it("needs a global admin to change its issuer, client ID or secret (PATCH /v1/admin/identity-providers/:id)", async () => {
+    const provider = await withScim();
+    const plain = await newProvider();
+    const other = await startFakeOidcProvider();
+    try {
+      const moves = [
+        {
+          issuer: other.issuer,
+          clientId: other.clientId,
+          clientSecret: other.clientSecret,
+        },
+        { clientId: "another-client", clientSecret: fake.clientSecret },
+        { clientSecret: fake.clientSecret },
+      ];
+      for (const body of moves) {
+        const refused = await call(
+          writeToken,
+          "PATCH",
+          `/${provider.id}`,
+          body
+        );
+        expect(refused.status, JSON.stringify(body)).toBe(403);
+      }
+      const row = await prisma.identityProvider.findUniqueOrThrow({
+        where: { id: provider.id },
+      });
+      expect(row).toMatchObject({
+        issuer: fake.issuer,
+        clientId: fake.clientId,
+      });
+
+      const renamed = await call(writeToken, "PATCH", `/${provider.id}`, {
+        displayName: "Renamed SCIM IdP",
+      });
+      expect(renamed.status).toBe(200);
+      for (const body of moves.slice(1)) {
+        const free = await call(writeToken, "PATCH", `/${plain.id}`, body);
+        expect(free.status, JSON.stringify(body)).toBe(200);
+      }
+      const byAdmin = await call(adminToken, "PATCH", `/${provider.id}`, {
+        issuer: other.issuer,
+        clientId: other.clientId,
+        clientSecret: other.clientSecret,
+      });
+      expect(byAdmin.status).toBe(200);
+    } finally {
+      await other.close();
+    }
+  });
+
+  it("needs a global admin to activate it (POST /v1/admin/identity-providers/:id/activate)", async () => {
+    const provider = await withScim();
+    const plain = await newProvider();
+    for (const p of [provider, plain]) {
+      expect(
+        (await call(writeToken, "POST", `/${p.id}/deactivate`)).status
+      ).toBe(200);
+    }
+    expect(
+      (await call(writeToken, "POST", `/${provider.id}/activate`)).status
+    ).toBe(403);
+    expect(
+      (
+        await prisma.identityProvider.findUniqueOrThrow({
+          where: { id: provider.id },
+        })
+      ).isActive
+    ).toBe(false);
+    expect(
+      (await call(adminToken, "POST", `/${provider.id}/activate`)).status
+    ).toBe(200);
+    expect(
+      (await call(writeToken, "POST", `/${plain.id}/activate`)).status
+    ).toBe(200);
+  });
+});
