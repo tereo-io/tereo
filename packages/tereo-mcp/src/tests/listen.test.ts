@@ -77,17 +77,15 @@ describe("listen", () => {
     expect(await res.json()).toEqual({ status: "ok" });
   });
 
-  it("refuses a foreign Host header with 403 before auth", async () => {
-    const { server } = await setup();
-
-    const res = await new Promise<number>((resolve, reject) => {
+  const statusWithHost = (port: number, path: string, host: string) =>
+    new Promise<number>((resolve, reject) => {
       const req = request(
         {
           host: "127.0.0.1",
-          port: server.port,
-          path: "/mcp",
-          method: "POST",
-          headers: { host: "evil.example", "content-type": "application/json" },
+          port,
+          path,
+          method: path === "/mcp" ? "POST" : "GET",
+          headers: { host, "content-type": "application/json" },
         },
         (r) => {
           r.resume();
@@ -95,10 +93,27 @@ describe("listen", () => {
         }
       );
       req.on("error", reject);
-      req.end("{}");
+      req.end(path === "/mcp" ? "{}" : undefined);
     });
 
-    expect(res).toBe(403);
+  it("refuses a foreign Host header with 403 before auth", async () => {
+    const { server } = await setup();
+
+    expect(await statusWithHost(server.port, "/mcp", "evil.example")).toBe(403);
+  });
+
+  it("answers /health for any Host, while the MCP path stays behind host validation", async () => {
+    const { server } = await setup();
+
+    expect(await statusWithHost(server.port, "/health", "10.1.2.3:4002")).toBe(
+      200
+    );
+    expect(await statusWithHost(server.port, "/mcp", "10.1.2.3:4002")).toBe(
+      403
+    );
+    expect(
+      await statusWithHost(server.port, "/health", "mcp.example.test")
+    ).toBe(200);
   });
 
   it("lets an in-flight tool call finish before close() resolves, then refuses new connections", async () => {

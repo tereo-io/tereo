@@ -50,6 +50,14 @@ describe("createTestClient", () => {
       handler: () => "pong",
     });
 
+    let listenedUrl = "";
+    const listen = mcp.listen.bind(mcp);
+    mcp.listen = async (port, host) => {
+      const server = await listen(port, host);
+      listenedUrl = server.url;
+      return server;
+    };
+
     const { client, close } = await createTestClient(mcp, {
       token: "test-token-u1|client=claude|perms=",
     });
@@ -58,9 +66,8 @@ describe("createTestClient", () => {
     const result = await client.callTool({ name: "ping", arguments: {} });
     expect(result.content).toEqual([{ type: "text", text: "pong" }]);
 
-    const url = (client as unknown as { _transport?: { _url?: URL } })
-      ._transport?._url;
     await close();
-    if (url) await expect(fetch(url)).rejects.toThrow();
+    expect(listenedUrl).not.toBe("");
+    await expect(fetch(listenedUrl)).rejects.toThrow();
   });
 });

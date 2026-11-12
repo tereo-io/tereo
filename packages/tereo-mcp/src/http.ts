@@ -95,13 +95,17 @@ export const listenOn = async (
     allowedHosts,
     allowedOrigins: options.allowedOrigins,
   });
-  app.get("/health", (_req, res) => {
-    res.json({ status: "ok" });
-  });
   const route = createRoute(started);
   app.use(route.router);
 
-  const server = createServer(app);
+  const outer = express();
+  // Probes send the pod address as Host, so health sits ahead of host validation.
+  outer.get("/health", (_req, res) => {
+    res.json({ status: "ok" });
+  });
+  outer.use(app);
+
+  const server = createServer(outer);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
