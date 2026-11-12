@@ -65,7 +65,18 @@ describe("DELETE /scim/v2/Groups/:id", () => {
       action: "scim_unlinked",
       reason: "scim_deleted",
       scimConnectionId: c.connectionId,
+      providerId: c.providerId,
     });
+    expect(
+      await prisma.outbox.count({
+        where: {
+          payload: { path: ["entityId"], equals: id },
+          AND: [
+            { payload: { path: ["eventType"], equals: "auth.group.updated" } },
+          ],
+        },
+      })
+    ).toBeGreaterThan(0);
   });
 
   it("is 404 the second time, and a re-push makes a new group without roles", async () => {
@@ -80,6 +91,39 @@ describe("DELETE /scim/v2/Groups/:id", () => {
     expect(
       await prisma.groupRole.count({ where: { groupId: again.body.id } })
     ).toBe(0);
+  });
+
+  it("is 404 for another connection's group, a local group and a non-uuid, leaving the other group alone", async () => {
+    const a = await orgConnection();
+    const b = await orgConnection();
+    const theirs = await pushGroup(b.token, { displayName: `T ${tag()}` });
+    const local = await prisma.group.create({
+      data: {
+        organizationId: a.organizationId,
+        slug: `local-${tag()}`,
+        name: "Local",
+        definitionSource: "local",
+        createdBy: (await makeUser(`l-${tag()}@${a.domain}`)).id,
+      },
+    });
+    expect((await del(a.token, theirs.body.id)).status).toBe(404);
+    expect((await del(a.token, local.id)).status).toBe(404);
+    expect((await del(a.token, "not-a-uuid")).status).toBe(404);
+
+    const untouched = await prisma.group.findUniqueOrThrow({
+      where: { id: theirs.body.id },
+      include: { scimLink: true },
+    });
+    expect(untouched.archivedAt).toBeNull();
+    expect(untouched).toMatchObject({
+      definitionSource: "scim",
+      membershipSource: "scim",
+    });
+    expect(untouched.scimLink?.connectionId).toBe(b.connectionId);
+    const stillLocal = await prisma.group.findUniqueOrThrow({
+      where: { id: local.id },
+    });
+    expect(stillLocal.archivedAt).toBeNull();
   });
 
   it("deletes an already-archived linked group", async () => {

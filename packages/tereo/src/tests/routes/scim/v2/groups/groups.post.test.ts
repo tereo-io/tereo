@@ -1,8 +1,9 @@
 // @module-tag int
 // @module-tag auth
 import { makeUser, manage, tag } from "../../../../support/scimUsers.js";
-import { groupSlug, joinOrg } from "../../../../support/groups.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
+import { CORE_URL } from "../../../../support/coreUrl.js";
+import { joinOrg } from "../../../../support/groups.js";
 import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
@@ -54,17 +55,14 @@ describe("POST /scim/v2/Groups", () => {
 
   it("answers with a Location header", async () => {
     const c = await orgConnection();
-    const response = await fetch(
-      `${(await import("../../../../support/coreUrl.js")).CORE_URL}/scim/v2/Groups`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${c.token}`,
-          "Content-Type": "application/scim+json",
-        },
-        body: JSON.stringify({ displayName: `Loc ${tag()}` }),
-      }
-    );
+    const response = await fetch(`${CORE_URL}/scim/v2/Groups`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${c.token}`,
+        "Content-Type": "application/scim+json",
+      },
+      body: JSON.stringify({ displayName: `Loc ${tag()}` }),
+    });
     const body = (await response.json()) as { id: string };
     expect(response.status).toBe(201);
     expect(response.headers.get("location")).toMatch(
@@ -116,7 +114,6 @@ describe("POST /scim/v2/Groups", () => {
       definitionSource: "local",
       membershipSource: "local",
     });
-    expect(groupSlug("x")).toBeTruthy();
   });
 
   it("adds managed org members, records managed non-members as skipped, ignores unknown ids", async () => {

@@ -67,8 +67,15 @@ describe("SCIM Groups errors", () => {
     const members = Array.from({ length: 1001 }, () => ({
       value: randomUUID(),
     }));
-    const r = await pushGroup(c.token, { displayName: `M ${tag()}`, members });
+    const displayName = `M ${tag()}`;
+    const r = await pushGroup(c.token, { displayName, members });
     expect(r.status).toBe(400);
     expect(r.body).toMatchObject({ status: "400", scimType: "tooMany" });
+    expect(await prisma.group.count({ where: { name: displayName } })).toBe(0);
+    expect(
+      await prisma.scimGroup.count({
+        where: { connectionId: c.connectionId },
+      })
+    ).toBe(0);
   });
 });
