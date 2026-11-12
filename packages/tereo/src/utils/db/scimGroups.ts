@@ -71,6 +71,11 @@ export const updateLink = async (
   });
 };
 
+/** Moves `updated_at` when the group's members change, which `groups.updated_at` does not follow. */
+export const touchLink = async (id: string, tx: Tx) => {
+  await tx.scimGroup.update({ where: { id }, data: { updatedAt: new Date() } });
+};
+
 /** The skipped members cascade. */
 export const deleteLink = async (id: string, tx: Tx) => {
   await tx.scimGroup.delete({ where: { id } });
@@ -161,15 +166,25 @@ export const groupIdsForMember = async (
   return rows.map((r) => r.groupId);
 };
 
-/** Replaces the group's skipped set with exactly `userIds`. */
+/**
+ * Replaces the group's skipped set with exactly `userIds`. With `seen`, only
+ * those rows may be deleted: a record written since the caller read them (an
+ * organization removal does) stays.
+ */
 export const setSkipped = async (
   scimGroupId: string,
   userIds: string[],
   reason: SkipReason,
-  tx: Tx
+  tx: Tx,
+  seen?: string[]
 ) => {
   await tx.scimGroupSkippedMember.deleteMany({
-    where: { scimGroupId, userId: { notIn: userIds } },
+    where: {
+      scimGroupId,
+      userId: seen
+        ? { in: seen.filter((id) => !userIds.includes(id)) }
+        : { notIn: userIds },
+    },
   });
   await tx.scimGroupSkippedMember.createMany({
     data: userIds.map((userId) => ({ scimGroupId, userId, reason })),

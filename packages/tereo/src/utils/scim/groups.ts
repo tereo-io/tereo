@@ -1,4 +1,5 @@
 import type { Group } from "../../../prisma/generated/client/index.js";
+import { resolveGroupOps, type GroupPatchOp } from "./groupPatch.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import type { ScimGroupLink } from "../db/scimGroups.js";
 import { prisma, type Prisma } from "../db/prisma.js";
@@ -10,6 +11,7 @@ import {
   MAX_GROUP_MEMBERS,
   MAX_MEMBER_CHANGES,
   slugFromDisplayName,
+  UUID_SHAPE,
   withSlugSuffix,
   type ScimGroupInput,
 } from "./groupMapping.js";
@@ -19,6 +21,9 @@ import {
   archiveGroup,
   createGroup,
   emitGroupEvent,
+  lockMemberAuthorities,
+  removeMembers,
+  updateGroup,
   type AuditActor,
   type GroupActor,
   type GroupChange,
@@ -41,7 +46,6 @@ export interface ScimGroupView {
 
 const SYSTEM_ACTOR: AuditActor = { userId: SYSTEM_USER_ID, email: null };
 const SLUG_ATTEMPTS = 50;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const notFound = () => new NotFoundError("Group not found");
 
@@ -57,7 +61,7 @@ const requireEnabled = (target: string) => {
 };
 
 const findLink = async (ctx: ScimContext, groupId: string, tx?: Tx) => {
-  if (!UUID.test(groupId)) throw notFound();
+  if (!UUID_SHAPE.test(groupId)) throw notFound();
   const link = await db.scimGroups.getLinkForConnection(
     ctx.connection.id,
     groupId.toLowerCase(),
@@ -76,29 +80,88 @@ const membersOf = async (groupId: string, tx?: Tx) => {
   return rows.map((r) => r.user);
 };
 
-/** Applies a member set under the locks. */
-const applyMembers = async (
-  tx: Tx,
-  ctx: ScimContext,
-  link: ScimGroupLink,
-  desired: string[]
-): Promise<GroupChange> => {
-  if (desired.length > MAX_GROUP_MEMBERS) {
-    throw new BadRequestError(
-      "tooMany",
-      `A group holds at most ${MAX_GROUP_MEMBERS} members`
-    );
-  }
-  if (desired.length > MAX_MEMBER_CHANGES) {
+interface MemberDiff {
+  toAdd: string[];
+  toRemove: string[];
+}
+
+/** What turns `current` into `desired`; the caps count these, not the request. */
+const diffMembers = (current: string[], desired: Set<string>): MemberDiff => {
+  const have = new Set(current);
+  const diff = {
+    toAdd: [...desired].filter((id) => !have.has(id)).sort(),
+    toRemove: current.filter((id) => !desired.has(id)).sort(),
+  };
+  if (diff.toAdd.length + diff.toRemove.length > MAX_MEMBER_CHANGES) {
     throw new BadRequestError(
       "tooMany",
       `A request changes at most ${MAX_MEMBER_CHANGES} memberships`
     );
   }
-  const ids = desired.filter((v) => UUID.test(v)).map((v) => v.toLowerCase());
-  const change = await addMembers(actorOf(ctx), link.groupId, ids, tx);
-  await db.scimGroups.setSkipped(link.id, change.skipped, "not_org_member", tx);
-  return change;
+  if (
+    current.length - diff.toRemove.length + diff.toAdd.length >
+    MAX_GROUP_MEMBERS
+  ) {
+    throw new BadRequestError(
+      "tooMany",
+      `A group holds at most ${MAX_GROUP_MEMBERS} members`
+    );
+  }
+  return diff;
+};
+
+const assertRequestSize = (values: string[]) => {
+  if (values.length > MAX_GROUP_MEMBERS) {
+    throw new BadRequestError(
+      "tooMany",
+      `A request may name at most ${MAX_GROUP_MEMBERS} members`
+    );
+  }
+};
+
+const uuidSet = (values: string[]) =>
+  new Set(values.filter((v) => UUID_SHAPE.test(v)).map((v) => v.toLowerCase()));
+
+interface MemberOutcome {
+  changes: GroupChange[];
+  membersChanged: boolean;
+}
+
+/** Removes, then adds, and records exactly the members `addMembers` skipped. */
+const applyDiff = async (
+  tx: Tx,
+  ctx: ScimContext,
+  link: ScimGroupLink,
+  { toAdd, toRemove }: MemberDiff,
+  recorded: string[]
+): Promise<MemberOutcome> => {
+  const changes: GroupChange[] = [];
+  let membersChanged = false;
+  if (toRemove.length > 0) {
+    const removed = await removeMembers(
+      actorOf(ctx),
+      link.groupId,
+      toRemove,
+      tx
+    );
+    changes.push(removed);
+    membersChanged ||= removed.removed.length > 0;
+  }
+  let skipped: string[] = [];
+  if (toAdd.length > 0) {
+    const added = await addMembers(actorOf(ctx), link.groupId, toAdd, tx);
+    changes.push(added);
+    membersChanged ||= added.added.length > 0;
+    skipped = added.skipped;
+  }
+  await db.scimGroups.setSkipped(
+    link.id,
+    skipped,
+    "not_org_member",
+    tx,
+    recorded
+  );
+  return { changes, membersChanged };
 };
 
 export const createScimGroup = async (
@@ -134,14 +197,16 @@ export const createScimGroup = async (
           },
           tx
         );
-        const added = await applyMembers(tx, ctx, link, input.members);
+        assertRequestSize(input.members);
+        const diff = diffMembers([], uuidSet(input.members));
+        const applied = await applyDiff(tx, ctx, link, diff, []);
         return {
           view: {
-            link,
-            group: added.group,
+            link: await findLink(ctx, created.group.id, tx),
+            group: await db.groups.getAny(created.group.id, tx),
             members: await membersOf(created.group.id, tx),
           },
-          changes: [created, added],
+          changes: [created, ...applied.changes],
         };
       });
       for (const change of changes) afterGroupChange(change);
@@ -242,3 +307,102 @@ export const deleteScimGroup = async (
   });
   if (change) afterGroupChange(change);
 };
+
+const mergeChanges = (group: Group, changes: GroupChange[]): GroupChange => ({
+  group,
+  affectedUserIds: [...new Set(changes.flatMap((c) => c.affectedUserIds))],
+  revokedJtis: changes.flatMap((c) => c.revokedJtis),
+});
+
+/**
+ * One transaction for a PUT or PATCH. The connection lock comes first, as in
+ * `createScimGroup`, so requests on one connection run one after another and
+ * each reads the members it diffs against after the previous one committed.
+ * Then, in the order the header of `utils/groups.ts` gives: authority locks
+ * for every member added or removed in one ascending pass, then the group.
+ */
+const changeScimGroup = async (
+  ctx: ScimContext,
+  groupId: string,
+  ops: GroupPatchOp[]
+): Promise<ScimGroupView> => {
+  requireEnabled(ctx.connection.groupsTarget);
+  if (ops.length === 0) {
+    return await getScimGroup(ctx, groupId, { members: true });
+  }
+  const { view, changes } = await db.$transaction(async (tx) => {
+    const connection = await db.scim.lockConnection(ctx.connection.id, tx);
+    requireEnabled(connection.groupsTarget);
+    const link = await findLink(ctx, groupId, tx);
+    const current = await db.groups.getMemberIds(link.groupId, tx);
+    const recorded = await db.scimGroups.listSkippedIds(link.id, tx);
+    const plan = resolveGroupOps(ops, current, recorded);
+    const diff = diffMembers(current, plan.desired);
+
+    await lockMemberAuthorities([...diff.toAdd, ...diff.toRemove], tx);
+    await db.groups.lockGroup(link.groupId, tx);
+    // An unlink or delete that committed since the first read leaves nothing to change.
+    const locked = await findLink(ctx, groupId, tx);
+    const before = await db.groups.getAny(link.groupId, tx);
+
+    const applied = plan.touchesMembers
+      ? await applyDiff(tx, ctx, locked, diff, recorded)
+      : { changes: [], membersChanged: false };
+    const changes: GroupChange[] = [...applied.changes];
+    if (plan.displayName !== undefined && plan.displayName !== before.name) {
+      changes.push(
+        await updateGroup(
+          actorOf(ctx),
+          link.groupId,
+          { name: plan.displayName },
+          tx
+        )
+      );
+    }
+    const linkData = {
+      ...(plan.displayName !== undefined &&
+        plan.displayName !== locked.displayName && {
+          displayName: plan.displayName,
+        }),
+      ...(plan.externalId !== undefined &&
+        plan.externalId !== locked.externalId && {
+          externalId: plan.externalId,
+        }),
+    };
+    if (Object.keys(linkData).length > 0) {
+      await db.scimGroups.updateLink(locked.id, linkData, tx);
+    } else if (applied.membersChanged) {
+      await db.scimGroups.touchLink(locked.id, tx);
+    }
+    const group = await db.groups.getAny(link.groupId, tx);
+    return {
+      view: {
+        link: await findLink(ctx, groupId, tx),
+        group,
+        members: await membersOf(group.id, tx),
+      },
+      changes: [mergeChanges(group, changes)],
+    };
+  });
+  for (const change of changes) afterGroupChange(change);
+  return view;
+};
+
+export const replaceScimGroup = async (
+  ctx: ScimContext,
+  groupId: string,
+  input: ScimGroupInput
+): Promise<ScimGroupView> => {
+  assertRequestSize(input.members);
+  return await changeScimGroup(ctx, groupId, [
+    { kind: "replaceMembers", values: input.members },
+    { kind: "displayName", value: input.displayName },
+    { kind: "externalId", value: input.externalId },
+  ]);
+};
+
+export const patchScimGroup = async (
+  ctx: ScimContext,
+  groupId: string,
+  ops: GroupPatchOp[]
+): Promise<ScimGroupView> => await changeScimGroup(ctx, groupId, ops);

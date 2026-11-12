@@ -133,7 +133,7 @@ describe("ScimGroupBodySchema", () => {
 describe("toScimGroup", () => {
   const now = new Date("2026-11-12T10:00:00.000Z");
   const view = {
-    link: { externalId: "ext-1" },
+    link: { externalId: "ext-1", updatedAt: now },
     group: { id: "g1", name: "Ops", createdAt: now, updatedAt: now },
   } as unknown as Parameters<typeof toScimGroup>[0];
 
@@ -177,6 +177,22 @@ describe("toScimGroup", () => {
         $ref: "https://core.test/scim/v2/Users/u2",
       },
     ]);
+  });
+
+  it("reports the later of the group's and the link's timestamps as lastModified", () => {
+    const later = new Date("2026-11-12T11:00:00.000Z");
+    const meta = (v: object) =>
+      (
+        toScimGroup(v as typeof view, "https://x").meta as {
+          lastModified: string;
+        }
+      ).lastModified;
+    expect(meta({ ...view, link: { ...view.link, updatedAt: later } })).toBe(
+      later.toISOString()
+    );
+    expect(meta({ ...view, group: { ...view.group, updatedAt: later } })).toBe(
+      later.toISOString()
+    );
   });
 
   it("keeps an empty member list", () => {

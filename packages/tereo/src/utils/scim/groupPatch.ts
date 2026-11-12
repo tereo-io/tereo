@@ -6,6 +6,7 @@ import {
   DISPLAY_NAME_MAX,
   MAX_GROUP_MEMBERS,
   memberValues,
+  UUID_SHAPE,
 } from "./groupMapping.js";
 
 export type GroupPatchOp =
@@ -139,4 +140,58 @@ export const normaliseGroupPatch = (
     );
   }
   return out;
+};
+
+export interface GroupChangePlan {
+  /** The member set the request leaves, as UUID-shaped ids. */
+  desired: Set<string>;
+  touchesMembers: boolean;
+  displayName?: string;
+  /** Undefined leaves it as it is. */
+  externalId?: string | null;
+}
+
+const uuids = (values: string[]) =>
+  values.filter((v) => UUID_SHAPE.test(v)).map((v) => v.toLowerCase());
+
+/**
+ * Runs the operations in order over the member set. The members the directory
+ * pushed that were skipped earlier count as part of it whenever a request
+ * touches members, so any member change retries them.
+ */
+export const resolveGroupOps = (
+  ops: GroupPatchOp[],
+  current: Iterable<string>,
+  recorded: Iterable<string>
+): GroupChangePlan => {
+  const touchesMembers = ops.some(
+    (op) => op.kind !== "displayName" && op.kind !== "externalId"
+  );
+  let desired = new Set(current);
+  if (touchesMembers) for (const id of recorded) desired.add(id);
+  const plan: GroupChangePlan = { desired, touchesMembers };
+  for (const op of ops) {
+    switch (op.kind) {
+      case "addMembers":
+        for (const id of uuids(op.values)) desired.add(id);
+        break;
+      case "removeMembers":
+        for (const id of uuids(op.values)) desired.delete(id);
+        break;
+      case "clearMembers":
+        desired.clear();
+        break;
+      case "replaceMembers":
+        desired = new Set(uuids(op.values));
+        break;
+      case "displayName":
+        plan.displayName = op.value;
+        break;
+      case "externalId":
+        plan.externalId = op.value;
+        break;
+    }
+  }
+  plan.desired = desired;
+  return plan;
 };

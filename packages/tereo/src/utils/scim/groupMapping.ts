@@ -13,6 +13,9 @@ export const MAX_MEMBER_CHANGES = 1000;
 
 const SLUG_MAX = 100;
 
+export const UUID_SHAPE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface ScimGroupInput {
   displayName: string;
   externalId: string | null;
@@ -92,7 +95,10 @@ export const toScimGroup = (
   meta: {
     resourceType: "Group",
     created: view.group.createdAt.toISOString(),
-    lastModified: view.group.updatedAt.toISOString(),
+    // Membership changes move the link's timestamp, not the group's.
+    lastModified: new Date(
+      Math.max(view.group.updatedAt.getTime(), view.link.updatedAt.getTime())
+    ).toISOString(),
     location: `${baseUrl}/Groups/${view.group.id}`,
   },
 });

@@ -1,8 +1,11 @@
 // @module-tag unit
 // @module-tag auth
-import { normaliseGroupPatch } from "../../../utils/scim/groupPatch.js";
 import { ScimPatchBodySchema } from "../../../utils/scim/patch.js";
 import { describe, expect, it } from "vitest";
+import {
+  normaliseGroupPatch,
+  resolveGroupOps,
+} from "../../../utils/scim/groupPatch.js";
 import {
   entraAddMembersPatch,
   entraRemoveMembersPatch,
@@ -256,5 +259,81 @@ describe("normaliseGroupPatch", () => {
         { kind: "displayName", value: "Platform Eng" },
       ]);
     });
+  });
+});
+
+describe("resolveGroupOps", () => {
+  const A = "0198f2a4-0000-7000-8000-00000000000a";
+  const B = "0198f2a4-0000-7000-8000-00000000000b";
+  const C = "0198f2a4-0000-7000-8000-00000000000c";
+  const ids = (plan: { desired: Set<string> }) => [...plan.desired].sort();
+
+  it("applies operations in order", () => {
+    expect(
+      ids(
+        resolveGroupOps(
+          [
+            { kind: "addMembers", values: [A] },
+            { kind: "removeMembers", values: [A] },
+          ],
+          [B],
+          []
+        )
+      )
+    ).toEqual([B]);
+    expect(
+      ids(
+        resolveGroupOps(
+          [
+            { kind: "removeMembers", values: [B] },
+            { kind: "addMembers", values: [B] },
+          ],
+          [B],
+          []
+        )
+      )
+    ).toEqual([B]);
+  });
+
+  it("clears and replaces, ignoring values that are not uuids", () => {
+    expect(
+      ids(resolveGroupOps([{ kind: "clearMembers" }], [A, B], [C]))
+    ).toEqual([]);
+    expect(
+      ids(
+        resolveGroupOps(
+          [{ kind: "replaceMembers", values: [C, "nope", C.toUpperCase()] }],
+          [A],
+          []
+        )
+      )
+    ).toEqual([C]);
+  });
+
+  it("retries recorded skips only when the request touches members", () => {
+    expect(
+      ids(resolveGroupOps([{ kind: "addMembers", values: [A] }], [], [B]))
+    ).toEqual([A, B]);
+    const rename = resolveGroupOps(
+      [{ kind: "displayName", value: "X" }],
+      [A],
+      [B]
+    );
+    expect(ids(rename)).toEqual([A]);
+    expect(rename).toMatchObject({ touchesMembers: false, displayName: "X" });
+  });
+
+  it("a removal drops a recorded skip, and the last name wins", () => {
+    const plan = resolveGroupOps(
+      [
+        { kind: "removeMembers", values: [B] },
+        { kind: "externalId", value: "one" },
+        { kind: "externalId", value: null },
+      ],
+      [],
+      [B]
+    );
+    expect(ids(plan)).toEqual([]);
+    expect(plan.externalId).toBeNull();
   });
 });
