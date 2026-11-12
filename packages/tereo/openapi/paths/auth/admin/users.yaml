@@ -257,7 +257,7 @@
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: Email already in use, or the deactivation would leave no active administrator
+        description: Email already in use, the deactivation would leave no active administrator, or the user is managed by SCIM (`managed_by_scim`, when `email` or `name` changes or the user is reactivated while the identity provider has them inactive)
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':

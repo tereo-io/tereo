@@ -892,6 +892,8 @@ tags:
     description: Admin endpoints for upstream identity providers and their lifecycle events
   - name: Admin - Identity Provider Domains
     description: Admin endpoints for the email domains a provider claims — organization, default roles, auto-accept and SSO-only
+  - name: Admin - Identity Provider SCIM
+    description: Admin endpoints for a provider's SCIM connection and tokens, and for unlinking a managed user. The `/scim/v2` protocol endpoints are described in `docs/scim.md`
   - name: Admin - Guests
     description: Admin endpoints for guest users — temporary single-organization logins that invite, extend, expire and promote
   - name: Password Setup
@@ -1016,6 +1018,7 @@ x-tagGroups:
       - Admin - Organization Member Roles
       - Admin - Identity Providers
       - Admin - Identity Provider Domains
+      - Admin - Identity Provider SCIM
       - Admin - Settings
       - Admin - Services
       - Admin - Integrations
@@ -1251,6 +1254,14 @@ paths:
     $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers~1{id}~1activate'
   /v1/admin/identity-providers/{id}/deactivate:
     $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers~1{id}~1deactivate'
+  /v1/admin/identity-providers/{id}/scim:
+    $ref: './paths/auth/admin/identity-provider-scim.yaml#/~1admin~1identity-providers~1{id}~1scim'
+  /v1/admin/identity-providers/{id}/scim/tokens:
+    $ref: './paths/auth/admin/identity-provider-scim.yaml#/~1admin~1identity-providers~1{id}~1scim~1tokens'
+  /v1/admin/identity-providers/{id}/scim/tokens/{tokenId}:
+    $ref: './paths/auth/admin/identity-provider-scim.yaml#/~1admin~1identity-providers~1{id}~1scim~1tokens~1{tokenId}'
+  /v1/admin/users/{id}/scim:
+    $ref: './paths/auth/admin/identity-provider-scim.yaml#/~1admin~1users~1{id}~1scim'
   /v1/admin/identity-providers/{id}/domains:
     $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers~1{id}~1domains'
   /v1/admin/identity-providers/{id}/domains/{domainId}:

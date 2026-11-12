@@ -52,7 +52,7 @@ export const ssoProviderElsewhere = async (
 const clip = (value: string | null): string | null =>
   value?.trim().slice(0, NAME_MAX) || null;
 
-/** Never matches an existing account by email: only by subject, an invite, or a new user. */
+/** Matches an existing account by email only for the SCIM claim; otherwise by subject, an invite, or a new user. */
 export const resolveLoginIdentity = async (
   provider: IdentityProvider,
   identity: NormalizedIdentity

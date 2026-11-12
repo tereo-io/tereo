@@ -1,0 +1,229 @@
+/admin/identity-providers/{id}/scim:
+  get:
+    tags:
+      - Admin - Identity Provider SCIM
+    summary: Get an identity provider's SCIM connection
+    description: |
+      Returns the provider's SCIM connection with its tokens (never their values) and
+      the number of users it manages. 404 when the provider has no connection.
+
+      The SCIM protocol endpoints under `baseUrl` are described in `docs/scim.md`.
+    operationId: getAdminScimConnection
+    security:
+      - BearerAuth: [identity-providers.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/IdentityProviderIdParam'
+    responses:
+      '200':
+        description: The SCIM connection
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ScimConnection'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+  put:
+    tags:
+      - Admin - Identity Provider SCIM
+    summary: Create a SCIM connection or switch it on or off
+    description: |
+      Creates the provider's SCIM connection (201), or sets `isActive` on the existing one
+      (200). While the connection or the provider is inactive, every SCIM call answers 401.
+
+      Creating a connection and setting `isActive: true` need a caller holding `admin`
+      through a global role, as `ssoOnly` does (403 otherwise): enabling SCIM lets the
+      provider sign in as any user it adopts in its domains. Switching a connection off
+      does not.
+
+      An audit log entry is created for a change (`ScimConnection`). No webhook event is emitted.
+    operationId: putAdminScimConnection
+    security:
+      - BearerAuth: [identity-providers.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/IdentityProviderIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../../components/auth/schemas.yaml#/PutScimConnectionRequest'
+    responses:
+      '200':
+        description: The existing connection, updated
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ScimConnection'
+      '201':
+        description: The connection was created
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ScimConnection'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/ScimConflictResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+  delete:
+    tags:
+      - Admin - Identity Provider SCIM
+    summary: Delete a SCIM connection
+    description: |
+      Removes the connection and its tokens. Refused with 409 `scim_users_exist` while it
+      manages any user, a deleted SCIM resource included: unlink them first with
+      `DELETE /v1/admin/users/{id}/scim`.
+
+      An audit log entry is created for this action.
+    operationId: deleteAdminScimConnection
+    security:
+      - BearerAuth: [identity-providers.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/IdentityProviderIdParam'
+    responses:
+      '204':
+        $ref: '../../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/ScimConflictResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/identity-providers/{id}/scim/tokens:
+  post:
+    tags:
+      - Admin - Identity Provider SCIM
+    summary: Mint a SCIM token
+    description: |
+      Mints a bearer token for the provider's SCIM connection. The value is in this
+      response only; core stores its SHA-256 hash. A token has no expiry. A connection
+      holds at most two unrevoked tokens (409 `scim_token_limit`): revoke one first.
+
+      Needs a caller holding `admin` through a global role (403 otherwise).
+      404 when the provider has no connection.
+
+      An audit log entry is created for this action (`ScimToken`).
+    operationId: createAdminScimToken
+    security:
+      - BearerAuth: [identity-providers.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/IdentityProviderIdParam'
+    responses:
+      '201':
+        description: The token, shown once
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/CreatedScimToken'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '409':
+        $ref: '../../../components/auth/responses.yaml#/ScimConflictResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/identity-providers/{id}/scim/tokens/{tokenId}:
+  delete:
+    tags:
+      - Admin - Identity Provider SCIM
+    summary: Revoke a SCIM token
+    description: |
+      Revokes one token; SCIM calls with it answer 401 from then on. 404 when the
+      token is unknown or already revoked.
+
+      An audit log entry is created for this action (`ScimToken`).
+    operationId: revokeAdminScimToken
+    security:
+      - BearerAuth: [identity-providers.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/IdentityProviderIdParam'
+      - name: tokenId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    responses:
+      '204':
+        $ref: '../../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+
+/admin/users/{id}/scim:
+  delete:
+    tags:
+      - Admin - Identity Provider SCIM
+    summary: Unlink a user from SCIM
+    description: |
+      Removes the user's SCIM link. The user keeps their state, inactive included, and
+      is managed locally from then on. 404 when the user is not managed by SCIM.
+
+      An audit log entry is created for this action (`metadata.action` `scim_unlinked`).
+    operationId: unlinkAdminUserScim
+    security:
+      - BearerAuth: [users.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/UserIdParam'
+    responses:
+      '204':
+        $ref: '../../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'

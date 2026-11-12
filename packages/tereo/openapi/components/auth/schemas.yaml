@@ -1366,6 +1366,11 @@ AdminUserDetail:
             `integration` are the account of that service or integration,
             managed under `/v1/admin/services` or `/v1/admin/integrations`.
             Updating such a user, its roles, 2FA or identity invites is refused.
+            `scim` is a user an identity provider's SCIM connection manages (`id`
+            and `name` are the provider's): changing its `email` or `name`, or
+            reactivating it while the provider has it inactive, is
+            `409 managed_by_scim`; unlink it with `DELETE /v1/admin/users/{id}/scim`.
+            A SCIM resource the provider deleted still counts as managed.
           oneOf:
             - type: 'null'
             - type: object
@@ -1379,7 +1384,7 @@ AdminUserDetail:
               properties:
                 kind:
                   type: string
-                  enum: [service, integration]
+                  enum: [service, integration, scim]
                 id:
                   type: string
                   format: uuid
@@ -4898,3 +4903,71 @@ GroupRolesEventData:
       items:
         type: string
         format: uuid
+
+PutScimConnectionRequest:
+  type: object
+  additionalProperties: false
+  required: [isActive]
+  properties:
+    isActive:
+      type: boolean
+
+ScimToken:
+  type: object
+  description: A SCIM token as listed. The value is never returned after minting.
+  required: [id, createdAt, lastUsedAt, revokedAt]
+  properties:
+    id:
+      type: string
+      format: uuid
+    createdAt:
+      type: string
+      format: date-time
+    lastUsedAt:
+      type: [string, 'null']
+      format: date-time
+    revokedAt:
+      type: [string, 'null']
+      format: date-time
+
+ScimConnection:
+  type: object
+  description: An identity provider's SCIM connection.
+  required: [id, providerId, baseUrl, isActive, lastUsedAt, managedUserCount, tokens]
+  properties:
+    id:
+      type: string
+      format: uuid
+    providerId:
+      type: string
+      format: uuid
+    baseUrl:
+      type: string
+      description: The SCIM base URL to give the identity provider (`PUBLIC_URL` + `/scim/v2`).
+    isActive:
+      type: boolean
+    lastUsedAt:
+      type: [string, 'null']
+      format: date-time
+      description: Updated at most once a minute.
+    managedUserCount:
+      type: integer
+      description: Users the connection manages, deleted SCIM resources included.
+    tokens:
+      type: array
+      items:
+        $ref: '#/ScimToken'
+
+CreatedScimToken:
+  type: object
+  required: [id, token, createdAt]
+  properties:
+    id:
+      type: string
+      format: uuid
+    token:
+      type: string
+      description: The bearer token (`scim_…`). Shown once; store it now.
+    createdAt:
+      type: string
+      format: date-time

@@ -234,7 +234,7 @@ apply. A group dropped from the documents is marked (`unprovisionedAt`), archive
 
 ## SCIM (later)
 
-Not built. SCIM Groups (Okta, Entra) are meant to slot in without reshaping this: add `scim` to the
+The SCIM connection now exists for **Users** ([scim.md](scim.md)); SCIM Groups (Okta, Entra) are still to come and are meant to slot in without reshaping this: add `scim` to the
 two source enums, a `scim_group_links (connection_id, external_id, group_id)` table, and a `scim` mode
 beside `admin` and `provisioning` in `utils/groups.ts`. A linked group's members become read-only in
 the admin API (`409 managed_by_scim`); unlinking returns membership to `local`, keeping the members.

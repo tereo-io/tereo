@@ -89,10 +89,12 @@ An area keeps its own code where a client plausibly branches on it, e.g. `user_n
 write through the files API to a bucket core declares for itself, other than an admin's version purge), `managed_by_provisioning` (409: a
 service, login client or branding profile declared in the provisioning file; branding adds
 `provisionedFrom`), `role_assigned_in_org`,
-`already_verified` (409: the address is already verified), `user_not_verifiable` (409: a service account, the system user, a deactivated user or an expired guest has no address to verify), `email_not_configured` (409: no default email connection to send through), `sso_only_domain` (409: a guest setup link for an email on an SSO-only domain, which could never be redeemed; also a provider deactivation while one of its domains is SSO-only), `blocked_file_type`, `invalid_event_type`, `reserved_event_type`, and for branding
+`already_verified` (409: the address is already verified), `user_not_verifiable` (409: a service account, the system user, a deactivated user or an expired guest has no address to verify), `email_not_configured` (409: no default email connection to send through), `sso_only_domain` (409: a guest setup link for an email on an SSO-only domain, which could never be redeemed; also a provider deactivation while one of its domains is SSO-only), `managed_by_scim` (409: a user the identity provider's SCIM connection manages: an admin change to `email` or `name`, or a reactivation while the provider has the user inactive), `scim_token_limit` (409: a connection already has two live tokens), `scim_users_exist` (409: a SCIM connection still manages users, so it cannot be deleted), `blocked_file_type`, `invalid_event_type`, `reserved_event_type`, and for branding
 `invalid_branding_image`, `unknown_branding_image` and `user_inactive`. Pass it to the class
 (`ConflictError(message, "bucket_retired")`, `BadRequestError(code, message)`) rather than
 building an `AppError` by status.
+
+The `/scim/v2` endpoints answer in the SCIM error shape (`schemas`, `status`, `scimType`, `detail`, `application/scim+json`), not this one: see [scim.md](scim.md#errors).
 
 The OAuth and OIDC endpoints (`/oauth/*`, `/.well-known/*`) keep the RFC 6749 / 6750 / OIDC codes
 (`invalid_request`, `invalid_grant`, `invalid_client`, `invalid_scope`, `login_required`, …).
