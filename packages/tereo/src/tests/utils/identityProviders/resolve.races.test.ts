@@ -5,6 +5,7 @@ import type { NormalizedIdentity } from "../../../utils/identityProviders/types.
 import { resolveLoginIdentity } from "../../../utils/identityProviders/resolve.js";
 import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
+import { holdLocks, waitForLockWait } from "../../support/dbLocks.js";
 import { ensureTestOrganization } from "../../support/principals.js";
 import { createTestUser } from "../../support/auth/users.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -306,6 +307,82 @@ describe("resolveLoginIdentity", () => {
 
       expect(results).toEqual([{ userId: user.id }, { userId: user.id }]);
       expect(await identitiesFor(provider.id, id.subject)).toHaveLength(1);
+    });
+
+    /**
+     * Starts a first sign-in while `change` is committed under the user's
+     * row lock, and releases it once the claim waits for that lock.
+     */
+    const claimDuring = async (
+      user: { id: string; email: string },
+      provider: Awaited<ReturnType<typeof makeProvider>>,
+      change: (
+        tx: Parameters<Parameters<typeof holdLocks>[0]>[0]
+      ) => Promise<unknown>
+    ) => {
+      const release = await holdLocks(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "auth"."users" WHERE id = ${user.id}::uuid FOR UPDATE`;
+        await change(tx);
+      });
+      const result = resolveLoginIdentity(
+        provider,
+        identity({ email: user.email })
+      );
+      try {
+        // The claim's own lock, or (without it) its identity insert's key
+        // lock on the user row.
+        await waitForLockWait('%"auth"."user%');
+      } finally {
+        await release();
+      }
+      return await result;
+    };
+
+    it("links nothing to a user deactivated while the claim waits for the lock", async () => {
+      const { provider, user } = await scimUser();
+      const result = await claimDuring(user, provider, async (tx) => {
+        await tx.user.update({
+          where: { id: user.id },
+          data: { isActive: false },
+        });
+        await tx.scimUser.update({
+          where: { userId: user.id },
+          data: { idpActive: false },
+        });
+      });
+      expect(result).toEqual({ userId: user.id });
+      expect(
+        await prisma.userIdentity.count({ where: { userId: user.id } })
+      ).toBe(0);
+    });
+
+    it("links nothing to a user unlinked or deleted while the claim waits for the lock", async () => {
+      for (const data of [
+        { unlinkedAt: new Date() },
+        { deletedAt: new Date(), idpActive: false },
+      ]) {
+        const { provider, user } = await scimUser();
+        await claimDuring(user, provider, (tx) =>
+          tx.scimUser.update({ where: { userId: user.id }, data })
+        );
+        expect(
+          await prisma.userIdentity.count({ where: { userId: user.id } }),
+          JSON.stringify(data)
+        ).toBe(0);
+      }
+    });
+
+    it("links nothing once the connection is paused while the claim waits for the lock", async () => {
+      const { provider, user } = await scimUser();
+      await claimDuring(user, provider, (tx) =>
+        tx.scimConnection.update({
+          where: { providerId: provider.id },
+          data: { isActive: false },
+        })
+      );
+      expect(
+        await prisma.userIdentity.count({ where: { userId: user.id } })
+      ).toBe(0);
     });
 
     it("link one of two subjects: one user, one account_exists", async () => {

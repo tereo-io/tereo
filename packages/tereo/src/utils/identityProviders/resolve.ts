@@ -168,17 +168,54 @@ const claimScimUser = async (
   // Nothing links a deactivated or expired account. Naming it lets the
   // callback refuse it as such; unlinked, it is never signed in.
   if (!isUsableAccount(user)) return { userId: user.id };
-  await db.$transaction((tx) =>
-    linkIdentity(
+
+  // Again under the user's row lock, which SCIM's writes and an admin's
+  // unlink take: a deactivation, delete, unlink or pause that committed
+  // since the checks above stops the link.
+  const outcome = await db.$transaction(async (tx) => {
+    await db.users.lockForSignInChange(user.id, tx);
+    const link = await db.scim.getLinkByUser(user.id, tx);
+    const current = await db.scim.getConnectionByProvider(provider.id, tx);
+    const locked = await db.users.get(user.id, tx);
+    if (
+      link?.id !== match.id ||
+      link.deletedAt !== null ||
+      link.unlinkedAt !== null ||
+      !current?.isActive ||
+      !(await db.identityProviders.get(provider.id, tx)).isActive ||
+      locked.email !== user.email
+    ) {
+      return "gone" as const;
+    }
+    if (
+      await db.userIdentities.getForUserAtProvider(user.id, provider.id, tx)
+    ) {
+      return "already linked" as const;
+    }
+    if (!isUsableAccount(locked)) return "unusable" as const;
+    await linkIdentity(
       tx,
-      { userId: user.id, email: user.email },
+      { userId: user.id, email: locked.email },
       user.id,
       provider,
       identity,
       { via: "scim", scimConnectionId: connection.id }
-    )
-  );
-  return { userId: user.id };
+    );
+    return "claimed" as const;
+  });
+  switch (outcome) {
+    case "gone":
+      return null;
+    case "already linked":
+      // A concurrent sign-in claimed the user first: this subject's own link,
+      // or another subject's, as a unique violation would have said.
+      return (
+        (await signInLinked(provider, identity)) ?? { error: "account_exists" }
+      );
+    case "unusable":
+    case "claimed":
+      return { userId: user.id };
+  }
 };
 
 const resolveOnce = async (
