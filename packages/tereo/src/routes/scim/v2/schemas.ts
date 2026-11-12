@@ -7,7 +7,7 @@ const MAX_START_INDEX = 1_000_000_000;
 const integer = (value: unknown) =>
   typeof value === "string" && /^-?\d+$/.test(value) ? Number(value) : value;
 
-export const listUsersQuerySchema = z.object({
+export const scimListQuerySchema = z.object({
   filter: z.string().optional(),
   startIndex: z.preprocess(
     integer,

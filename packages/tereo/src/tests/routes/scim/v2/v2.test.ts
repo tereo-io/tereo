@@ -24,11 +24,11 @@ describe("/scim/v2 discovery", () => {
     }
   );
 
-  it("lists exactly the User resource type", async () => {
+  it("lists the User and Group resource types", async () => {
     const { token } = await createScimConnection();
     const { body } = await scimFetch(token, "GET", "/scim/v2/ResourceTypes");
     const names = (body.Resources as { id: string }[]).map((r) => r.id);
-    expect(names).toEqual(["User"]);
+    expect(names).toEqual(["User", "Group"]);
   });
 
   it("builds locations from PUBLIC_URL", async () => {
