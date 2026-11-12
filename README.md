@@ -21,6 +21,7 @@ configuration is not.
 | `tereo` | **The service** — auth (OAuth2/OIDC), file storage, webhook delivery and audit logging in one process, port 4001 |
 | `tereo-ui` | The admin UI (Vite + React): auth admin and My Account, file storage, webhooks and the audit log, talking to core directly. Ships in core's image and is served by core at `/`; port 4000 in development |
 | `@tereo-io/sdk` | The SDK app services use to reach core: `createCoreClient` gives `auth`, `files`, `webhooks` and `audit` over the service's one set of credentials. its types describe the service's provisioning document, and `core.outbox` writes audit entries and events in the app's own transactions |
+| `@tereo-io/mcp` | Serves an app service's tools over the Model Context Protocol, signed in through core: each tool names the permission it needs, so Claude and ChatGPT connectors see only what the user may call |
 
 ## Getting started
 
@@ -133,7 +134,7 @@ npm run format && npm run sort-imports && npm run lint && npm run check
 npm run openapi:build -w tereo               # after changing the OpenAPI spec
 ```
 
-A change to `@tereo-io/sdk`, `tereo` or `tereo-ui` also needs a version plan (`npm run version-plan`).
+A change to `@tereo-io/sdk`, `@tereo-io/mcp`, `tereo` or `tereo-ui` also needs a version plan (`npm run version-plan`).
 The admin UI's components come from [`@kosmeo-ui/react`](https://github.com/kosmeo-ui/kosmeo-ui); library changes go there.
 
 ### 4. Add an app service

@@ -1,0 +1,78 @@
+{
+  "name": "@tereo-io/mcp",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Expose a Tereo app service's tools over the Model Context Protocol, authenticated by Tereo",
+  "keywords": [
+    "tereo",
+    "mcp",
+    "model-context-protocol",
+    "oauth"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tereo-io/tereo.git",
+    "directory": "packages/tereo-mcp"
+  },
+  "homepage": "https://github.com/tereo-io/tereo/tree/master/packages/tereo-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/tereo-io/tereo/issues"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!dist/tests",
+    "!src/tests",
+    "!**/*.tsbuildinfo",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "author": "Aaron Leman",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/express": "^2.0.2",
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "pino": "^10.4.0"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@tereo-io/sdk": "^0.5.0",
+    "express": "^5",
+    "ioredis": "^6",
+    "zod": "^4.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@modelcontextprotocol/client": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@types/express": "^5.0.6",
+    "express": "^5.3.0",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.4"
+  }
+}

@@ -16,6 +16,7 @@ built on [`@kosmeo-ui/react`](https://github.com/kosmeo-ui/kosmeo-ui) from npm. 
 core's image and core serves it at `/`, around core's API under `/v1`.
 The Helm chart is `charts/tereo` (external Postgres and Redis; migrations as a hook), released with
 the image at the same version.
+`@tereo-io/mcp` (`packages/tereo-mcp`) lets an app service serve MCP tools to clients that sign in through core, each tool gated by a Tereo permission.
 Outbound HTTP goes through the request handler [`@dianemo/core`](https://github.com/dianemo/dianemo).
 
 Read [README.md](README.md) first; its *Current state* section lists what is done and what is not.
@@ -59,7 +60,7 @@ One ordinary package, shared by every area:
 
 - **Style is enforced by CI** ([docs/code-style.md](docs/code-style.md)): Prettier, import order
   (single-line imports longest first, then multi-line — `npm run sort-imports`), ESLint, `tsc`. Run
-  `npm run format && npm run sort-imports && npm run lint` before committing. A change to `@tereo-io/sdk`, or
+  `npm run format && npm run sort-imports && npm run lint` before committing. A change to `@tereo-io/sdk`, `@tereo-io/mcp`, or
   to `tereo` or `tereo-ui` (one release group, `core`, whose version tags the image), needs a
   version plan (`npm run version-plan`).
 - **ESM only.** Every package is `"type": "module"` with `.js` extensions on all relative imports,
