@@ -41,7 +41,9 @@ import {
  * Lock order, in each transaction:
  * 1. `lockAuthority` for every user whose authority changes, ascending id:
  *    the users added or removed, or for a change to the group's roles (and
- *    archive and restore) every current member.
+ *    archive and restore) every current member. A directory's `scim` addition
+ *    re-reads which ids have a live link only after this step, so a user
+ *    unlinked or deleted meanwhile is dropped.
  * 2. `lockGroup`.
  * 3. For role changes, archive and restore: the members re-read, and the
  *    authority of any not locked in step 1 locked. Such a user was added by
@@ -50,8 +52,6 @@ import {
  *    group: then each waits on the other, Postgres aborts one side with a
  *    deadlock error (40P01), and that request fails. The window is narrow
  *    and nothing retries it.
- *    A directory's `scim` additions re-read which ids have a live link only
- *    after step 1, so a user unlinked or deleted meanwhile is dropped.
  * 4. `lockOrgOwners` when an org admin acts on an org group, then
  *    `assertAdminRemains` last.
  *
@@ -528,6 +528,20 @@ export const addMembers = async (
     );
     dropped = ids.length - live.size;
     ids = ids.filter((id) => live.has(id));
+    // One ineligible member must not fail a directory push: left out too.
+    const ineligible = new Set(
+      (await tx.user.findMany({ where: { id: { in: ids } } }))
+        .filter(
+          (u) =>
+            u.id === SYSTEM_USER_ID ||
+            u.userType === "guest" ||
+            u.userType === "service_account" ||
+            u.oauthClientId !== null
+        )
+        .map((u) => u.id)
+    );
+    dropped += ineligible.size;
+    ids = ids.filter((id) => !ineligible.has(id));
   }
   const skipped: string[] = [];
 
@@ -613,6 +627,21 @@ export const addMembers = async (
       ...(dropped > 0 && { dropped }),
     });
     await emitMembersEvents(tx, group, "auth.group.members-added", added);
+  } else if (actor.mode === "scim" && skipped.length + dropped > 0) {
+    await logAuditTx(tx, {
+      auth: auditActor(actor),
+      organizationId: group.organizationId,
+      action: "UPDATE",
+      entityType: "Group",
+      entityId: group.id,
+      entityName: group.slug,
+      metadata: {
+        action: "members_skipped",
+        ...scimDetail(actor),
+        skipped: skipped.length,
+        dropped,
+      },
+    });
   }
   return {
     group,

@@ -4,6 +4,7 @@ import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, type Prisma } from "../../../utils/db/prisma.js";
 import { SYSTEM_USER_ID } from "../../../definitions/index.js";
+import { setAsideAdmins } from "../../support/adminGuard.js";
 import { createScimConnection } from "../../support/scim.js";
 import { createTestUser } from "../../support/auth/users.js";
 import { managedWith } from "../../support/scimUsers.js";
@@ -190,6 +191,53 @@ describe("scim mode", () => {
     expect(result.revokedJtis).toContain(jti);
   });
 
+  it("scim add drops a managed guest and adds the rest", async () => {
+    const group = await pushedGroup(c);
+    const member = await orgUser(c);
+    const guest = await orgUser(c);
+    await prisma.user.update({
+      where: { id: guest.id },
+      data: {
+        userType: "guest",
+        expiresAt: new Date(Date.now() + 86_400_000),
+      },
+    });
+
+    const result = await run((tx) =>
+      addMembers(scimActor(c), group.id, [member.id, guest.id], tx)
+    );
+
+    expect(result.added).toEqual([member.id]);
+    expect(result.dropped).toBe(1);
+  });
+
+  it("scim add with nothing to add audits the skipped and dropped counts and emits no event", async () => {
+    const group = await pushedGroup(c);
+    const outsider = await managedWith(c);
+    const before = await prisma.outbox.count({
+      where: { payload: { path: ["entityId"], equals: group.id } },
+    });
+
+    const result = await run((tx) =>
+      addMembers(scimActor(c), group.id, [outsider.id, randomUUID()], tx)
+    );
+
+    expect(result.added).toEqual([]);
+    const entry = await lastAudit(group.id);
+    expect(entry.userId).toBe(SYSTEM_USER_ID);
+    expect(entry.metadata).toMatchObject({
+      action: "members_skipped",
+      scimConnectionId: c.connectionId,
+      skipped: 1,
+      dropped: 1,
+    });
+    expect(
+      await prisma.outbox.count({
+        where: { payload: { path: ["entityId"], equals: group.id } },
+      })
+    ).toBe(before);
+  });
+
   it("scim audit entries carry scimConnectionId", async () => {
     const group = await pushedGroup(c);
     expect((await lastAudit(group.id)).metadata).toMatchObject({
@@ -234,59 +282,14 @@ describe("scim mode", () => {
 });
 
 describe("scim mode and the last administrator", () => {
-  // Other suites leave admins behind: their assignments are set aside for
-  // this block.
-  const expired = new Map<string, Date | null>();
-  const archivedGroups: string[] = [];
+  let restoreAdmins: () => Promise<void>;
 
   beforeAll(async () => {
-    const grantsAdmin = {
-      isActive: true,
-      archivedAt: null,
-      retiredAt: null,
-      rolePermissions: {
-        some: { permission: { name: "admin", retiredAt: null } },
-      },
-    } satisfies Prisma.RoleWhereInput;
-    const direct = await prisma.userRole.findMany({
-      where: {
-        organizationId: null,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-        user: { isActive: true, userType: "human" },
-        role: grantsAdmin,
-      },
-    });
-    for (const a of direct) {
-      expired.set(a.id, a.expiresAt);
-      await prisma.userRole.update({
-        where: { id: a.id },
-        data: { expiresAt: new Date(Date.now() - 60_000) },
-      });
-    }
-    const groups = await prisma.group.findMany({
-      where: {
-        organizationId: null,
-        archivedAt: null,
-        roles: { some: { role: grantsAdmin } },
-      },
-    });
-    for (const g of groups) {
-      archivedGroups.push(g.id);
-      await prisma.group.update({
-        where: { id: g.id },
-        data: { archivedAt: new Date() },
-      });
-    }
+    restoreAdmins = await setAsideAdmins();
   });
 
   afterAll(async () => {
-    for (const [id, expiresAt] of expired) {
-      await prisma.userRole.updateMany({ where: { id }, data: { expiresAt } });
-    }
-    await prisma.group.updateMany({
-      where: { id: { in: archivedGroups } },
-      data: { archivedAt: null },
-    });
+    await restoreAdmins();
   });
 
   it("scim remove of the last administrator is refused", async () => {
@@ -312,6 +315,7 @@ describe("scim mode and the last administrator", () => {
     );
 
     expect(err.statusCode).toBe(409);
+    expect(err.message).toContain("no active administrator");
     expect(await db.groups.getMemberIds(group.id)).toEqual([user.id]);
     await prisma.scimGroup.deleteMany({ where: { groupId: group.id } });
     await deleteGroups([group.id]);

@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, type Prisma } from "../../utils/db/prisma.js";
 import { createTestGuest } from "../support/auth/guests.js";
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import { setAsideAdmins } from "../support/adminGuard.js";
 import { AppError } from "../../utils/errors.js";
 import db from "../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
@@ -189,59 +190,14 @@ describe("addMembers", () => {
 });
 
 describe("removeMembers and the last admin", () => {
-  // Other suites leave admins behind: their assignments are set aside (direct
-  // ones expired, global groups granting admin archived) for this block.
-  const expired = new Map<string, Date | null>();
-  const archivedGroups: string[] = [];
+  let restoreAdmins: () => Promise<void>;
 
   beforeAll(async () => {
-    const grantsAdmin = {
-      isActive: true,
-      archivedAt: null,
-      retiredAt: null,
-      rolePermissions: {
-        some: { permission: { name: "admin", retiredAt: null } },
-      },
-    } satisfies Prisma.RoleWhereInput;
-    const direct = await prisma.userRole.findMany({
-      where: {
-        organizationId: null,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-        user: { isActive: true, userType: "human" },
-        role: grantsAdmin,
-      },
-    });
-    for (const a of direct) {
-      expired.set(a.id, a.expiresAt);
-      await prisma.userRole.update({
-        where: { id: a.id },
-        data: { expiresAt: new Date(Date.now() - 60_000) },
-      });
-    }
-    const groups = await prisma.group.findMany({
-      where: {
-        organizationId: null,
-        archivedAt: null,
-        roles: { some: { role: grantsAdmin } },
-      },
-    });
-    for (const g of groups) {
-      archivedGroups.push(g.id);
-      await prisma.group.update({
-        where: { id: g.id },
-        data: { archivedAt: new Date() },
-      });
-    }
+    restoreAdmins = await setAsideAdmins();
   });
 
   afterAll(async () => {
-    for (const [id, expiresAt] of expired) {
-      await prisma.userRole.updateMany({ where: { id }, data: { expiresAt } });
-    }
-    await prisma.group.updateMany({
-      where: { id: { in: archivedGroups } },
-      data: { archivedAt: null },
-    });
+    await restoreAdmins();
   });
 
   it("removeMembers refuses removing the last admin held only via a global group (409)", async () => {
