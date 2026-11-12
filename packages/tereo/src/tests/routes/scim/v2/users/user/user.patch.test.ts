@@ -251,6 +251,86 @@ describe("PATCH /scim/v2/Users/:id", () => {
   });
 });
 
+describe("PATCH /scim/v2/Users/:id on a user the connection may not write", () => {
+  it.each([
+    ["another connection's managed user", "other"],
+    ["a user whose link is deleted", "deleted"],
+    ["a user an admin unlinked", "unlinked"],
+  ] as const)("answers 404 for %s, changing nothing", async (_, kind) => {
+    const c = await createScimConnection();
+    const other = await createScimConnection();
+    const user = await makeUser(`n-${tag()}@${c.domain}`);
+    await manage(
+      kind === "other" ? other.connectionId : c.connectionId,
+      user.id,
+      user.email,
+      {
+        ...(kind === "deleted" && { deletedAt: new Date() }),
+        ...(kind === "unlinked" && { unlinkedAt: new Date() }),
+      }
+    );
+    const withLink = () =>
+      prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+        include: { scimLink: true },
+      });
+    const before = await withLink();
+    const r = await patch(
+      c.token,
+      user.id,
+      ops(
+        { op: "replace", path: "active", value: false },
+        { op: "replace", path: "displayName", value: "Changed" }
+      )
+    );
+    expect(r.status).toBe(404);
+    expect(await withLink()).toEqual(before);
+  });
+});
+
+describe("PATCH /scim/v2/Users/:id on a managed user whose domain left the provider", () => {
+  it("still renames and deactivates them, and refuses an email change with 400 invalidValue", async () => {
+    const c = await createScimConnection({
+      domains: [`left-${tag()}.test`, `kept-${tag()}.test`],
+    });
+    const user = await managedWith(c);
+    await prisma.identityProviderDomain.delete({ where: { domain: c.domain } });
+
+    const renamed = await patch(
+      c.token,
+      user.id,
+      ops({ op: "replace", path: "name.givenName", value: "Renamed" })
+    );
+    expect(renamed.status).toBe(200);
+    expect((await row(user.id)).firstName).toBe("Renamed");
+
+    const moved = await patch(
+      c.token,
+      user.id,
+      ops({
+        op: "replace",
+        path: "emails",
+        value: [{ value: `moved-${tag()}@${c.domain}`, primary: true }],
+      })
+    );
+    expect(moved.status).toBe(400);
+    expect(moved.body).toMatchObject({ scimType: "invalidValue" });
+    expect((await row(user.id)).email).toBe(user.email);
+
+    const off = await patch(
+      c.token,
+      user.id,
+      ops({ op: "replace", path: "active", value: false })
+    );
+    expect(off.status).toBe(200);
+    expect(await activeState(user.id)).toEqual({
+      isActive: false,
+      idpActive: false,
+      adminHold: false,
+    });
+  });
+});
+
 describe("PATCH /scim/v2/Users/:id active", () => {
   const setActive = (token: string, id: string, active: boolean) =>
     patch(token, id, ops({ op: "replace", path: "active", value: active }));

@@ -1,12 +1,29 @@
 // @module-tag int
 // @module-tag auth
-import { makeUser, manage, tag } from "../../../../../support/scimUsers.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import {
+  REDIRECT_URI,
+  sessionLifecycleHelpers,
+} from "../../../../../support/auth/sessionLifecycle.js";
+import {
+  makeUser,
+  manage,
+  signedInManagedUser,
+  tag,
+} from "../../../../../support/scimUsers.js";
 import {
   createScimConnection,
   scimFetch,
 } from "../../../../../support/scim.js";
+
+let client: Awaited<ReturnType<typeof createTestClient>>;
+const { login, refresh } = sessionLifecycleHelpers(() => client);
+
+beforeAll(async () => {
+  client = await createTestClient({ redirectUris: [REDIRECT_URI] });
+});
 
 const del = (token: string, id: string) =>
   scimFetch(token, "DELETE", `/scim/v2/Users/${id}`);
@@ -52,6 +69,13 @@ describe("DELETE /scim/v2/Users/:id", () => {
       changes: { isActive: { old: true, new: false } },
       metadata: { action: "scim_deleted", scimConnectionId: c.connectionId },
     });
+  });
+
+  it("refuses a refresh token issued before the DELETE", async () => {
+    const c = await createScimConnection();
+    const { user, tokens } = await signedInManagedUser(c, login);
+    expect((await del(c.token, user.id)).status).toBe(204);
+    expect((await refresh(tokens.refresh_token)).status).toBe(400);
   });
 
   it("then answers 404 to GET and to a second DELETE", async () => {

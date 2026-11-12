@@ -320,6 +320,40 @@ describe("PUT /scim/v2/Users/:id", () => {
   });
 });
 
+describe("PUT /scim/v2/Users/:id on a user the connection may not write", () => {
+  it.each([
+    ["another connection's managed user", "other"],
+    ["a user whose link is deleted", "deleted"],
+    ["a user an admin unlinked", "unlinked"],
+  ] as const)("answers 404 for %s, changing nothing", async (_, kind) => {
+    const c = await createScimConnection();
+    const other = await createScimConnection();
+    const user = await makeUser(`n-${tag()}@${c.domain}`);
+    await manage(
+      kind === "other" ? other.connectionId : c.connectionId,
+      user.id,
+      user.email,
+      {
+        ...(kind === "deleted" && { deletedAt: new Date() }),
+        ...(kind === "unlinked" && { unlinkedAt: new Date() }),
+      }
+    );
+    const withLink = () =>
+      prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+        include: { scimLink: true },
+      });
+    const before = await withLink();
+    const r = await put(
+      c.token,
+      user.id,
+      replacing(user.email, { active: false, displayName: "Changed" })
+    );
+    expect(r.status).toBe(404);
+    expect(await withLink()).toEqual(before);
+  });
+});
+
 describe("PUT /scim/v2/Users/:id active", () => {
   it("active:false deactivates; a refresh token issued before is refused", async () => {
     const c = await createScimConnection();

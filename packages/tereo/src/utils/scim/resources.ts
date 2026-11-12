@@ -1,7 +1,6 @@
 export const USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User";
 export const LIST_RESPONSE_SCHEMA =
   "urn:ietf:params:scim:api:messages:2.0:ListResponse";
-export const PATCH_OP_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 const SERVICE_PROVIDER_CONFIG_SCHEMA =
   "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig";
 const RESOURCE_TYPE_SCHEMA =

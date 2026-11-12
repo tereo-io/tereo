@@ -502,26 +502,6 @@ export const replaceScimUser = updateScimUser;
 export const patchScimUser = updateScimUser;
 
 /**
- * Records the IdP's `active` on a managed user and acts on it, unless an
- * admin's hold keeps the user inactive.
- */
-export const setIdpActive = async (
-  ctx: ScimContext,
-  target: { user: UserRow; link: ScimUserLink },
-  active: boolean
-): Promise<UserRow> => {
-  const { user } = await scimWrite(async () =>
-    settle(
-      ctx,
-      target,
-      { input: { active } },
-      relockVisible(ctx, target.user.id)
-    )
-  );
-  return user;
-};
-
-/**
  * The IdP's "this person should no longer have access": an unmanaged user is
  * adopted first. The user and link rows stay; the resource answers 404 after.
  */
@@ -557,8 +537,11 @@ export const assertScimAllows = (
   if (!link || link.unlinkedAt !== null) return;
   if (change.profile) throw new ManagedByScimError();
   if (change.reactivating && !link.idpActive) {
+    // A deleted resource is gone from the IdP: nothing there reactivates it.
     throw new ManagedByScimError(
-      "The identity provider has this user deactivated; reactivate them there"
+      link.deletedAt !== null
+        ? "The user was removed by the identity provider; re-assign them there or unlink them here"
+        : "The identity provider has this user deactivated; reactivate them there"
     );
   }
 };

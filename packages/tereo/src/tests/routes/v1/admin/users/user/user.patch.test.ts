@@ -368,6 +368,17 @@ describe("PATCH /v1/admin/users/:id on a SCIM-managed user", () => {
     }
   );
 
+  it("refuses reactivating a user the IdP deleted, pointing at re-assigning or unlinking", async () => {
+    const user = await scimUser({ idpActive: false, deletedAt: new Date() });
+    const r = await patch(user.id, writer, { isActive: true });
+    expectManaged(r);
+    expect(r.body.error_description).toMatch(
+      /removed by the identity provider/i
+    );
+    expect(r.body.error_description).toMatch(/unlink/i);
+    expect(r.body.error_description).not.toMatch(/reactivate them there/i);
+  });
+
   it("reactivates a held user the IdP has active and clears the hold", async () => {
     const user = await scimUser({ adminHold: true });
     const r = await patch(user.id, writer, { isActive: true });
