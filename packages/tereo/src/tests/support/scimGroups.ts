@@ -25,6 +25,13 @@ export const orgConnection = async () => {
   return c;
 };
 
+/** A connection whose groups are global. */
+export const globalConnection = async () => {
+  const c = await createScimConnection();
+  await setGroupsTarget(c.connectionId, { kind: "global" });
+  return c;
+};
+
 /** A user the connection manages, with or without membership of its organization. */
 export const managedUser = async (
   c: ScimTestConnection,

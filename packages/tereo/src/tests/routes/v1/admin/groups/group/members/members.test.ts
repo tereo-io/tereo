@@ -10,6 +10,12 @@ import { prisma } from "../../../../../../../utils/db/prisma.js";
 import db from "../../../../../../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
 import {
+  managedUser,
+  memberIds,
+  orgConnection,
+  pushedGroup,
+} from "../../../../../../support/scimGroups.js";
+import {
   ensureTestOrganization,
   getTestPrincipalToken,
 } from "../../../../../../support/principals.js";
@@ -226,5 +232,20 @@ describe("GET /v1/admin/groups/:id/members", () => {
       admin
     );
     expect(second.body.data).toHaveLength(2);
+  });
+});
+
+describe("POST /v1/admin/groups/:id/members on a SCIM-pushed group", () => {
+  it("returns 409 managed_by_scim", async () => {
+    const c = await orgConnection();
+    const { id } = await pushedGroup(c, []);
+    const user = await managedUser(c);
+
+    const res = await adminApi("POST", `/groups/${id}/members`, admin, {
+      userIds: [user.id],
+    });
+    expect(res.status).toBe(HTTP_STATUS.CONFLICT);
+    expect(res.body.error).toBe("managed_by_scim");
+    expect(await memberIds(id)).toEqual([]);
   });
 });

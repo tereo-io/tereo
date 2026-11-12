@@ -55,6 +55,33 @@ export const getLinkWithProvider = async (groupId: string, tx?: Tx) => {
   });
 };
 
+/** The pushed groups among `groupIds`: their provider and skipped-member count, in one query. */
+export const summariesForGroups = async (groupIds: string[], tx?: Tx) => {
+  const rows = await (tx ?? prisma).scimGroup.findMany({
+    where: { groupId: { in: groupIds } },
+    select: {
+      groupId: true,
+      connection: {
+        select: {
+          providerId: true,
+          provider: { select: { displayName: true } },
+        },
+      },
+      _count: { select: { skipped: true } },
+    },
+  });
+  return new Map(
+    rows.map((r) => [
+      r.groupId,
+      {
+        providerId: r.connection.providerId,
+        providerName: r.connection.provider.displayName,
+        skippedMemberCount: r._count.skipped,
+      },
+    ])
+  );
+};
+
 export const updateLink = async (
   id: string,
   data: { externalId?: string | null; displayName?: string },

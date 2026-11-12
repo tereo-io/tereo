@@ -1,7 +1,9 @@
 // @module-tag int
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../../../../utils/defaultOrganization.js";
+import { orgConnection, pushedGroup } from "../../../../support/scimGroups.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { makeUser, tag } from "../../../../support/scimUsers.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -70,6 +72,8 @@ describe("POST /v1/admin/groups", () => {
       createdAt: expect.any(String),
       updatedAt: expect.any(String),
       memberCount: 0,
+      managedBy: null,
+      skippedMemberCount: 0,
     });
   });
 
@@ -251,5 +255,52 @@ describe("GET /v1/admin/groups", () => {
     );
     expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
     expect(res.body.error).toBe("invalid_cursor");
+  });
+});
+
+describe("GET /v1/admin/groups for pushed groups", () => {
+  it("shows managedBy and the skipped count, null and 0 for a local group", async () => {
+    const c = await orgConnection();
+    const outsider = await makeUser(`out-${tag()}@${c.domain}`);
+    const pushed = await pushedGroup(c, [], [outsider.id]);
+    const local = track(
+      await postGroup(admin, { organizationId: c.organizationId })
+    );
+
+    const res = await adminApi(
+      "GET",
+      `/groups?organizationId=${c.organizationId}&limit=100`,
+      admin
+    );
+    expect(res.status).toBe(HTTP_STATUS.OK);
+    const byId = new Map(res.body.data.map((g: ApiGroup) => [g.id, g]));
+    expect(byId.get(pushed.id)).toMatchObject({
+      definitionSource: "scim",
+      membershipSource: "scim",
+      managedBy: {
+        kind: "scim",
+        providerId: c.providerId,
+        providerName: "SCIM IdP",
+      },
+      skippedMemberCount: 1,
+    });
+    expect(byId.get(local.id)).toMatchObject({
+      managedBy: null,
+      skippedMemberCount: 0,
+    });
+  });
+
+  it("filters by definitionSource=scim", async () => {
+    const c = await orgConnection();
+    const pushed = await pushedGroup(c, []);
+    track(await postGroup(admin, { organizationId: c.organizationId }));
+
+    const res = await adminApi(
+      "GET",
+      `/groups?definitionSource=scim&organizationId=${c.organizationId}`,
+      admin
+    );
+    expect(res.status).toBe(HTTP_STATUS.OK);
+    expect(res.body.data.map((g: ApiGroup) => g.id)).toEqual([pushed.id]);
   });
 });

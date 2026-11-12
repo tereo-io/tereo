@@ -645,7 +645,11 @@ export const removeMembers = async (
   tx: Tx
 ): Promise<GroupChange & { removed: string[] }> => {
   // A group's organization never changes, so it can be read before the locks.
-  const { organizationId } = await db.groups.getAny(groupId, tx);
+  const first = await db.groups.getAny(groupId, tx);
+  const { organizationId } = first;
+  // Before the disempower guard below, so an admin sees the pushed group's
+  // refusal and not a 403 that says nothing of why.
+  assertNotScimManaged(actor, first, "members");
   await lockMemberAuthorities(unique(userIds), tx);
   // Every writer to these users' memberships holds their authority lock, so
   // who of them is a member holds until commit. Non-members are left out

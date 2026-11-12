@@ -23,7 +23,7 @@ export const BooleanFlagSchema = z
 
 export const ListGroupsQuerySchema = z.object({
   organizationId: z.union([z.literal("global"), z.guid()]).optional(),
-  definitionSource: z.enum(["local", "provisioned"]).optional(),
+  definitionSource: z.enum(["local", "provisioned", "scim"]).optional(),
   includeArchived: BooleanFlagSchema.default(false),
   q: z.string().min(1).max(255).optional(),
   cursor: z.string().min(1).optional(),

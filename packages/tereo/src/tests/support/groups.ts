@@ -156,13 +156,19 @@ export interface ApiGroup {
   slug: string;
   name: string;
   description: string | null;
-  definitionSource: "local" | "provisioned";
-  membershipSource: "local";
+  definitionSource: "local" | "provisioned" | "scim";
+  membershipSource: "local" | "scim";
   unprovisionedAt: string | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
   memberCount: number;
+  managedBy: {
+    kind: "scim";
+    providerId: string;
+    providerName: string;
+  } | null;
+  skippedMemberCount: number;
 }
 
 /** Creates a group through the admin API; the caller tracks its id. */

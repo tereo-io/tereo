@@ -15,7 +15,8 @@ import {
 const withMemberCount = async (group: Parameters<typeof formatGroup>[0]) =>
   formatGroup(
     group,
-    (await db.groups.countMembers([group.id])).get(group.id) ?? 0
+    (await db.groups.countMembers([group.id])).get(group.id) ?? 0,
+    (await db.scimGroups.summariesForGroups([group.id])).get(group.id)
   );
 
 export const getGroup = async (req: Request, res: Response) => {
