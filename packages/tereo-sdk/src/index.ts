@@ -38,6 +38,8 @@ export type {
 
 export { parseTestToken } from "./utils/testTokens.js";
 export { requestIdMiddleware } from "./utils/requestId.js";
+export { authContextFromIntrospection } from "./utils/authContext.js";
+export { hasPermission } from "./utils/permissions.js";
 export {
   HttpError,
   UnauthorizedError,
