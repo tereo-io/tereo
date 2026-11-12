@@ -12,6 +12,7 @@ import { RateLimitField } from "@/components/RateLimitField";
 import { useGroupAccess } from "../groups/useGroupAuthority";
 import ManageRolesButton from "./buttons/ManageRolesButton";
 import ExtendGuestButton from "./buttons/ExtendGuestButton";
+import ReleaseScimButton from "./buttons/ReleaseScimButton";
 import useUserGroups from "../../api/groups/useUserGroups";
 import useUpdateUser from "../../api/users/useUpdateUser";
 import UnlinkScimButton from "./buttons/UnlinkScimButton";
@@ -28,6 +29,7 @@ import { useAuth } from "@/lib/auth";
 import "../groups/styles.css";
 import "./sessions.css";
 import type {
+  ScimExclusion,
   UserDetail as UserDetailData,
   UserManager,
 } from "../../api/users/types";
@@ -94,6 +96,28 @@ const ManagedNotice = ({
     </Alert>
   );
 };
+
+const ScimExcludedNotice = ({
+  user,
+  exclusion,
+  canRelease,
+}: {
+  user: UserDetailData;
+  exclusion: ScimExclusion;
+  canRelease: boolean;
+}) => (
+  <Alert variant="secondary">
+    Excluded from SCIM ({exclusion.name}). An admin unlinked this user, so the
+    provider can neither update nor sign in as them.{" "}
+    {canRelease && (
+      <ReleaseScimButton
+        userId={user.id}
+        email={user.email}
+        providerName={exclusion.name}
+      />
+    )}
+  </Alert>
+);
 
 export const UserDetail = () => {
   const { userId } = useParams<{ userId: string }>();
@@ -183,6 +207,14 @@ export const UserDetail = () => {
           manager={user.managedBy}
           user={user}
           canUnlink={canWrite}
+        />
+      )}
+      {user.scimExcluded && (
+        <ScimExcludedNotice
+          user={user}
+          exclusion={user.scimExcluded}
+          // Core also needs a global admin: it hands the account back.
+          canRelease={canWrite && hasPermission("admin")}
         />
       )}
       <Row>

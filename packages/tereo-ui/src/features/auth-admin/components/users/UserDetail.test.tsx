@@ -36,6 +36,7 @@ const person: UserDetailData = {
   createdAt: "2026-10-01T00:00:00Z",
   updatedAt: "2026-10-01T00:00:00Z",
   managedBy: null,
+  scimExcluded: null,
   rateLimitPerSecond: null,
 };
 
@@ -392,6 +393,27 @@ describe("UserDetail", () => {
       );
     });
 
+    it("says the unlinked user stays excluded until allowed again, and refreshes the user list", async () => {
+      authMock.axios.delete.mockReset();
+      authMock.axios.delete.mockResolvedValue({});
+      const client = new QueryClient();
+      const invalidate = vi.spyOn(client, "invalidateQueries");
+      renderDetail(scimUser, client);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Unlink" }));
+      expect(
+        await screen.findByText(
+          /excluded from SCIM until an admin allows it again/
+        )
+      ).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Unlink user" }));
+
+      await waitFor(() =>
+        expect(invalidate).toHaveBeenCalledWith({ queryKey: ["users"] })
+      );
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["users", "u1"] });
+    });
+
     it("still shows the connected accounts", async () => {
       renderDetail(scimUser);
 
@@ -405,6 +427,61 @@ describe("UserDetail", () => {
       await screen.findByText(/Managed by SCIM/);
       expect(screen.queryByRole("button", { name: "Unlink" })).toBeNull();
     });
+  });
+
+  describe("a user excluded from SCIM", () => {
+    const excluded: UserDetailData = {
+      ...person,
+      scimExcluded: { id: "p1", name: "Okta" },
+    };
+
+    it("notes the exclusion and its provider", async () => {
+      renderDetail(excluded);
+
+      expect(
+        await screen.findByText(/Excluded from SCIM \(Okta\)/)
+      ).toBeVisible();
+      expect(screen.queryByText(/Managed by SCIM/)).toBeNull();
+    });
+
+    it("allows SCIM again behind a confirmation, and refreshes the user list", async () => {
+      authMock.axios.put.mockResolvedValue({});
+      const client = new QueryClient();
+      const invalidate = vi.spyOn(client, "invalidateQueries");
+      renderDetail(excluded, client);
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Allow SCIM again" })
+      );
+      expect(authMock.axios.put).not.toHaveBeenCalled();
+      expect(
+        await screen.findByText(/Allow Okta to manage ada@example.com again\?/)
+      ).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Allow SCIM" }));
+
+      await waitFor(() =>
+        expect(authMock.axios.put).toHaveBeenCalledWith(
+          "/v1/admin/users/u1/scim/release"
+        )
+      );
+      await waitFor(() =>
+        expect(invalidate).toHaveBeenCalledWith({ queryKey: ["users"] })
+      );
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["users", "u1"] });
+    });
+
+    it.each(["admin", "users.write"])(
+      "hides Allow SCIM again without %s",
+      async (permission) => {
+        denied.add(permission);
+        renderDetail(excluded);
+
+        await screen.findByText(/Excluded from SCIM/);
+        expect(
+          screen.queryByRole("button", { name: "Allow SCIM again" })
+        ).toBeNull();
+      }
+    );
   });
 
   it("renders after a settings save whose response has no rate limits", async () => {

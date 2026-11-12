@@ -28,7 +28,7 @@ const UnlinkScimButton = ({
           unlink.mutate(userId, { onSettled: () => setConfirming(false) })
         }
         title="Unlink from SCIM"
-        body={`Unlink ${email} from ${providerName}? ${providerName} stops managing this user, and their name and email can be edited here.`}
+        body={`Unlink ${email} from ${providerName}? ${providerName} stops managing this user, and their name and email can be edited here. The user will be excluded from SCIM until an admin allows it again.`}
         confirmButtonText={unlink.isPending ? "Unlinking..." : "Unlink user"}
       />
     </>

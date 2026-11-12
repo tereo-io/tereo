@@ -24,8 +24,15 @@ export type UserManager =
   | { kind: "system" }
   | { kind: "service" | "integration" | "scim"; id: string; name: string };
 
+/** The provider an admin's unlink excludes the user from, until released. */
+export interface ScimExclusion {
+  id: string;
+  name: string;
+}
+
 export interface UserDetail extends User {
   managedBy: UserManager | null;
+  scimExcluded: ScimExclusion | null;
   /** Requests per second this account may make; null follows the default. */
   rateLimitPerSecond?: number | null;
 }

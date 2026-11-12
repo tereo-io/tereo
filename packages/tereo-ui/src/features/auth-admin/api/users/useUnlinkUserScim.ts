@@ -13,6 +13,7 @@ const useUnlinkUserScim = () => {
     },
     onSuccess: async (_, userId) => {
       await queryClient.invalidateQueries({ queryKey: ["users", userId] });
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
       await queryClient.invalidateQueries({
         queryKey: ["identity-providers"],
       });
