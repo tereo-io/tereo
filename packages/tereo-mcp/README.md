@@ -37,12 +37,22 @@ mcp.define({
 });
 
 mcp.define({
+  name: "describe_connection",
+  description: "Show a connection's tables",
+  permission: "query.connections.read",
+  readOnly: true,
+  input: z.object({ connectionId: z.string() }),
+  handler: async (input, ctx) =>                       // input: { connectionId: string }
+    describeConnection(input.connectionId, { signal: ctx.signal }),
+});
+
+mcp.define({
   name: "run_query",
   description: "Run a read-only query against a connection",
   permission: "query.queries.run",
   readOnly: true,
   input: async (ctx) => querySchemaFor(ctx.auth.userId),   // per-user schema
-  handler: async (input, ctx) => runQuery(ctx.auth, input),
+  handler: async (input, ctx) => runQuery(ctx.auth, input),   // input: unknown
 });
 
 const server = await mcp.listen(4002);      // or: app.use(await mcp.router())
@@ -57,6 +67,7 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 | Option | Required | |
 |--------|----------|---|
 | `name`, `version` | yes | Reported to MCP clients |
+| `instructions` | no | A non-empty string sent to clients at initialize: how to use this server's tools. See [Instructions and titles](#instructions-and-titles) |
 | `core` | yes | The app's `CoreClient`. Its `service` slug is the audience core checks at introspection |
 | `publicUrl` | yes | Public origin of this server, with no path; https unless the host is loopback. The MCP endpoint is `${publicUrl}${path}` |
 | `allowedClients` | yes | Non-empty list of `client_id`s; tokens issued to any other client are refused |
@@ -70,20 +81,32 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 | `coreUrl` | no | Core's base URL, for fetching its authorization-server metadata at start. Default `CORE_URL`, as in the SDK |
 | `logger` | no | A Pino logger. Default a new one named `@tereo-io/mcp` |
 | `maxResultBytes` | no | Default 1 000 000; a positive integer. A larger result becomes a tool error instead of flooding the model |
+| `toolTimeoutMs` | no | Default 60 000; a positive integer. How long a tool call may run. See [Timeouts and cancellation](#timeouts-and-cancellation) |
 
 ## `mcp.define(tool)`
 
 | Field | Required | |
 |-------|----------|---|
 | `name` | yes | `[a-z0-9_]`, unique; a duplicate throws |
+| `title` | no | A non-empty display name for people; clients show it in place of `name` |
 | `description` | yes | Shown to the model |
 | `permission` | yes | A non-empty Tereo permission name, or `null` for any signed-in user. The hierarchy is the SDK's: `write` includes `read`, `admin` includes all |
 | `readOnly` | yes | Sets `readOnlyHint`. Required so an author has to state it |
 | `destructive`, `idempotent` | no | `destructiveHint`, `idempotentHint` |
 | `input` | no | `z.object(...)`, or `(ctx) => z.object(...)` (may be async) for a per-user schema. Omitted: no arguments |
+| `output` | no | `z.object(...)`, static only. The result is validated and sent as structured content too. See [Structured results](#structured-results) |
 | `handler` | yes | `(input, ctx) => value`. A string is returned as text; any other JSON value as JSON text |
+| `timeoutMs` | no | A positive integer; overrides `toolTimeoutMs` for this tool |
+| `rateLimit` | no | `{ perMinute }` (a positive integer) for the tool's own limit, or `false` for none. Unset: the server-wide limit. See [Rate limit](#rate-limit) |
 
-`define` throws once the server has started (`router()` or `listen()` was called).
+`define` throws once the server has started (`router()` or `listen()` was called), and when a
+field above is out of range; the message names the tool and the field.
+
+The handler's input is typed from a static `input`: with `input: z.object({ sides: z.number() })`
+the handler sees `{ sides: number }` without an annotation, and with no `input` it sees
+`undefined`. A function `input` is known only per request, so there the input is `unknown` unless
+you annotate the handler's parameter. With `output`, the handler's return value is checked
+against the schema at compile time.
 
 An `input` function runs for every protocol message the caller sends (`initialize`, `tools/list`,
 `tools/call`), not only for calls, because the server is built per request. Keep it cheap and free
@@ -98,6 +121,14 @@ that tool is left out for that request.
 | `core` | The `CoreClient`, for lookups (groups, users) and `outbox.audit` |
 | `requestId` | Also on every log line for the call |
 | `logger` | A Pino child logger carrying `tool`, `user_id` and `request_id` |
+| `signal` | An `AbortSignal` for the call. See [Timeouts and cancellation](#timeouts-and-cancellation) |
+
+### Instructions and titles
+
+`instructions` is sent to clients when they connect, on both protocol eras; clients typically put
+it in the model's context, so say there how the tools fit together. A tool's `title` is listed
+with the tool in `tools/list` for clients to show people; the model still calls the tool by
+`name`.
 
 ## Serving
 
@@ -204,7 +235,9 @@ metadata, so clients request them at sign-in. That is what makes `ctx.auth.name`
 - `path` does not start with `/`;
 - `allowedClients` is empty;
 - `redis` is missing and `rateLimit` is not `false`;
-- `rateLimit.perMinute` or `maxResultBytes` is given and is not a positive integer;
+- a tool sets its own `rateLimit` and `redis` is missing;
+- `rateLimit.perMinute`, `maxResultBytes` or `toolTimeoutMs` is given and is not a positive integer;
+- `instructions` is given and is not a non-empty string;
 - an `allowedOrigins` entry is not an http or https origin (scheme, host and optional port only);
 - a `scopes` entry is empty, contains whitespace, a quote or a backslash, is repeated, or is `offline_access`;
 - with `provisioning`, a tool needs a permission the document's service does not declare;
@@ -215,6 +248,53 @@ metadata, so clients request them at sign-in. That is what makes `ctx.auth.name`
 
 A failed start is not cached: the next `router()` or `listen()` runs the checks again.
 
+## Timeouts and cancellation
+
+Each call has a deadline: the tool's `timeoutMs`, else `toolTimeoutMs`, else 60 seconds. When it
+passes, the call answers `Tool timed out after <n> ms` as a tool error, logged at warn with
+outcome `timeout`. Whatever the handler returns or throws afterwards is discarded. The call
+still counts toward the rate limit.
+
+`ctx.signal` aborts:
+
+- at the deadline, with a `TimeoutError` as its `reason`;
+- when the client disconnects or cancels the call (the MCP SDK's per-request signal, on both
+  protocol eras);
+- when a `listen` server's `close()` begins, including the shutdown on a signal, with an
+  `AbortError`. `router()` has no `close()`, so there the signal aborts only at the deadline or
+  on a disconnect.
+
+A timeout answers the client; it cannot stop a handler that ignores `ctx.signal`, which runs on
+in the background, holding whatever connections and locks it has. Pass the signal to database and HTTP calls
+(`fetch(url, { signal: ctx.signal })`, a query's abort option) so the work stops with the call.
+In an `input` function `ctx.signal` aborts only when the server closes.
+
+## Structured results
+
+With `output`, the tool is listed with that schema as its `outputSchema`, and the handler's return
+value is parsed with it. A successful result is sent twice: as `structuredContent` (the parsed
+value; a plain `z.object` drops unknown keys) and as its JSON in a text block, for clients that
+read only text. `maxResultBytes` applies to that JSON.
+
+```ts
+mcp.define({
+  name: "count_rows",
+  description: "Count the rows in a table",
+  permission: "query.connections.read",
+  readOnly: true,
+  input: z.object({ table: z.string() }),
+  output: z.object({ table: z.string(), rows: z.number().int() }),
+  handler: async ({ table }, ctx) => ({ table, rows: await countRows(table, ctx.signal) }),
+});
+```
+
+A return value that does not match is an internal error: the model sees
+`Internal error (request <id>)`, and the log line's `err` names the failing paths and issue
+codes, never the values. Error results (`ToolError`, timeouts, the rate limit) carry no
+`structuredContent`. The schema must accept its own parsed value, because the MCP SDK validates
+`structuredContent` again; a `transform` that changes a field's type fails that and is reported
+the same way.
+
 ## Errors
 
 | Thrown by the handler | The model sees | Logged |
@@ -223,13 +303,14 @@ A failed start is not cached: the next `router()` or `listen()` runs the checks 
 | An SDK `HttpError` with status below 500 (`ForbiddenError`, `NotFoundError`, …) | Its message, as a tool error | info, outcome `tool_error` |
 | Anything else | `Internal error (request <id>)`, as a tool error | error, with `err`, outcome `internal_error` |
 
-A result over `maxResultBytes` is a tool error too (outcome `tool_error`). The wrapper exists so
-that a database error or a stack detail never reaches the model.
+A result over `maxResultBytes` is a tool error too (outcome `tool_error`), as is a call that runs
+past its timeout (outcome `timeout`, logged at warn). The wrapper exists so that a database error
+or a stack detail never reaches the model.
 
 ## Logging
 
 One line per tool call, object first: `tool`, `user_id`, `client_id`, `org_id`, `request_id`,
-`outcome` (`ok`, `tool_error`, `internal_error`, `rate_limited`) and `duration_ms`. Inputs and
+`outcome` (`ok`, `tool_error`, `internal_error`, `rate_limited`, `timeout`) and `duration_ms`. Inputs and
 results are never logged; they may be the app's data.
 
 ## Audit
@@ -261,6 +342,17 @@ and the handler does not run. Only `tools/call` is counted: `input` functions, w
 protocol message, are not limited, and neither is a call whose arguments fail the schema, which the
 MCP SDK refuses before the limit is checked. If Redis fails the call goes through and the failure is
 logged at error.
+
+A tool can set its own limit instead:
+
+| `rateLimit` on the tool | |
+|-------------------------|---|
+| unset | The server-wide limit applies |
+| `{ perMinute }` | Its own per-user counter, under `@tereo-io/mcp:<name>:rl:<user>:<tool>`. Its calls do not count toward the server-wide limit |
+| `false` | Never limited; Redis is not touched |
+
+A tool with its own limit needs `redis` even when the server-wide `rateLimit` is `false`. The
+answer over the limit, the outcome and the Redis failure behaviour are the same as above.
 
 ## Testing
 
