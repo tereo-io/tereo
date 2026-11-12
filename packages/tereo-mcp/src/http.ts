@@ -144,10 +144,12 @@ export const listenOn = async (
 
   const timeoutMs =
     listenOptions.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
-  const signals =
+  // A signal listed twice would run onSignal twice and take the forced-exit branch.
+  const signals = new Set(
     listenOptions.signals === false
       ? []
-      : (listenOptions.signals ?? DEFAULT_SIGNALS);
+      : (listenOptions.signals ?? DEFAULT_SIGNALS)
+  );
   let shuttingDown = false;
   let drainTimedOut = false;
 

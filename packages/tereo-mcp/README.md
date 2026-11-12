@@ -130,6 +130,10 @@ that tool is left out for that request.
 | `shutdownTimeoutMs` | `25000` | How long `close()` waits for in-flight calls before dropping their connections; also bounds `onShutdown`. A positive integer |
 | `onShutdown` | none | Runs after the server has closed, before the process exits: stop the core client, close Redis |
 
+`shutdownTimeoutMs` bounds the drain and `onShutdown` separately, so a shutdown can take about
+twice that value (50 seconds by default): size a Kubernetes `terminationGracePeriodSeconds` above
+it, or lower `shutdownTimeoutMs`.
+
 With signals handled, `listen` owns the exit: on the first signal it logs `MCP server shutting down`,
 runs `close()`, then `onShutdown`, and then **exits the process** with code `0`. The exit code is
 `1` if the drain deadline was hit, if `close()` or `onShutdown` threw (logged at error as

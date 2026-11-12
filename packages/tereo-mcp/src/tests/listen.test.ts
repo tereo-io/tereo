@@ -246,6 +246,24 @@ describe("listen", () => {
     expect(process.listenerCount("SIGINT")).toBe(int);
   });
 
+  it("listens once for a signal listed twice, and close() removes it", async () => {
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    try {
+      const term = process.listenerCount("SIGTERM");
+
+      const { server } = await setup({}, { signals: ["SIGTERM", "SIGTERM"] });
+
+      expect(process.listenerCount("SIGTERM")).toBe(term + 1);
+      await server.close();
+      expect(process.listenerCount("SIGTERM")).toBe(term);
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      exit.mockRestore();
+    }
+  });
+
   it("by default listens for SIGTERM and SIGINT once each, and close() removes them", async () => {
     const exit = vi
       .spyOn(process, "exit")
