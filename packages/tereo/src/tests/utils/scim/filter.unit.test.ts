@@ -56,4 +56,36 @@ describe("parseFilter", () => {
       expect.objectContaining({ code: "invalidFilter" })
     );
   });
+
+  describe("for Group", () => {
+    it.each([
+      ['displayName eq "A"', [{ attr: "displayName", value: "A" }]],
+      ['DISPLAYNAME EQ "A"', [{ attr: "displayName", value: "A" }]],
+      ['externalId eq "x"', [{ attr: "externalId", value: "x" }]],
+    ])("parses %s", (raw, expected) => {
+      expect(parseFilter(raw, "Group")).toEqual(expected);
+    });
+
+    it.each([
+      ['userName eq "a"'],
+      ['emails.value eq "a@x.com"'],
+      ['displayName co "a"'],
+    ])("rejects %s", (raw) => {
+      expect(() => parseFilter(raw, "Group")).toThrow(
+        expect.objectContaining({ code: "invalidFilter" })
+      );
+    });
+
+    it("names displayName and externalId in the error", () => {
+      expect(() => parseFilter('userName eq "a"', "Group")).toThrow(
+        /displayName and externalId/
+      );
+    });
+
+    it("a User filter on displayName is still invalid", () => {
+      expect(() => parseFilter('displayName eq "A"', "User")).toThrow(
+        expect.objectContaining({ code: "invalidFilter" })
+      );
+    });
+  });
 });
