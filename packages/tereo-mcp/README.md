@@ -9,8 +9,9 @@ handling, logging, rate limiting and the HTTP server, and runs your handler as a
 npm install @tereo-io/mcp
 ```
 
-It is ESM only and built on Node.js 22. Peer dependencies: `@tereo-io/sdk`, `express` 5, `zod` 4 and
-`ioredis`; `@modelcontextprotocol/client` is an optional peer, needed only for `@tereo-io/mcp/testing`.
+It is ESM only and built on Node.js 22. Peer dependencies: `@tereo-io/sdk`, `express` 5, `zod`
+4.2 or later (the MCP SDK needs it) and `ioredis`; `@modelcontextprotocol/client` is an optional
+peer, needed only for `@tereo-io/mcp/testing`.
 
 Tools only: MCP resources and prompts are not supported.
 

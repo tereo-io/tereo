@@ -71,22 +71,19 @@ export class ToolRegistry {
         `Tool "${tool.name}" needs output to be a z.object() schema`
       );
     }
-    if (
-      tool.output !== undefined &&
-      toJsonSchemaError(tool.output, "output") !== undefined
-    ) {
-      throw new Error(
-        `Tool "${tool.name}" needs an output schema that can be expressed as JSON Schema`
-      );
-    }
-    if (
-      tool.input !== undefined &&
-      typeof tool.input !== "function" &&
-      toJsonSchemaError(tool.input, "input") !== undefined
-    ) {
-      throw new Error(
-        `Tool "${tool.name}" needs an input schema that can be expressed as JSON Schema`
-      );
+    for (const io of ["input", "output"] as const) {
+      const schema = tool[io];
+      if (schema === undefined || typeof schema === "function") continue;
+      // At define time the schema is the author's code, so its message is safe to show.
+      const failure = toJsonSchemaError(schema, io);
+      if (failure !== undefined) {
+        const detail =
+          failure instanceof Error ? failure.message : String(failure);
+        throw new Error(
+          `Tool "${tool.name}" needs an ${io} schema that can be expressed as JSON Schema: ${detail}`,
+          { cause: failure }
+        );
+      }
     }
     this.tools.set(tool.name, tool);
   }

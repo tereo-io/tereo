@@ -121,26 +121,47 @@ describe("ToolRegistry", () => {
     expect(registry.list()).toHaveLength(2);
   });
 
+  const thrown = (fn: () => void): Error => {
+    try {
+      fn();
+    } catch (err) {
+      return err as Error;
+    }
+    throw new Error("did not throw");
+  };
+
   it.each([
-    ["a transform", z.object({ n: z.string().transform((v) => v.length) })],
-    ["a date", z.object({ at: z.date() })],
-    ["a bigint", z.object({ n: z.bigint() })],
+    [
+      "a transform",
+      z.object({ n: z.string().transform((v) => v.length) }),
+      "Transforms",
+    ],
+    ["a date", z.object({ at: z.date() }), "Date"],
+    ["a bigint", z.object({ n: z.bigint() }), "BigInt"],
   ])(
-    "rejects an output schema with %s, which JSON Schema cannot express",
-    (_l, output) => {
-      expect(() => new ToolRegistry().define(tool({ output }))).toThrow(
-        'Tool "list_things" needs an output schema that can be expressed as JSON Schema'
+    "rejects an output schema with %s, naming the construct",
+    (_l, output, construct) => {
+      const err = thrown(() => new ToolRegistry().define(tool({ output })));
+      expect(err.message).toMatch(
+        /^Tool "list_things" needs an output schema that can be expressed as JSON Schema: /
       );
+      expect(err.message).toContain(
+        `${construct} cannot be represented in JSON Schema`
+      );
+      expect((err.cause as Error).message).toContain(construct);
     }
   );
 
-  it("rejects a static input schema JSON Schema cannot express, and accepts an input transform", () => {
+  it("rejects a static input schema JSON Schema cannot express, naming the construct, and accepts an input transform", () => {
     const registry = new ToolRegistry();
-    expect(() =>
+    const err = thrown(() =>
       registry.define(tool({ input: z.object({ at: z.date() }) }))
-    ).toThrow(
-      'Tool "list_things" needs an input schema that can be expressed as JSON Schema'
     );
+    expect(err.message).toMatch(
+      /^Tool "list_things" needs an input schema that can be expressed as JSON Schema: /
+    );
+    expect(err.message).toContain("Date cannot be represented in JSON Schema");
+    expect((err.cause as Error).message).toContain("Date");
     registry.define(
       tool({ input: z.object({ n: z.string().transform((v) => v.length) }) })
     );
