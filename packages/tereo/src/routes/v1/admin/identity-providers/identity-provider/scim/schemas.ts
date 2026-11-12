@@ -8,9 +8,13 @@ export const GroupsTargetSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 
-export const PutScimConnectionSchema = z.object({
-  isActive: z.boolean(),
-  groupsTarget: GroupsTargetSchema.optional(),
-});
+// `isActive` is required to create the connection; on an update, omitting it
+// leaves the state as it is.
+export const PutScimConnectionSchema = z
+  .object({
+    isActive: z.boolean().optional(),
+    groupsTarget: GroupsTargetSchema.optional(),
+  })
+  .strict();
 
 export type PutScimConnectionInput = z.infer<typeof PutScimConnectionSchema>;

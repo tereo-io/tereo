@@ -19,6 +19,7 @@ import {
   BadRequestError,
   ConflictError,
   NotFoundError,
+  ValidationError,
 } from "../../../../../../utils/errors.js";
 
 type Tx = Prisma.TransactionClient;
@@ -119,6 +120,12 @@ export const putScimConnection = async (req: Request, res: Response) => {
     const existing = await db.scim.getConnectionByProvider(providerId, tx);
 
     if (!existing) {
+      if (isActive === undefined) {
+        throw new ValidationError(
+          "isActive is required to create a connection",
+          [{ path: "isActive", message: "Required" }]
+        );
+      }
       await assertMayGrantScim(auth, tx);
       const row = await mapUniqueViolation(
         () =>
@@ -155,7 +162,8 @@ export const putScimConnection = async (req: Request, res: Response) => {
     const oldTarget = toTarget(locked);
     const targetChanged =
       groupsTarget !== undefined && !sameTarget(oldTarget, groupsTarget);
-    const activeChanged = locked.isActive !== isActive;
+    const activeChanged =
+      isActive !== undefined && locked.isActive !== isActive;
 
     if (activeChanged && isActive) await assertMayGrantScim(auth, tx);
     if (targetChanged) {

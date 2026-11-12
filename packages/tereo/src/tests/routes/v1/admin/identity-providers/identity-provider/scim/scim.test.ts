@@ -106,6 +106,41 @@ describe("/v1/admin/identity-providers/:id/scim", () => {
     expect(res.status).toBe(400);
   });
 
+  it("a PUT with only groupsTarget leaves a disabled connection disabled and changes the target", async () => {
+    const provider = await newProvider();
+    const url = `${BASE}/${provider.id}/scim`;
+    await fetchJson("PUT", url, adminToken, { isActive: true });
+    await fetchJson("PUT", url, adminToken, { isActive: false });
+    const res = await fetchJson("PUT", url, adminToken, {
+      groupsTarget: { kind: "global" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.isActive).toBe(false);
+    expect(res.body.groupsTarget).toEqual({ kind: "global" });
+    const entry = await prisma.auditLogEntry.findFirstOrThrow({
+      where: {
+        entityType: "ScimConnection",
+        entityId: res.body.id,
+        action: "UPDATE",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(entry.changes).toEqual({
+      groupsTarget: { old: { kind: "none" }, new: { kind: "global" } },
+    });
+  });
+
+  it("rejects an unknown top-level key", async () => {
+    const provider = await newProvider();
+    const res = await fetchJson(
+      "PUT",
+      `${BASE}/${provider.id}/scim`,
+      adminToken,
+      { isActive: true, surprise: 1 }
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("deletes the connection and audits it", async () => {
     const provider = await newProvider();
     const url = `${BASE}/${provider.id}/scim`;

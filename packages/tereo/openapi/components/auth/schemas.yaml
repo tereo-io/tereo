@@ -4973,8 +4973,11 @@ ScimGroupsTarget:
 
 PutScimConnectionRequest:
   type: object
-  description: Unknown properties are ignored.
-  required: [isActive]
+  description: |
+    Unknown properties are rejected (400). `isActive` is required to create the
+    connection (400 without it); on an existing connection, leaving it out keeps the
+    current state.
+  additionalProperties: false
   properties:
     isActive:
       type: boolean

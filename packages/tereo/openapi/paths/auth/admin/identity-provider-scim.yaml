@@ -40,7 +40,8 @@
     summary: Create a SCIM connection or switch it on or off
     description: |
       Creates the provider's SCIM connection (201), or sets `isActive` on the existing one
-      (200). While the connection or the provider is inactive, every SCIM call answers 401.
+      (200); `isActive` is required on create and optional on update, where leaving it out
+      keeps the current state. While the connection or the provider is inactive, every SCIM call answers 401.
 
       Creating a connection and setting `isActive: true` need a caller holding `admin`
       through a global role, as `ssoOnly` does (403 otherwise): enabling SCIM lets the

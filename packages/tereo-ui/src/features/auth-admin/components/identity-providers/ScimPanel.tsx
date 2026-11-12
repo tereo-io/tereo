@@ -66,7 +66,7 @@ const GroupsTargetField = ({
 
   const save = (groupsTarget: ScimGroupsTarget) =>
     setConnection.mutate(
-      { providerId, isActive: connection.isActive, groupsTarget },
+      { providerId, groupsTarget },
       { onSettled: () => setPendingOrganization(false) }
     );
 

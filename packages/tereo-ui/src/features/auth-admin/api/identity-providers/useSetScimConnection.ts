@@ -11,11 +11,11 @@ const useSetScimConnection = () => {
   return useMutation({
     mutationFn: async (data: {
       providerId: string;
-      isActive: boolean;
+      isActive?: boolean;
       groupsTarget?: ScimGroupsTarget;
     }) => {
       await axios.put(`/v1/admin/identity-providers/${data.providerId}/scim`, {
-        isActive: data.isActive,
+        ...(data.isActive === undefined ? {} : { isActive: data.isActive }),
         ...(data.groupsTarget ? { groupsTarget: data.groupsTarget } : {}),
       });
     },

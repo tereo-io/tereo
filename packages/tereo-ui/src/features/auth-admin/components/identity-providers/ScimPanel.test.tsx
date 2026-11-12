@@ -302,7 +302,7 @@ describe("ScimPanel", () => {
       await waitFor(() =>
         expect(authMock.axios.put).toHaveBeenCalledWith(
           "/v1/admin/identity-providers/p1/scim",
-          { isActive: true, groupsTarget: { kind: "global" } }
+          { groupsTarget: { kind: "global" } }
         )
       );
     });
@@ -323,7 +323,6 @@ describe("ScimPanel", () => {
         expect(authMock.axios.put).toHaveBeenCalledWith(
           "/v1/admin/identity-providers/p1/scim",
           {
-            isActive: true,
             groupsTarget: { kind: "organization", organizationId: "o2" },
           }
         )
@@ -340,7 +339,7 @@ describe("ScimPanel", () => {
       await waitFor(() =>
         expect(authMock.axios.put).toHaveBeenCalledWith(
           "/v1/admin/identity-providers/p1/scim",
-          { isActive: true, groupsTarget: { kind: "none" } }
+          { groupsTarget: { kind: "none" } }
         )
       );
     });
