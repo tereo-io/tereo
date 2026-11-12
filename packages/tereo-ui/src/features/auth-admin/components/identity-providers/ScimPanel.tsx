@@ -3,12 +3,17 @@ import useSetScimConnection from "../../api/identity-providers/useSetScimConnect
 import useCreateScimToken from "../../api/identity-providers/useCreateScimToken";
 import useRevokeScimToken from "../../api/identity-providers/useRevokeScimToken";
 import useScimConnection from "../../api/identity-providers/useScimConnection";
-import type { ScimToken } from "../../api/identity-providers/types";
+import useAllOrganizations from "../../api/organizations/useAllOrganizations";
 import ScimTokenModal from "./modals/ScimTokenModal";
 import { formatDateTime } from "@/utils/formatDate";
 import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 import "./styles.css";
+import type {
+  ScimConnection,
+  ScimGroupsTarget,
+  ScimToken,
+} from "../../api/identity-providers/types";
 import {
   Badge,
   Button,
@@ -17,6 +22,7 @@ import {
   DetailField,
   SecretDisplay,
   SectionHeader,
+  Select,
   Spinner,
   Table,
   type TableColumn,
@@ -28,10 +34,82 @@ interface ScimPanelProps {
 
 const MAX_LIVE_TOKENS = 2;
 
+type TargetKind = ScimGroupsTarget["kind"];
+
+const TARGET_OPTIONS: { value: TargetKind; label: string }[] = [
+  { value: "none", label: "Off" },
+  { value: "global", label: "Global groups" },
+  { value: "organization", label: "An organization's groups" },
+];
+
+interface GroupsTargetFieldProps {
+  providerId: string;
+  connection: ScimConnection;
+  /** Changing the target needs `admin` through a global role. */
+  disabled: boolean;
+}
+
+const GroupsTargetField = ({
+  providerId,
+  connection,
+  disabled,
+}: GroupsTargetFieldProps) => {
+  const setConnection = useSetScimConnection();
+  // "An organization's groups" is chosen before an organization is, so the
+  // choice is kept here until the picker saves it.
+  const [pendingOrganization, setPendingOrganization] = useState(false);
+  const stored = connection.groupsTarget;
+  const kind: TargetKind = pendingOrganization ? "organization" : stored.kind;
+  const { data: organizations } = useAllOrganizations({
+    enabled: kind === "organization",
+  });
+
+  const save = (groupsTarget: ScimGroupsTarget) =>
+    setConnection.mutate(
+      { providerId, isActive: connection.isActive, groupsTarget },
+      { onSettled: () => setPendingOrganization(false) }
+    );
+
+  return (
+    <>
+      <Select<TargetKind>
+        label="Groups"
+        value={kind}
+        options={TARGET_OPTIONS}
+        disabled={disabled || setConnection.isPending}
+        onChange={(value) => {
+          if (value === "organization") {
+            setPendingOrganization(true);
+          } else if (value === "global" || value === "none") {
+            setPendingOrganization(false);
+            save({ kind: value });
+          }
+        }}
+      />
+      {kind === "organization" && (
+        <Select
+          label="Organization"
+          placeholder="Choose an organization"
+          value={stored.kind === "organization" ? stored.organizationId : ""}
+          options={(organizations ?? []).map((o) => ({
+            value: o.id,
+            label: o.name,
+          }))}
+          disabled={disabled || setConnection.isPending}
+          onChange={(organizationId) =>
+            organizationId && save({ kind: "organization", organizationId })
+          }
+        />
+      )}
+    </>
+  );
+};
+
 /** The provider's SCIM connection: enabling it, its base URL and its tokens. */
 export const ScimPanel = ({ providerId }: ScimPanelProps) => {
   const { hasPermission } = useAuth();
   const canWrite = hasPermission("identity-providers.write");
+  const isGlobalAdmin = hasPermission("admin");
   const {
     data: connection,
     isLoading,
@@ -163,6 +241,17 @@ export const ScimPanel = ({ providerId }: ScimPanelProps) => {
         value={<SecretDisplay value={connection.baseUrl} />}
       />
       <DetailField label="Managed users" value={connection.managedUserCount} />
+      <GroupsTargetField
+        // Remount on a stored change so a finished save drops the local choice.
+        key={JSON.stringify(connection.groupsTarget)}
+        providerId={providerId}
+        connection={connection}
+        disabled={!canWrite || !isGlobalAdmin}
+      />
+      <DetailField
+        label="Managed groups"
+        value={connection.managedGroupCount}
+      />
       <DetailField
         label="Last used"
         value={

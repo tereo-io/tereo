@@ -50,6 +50,11 @@ export const GroupList = ({ organizationId, canCreate }: GroupListProps) => {
               {group.name}
             </TableCellLink>
             {group.definitionSource === "provisioned" && <ProvisionedBadge />}
+            {group.managedBy && (
+              <Badge size="sm" subtle variant="primary">
+                Directory
+              </Badge>
+            )}
             {group.archivedAt !== null && (
               <Badge size="sm" variant="warning">
                 Archived
