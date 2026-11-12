@@ -96,7 +96,7 @@ export const groupProblems = async (
     const organizationId = group.organizationId ?? null;
     const sameSlug = rows.filter((r) => r.slug === group.slug);
     const own = sameSlug.find((r) => r.organizationId === organizationId);
-    if (own?.definitionSource === "local") {
+    if (own && own.definitionSource !== "provisioned") {
       problems.push(
         `${label}: a group with slug "${group.slug}" already exists here and was not created from the provisioning file`
       );

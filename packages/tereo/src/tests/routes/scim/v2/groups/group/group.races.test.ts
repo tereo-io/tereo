@@ -346,6 +346,34 @@ describe("SCIM group changes racing", { tags: ["race"] }, () => {
     }
   });
 
+  it("a SCIM user DELETE keeps the membership of a group an admin unlinked while it waited", async () => {
+    const c = await orgConnection();
+    const user = await managedUser(c);
+    const pushed = await pushGroup(c.token, {
+      displayName: `Kept ${tag()}`,
+      members: asMembers(user.id),
+    });
+    const id = pushed.body.id;
+
+    const release = await holdLocks(async (tx) => {
+      await db.groups.lockGroup(id, tx);
+      await tx.scimGroup.deleteMany({ where: { groupId: id } });
+      await tx.group.update({
+        where: { id },
+        data: { definitionSource: "local", membershipSource: "local" },
+      });
+    });
+    let deleting;
+    try {
+      deleting = scimFetch(c.token, "DELETE", `/scim/v2/Users/${user.id}`);
+      await waitForLockWait('%FROM "auth"."groups"%FOR UPDATE%');
+    } finally {
+      await release();
+    }
+    expect((await deleting).status).toBe(204);
+    expect(await memberIds(id)).toEqual([user.id]);
+  });
+
   it("an admin unlink and a SCIM deactivation of the same user do not deadlock", async () => {
     const writer = await getTestPrincipalToken({
       permissions: ["users.read", "users.write"],

@@ -136,6 +136,23 @@ export const lockGroup = async (id: string, tx: Prisma.TransactionClient) => {
   await tx.$queryRaw`SELECT 1 FROM "auth"."groups" WHERE id = ${id}::uuid FOR UPDATE`;
 };
 
+/**
+ * The slugs in one scope (an organization, or none for global) that start
+ * with `prefix`, archived groups included: they keep their slug. The prefix
+ * is always `[a-z0-9-]`, so it carries no wildcard.
+ */
+export const slugsStartingWith = async (
+  organizationId: string | null,
+  prefix: string,
+  tx: Prisma.TransactionClient
+): Promise<Set<string>> => {
+  const rows = await tx.group.findMany({
+    where: { organizationId, slug: { startsWith: prefix } },
+    select: { slug: true },
+  });
+  return new Set(rows.map((r) => r.slug));
+};
+
 /** Locks several groups' rows, ascending id: the order every such caller takes. */
 export const lockGroups = async (
   ids: string[],

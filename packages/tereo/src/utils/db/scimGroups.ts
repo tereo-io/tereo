@@ -258,12 +258,6 @@ export const clearSkippedForUser = async (
   });
 };
 
-export const countSkipped = async (scimGroupId: string, tx?: Tx) => {
-  return await (tx ?? prisma).scimGroupSkippedMember.count({
-    where: { scimGroupId },
-  });
-};
-
 export const listSkipped = async (
   scimGroupId: string,
   opts: { cursor?: string; limit: number }

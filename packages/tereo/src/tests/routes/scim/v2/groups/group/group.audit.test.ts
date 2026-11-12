@@ -1,9 +1,11 @@
 // @module-tag int
 // @module-tag auth
+import { removeFromOrgGroupsTx } from "../../../../../../utils/groups.js";
 import { SYSTEM_USER_ID } from "../../../../../../definitions/index.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { pushGroup } from "../../../../../support/scim.js";
 import { tag } from "../../../../../support/scimUsers.js";
+import db from "../../../../../../utils/db/index.js";
 import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
@@ -34,6 +36,39 @@ const eventTypes = async (groupId: string) =>
   ).map((row) => (row.payload as { eventType?: string }).eventType);
 
 describe("SCIM group change audit and events", () => {
+  it("an organization removal records a skip and moves the link's lastModified", async () => {
+    const c = await orgConnection();
+    const user = await managedUser(c);
+    const pushed = await pushGroup(c.token, {
+      displayName: `Org ${tag()}`,
+      members: asMembers(user.id),
+    });
+    const id = pushed.body.id;
+    const before = await prisma.scimGroup.findUniqueOrThrow({
+      where: { groupId: id },
+    });
+
+    await db.$transaction(async (tx) => {
+      await db.users.lockAuthority(user.id, tx);
+      await tx.organizationMember.deleteMany({
+        where: { organizationId: c.organizationId, userId: user.id },
+      });
+      await removeFromOrgGroupsTx(
+        tx,
+        { userId: SYSTEM_USER_ID, email: null },
+        c.organizationId,
+        user.id
+      );
+    });
+
+    const after = await prisma.scimGroup.findUniqueOrThrow({
+      where: { groupId: id },
+    });
+    expect(after.updatedAt.getTime()).toBeGreaterThan(
+      before.updatedAt.getTime()
+    );
+  });
+
   it("writes members_added with the system actor, the connection, and skipped and dropped counts", async () => {
     const c = await orgConnection();
     const member = await managedUser(c);

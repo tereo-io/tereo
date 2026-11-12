@@ -38,7 +38,9 @@ import {
  * Callers own the transaction (provisioning applies many changes in one) and
  * call `afterGroupChange` once it commits.
  *
- * Lock order, in each transaction:
+ * Lock order, in each transaction. A directory's group writers take the SCIM
+ * connection row (`FOR NO KEY UPDATE`) before step 1; nothing takes a
+ * connection row lock after an authority or group lock.
  * 1. `lockAuthority` for every user whose authority changes, ascending id:
  *    the users added or removed, or for a change to the group's roles (and
  *    archive and restore) every current member. A directory's `scim` addition
@@ -924,6 +926,7 @@ export const removeFromOrgGroupsTx = async (
       const link = await db.scimGroups.getLinkByGroup(groupId, tx);
       if (link) {
         await db.scimGroups.addSkipped(link.id, userId, "not_org_member", tx);
+        await db.scimGroups.touchLink(link.id, tx);
       }
     }
     await membersAudit(tx, auth, group, "members_removed", removed, {

@@ -88,6 +88,34 @@ describe("POST /scim/v2/Groups", () => {
     expect(slugs).toEqual([name.toLowerCase(), `${name.toLowerCase()}-2`]);
   });
 
+  it("numbers the slug past any count of groups whose names derive the same base", async () => {
+    const c = await orgConnection();
+    const createdBy = (await makeUser(`bulk-${tag()}@${c.domain}`)).id;
+    const slugs = [
+      "group",
+      ...Array.from({ length: 54 }, (_, i) => `group-${i + 2}`),
+    ];
+    await prisma.group.createMany({
+      data: slugs.map((slug) => ({
+        organizationId: c.organizationId,
+        slug,
+        name: slug,
+        definitionSource: "local" as const,
+        createdBy,
+      })),
+    });
+    const names = ["!!!", "???", "###", "***", "+++", "~~~"];
+    const created: string[] = [];
+    for (const displayName of names) {
+      const { status, body } = await pushGroup(c.token, { displayName });
+      expect(status).toBe(201);
+      created.push(
+        (await prisma.group.findUniqueOrThrow({ where: { id: body.id } })).slug
+      );
+    }
+    expect(created).toEqual(names.map((_, i) => `group-${i + 56}`));
+  });
+
   it("leaves a local group with the same slug untouched", async () => {
     const c = await orgConnection();
     const label = `clash${tag()}`;

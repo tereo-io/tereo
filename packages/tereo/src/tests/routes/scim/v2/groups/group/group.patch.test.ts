@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag auth
+import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { makeUser, tag } from "../../../../../support/scimUsers.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { pushGroup } from "../../../../../support/scim.js";
@@ -29,6 +30,7 @@ import {
   oktaRenameGroupPatch,
 } from "../../../../../fixtures/scim/okta.js";
 import {
+  adminApi,
   ensureGroupPermission,
   GROUP_PERMISSION,
   passwordOnlyToken,
@@ -377,7 +379,11 @@ describe("PATCH /scim/v2/Groups/:id", () => {
       await db.roles.getUserPermissions(user.id, c.organizationId)
     ).not.toContain(GROUP_PERMISSION);
 
-    await prisma.group.update({ where: { id }, data: { archivedAt: null } });
+    const admin = await getTestPrincipalToken({
+      permissions: ["groups.admin", GROUP_PERMISSION],
+    });
+    const restored = await adminApi("POST", `/groups/${id}/restore`, admin);
+    expect(restored.status, JSON.stringify(restored.body)).toBe(200);
     expect(
       await db.roles.getUserPermissions(user.id, c.organizationId)
     ).toContain(GROUP_PERMISSION);

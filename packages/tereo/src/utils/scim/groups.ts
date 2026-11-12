@@ -45,7 +45,8 @@ export interface ScimGroupView {
 }
 
 const SYSTEM_ACTOR: AuditActor = { userId: SYSTEM_USER_ID, email: null };
-const SLUG_ATTEMPTS = 50;
+// Retries of a create that lost its slug to a writer outside the directory.
+const SLUG_RACE_ATTEMPTS = 5;
 
 const notFound = () => new NotFoundError("Group not found");
 
@@ -224,8 +225,10 @@ export const createScimGroup = async (
 ): Promise<ScimGroupView> => {
   requireEnabled(ctx.connection.groupsTarget);
   const base = slugFromDisplayName(input.displayName);
-  for (let n = 1; n <= SLUG_ATTEMPTS; n++) {
-    const slug = n === 1 ? base : withSlugSuffix(base, n);
+  // Every suffixed candidate starts with the base cut to leave room for the
+  // longest suffix.
+  const prefix = withSlugSuffix(base, 99999).slice(0, -"-99999".length);
+  for (let attempt = 1; attempt <= SLUG_RACE_ATTEMPTS; attempt++) {
     try {
       const { view, changes } = await db.$transaction(async (tx) => {
         const connection = await db.scim.lockConnectionForGroups(
@@ -233,13 +236,22 @@ export const createScimGroup = async (
           tx
         );
         requireEnabled(connection.groupsTarget);
+        const organizationId =
+          connection.groupsTarget === "organization"
+            ? connection.groupsOrganizationId
+            : null;
+        const taken = await db.groups.slugsStartingWith(
+          organizationId,
+          prefix,
+          tx
+        );
+        let n = 1;
+        let slug = base;
+        while (taken.has(slug)) slug = withSlugSuffix(base, ++n);
         const created = await createGroup(
           actorOf(ctx),
           {
-            organizationId:
-              connection.groupsTarget === "organization"
-                ? connection.groupsOrganizationId
-                : null,
+            organizationId,
             slug,
             name: input.displayName,
           },
@@ -518,10 +530,13 @@ export const leaveScimGroupsTx = async (
   const affected = new Set<string>();
   const revokedJtis: string[] = [];
   for (const groupId of groupIds) {
+    // An unlink or group DELETE may have committed between reading the ids and
+    // taking the group locks; the group is then no longer this connection's.
+    const link = await db.scimGroups.getLinkByGroup(groupId, tx);
+    if (link?.connectionId !== connectionId) continue;
     const change = await removeMembers(actor, groupId, [userId], tx);
     if (change.removed.length === 0) continue;
-    const link = await db.scimGroups.getLinkByGroup(groupId, tx);
-    if (link) await db.scimGroups.touchLink(link.id, tx);
+    await db.scimGroups.touchLink(link.id, tx);
     for (const id of change.affectedUserIds) affected.add(id);
     revokedJtis.push(...change.revokedJtis);
   }
