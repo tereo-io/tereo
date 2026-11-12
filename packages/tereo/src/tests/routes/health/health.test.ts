@@ -1,8 +1,10 @@
 // @module-tag int
 // @module-tag platform
+import { spendRateLimit } from "../../support/redis.js";
 import { HTTP_STATUS } from "../../support/files.js";
 import { CORE_URL } from "../../support/coreUrl.js";
 import { describe, it, expect } from "vitest";
+import env from "../../../env.js";
 import axios from "axios";
 
 const BASE_URL = CORE_URL;
@@ -42,16 +44,27 @@ describe("GET /health", () => {
 
   it("is rate-limited per address", async () => {
     // The default TRUST_PROXY (loopback) honours X-Forwarded-For; a proxied
-    // caller gets the external tier, 300 a second.
+    // caller gets the external tier.
+    const limit = env.RATE_LIMIT_PRE_AUTH_PER_SECOND;
     const get = (ip: string) =>
       axios.get(`${BASE_URL}/health`, {
         headers: { "X-Forwarded-For": ip },
         validateStatus: () => true,
       });
+    await spendRateLimit("health", "198.51.100.20", limit, 5);
     const statuses = (
-      await Promise.all(Array.from({ length: 400 }, () => get("198.51.100.20")))
+      await Promise.all(Array.from({ length: 10 }, () => get("198.51.100.20")))
     ).map((r) => r.status);
-    expect(statuses).toContain(429);
+    expect(statuses.filter((s) => s === 429)).toHaveLength(5);
+
+    const limited = await get("198.51.100.20");
+    expect(limited.status).toBe(429);
+    expect(limited.data).toMatchObject({ error: "too_many_requests" });
+    expect(limited.data.retry_after).toBeGreaterThan(0);
+    expect(limited.headers["retry-after"]).toBe(
+      String(limited.data.retry_after)
+    );
+    expect(limited.headers["x-ratelimit-limit"]).toBe(String(limit));
     expect((await get("198.51.100.21")).status).toBe(HTTP_STATUS.OK);
   });
 

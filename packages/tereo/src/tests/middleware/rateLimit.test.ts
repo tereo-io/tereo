@@ -4,9 +4,11 @@
 
 import { BASE_URL, HTTP_STATUS } from "../support/auth/constants.js";
 import { getTestPrincipalToken } from "../support/principals.js";
+import { spendRateLimit } from "../support/redis.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { describe, it, expect } from "vitest";
 import { randomUUID } from "node:crypto";
+import env from "../../env.js";
 
 const TOO_MANY_REQUESTS = 429;
 /** Well under the one-second window, so a run inside it cannot have crossed one. */
@@ -29,28 +31,27 @@ const expectTooMany = async (res: Response) => {
 describe("rateLimitPreAuth", () => {
   it("throttles a flood of unauthenticated requests from one address", async () => {
     const ip = freshIp();
-    const statuses: number[] = [];
-    let limited: Response | undefined;
-    // In batches, so the flood lands inside the one-second window without
-    // opening hundreds of sockets at once.
-    for (let batch = 0; batch < 10 && !limited; batch++) {
-      const responses = await Promise.all(
-        Array.from({ length: 50 }, () =>
-          fetch(`${BASE_URL}/v1/audit/entries`, {
-            headers: { "X-Forwarded-For": ip },
-          })
-        )
-      );
-      for (const res of responses) {
-        statuses.push(res.status);
-        if (res.status === TOO_MANY_REQUESTS && !limited) limited = res;
-        else await res.body?.cancel();
-      }
-    }
-    expect(new Set(statuses)).toEqual(
-      new Set([HTTP_STATUS.UNAUTHORIZED, TOO_MANY_REQUESTS])
+    // A proxied caller gets the external tier.
+    const limit = env.RATE_LIMIT_PRE_AUTH_PER_SECOND;
+    await spendRateLimit("preauth", ip, limit, 5);
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        fetch(`${BASE_URL}/v1/audit/entries`, {
+          headers: { "X-Forwarded-For": ip },
+        })
+      )
     );
-    await expectTooMany(limited!);
+    const passed = responses.filter(
+      (r) => r.status === HTTP_STATUS.UNAUTHORIZED
+    );
+    const refused = responses.filter((r) => r.status === TOO_MANY_REQUESTS);
+    expect(passed).toHaveLength(5);
+    expect(refused).toHaveLength(5);
+    for (const res of passed) await res.body?.cancel();
+    for (const res of refused.slice(1)) await res.body?.cancel();
+    expect(refused[0]!.headers.get("x-ratelimit-limit")).toBe(String(limit));
+    expect(refused[0]!.headers.get("x-ratelimit-remaining")).toBe("0");
+    await expectTooMany(refused[0]!);
 
     // Other addresses are unaffected.
     const other = await fetch(`${BASE_URL}/v1/audit/entries`, {
