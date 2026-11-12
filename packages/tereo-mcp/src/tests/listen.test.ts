@@ -1,11 +1,11 @@
 import { createServer, request, type Server as HttpServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Listening, ListenOptions } from "../index.js";
+import { type AddressInfo, connect as tcp } from "node:net";
 import type { TereoMcpOptions } from "../types.js";
 import { fakeCore } from "./support/fakeCore.js";
 import { createTereoMcp } from "../tereoMcp.js";
 import { connect } from "./support/connect.js";
-import type { AddressInfo } from "node:net";
 import type { Logger } from "pino";
 import express from "express";
 import pino from "pino";
@@ -231,6 +231,48 @@ describe("listen", () => {
     expect(dropped).toBeInstanceOf(Error);
     expect(Date.now() - started).toBeLessThan(2_000);
     await client.close().catch(() => undefined);
+  });
+
+  const openSocket = async (port: number) => {
+    const socket = tcp(port, "127.0.0.1");
+    socket.on("error", () => undefined);
+    await new Promise((resolve) => socket.once("connect", resolve));
+    // connect fires on the kernel's handshake; give the server time to accept.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return socket;
+  };
+
+  it("does not wait for a connection that never sent a request", async () => {
+    const { server } = await setup(
+      {},
+      { signals: false, shutdownTimeoutMs: 10_000 }
+    );
+    const socket = await openSocket(server.port);
+    const closedByServer = new Promise((resolve) =>
+      socket.once("close", resolve)
+    );
+
+    const started = Date.now();
+    await server.close();
+
+    expect(Date.now() - started).toBeLessThan(1_500);
+    await closedByServer;
+  });
+
+  it("waits for a connection partway through sending a request", async () => {
+    const { server } = await setup(
+      {},
+      { signals: false, shutdownTimeoutMs: 600 }
+    );
+    const socket = await openSocket(server.port);
+    socket.write("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const started = Date.now();
+    await server.close();
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(550);
+    socket.destroy();
   });
 
   it("with signals: false installs no signal listeners", async () => {

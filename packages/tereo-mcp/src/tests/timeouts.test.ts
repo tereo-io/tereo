@@ -158,6 +158,36 @@ describe("tool timeouts over the served endpoint", () => {
   );
 
   it.each(["legacy", "modern"] as const)(
+    "close() after a mid-call disconnect resolves promptly (%s era)",
+    async (era) => {
+      let entered!: () => void;
+      const inHandler = new Promise<void>((resolve) => (entered = resolve));
+      const { server } = await serve(
+        {},
+        tool(
+          "until_gone",
+          (_input, ctx) =>
+            new Promise((resolve) => {
+              entered();
+              ctx.signal.addEventListener("abort", () => resolve("gone"));
+            })
+        )
+      );
+      const client = await connect(server.url, token, { era });
+
+      void client.callTool({ name: "until_gone" }).catch(() => undefined);
+      await inHandler;
+      await client.close();
+      // The client opens one more connection after close and sends nothing on it.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const started = Date.now();
+      await server.close();
+
+      expect(Date.now() - started).toBeLessThan(1_500);
+    }
+  );
+
+  it.each(["legacy", "modern"] as const)(
     "aborts the signal when the client disconnects mid-call (%s era)",
     async (era) => {
       let entered!: (ctx: ToolContext) => void;

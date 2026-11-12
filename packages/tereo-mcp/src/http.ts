@@ -1,12 +1,12 @@
 import type { NextFunction, Request, Response, Router } from "express";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
+import type { AddressInfo, Socket } from "node:net";
 import type { StartState } from "./startChecks.js";
 import { requestScope } from "./requestScope.js";
 import type { ListenOptions } from "./types.js";
 import { createVerifier } from "./verifier.js";
 import type { ServerDeps } from "./server.js";
-import type { AddressInfo } from "node:net";
 import { buildServer } from "./server.js";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
@@ -130,6 +130,20 @@ export const listenOn = async (
   );
 
   const server = createServer(outer);
+  const sockets = new Set<Socket>();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+  // closeIdleConnections leaves a connection that has never sent a request
+  // open, and clients keep such spare connections pooled for seconds. One
+  // that has sent no bytes carries no call, so it is safe to drop.
+  const closeIdle = () => {
+    server.closeIdleConnections();
+    for (const socket of sockets) {
+      if (socket.bytesRead === 0) socket.destroy();
+    }
+  };
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
@@ -166,12 +180,12 @@ export const listenOn = async (
         new DOMException("The MCP server is closing", "AbortError")
       );
       // Connections that go idle after their last response must not hold close() open.
-      const sweep = setInterval(() => server.closeIdleConnections(), 50);
+      const sweep = setInterval(closeIdle, 50);
       let deadline: NodeJS.Timeout | undefined;
       try {
         await new Promise<void>((resolve) => {
           server.close(() => resolve());
-          server.closeIdleConnections();
+          closeIdle();
           deadline = setTimeout(() => {
             drainTimedOut = true;
             logger.warn(
