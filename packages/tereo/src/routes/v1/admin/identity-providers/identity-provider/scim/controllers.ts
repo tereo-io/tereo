@@ -209,8 +209,14 @@ export const deleteScimConnection = async (req: Request, res: Response) => {
         "scim_users_exist"
       );
     }
+    // A SCIM group delete takes no connection lock and can unlink a group
+    // while this waits on its row; no link can be added under the connection
+    // lock, so the re-read lists exactly the groups still linked.
+    await db.groups.lockGroups(
+      await db.scimGroups.listGroupIds(existing.id, tx),
+      tx
+    );
     const groupIds = await db.scimGroups.listGroupIds(existing.id, tx);
-    await db.groups.lockGroups(groupIds, tx);
     for (const groupId of groupIds) {
       await unlinkScimGroupTx(tx, auth, groupId, "connection_deleted");
     }

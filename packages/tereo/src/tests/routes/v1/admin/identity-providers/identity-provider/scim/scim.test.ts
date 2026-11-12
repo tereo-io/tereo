@@ -1,14 +1,16 @@
 // @module-tag int
 // @module-tag auth
 
-import { ensureTestOrganization } from "../../../../../../support/principals.js";
-import { getTestPrincipalToken } from "../../../../../../support/principals.js";
 import { SYSTEM_USER_ID } from "../../../../../../../definitions/index.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../../support/coreUrl.js";
 import { fetchJson } from "../../../../../../support/http.js";
 import { randomBytes } from "node:crypto";
+import {
+  ensureTestOrganization,
+  getTestPrincipalToken,
+} from "../../../../../../support/principals.js";
 import {
   createScimConnection,
   pushGroup,
@@ -378,6 +380,25 @@ describe("/v1/admin/identity-providers/:id/scim", () => {
         addedBy: member.id,
       },
     });
+    await prisma.scimGroupSkippedMember.create({
+      data: {
+        scimGroupId: (
+          await prisma.scimGroup.findUniqueOrThrow({
+            where: { groupId: pushed.body.id },
+          })
+        ).id,
+        userId: member.id,
+        reason: "not_org_member",
+      },
+    });
+    const second = await pushGroup(c.token, {
+      displayName: `A ${randomBytes(4).toString("hex")}`,
+    });
+    expect(second.status).toBe(201);
+    await prisma.group.update({
+      where: { id: second.body.id },
+      data: { archivedAt: new Date() },
+    });
 
     const del = await fetchJson(
       "DELETE",
@@ -395,10 +416,67 @@ describe("/v1/admin/identity-providers/:id/scim", () => {
     expect(group.scimLink).toBeNull();
     expect(group.members.map((m) => m.userId)).toEqual([member.id]);
     await audit("ScimConnection", c.connectionId, "DELETE");
+    const archived = await prisma.group.findUniqueOrThrow({
+      where: { id: second.body.id },
+      include: { scimLink: true },
+    });
+    expect(archived.archivedAt).not.toBeNull();
+    expect(archived.definitionSource).toBe("local");
+    expect(archived.scimLink).toBeNull();
     expect(
-      await prisma.auditLogEntry.count({
-        where: { entityId: pushed.body.id, entityType: "Group" },
+      await prisma.scimGroupSkippedMember.count({
+        where: { userId: member.id },
       })
-    ).toBeGreaterThan(0);
+    ).toBe(0);
+    for (const groupId of [pushed.body.id, second.body.id]) {
+      const entry = await prisma.auditLogEntry.findFirstOrThrow({
+        where: { entityId: groupId, entityType: "Group", action: "UPDATE" },
+        orderBy: { createdAt: "desc" },
+      });
+      expect(entry.metadata).toMatchObject({
+        action: "scim_unlinked",
+        reason: "connection_deleted",
+        scimConnectionId: c.connectionId,
+      });
+      const events = await prisma.outbox.findMany({
+        where: { payload: { path: ["entityId"], equals: groupId } },
+      });
+      expect(JSON.stringify(events.map((e) => e.payload))).toContain(
+        "auth.group.updated"
+      );
+    }
+  });
+
+  it("creates a connection with a groups target, audits it, and validates the organization", async () => {
+    const provider = await newProvider();
+    const url = `${BASE}/${provider.id}/scim`;
+    const organizationId = await ensureTestOrganization(
+      `gt-${randomBytes(4).toString("hex")}`
+    );
+    const target = { kind: "organization", organizationId };
+    const created = await fetchJson("PUT", url, adminToken, {
+      isActive: true,
+      groupsTarget: target,
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.groupsTarget).toEqual(target);
+    const entry = await audit("ScimConnection", created.body.id, "CREATE");
+    expect(entry.changes).toEqual({
+      groupsTarget: { old: { kind: "none" }, new: target },
+    });
+
+    const other = await newProvider();
+    const bad = await fetchJson("PUT", `${BASE}/${other.id}/scim`, adminToken, {
+      isActive: true,
+      groupsTarget: {
+        kind: "organization",
+        organizationId: "00000000-0000-7000-8000-00000000dead",
+      },
+    });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toBe("unknown_organization");
+    expect(
+      await prisma.scimConnection.count({ where: { providerId: other.id } })
+    ).toBe(0);
   });
 });
