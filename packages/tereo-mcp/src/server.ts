@@ -1,10 +1,10 @@
 import type { TereoMcpOptions, ToolContext, ToolDefinition } from "./types.js";
+import { isZodObject, toJsonSchemaError } from "./zodObject.js";
 import { McpServer } from "@modelcontextprotocol/server";
 import type { RateLimiter } from "./rateLimit.js";
 import { requestScope } from "./requestScope.js";
 import { hasPermission } from "@tereo-io/sdk";
 import { authFromInfo } from "./verifier.js";
-import { isZodObject } from "./zodObject.js";
 import { randomUUID } from "node:crypto";
 import { runTool } from "./runTool.js";
 import type { Logger } from "pino";
@@ -82,6 +82,11 @@ export const buildServer = async (
         if (!isZodObject(schema)) {
           throw new Error(
             `The input function of tool "${tool.name}" did not return a z.object() schema`
+          );
+        }
+        if (toJsonSchemaError(schema, "input") !== undefined) {
+          throw new Error(
+            `The input function of tool "${tool.name}" returned a schema that cannot be expressed as JSON Schema`
           );
         }
         return { tool, ctx, schema };

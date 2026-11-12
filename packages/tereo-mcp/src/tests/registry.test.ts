@@ -121,6 +121,32 @@ describe("ToolRegistry", () => {
     expect(registry.list()).toHaveLength(2);
   });
 
+  it.each([
+    ["a transform", z.object({ n: z.string().transform((v) => v.length) })],
+    ["a date", z.object({ at: z.date() })],
+    ["a bigint", z.object({ n: z.bigint() })],
+  ])(
+    "rejects an output schema with %s, which JSON Schema cannot express",
+    (_l, output) => {
+      expect(() => new ToolRegistry().define(tool({ output }))).toThrow(
+        'Tool "list_things" needs an output schema that can be expressed as JSON Schema'
+      );
+    }
+  );
+
+  it("rejects a static input schema JSON Schema cannot express, and accepts an input transform", () => {
+    const registry = new ToolRegistry();
+    expect(() =>
+      registry.define(tool({ input: z.object({ at: z.date() }) }))
+    ).toThrow(
+      'Tool "list_things" needs an input schema that can be expressed as JSON Schema'
+    );
+    registry.define(
+      tool({ input: z.object({ n: z.string().transform((v) => v.length) }) })
+    );
+    expect(registry.list()).toHaveLength(1);
+  });
+
   it("rejects any define after freeze", () => {
     const registry = new ToolRegistry();
     registry.define(tool());

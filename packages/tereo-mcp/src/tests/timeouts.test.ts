@@ -93,6 +93,70 @@ describe("tool timeouts over the served endpoint", () => {
     await client.close().catch(() => undefined);
   });
 
+  it("logs a call whose handler rejects with the abort at close() as cancelled", async () => {
+    let entered!: () => void;
+    const inHandler = new Promise<void>((resolve) => (entered = resolve));
+    const { server, lines } = await serve(
+      {},
+      tool(
+        "until_closed",
+        (_input, ctx) =>
+          new Promise((_resolve, reject) => {
+            entered();
+            ctx.signal.addEventListener("abort", () =>
+              reject(ctx.signal.reason)
+            );
+          })
+      )
+    );
+    const client = await connect(server.url, token);
+
+    const call = client.callTool({ name: "until_closed" });
+    await inHandler;
+    const closing = server.close();
+    const result = await call;
+    await closing;
+
+    expect(result.content).toEqual([
+      { type: "text", text: "Tool call cancelled" },
+    ]);
+    const line = lines.find((l) => l.msg === "MCP tool call");
+    expect(line).toMatchObject({ level: 30, outcome: "cancelled" });
+    expect(line).not.toHaveProperty("err");
+    await client.close().catch(() => undefined);
+  });
+
+  it.each(["legacy", "modern"] as const)(
+    "logs a call whose handler rejects with the abort on disconnect as cancelled (%s era)",
+    async (era) => {
+      let entered!: () => void;
+      const inHandler = new Promise<void>((resolve) => (entered = resolve));
+      const { server, lines } = await serve(
+        {},
+        tool(
+          "until_gone",
+          (_input, ctx) =>
+            new Promise((_resolve, reject) => {
+              entered();
+              ctx.signal.addEventListener("abort", () =>
+                reject(ctx.signal.reason)
+              );
+            })
+        )
+      );
+      const client = await connect(server.url, token, { era });
+
+      void client.callTool({ name: "until_gone" }).catch(() => undefined);
+      await inHandler;
+      await client.close();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const line = lines.find((l) => l.msg === "MCP tool call");
+      expect(line).toMatchObject({ level: 30, outcome: "cancelled" });
+      expect(line).not.toHaveProperty("err");
+    }
+  );
+
   it.each(["legacy", "modern"] as const)(
     "aborts the signal when the client disconnects mid-call (%s era)",
     async (era) => {

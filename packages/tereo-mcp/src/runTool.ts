@@ -1,5 +1,6 @@
 import type { ToolContext, ToolDefinition } from "./types.js";
 import type { RateLimiter } from "./rateLimit.js";
+import { describePath } from "./zodObject.js";
 import { HttpError } from "@tereo-io/sdk";
 import { ToolError } from "./errors.js";
 import type { Logger } from "pino";
@@ -11,7 +12,12 @@ export interface ToolResult {
 }
 
 type Outcome =
-  "ok" | "tool_error" | "rate_limited" | "internal_error" | "timeout";
+  | "ok"
+  | "tool_error"
+  | "rate_limited"
+  | "internal_error"
+  | "timeout"
+  | "cancelled";
 
 const TIMED_OUT = Symbol("timed out");
 
@@ -20,18 +26,19 @@ const text = (value: string, isError?: true): ToolResult => ({
   ...(isError ? { isError } : {}),
 });
 
+const timedOutText = (timeoutMs: number) =>
+  `Tool timed out after ${timeoutMs} ms`;
+
 // Paths and issue codes only: an issue's message may quote the result.
 const outputMismatch = (
   toolName: string,
+  schema: unknown,
   problem: string,
   issues: readonly { path: readonly PropertyKey[]; code: string }[]
 ): Error =>
   new Error(
     `Tool "${toolName}" ${problem}: ${issues
-      .map(
-        (issue) =>
-          `${issue.path.map(String).join(".") || "(root)"} (${issue.code})`
-      )
+      .map((issue) => `${describePath(schema, issue.path)} (${issue.code})`)
       .join(", ")}`
   );
 
@@ -79,10 +86,7 @@ export const runTool = async (
         // Whatever the handler settles with later is discarded, unlogged.
         pending.catch(() => undefined);
         controller.abort(
-          new DOMException(
-            `Tool timed out after ${timeoutMs} ms`,
-            "TimeoutError"
-          )
+          new DOMException(timedOutText(timeoutMs), "TimeoutError")
         );
       }
       return settled;
@@ -106,7 +110,7 @@ export const runTool = async (
       const result = await call();
       if (result === TIMED_OUT) {
         state.outcome = "timeout";
-        return text(`Tool timed out after ${timeoutMs} ms`, true);
+        return text(timedOutText(timeoutMs), true);
       }
       let structured: Record<string, unknown> | undefined;
       if (tool.output) {
@@ -115,6 +119,7 @@ export const runTool = async (
           return internal(
             outputMismatch(
               tool.name,
+              tool.output,
               "returned a result that does not match its output schema",
               parsed.error.issues
             )
@@ -127,6 +132,7 @@ export const runTool = async (
           return internal(
             outputMismatch(
               tool.name,
+              tool.output,
               "has an output schema that refuses its own parsed result",
               again.error.issues
             )
@@ -150,6 +156,16 @@ export const runTool = async (
         ? { ...text(body), structuredContent: structured }
         : text(body);
     } catch (err) {
+      // A timeout never gets here: its call has already answered.
+      const { signal } = controller;
+      if (
+        signal.aborted &&
+        (err === signal.reason ||
+          (err as { name?: unknown } | null)?.name === "AbortError")
+      ) {
+        state.outcome = "cancelled";
+        return text("Tool call cancelled", true);
+      }
       if (
         err instanceof ToolError ||
         (err instanceof HttpError &&

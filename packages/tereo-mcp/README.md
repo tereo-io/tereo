@@ -100,7 +100,10 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 | `rateLimit` | no | `{ perMinute }` (a positive integer) for the tool's own limit, or `false` for none. Unset: the server-wide limit. See [Rate limit](#rate-limit) |
 
 `define` throws once the server has started (`router()` or `listen()` was called), and when a
-field above is out of range; the message names the tool and the field.
+field above is out of range; the message names the tool and the field. It also throws for a static
+`input` or an `output` that JSON Schema cannot express (a `transform` on the output side,
+`z.date()`, `z.bigint()`, a custom type): the MCP SDK converts both when it lists tools, and one
+such tool would fail `tools/list` for every caller who can see it.
 
 The handler's input is typed from a static `input`: with `input: z.object({ sides: z.number() })`
 the handler sees `{ sides: number }` without an annotation, and with no `input` it sees
@@ -110,8 +113,9 @@ against the schema at compile time.
 
 An `input` function runs for every protocol message the caller sends (`initialize`, `tools/list`,
 `tools/call`), not only for calls, because the server is built per request. Keep it cheap and free
-of side effects. If it throws, or returns anything but a `z.object(...)`, the error is logged and
-that tool is left out for that request.
+of side effects. If it throws, returns anything but a `z.object(...)`, or returns one JSON Schema
+cannot express, the error is logged as `MCP tool input schema failed` and that tool is left out
+for that request; the caller's other tools still list and run.
 
 ### `ctx`
 
@@ -264,10 +268,19 @@ still counts toward the rate limit.
   `AbortError`. `router()` has no `close()`, so there the signal aborts only at the deadline or
   on a disconnect.
 
-A timeout answers the client; it cannot stop a handler that ignores `ctx.signal`, which runs on
-in the background, holding whatever connections and locks it has. Pass the signal to database and HTTP calls
-(`fetch(url, { signal: ctx.signal })`, a query's abort option) so the work stops with the call.
-In an `input` function `ctx.signal` aborts only when the server closes.
+A handler that rejects with the abort, after a disconnect or `close()` (the signal's `reason`, or
+any `AbortError`, as `fetch` throws), ends as outcome `cancelled`, logged at info with no `err`;
+a client still connected gets the tool error `Tool call cancelled`. Any other error stays an
+internal error.
+
+A timeout answers the client; it cannot stop a handler that ignores `ctx.signal`, which runs on in
+the background, holding whatever connections and locks it has. Pass the signal to database and
+HTTP calls (`fetch(url, { signal: ctx.signal })`, a query's abort option) so the work stops with
+the call.
+
+In an `input` function `ctx.signal` is the server's closing signal, shared by every request, not
+one for the call: read `aborted` if you need to, but do not attach listeners to it there, or they
+pile up for the life of the server.
 
 ## Structured results
 
@@ -290,10 +303,17 @@ mcp.define({
 
 A return value that does not match is an internal error: the model sees
 `Internal error (request <id>)`, and the log line's `err` names the failing paths and issue
-codes, never the values. Error results (`ToolError`, timeouts, the rate limit) carry no
-`structuredContent`. The schema must accept its own parsed value, because the MCP SDK validates
-`structuredContent` again; a `transform` that changes a field's type fails that and is reported
-the same way.
+codes, never the values. A path names only fields the schema declares: a key of a `z.record`, a
+`catchall` or a `z.map` comes from the result, so it is written `*`. Error results (`ToolError`,
+timeouts, cancellations, the rate limit) carry no `structuredContent`.
+
+The schema must accept its own parsed value, because the MCP SDK validates `structuredContent`
+again with the same schema; one that does not (an `.overwrite()` that changes the value on every
+parse, say) is reported the same way, so the SDK's own message, which may quote values, never
+reaches the client. A schema JSON Schema cannot express is refused by `define`, as above.
+
+Output validation runs after the handler, outside the tool's timeout. Keep output schemas
+synchronous and cheap: no async refinements, no lookups.
 
 ## Errors
 
@@ -304,13 +324,16 @@ the same way.
 | Anything else | `Internal error (request <id>)`, as a tool error | error, with `err`, outcome `internal_error` |
 
 A result over `maxResultBytes` is a tool error too (outcome `tool_error`), as is a call that runs
-past its timeout (outcome `timeout`, logged at warn). The wrapper exists so that a database error
-or a stack detail never reaches the model.
+past its timeout (outcome `timeout`, logged at warn) and one cancelled by a disconnect or
+`close()` (outcome `cancelled`, logged at info; see
+[Timeouts and cancellation](#timeouts-and-cancellation)). The wrapper exists so that a database
+error or a stack detail never reaches the model.
 
 ## Logging
 
 One line per tool call, object first: `tool`, `user_id`, `client_id`, `org_id`, `request_id`,
-`outcome` (`ok`, `tool_error`, `internal_error`, `rate_limited`, `timeout`) and `duration_ms`. Inputs and
+`outcome` (`ok`, `tool_error`, `internal_error`, `rate_limited`, `timeout`, `cancelled`) and
+`duration_ms`. Inputs and
 results are never logged; they may be the app's data.
 
 ## Audit

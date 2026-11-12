@@ -430,6 +430,34 @@ describe("TereoMcp router", () => {
     }
   );
 
+  it("leaves out a tool whose input function returns a schema JSON Schema cannot express, and lists and runs the others", async () => {
+    const h = await serving(
+      {},
+      openTool("dated", () => "never", {
+        input: () => z.object({ at: z.date() }),
+      }),
+      openTool("fine", () => "fine")
+    );
+    const client = await connect(h.mcpUrl, token("user-1", ""));
+
+    const { tools } = await client.listTools();
+    const result = await client.callTool({ name: "fine" });
+
+    expect(tools.map((t) => t.name)).toEqual(["fine"]);
+    expect(result.content).toEqual([{ type: "text", text: "fine" }]);
+    const logged = h.lines.filter(
+      (l) => l.msg === "MCP tool input schema failed"
+    );
+    expect(logged.length).toBeGreaterThan(0);
+    expect(logged[0]).toMatchObject({
+      level: 50,
+      tool: "dated",
+      user_id: "user-1",
+      err: { message: expect.stringContaining("JSON Schema") },
+    });
+    await client.close();
+  });
+
   it("writes each field of the tool-call log line once", async () => {
     const h = await serving(
       {},

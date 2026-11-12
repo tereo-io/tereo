@@ -21,6 +21,14 @@ const serve = (extra: Partial<TereoMcpOptions>, ...tools: ToolDefinition[]) =>
 
 const output = z.object({ total: z.number(), label: z.string() });
 
+// Every test lists first: a schema the SDK cannot convert fails tools/list.
+const connectListed = async (url: string, era: "legacy" | "modern") => {
+  const client = await connect(url, token, { era });
+  const { tools } = await client.listTools();
+  expect(tools.map((t) => t.name)).toContain("report");
+  return client;
+};
+
 describe.each(["legacy", "modern"] as const)(
   "structured results over the served endpoint (%s era)",
   (era) => {
@@ -51,7 +59,7 @@ describe.each(["legacy", "modern"] as const)(
           output,
         })
       );
-      const client = await connect(server.url, token, { era });
+      const client = await connectListed(server.url, era);
 
       const result = await client.callTool({ name: "report" });
 
@@ -73,11 +81,17 @@ describe.each(["legacy", "modern"] as const)(
           {},
           handler
             ? tool("report", handler, { output })
-            : tool("report", () => ({ n: "SECRET-VALUE" }), {
-                output: z.object({ n: z.string().transform((s) => s.length) }),
+            : // Each parse appends "x", so a second parse breaks maxLength.
+              tool("report", () => ({ n: "SECRET-VALUE".slice(0, 3) }), {
+                output: z.object({
+                  n: z
+                    .string()
+                    .overwrite((v) => `${v}x`)
+                    .max(4),
+                }),
               })
         );
-        const client = await connect(server.url, token, { era });
+        const client = await connectListed(server.url, era);
 
         const result = await client.callTool({ name: "report" });
 
@@ -88,17 +102,41 @@ describe.each(["legacy", "modern"] as const)(
         expect(result.structuredContent).toBeUndefined();
         const seen = JSON.stringify(result) + raw.join("");
         expect(seen).not.toContain("SECRET-VALUE");
+        expect(seen).not.toContain("SECx");
         expect(seen).not.toContain("Output validation error");
         await client.close();
       }
     );
+
+    it("names a record's key as * in the log and sends neither to the client", async () => {
+      const { server, raw, lines } = await serve(
+        {},
+        tool("report", () => ({ scores: { "SECRET-KEY": "x" } }), {
+          output: z.object({ scores: z.record(z.string(), z.number()) }),
+        })
+      );
+      const client = await connectListed(server.url, era);
+
+      const result = await client.callTool({ name: "report" });
+
+      expect(result.content).toEqual([
+        { type: "text", text: expect.stringMatching(INTERNAL_ERROR) },
+      ]);
+      expect(JSON.stringify(result)).not.toContain("SECRET-KEY");
+      expect(raw.join("")).not.toContain("SECRET-KEY");
+      const line = lines.find((l) => l.msg === "MCP tool call");
+      expect((line?.err as { message: string }).message).toContain(
+        "scores.* (invalid_type)"
+      );
+      await client.close();
+    });
 
     it("turns an over-size structured result into the size error, without structuredContent", async () => {
       const { server } = await serve(
         { maxResultBytes: 10 },
         tool("report", () => ({ total: 1, label: "long label" }), { output })
       );
-      const client = await connect(server.url, token, { era });
+      const client = await connectListed(server.url, era);
 
       const result = await client.callTool({ name: "report" });
 
@@ -121,7 +159,7 @@ describe.each(["legacy", "modern"] as const)(
           { output }
         )
       );
-      const client = await connect(server.url, token, { era });
+      const client = await connectListed(server.url, era);
 
       const result = await client.callTool({ name: "report" });
 

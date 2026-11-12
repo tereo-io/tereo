@@ -1,5 +1,5 @@
+import { isZodObject, toJsonSchemaError } from "./zodObject.js";
 import type { ToolDefinition } from "./types.js";
-import { isZodObject } from "./zodObject.js";
 
 const NAME_PATTERN = /^[a-z0-9_]+$/;
 
@@ -69,6 +69,23 @@ export class ToolRegistry {
     if (tool.output !== undefined && !isZodObject(tool.output)) {
       throw new Error(
         `Tool "${tool.name}" needs output to be a z.object() schema`
+      );
+    }
+    if (
+      tool.output !== undefined &&
+      toJsonSchemaError(tool.output, "output") !== undefined
+    ) {
+      throw new Error(
+        `Tool "${tool.name}" needs an output schema that can be expressed as JSON Schema`
+      );
+    }
+    if (
+      tool.input !== undefined &&
+      typeof tool.input !== "function" &&
+      toJsonSchemaError(tool.input, "input") !== undefined
+    ) {
+      throw new Error(
+        `Tool "${tool.name}" needs an input schema that can be expressed as JSON Schema`
       );
     }
     this.tools.set(tool.name, tool);

@@ -398,3 +398,120 @@ describe("runTool structured results", () => {
     });
   });
 });
+
+describe("runTool output mismatch paths", () => {
+  it.each([
+    [
+      "a record key",
+      z.object({ scores: z.record(z.string(), z.number()) }),
+      { scores: { "SECRET-KEY": "x" } },
+      "scores.* (invalid_type)",
+    ],
+    [
+      "a catchall key",
+      z.object({ id: z.string() }).catchall(z.number()),
+      { id: "a", "SECRET-KEY": "x" },
+      "* (invalid_type)",
+    ],
+    [
+      "a map key",
+      z.object({ m: z.map(z.string(), z.number()) }),
+      { m: new Map([["SECRET-KEY", "x"]]) },
+      "m.*",
+    ],
+    [
+      "nested names and an array index",
+      z.object({ rows: z.array(z.object({ id: z.string() })).optional() }),
+      { rows: [{ id: "a" }, { id: 5 }] },
+      "rows.1.id (invalid_type)",
+    ],
+  ])(
+    "describes %s without the result's data",
+    async (_label, output, value, described) => {
+      const { run, lines } = setup(() => value, { output });
+
+      const result = await run();
+
+      expect(result.content[0].text).toBe("Internal error (request req-9)");
+      const message = (lines[0].err as { message: string }).message;
+      expect(message).toContain(described);
+      expect(JSON.stringify(lines)).not.toContain("SECRET-KEY");
+    }
+  );
+});
+
+describe("runTool cancellation", () => {
+  const rejectOnAbort =
+    (make: (signal: AbortSignal) => unknown) =>
+    (_input: unknown, ctx: ToolContext) =>
+      new Promise((_resolve, reject) => {
+        ctx.signal.addEventListener("abort", () => reject(make(ctx.signal)));
+      });
+
+  it.each([
+    [
+      "requestSignal",
+      "the signal's reason",
+      (signal: AbortSignal) => signal.reason,
+    ],
+    [
+      "closing",
+      "an AbortError of its own",
+      () => new DOMException("fetch aborted", "AbortError"),
+    ],
+  ] as const)(
+    "answers a handler that rejects after the %s signal aborts, with %s, as cancelled",
+    async (which, _label, make) => {
+      const outer = new AbortController();
+      const { run, lines } = setup(rejectOnAbort(make));
+
+      const pending = run({}, { [which]: outer.signal });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      outer.abort(new Error("gone"));
+      const result = await pending;
+
+      expect(result).toEqual({
+        isError: true,
+        content: [{ type: "text", text: "Tool call cancelled" }],
+      });
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({ level: 30, outcome: "cancelled" });
+      expect(lines[0]).not.toHaveProperty("err");
+    }
+  );
+
+  it("keeps another error thrown after an abort an internal error", async () => {
+    const outer = new AbortController();
+    const { run, lines } = setup(
+      rejectOnAbort(() => new Error("pool exhausted"))
+    );
+
+    const pending = run({}, { requestSignal: outer.signal });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    outer.abort(new Error("gone"));
+    const result = await pending;
+
+    expect(result.content[0].text).toBe("Internal error (request req-9)");
+    expect(lines[0]).toMatchObject({ level: 50, outcome: "internal_error" });
+  });
+
+  it("keeps an AbortError with no abort an internal error", async () => {
+    const { run, lines } = setup(() => {
+      throw new DOMException("aborted elsewhere", "AbortError");
+    });
+
+    await run();
+
+    expect(lines[0]).toMatchObject({ level: 50, outcome: "internal_error" });
+  });
+
+  it("keeps a timeout a timeout", async () => {
+    const { run, lines } = setup(rejectOnAbort((signal) => signal.reason));
+
+    const result = await run({}, { timeoutMs: 10 });
+
+    expect(result.content[0].text).toBe("Tool timed out after 10 ms");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ level: 40, outcome: "timeout" });
+  });
+});
