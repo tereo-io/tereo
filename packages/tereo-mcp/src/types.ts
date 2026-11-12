@@ -28,6 +28,8 @@ interface ToolFields {
   description: string;
   permission: string | null;
   readOnly: boolean;
+  /** Display name for people; `name` stays what the model calls. */
+  title?: string;
   destructive?: boolean;
   idempotent?: boolean;
   /** Overrides `toolTimeoutMs` for this tool. A positive integer. */
@@ -66,6 +68,8 @@ export type RateLimitRedis = Pick<Redis, "incr" | "expire" | "ttl">;
 export interface TereoMcpOptions {
   name: string;
   version: string;
+  /** Sent to clients at initialize: how to use this server's tools. */
+  instructions?: string;
   core: CoreClient;
   publicUrl: string;
   allowedClients: string[];

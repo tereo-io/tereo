@@ -91,6 +91,12 @@ describe("ToolRegistry", () => {
     ).toThrow(/"list_things".*output/);
   });
 
+  it.each(["", "  ", 7])("rejects the title %j", (title) => {
+    expect(() =>
+      new ToolRegistry().define(tool({ title: title as string }))
+    ).toThrow(/"list_things".*title/);
+  });
+
   it("rejects any define after freeze", () => {
     const registry = new ToolRegistry();
     registry.define(tool());

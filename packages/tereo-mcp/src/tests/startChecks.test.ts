@@ -327,6 +327,25 @@ describe("runStartChecks", () => {
     }
   );
 
+  it.each(["", "   ", 42])("refuses instructions %j", async (instructions) => {
+    const message = await failure(
+      runStartChecks(
+        options({ instructions: instructions as string }),
+        [],
+        answering(200, metadata)
+      )
+    );
+    expect(message).toContain("instructions");
+  });
+
+  it("accepts instructions", async () => {
+    await runStartChecks(
+      options({ instructions: "Ask for a connection first." }),
+      [],
+      answering(200, metadata)
+    );
+  });
+
   it("accepts positive integer limits", async () => {
     await runStartChecks(
       options({

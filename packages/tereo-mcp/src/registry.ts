@@ -38,6 +38,14 @@ export class ToolRegistry {
       );
     }
     if (
+      tool.title !== undefined &&
+      (typeof tool.title !== "string" || tool.title.trim() === "")
+    ) {
+      throw new Error(
+        `Tool "${tool.name}" needs title, when given, to be a non-empty string`
+      );
+    }
+    if (
       tool.timeoutMs !== undefined &&
       !(Number.isInteger(tool.timeoutMs) && tool.timeoutMs > 0)
     ) {

@@ -222,6 +222,13 @@ export const runStartChecks = async (
   }
   checkPositiveInteger("maxResultBytes", options.maxResultBytes);
   checkPositiveInteger("toolTimeoutMs", options.toolTimeoutMs);
+  if (
+    options.instructions !== undefined &&
+    (typeof options.instructions !== "string" ||
+      options.instructions.trim() === "")
+  ) {
+    fail("instructions, when given, must be a non-empty string");
+  }
   checkAllowedOrigins(options.allowedOrigins);
   checkScopes(options.scopes);
   checkPermissions(options, tools);

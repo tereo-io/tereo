@@ -43,7 +43,10 @@ export const buildServer = async (
   // rather than "method not found", for a caller who may use no tool.
   const server = new McpServer(
     { name: options.name, version: options.version },
-    { capabilities: { tools: { listChanged: false } } }
+    {
+      capabilities: { tools: { listChanged: false } },
+      instructions: options.instructions,
+    }
   );
   const auth = authFromInfo(authInfo);
   if (!auth) return server;
@@ -110,6 +113,7 @@ export const buildServer = async (
       )),
     });
     const config = {
+      ...(tool.title !== undefined && { title: tool.title }),
       description: tool.description,
       annotations: annotationsOf(tool),
       ...(tool.output && { outputSchema: tool.output }),
