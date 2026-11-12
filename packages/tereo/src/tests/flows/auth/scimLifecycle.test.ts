@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag auth
 import { createScimConnection, scimFetch } from "../../support/scim.js";
+import { DEFAULT_ORGANIZATION_ID } from "../../../definitions/index.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { oktaCreateUser } from "../../fixtures/scim/okta.js";
 import { BASE_URL } from "../../support/auth/constants.js";
@@ -8,6 +9,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../utils/db/prisma.js";
 import { fetchJson } from "../../support/http.js";
 import { tag } from "../../support/scimUsers.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../../support/webhooks.js";
 
 const PATCH_OP = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 
@@ -121,6 +127,10 @@ describe("SCIM user lifecycle", () => {
   });
 
   it("an admin hold on a user the IdP already deactivated survives the IdP's active:true", async () => {
+    const endpoint = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      { eventTypes: ["auth.user.updated"] }
+    );
     const c = await createScimConnection();
     const created = await scimFetch(
       c.token,
@@ -130,7 +140,16 @@ describe("SCIM user lifecycle", () => {
     );
     const id = created.body.id as string;
     expect((await setActive(c.token, id, false)).status).toBe(200);
+    const userEntries = () =>
+      prisma.auditLogEntry.findMany({
+        where: { entityType: "User", entityId: id },
+      });
+    const newEntries = async (before: { id: string }[]) => {
+      const seen = new Set(before.map((e) => e.id));
+      return (await userEntries()).filter((e) => !seen.has(e.id));
+    };
 
+    const beforeHold = await userEntries();
     const held = await adminPatch(id, { isActive: false });
     expect(held.status).toBe(200);
     expect(await state(id)).toMatchObject({
@@ -138,23 +157,23 @@ describe("SCIM user lifecycle", () => {
       idpActive: false,
       adminHold: true,
     });
-    const holdEntries = () =>
-      prisma.auditLogEntry.findMany({
-        where: {
-          entityType: "User",
-          entityId: id,
-          metadata: { path: ["action"], equals: "scim_admin_hold" },
-        },
-      });
-    const entries = await holdEntries();
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({
+    const holdEntries = await newEntries(beforeHold);
+    expect(holdEntries).toHaveLength(1);
+    expect(holdEntries[0]).toMatchObject({
       action: "UPDATE",
-      metadata: { scimConnectionId: c.connectionId, providerId: c.providerId },
+      metadata: {
+        action: "scim_admin_hold",
+        scimConnectionId: c.connectionId,
+        providerId: c.providerId,
+      },
     });
-    // Already held: nothing more is written.
-    expect((await adminPatch(id, { isActive: false })).status).toBe(200);
-    expect(await holdEntries()).toHaveLength(1);
+
+    // Already held: nothing is written.
+    const beforeRepeat = await userEntries();
+    const repeat = await adminPatch(id, { isActive: false });
+    expect(repeat.status).toBe(200);
+    expect(await newEntries(beforeRepeat)).toHaveLength(0);
+    expect(await state(id)).toMatchObject({ adminHold: true });
 
     const back = await setActive(c.token, id, true);
     expect(back.status).toBe(200);
@@ -172,6 +191,26 @@ describe("SCIM user lifecycle", () => {
       idpActive: true,
       adminHold: false,
     });
+
+    // Deliveries fan out in emission order: once the lift's is in, every
+    // earlier step's is too. Only the IdP's deactivation and the lift emit.
+    const deliveries = () =>
+      prisma.webhookDelivery.findMany({
+        where: {
+          webhookEndpointId: endpoint.id,
+          eventType: "auth.user.updated",
+          payload: { path: ["entityId"], equals: id },
+        },
+      });
+    const activeIn = (payload: unknown) =>
+      (payload as { data: { isActive: boolean } }).data.isActive;
+    await waitFor(
+      async () => (await deliveries()).some((d) => activeIn(d.payload)),
+      10_000
+    );
+    expect((await deliveries()).map((d) => activeIn(d.payload)).sort()).toEqual(
+      [false, true]
+    );
   });
 
   it("creates a user inactive when the IdP says active:false", async () => {

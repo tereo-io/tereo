@@ -143,11 +143,14 @@ export const updateUser = async (req: Request, res: Response) => {
   };
 
   const update = async (tx: Prisma.TransactionClient) => {
-    // A body of only a rate limit is not a profile update.
-    const profileChanged =
-      rateLimitPerSecond === undefined ||
-      isActive !== undefined ||
-      Object.keys(profile).length > 0;
+    // A body of only a rate limit is not a profile update. On a held user,
+    // isActive:false is the hold alone and a repeated email or name changes
+    // nothing (any other is refused), so only a password is a profile update.
+    const profileChanged = holding
+      ? body.password !== undefined
+      : rateLimitPerSecond === undefined ||
+        isActive !== undefined ||
+        Object.keys(profile).length > 0;
     const updated = profileChanged
       ? await updateUserProfileTx(tx, auth, existing, profile)
       : await db.users.get(id, tx);

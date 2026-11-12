@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrganization.js";
+import { DEFAULT_ORGANIZATION_ID } from "../../../../../../definitions/index.js";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { createGuest, issue } from "../../../../../support/passwordSetup.js";
@@ -8,7 +9,6 @@ import { issueVerifyLinkFor } from "../../../../../support/verifyLink.js";
 import { createScimConnection } from "../../../../../support/scim.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
-import { waitFor } from "../../../../../support/webhooks.js";
 import { fetchJson } from "../../../../../support/http.js";
 import env from "../../../../../../env.js";
 import { randomUUID } from "node:crypto";
@@ -37,6 +37,11 @@ import {
   managedWith,
   tag,
 } from "../../../../../support/scimUsers.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../../../../../support/webhooks.js";
 
 const patch = (id: string, token: string, body: unknown) =>
   fetchJson("PATCH", `${BASE_URL}/v1/admin/users/${id}`, token, body);
@@ -373,6 +378,87 @@ describe("PATCH /v1/admin/users/:id on a SCIM-managed user", () => {
       idpActive: true,
       adminHold: false,
     });
+  });
+
+  it("holds an IdP-deactivated user with a password reset: the reset audits and emits alone", async () => {
+    const user = await scimUser({ idpActive: false });
+    const r = await patch(user.id, writer, {
+      isActive: false,
+      password: "Another-Passw0rd!",
+    });
+    expect(r.status).toBe(200);
+    expect(await activeState(user.id)).toEqual({
+      isActive: false,
+      idpActive: false,
+      adminHold: true,
+    });
+    const entries = await prisma.auditLogEntry.findMany({
+      where: { entityType: "User", entityId: user.id },
+    });
+    expect(entries.map((e) => e.metadata)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "scim_admin_hold" }),
+        expect.objectContaining({ passwordReset: true }),
+      ])
+    );
+    expect(entries).toHaveLength(2);
+  });
+
+  it("an unmanaged inactive user's isActive:false still writes its no-change entry and event", async () => {
+    const endpoint = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      { eventTypes: ["auth.user.updated"] }
+    );
+    const user = await createTestUser({ isActive: false });
+    const entries = () =>
+      prisma.auditLogEntry.findMany({
+        where: { entityType: "User", entityId: user.id },
+      });
+    const before = await entries();
+
+    const r = await patch(user.id, writer, { isActive: false });
+    expect(r.status).toBe(200);
+    expect(r.body.isActive).toBe(false);
+    const seen = new Set(before.map((e) => e.id));
+    const written = (await entries()).filter((e) => !seen.has(e.id));
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatchObject({
+      action: "UPDATE",
+      changes: null,
+      metadata: null,
+    });
+
+    // Deliveries fan out in emission order: once the rename's is in, the
+    // no-change request's is too.
+    const later = `Renamed ${user.id}`;
+    expect((await patch(user.id, writer, { name: later })).status).toBe(200);
+    const deliveries = () =>
+      prisma.webhookDelivery.findMany({
+        where: {
+          webhookEndpointId: endpoint.id,
+          eventType: "auth.user.updated",
+          payload: { path: ["entityId"], equals: user.id },
+        },
+      });
+    await waitFor(
+      async () =>
+        (await deliveries()).some((d) =>
+          JSON.stringify(d.payload).includes(later)
+        ),
+      10_000
+    );
+    const delivered = (await deliveries()).map((d) => d.payload);
+    expect(delivered).toHaveLength(2);
+    expect(delivered).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({ isActive: false, name: user.name }),
+        }),
+        expect.objectContaining({
+          data: expect.objectContaining({ isActive: false, name: later }),
+        }),
+      ])
+    );
   });
 
   it("changes the rate limit and the password", async () => {
