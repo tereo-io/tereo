@@ -90,6 +90,28 @@ const checkAllowedOrigins = (origins: readonly string[] | undefined) => {
   }
 };
 
+// RFC 6749 section 3.3 scope-token: printable ASCII except space, `"` and `\`.
+const SCOPE_TOKEN = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
+
+const checkScopes = (scopes: readonly string[] | undefined) => {
+  const seen = new Set<string>();
+  for (const scope of scopes ?? []) {
+    const shown = JSON.stringify(scope);
+    if (!SCOPE_TOKEN.test(scope)) {
+      fail(
+        `scopes entry ${shown} must be a non-empty string of printable characters with no whitespace, quote or backslash`
+      );
+    }
+    if (scope === "offline_access") {
+      fail(
+        `scopes entry "offline_access" must not be advertised by a resource server`
+      );
+    }
+    if (seen.has(scope)) fail(`scopes entry ${shown} appears more than once`);
+    seen.add(scope);
+  }
+};
+
 // Mirrors the MCP SDK's own issuer check in mcpAuthMetadataRouter, which
 // would otherwise throw from router() or listen() with no context.
 const checkIssuer = (issuer: string): void => {
@@ -180,6 +202,7 @@ export const runStartChecks = async (
   }
   checkPositiveInteger("maxResultBytes", options.maxResultBytes);
   checkAllowedOrigins(options.allowedOrigins);
+  checkScopes(options.scopes);
   checkPermissions(options, tools);
 
   const coreUrl = options.coreUrl ?? process.env.CORE_URL;

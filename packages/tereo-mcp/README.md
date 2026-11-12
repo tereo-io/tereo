@@ -65,6 +65,7 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 | `rateLimit` | no | `{ perMinute }` (default 120; a positive integer) or `false` |
 | `allowServiceAccounts` | no | Default `false`: `client_credentials` tokens are refused |
 | `allowedOrigins` | no | Browser origins allowed to call the endpoint, such as `https://app.example.com` (`listen` only). See [Serving](#serving) |
+| `scopes` | no | OAuth scopes advertised to clients, typically `["openid", "profile", "email"]`; advertised only, never required. See [Scopes](#scopes) |
 | `provisioning` | no | The service's provisioning document, for the start-time permission check |
 | `coreUrl` | no | Core's base URL, for fetching its authorization-server metadata at start. Default `CORE_URL`, as in the SDK |
 | `logger` | no | A Pino logger. Default a new one named `@tereo-io/mcp` |
@@ -145,8 +146,22 @@ A revoked token or a removed permission keeps working for up to the SDK's intros
 `auth.introspectionCacheTtlSeconds` on `createCoreClient` (60 seconds by default). Lower it if that
 is too long.
 
-No scopes are required or advertised. The protected-resource metadata, at
+No scopes are required. The protected-resource metadata, at
 `/.well-known/oauth-protected-resource${path}`, names Tereo as the authorization server.
+
+### Scopes
+
+The server advertises no scopes by default, so MCP clients request none. Set `scopes`
+(typically `["openid", "profile", "email"]`) and they are listed as `scopes_supported` in the
+metadata, so clients request them at sign-in. That is what makes `ctx.auth.name` and
+`ctx.auth.email` non-null: Tereo puts `name` in a token's details only with the `profile` scope and
+`email` only with `email`.
+
+- The scopes are advertised, not required: a token without them is still accepted, and the `401`
+  challenge carries no `scope` parameter.
+- The login client in Tereo must list them in its `scopes`, or core will not grant them.
+- `offline_access` is never advertised; a resource server must not, and `scopes` refuses it.
+- Without the scopes, look the user up with `ctx.core.auth.getUser(ctx.auth.userId)`.
 
 ## Start checks
 
@@ -158,6 +173,7 @@ No scopes are required or advertised. The protected-resource metadata, at
 - `redis` is missing and `rateLimit` is not `false`;
 - `rateLimit.perMinute` or `maxResultBytes` is given and is not a positive integer;
 - an `allowedOrigins` entry is not an http or https origin (scheme, host and optional port only);
+- a `scopes` entry is empty, contains whitespace, a quote or a backslash, is repeated, or is `offline_access`;
 - with `provisioning`, a tool needs a permission the document's service does not declare;
 - neither `coreUrl` nor `CORE_URL` is set, or Tereo's authorization-server metadata cannot be fetched
   from `${coreUrl}/.well-known/oauth-authorization-server`;

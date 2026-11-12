@@ -600,3 +600,59 @@ describe("TereoMcp router in the modern protocol era", () => {
     await client.close();
   });
 });
+
+describe("TereoMcp router scopes", () => {
+  const metadataUrl = (base: string) =>
+    `${base}/.well-known/oauth-protected-resource/mcp`;
+  const getDoc = (base: string) =>
+    fetch(metadataUrl(base)).then(
+      (r) => r.json() as Promise<Record<string, unknown>>
+    );
+
+  it("advertises the configured scopes in the protected-resource metadata", async () => {
+    const { base } = await serving({ scopes: ["openid", "profile", "email"] });
+    expect((await getDoc(base)).scopes_supported).toEqual([
+      "openid",
+      "profile",
+      "email",
+    ]);
+  });
+
+  it.each([undefined, []])(
+    "leaves scopes_supported out when scopes is %j",
+    async (scopes) => {
+      const { base } = await serving({ scopes });
+      expect(await getDoc(base)).not.toHaveProperty("scopes_supported");
+    }
+  );
+
+  it("does not enforce the advertised scopes", async () => {
+    const { mcpUrl } = await serving(
+      {
+        scopes: ["openid", "profile", "email"],
+        core: fakeCore({ scope: "" }),
+      },
+      openTool("ping", () => "pong")
+    );
+    const client = await connect(mcpUrl, token("user-1", "q.items.read"));
+    const res = await client.callTool({ name: "ping", arguments: {} });
+    expect(res.isError).toBeFalsy();
+    await client.close();
+  });
+
+  it("puts no scope parameter in the 401 challenge, with or without advertised scopes", async () => {
+    for (const scopes of [undefined, ["openid", "profile"]]) {
+      const { mcpUrl } = await serving({ scopes });
+      const res = await fetch(mcpUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      expect(res.status).toBe(401);
+      expect(res.headers.get("www-authenticate")).not.toContain("scope=");
+    }
+  });
+});

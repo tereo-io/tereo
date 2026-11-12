@@ -55,6 +55,7 @@ export const createRoute = (started: Started): McpRoute => {
     mcpAuthMetadataRouter({
       oauthMetadata: state.oauthMetadata,
       resourceServerUrl: resourceUrl,
+      scopesSupported: options.scopes?.length ? options.scopes : undefined,
     })
   );
   // With no body parser ahead of this router req.body is undefined and the

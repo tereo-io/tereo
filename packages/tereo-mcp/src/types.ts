@@ -41,6 +41,12 @@ export interface TereoMcpOptions {
   rateLimit?: { perMinute: number } | false;
   allowServiceAccounts?: boolean;
   allowedOrigins?: string[];
+  /**
+   * OAuth scopes advertised to MCP clients in the protected-resource
+   * metadata, so they request them at sign-in. Advertised only: a token
+   * without them is still accepted.
+   */
+  scopes?: string[];
   provisioning?: ProvisioningDocument;
   logger?: Logger;
   maxResultBytes?: number;

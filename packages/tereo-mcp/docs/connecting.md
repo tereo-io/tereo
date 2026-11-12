@@ -46,6 +46,7 @@ public (no secret), uses the authorization-code flow and names the service in `a
 - `consentRequired: true` shows the user a consent screen on first sign-in.
 - Redirect URIs must match exactly. ChatGPT shows its callback URL in the connector form; copy it
   from there into `redirectUris`, and do not guess it. Claude's two URLs are above.
+- To have `ctx.auth.name` and `ctx.auth.email` filled in, give each client the `scopes` `openid`, `profile` and `email`, and set the same list in the `scopes` option (see [Scopes](../README.md#scopes)).
 - List the same `clientId`s in `allowedClients`. Tokens issued to any other client are refused.
 - A token issued to a connector client is an ordinary Tereo access token for the service. Besides
   the MCP endpoint, the service's own routes behind the SDK's `requireAuth` accept it, with the

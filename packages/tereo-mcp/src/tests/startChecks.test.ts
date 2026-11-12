@@ -353,6 +353,56 @@ describe("runStartChecks", () => {
     );
   });
 
+  it("accepts a list of scopes", async () => {
+    await runStartChecks(
+      options({ scopes: ["openid", "profile", "email"] }),
+      [],
+      answering(200, metadata)
+    );
+  });
+
+  it.each([
+    ["", "scopes", "empty"],
+    ["two words", "two words", "whitespace"],
+    ['quo"te', "quo", "scope-token"],
+  ])("refuses the scope %j", async (scope, entry) => {
+    const message = await failure(
+      runStartChecks(
+        options({ scopes: ["openid", scope] }),
+        [],
+        answering(200, metadata)
+      )
+    );
+    expect(message).toMatch(/^@tereo-io\/mcp cannot start: /);
+    expect(message).toContain("scopes");
+    expect(message).toContain(entry);
+  });
+
+  it("refuses a duplicate scope", async () => {
+    const message = await failure(
+      runStartChecks(
+        options({ scopes: ["openid", "profile", "openid"] }),
+        [],
+        answering(200, metadata)
+      )
+    );
+    expect(message).toContain("scopes");
+    expect(message).toContain('"openid"');
+  });
+
+  it("refuses offline_access", async () => {
+    const message = await failure(
+      runStartChecks(
+        options({ scopes: ["openid", "offline_access"] }),
+        [],
+        answering(200, metadata)
+      )
+    );
+    expect(message).toContain("scopes");
+    expect(message).toContain("offline_access");
+    expect(message).toContain("resource server");
+  });
+
   it("fails on metadata that is not JSON", async () => {
     const fetchImpl = vi.fn<typeof fetch>(
       async () => new Response("<html>", { status: 200 })
