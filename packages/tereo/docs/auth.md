@@ -486,7 +486,11 @@ in the request instead, once.
 **A SCIM connection grants the same power.** It lets the provider sign in as any user it adopts in its
 domains, a platform admin included, by `oid` or verified email. So creating or re-enabling a
 connection and minting its token need `admin` through a global role on top of
-`identity-providers.write` (403 otherwise). See [scim.md](scim.md#trust).
+`identity-providers.write` (403 otherwise). Once a provider has a connection (active or not), so do
+the changes that would hand that power to someone else: changing its `issuer`, `clientId` or client
+secret, adding a domain or renaming one, and activating the provider (which resumes the connection);
+an issuer change is also refused while a SCIM user who has not yet signed in through the provider
+exists, as for a pending invite. See [scim.md](scim.md#trust).
 
 A domain's `autoAccept` only matches the provider that owns the domain. A user with a matching
 email who already exists is never signed in by it: see _No matching by email_ below.

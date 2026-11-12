@@ -1357,8 +1357,24 @@ AdminUserDetail:
   allOf:
     - $ref: '#/AdminUser'
     - type: object
-      required: [managedBy]
+      required: [managedBy, scimExcluded]
       properties:
+        scimExcluded:
+          description: |
+            The provider whose SCIM connection an admin unlinked the user from, or
+            `null`. While set, the user is not managed by SCIM and no connection can
+            see, adopt or sign them in by claim; `PUT /v1/admin/users/{id}/scim/release`
+            (global `admin`) ends it.
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [id, name]
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                name:
+                  type: string
         managedBy:
           description: |
             What owns an account the admin API will not change, or `null` when
@@ -1370,7 +1386,8 @@ AdminUserDetail:
             and `name` are the provider's): changing its `email` or `name`, or
             reactivating it while the provider has it inactive, is
             `409 managed_by_scim`; unlink it with `DELETE /v1/admin/users/{id}/scim`.
-            A SCIM resource the provider deleted still counts as managed.
+            A SCIM resource the provider deleted still counts as managed; an unlinked
+            user does not (see `scimExcluded`).
           oneOf:
             - type: 'null'
             - type: object
@@ -4906,7 +4923,7 @@ GroupRolesEventData:
 
 PutScimConnectionRequest:
   type: object
-  additionalProperties: false
+  description: Unknown properties are ignored.
   required: [isActive]
   properties:
     isActive:
@@ -4952,7 +4969,7 @@ ScimConnection:
       description: Updated at most once a minute.
     managedUserCount:
       type: integer
-      description: Users the connection manages, deleted SCIM resources included.
+      description: Users the connection manages, deleted SCIM resources included and users an admin unlinked left out.
     tokens:
       type: array
       items:

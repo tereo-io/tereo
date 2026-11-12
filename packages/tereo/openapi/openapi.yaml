@@ -1262,6 +1262,8 @@ paths:
     $ref: './paths/auth/admin/identity-provider-scim.yaml#/~1admin~1identity-providers~1{id}~1scim~1tokens~1{tokenId}'
   /v1/admin/users/{id}/scim:
     $ref: './paths/auth/admin/identity-provider-scim.yaml#/~1admin~1users~1{id}~1scim'
+  /v1/admin/users/{id}/scim/release:
+    $ref: './paths/auth/admin/identity-provider-scim.yaml#/~1admin~1users~1{id}~1scim~1release'
   /v1/admin/identity-providers/{id}/domains:
     $ref: './paths/auth/admin/identity-providers.yaml#/~1admin~1identity-providers~1{id}~1domains'
   /v1/admin/identity-providers/{id}/domains/{domainId}:
