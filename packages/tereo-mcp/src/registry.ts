@@ -53,6 +53,19 @@ export class ToolRegistry {
         `Tool "${tool.name}" needs timeoutMs to be a positive integer, not ${String(tool.timeoutMs)}`
       );
     }
+    if (tool.rateLimit !== undefined && tool.rateLimit !== false) {
+      if (typeof tool.rateLimit !== "object" || tool.rateLimit === null) {
+        throw new Error(
+          `Tool "${tool.name}" needs rateLimit to be { perMinute } or false`
+        );
+      }
+      const { perMinute } = tool.rateLimit;
+      if (!(Number.isInteger(perMinute) && perMinute > 0)) {
+        throw new Error(
+          `Tool "${tool.name}" needs rateLimit.perMinute to be a positive integer, not ${String(perMinute)}`
+        );
+      }
+    }
     if (tool.output !== undefined && !isZodObject(tool.output)) {
       throw new Error(
         `Tool "${tool.name}" needs output to be a z.object() schema`

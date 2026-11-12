@@ -165,6 +165,28 @@ describe("runStartChecks", () => {
     );
   });
 
+  it("needs redis for a tool with its own rate limit, even with rateLimit false, and names the tool", async () => {
+    const own: ToolDefinition = {
+      ...tool(null),
+      name: "own_limit",
+      rateLimit: { perMinute: 5 },
+    };
+    const message = await failure(
+      runStartChecks(
+        options({ redis: undefined, rateLimit: false }),
+        [own],
+        answering(200, metadata)
+      )
+    );
+    expect(message).toContain("redis");
+    expect(message).toContain("own_limit");
+    await runStartChecks(
+      options({ redis: undefined, rateLimit: false }),
+      [{ ...own, rateLimit: false }],
+      answering(200, metadata)
+    );
+  });
+
   it("refuses a tool permission the provisioning document does not declare", async () => {
     const message = await failure(
       runStartChecks(

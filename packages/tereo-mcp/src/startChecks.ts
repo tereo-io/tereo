@@ -220,6 +220,10 @@ export const runStartChecks = async (
   if (options.rateLimit) {
     checkPositiveInteger("rateLimit.perMinute", options.rateLimit.perMinute);
   }
+  const ownLimit = tools.find((tool) => tool.rateLimit);
+  if (ownLimit && !options.redis) {
+    fail(`redis is required: tool "${ownLimit.name}" sets its own rateLimit`);
+  }
   checkPositiveInteger("maxResultBytes", options.maxResultBytes);
   checkPositiveInteger("toolTimeoutMs", options.toolTimeoutMs);
   if (

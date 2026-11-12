@@ -97,6 +97,30 @@ describe("ToolRegistry", () => {
     ).toThrow(/"list_things".*title/);
   });
 
+  it.each([0, -1, 1.5, Number.NaN])(
+    "rejects rateLimit.perMinute %s",
+    (perMinute) => {
+      expect(() =>
+        new ToolRegistry().define(tool({ rateLimit: { perMinute } }))
+      ).toThrow(/"list_things".*rateLimit\.perMinute/);
+    }
+  );
+
+  it.each([true, null, {}, "10"])("rejects the rateLimit %j", (rateLimit) => {
+    expect(() =>
+      new ToolRegistry().define(
+        tool({ rateLimit: rateLimit as unknown as false })
+      )
+    ).toThrow(/"list_things".*rateLimit/);
+  });
+
+  it("accepts a rateLimit of { perMinute } or false", () => {
+    const registry = new ToolRegistry();
+    registry.define(tool({ name: "own", rateLimit: { perMinute: 1 } }));
+    registry.define(tool({ name: "free", rateLimit: false }));
+    expect(registry.list()).toHaveLength(2);
+  });
+
   it("rejects any define after freeze", () => {
     const registry = new ToolRegistry();
     registry.define(tool());

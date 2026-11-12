@@ -18,7 +18,7 @@ import type {
 export interface ServerDeps {
   options: TereoMcpOptions;
   tools: readonly ToolDefinition[];
-  limiter: RateLimiter | null;
+  limiters: ReadonlyMap<string, RateLimiter>;
   logger: Logger;
   // Aborts when a listen server begins closing; router() has none.
   closing?: AbortSignal;
@@ -38,7 +38,7 @@ export const buildServer = async (
   deps: ServerDeps,
   authInfo: AuthInfo | undefined
 ): Promise<McpServer> => {
-  const { options, logger, limiter } = deps;
+  const { options, logger, limiters } = deps;
   // Declaring the capability up front answers tools/list with an empty list,
   // rather than "method not found", for a caller who may use no tool.
   const server = new McpServer(
@@ -100,6 +100,7 @@ export const buildServer = async (
     const { tool, ctx, schema } = entry;
     // ToolResult is an interface, which lacks the index signature
     // CallToolResult carries; a spread copy has it implicitly.
+    const limiter = limiters.get(tool.name) ?? null;
     const timeoutMs =
       tool.timeoutMs ?? options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
     const run = async (

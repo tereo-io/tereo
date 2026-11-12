@@ -1,5 +1,5 @@
 import { checkListenOptions, runStartChecks } from "./startChecks.js";
-import { createRateLimiter } from "./rateLimit.js";
+import { createLimiters } from "./rateLimit.js";
 import { ToolRegistry } from "./registry.js";
 import type { Router } from "express";
 import type { z } from "zod";
@@ -35,8 +35,6 @@ export interface TereoMcp {
   ): Promise<Listening>;
 }
 
-const DEFAULT_PER_MINUTE = 120;
-
 export const createTereoMcp = (options: TereoMcpOptions): TereoMcp => {
   const registry = new ToolRegistry();
   const logger = options.logger ?? pino({ name: "@tereo-io/mcp" });
@@ -51,15 +49,7 @@ export const createTereoMcp = (options: TereoMcpOptions): TereoMcp => {
         tools,
         state,
         logger,
-        limiter:
-          options.rateLimit === false || !options.redis
-            ? null
-            : createRateLimiter({
-                redis: options.redis,
-                service: options.name,
-                perMinute: options.rateLimit?.perMinute ?? DEFAULT_PER_MINUTE,
-                logger,
-              }),
+        limiters: createLimiters(options, tools, logger),
       }));
       // A failed start (core unreachable, say) is retried by the next call.
       started.catch(() => {

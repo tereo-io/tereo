@@ -34,6 +34,11 @@ interface ToolFields {
   idempotent?: boolean;
   /** Overrides `toolTimeoutMs` for this tool. A positive integer. */
   timeoutMs?: number;
+  /**
+   * `{ perMinute }`: this tool's own per-user counter, apart from the
+   * server-wide one. `false`: not limited. Unset: the server-wide limit.
+   */
+  rateLimit?: { perMinute: number } | false;
 }
 
 // With an output schema the handler returns what the schema parses: its input type.

@@ -1,4 +1,5 @@
-import { createRateLimiter } from "../rateLimit.js";
+import { createLimiters, createRateLimiter } from "../rateLimit.js";
+import type { TereoMcpOptions, ToolDefinition } from "../types.js";
 import { fakeRedis } from "./support/fakeRedis.js";
 import { describe, expect, it } from "vitest";
 import type { Logger } from "pino";
@@ -127,4 +128,95 @@ describe("createRateLimiter", () => {
       expect((lines[0].err as { message: string }).message).toBe("redis down");
     }
   );
+});
+
+describe("createLimiters", () => {
+  const tool = (
+    name: string,
+    rateLimit?: ToolDefinition["rateLimit"]
+  ): ToolDefinition => ({
+    name,
+    description: "d",
+    permission: null,
+    readOnly: true,
+    handler: () => "ok",
+    ...(rateLimit !== undefined && { rateLimit }),
+  });
+  const limitersFor = (
+    options: Pick<TereoMcpOptions, "name" | "redis" | "rateLimit">,
+    ...tools: ToolDefinition[]
+  ) => createLimiters(options, tools, capture().logger);
+
+  it("counts a tool with its own limit under its own key, apart from the server-wide count", async () => {
+    const redis = fakeRedis();
+    const limiters = limitersFor(
+      { name: "svc", redis, rateLimit: { perMinute: 2 } },
+      tool("own", { perMinute: 1 }),
+      tool("shared")
+    );
+    const own = limiters.get("own");
+    const shared = limiters.get("shared");
+
+    expect((await own?.("u1"))?.allowed).toBe(true);
+    expect((await own?.("u1"))?.allowed).toBe(false);
+    expect((await shared?.("u1"))?.allowed).toBe(true);
+    expect((await shared?.("u1"))?.allowed).toBe(true);
+    expect((await shared?.("u1"))?.allowed).toBe(false);
+    expect((await own?.("u1"))?.allowed).toBe(false);
+    expect([...redis.counts.keys()].sort()).toEqual([
+      "@tereo-io/mcp:svc:rl:u1",
+      "@tereo-io/mcp:svc:rl:u1:own",
+    ]);
+    expect(redis.counts.get("@tereo-io/mcp:svc:rl:u1")).toBe(3);
+    expect(redis.counts.get("@tereo-io/mcp:svc:rl:u1:own")).toBe(3);
+  });
+
+  it("leaves an exempt tool unlimited", () => {
+    const limiters = limitersFor(
+      { name: "svc", redis: fakeRedis(), rateLimit: { perMinute: 1 } },
+      tool("free", false),
+      tool("shared")
+    );
+
+    expect(limiters.has("free")).toBe(false);
+    expect(limiters.has("shared")).toBe(true);
+  });
+
+  it("limits a tool with its own limit when the server-wide limit is off", () => {
+    const limiters = limitersFor(
+      { name: "svc", redis: fakeRedis(), rateLimit: false },
+      tool("own", { perMinute: 5 }),
+      tool("shared")
+    );
+
+    expect(limiters.has("own")).toBe(true);
+    expect(limiters.has("shared")).toBe(false);
+  });
+
+  it("shares one server-wide counter across tools", async () => {
+    const redis = fakeRedis();
+    const limiters = limitersFor(
+      { name: "svc", redis, rateLimit: { perMinute: 1 } },
+      tool("a"),
+      tool("b")
+    );
+
+    expect((await limiters.get("a")?.("u1"))?.allowed).toBe(true);
+    expect((await limiters.get("b")?.("u1"))?.allowed).toBe(false);
+  });
+
+  it("allows a call and logs at error when redis fails under a tool's own limit", async () => {
+    const redis = fakeRedis();
+    redis.failIncr = new Error("ECONNREFUSED");
+    const { logger, lines } = capture();
+    const limiters = createLimiters(
+      { name: "svc", redis, rateLimit: false },
+      [tool("own", { perMinute: 1 })],
+      logger
+    );
+
+    expect(await limiters.get("own")?.("u1")).toEqual({ allowed: true });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ level: 50 });
+  });
 });
