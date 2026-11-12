@@ -477,9 +477,10 @@ export const patchScimGroup = async (
 /**
  * Takes the locks a user's leaving the connection needs, in the order the
  * header of `utils/groups.ts` gives: the user's authority lock, then the row of
- * every pushed group they are in, ascending. A caller takes them before the
- * user's row lock and before `assertAdminRemains`, as a group write does, and
- * never locks the connection row after them. Returns the group ids.
+ * every pushed group they are in, ascending. A caller that takes the
+ * last-admin lock takes these first, as a group write does; the user's row
+ * lock comes after the authority lock and may come before the groups. The
+ * connection row is never locked after them. Returns the group ids.
  */
 export const lockScimGroupsForUser = async (
   tx: Tx,

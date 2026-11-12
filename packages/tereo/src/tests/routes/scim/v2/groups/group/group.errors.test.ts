@@ -2,11 +2,16 @@
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrganization.js";
 import { assertAdminRemains } from "../../../../../../utils/adminGuard.js";
-import { CORE_SERVICE_ID } from "../../../../../../definitions/index.js";
+import type { AuthContext } from "../../../../../../middleware/auth.js";
 import { managedWith, tag } from "../../../../../support/scimUsers.js";
+import { unlinkScimUser } from "../../../../../../utils/scim/users.js";
 import { toScimError } from "../../../../../../utils/scim/errors.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  CORE_SERVICE_ID,
+  SYSTEM_USER_ID,
+} from "../../../../../../definitions/index.js";
 import {
   createScimGroup,
   patchScimGroup,
@@ -139,5 +144,21 @@ describe("SCIM group removal of the only administrator", () => {
 
     expectLastAdminRefusal(err);
     await stillMember(groupId, user.id);
+  });
+
+  it("an admin unlink of the only administrator is refused and changes nothing", async () => {
+    const { user, groupId } = await adminGroup();
+    asSoleAdminGroupOnce(groupId);
+    const err = await unlinkScimUser(
+      { userId: SYSTEM_USER_ID, email: null } as unknown as AuthContext,
+      user.id
+    ).catch((e: unknown) => e);
+
+    expectLastAdminRefusal(err);
+    await stillMember(groupId, user.id);
+    const link = await prisma.scimUser.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+    expect(link.unlinkedAt).toBeNull();
   });
 });

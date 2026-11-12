@@ -264,7 +264,7 @@ const settle = async (
   const metadata = { ...auditMetadata(ctx), ...write.auditMetadata };
 
   const recheck = async (tx: Tx) => {
-    await lockGroupsFirst(tx);
+    await lockFirst(tx);
     if (!sameRows(await relock(tx), target)) throw new StaleTarget();
     await emailChange(ctx, user, write.input, tx);
   };
@@ -277,19 +277,23 @@ const settle = async (
     }
     link = await writeLinkTx(tx, ctx, target, write);
   };
-  // A user leaving takes the locks a group write takes, in its order: their
-  // authority lock and the pushed groups, before the last-admin lock and
-  // before the user's row.
-  const lockGroupsFirst = async (tx: Tx) => {
+  // The user's authority lock comes before the last-admin lock and any row
+  // lock on the user, as `lockAuthority` requires: it queues this write
+  // behind an unlink or delete of the same user. A user leaving also locks the
+  // pushed groups they are in, as a group write does, before the last-admin
+  // lock.
+  const lockFirst = async (tx: Tx) => {
     if (write.leaveGroups) {
       await lockScimGroupsForUser(tx, ctx.connection.id, user.id);
+    } else {
+      await db.users.lockAuthority(user.id, tx);
     }
   };
 
   if (change === "deactivate") {
     const updated = await deactivateUser(SYSTEM_ACTOR, user, {
       authorize: async (tx) => {
-        await lockGroupsFirst(tx);
+        await lockFirst(tx);
         await assertAdminRemains(null, tx);
         await recheck(tx);
       },
@@ -526,8 +530,8 @@ export const patchScimUser = updateScimUser;
  * The IdP's "this person should no longer have access": an unmanaged user is
  * adopted first. The user and link rows stay; the resource answers 404 after.
  * The user leaves the connection's pushed groups in the same transaction.
- * Lock order: authority lock, the pushed groups, the last-admin lock, the
- * user's row; the same prefix a group write takes.
+ * Lock order: the user's authority lock, the pushed groups, the last-admin
+ * lock, the user's row; the same prefix a group write takes.
  */
 export const deleteScimUser = async (
   ctx: ScimContext,
@@ -616,8 +620,10 @@ export const holdScimUserTx = async (
  * The user is then managed locally and excluded from SCIM until released;
  * their state, active or not, is kept. The row stays as that exclusion. They
  * leave the connection's pushed groups in the same transaction, and keep
- * their local ones. Lock order: authority lock, the user's row, then the
- * pushed groups; no last-admin lock comes before a group lock.
+ * their local ones. Lock order: the user's authority lock, their row, the
+ * pushed groups, then the last-admin lock inside each removal. Every other
+ * write to the user takes the authority lock before the last-admin lock and
+ * the row (`settle`), so none holds the row while waiting on the guard.
  */
 export const unlinkScimUser = async (
   auth: AuthContext,

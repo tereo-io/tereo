@@ -164,7 +164,16 @@ describe("DELETE /scim/v2/Users/:id", () => {
         where: { id: archived.id },
         data: { archivedAt: new Date() },
       });
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Both timestamps set well back, so any move is the leave's.
+      const past = new Date(Date.now() - 3_600_000);
+      await prisma.scimGroup.updateMany({
+        where: { groupId: first.id },
+        data: { updatedAt: past },
+      });
+      await prisma.group.update({
+        where: { id: first.id },
+        data: { updatedAt: past },
+      });
 
       expect((await del(c.token, user.id)).status).toBe(204);
 
@@ -193,7 +202,7 @@ describe("DELETE /scim/v2/Users/:id", () => {
       );
       const read = await getGroup(c.token, first.id);
       expect(Date.parse(read.body.meta.lastModified)).toBeGreaterThan(
-        Date.parse(first.lastModified)
+        past.getTime() + 60_000
       );
     });
 
@@ -214,8 +223,14 @@ describe("DELETE /scim/v2/Users/:id", () => {
       const user = await groupMember(c);
       const mine = await pushedGroup(c, [user.id]);
       const local = await localGroupWith(c, user.id);
+      const elsewhere = await orgConnection();
+      const theirs = await pushedGroup(elsewhere, []);
+      await prisma.groupMember.create({
+        data: { groupId: theirs.id, userId: user.id, addedBy: user.id },
+      });
       expect((await del(c.token, user.id)).status).toBe(204);
       expect(await memberIds(mine.id)).toEqual([]);
+      expect(await memberIds(theirs.id)).toEqual([user.id]);
       expect(await memberIds(local.id)).toEqual([user.id]);
     });
   });

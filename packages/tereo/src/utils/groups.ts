@@ -80,7 +80,7 @@ export type GroupActor =
       callerOrgRole: OrgMemberRole | null;
     }
   | { mode: "provisioning" }
-  | { mode: "scim"; connectionId: string; reason?: string };
+  | { mode: "scim"; connectionId: string; reason?: "scim_user_left" };
 
 export interface GroupChange {
   group: Group;
@@ -117,12 +117,7 @@ const actorUserId = (actor: GroupActor): string =>
 
 /** Audit detail naming the connection a directory-driven change came through. */
 const scimDetail = (actor: GroupActor) =>
-  actor.mode === "scim"
-    ? {
-        scimConnectionId: actor.connectionId,
-        ...(actor.reason && { reason: actor.reason }),
-      }
-    : {};
+  actor.mode === "scim" ? { scimConnectionId: actor.connectionId } : {};
 
 const unique = (ids: string[]): string[] => [...new Set(ids)].sort();
 
@@ -699,7 +694,10 @@ export const removeMembers = async (
       group,
       "members_removed",
       removed,
-      scimDetail(actor)
+      {
+        ...scimDetail(actor),
+        ...(actor.mode === "scim" && actor.reason && { reason: actor.reason }),
+      }
     );
     await emitMembersEvents(tx, group, "auth.group.members-removed", removed);
   }

@@ -2,9 +2,12 @@
 // @module-tag auth
 // @module-tag race
 import { holdLocks, waitForLockWait } from "../../../../../support/dbLocks.js";
+import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { removeFromOrgGroupsTx } from "../../../../../../utils/groups.js";
 import { SYSTEM_USER_ID } from "../../../../../../definitions/index.js";
+import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
+import { fetchJson } from "../../../../../support/http.js";
 import db from "../../../../../../utils/db/index.js";
 import { describe, expect, it } from "vitest";
 import {
@@ -271,18 +274,27 @@ describe("SCIM group changes racing", { tags: ["race"] }, () => {
           );
         const remove = () =>
           scimFetch(c.token, "DELETE", `/scim/v2/Users/${user.id}`);
-        const [first, second] = round % 2 === 0 ? [add, remove] : [remove, add];
+        const addFirst = round % 2 === 0;
+        const [first, second] = addFirst ? [add, remove] : [remove, add];
         const firstResponse = first();
         await waitForAuthorityLockWait(user.id);
         const secondResponse = second();
         await new Promise((r) => setTimeout(r, 100));
-        responses = Promise.all([firstResponse, secondResponse]);
+        responses = Promise.all(
+          addFirst
+            ? [firstResponse, secondResponse]
+            : [secondResponse, firstResponse]
+        );
       } finally {
         await release();
       }
-      const [x, y] = await responses;
-      expect(x.status, JSON.stringify(x.body)).toBeLessThan(500);
-      expect(y.status, JSON.stringify(y.body)).toBeLessThan(500);
+      const [added, removed] = await responses;
+      expect(added.status, JSON.stringify(added.body)).toBe(200);
+      expect(removed.status, JSON.stringify(removed.body)).toBe(204);
+      // The add ran first and took the user in, or ran second and was dropped.
+      expect(bodyMemberIds(added.body)).toEqual(
+        round % 2 === 0 ? [user.id] : []
+      );
       expect(await memberIds(id)).toEqual([]);
       expect(await skippedIds(id)).toEqual([]);
     }
@@ -330,6 +342,58 @@ describe("SCIM group changes racing", { tags: ["race"] }, () => {
       const [deleted, removed] = await responses;
       expect(deleted.status, JSON.stringify(deleted.body)).toBe(204);
       expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+      expect(await memberIds(id)).toEqual([]);
+    }
+  });
+
+  it("an admin unlink and a SCIM deactivation of the same user do not deadlock", async () => {
+    const writer = await getTestPrincipalToken({
+      permissions: ["users.read", "users.write"],
+    });
+    const c = await createScimConnection();
+    await setGroupsTarget(c.connectionId, { kind: "global" });
+    for (let round = 0; round < 3; round++) {
+      const user = await managedWith(c);
+      const pushed = await pushGroup(c.token, {
+        displayName: `Un ${tag()}`,
+        members: asMembers(user.id),
+      });
+      const id = pushed.body.id;
+      // The deactivation queues on the administrator guard first. The unlink
+      // then takes the user's row and reaches the guard inside the removal,
+      // unless the authority lock holds it behind the deactivation.
+      const release = await holdLocks(
+        (tx) =>
+          tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('core:admin-remains', 0))`
+      );
+      let responses;
+      try {
+        const deactivating = scimFetch(
+          c.token,
+          "PATCH",
+          `/scim/v2/Users/${user.id}`,
+          patchOps({ op: "replace", path: "active", value: false })
+        );
+        await waitForLockWait("%core:admin-remains%", 10_000, 1);
+        const unlinking = fetchJson(
+          "DELETE",
+          `${BASE_URL}/v1/admin/users/${user.id}/scim`,
+          writer
+        );
+        await new Promise((r) => setTimeout(r, 150));
+        responses = Promise.all([unlinking, deactivating]);
+      } finally {
+        await release();
+      }
+      const [unlinked, deactivated] = await responses;
+      expect(unlinked.status, JSON.stringify(unlinked.body)).toBe(204);
+      expect(deactivated.status, JSON.stringify(deactivated.body)).toBeLessThan(
+        500
+      );
+      const link = await prisma.scimUser.findUniqueOrThrow({
+        where: { userId: user.id },
+      });
+      expect(link.unlinkedAt).not.toBeNull();
       expect(await memberIds(id)).toEqual([]);
     }
   });
