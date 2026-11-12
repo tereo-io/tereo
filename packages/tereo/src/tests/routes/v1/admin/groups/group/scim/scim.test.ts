@@ -8,6 +8,7 @@ import { createTestUser } from "../../../../../../support/auth/users.js";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import db from "../../../../../../../utils/db/index.js";
+import { randomUUID } from "node:crypto";
 import {
   getGroup,
   globalConnection,
@@ -78,7 +79,14 @@ describe("DELETE /v1/admin/groups/:id/scim", () => {
   it("audits the unlink with the admin as actor, once", async () => {
     const c = await orgConnection();
     const { id } = await pushedGroup(c, []);
-    await unlink(id);
+    const adminId = randomUUID();
+    await unlink(
+      id,
+      await getTestPrincipalToken({
+        userId: adminId,
+        permissions: ["groups.admin"],
+      })
+    );
 
     const entries = await prisma.auditLogEntry.findMany({
       where: { entityType: "Group", entityId: id },
@@ -89,7 +97,7 @@ describe("DELETE /v1/admin/groups/:id/scim", () => {
     );
     expect(unlinks).toHaveLength(1);
     expect(unlinks[0].metadata).toMatchObject({ reason: "admin" });
-    expect(unlinks[0].userId).not.toBe(null);
+    expect(unlinks[0].userId).toBe(adminId);
     await deleteGroups([id]);
   });
 

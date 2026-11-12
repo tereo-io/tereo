@@ -279,11 +279,12 @@ export const listSkipped = async (
   nextCursor: string | null;
 }> => {
   const rows = await prisma.scimGroupSkippedMember.findMany({
-    where: { scimGroupId },
+    // `id > cursor`, not Prisma's cursor: a row deleted since the previous
+    // page would otherwise end the list.
+    where: { scimGroupId, ...(opts.cursor ? { id: { gt: opts.cursor } } : {}) },
     include: { user: { select: { email: true, name: true } } },
     orderBy: { id: "asc" },
     take: opts.limit + 1,
-    ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
   });
   const hasMore = rows.length > opts.limit;
   const page = hasMore ? rows.slice(0, opts.limit) : rows;

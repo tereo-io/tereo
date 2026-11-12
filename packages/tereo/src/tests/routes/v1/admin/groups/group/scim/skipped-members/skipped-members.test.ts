@@ -4,8 +4,10 @@ import { ensureDefaultOrganization } from "../../../../../../../../utils/default
 import { getTestPrincipalToken } from "../../../../../../../support/principals.js";
 import { NON_EXISTENT_UUID } from "../../../../../../../support/auth/constants.js";
 import { createTestUser } from "../../../../../../../support/auth/users.js";
+import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import {
+  globalConnection,
   orgConnection,
   pushedGroup,
 } from "../../../../../../../support/scimGroups.js";
@@ -21,6 +23,12 @@ beforeAll(async () => {
   await ensureDefaultOrganization();
   admin = await getTestPrincipalToken({ permissions: ["groups.admin"] });
 });
+
+const orgAdminToken = async (organizationId: string) => {
+  const user = await createTestUser();
+  await joinOrg(organizationId, user.id, "admin");
+  return await getTestPrincipalToken({ userId: user.id, permissions: [] });
+};
 
 const listPath = (id: string, query = "") =>
   `/groups/${id}/scim/skipped-members${query}`;
@@ -97,6 +105,62 @@ describe("GET /v1/admin/groups/:id/scim/skipped-members", () => {
     const stranger = await getTestPrincipalToken({ permissions: [] });
     const res = await adminApi("GET", listPath(id), stranger);
     expect(res.status).toBe(403);
+  });
+
+  it("continues past the row the cursor names when it was deleted", async () => {
+    const c = await orgConnection();
+    const users = [
+      await createTestUser(),
+      await createTestUser(),
+      await createTestUser(),
+    ];
+    const { id } = await pushedGroup(
+      c,
+      [],
+      users.map((u) => u.id)
+    );
+    const first = await adminApi("GET", listPath(id, "?limit=1"), admin);
+    expect(first.body.hasMore).toBe(true);
+    await prisma.scimGroupSkippedMember.delete({
+      where: { id: first.body.nextCursor },
+    });
+
+    const second = await adminApi(
+      "GET",
+      listPath(id, `?limit=5&cursor=${first.body.nextCursor}`),
+      admin
+    );
+    expect(second.status).toBe(200);
+    expect(second.body.data).toHaveLength(2);
+  });
+
+  it("gives another organization's admin the uniform 403 on an organization's pushed group", async () => {
+    const c = await orgConnection();
+    const { id } = await pushedGroup(c, []);
+    const other = await orgConnection();
+    const res = await adminApi(
+      "GET",
+      listPath(id),
+      await orgAdminToken(other.organizationId)
+    );
+    expect(res.status).toBe(403);
+    const sibling = await adminApi(
+      "GET",
+      `/groups/${id}/members`,
+      await orgAdminToken(other.organizationId)
+    );
+    expect(res.body).toEqual(sibling.body);
+  });
+
+  it("gives an organization admin the uniform 403 on a global pushed group", async () => {
+    const g = await globalConnection();
+    const { id } = await pushedGroup(g, []);
+    const c = await orgConnection();
+    const token = await orgAdminToken(c.organizationId);
+    const res = await adminApi("GET", listPath(id), token);
+    expect(res.status).toBe(403);
+    const sibling = await adminApi("GET", `/groups/${id}/members`, token);
+    expect(res.body).toEqual(sibling.body);
   });
 
   it("lets an organization admin read their organization's group", async () => {
