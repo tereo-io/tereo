@@ -39,7 +39,8 @@ export const createVerifier = (opts: {
       if (auth.userType === "service_account" && !opts.allowServiceAccounts) {
         return refuse("service_account", res.client_id);
       }
-      if (res.exp * 1000 <= now()) return refuse("expired", res.client_id);
+      // Negated so that a missing or NaN exp is refused too.
+      if (!(res.exp * 1000 > now())) return refuse("expired", res.client_id);
 
       return {
         token,

@@ -79,6 +79,18 @@ describe("createVerifier", () => {
     expect(ok.expiresAt).toBe(exp);
   });
 
+  it("refuses a token with no expiry as expired", async () => {
+    const info = vi.fn();
+    const logger = { info } as never;
+    await refusal(
+      make(fakeCore({ exp: undefined }), { logger }).verifyAccessToken(token())
+    );
+    expect(info).toHaveBeenCalledWith(
+      { reason: "expired", client_id: "claude" },
+      "MCP token refused"
+    );
+  });
+
   it("sends the same message for every reason and logs the real one", async () => {
     const info = vi.fn();
     const logger = { info } as never;
