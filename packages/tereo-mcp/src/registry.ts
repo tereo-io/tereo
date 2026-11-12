@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "./types.js";
+import { isZodObject } from "./zodObject.js";
 
 const NAME_PATTERN = /^[a-z0-9_]+$/;
 
@@ -42,6 +43,11 @@ export class ToolRegistry {
     ) {
       throw new Error(
         `Tool "${tool.name}" needs timeoutMs to be a positive integer, not ${String(tool.timeoutMs)}`
+      );
+    }
+    if (tool.output !== undefined && !isZodObject(tool.output)) {
+      throw new Error(
+        `Tool "${tool.name}" needs output to be a z.object() schema`
       );
     }
     this.tools.set(tool.name, tool);

@@ -128,4 +128,44 @@ describe("define typing", () => {
       },
     });
   });
+
+  it("checks the handler's return against a static output schema", () => {
+    const mcp = createTereoMcp(options);
+    const output = z.object({ total: z.number() });
+    mcp.define({
+      ...base,
+      name: "sums",
+      input: z.object({ a: z.number(), b: z.number() }),
+      output,
+      handler: async ({ a, b }) => ({ total: a + b }),
+    });
+    mcp.define({
+      ...base,
+      name: "sums_sync",
+      output,
+      handler: () => ({ total: 1 }),
+    });
+    mcp.define({
+      ...base,
+      name: "sums_dynamic",
+      input: () => z.object({ a: z.number() }),
+      output,
+      handler: (input: { a: number }) => ({ total: input.a }),
+    });
+    mcp.define({
+      ...base,
+      name: "sums_wrong",
+      output,
+      // @ts-expect-error total must be a number
+      handler: () => ({ total: "one" }),
+    });
+    mcp.define({
+      ...base,
+      name: "sums_wrong_dynamic",
+      input: () => z.object({ a: z.number() }),
+      output,
+      // @ts-expect-error total is missing
+      handler: (input: { a: number }) => ({ sum: input.a }),
+    });
+  });
 });

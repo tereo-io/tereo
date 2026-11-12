@@ -2,6 +2,7 @@ import type { ToolDefinition } from "../types.js";
 import { describe, expect, it } from "vitest";
 import { ToolRegistry } from "../registry.js";
 import { ToolError } from "../errors.js";
+import { z } from "zod";
 
 const tool = (overrides: Partial<ToolDefinition> = {}): ToolDefinition => ({
   name: "list_things",
@@ -76,6 +77,18 @@ describe("ToolRegistry", () => {
     const registry = new ToolRegistry();
     registry.define(tool({ timeoutMs: 1 }));
     expect(registry.list()).toHaveLength(1);
+  });
+
+  it.each([
+    ["a function", () => z.object({})],
+    ["a plain object", { total: "number" }],
+    ["a non-object schema", z.string()],
+  ])("rejects an output that is %s", (_label, output) => {
+    expect(() =>
+      new ToolRegistry().define(
+        tool({ output: output as unknown as z.ZodObject })
+      )
+    ).toThrow(/"list_things".*output/);
   });
 
   it("rejects any define after freeze", () => {

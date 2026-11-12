@@ -34,17 +34,31 @@ interface ToolFields {
   timeoutMs?: number;
 }
 
-export interface ToolDefinition<I = unknown> extends ToolFields {
+// With an output schema the handler returns what the schema parses: its input type.
+type ResultOf<O> = [O] extends [z.ZodObject]
+  ? z.input<O> | Promise<z.input<O>>
+  : unknown;
+
+export interface ToolDefinition<
+  I = unknown,
+  O extends z.ZodObject | undefined = undefined,
+> extends ToolFields {
   input?: ToolInput;
-  handler: (input: I, ctx: ToolContext) => unknown | Promise<unknown>;
+  /** Static only. A successful result is sent as structuredContent and as JSON text. */
+  output?: [O] extends [undefined] ? z.ZodObject : O;
+  handler: (input: I, ctx: ToolContext) => ResultOf<O>;
 }
 
 type InputOf<S> = S extends z.ZodObject ? z.output<S> : undefined;
 
 /** A definition whose `input`, when present, is a static schema that types the handler's input. */
-export type StaticTool<S extends z.ZodObject | undefined> = ToolFields & {
+export type StaticTool<
+  S extends z.ZodObject | undefined,
+  O extends z.ZodObject | undefined = undefined,
+> = ToolFields & {
   input?: S;
-  handler: (input: InputOf<S>, ctx: ToolContext) => unknown | Promise<unknown>;
+  output?: O;
+  handler: (input: InputOf<S>, ctx: ToolContext) => ResultOf<O>;
 };
 
 export type RateLimitRedis = Pick<Redis, "incr" | "expire" | "ttl">;

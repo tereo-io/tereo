@@ -1,12 +1,7 @@
-import type { ToolContext, ToolDefinition, TereoMcpOptions } from "../types.js";
+import type { TereoMcpOptions, ToolContext, ToolDefinition } from "../types.js";
+import { serve as serveWith, tool } from "./support/serve.js";
 import { afterEach, describe, expect, it } from "vitest";
-import { fakeCore } from "./support/fakeCore.js";
-import { createTereoMcp } from "../tereoMcp.js";
 import { connect } from "./support/connect.js";
-import { startStubCore } from "../testing.js";
-import type { Listening } from "../http.js";
-import type { Logger } from "pino";
-import pino from "pino";
 
 const token = "test-token-u1|client=claude|perms=";
 
@@ -16,46 +11,8 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((fn) => fn()));
 });
 
-const tool = (
-  name: string,
-  handler: ToolDefinition["handler"],
-  extra: Partial<ToolDefinition> = {}
-): ToolDefinition => ({
-  name,
-  description: `The ${name} tool`,
-  permission: null,
-  readOnly: true,
-  handler,
-  ...extra,
-});
-
-async function serve(
-  extra: Partial<TereoMcpOptions>,
-  ...tools: ToolDefinition[]
-): Promise<{ server: Listening; lines: Record<string, unknown>[] }> {
-  const stub = await startStubCore();
-  cleanups.push(() => stub.close());
-  const lines: Record<string, unknown>[] = [];
-  const logger = pino(
-    { level: "debug" },
-    { write: (s: string) => lines.push(JSON.parse(s)) }
-  ) as Logger;
-  const mcp = createTereoMcp({
-    name: "quotes",
-    version: "1.0.0",
-    core: fakeCore(),
-    publicUrl: "https://mcp.example.test",
-    allowedClients: ["claude"],
-    rateLimit: false,
-    coreUrl: stub.coreUrl,
-    logger,
-    ...extra,
-  });
-  for (const t of tools) mcp.define(t);
-  const server = await mcp.listen(0, "127.0.0.1", { signals: false });
-  cleanups.push(() => server.close());
-  return { server, lines };
-}
+const serve = (extra: Partial<TereoMcpOptions>, ...tools: ToolDefinition[]) =>
+  serveWith(cleanups, extra, ...tools);
 
 const never = () => new Promise<never>(() => undefined);
 const sleep = (ms: number) =>

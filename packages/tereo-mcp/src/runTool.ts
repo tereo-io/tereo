@@ -6,6 +6,7 @@ import type { Logger } from "pino";
 
 export interface ToolResult {
   content: { type: "text"; text: string }[];
+  structuredContent?: Record<string, unknown>;
   isError?: true;
 }
 
@@ -18,6 +19,21 @@ const text = (value: string, isError?: true): ToolResult => ({
   content: [{ type: "text", text: value }],
   ...(isError ? { isError } : {}),
 });
+
+// Paths and issue codes only: an issue's message may quote the result.
+const outputMismatch = (
+  toolName: string,
+  problem: string,
+  issues: readonly { path: readonly PropertyKey[]; code: string }[]
+): Error =>
+  new Error(
+    `Tool "${toolName}" ${problem}: ${issues
+      .map(
+        (issue) =>
+          `${issue.path.map(String).join(".") || "(root)"} (${issue.code})`
+      )
+      .join(", ")}`
+  );
 
 export const runTool = async (
   deps: {
@@ -92,9 +108,36 @@ export const runTool = async (
         state.outcome = "timeout";
         return text(`Tool timed out after ${timeoutMs} ms`, true);
       }
+      let structured: Record<string, unknown> | undefined;
+      if (tool.output) {
+        const parsed = await tool.output.safeParseAsync(result);
+        if (!parsed.success) {
+          return internal(
+            outputMismatch(
+              tool.name,
+              "returned a result that does not match its output schema",
+              parsed.error.issues
+            )
+          );
+        }
+        // The SDK validates structuredContent against the same schema and
+        // answers a failure with its own message, which may quote values.
+        const again = await tool.output.safeParseAsync(parsed.data);
+        if (!again.success) {
+          return internal(
+            outputMismatch(
+              tool.name,
+              "has an output schema that refuses its own parsed result",
+              again.error.issues
+            )
+          );
+        }
+        structured = parsed.data;
+      }
+      const value = structured ?? result;
       // JSON.stringify returns undefined for undefined, functions and symbols
       const body =
-        typeof result === "string" ? result : (JSON.stringify(result) ?? "");
+        typeof value === "string" ? value : (JSON.stringify(value) ?? "");
       const bytes = Buffer.byteLength(body, "utf8");
       if (bytes > maxResultBytes) {
         state.outcome = "tool_error";
@@ -103,7 +146,9 @@ export const runTool = async (
           true
         );
       }
-      return text(body);
+      return structured
+        ? { ...text(body), structuredContent: structured }
+        : text(body);
     } catch (err) {
       if (
         err instanceof ToolError ||

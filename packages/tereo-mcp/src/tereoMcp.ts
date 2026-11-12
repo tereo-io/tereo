@@ -18,10 +18,15 @@ import {
 } from "./http.js";
 
 export interface TereoMcp {
-  define<S extends z.ZodObject | undefined = undefined>(
-    tool: StaticTool<S>
+  define<
+    S extends z.ZodObject | undefined = undefined,
+    O extends z.ZodObject | undefined = undefined,
+  >(
+    tool: StaticTool<S, O>
   ): void;
-  define<I = unknown>(tool: ToolDefinition<I>): void;
+  define<I = unknown, O extends z.ZodObject | undefined = undefined>(
+    tool: ToolDefinition<I, O>
+  ): void;
   router(): Promise<Router>;
   listen(
     port: number,

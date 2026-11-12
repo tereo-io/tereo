@@ -6,6 +6,7 @@ import { ToolError } from "../errors.js";
 import { runTool } from "../runTool.js";
 import type { Logger } from "pino";
 import pino from "pino";
+import { z } from "zod";
 
 const setup = (
   handler: ToolDefinition["handler"],
@@ -312,5 +313,88 @@ describe("runTool timeouts and the abort signal", () => {
     await run({}, { closing: outer.signal });
 
     expect(signalOf(seen).aborted).toBe(true);
+  });
+});
+
+describe("runTool structured results", () => {
+  const output = z.object({ total: z.number(), names: z.array(z.string()) });
+
+  it("returns the validated value as structuredContent and as JSON text", async () => {
+    const { run, lines } = setup(
+      () => ({ total: 2, names: ["a", "b"], extra: "dropped" }),
+      { output }
+    );
+
+    const result = await run();
+
+    expect(result).toEqual({
+      content: [{ type: "text", text: '{"total":2,"names":["a","b"]}' }],
+      structuredContent: { total: 2, names: ["a", "b"] },
+    });
+    expect(lines[0]).toMatchObject({ level: 30, outcome: "ok" });
+  });
+
+  it("treats a result that fails the schema as an internal error, naming paths but no values", async () => {
+    const { run, lines } = setup(
+      () => ({ total: "SECRET-TOTAL", names: [424242] }),
+      { output }
+    );
+
+    const result = await run();
+
+    expect(result).toEqual({
+      isError: true,
+      content: [{ type: "text", text: "Internal error (request req-9)" }],
+    });
+    expect(lines[0]).toMatchObject({ level: 50, outcome: "internal_error" });
+    const message = (lines[0].err as { message: string }).message;
+    expect(message).toContain("total");
+    expect(message).toContain("names.0");
+    const logged = JSON.stringify(lines);
+    expect(logged).not.toContain("SECRET-TOTAL");
+    expect(logged).not.toContain("424242");
+  });
+
+  it("refuses a schema that does not accept its own parsed value, which the SDK would reject", async () => {
+    const { run, lines } = setup(() => ({ n: "abc" }), {
+      output: z.object({ n: z.string().transform((s) => s.length) }),
+    });
+
+    const result = await run();
+
+    expect(result.content[0].text).toBe("Internal error (request req-9)");
+    expect(result).not.toHaveProperty("structuredContent");
+    expect(lines[0]).toMatchObject({ level: 50, outcome: "internal_error" });
+  });
+
+  it("measures the size cap on the JSON text and drops structuredContent over it", async () => {
+    const { run, lines } = setup(
+      () => ({ total: 1, names: ["x".repeat(50)] }),
+      { output }
+    );
+
+    const result = await run({}, { max: 20 });
+
+    expect(result).toEqual({
+      isError: true,
+      content: [
+        { type: "text", text: "Result too large (74 bytes; limit 20)" },
+      ],
+    });
+    expect(lines[0]).toMatchObject({ level: 30, outcome: "tool_error" });
+  });
+
+  it("answers a ToolError from a tool with output as a plain tool error", async () => {
+    const { run } = setup(
+      () => {
+        throw new ToolError("No such report");
+      },
+      { output }
+    );
+
+    expect(await run()).toEqual({
+      isError: true,
+      content: [{ type: "text", text: "No such report" }],
+    });
   });
 });

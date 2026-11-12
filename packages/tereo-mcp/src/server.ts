@@ -4,10 +4,10 @@ import type { RateLimiter } from "./rateLimit.js";
 import { requestScope } from "./requestScope.js";
 import { hasPermission } from "@tereo-io/sdk";
 import { authFromInfo } from "./verifier.js";
+import { isZodObject } from "./zodObject.js";
 import { randomUUID } from "node:crypto";
 import { runTool } from "./runTool.js";
 import type { Logger } from "pino";
-import type { z } from "zod";
 import type {
   AuthInfo,
   CallToolResult,
@@ -33,13 +33,6 @@ const annotationsOf = (tool: ToolDefinition): ToolAnnotations => ({
   ...(tool.destructive !== undefined && { destructiveHint: tool.destructive }),
   ...(tool.idempotent !== undefined && { idempotentHint: tool.idempotent }),
 });
-
-// Structural, so a schema from another copy of zod still counts.
-const isZodObject = (value: unknown): value is z.ZodObject =>
-  typeof value === "object" &&
-  value !== null &&
-  (value as { _zod?: { def?: { type?: unknown } } })._zod?.def?.type ===
-    "object";
 
 export const buildServer = async (
   deps: ServerDeps,
@@ -119,6 +112,7 @@ export const buildServer = async (
     const config = {
       description: tool.description,
       annotations: annotationsOf(tool),
+      ...(tool.output && { outputSchema: tool.output }),
     };
     if (schema) {
       server.registerTool(
