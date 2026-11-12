@@ -1,37 +1,41 @@
+import { createTestClient, startStubCore } from "../testing.js";
 import { afterEach, describe, expect, it } from "vitest";
-import { createTestClient } from "../testing.js";
 import { fakeCore } from "./support/fakeCore.js";
 import { createTereoMcp } from "../tereoMcp.js";
-import type { AddressInfo } from "node:net";
-import { createServer } from "node:http";
-import express from "express";
+import pino from "pino";
 
-const ISSUER = "https://tereo.example.test";
 const cleanups: (() => Promise<void>)[] = [];
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((fn) => fn()));
 });
 
+describe("startStubCore", () => {
+  it("serves authorization-server metadata whose issuer is its own URL, until closed", async () => {
+    const stub = await startStubCore();
+
+    const res = await fetch(
+      `${stub.coreUrl}/.well-known/oauth-authorization-server`
+    );
+    const doc = (await res.json()) as Record<string, unknown>;
+
+    expect(stub.coreUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(doc).toMatchObject({
+      issuer: stub.coreUrl,
+      authorization_endpoint: `${stub.coreUrl}/oauth/authorize`,
+      token_endpoint: `${stub.coreUrl}/oauth/token`,
+    });
+    await stub.close();
+    await expect(
+      fetch(`${stub.coreUrl}/.well-known/oauth-authorization-server`)
+    ).rejects.toThrow();
+  });
+});
+
 describe("createTestClient", () => {
   it("lists and calls a tool with a test token, and close() stops the server", async () => {
-    const coreApp = express();
-    coreApp.get("/core/.well-known/oauth-authorization-server", (_req, res) => {
-      res.json({
-        issuer: ISSUER,
-        authorization_endpoint: `${ISSUER}/oauth/authorize`,
-        token_endpoint: `${ISSUER}/oauth/token`,
-        response_types_supported: ["code"],
-      });
-    });
-    const coreServer = createServer(coreApp);
-    await new Promise<void>((resolve) =>
-      coreServer.listen(0, "127.0.0.1", resolve)
-    );
-    cleanups.push(
-      () => new Promise<void>((resolve) => coreServer.close(() => resolve()))
-    );
-    const corePort = (coreServer.address() as AddressInfo).port;
+    const stub = await startStubCore();
+    cleanups.push(() => stub.close());
 
     const mcp = createTereoMcp({
       name: "quotes",
@@ -40,7 +44,8 @@ describe("createTestClient", () => {
       publicUrl: "https://mcp.example.test",
       allowedClients: ["claude"],
       rateLimit: false,
-      coreUrl: `http://127.0.0.1:${corePort}/core`,
+      coreUrl: stub.coreUrl,
+      logger: pino({ level: "silent" }),
     });
     mcp.define({
       name: "ping",
