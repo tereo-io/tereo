@@ -1,6 +1,7 @@
 import type { ScimGroup } from "../../../prisma/generated/client/index.js";
 import type { Prisma } from "../../../prisma/generated/client/index.js";
 import type { Group } from "../../../prisma/generated/client/index.js";
+import type { ScimGroupFilter } from "../scim/filter.js";
 import { prisma } from "./prisma.js";
 
 type Tx = Prisma.TransactionClient;
@@ -105,9 +106,7 @@ export const linkedScope = async (
 };
 
 // Each clause is an exact equality; displayName compares the lower-cased key.
-const filterWhere = (
-  filter: Array<{ attr: "displayName" | "externalId"; value: string }>
-): Prisma.ScimGroupWhereInput[] =>
+const filterWhere = (filter: ScimGroupFilter): Prisma.ScimGroupWhereInput[] =>
   filter.map((clause) =>
     clause.attr === "displayName"
       ? { displayNameKey: displayNameKey(clause.value) }
@@ -117,7 +116,7 @@ const filterWhere = (
 export const listLinks = async (
   connectionId: string,
   opts: {
-    filter?: Array<{ attr: "displayName" | "externalId"; value: string }>;
+    filter?: ScimGroupFilter;
     skip: number;
     take: number;
   },

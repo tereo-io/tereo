@@ -1,15 +1,15 @@
 // @module-tag int
 // @module-tag auth
-import { ensureDefaultOrganization } from "../../../utils/defaultOrganization.js";
+import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { prisma, type Prisma } from "../../../utils/db/prisma.js";
-import { SYSTEM_USER_ID } from "../../../definitions/index.js";
-import { setAsideAdmins } from "../../support/adminGuard.js";
-import { createScimConnection } from "../../support/scim.js";
-import { createTestUser } from "../../support/auth/users.js";
-import { managedWith } from "../../support/scimUsers.js";
-import { AppError } from "../../../utils/errors.js";
-import db from "../../../utils/db/index.js";
+import { prisma, type Prisma } from "../../utils/db/prisma.js";
+import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import { setAsideAdmins } from "../support/adminGuard.js";
+import { createScimConnection } from "../support/scim.js";
+import { createTestUser } from "../support/auth/users.js";
+import { managedWith } from "../support/scimUsers.js";
+import { AppError } from "../../utils/errors.js";
+import db from "../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
 import {
   addMembers,
@@ -20,7 +20,7 @@ import {
   setGroupRoles,
   updateGroup,
   type GroupActor,
-} from "../../../utils/groups.js";
+} from "../../utils/groups.js";
 import {
   adminActor,
   deleteGroups,
@@ -31,7 +31,7 @@ import {
   passwordOnlyToken,
   PROVISIONING,
   roleGranting,
-} from "../../support/groups.js";
+} from "../support/groups.js";
 
 const groupIds: string[] = [];
 
