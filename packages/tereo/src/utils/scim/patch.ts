@@ -27,7 +27,11 @@ const OPS = new Set(["add", "replace", "remove"]);
 const invalidValue = (detail: string) =>
   new BadRequestError("invalidValue", detail);
 
-const EMAILS_PATH = /^emails(?:\[[^\]]*\])?(?:\.value)?$/i;
+// The paths that name the core email: `emails` itself, its unfiltered value,
+// and the work or primary address. Any other selector (a home address, say)
+// is ignored like an unknown attribute.
+const EMAILS_PATH =
+  /^emails(?:\.value|\[\s*type\s+eq\s+"work"\s*\]\.value|\[\s*primary\s+eq\s+true\s*\]\.value)?$/i;
 const SCHEMA_PREFIX = /^urn:[^\s]*:User:/i;
 
 const str = (v: unknown, attr: string, max: number): string => {

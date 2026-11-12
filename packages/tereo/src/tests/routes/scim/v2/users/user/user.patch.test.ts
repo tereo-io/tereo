@@ -268,6 +268,31 @@ describe("PATCH /scim/v2/Users/:id active", () => {
     });
   });
 
+  it("deactivates when Entra also sends a home email outside the domains", async () => {
+    const c = await createScimConnection();
+    const user = await managedWith(c);
+    const { status, body } = await patch(
+      c.token,
+      user.id,
+      ops(
+        { op: "Replace", path: "active", value: "False" },
+        {
+          op: "Add",
+          path: 'emails[type eq "home"].value',
+          value: `home-${tag()}@personal.test`,
+        }
+      )
+    );
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ active: false });
+    expect(await activeState(user.id)).toEqual({
+      isActive: false,
+      idpActive: false,
+      adminHold: false,
+    });
+    expect((await row(user.id)).email).toBe(user.email);
+  });
+
   it("applies the profile in the deactivation's entry", async () => {
     const c = await createScimConnection();
     const user = await managedWith(c);

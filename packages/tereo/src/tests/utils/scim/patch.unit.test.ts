@@ -65,6 +65,55 @@ describe("applyPatch", () => {
     ).toEqual({ email: "a@x.com" });
   });
 
+  it.each([
+    ["emails.value", "A@X.com"],
+    ['emails[type eq "work"].value', "A@X.com"],
+    ['EMAILS[TYPE EQ "Work"].VALUE', "A@X.com"],
+    ["emails[primary eq true].value", "A@X.com"],
+    ["emails[primary eq True].value", "A@X.com"],
+    ["urn:ietf:params:scim:schemas:core:2.0:User:emails.value", "A@X.com"],
+  ])("writes the core email from %s", (path, value) => {
+    expect(patch({ op: "replace", path, value })).toEqual({
+      email: "a@x.com",
+    });
+  });
+
+  it.each([
+    'emails[type eq "home"].value',
+    'emails[type eq "other"].value',
+    "emails[primary eq false].value",
+    'emails[value eq "a@x.com"].value',
+    'emails[type eq "work"]',
+    'emails[type eq "work" and primary eq true].value',
+  ])("ignores %s like an unknown attribute", (path) => {
+    expect(
+      patch({ op: "replace", path, value: "home@elsewhere.test" })
+    ).toEqual({});
+    expect(patch({ op: "remove", path })).toEqual({});
+  });
+
+  it.each(["emails", 'emails[type eq "work"].value'])(
+    "refuses to remove %s",
+    (path) => {
+      expect(() => patch({ op: "remove", path })).toThrow(
+        expect.objectContaining({ code: "invalidValue" })
+      );
+    }
+  );
+
+  it("deactivates with Entra's home email in the same body, ignoring the email", () => {
+    expect(
+      patch(
+        { op: "Replace", path: "active", value: "False" },
+        {
+          op: "Add",
+          path: 'emails[type eq "home"].value',
+          value: "someone@personal.test",
+        }
+      )
+    ).toEqual({ active: false });
+  });
+
   it("takes the primary address from an emails array", () => {
     expect(
       patch({
