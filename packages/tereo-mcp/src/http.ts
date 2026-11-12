@@ -1,3 +1,4 @@
+import type { NextFunction, Request, Response, Router } from "express";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import type { StartState } from "./startChecks.js";
@@ -8,7 +9,6 @@ import type { AddressInfo } from "node:net";
 import { buildServer } from "./server.js";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import type { Router } from "express";
 import express from "express";
 import {
   createMcpExpressApp,
@@ -86,15 +86,15 @@ export const listenOn = async (
 ): Promise<Listening> => {
   const { options, logger } = started;
   const loopback = LOOPBACK.includes(host);
-  const allowedHosts = [
-    new URL(options.publicUrl).hostname,
-    ...(loopback ? ["localhost", "127.0.0.1", "[::1]"] : []),
+  const loopbackNames = loopback ? ["localhost", "127.0.0.1", "[::1]"] : [];
+  const allowedHosts = [new URL(options.publicUrl).hostname, ...loopbackNames];
+  // The SDK compares the Origin's hostname, and a list given here replaces
+  // its loopback default rather than adding to it.
+  const allowedOrigins = options.allowedOrigins && [
+    ...options.allowedOrigins.map((origin) => new URL(origin).hostname),
+    ...loopbackNames,
   ];
-  const app = createMcpExpressApp({
-    host,
-    allowedHosts,
-    allowedOrigins: options.allowedOrigins,
-  });
+  const app = createMcpExpressApp({ host, allowedHosts, allowedOrigins });
   const route = createRoute(started);
   app.use(route.router);
 
@@ -104,6 +104,21 @@ export const listenOn = async (
     res.json({ status: "ok" });
   });
   outer.use(app);
+  // Without this Express answers a bad body with an HTML page that, outside
+  // production, carries the stack and file paths.
+  outer.use(
+    (err: unknown, _req: Request, res: Response, next: NextFunction) => {
+      if (res.headersSent) return next(err);
+      const status = (err as { status?: unknown } | null)?.status;
+      if (typeof status === "number" && status >= 400 && status < 500) {
+        logger.warn({ status }, "MCP request rejected");
+        res.status(status).json({ error: "invalid_request" });
+        return;
+      }
+      logger.error({ err }, "MCP request failed");
+      res.status(500).json({ error: "server_error" });
+    }
+  );
 
   const server = createServer(outer);
   await new Promise<void>((resolve, reject) => {

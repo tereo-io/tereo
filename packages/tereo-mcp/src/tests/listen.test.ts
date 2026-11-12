@@ -1,11 +1,14 @@
 import { createServer, request, type Server as HttpServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
+import type { TereoMcpOptions } from "../types.js";
 import { fakeCore } from "./support/fakeCore.js";
 import { createTereoMcp } from "../tereoMcp.js";
 import { connect } from "./support/connect.js";
 import type { Listening } from "../index.js";
 import type { AddressInfo } from "node:net";
+import type { Logger } from "pino";
 import express from "express";
+import pino from "pino";
 import { z } from "zod";
 
 const ISSUER = "https://tereo.example.test";
@@ -23,7 +26,7 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((fn) => fn()));
 });
 
-async function setup() {
+async function setup(extra: Partial<TereoMcpOptions> = {}) {
   const coreApp = express();
   coreApp.get("/core/.well-known/oauth-authorization-server", (_req, res) => {
     res.json(metadata);
@@ -42,6 +45,11 @@ async function setup() {
   let entered!: () => void;
   const inHandler = new Promise<void>((resolve) => (entered = resolve));
 
+  const lines: Record<string, unknown>[] = [];
+  const logger = pino(
+    { level: "debug" },
+    { write: (s: string) => lines.push(JSON.parse(s)) }
+  ) as Logger;
   const mcp = createTereoMcp({
     name: "quotes",
     version: "1.0.0",
@@ -50,6 +58,8 @@ async function setup() {
     allowedClients: ["claude"],
     rateLimit: false,
     coreUrl: `http://127.0.0.1:${corePort}/core`,
+    logger,
+    ...extra,
   });
   mcp.define({
     name: "slow",
@@ -65,8 +75,47 @@ async function setup() {
   });
   const server: Listening = await mcp.listen(0, "127.0.0.1");
   cleanups.push(() => server.close());
-  return { mcp, server, release, inHandler };
+  return { mcp, server, release, inHandler, lines };
 }
+
+const raw = (
+  port: number,
+  opts: { headers?: Record<string, string>; body?: string }
+) =>
+  new Promise<{ status: number; type: string; body: string }>(
+    (resolve, reject) => {
+      const req = request(
+        {
+          host: "127.0.0.1",
+          port,
+          path: "/mcp",
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            ...opts.headers,
+          },
+        },
+        (r) => {
+          let body = "";
+          r.setEncoding("utf8");
+          r.on("data", (chunk: string) => (body += chunk));
+          r.on("end", () =>
+            resolve({
+              status: r.statusCode ?? 0,
+              type: r.headers["content-type"] ?? "",
+              body,
+            })
+          );
+        }
+      );
+      req.on("error", reject);
+      req.end(
+        opts.body ??
+          JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })
+      );
+    }
+  );
 
 describe("listen", () => {
   it("reports its port and answers /health without a token", async () => {
@@ -138,5 +187,58 @@ describe("listen", () => {
     ).rejects.toThrow();
     await expect(server.close()).resolves.toBeUndefined();
     await client.close().catch(() => undefined);
+  });
+
+  describe("allowedOrigins", () => {
+    const allowedOrigins = ["https://app.example.com"];
+
+    it("allows a listed browser origin", async () => {
+      const { server } = await setup({ allowedOrigins });
+
+      const res = await raw(server.port, {
+        headers: { origin: "https://app.example.com" },
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it("refuses an unlisted origin with 403", async () => {
+      const { server } = await setup({ allowedOrigins });
+
+      const res = await raw(server.port, {
+        headers: { origin: "https://evil.example.com" },
+      });
+
+      expect(res.status).toBe(403);
+    });
+
+    it("still allows a loopback origin on a loopback bind", async () => {
+      const { server } = await setup({ allowedOrigins });
+
+      const res = await raw(server.port, {
+        headers: { origin: "http://localhost:3000" },
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it("lets a request with no Origin through", async () => {
+      const { server } = await setup({ allowedOrigins });
+
+      expect((await raw(server.port, {})).status).toBe(401);
+    });
+  });
+
+  it("answers a malformed JSON body with a JSON 400 and no stack", async () => {
+    const { server, lines } = await setup();
+
+    const res = await raw(server.port, { body: "{not json" });
+
+    expect(res.status).toBe(400);
+    expect(res.type).toMatch(/^application\/json/);
+    expect(JSON.parse(res.body)).toEqual({ error: "invalid_request" });
+    expect(res.body).not.toContain("at ");
+    expect(res.body).not.toContain("/");
+    expect(JSON.stringify(lines)).not.toContain("not json");
   });
 });
