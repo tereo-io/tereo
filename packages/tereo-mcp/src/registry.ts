@@ -23,9 +23,12 @@ export class ToolRegistry {
       throw new Error(`Tool "${tool.name}" needs a non-empty description`);
     }
     // undefined is rejected so that forgetting the permission cannot silently mean "open to all"
-    if (tool.permission !== null && typeof tool.permission !== "string") {
+    if (
+      tool.permission !== null &&
+      (typeof tool.permission !== "string" || tool.permission === "")
+    ) {
       throw new Error(
-        `Tool "${tool.name}" needs a permission: a string, or null for none`
+        `Tool "${tool.name}" needs a permission: a non-empty string, or null for none`
       );
     }
     if (typeof tool.readOnly !== "boolean") {

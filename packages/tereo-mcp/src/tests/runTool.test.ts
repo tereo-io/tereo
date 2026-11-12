@@ -43,6 +43,7 @@ const setup = (handler: ToolDefinition["handler"]) => {
         ctx,
         limiter: extra.limiter ?? null,
         maxResultBytes: extra.max ?? 1000,
+        logger,
       },
       input
     );

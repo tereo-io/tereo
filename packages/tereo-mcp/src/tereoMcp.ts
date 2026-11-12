@@ -43,6 +43,10 @@ export const createTereoMcp = (options: TereoMcpOptions): TereoMcp => {
                 logger,
               }),
       }));
+      // A failed start (core unreachable, say) is retried by the next call.
+      started.catch(() => {
+        started = undefined;
+      });
     }
     return started;
   };

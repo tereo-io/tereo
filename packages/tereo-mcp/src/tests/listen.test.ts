@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fakeCore } from "./support/fakeCore.js";
 import { createTereoMcp } from "../tereoMcp.js";
 import { connect } from "./support/connect.js";
+import type { Listening } from "../index.js";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { z } from "zod";
@@ -62,7 +63,7 @@ async function setup() {
       return "finished";
     },
   });
-  const server = await mcp.listen(0, "127.0.0.1");
+  const server: Listening = await mcp.listen(0, "127.0.0.1");
   cleanups.push(() => server.close());
   return { mcp, server, release, inHandler };
 }

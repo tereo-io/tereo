@@ -54,6 +54,12 @@ describe("ToolRegistry", () => {
     expect(registry.list()).toHaveLength(2);
   });
 
+  it("rejects an empty-string permission", () => {
+    expect(() => new ToolRegistry().define(tool({ permission: "" }))).toThrow(
+      /permission/
+    );
+  });
+
   it("rejects a readOnly that is not a boolean", () => {
     expect(() =>
       new ToolRegistry().define(tool({ readOnly: "yes" as unknown as boolean }))

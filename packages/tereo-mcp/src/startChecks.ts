@@ -60,6 +60,65 @@ const checkPermissions = (
   }
 };
 
+const checkPositiveInteger = (name: string, value: number | undefined) => {
+  if (value !== undefined && !(Number.isInteger(value) && value > 0)) {
+    fail(`${name} must be a positive integer, not ${String(value)}`);
+  }
+};
+
+const checkAllowedOrigins = (origins: readonly string[] | undefined) => {
+  for (const origin of origins ?? []) {
+    let url: URL | undefined;
+    try {
+      url = new URL(origin);
+    } catch {
+      url = undefined;
+    }
+    if (
+      !url ||
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      url.pathname !== "/" ||
+      url.search !== "" ||
+      url.hash !== "" ||
+      url.username !== "" ||
+      url.password !== ""
+    ) {
+      fail(
+        `allowedOrigins entry ${JSON.stringify(origin)} is not an origin such as "https://app.example.com"`
+      );
+    }
+  }
+};
+
+// Mirrors the MCP SDK's own issuer check in mcpAuthMetadataRouter, which
+// would otherwise throw from router() or listen() with no context.
+const checkIssuer = (issuer: string): void => {
+  let url: URL;
+  try {
+    url = new URL(issuer);
+  } catch {
+    return fail(`core's issuer ${JSON.stringify(issuer)} is not a valid URL`);
+  }
+  const insecureAllowed = ["true", "1"].includes(
+    process.env.MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL ?? ""
+  );
+  if (
+    url.protocol !== "https:" &&
+    url.hostname !== "localhost" &&
+    url.hostname !== "127.0.0.1" &&
+    !insecureAllowed
+  ) {
+    fail(
+      `core's issuer ${JSON.stringify(issuer)} must be https unless its host is localhost or 127.0.0.1`
+    );
+  }
+  if (url.search !== "" || url.hash !== "") {
+    fail(
+      `core's issuer ${JSON.stringify(issuer)} must have no query or fragment`
+    );
+  }
+};
+
 const isMetadata = (value: unknown): value is OAuthMetadata => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
@@ -116,11 +175,17 @@ export const runStartChecks = async (
   if (options.rateLimit !== false && !options.redis) {
     fail("redis is required unless rateLimit is false");
   }
+  if (options.rateLimit) {
+    checkPositiveInteger("rateLimit.perMinute", options.rateLimit.perMinute);
+  }
+  checkPositiveInteger("maxResultBytes", options.maxResultBytes);
+  checkAllowedOrigins(options.allowedOrigins);
   checkPermissions(options, tools);
 
   const coreUrl = options.coreUrl ?? process.env.CORE_URL;
   if (!coreUrl) fail("coreUrl is not set and neither is CORE_URL");
 
   const oauthMetadata = await fetchMetadata(coreUrl, fetchImpl);
+  checkIssuer(oauthMetadata.issuer);
   return { resourceUrl: `${origin}${path}`, oauthMetadata };
 };

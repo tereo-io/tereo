@@ -250,6 +250,109 @@ describe("runStartChecks", () => {
     );
   });
 
+  // The MCP SDK allows plain http only for localhost and 127.0.0.1, not [::1].
+  it.each([
+    "http://tereo.example.test",
+    "http://[::1]:4001",
+    "not a url",
+    "https://tereo.example.test/?x=1",
+    "https://tereo.example.test/#frag",
+  ])("fails on the issuer %s, naming it", async (issuer) => {
+    const message = await failure(
+      runStartChecks(options(), [], answering(200, { ...metadata, issuer }))
+    );
+    expect(message).toMatch(/^@tereo-io\/mcp cannot start: /);
+    expect(message).toContain("issuer");
+    expect(message).toContain(JSON.stringify(issuer));
+  });
+
+  it.each(["http://localhost:4001", "http://127.0.0.1:4001"])(
+    "accepts the plain-http loopback issuer %s",
+    async (issuer) => {
+      const state = await runStartChecks(
+        options(),
+        [],
+        answering(200, { ...metadata, issuer })
+      );
+      expect(state.oauthMetadata.issuer).toBe(issuer);
+    }
+  );
+
+  it("accepts a plain-http issuer when the MCP SDK's insecure-issuer override is set", async () => {
+    vi.stubEnv("MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL", "true");
+    const issuer = "http://tereo.example.test";
+    const state = await runStartChecks(
+      options(),
+      [],
+      answering(200, { ...metadata, issuer })
+    );
+    expect(state.oauthMetadata.issuer).toBe(issuer);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])(
+    "refuses rateLimit.perMinute %s",
+    async (perMinute) => {
+      const message = await failure(
+        runStartChecks(
+          options({ rateLimit: { perMinute } }),
+          [],
+          answering(200, metadata)
+        )
+      );
+      expect(message).toContain("rateLimit.perMinute");
+    }
+  );
+
+  it.each([0, -1, 1.5, Number.NaN])(
+    "refuses maxResultBytes %s",
+    async (maxResultBytes) => {
+      const message = await failure(
+        runStartChecks(
+          options({ maxResultBytes }),
+          [],
+          answering(200, metadata)
+        )
+      );
+      expect(message).toContain("maxResultBytes");
+    }
+  );
+
+  it("accepts positive integer limits", async () => {
+    await runStartChecks(
+      options({ rateLimit: { perMinute: 1 }, maxResultBytes: 1 }),
+      [],
+      answering(200, metadata)
+    );
+  });
+
+  it.each([
+    "app.example.com",
+    "not a url",
+    "https://app.example.com/path",
+    "https://app.example.com/?x=1",
+    "ftp://app.example.com",
+  ])("refuses the allowedOrigins entry %s, naming it", async (origin) => {
+    const message = await failure(
+      runStartChecks(
+        options({ allowedOrigins: ["https://ok.example.com", origin] }),
+        [],
+        answering(200, metadata)
+      )
+    );
+    expect(message).toContain("allowedOrigins");
+    expect(message).toContain(JSON.stringify(origin));
+  });
+
+  it("accepts origins with a port or a trailing slash", async () => {
+    await runStartChecks(
+      options({
+        allowedOrigins: ["https://app.example.com", "http://localhost:3000/"],
+      }),
+      [],
+      answering(200, metadata)
+    );
+  });
+
   it("fails on metadata that is not JSON", async () => {
     const fetchImpl = vi.fn<typeof fetch>(
       async () => new Response("<html>", { status: 200 })

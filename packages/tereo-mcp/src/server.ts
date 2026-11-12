@@ -7,6 +7,7 @@ import { authFromInfo } from "./verifier.js";
 import { randomUUID } from "node:crypto";
 import { runTool } from "./runTool.js";
 import type { Logger } from "pino";
+import type { z } from "zod";
 import type {
   AuthInfo,
   CallToolResult,
@@ -27,6 +28,13 @@ const annotationsOf = (tool: ToolDefinition): ToolAnnotations => ({
   ...(tool.destructive !== undefined && { destructiveHint: tool.destructive }),
   ...(tool.idempotent !== undefined && { idempotentHint: tool.idempotent }),
 });
+
+// Structural, so a schema from another copy of zod still counts.
+const isZodObject = (value: unknown): value is z.ZodObject =>
+  typeof value === "object" &&
+  value !== null &&
+  (value as { _zod?: { def?: { type?: unknown } } })._zod?.def?.type ===
+    "object";
 
 export const buildServer = async (
   deps: ServerDeps,
@@ -66,7 +74,13 @@ export const buildServer = async (
         return { tool, ctx, schema: tool.input };
       }
       try {
-        return { tool, ctx, schema: await tool.input(ctx) };
+        const schema: unknown = await tool.input(ctx);
+        if (!isZodObject(schema)) {
+          throw new Error(
+            `The input function of tool "${tool.name}" did not return a z.object() schema`
+          );
+        }
+        return { tool, ctx, schema };
       } catch (err) {
         logger.error(
           { tool: tool.name, user_id: auth.userId, err },
@@ -83,7 +97,7 @@ export const buildServer = async (
     // ToolResult is an interface, which lacks the index signature
     // CallToolResult carries; a spread copy has it implicitly.
     const run = async (input: unknown): Promise<CallToolResult> => ({
-      ...(await runTool({ tool, ctx, limiter, maxResultBytes }, input)),
+      ...(await runTool({ tool, ctx, limiter, maxResultBytes, logger }, input)),
     });
     const config = {
       description: tool.description,

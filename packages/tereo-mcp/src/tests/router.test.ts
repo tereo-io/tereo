@@ -1,6 +1,7 @@
+import type { TereoMcpOptions, ToolContext, ToolDefinition } from "../types.js";
 import { createServer, type Server as HttpServer } from "node:http";
-import type { TereoMcpOptions, ToolContext } from "../types.js";
 import { afterEach, describe, expect, it } from "vitest";
+import { fakeRedis } from "./support/fakeRedis.js";
 import { fakeCore } from "./support/fakeCore.js";
 import { createTereoMcp } from "../tereoMcp.js";
 import { connect } from "./support/connect.js";
@@ -17,6 +18,9 @@ const metadata = {
   token_endpoint: `${ISSUER}/oauth/token`,
   response_types_supported: ["code"],
 };
+
+const INTERNAL_ERROR =
+  /^Internal error \(request [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)$/;
 
 const token = (user: string, perms: string) =>
   `test-token-${user}|client=claude|perms=${perms}`;
@@ -36,9 +40,14 @@ afterEach(async () => {
 
 async function listening() {
   const app = express();
-  const metadataHits = { count: 0 };
+  const metadataHits = { count: 0, failNext: 0 };
   app.get("/core/.well-known/oauth-authorization-server", (_req, res) => {
     metadataHits.count++;
+    if (metadataHits.failNext > 0) {
+      metadataHits.failNext--;
+      res.status(503).json({ error: "unavailable" });
+      return;
+    }
     res.json(metadata);
   });
   const server = createServer(app);
@@ -47,9 +56,15 @@ async function listening() {
   const { port } = server.address() as AddressInfo;
   const base = `http://127.0.0.1:${port}`;
   const lines: Record<string, unknown>[] = [];
+  const raw: string[] = [];
   const logger = pino(
     { level: "debug" },
-    { write: (s: string) => lines.push(JSON.parse(s)) }
+    {
+      write: (s: string) => {
+        raw.push(s);
+        lines.push(JSON.parse(s));
+      },
+    }
   ) as Logger;
   const options = (extra: Partial<TereoMcpOptions> = {}): TereoMcpOptions => ({
     name: "quotes",
@@ -62,8 +77,53 @@ async function listening() {
     logger,
     ...extra,
   });
-  return { app, base, mcpUrl: `${base}/mcp`, metadataHits, lines, options };
+  return {
+    app,
+    base,
+    mcpUrl: `${base}/mcp`,
+    metadataHits,
+    lines,
+    raw,
+    options,
+  };
 }
+
+async function serving(
+  extra: Partial<TereoMcpOptions>,
+  ...tools: ToolDefinition[]
+) {
+  const h = await listening();
+  const mcp = createTereoMcp(h.options(extra));
+  for (const tool of tools) mcp.define(tool);
+  h.app.use(await mcp.router());
+  return { ...h, mcp };
+}
+
+const openTool = (
+  name: string,
+  handler: ToolDefinition["handler"],
+  extra: Partial<ToolDefinition> = {}
+): ToolDefinition => ({
+  name,
+  description: `The ${name} tool`,
+  permission: null,
+  readOnly: true,
+  handler,
+  ...extra,
+});
+
+const postStatus = async (url: string, bearer: string) =>
+  (
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${bearer}`,
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    })
+  ).status;
 
 async function standard() {
   const h = await listening();
@@ -318,5 +378,225 @@ describe("TereoMcp router", () => {
 
     await expect(mcp.router()).rejects.toThrow(/allowedClients/);
     expect(h.metadataHits.count).toBe(0);
+  });
+
+  it("retries the start after a failed metadata fetch", async () => {
+    const h = await listening();
+    h.metadataHits.failNext = 1;
+    const mcp = createTereoMcp(h.options());
+    mcp.define(openTool("ping", () => "pong"));
+
+    await expect(mcp.router()).rejects.toThrow(/503/);
+    h.app.use(await mcp.router());
+    const client = await connect(h.mcpUrl, token("user-1", ""));
+    const result = await client.callTool({ name: "ping" });
+
+    expect(result.content).toEqual([{ type: "text", text: "pong" }]);
+    expect(h.metadataHits.count).toBe(2);
+    await client.close();
+  });
+
+  it.each([
+    ["undefined", () => undefined],
+    ["a plain object", () => ({ id: "string" })],
+  ])(
+    "leaves out a tool whose input function returns %s and keeps the others",
+    async (_label, input) => {
+      const h = await serving(
+        {},
+        openTool("shapeless", () => "never", {
+          input: input as unknown as ToolDefinition["input"],
+        }),
+        openTool("fine", () => "fine")
+      );
+      const client = await connect(h.mcpUrl, token("user-1", ""));
+
+      const { tools } = await client.listTools();
+      const result = await client.callTool({ name: "fine" });
+
+      expect(tools.map((t) => t.name)).toEqual(["fine"]);
+      expect(result.content).toEqual([{ type: "text", text: "fine" }]);
+      const logged = h.lines.filter(
+        (l) => l.msg === "MCP tool input schema failed"
+      );
+      expect(logged.length).toBeGreaterThan(0);
+      expect(logged[0]).toMatchObject({
+        level: 50,
+        tool: "shapeless",
+        user_id: "user-1",
+        err: { message: expect.stringContaining("did not return") },
+      });
+      await client.close();
+    }
+  );
+
+  it("writes each field of the tool-call log line once", async () => {
+    const h = await serving(
+      {},
+      openTool("ping", () => "pong")
+    );
+    const client = await connect(h.mcpUrl, token("user-1", ""));
+
+    await client.callTool({ name: "ping" });
+
+    const line = h.raw.find((s) => s.includes('"msg":"MCP tool call"'));
+    expect(line).toBeDefined();
+    for (const key of [
+      "tool",
+      "user_id",
+      "client_id",
+      "org_id",
+      "request_id",
+      "outcome",
+      "duration_ms",
+    ]) {
+      expect(line?.split(`"${key}":`).length, key).toBe(2);
+    }
+    await client.close();
+  });
+
+  it("sets idempotentHint from the definition", async () => {
+    const h = await serving(
+      {},
+      openTool("put", () => "ok", { readOnly: false, idempotent: true })
+    );
+    const client = await connect(h.mcpUrl, token("user-1", ""));
+
+    const { tools } = await client.listTools();
+
+    expect(tools[0].annotations).toEqual({
+      readOnlyHint: false,
+      idempotentHint: true,
+    });
+    await client.close();
+  });
+});
+
+describe("TereoMcp router security wiring", () => {
+  it("refuses a token issued to a client not in allowedClients", async () => {
+    const h = await serving(
+      {},
+      openTool("ping", () => "pong")
+    );
+
+    expect(
+      await postStatus(h.mcpUrl, "test-token-user-1|client=other|perms=")
+    ).toBe(401);
+  });
+
+  it("refuses a service-account token unless allowServiceAccounts", async () => {
+    const serviceToken = "test-token-claude|client=claude";
+    const refused = await serving(
+      {},
+      openTool("ping", () => "pong")
+    );
+    expect(await postStatus(refused.mcpUrl, serviceToken)).toBe(401);
+
+    const allowed = await serving(
+      { allowServiceAccounts: true },
+      openTool("ping", () => "pong")
+    );
+    const client = await connect(allowed.mcpUrl, serviceToken);
+    const result = await client.callTool({ name: "ping" });
+    expect(result.content).toEqual([{ type: "text", text: "pong" }]);
+    await client.close();
+  });
+
+  it("rate-limits tool calls through redis", async () => {
+    const h = await serving(
+      { redis: fakeRedis(), rateLimit: { perMinute: 1 } },
+      openTool("ping", () => "pong")
+    );
+    const client = await connect(h.mcpUrl, token("user-1", ""));
+
+    const first = await client.callTool({ name: "ping" });
+    const second = await client.callTool({ name: "ping" });
+
+    expect(first.content).toEqual([{ type: "text", text: "pong" }]);
+    expect(second.isError).toBe(true);
+    expect(second.content).toEqual([
+      { type: "text", text: "Rate limit reached; retry in 42 seconds" },
+    ]);
+    await client.close();
+  });
+
+  it("hides a thrown error's message behind the request id", async () => {
+    const h = await serving(
+      {},
+      openTool("boom", () => {
+        throw new Error("SECRET db detail");
+      })
+    );
+    const client = await connect(h.mcpUrl, token("user-1", ""));
+
+    const result = await client.callTool({ name: "boom" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([
+      { type: "text", text: expect.stringMatching(INTERNAL_ERROR) },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("SECRET");
+    await client.close();
+  });
+
+  it("turns a result over maxResultBytes into a tool error", async () => {
+    const h = await serving(
+      { maxResultBytes: 10 },
+      openTool("big", () => "x".repeat(100))
+    );
+    const client = await connect(h.mcpUrl, token("user-1", ""));
+
+    const result = await client.callTool({ name: "big" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([
+      { type: "text", text: "Result too large (100 bytes; limit 10)" },
+    ]);
+    await client.close();
+  });
+});
+
+describe("TereoMcp router in the modern protocol era", () => {
+  it("answers a tool the caller may not use exactly as an unknown tool", async () => {
+    const { mcpUrl, calls } = await standard();
+    const client = await connect(mcpUrl, token("user-1", "q.items.write"), {
+      era: "modern",
+    });
+    expect(client.getNegotiatedProtocolVersion()).toBe("2026-07-28");
+
+    const hidden = await outcome(
+      client.callTool({ name: "admin_tool", arguments: {} })
+    );
+    const unknown = await outcome(
+      client.callTool({ name: "no_such_tool", arguments: {} })
+    );
+
+    expect(JSON.stringify(hidden).replaceAll("admin_tool", "<name>")).toEqual(
+      JSON.stringify(unknown).replaceAll("no_such_tool", "<name>")
+    );
+    expect(calls).toEqual([]);
+    await client.close();
+  });
+
+  it("hides a thrown error's message behind the request id", async () => {
+    const h = await serving(
+      {},
+      openTool("boom", () => {
+        throw new Error("SECRET db detail");
+      })
+    );
+    const client = await connect(h.mcpUrl, token("user-1", ""), {
+      era: "modern",
+    });
+    expect(client.getNegotiatedProtocolVersion()).toBe("2026-07-28");
+
+    const result = await client.callTool({ name: "boom" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([
+      { type: "text", text: expect.stringMatching(INTERNAL_ERROR) },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("SECRET");
+    await client.close();
   });
 });

@@ -2,6 +2,7 @@ import type { ToolContext, ToolDefinition } from "./types.js";
 import type { RateLimiter } from "./rateLimit.js";
 import { HttpError } from "@tereo-io/sdk";
 import { ToolError } from "./errors.js";
+import type { Logger } from "pino";
 
 export interface ToolResult {
   content: { type: "text"; text: string }[];
@@ -21,10 +22,12 @@ export const runTool = async (
     ctx: ToolContext;
     limiter: RateLimiter | null;
     maxResultBytes: number;
+    // Not ctx.logger, whose bindings would repeat this line's own fields.
+    logger: Logger;
   },
   input: unknown
 ): Promise<ToolResult> => {
-  const { tool, ctx, limiter, maxResultBytes } = deps;
+  const { tool, ctx, limiter, maxResultBytes, logger } = deps;
   const started = process.hrtime.bigint();
   const state: { outcome: Outcome; failure?: unknown } = { outcome: "ok" };
 
@@ -90,9 +93,9 @@ export const runTool = async (
     duration_ms: Number((process.hrtime.bigint() - started) / 1_000_000n),
   };
   if (state.outcome === "internal_error") {
-    ctx.logger.error({ ...fields, err: state.failure }, "MCP tool call");
+    logger.error({ ...fields, err: state.failure }, "MCP tool call");
   } else {
-    ctx.logger.info(fields, "MCP tool call");
+    logger.info(fields, "MCP tool call");
   }
   return result;
 };
