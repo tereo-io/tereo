@@ -47,6 +47,10 @@ public (no secret), uses the authorization-code flow and names the service in `a
 - Redirect URIs must match exactly. ChatGPT shows its callback URL in the connector form; copy it
   from there into `redirectUris`, and do not guess it. Claude's two URLs are above.
 - List the same `clientId`s in `allowedClients`. Tokens issued to any other client are refused.
+- A token issued to a connector client is an ordinary Tereo access token for the service. Besides
+  the MCP endpoint, the service's own routes behind the SDK's `requireAuth` accept it, with the
+  user's permissions, unless the app restricts them with the SDK's `auth.allowedClients` option on
+  `createCoreClient`.
 
 ## Deployment conditions
 

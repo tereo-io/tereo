@@ -50,7 +50,7 @@ await server.close();
 ```
 
 Clients sign in through Tereo, so each one needs a login client created there first; see
-[docs/connecting.md](docs/connecting.md).
+[connecting](https://github.com/tereo-io/tereo/blob/master/packages/tereo-mcp/docs/connecting.md).
 
 ## `createTereoMcp(options)`
 
@@ -62,13 +62,13 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 | `allowedClients` | yes | Non-empty list of `client_id`s; tokens issued to any other client are refused |
 | `path` | no | Default `/mcp`. Must start with `/` |
 | `redis` | unless `rateLimit: false` | An `ioredis` client, owned by the caller |
-| `rateLimit` | no | `{ perMinute }` (default 120) or `false` |
+| `rateLimit` | no | `{ perMinute }` (default 120; a positive integer) or `false` |
 | `allowServiceAccounts` | no | Default `false`: `client_credentials` tokens are refused |
-| `allowedOrigins` | no | Extra browser origins allowed to call the endpoint (`listen` only) |
+| `allowedOrigins` | no | Browser origins allowed to call the endpoint, such as `https://app.example.com` (`listen` only). See [Serving](#serving) |
 | `provisioning` | no | The service's provisioning document, for the start-time permission check |
 | `coreUrl` | no | Core's base URL, for fetching its authorization-server metadata at start. Default `CORE_URL`, as in the SDK |
 | `logger` | no | A Pino logger. Default a new one named `@tereo-io/mcp` |
-| `maxResultBytes` | no | Default 1 000 000. A larger result becomes a tool error instead of flooding the model |
+| `maxResultBytes` | no | Default 1 000 000; a positive integer. A larger result becomes a tool error instead of flooding the model |
 
 ## `mcp.define(tool)`
 
@@ -76,7 +76,7 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 |-------|----------|---|
 | `name` | yes | `[a-z0-9_]`, unique; a duplicate throws |
 | `description` | yes | Shown to the model |
-| `permission` | yes | A Tereo permission name, or `null` for any signed-in user. The hierarchy is the SDK's: `write` includes `read`, `admin` includes all |
+| `permission` | yes | A non-empty Tereo permission name, or `null` for any signed-in user. The hierarchy is the SDK's: `write` includes `read`, `admin` includes all |
 | `readOnly` | yes | Sets `readOnlyHint`. Required so an author has to state it |
 | `destructive`, `idempotent` | no | `destructiveHint`, `idempotentHint` |
 | `input` | no | `z.object(...)`, or `(ctx) => z.object(...)` (may be async) for a per-user schema. Omitted: no arguments |
@@ -86,7 +86,8 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 
 An `input` function runs for every protocol message the caller sends (`initialize`, `tools/list`,
 `tools/call`), not only for calls, because the server is built per request. Keep it cheap and free
-of side effects. If it throws, the error is logged and that tool is left out for that request.
+of side effects. If it throws, or returns anything but a `z.object(...)`, the error is logged and
+that tool is left out for that request.
 
 ### `ctx`
 
@@ -102,13 +103,26 @@ of side effects. If it throws, the error is logged and that tool is left out for
 `router()` and `listen()` are async and run the start checks once.
 
 - `await mcp.router()` returns an Express router with the protected-resource metadata routes and the
-  MCP endpoint behind bearer auth. The host app owns Host and Origin validation and body limits; use
-  the MCP SDK's `hostHeaderValidation` and `originValidation` from `@modelcontextprotocol/express`.
+  MCP endpoint behind bearer auth. Mount it at the app root (`app.use(await mcp.router())`, not
+  `app.use("/x", …)`): the `401` challenge and the `/.well-known` routes assume `publicUrl` maps to
+  `/`. The host app owns Host and Origin validation and body limits; use the MCP SDK's
+  `hostHeaderValidation` and `originValidation` from `@modelcontextprotocol/express`. It also owns
+  error handling: install a final JSON error handler, or Express answers a malformed body with its
+  HTML error page, which outside production carries the stack.
 - `await mcp.listen(port, host?)` builds a standalone app, bound to `0.0.0.0` by default, that
   accepts the host of `publicUrl` (plus loopback names when `host` is loopback), and adds
-  `GET /health`. It resolves `{ port, url, close }`: `port` is the bound port (pass `0` to pick one),
-  `url` the endpoint as reached locally, and `close()` stops accepting connections, closes the MCP
-  handler and resolves when in-flight calls finish.
+  `GET /health`. It answers a request it rejects (a malformed JSON body, say) with JSON:
+  `{ "error": "invalid_request" }` and the 4xx status, or `500 { "error": "server_error" }`. It
+  resolves `{ port, url, close }` (type `Listening`): `port` is the bound port (pass `0` to pick
+  one), `url` the endpoint as reached locally, and `close()` stops accepting connections, closes the
+  MCP handler and resolves when in-flight calls finish. It has no deadline: a handler that never
+  returns keeps `close()` waiting, so bound it with your own timeout if needed.
+
+Browsers send an `Origin` header; other MCP clients do not, and a request without one is allowed.
+With `allowedOrigins`, `listen` allows a browser request only from those origins, compared by
+hostname (the MCP SDK's rule, so the scheme and port are not checked), plus the loopback hostnames
+when `host` is loopback. Without it, a loopback bind allows only loopback origins and any other bind
+checks no origin.
 
 ## Request flow
 
@@ -118,7 +132,7 @@ of side effects. If it throws, the error is logged and that tool is left out for
 3. **Verification.** The token is introspected through `core.auth.introspectToken`. Core reports a
    token active to this service only when its audience includes the service's slug. The token is
    refused when it is inactive, was issued to a client not in `allowedClients`, belongs to a service
-   account (unless `allowServiceAccounts`) or has expired. Every refusal answers `401` with the same
+   account (unless `allowServiceAccounts`), or has expired or carries no valid expiry. Every refusal answers `401` with the same
    message, `Invalid or expired token`; the real reason (`inactive`, `client_not_allowed`,
    `service_account`, `expired`) is logged at info as `MCP token refused`.
 4. **Per-request server.** A server is built for each request with only the tools whose permission
@@ -142,9 +156,15 @@ No scopes are required or advertised. The protected-resource metadata, at
 - `path` does not start with `/`;
 - `allowedClients` is empty;
 - `redis` is missing and `rateLimit` is not `false`;
+- `rateLimit.perMinute` or `maxResultBytes` is given and is not a positive integer;
+- an `allowedOrigins` entry is not an http or https origin (scheme, host and optional port only);
 - with `provisioning`, a tool needs a permission the document's service does not declare;
 - neither `coreUrl` nor `CORE_URL` is set, or Tereo's authorization-server metadata cannot be fetched
-  from `${coreUrl}/.well-known/oauth-authorization-server`.
+  from `${coreUrl}/.well-known/oauth-authorization-server`;
+- the metadata's `issuer` is not https (plain http is allowed on `localhost` and `127.0.0.1`, as the
+  MCP SDK requires) or has a query or fragment.
+
+A failed start is not cached: the next `router()` or `listen()` runs the checks again.
 
 ## Errors
 
@@ -188,17 +208,32 @@ handler: async (input, ctx) => {
 
 A fixed one-minute window per user id, counted in Redis under `@tereo-io/mcp:<name>:rl:<user>`,
 120 calls by default. Over the limit the call returns a tool error saying how many seconds to wait
-and the handler does not run. Only `tools/call` is counted. If Redis fails the call goes through and
-the failure is logged at error.
+and the handler does not run. Only `tools/call` is counted: `input` functions, which run for every
+protocol message, are not limited, and neither is a call whose arguments fail the schema, which the
+MCP SDK refuses before the limit is checked. If Redis fails the call goes through and the failure is
+logged at error.
 
 ## Testing
 
-`@tereo-io/mcp/testing` gives an app's own tests an in-process MCP client. It needs
+`@tereo-io/mcp/testing` gives an app's own tests an in-process MCP client and a stub core. It needs
 `@modelcontextprotocol/client` installed and a core client in the SDK's
-[`testMode`](../tereo-sdk/docs/testing.md), so test tokens are accepted without a core:
+[`testMode`](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/testing.md), so
+test tokens are accepted without a core:
 
 ```ts
-import { createTestClient } from "@tereo-io/mcp/testing";
+import { createTestClient, startStubCore } from "@tereo-io/mcp/testing";
+
+const stubCore = await startStubCore();
+const mcp = createTereoMcp({
+  name: "query-service",
+  version: "1.0.0",
+  core,                                     // createCoreClient({ …, testMode: true })
+  publicUrl: "https://mcp.example.com",
+  allowedClients: ["claude-connector"],
+  rateLimit: false,
+  coreUrl: stubCore.coreUrl,
+});
+mcp.define(/* … */);
 
 const { client, close } = await createTestClient(mcp, {
   token: "test-token-user-1|client=claude-connector|perms=query.connections.read",
@@ -206,7 +241,9 @@ const { client, close } = await createTestClient(mcp, {
 const { tools } = await client.listTools();
 const result = await client.callTool({ name: "list_connections", arguments: {} });
 await close();
+await stubCore.close();
 ```
 
-`createTestClient` calls `mcp.listen(0, "127.0.0.1")`, so the start checks run, including the fetch
-of core's metadata from `coreUrl` or `CORE_URL`. `close()` stops the client and the server.
+`startStubCore()` serves only core's authorization-server metadata, on a loopback port, so the start
+checks pass; it answers nothing else. `createTestClient` calls `mcp.listen(0, "127.0.0.1")`, so the
+start checks run, including the fetch of that metadata. `close()` stops the client and the server.
