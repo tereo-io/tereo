@@ -4,6 +4,7 @@ export type { Listening } from "./http.js";
 export type {
   ListenOptions,
   RateLimitRedis,
+  StaticTool,
   TereoMcpOptions,
   ToolContext,
   ToolDefinition,

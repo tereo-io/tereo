@@ -2,9 +2,11 @@ import { checkListenOptions, runStartChecks } from "./startChecks.js";
 import { createRateLimiter } from "./rateLimit.js";
 import { ToolRegistry } from "./registry.js";
 import type { Router } from "express";
+import type { z } from "zod";
 import pino from "pino";
 import type {
   ListenOptions,
+  StaticTool,
   TereoMcpOptions,
   ToolDefinition,
 } from "./types.js";
@@ -16,7 +18,10 @@ import {
 } from "./http.js";
 
 export interface TereoMcp {
-  define<I>(tool: ToolDefinition<I>): void;
+  define<S extends z.ZodObject | undefined = undefined>(
+    tool: StaticTool<S>
+  ): void;
+  define<I = unknown>(tool: ToolDefinition<I>): void;
   router(): Promise<Router>;
   listen(
     port: number,
@@ -60,7 +65,9 @@ export const createTereoMcp = (options: TereoMcpOptions): TereoMcp => {
   };
 
   return {
-    define: (tool) => registry.define(tool as ToolDefinition),
+    // Every overload's definition is a ToolDefinition<never>: no handler input type is narrower.
+    define: (tool: ToolDefinition<never>) =>
+      registry.define(tool as ToolDefinition),
     router: async () => createRouter(await start()),
     listen: async (port, host, listenOptions) => {
       checkListenOptions(listenOptions);

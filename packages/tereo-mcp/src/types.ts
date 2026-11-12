@@ -17,16 +17,27 @@ export interface ToolContext {
 export type ToolInput =
   z.ZodObject | ((ctx: ToolContext) => z.ZodObject | Promise<z.ZodObject>);
 
-export interface ToolDefinition<I = unknown> {
+interface ToolFields {
   name: string;
   description: string;
   permission: string | null;
   readOnly: boolean;
   destructive?: boolean;
   idempotent?: boolean;
+}
+
+export interface ToolDefinition<I = unknown> extends ToolFields {
   input?: ToolInput;
   handler: (input: I, ctx: ToolContext) => unknown | Promise<unknown>;
 }
+
+type InputOf<S> = S extends z.ZodObject ? z.output<S> : undefined;
+
+/** A definition whose `input`, when present, is a static schema that types the handler's input. */
+export type StaticTool<S extends z.ZodObject | undefined> = ToolFields & {
+  input?: S;
+  handler: (input: InputOf<S>, ctx: ToolContext) => unknown | Promise<unknown>;
+};
 
 export type RateLimitRedis = Pick<Redis, "incr" | "expire" | "ttl">;
 
