@@ -11,6 +11,7 @@ import type { z } from "zod";
 import type {
   AuthInfo,
   CallToolResult,
+  ServerContext,
   ToolAnnotations,
 } from "@modelcontextprotocol/server";
 
@@ -19,9 +20,13 @@ export interface ServerDeps {
   tools: readonly ToolDefinition[];
   limiter: RateLimiter | null;
   logger: Logger;
+  // Aborts when a listen server begins closing; router() has none.
+  closing?: AbortSignal;
 }
 
 const DEFAULT_MAX_RESULT_BYTES = 1_000_000;
+const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
+const NEVER_ABORTED = new AbortController().signal;
 
 const annotationsOf = (tool: ToolDefinition): ToolAnnotations => ({
   readOnlyHint: tool.readOnly,
@@ -52,6 +57,7 @@ export const buildServer = async (
 
   const requestId = requestScope.getStore()?.requestId ?? randomUUID();
   const maxResultBytes = options.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES;
+  const { closing } = deps;
   const visible = deps.tools.filter(
     (tool) =>
       tool.permission === null ||
@@ -69,6 +75,8 @@ export const buildServer = async (
           user_id: auth.userId,
           request_id: requestId,
         }),
+        // runTool gives each call its own; an input function sees this one.
+        signal: closing ?? NEVER_ABORTED,
       };
       if (typeof tool.input !== "function") {
         return { tool, ctx, schema: tool.input };
@@ -96,8 +104,17 @@ export const buildServer = async (
     const { tool, ctx, schema } = entry;
     // ToolResult is an interface, which lacks the index signature
     // CallToolResult carries; a spread copy has it implicitly.
-    const run = async (input: unknown): Promise<CallToolResult> => ({
-      ...(await runTool({ tool, ctx, limiter, maxResultBytes, logger }, input)),
+    const timeoutMs =
+      tool.timeoutMs ?? options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
+    const run = async (
+      input: unknown,
+      sdkCtx: ServerContext
+    ): Promise<CallToolResult> => ({
+      ...(await runTool(
+        { tool, ctx, limiter, maxResultBytes, timeoutMs, closing, logger },
+        input,
+        sdkCtx.mcpReq.signal
+      )),
     });
     const config = {
       description: tool.description,
@@ -107,12 +124,14 @@ export const buildServer = async (
       server.registerTool(
         tool.name,
         { ...config, inputSchema: schema },
-        (args) => run(args)
+        (args, sdkCtx) => run(args, sdkCtx)
       );
     } else {
       // Without an input schema the SDK passes the context as the only
       // argument, so the tool's input is undefined rather than that context.
-      server.registerTool(tool.name, config, () => run(undefined));
+      server.registerTool(tool.name, config, (sdkCtx) =>
+        run(undefined, sdkCtx)
+      );
     }
   }
   return server;

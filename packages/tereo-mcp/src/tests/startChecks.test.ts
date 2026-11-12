@@ -317,9 +317,23 @@ describe("runStartChecks", () => {
     }
   );
 
+  it.each([0, -1, 1.5, Number.NaN])(
+    "refuses toolTimeoutMs %s",
+    async (toolTimeoutMs) => {
+      const message = await failure(
+        runStartChecks(options({ toolTimeoutMs }), [], answering(200, metadata))
+      );
+      expect(message).toContain("toolTimeoutMs");
+    }
+  );
+
   it("accepts positive integer limits", async () => {
     await runStartChecks(
-      options({ rateLimit: { perMinute: 1 }, maxResultBytes: 1 }),
+      options({
+        rateLimit: { perMinute: 1 },
+        maxResultBytes: 1,
+        toolTimeoutMs: 1,
+      }),
       [],
       answering(200, metadata)
     );

@@ -36,6 +36,14 @@ export class ToolRegistry {
         `Tool "${tool.name}" needs readOnly set to true or false`
       );
     }
+    if (
+      tool.timeoutMs !== undefined &&
+      !(Number.isInteger(tool.timeoutMs) && tool.timeoutMs > 0)
+    ) {
+      throw new Error(
+        `Tool "${tool.name}" needs timeoutMs to be a positive integer, not ${String(tool.timeoutMs)}`
+      );
+    }
     this.tools.set(tool.name, tool);
   }
 

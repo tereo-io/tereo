@@ -12,6 +12,12 @@ export interface ToolContext {
   core: CoreClient;
   requestId: string;
   logger: Logger;
+  /**
+   * Aborts when the tool's timeout expires, when the client disconnects or
+   * cancels the call, and when a `listen` server begins closing. Pass it to
+   * database and HTTP calls: a timeout cannot stop a handler that ignores it.
+   */
+  signal: AbortSignal;
 }
 
 export type ToolInput =
@@ -24,6 +30,8 @@ interface ToolFields {
   readOnly: boolean;
   destructive?: boolean;
   idempotent?: boolean;
+  /** Overrides `toolTimeoutMs` for this tool. A positive integer. */
+  timeoutMs?: number;
 }
 
 export interface ToolDefinition<I = unknown> extends ToolFields {
@@ -61,6 +69,8 @@ export interface TereoMcpOptions {
   provisioning?: ProvisioningDocument;
   logger?: Logger;
   maxResultBytes?: number;
+  /** How long a tool call may run before it ends as a timeout. Default 60_000 ms. */
+  toolTimeoutMs?: number;
   coreUrl?: string;
 }
 

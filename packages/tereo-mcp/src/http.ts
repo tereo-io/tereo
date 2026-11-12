@@ -30,7 +30,10 @@ export interface McpRoute {
 export const createRouter = (started: Started): Router =>
   createRoute(started).router;
 
-export const createRoute = (started: Started): McpRoute => {
+export const createRoute = (
+  started: Started,
+  closing?: AbortSignal
+): McpRoute => {
   const { options, logger, state } = started;
   const resourceUrl = new URL(state.resourceUrl);
   const path = options.path ?? "/mcp";
@@ -43,7 +46,7 @@ export const createRoute = (started: Started): McpRoute => {
     logger,
   });
   const mcpHandler = createMcpHandler(
-    (ctx) => buildServer(started, ctx.authInfo),
+    (ctx) => buildServer({ ...started, closing }, ctx.authInfo),
     { onerror: (err) => logger.warn({ err }, "MCP request failed") }
   );
   const handler = toNodeHandler(mcpHandler);
@@ -100,7 +103,8 @@ export const listenOn = async (
     ...loopbackNames,
   ];
   const app = createMcpExpressApp({ host, allowedHosts, allowedOrigins });
-  const route = createRoute(started);
+  const beginClose = new AbortController();
+  const route = createRoute(started, beginClose.signal);
   app.use(route.router);
 
   const outer = express();
@@ -158,6 +162,9 @@ export const listenOn = async (
     (closing ??= (async () => {
       // On the signal path the listeners stay until exit, to catch a second signal.
       if (!shuttingDown) removeSignalListeners();
+      beginClose.abort(
+        new DOMException("The MCP server is closing", "AbortError")
+      );
       // Connections that go idle after their last response must not hold close() open.
       const sweep = setInterval(() => server.closeIdleConnections(), 50);
       let deadline: NodeJS.Timeout | undefined;

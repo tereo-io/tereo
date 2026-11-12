@@ -221,6 +221,7 @@ export const runStartChecks = async (
     checkPositiveInteger("rateLimit.perMinute", options.rateLimit.perMinute);
   }
   checkPositiveInteger("maxResultBytes", options.maxResultBytes);
+  checkPositiveInteger("toolTimeoutMs", options.toolTimeoutMs);
   checkAllowedOrigins(options.allowedOrigins);
   checkScopes(options.scopes);
   checkPermissions(options, tools);

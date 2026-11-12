@@ -66,6 +66,18 @@ describe("ToolRegistry", () => {
     ).toThrow(/readOnly/);
   });
 
+  it.each([0, -1, 1.5, Number.NaN])("rejects timeoutMs %s", (timeoutMs) => {
+    expect(() => new ToolRegistry().define(tool({ timeoutMs }))).toThrow(
+      /"list_things".*timeoutMs/
+    );
+  });
+
+  it("accepts a positive integer timeoutMs", () => {
+    const registry = new ToolRegistry();
+    registry.define(tool({ timeoutMs: 1 }));
+    expect(registry.list()).toHaveLength(1);
+  });
+
   it("rejects any define after freeze", () => {
     const registry = new ToolRegistry();
     registry.define(tool());
