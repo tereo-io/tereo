@@ -105,10 +105,10 @@ Errors are SCIM error bodies (`schemas`, `status`, `scimType`, `detail`) with
 | 400 | `invalidPath` | PATCH `remove` without a path; a Groups PATCH path core does not support |
 | 400 | `tooMany` | A Groups request over the [limits](#limits) |
 | 401 | | See above |
-| 403 | | Any `/Groups` request while the connection's groups target is `none` |
+| 403 | | A valid `/Groups` request while the connection's groups target is `none` (an invalid body or filter gets its `400` first) |
 | 404 | | The user does not exist or is not visible to the connection; also an unknown path |
 | 409 | `uniqueness` | See [Create](#create-post) |
-| 409 | (none) | A deactivation the last-admin check refuses (`idp_active` is left unchanged, so the IdP's retry means the same thing), a Groups write whose member removal the last-admin check refuses, or a write that lost a race three times. None carries a `scimType` |
+| 409 | (none) | A deactivation the last-admin check refuses (`idp_active` is left unchanged, so the IdP's retry means the same thing), a Groups write whose member removal the last-admin check refuses, or a Users write that lost a race three times (Groups writes on one connection run one after another). None carries a `scimType` |
 | 413, 429 | | Body too large, rate limited |
 
 ### Capabilities
@@ -260,8 +260,9 @@ attaches to it, under the usual [grant checks](groups.md#authorization).
 
 The connection's groups target says where pushed groups are created: `none` (the default), `global`,
 or one organization. It is set with `groupsTarget` on `PUT …/scim`, also when the connection is
-created. Setting it, including to `none`, needs `admin` through a global role, as enabling SCIM does,
-and an organization target must be live (`400 unknown_organization`).
+created. Creating a connection and changing the target, including to `none`, need `admin` through a
+global role, as enabling SCIM does; a `PUT` that repeats the current target needs none. An
+organization target must be live (`400 unknown_organization`).
 
 While the connection has linked groups, archived ones included, the target may only be `none` or the
 scope those groups are in (they share one); anything else is `409 scim_groups_exist`. `none` freezes
@@ -319,7 +320,7 @@ user the directory pushed who is later removed from the target organization is r
 so the difference from the directory stays visible.
 
 Core does not add a skipped user when they join the organization. Recorded skips are retried on any
-later request that changes the group's members, but only within what is left of the [limits](#limits)
+later request that touches the group's members (names a member operation), but only within what is left of the [limits](#limits)
 after that request's own changes; the rest stay recorded. A skip is deleted when the user is added,
 when the directory removes them (a `remove` naming them, or a `PUT` or `replace` without them), when
 the user leaves the connection's groups, and when the group is unlinked.
@@ -331,7 +332,7 @@ the user leaves the connection's groups, and when the group is unlinked.
 `created`, `lastModified`, `location`). `members` lists only users actually in the group. It is in
 `GET /Groups/{id}`, `POST`, `PUT` and `PATCH` responses, left out of the list, and left out of a
 single read with `excludedAttributes=members`; other `attributes` and `excludedAttributes` values are
-ignored. `meta.lastModified` moves on a name or member change.
+ignored. `meta.lastModified` moves on a name, member or `externalId` change.
 
 ### Endpoints
 
@@ -349,8 +350,8 @@ PATCH operation names are case-insensitive:
 | `op` | `path` | `value` |
 |------|--------|---------|
 | `add` | `members` | `[{ value }]` |
-| `remove` | `members` | `[{ value }]` (Entra), or none: clears the group |
-| `remove` | `members[value eq "<id>"]` | none (Okta) |
+| `remove` | `members` | `[{ value }]`, or none: clears the group |
+| `remove` | `members[value eq "<id>"]` | none |
 | `replace` | `members` | `[{ value }]`: the whole set |
 | `replace` or `add` | `displayName`, `externalId` | a string (`add` is accepted as `replace`) |
 | `remove` | `externalId` | none: clears it (`displayName` cannot be removed) |
@@ -360,7 +361,7 @@ Any other path is `400 invalidPath`; a bad value `400 invalidValue`. Removing a 
 member does nothing. A `path` may carry the `urn:…:Group:` schema prefix.
 
 A request that changes nothing writes no audit entry, emits no event and does not move
-`meta.lastModified`. A change of `externalId` alone is not audited. A removal that would leave core
+`meta.lastModified`. A change of `externalId` alone is not audited, though it moves `meta.lastModified`. A removal that would leave core
 with no administrator fails the whole request with `409`.
 
 ### Limits
@@ -370,6 +371,9 @@ with no administrator fails the whole request with `409`.
   against the current members: a `PUT` naming 1,500 current members and 10 new ones is 10 changes. A
   `POST` with more than 1,000 members is refused.
 - Over either limit the answer is `400` with `scimType: "tooMany"` and nothing is applied.
+
+`POST /Groups` tries the derived slug, then up to 49 numbered suffixes (50 attempts in all); if none
+is free it answers `409`.
 
 Each change takes one database authority lock, and the cap keeps one request well inside Postgres's
 shared lock table. How Okta and Entra send a group with more than 1,000 members, in one request or in
@@ -394,7 +398,9 @@ batches, is not verified: see the checklists.
 
 ### Audit and events
 
-Entries are on entity `Group` with the system user as actor and `scimConnectionId` in the metadata.
+Entries are on entity `Group` with `scimConnectionId` in the metadata. Directory-driven entries have
+the system user as actor; an admin's unlink, and a connection delete, write `scim_unlinked` with the
+admin as actor.
 Events are the existing `auth.group.*` ones; their `definitionSource` and `membershipSource` can now
 be `scim`. A group-members entry is written only when someone is added or removed; a request that
 only changes what is recorded as skipped writes a `members_skipped` entry.
@@ -477,9 +483,9 @@ and the [SCIM 2.0 reference](https://developer.okta.com/docs/api/openapi/okta-sc
 5. Enable create, update and deactivate; leave password sync off (core ignores it).
 6. Test the connection; core's `ServiceProviderConfig` and a `GET /Users` must answer `200`.
 7. To push groups, first set the connection's [groups target](#groups-target) (`groupsTarget` on
-   `PUT …/scim`; with `none` every `/Groups` request answers `403`). Then in Okta enable group
+   `PUT …/scim`; with `none` valid `/Groups` requests answer `403`). Then in Okta enable group
    pushing for the app and push the groups you want. Core creates each as a new group with no roles;
-   attach roles in the admin UI.
+   attach roles in the admin UI. **Unverified, for the manual run:** the Okta UI steps for group push.
 8. Push users before their groups: a member core has no link for yet is ignored, not recorded. If the
    target is an organization, the pushed users must be members of it, or they are
    [skipped](#skipped-members).
@@ -528,8 +534,8 @@ and [Customize attribute mappings](https://learn.microsoft.com/en-us/entra/ident
 7. **Test connection**, set the scope (assigned users and groups), turn provisioning on.
 8. The provider's issuer must be `https://login.microsoftonline.com/<tenant-guid>/v2.0` for `oid`
    claiming to apply.
-9. To push groups, set the connection's [groups target](#groups-target) first (with `none` every
-   `/Groups` request answers `403`). Under **Provisioning > Attribute Mapping**, enable the Groups
+9. To push groups, set the connection's [groups target](#groups-target) first (with `none` valid
+   `/Groups` requests answer `403`). **Unverified, for the manual run:** the Entra UI steps below. Under **Provisioning > Attribute Mapping**, enable the Groups
    mapping and add the groups to the application's scope. Core creates each as a new group with no
    roles; attach roles in the admin UI. Assign the users before their groups, and make them members of
    the target organization if the target is one ([Skipped members](#skipped-members)).

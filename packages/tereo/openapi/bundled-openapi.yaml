@@ -9501,7 +9501,7 @@ paths:
 
         `groupsTarget` (optional, also accepted on create) sets where pushed groups are
         created: `none` (the default; every `/scim/v2/Groups` call answers 403), `global`, or
-        one live organization. Changing it, to `none` included, needs a global `admin` too.
+        one live organization. Changing it, to `none` included, needs a global `admin` too; a `PUT` repeating the current target needs none.
         While the connection has linked groups (archived ones included), the target may only
         be `none` or the scope those groups are in; anything else is `409 scim_groups_exist`.
         `none` freezes the linked groups until the target is set back to their scope.

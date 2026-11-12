@@ -138,7 +138,7 @@ All under `/v1/admin`. Lists are cursor-paginated (`limit` 1-100, default 50; `n
 | `GET /groups` | List. Filters: `organizationId` (a UUID or `global`), `definitionSource` (`local`, `provisioned` or `scim`), `includeArchived` (archived groups are left out unless `true`), `q`. Every group response, this list and `GET /users/:id/groups` included, carries `managedBy` and `skippedMemberCount` ([SCIM](#scim)) |
 | `POST /groups` | Create. Body: `slug`, `name`, `description?`, `organizationId?`, `roleIds?` (max 100). 201 |
 | `GET /groups/:id` | Read, with `memberCount` |
-| `PATCH /groups/:id` | Edit `slug`, `name`, `description`. Not on an archived group; `name` not on a pushed group |
+| `PATCH /groups/:id` | Edit `slug`, `name`, `description`. Not on an archived group; `name` not on a pushed group (repeating its current `name` is accepted and changes nothing) |
 | `POST /groups/:id/archive`, `POST /groups/:id/restore` | Archive keeps members and roles |
 | `GET /groups/:id/members` | `{ data: [{ userId, email, name, isActive, addedAt }], hasMore, nextCursor }` |
 | `POST /groups/:id/members` | `{ userIds }` (1-500). Returns `{ added }`: users already in the group are skipped. `409 managed_by_scim` on a pushed group |
@@ -199,7 +199,7 @@ organization's ([webhooks](webhooks.md)).
 
 | Event | `data` |
 |---|---|
-| `auth.group.created`, `updated`, `archived`, `restored` | `id`, `slug`, `name`, `organizationId`, `definitionSource`, `membershipSource` (each `local`, `provisioned` or `scim` as above), `unprovisionedAt` |
+| `auth.group.created`, `updated`, `archived`, `restored` | `id`, `slug`, `name`, `organizationId`, `definitionSource`, `membershipSource` (`local` or `scim`; `definitionSource` can also be `provisioned`), `unprovisionedAt` |
 | `auth.group.members-added`, `members-removed` | `groupId`, `organizationId`, `userIds`; one event per operation, in chunks of 1,000 ids |
 | `auth.group.roles-changed` | `groupId`, `organizationId`, `roleIds`, `added`, `removed` |
 
@@ -247,8 +247,10 @@ in the scope the connection's groups target names (global or one organization) w
 
 | | Directory | Admin API |
 |---|---|---|
-| Name, members, existence | Yes | `409 managed_by_scim` |
+| Name, members | Yes | `409 managed_by_scim` |
 | Roles, slug, description, archive, restore, unlink | No | Yes |
+
+The directory's `DELETE /Groups/{id}` is how a pushed group's existence ends (it archives and unlinks it).
 
 - A group response carries `managedBy` (`{ kind: "scim", providerId, providerName }`, else `null`) and
   `skippedMemberCount`, the managed users the directory named who are not members of the group's
