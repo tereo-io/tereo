@@ -142,9 +142,11 @@ To sort on save in VS Code, install *Run on Save* (`emeraldwalk.runonsave`) and 
 
 ## Releases
 
-Every package is versioned with Nx release version plans, in two release groups:
+Every package is versioned with Nx release version plans, in three release groups:
 
 - `sdk`: `@tereo-io/sdk`, published to npm and tagged `@tereo-io/sdk@<version>`.
+- `mcp`: `@tereo-io/mcp`, published to npm and tagged `@tereo-io/mcp@<version>`. A release of the
+  SDK bumps it by a patch and raises its `@tereo-io/sdk` peer range to the new version.
 - `core`: `tereo` and `tereo-ui`, which share one version because they ship as one image. It is
   tagged `tereo@<version>`, and neither package is published to npm.
 
@@ -156,7 +158,7 @@ Before 1.0, a plan's bump is one step smaller than its name: `major` for a break
 change as `major`.
 
 Merging that PR runs `publish.yml`, which releases each group whose version has no tag yet: the SDK
-to npm, and core's image to `ghcr.io/tereo-io/tereo` as `<version>`, `<major>.<minor>` and `latest`
+and `@tereo-io/mcp` to npm, and core's image to `ghcr.io/tereo-io/tereo` as `<version>`, `<major>.<minor>` and `latest`
 (amd64 and arm64), with the Helm chart in `charts/tereo` at the same version to
 `oci://ghcr.io/tereo-io/charts/tereo`. It then pushes the tag. Run it by hand (`workflow_dispatch`) for the first release
 or to retry one that failed.

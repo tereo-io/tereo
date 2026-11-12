@@ -8,7 +8,7 @@
 
 ## Version Plan
 
-A change to `@tereo-io/sdk`, `tereo` or `tereo-ui` needs a version plan: run `npm run version-plan` and commit the file it
+A change to `@tereo-io/sdk`, `@tereo-io/mcp`, `tereo` or `tereo-ui` needs a version plan: run `npm run version-plan` and commit the file it
 writes in `.nx/version-plans/`. Other changes need none (CI's version-plan check says which).
 
 - [ ] Version plan included, or not needed
